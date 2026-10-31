@@ -90,6 +90,7 @@ surrealdb-cnf.workspace = true
 surrealdb-datastore.workspace = true
 surrealdb-expr.workspace = true
 surrealdb-kvs.workspace = true
+surrealdb-observe.workspace = true
 surrealdb-runtime.workspace = true
 surrealdb-strand.workspace = true
 surrealdb-types.workspace = true

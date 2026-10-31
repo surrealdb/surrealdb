@@ -23820,6 +23820,86 @@ async fn a_rebuild_wipes_its_index_a_page_to_a_batch() -> Result<()> {
 	Ok(())
 }
 
+/// `INFO FOR INDEX` reports `building.compacting`, `building.queued`, `building.armed_shards`,
+/// and `building.active` independently across pending writes, a write transaction's own
+/// buffered shards, compaction passes running on this node, and standalone `/!ic` queue
+/// records.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test(flavor = "multi_thread", worker_threads = 2))]
+async fn info_for_index_reports_active_queued_compacting_and_armed_shards() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS v HNSW DIMENSION 2;").await?;
+	for i in 0..16 {
+		execute_all(&ds, &session, &format!("CREATE t:{i} SET v = [{i}.0, 1.0];")).await?;
+	}
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let before = index_building_json(&ds, &session, "t", "ix").await?;
+	assert_eq!(before["status"], "ready");
+	assert_eq!(before["compacting"], true);
+	assert_eq!(before["queued"], true);
+	let stored_shards = before["armed_shards"].as_u64().unwrap_or(0);
+	assert!(stored_shards > 1, "the writes must arm more than one stored shard: {before}");
+	assert_eq!(before["active"], false);
+
+	// A write transaction that wrote into the index counts the one shard it buffered, not
+	// the stored ones, before its commit arms the stored guard.
+	let results = ds
+		.execute(
+			"BEGIN; CREATE t:100 SET v = [100.0, 1.0]; \
+			 (INFO FOR INDEX ix ON t).building; COMMIT;",
+			&session,
+			None,
+		)
+		.await?;
+	// `BEGIN`, `CREATE`, the `INFO` and `COMMIT` each answer.
+	let in_tx = results.into_iter().nth(2).expect("the INFO result").result?.into_json_value();
+	assert_eq!(in_tx["compacting"], true, "{in_tx}");
+	assert_eq!(in_tx["armed_shards"], 1, "{in_tx}");
+	assert_eq!(in_tx["queued"], true, "{in_tx}");
+
+	// Holding the per-index materialisation lock is not a pass; a pass entered on this node
+	// is, until it ends.
+	let builder = ds.index_builder();
+	let lock = builder.materialise_lock(&ikb);
+	let held = lock.lock().await;
+	assert_eq!(index_building_json(&ds, &session, "t", "ix").await?["active"], false);
+	let pass = builder.enter_pass(&ikb);
+	assert_eq!(index_building_json(&ds, &session, "t", "ix").await?["active"], true);
+	drop(pass);
+	assert_eq!(index_building_json(&ds, &session, "t", "ix").await?["active"], false);
+	drop(held);
+	drop(lock);
+
+	let (iterations, errors) = Datastore::index_compaction(
+		Arc::clone(&ds),
+		Duration::from_secs(1),
+		CancellationToken::new(),
+	)
+	.await?;
+	assert_eq!(errors, 0);
+	assert!(iterations >= 1);
+	let after = index_building_json(&ds, &session, "t", "ix").await?;
+	assert_eq!(after["status"], "ready");
+	assert_eq!(after["compacting"], false);
+	assert_eq!(after["queued"], false);
+	assert_eq!(after["armed_shards"], 0);
+	assert_eq!(after["active"], false);
+
+	// A standalone `/!ic` record with no armed guard shards reports `queued == true` while
+	// `compacting` and `armed_shards` remain `false` / `0`.
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.buffer_compaction_trigger(ns, db, &table, ix.index_id, ds.id());
+	tx.commit().await?;
+	let queued_only = index_building_json(&ds, &session, "t", "ix").await?;
+	assert_eq!(queued_only["compacting"], false);
+	assert_eq!(queued_only["queued"], true);
+	assert_eq!(queued_only["armed_shards"], 0);
+	assert_eq!(queued_only["active"], false);
+	Ok(())
+}
+
 /// A build whose initial scan runs on several tasks reads a plain-field column
 /// off each stored record in place, and falls back to the decoded record where
 /// the record does not hold the path through objects alone. Either way the

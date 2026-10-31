@@ -579,10 +579,15 @@ impl LeaseHandler {
 			)
 			.await;
 		match res {
-			Ok(()) => {
-				tx.commit().await?;
-				Ok(true)
-			}
+			Ok(()) => match tx.commit().await {
+				Ok(()) => Ok(true),
+				Err(e)
+					if matches!(storage_error(&e), Some(KvsError::TransactionConditionNotMet)) =>
+				{
+					Ok(false)
+				}
+				Err(e) => Err(e),
+			},
 			// CRITICAL: Convert TxConditionNotMet to Ok(false) rather than propagating as an error.
 			// This race condition occurs when another node acquires/renews the lease between our
 			// read and write operations. By returning Ok(false) instead of Err, we enable the

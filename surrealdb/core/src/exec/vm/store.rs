@@ -1843,10 +1843,15 @@ async fn step_inner(
 					}))
 				})?;
 			let (ns, db) = (descriptor.ns, descriptor.db);
+			let ikb = crate::idx::IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
+			// Node-local: whether this process runs a pass over the index, unlike the
+			// stored fields beside it.
+			let active = ctx.ctx().get_index_builder().is_some_and(|b| b.is_materialising(&ikb));
 			let txn = ctx.txn();
-			let info = surrealdb_datastore::index_state::index_building_info(&txn, ns, db, &ix)
-				.await
-				.map_err(ControlFlow::Err)?;
+			let info =
+				surrealdb_datastore::index_state::index_building_info(&txn, ns, db, &ix, active)
+					.await
+					.map_err(ControlFlow::Err)?;
 			write(regs, *dst, info);
 		}
 		StoreInstr::JumpIfNoService {

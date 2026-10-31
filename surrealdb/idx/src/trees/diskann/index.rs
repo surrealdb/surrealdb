@@ -218,6 +218,11 @@ impl DiskAnnCompactionPlan {
 	pub fn has_more(&self) -> bool {
 		self.has_more
 	}
+
+	/// Returns the number of pending keys captured in this plan.
+	pub fn captured_len(&self) -> usize {
+		self.captured_keys.len()
+	}
 }
 
 /// Coalesces record-keyed pending updates into a bounded compaction plan.
@@ -3876,6 +3881,16 @@ impl DiskAnnIndex {
 		}
 		self.score_pending_batch(ctx, &mut scan).await?;
 		scan.pending.finish();
+		let keys_read = scan.pending.entries() as u64;
+		if keys_read > 0 {
+			ctx.tx.observer().on_index_pending_read(&surrealdb_observe::IndexPendingReadEvent {
+				safe: surrealdb_observe::IndexPendingReadEventSafe {
+					kind: surrealdb_observe::IndexCompactionKind::DiskAnn,
+					keys: keys_read,
+				},
+				ctx: surrealdb_observe::IndexPendingReadEventCtx::default(),
+			});
+		}
 		if scan.suppressed.is_empty() {
 			return Ok(None);
 		}

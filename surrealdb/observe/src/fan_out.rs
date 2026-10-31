@@ -11,8 +11,10 @@
 use std::sync::Arc;
 
 use super::events::{
-	AuthEvent, BucketOperationEvent, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent,
-	QueryEvent, RpcEvent, SessionEvent, StatementEvent, TaskPassEvent, TransactionEvent,
+	AuthEvent, BucketOperationEvent, HttpRequestEvent, HttpRequestStartEvent,
+	IndexCompactionPassEvent, IndexCompactionPlanEvent, IndexCompactionRetryEvent,
+	IndexHnswCacheDiscardEvent, IndexPendingReadEvent, NetworkBytesEvent, QueryEvent, RpcEvent,
+	SessionEvent, StatementEvent, TaskPassEvent, TransactionEvent,
 };
 use super::observer::ExecutionObserver;
 
@@ -135,6 +137,26 @@ impl ExecutionObserver for FanOutObserver {
 		fan_out!(self, on_task_pass, event);
 	}
 
+	fn on_index_compaction_pass(&self, event: &IndexCompactionPassEvent) {
+		fan_out!(self, on_index_compaction_pass, event);
+	}
+
+	fn on_index_compaction_plan(&self, event: &IndexCompactionPlanEvent) {
+		fan_out!(self, on_index_compaction_plan, event);
+	}
+
+	fn on_index_hnsw_cache_discard(&self, event: &IndexHnswCacheDiscardEvent) {
+		fan_out!(self, on_index_hnsw_cache_discard, event);
+	}
+
+	fn on_index_compaction_retry(&self, event: &IndexCompactionRetryEvent) {
+		fan_out!(self, on_index_compaction_retry, event);
+	}
+
+	fn on_index_pending_read(&self, event: &IndexPendingReadEvent) {
+		fan_out!(self, on_index_pending_read, event);
+	}
+
 	/// Reads a cached value populated in [`Self::new`].
 	fn needs_statement_text(&self) -> bool {
 		self.needs_statement_text
@@ -164,12 +186,18 @@ mod tests {
 		AuthAction, AuthEvent, AuthEventCtx, AuthEventSafe, AuthScope, BucketOp,
 		BucketOperationEvent, BucketOperationEventCtx, BucketOperationEventSafe, HttpMethod,
 		HttpRequestEvent, HttpRequestEventCtx, HttpRequestEventSafe, HttpRequestStartEvent,
-		HttpRequestStartEventSafe, HttpVersion, NetworkBytesEvent, NetworkBytesEventCtx,
-		NetworkBytesEventSafe, NetworkDirection, QueryCounters, QueryEvent, QueryEventCtx,
-		QueryEventSafe, RpcEvent, RpcEventCtx, RpcEventSafe, SessionAction, SessionEvent,
-		SessionEventCtx, SessionEventSafe, SessionProtocol, StatementType, TaskLeaseState,
-		TaskPassEvent, TaskPassEventCtx, TaskPassEventSafe, TransactionEvent, TransactionEventCtx,
-		TransactionEventSafe, TransactionMetricsSnapshot,
+		HttpRequestStartEventSafe, HttpVersion, IndexCompactionKind, IndexCompactionPassEvent,
+		IndexCompactionPassEventCtx, IndexCompactionPassEventSafe, IndexCompactionPassOutcome,
+		IndexCompactionPlanEvent, IndexCompactionPlanEventCtx, IndexCompactionPlanEventSafe,
+		IndexCompactionPlanMode, IndexCompactionRetryEvent, IndexCompactionRetryEventCtx,
+		IndexCompactionRetryEventSafe, IndexCompactionRetryReason, IndexCompactionTrigger,
+		IndexHnswCacheDiscardEvent, IndexPendingReadEvent, IndexPendingReadEventCtx,
+		IndexPendingReadEventSafe, NetworkBytesEvent, NetworkBytesEventCtx, NetworkBytesEventSafe,
+		NetworkDirection, QueryCounters, QueryEvent, QueryEventCtx, QueryEventSafe, RpcEvent,
+		RpcEventCtx, RpcEventSafe, SessionAction, SessionEvent, SessionEventCtx, SessionEventSafe,
+		SessionProtocol, StatementType, TaskLeaseState, TaskPassEvent, TaskPassEventCtx,
+		TaskPassEventSafe, TransactionEvent, TransactionEventCtx, TransactionEventSafe,
+		TransactionMetricsSnapshot,
 	};
 
 	struct Counting {
@@ -232,7 +260,7 @@ mod tests {
 	/// [`forwards_every_hook`] drives each one exactly once and requires the
 	/// fan-out to have delivered all of them; a new hook must be added here
 	/// and to the driving loop at the same time as it is added to the trait.
-	const EVENT_HOOKS: [&str; 11] = [
+	const EVENT_HOOKS: [&str; 16] = [
 		"on_statement_complete",
 		"on_query_complete",
 		"on_transaction_complete",
@@ -244,6 +272,11 @@ mod tests {
 		"on_http_request_started",
 		"on_http_request_complete",
 		"on_task_pass",
+		"on_index_compaction_pass",
+		"on_index_compaction_plan",
+		"on_index_hnsw_cache_discard",
+		"on_index_compaction_retry",
+		"on_index_pending_read",
 	];
 
 	/// Records the name of every hook it receives, so a test can assert on
@@ -306,6 +339,26 @@ mod tests {
 
 		fn on_task_pass(&self, _event: &TaskPassEvent) {
 			self.record("on_task_pass");
+		}
+
+		fn on_index_compaction_pass(&self, _event: &IndexCompactionPassEvent) {
+			self.record("on_index_compaction_pass");
+		}
+
+		fn on_index_compaction_plan(&self, _event: &IndexCompactionPlanEvent) {
+			self.record("on_index_compaction_plan");
+		}
+
+		fn on_index_hnsw_cache_discard(&self, _event: &IndexHnswCacheDiscardEvent) {
+			self.record("on_index_hnsw_cache_discard");
+		}
+
+		fn on_index_compaction_retry(&self, _event: &IndexCompactionRetryEvent) {
+			self.record("on_index_compaction_retry");
+		}
+
+		fn on_index_pending_read(&self, _event: &IndexPendingReadEvent) {
+			self.record("on_index_pending_read");
 		}
 	}
 
@@ -458,6 +511,40 @@ mod tests {
 				backlog: false,
 			},
 			ctx: TaskPassEventCtx::default(),
+		});
+		f.on_index_compaction_pass(&IndexCompactionPassEvent {
+			safe: IndexCompactionPassEventSafe {
+				kind: Some(IndexCompactionKind::Count),
+				trigger: IndexCompactionTrigger::Queue,
+				outcome: IndexCompactionPassOutcome::Short,
+				duration: Duration::from_millis(1),
+				unqueued: true,
+			},
+			ctx: IndexCompactionPassEventCtx::default(),
+		});
+		f.on_index_compaction_plan(&IndexCompactionPlanEvent {
+			safe: IndexCompactionPlanEventSafe {
+				kind: IndexCompactionKind::Count,
+				mode: IndexCompactionPlanMode::Folded,
+				duration: Duration::from_millis(1),
+				pending_entries: 1,
+			},
+			ctx: IndexCompactionPlanEventCtx::default(),
+		});
+		f.on_index_hnsw_cache_discard(&IndexHnswCacheDiscardEvent::default());
+		f.on_index_compaction_retry(&IndexCompactionRetryEvent {
+			safe: IndexCompactionRetryEventSafe {
+				kind: IndexCompactionKind::Count,
+				reason: IndexCompactionRetryReason::TxnConflict,
+			},
+			ctx: IndexCompactionRetryEventCtx::default(),
+		});
+		f.on_index_pending_read(&IndexPendingReadEvent {
+			safe: IndexPendingReadEventSafe {
+				kind: IndexCompactionKind::Count,
+				keys: 2,
+			},
+			ctx: IndexPendingReadEventCtx::default(),
 		});
 
 		// Each hook was driven exactly once, so every observer must have seen

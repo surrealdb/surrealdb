@@ -1052,6 +1052,263 @@ pub struct TaskPassEvent {
 	pub ctx: TaskPassEventCtx,
 }
 
+// --- IndexCompactionEvents ---
+
+/// Bounded classification of an index type that folds pending keys in the
+/// background compaction loop.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum IndexCompactionKind {
+	Count,
+	FullText,
+	Hnsw,
+	DiskAnn,
+}
+
+impl IndexCompactionKind {
+	/// Stable lower-case label safe for use as a metric attribute value.
+	pub const fn as_label(self) -> &'static str {
+		match self {
+			Self::Count => "count",
+			Self::FullText => "fulltext",
+			Self::Hnsw => "hnsw",
+			Self::DiskAnn => "diskann",
+		}
+	}
+}
+
+/// Which path invoked an index compaction pass.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum IndexCompactionTrigger {
+	/// The background `index_compaction` task draining queued compaction
+	/// requests, on its periodic tick or woken by a commit that queued one.
+	Queue,
+	/// The post-commit wait of a blocking `DEFINE INDEX` or `REBUILD INDEX`,
+	/// which runs compaction passes inline until its index is materialised.
+	AfterCommit,
+}
+
+impl IndexCompactionTrigger {
+	/// Stable lower-case label safe for use as a metric attribute value.
+	pub const fn as_label(self) -> &'static str {
+		match self {
+			Self::Queue => "queue",
+			Self::AfterCommit => "after_commit",
+		}
+	}
+}
+
+/// Outcome of a single per-index compaction pass (`consume`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum IndexCompactionPassOutcome {
+	/// No pending deltas were present when the pass ran, or the index has been
+	/// removed or its defining statement rolled back.
+	Empty,
+	/// At least one plan was applied and all observed backlog was folded within
+	/// the pass budget.
+	Short,
+	/// The pass stopped with work remaining and requeued its index because it
+	/// reached the per-pass plan budget or lost its lease at a plan boundary.
+	Budget,
+	/// A plan was stale when applied (another compactor advanced the compaction
+	/// generation or modified a captured entry) and the pass exhausted its
+	/// retry budget, requeueing the index.
+	LostRace,
+	/// A live index build owner holds the vector index, so the pass deferred to
+	/// that build and retained the compaction request.
+	Fenced,
+	/// The index definition is not yet visible at this node's snapshot while a
+	/// live build owner holds it, so the pass retained the compaction request.
+	NotVisible,
+	/// The pass failed with an unrecoverable error.
+	Error,
+	/// The pass stopped because its cancellation token fired.
+	Cancelled,
+}
+
+impl IndexCompactionPassOutcome {
+	/// Stable lower-case label safe for use as a metric attribute value.
+	pub const fn as_label(self) -> &'static str {
+		match self {
+			Self::Empty => "empty",
+			Self::Short => "short",
+			Self::Budget => "budget",
+			Self::LostRace => "lost_race",
+			Self::Fenced => "fenced",
+			Self::NotVisible => "not_visible",
+			Self::Error => "error",
+			Self::Cancelled => "cancelled",
+		}
+	}
+}
+
+/// Execution mode of a single `MaterialisePlan`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum IndexCompactionPlanMode {
+	/// Read phase prepared a bounded plan in a read snapshot and applied or folded
+	/// the captured pending deltas in a guarded write transaction (count, full-text,
+	/// and DiskANN). An HNSW guard-only step is also `Folded`, but folds no key and
+	/// so emits no plan event.
+	Folded,
+	/// HNSW add-only batch linked against the committed graph under a shared graph
+	/// read lock and published into the resident graph on commit.
+	Staged,
+	/// HNSW batch applied to the resident graph in place under the exclusive graph
+	/// write lock.
+	InPlace,
+}
+
+impl IndexCompactionPlanMode {
+	/// Stable lower-case label safe for use as a metric attribute value.
+	pub const fn as_label(self) -> &'static str {
+		match self {
+			Self::Folded => "folded",
+			Self::Staged => "staged",
+			Self::InPlace => "in_place",
+		}
+	}
+}
+
+/// Reason a single index compaction batch attempt had to be retried.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum IndexCompactionRetryReason {
+	/// Write transaction conflicted at commit (`TxFailure::Retry`).
+	TxnConflict,
+	/// A concurrent worker folded part of the batch (`CompactionOutcome::LostRace`).
+	LostRace,
+}
+
+impl IndexCompactionRetryReason {
+	/// Stable lower-case label safe for use as a metric attribute value.
+	pub const fn as_label(self) -> &'static str {
+		match self {
+			Self::TxnConflict => "txn_conflict",
+			Self::LostRace => "lost_race",
+		}
+	}
+}
+
+/// Safe portion of an [`IndexCompactionPassEvent`]. All fields are bounded
+/// enums or scalars; no customer data is carried.
+#[derive(Clone, Copy, Debug)]
+pub struct IndexCompactionPassEventSafe {
+	/// Index family if the index definition was resolved (`None` for
+	/// `NotVisible` or early `Fenced`/`Error` before kind resolution).
+	pub kind: Option<IndexCompactionKind>,
+	/// Whether the pass was driven by the background queue or post-commit hook.
+	pub trigger: IndexCompactionTrigger,
+	/// Pass terminal outcome.
+	pub outcome: IndexCompactionPassOutcome,
+	/// Wall-clock duration of the pass.
+	pub duration: Duration,
+	/// Whether the pass owed its index a fresh compaction request and could
+	/// not queue it.
+	pub unqueued: bool,
+}
+
+/// Contextual portion of an [`IndexCompactionPassEvent`].
+#[derive(Clone, Debug, Default)]
+pub struct IndexCompactionPassEventCtx {}
+
+/// Emitted once per per-index compaction pass (`consume`). See
+/// [`ExecutionObserver::on_index_compaction_pass`](super::observer::ExecutionObserver::on_index_compaction_pass).
+#[derive(Clone, Debug)]
+pub struct IndexCompactionPassEvent {
+	pub safe: IndexCompactionPassEventSafe,
+	pub ctx: IndexCompactionPassEventCtx,
+}
+
+/// Safe portion of an [`IndexCompactionPlanEvent`].
+#[derive(Clone, Copy, Debug)]
+pub struct IndexCompactionPlanEventSafe {
+	/// Index family that produced the plan.
+	pub kind: IndexCompactionKind,
+	/// Execution mode of the plan (`Folded`, `Staged`, or `InPlace`).
+	pub mode: IndexCompactionPlanMode,
+	/// Total wall-clock duration of the plan, apply and commit.
+	pub duration: Duration,
+	/// Number of pending delta keys the committed plan folded; never zero.
+	pub pending_entries: u64,
+}
+
+/// Contextual portion of an [`IndexCompactionPlanEvent`].
+#[derive(Clone, Debug, Default)]
+pub struct IndexCompactionPlanEventCtx {}
+
+/// Emitted once per compaction plan that committed and folded at least one
+/// pending key. A plan that lost its race, failed, or folded nothing emits
+/// none. See
+/// [`ExecutionObserver::on_index_compaction_plan`](super::observer::ExecutionObserver::on_index_compaction_plan).
+#[derive(Clone, Debug)]
+pub struct IndexCompactionPlanEvent {
+	pub safe: IndexCompactionPlanEventSafe,
+	pub ctx: IndexCompactionPlanEventCtx,
+}
+
+/// Safe portion of an [`IndexHnswCacheDiscardEvent`]. The event carries no
+/// fields: the discard itself is what is counted.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IndexHnswCacheDiscardEventSafe {}
+
+/// Contextual portion of an [`IndexHnswCacheDiscardEvent`].
+#[derive(Clone, Debug, Default)]
+pub struct IndexHnswCacheDiscardEventCtx {}
+
+/// Emitted when an in-place HNSW compaction plan that had already mutated the
+/// resident graph does not commit, so the process-local index is discarded.
+/// See
+/// [`ExecutionObserver::on_index_hnsw_cache_discard`](super::observer::ExecutionObserver::on_index_hnsw_cache_discard).
+#[derive(Clone, Debug, Default)]
+pub struct IndexHnswCacheDiscardEvent {
+	pub safe: IndexHnswCacheDiscardEventSafe,
+	pub ctx: IndexHnswCacheDiscardEventCtx,
+}
+
+/// Safe portion of an [`IndexCompactionRetryEvent`].
+#[derive(Clone, Copy, Debug)]
+pub struct IndexCompactionRetryEventSafe {
+	/// Index family being compacted.
+	pub kind: IndexCompactionKind,
+	/// Why the batch attempt had to be retried.
+	pub reason: IndexCompactionRetryReason,
+}
+
+/// Contextual portion of an [`IndexCompactionRetryEvent`].
+#[derive(Clone, Debug, Default)]
+pub struct IndexCompactionRetryEventCtx {}
+
+/// Emitted when an index compaction batch attempt retries due to a transaction
+/// conflict or concurrent worker race. See
+/// [`ExecutionObserver::on_index_compaction_retry`](super::observer::ExecutionObserver::on_index_compaction_retry).
+#[derive(Clone, Debug)]
+pub struct IndexCompactionRetryEvent {
+	pub safe: IndexCompactionRetryEventSafe,
+	pub ctx: IndexCompactionRetryEventCtx,
+}
+
+/// Safe portion of an [`IndexPendingReadEvent`].
+#[derive(Clone, Copy, Debug)]
+pub struct IndexPendingReadEventSafe {
+	/// Index family whose pending overlay was read.
+	pub kind: IndexCompactionKind,
+	/// Number of uncompacted pending delta keys merged on the read path;
+	/// never zero.
+	pub keys: u64,
+}
+
+/// Contextual portion of an [`IndexPendingReadEvent`].
+#[derive(Clone, Debug, Default)]
+pub struct IndexPendingReadEventCtx {}
+
+/// Emitted when a query merges at least one uncompacted pending-delta key of
+/// an index at query time.
+///
+/// See [`ExecutionObserver::on_index_pending_read`](super::observer::ExecutionObserver::on_index_pending_read).
+#[derive(Clone, Debug)]
+pub struct IndexPendingReadEvent {
+	pub safe: IndexPendingReadEventSafe,
+	pub ctx: IndexPendingReadEventCtx,
+}
+
 #[cfg(test)]
 mod tests {
 	use std::sync::Arc;
@@ -1247,6 +1504,35 @@ mod tests {
 			HttpMethod::Connect.as_label(),
 			HttpMethod::Trace.as_label(),
 			HttpMethod::Other.as_label(),
+		]);
+		labels.extend([
+			IndexCompactionKind::Count.as_label(),
+			IndexCompactionKind::FullText.as_label(),
+			IndexCompactionKind::Hnsw.as_label(),
+			IndexCompactionKind::DiskAnn.as_label(),
+		]);
+		labels.extend([
+			IndexCompactionTrigger::Queue.as_label(),
+			IndexCompactionTrigger::AfterCommit.as_label(),
+		]);
+		labels.extend([
+			IndexCompactionPassOutcome::Empty.as_label(),
+			IndexCompactionPassOutcome::Short.as_label(),
+			IndexCompactionPassOutcome::Budget.as_label(),
+			IndexCompactionPassOutcome::LostRace.as_label(),
+			IndexCompactionPassOutcome::Fenced.as_label(),
+			IndexCompactionPassOutcome::NotVisible.as_label(),
+			IndexCompactionPassOutcome::Error.as_label(),
+			IndexCompactionPassOutcome::Cancelled.as_label(),
+		]);
+		labels.extend([
+			IndexCompactionPlanMode::Folded.as_label(),
+			IndexCompactionPlanMode::Staged.as_label(),
+			IndexCompactionPlanMode::InPlace.as_label(),
+		]);
+		labels.extend([
+			IndexCompactionRetryReason::TxnConflict.as_label(),
+			IndexCompactionRetryReason::LostRace.as_label(),
 		]);
 		for l in labels {
 			assert!(!l.is_empty());

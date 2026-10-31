@@ -2101,13 +2101,13 @@ keyspace:
 "DEFINE USER db_user ON DATABASE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE"
 keyspace:
 ### INFO FOR INDEX by_a ON indexed
-{ building: { compacting: false, initial: 0, pending: 0, status: 'ready', updated: 0 } }
+{ building: { active: false, armed_shards: 0, compacting: false, initial: 0, pending: 0, queued: false, status: 'ready', updated: 0 } }
 keyspace:
 ### INFO FOR INDEX by_a ON indexed STRUCTURE
-{ building: { compacting: false, initial: 0, pending: 0, status: 'ready', updated: 0 } }
+{ building: { active: false, armed_shards: 0, compacting: false, initial: 0, pending: 0, queued: false, status: 'ready', updated: 0 } }
 keyspace:
 ### INFO FOR INDEX ('by_' + 'a') ON ('index' + 'ed')
-{ building: { compacting: false, initial: 0, pending: 0, status: 'ready', updated: 0 } }
+{ building: { active: false, armed_shards: 0, compacting: false, initial: 0, pending: 0, queued: false, status: 'ready', updated: 0 } }
 keyspace:
 ### INFO FOR INDEX missing ON indexed
 error: The index 'missing' does not exist

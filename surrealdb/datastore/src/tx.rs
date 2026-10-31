@@ -10902,6 +10902,11 @@ impl Transaction {
 		}
 	}
 
+	/// The execution observer attached to this transaction.
+	pub fn observer(&self) -> &Arc<dyn ExecutionObserver> {
+		&self.observer
+	}
+
 	/// Register that an index wants compaction once this transaction commits.
 	///
 	/// Deduplicated per index for the same reason as the count deltas: the
@@ -10926,6 +10931,26 @@ impl Transaction {
 				},
 				nid,
 			)
+	}
+
+	/// Whether an open frame of this transaction has buffered a compaction
+	/// trigger for the given index.
+	pub fn has_buffered_compaction_trigger(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> bool {
+		let Some(buffer) = self.index_deltas.get() else {
+			return false;
+		};
+		buffer.has_compaction_trigger(&BufferedIndex {
+			ns,
+			db,
+			tb: tb.clone(),
+			ix,
+		})
 	}
 
 	/// Whether this transaction's commit fails if any key it read was written

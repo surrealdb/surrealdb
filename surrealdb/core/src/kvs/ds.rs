@@ -15252,7 +15252,7 @@ pub(crate) mod test {
 			first,
 		)
 		.await;
-		let applied = catch!(txn, applied);
+		let applied = catch!(txn, applied.map_err(|e| e.error));
 		assert!(applied.applied(), "the first plan must apply: {applied:?}");
 		txn.commit().await?;
 		assert!(step.run(&txn).await?, "the first plan drained its shards");
@@ -15848,6 +15848,71 @@ pub(crate) mod test {
 		assert!(
 			!Arc::ptr_eq(&before, &after),
 			"an apply error before versioning must evict the mutated wrapper"
+		);
+		Ok(())
+	}
+
+	/// A staged add-only batch links against the committed graph under the
+	/// graph read lock and publishes into the resident graph only on commit.
+	/// When `apply_staged` fails before commit (for example because a vector
+	/// read from the store is malformed), the resident graph has not been
+	/// mutated and the loaded `HnswIndex` wrapper must stay cached rather than
+	/// being evicted.
+	#[tokio::test]
+	async fn hnsw_staged_compaction_apply_error_keeps_the_loaded_index() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+
+		let before = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		let (table_id, format_version, entry_point) = {
+			let txn = ds.transaction(Read).await?;
+			let ns = txn.get_ns_by_name("test", None).await?.unwrap();
+			let db = txn.get_db_by_name("test", "test", None).await?.unwrap();
+			let table = TableName::from("vec");
+			let tb = txn.get_tb(ns.namespace_id, db.database_id, &table, None).await?.unwrap();
+			let ix = txn
+				.get_tb_index(ns.namespace_id, db.database_id, &table, "hnsw_idx", None)
+				.await?
+				.unwrap();
+			let state: surrealdb_datastore::values::hnsw::HnswState =
+				txn.get_key(&ikb.new_hs_key(), None).await?.unwrap();
+			txn.cancel().await?;
+			(tb.table_id, ix.format_version, state.enter_point.unwrap())
+		};
+
+		// Queue an add-only pending operation so compaction takes the staged path.
+		execute_all(&ds, &session, "CREATE vec:3 SET vector = [8, 9] RETURN NONE;").await?;
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, 1);
+
+		// Evict the vector cache and corrupt the entry-point vector in the store
+		// so `batch::build` inside `apply_staged` fails while reading the base graph.
+		ds.index_store().invalidate_hnsw_index_caches(table_id, &ikb, format_version).await;
+		let entry_vector_key = surrealdb_datastore::key::schema::HnswVectorKey::new(
+			ikb.ns(),
+			ikb.db(),
+			Cow::Borrowed(ikb.table()),
+			ikb.index(),
+			entry_point,
+		);
+		let txn = ds.transaction(Write).await?;
+		txn.set(entry_vector_key.encode_key()?, vec![0xff]).await?;
+		txn.commit().await?;
+
+		ds.process_index_compaction(&ikb, CancellationToken::new())
+			.await
+			.expect_err("the malformed entry-point vector must fail the staged build");
+		assert_eq!(
+			hnsw_pending_len(&ds, &ikb).await?,
+			1,
+			"the failed staged apply must roll back its conditional pending delete"
+		);
+
+		let after = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		assert!(
+			Arc::ptr_eq(&before, &after),
+			"a staged apply error leaves the resident graph untouched and must not evict the wrapper"
 		);
 		Ok(())
 	}

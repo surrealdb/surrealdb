@@ -219,10 +219,11 @@ impl Lifecycle<HnswCacheKey, HnswCacheValue> for HnswCacheLifecycle {
 
 	fn begin_request(&self) -> Self::RequestState {}
 
-	fn on_evict(&self, _: &mut Self::RequestState, key: HnswCacheKey, _: HnswCacheValue) {
-		// Called synchronously by quick_cache during eviction.
-		// We use the sync variant to maintain consistency without async overhead.
-		match key {
+	fn before_evict(&self, _: &mut Self::RequestState, key: &HnswCacheKey, _: &mut HnswCacheValue) {
+		// Called synchronously by quick_cache when a resident entry is evicted
+		// or an overweight insert is rejected, and NOT when an existing key's
+		// value is replaced in place.
+		match *key {
 			HnswCacheKey::Vector(key) => self.indexes.evict_element(key),
 			HnswCacheKey::DocSet(key) => self.doc_set_indexes.evict_element(key),
 			HnswCacheKey::DocId(key) => self.doc_id_indexes.evict_element(key),
@@ -791,5 +792,39 @@ mod tests {
 		assert!(!cache.contains(namespace_id, database_id, table_id, index_id, 1, 8).await);
 		assert!(cache.get_doc_set(rebuilt, 8, None).await.is_none());
 		assert!(cache.get_doc_id(rebuilt, 12, Some(1)).await.is_none());
+	}
+
+	#[tokio::test]
+	async fn test_replace_existing_entries_retains_index_tracking() {
+		let cache = VectorCache::new(1024 * 1024);
+
+		let namespace_id = NamespaceId(1);
+		let database_id = DatabaseId(2);
+		let table_id = TableId(3);
+		let index_id = IndexId(4);
+		let index = (namespace_id, database_id, table_id, index_id, 0u16);
+
+		let v1 = SharedVector::from(Vector::F32(Array1::from_vec(vec![1.0, 2.0, 3.0, 4.0])));
+		let v2 = SharedVector::from(Vector::F32(Array1::from_vec(vec![5.0, 6.0, 7.0, 8.0])));
+
+		cache.insert(namespace_id, database_id, table_id, index_id, 0, 7, v1).await;
+		cache.insert_doc_set(index, 7, Some(1), Ids64::One(11)).await;
+		cache.insert_doc_id(index, 11, Some(1), RecordIdKey::Number(17)).await;
+
+		// Replacing resident entries in place (e.g., on commit publish or generation refresh)
+		// must keep the keys in the per-index trackers so remove_index still evicts them.
+		cache.insert(namespace_id, database_id, table_id, index_id, 0, 7, v2.clone()).await;
+		cache.insert_doc_set(index, 7, Some(2), Ids64::Vec2([11, 12])).await;
+		cache.insert_doc_id(index, 11, Some(2), RecordIdKey::Number(18)).await;
+
+		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id, 0).await, 1);
+		assert_eq!(cache.doc_set_len(namespace_id, database_id, table_id, index_id, 0).await, 1);
+		assert_eq!(cache.doc_id_len(namespace_id, database_id, table_id, index_id, 0).await, 1);
+		assert_eq!(cache.get(namespace_id, database_id, table_id, index_id, 0, 7).await, Some(v2));
+
+		cache.remove_index(namespace_id, database_id, table_id, index_id, 0).await;
+		assert!(!cache.contains(namespace_id, database_id, table_id, index_id, 0, 7).await);
+		assert!(cache.get_doc_set(index, 7, Some(2)).await.is_none());
+		assert!(cache.get_doc_id(index, 11, Some(2)).await.is_none());
 	}
 }

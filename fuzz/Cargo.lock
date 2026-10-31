@@ -4308,6 +4308,7 @@ dependencies = [
  "surrealdb-datastore",
  "surrealdb-expr",
  "surrealdb-kvs",
+ "surrealdb-observe",
  "surrealdb-runtime",
  "surrealdb-strand",
  "surrealdb-types",

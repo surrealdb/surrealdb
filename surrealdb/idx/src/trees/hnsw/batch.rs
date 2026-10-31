@@ -767,14 +767,17 @@ impl RollbackAction for InvalidateResident {
 /// at a time queues them, while the steps' distance work still runs on every
 /// task. The graph is the same either way, because it is a function of *G₀*
 /// and the batch alone.
-pub(super) async fn build(
-	resident: Arc<tokio::sync::OwnedRwLockReadGuard<ResidentGraph>>,
+pub(super) async fn build<G>(
+	resident: Arc<G>,
 	tx: Arc<Transaction>,
 	base: GraphBase,
 	elements: Vec<NewElement>,
 	places: &Ticket,
 	tasks: usize,
-) -> Result<StagedGraph> {
+) -> Result<StagedGraph>
+where
+	G: std::ops::Deref<Target = ResidentGraph> + Send + Sync + 'static,
+{
 	let Some(view) = ReadView::open(&tx).await? else {
 		return build_on(resident, tx, None, base, elements, places, tasks).await;
 	};
@@ -786,15 +789,18 @@ pub(super) async fn build(
 
 /// Steps 1 and 2 on up to `tasks` tasks, reading stored vectors through
 /// `reads` when given, and through `tx` otherwise.
-async fn build_on(
-	resident: Arc<tokio::sync::OwnedRwLockReadGuard<ResidentGraph>>,
+async fn build_on<G>(
+	resident: Arc<G>,
 	tx: Arc<Transaction>,
 	reads: Option<Arc<ReadView>>,
 	base: GraphBase,
 	elements: Vec<NewElement>,
 	places: &Ticket,
 	tasks: usize,
-) -> Result<StagedGraph> {
+) -> Result<StagedGraph>
+where
+	G: std::ops::Deref<Target = ResidentGraph> + Send + Sync + 'static,
+{
 	let input = Arc::new(BatchInput::new(base.next_element_id(), elements));
 	let view = with_hnsw!(&resident.graph, h => h.elements.view(Some(Arc::new(input.overlay()))));
 	let view = Arc::new(match reads {
@@ -880,7 +886,7 @@ mod tests {
 	use crate::trees::hnsw::flavor::with_hnsw;
 	use crate::trees::hnsw::index::{HnswCompactionOutcome, HnswIndex, ResidentGraph};
 	use crate::trees::vector::{SharedVector, Vector};
-	use crate::val::{RecordIdKey, Value};
+	use crate::val::{Number, RecordIdKey, Value};
 
 	const NS: NamespaceId = NamespaceId(1);
 	const DB: DatabaseId = DatabaseId(2);
@@ -930,6 +936,12 @@ mod tests {
 		)
 		.await?;
 		env.tx().cancel().await?;
+		{
+			let mut guard = h.resident().write_owned().await;
+			with_hnsw!(&mut guard.graph, g => {
+				g.rng = SmallRng::seed_from_u64(99);
+			});
+		}
 		let mut rng = SmallRng::seed_from_u64(7);
 		{
 			let env = ds.env(TransactionType::Write).await;
@@ -1220,6 +1232,212 @@ mod tests {
 		assert!(written[0].len() > 150, "the scan reads the written graph");
 		assert!(written[1] == written[0], "a build that yielded mid-run wrote other bytes");
 		assert!(written[2] == written[0], "a build without a place wrote other bytes");
+		Ok(())
+	}
+
+	/// The record numbers `k` nearest `v` in `h`, nearest first.
+	async fn nearest(
+		ds: &TestIndexStore,
+		h: &HnswIndex,
+		v: &SharedVector,
+		k: usize,
+	) -> Result<Vec<RecordIdKey>> {
+		let Vector::F32(a) = &**v else {
+			unreachable!("the fixture's vectors are F32")
+		};
+		let pt: Vec<Number> = a.iter().map(|x| Number::Float(f64::from(*x))).collect();
+		let env = ds.env(TransactionType::Read).await;
+		let res = h.knn_search(&env, &pt, k, 40, None, None).await?;
+		env.tx().cancel().await?;
+		Ok(res.iter().map(|(rid, _, _)| rid.key.clone()).collect())
+	}
+
+	/// A mixed plan (deletes, updates, and inserts) applied in place links its
+	/// new elements through [`build`] and writes byte-identical `!hn` and `!hs`
+	/// entries regardless of task count. Against the serial path, which
+	/// interleaves each operation's removals and additions where the parallel
+	/// one makes every removal first, the graph differs but answers the same:
+	/// deleted documents are gone, updated and inserted ones are found at their
+	/// new vectors, and every query returns the same neighbours.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn mixed_batch_in_place_parallel_compaction() -> Result<()> {
+		let mut snapshots = Vec::new();
+		let mut answers = Vec::new();
+		let runs = [
+			BuildParallelism::Serial,
+			BuildParallelism::Fixed(1.try_into().unwrap()),
+			BuildParallelism::Fixed(4.try_into().unwrap()),
+			BuildParallelism::Fixed(8.try_into().unwrap()),
+		];
+		for parallelism in runs {
+			let ds = TestIndexStore::with_idx_config(|c| {
+				c.hnsw_build_parallelism = parallelism;
+			})
+			.await;
+			let h = seed(&ds, &params(true, true), 60).await?;
+			let mut seed_rng = SmallRng::seed_from_u64(7);
+			let mut new_rng = SmallRng::seed_from_u64(42);
+			let mut deleted = Vec::new();
+			let mut live = Vec::new();
+			{
+				let env = ds.env(TransactionType::Write).await;
+				for i in 0..10 {
+					let old = random_vector(&mut seed_rng);
+					h.index(
+						&env,
+						&RecordIdKey::Number(i),
+						Some(vec![Value::from(old.deref())]),
+						None,
+					)
+					.await?;
+					deleted.push(old);
+				}
+				for i in 10..25 {
+					let old = vec![Value::from(random_vector(&mut seed_rng).deref())];
+					let new = random_vector(&mut new_rng);
+					h.index(
+						&env,
+						&RecordIdKey::Number(i),
+						Some(old),
+						Some(vec![Value::from(new.deref())]),
+					)
+					.await?;
+					live.push((i, new));
+				}
+				for i in 60..110 {
+					let new = random_vector(&mut new_rng);
+					h.index(
+						&env,
+						&RecordIdKey::Number(i),
+						None,
+						Some(vec![Value::from(new.deref())]),
+					)
+					.await?;
+					live.push((i, new));
+				}
+				env.tx().commit().await?;
+			}
+			let env = ds.env(TransactionType::Write).await;
+			let plan = HnswIndex::prepare_compaction(&env, &ikb(), h.format_version()).await?;
+			let outcome = h.apply_compaction(&env, plan).await?;
+			assert_eq!(outcome, HnswCompactionOutcome::InPlace);
+			env.tx().commit().await?;
+			let env = ds.env(TransactionType::Read).await;
+			h.check_state(&env).await?;
+			snapshots.push(stored_graph(&env.tx(), 4).await?);
+			env.tx().cancel().await?;
+			h.check_hnsw_properties(60 - 10 + 50).await;
+			let mut found = Vec::new();
+			for (i, v) in &live {
+				let top = nearest(&ds, &h, v, 5).await?;
+				assert_eq!(
+					top.first(),
+					Some(&RecordIdKey::Number(*i)),
+					"{parallelism:?}: {i} lost"
+				);
+				found.push(top);
+			}
+			for v in &deleted {
+				let top = nearest(&ds, &h, v, 5).await?;
+				assert!(
+					top.iter().all(|k| !matches!(k, RecordIdKey::Number(n) if *n < 10)),
+					"{parallelism:?}: a deleted document was found: {top:?}"
+				);
+				found.push(top);
+			}
+			answers.push(found);
+		}
+		assert!(snapshots[1].len() > 60);
+		assert_eq!(snapshots[2], snapshots[1], "4 tasks wrote a different mixed-batch graph");
+		assert_eq!(snapshots[3], snapshots[1], "8 tasks wrote a different mixed-batch graph");
+		for (run, found) in answers.iter().enumerate().skip(1) {
+			assert_eq!(found, &answers[0], "{:?} answered unlike the serial path", runs[run]);
+		}
+		Ok(())
+	}
+
+	/// Cancelling a transaction after a mixed (in-place parallel) compaction
+	/// apply invalidates the resident graph and vector cache so subsequent
+	/// reads and compactions observe the committed pre-apply graph.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn mixed_batch_in_place_parallel_rollback_restores_committed_graph() -> Result<()> {
+		let ds = TestIndexStore::with_idx_config(|c| {
+			c.hnsw_build_parallelism = BuildParallelism::Fixed(4.try_into().unwrap());
+		})
+		.await;
+		let h = seed(&ds, &params(true, true), 40).await?;
+		let committed_before = {
+			let env = ds.env(TransactionType::Read).await;
+			h.check_state(&env).await?;
+			let snap = stored_graph(&env.tx(), 4).await?;
+			env.tx().cancel().await?;
+			snap
+		};
+		let adj_before = h.adjacency().await;
+
+		let mut seed_rng = SmallRng::seed_from_u64(7);
+		let mut new_rng = SmallRng::seed_from_u64(99);
+		{
+			let env = ds.env(TransactionType::Write).await;
+			for i in 0..8 {
+				let old = vec![Value::from(random_vector(&mut seed_rng).deref())];
+				h.index(&env, &RecordIdKey::Number(i), Some(old), None).await?;
+			}
+			for i in 40..65 {
+				let new = vec![Value::from(random_vector(&mut new_rng).deref())];
+				h.index(&env, &RecordIdKey::Number(i), None, Some(new)).await?;
+			}
+			env.tx().commit().await?;
+		}
+		{
+			let env = ds.env(TransactionType::Write).await;
+			let plan = HnswIndex::prepare_compaction(&env, &ikb(), h.format_version()).await?;
+			let outcome = h.apply_compaction(&env, plan).await?;
+			assert_eq!(outcome, HnswCompactionOutcome::InPlace);
+			env.tx().cancel().await?;
+		}
+		{
+			let env = ds.env(TransactionType::Read).await;
+			h.check_state(&env).await?;
+			let snap = stored_graph(&env.tx(), 4).await?;
+			env.tx().cancel().await?;
+			assert_eq!(snap, committed_before);
+		}
+		assert_eq!(h.adjacency().await, adj_before);
+		Ok(())
+	}
+
+	/// Two `apply_compaction` batches inside a single write transaction on a
+	/// store with `ReadView` support read the first batch's uncommitted
+	/// vectors through `tx` when the `ReadView` (opened at the pre-transaction
+	/// committed snapshot) misses them.
+	#[cfg(feature = "kv-surrealkv")]
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn multi_apply_in_one_transaction_falls_back_to_tx_on_view_miss() -> Result<()> {
+		let (_dir, ds) = surrealkv_store().await;
+		let p = params(true, true);
+		let h = seed(&ds, &p, 0).await?;
+		let env = ds.env(TransactionType::Write).await;
+		let mut rng = SmallRng::seed_from_u64(123);
+		for i in 0..20 {
+			let v = vec![Value::from(random_vector(&mut rng).deref())];
+			h.index(&env, &RecordIdKey::Number(i), None, Some(v)).await?;
+		}
+		let plan1 = HnswIndex::prepare_compaction(&env, &ikb(), h.format_version()).await?;
+		assert_eq!(h.apply_compaction(&env, plan1).await?, HnswCompactionOutcome::Staged);
+
+		for i in 20..40 {
+			let v = vec![Value::from(random_vector(&mut rng).deref())];
+			h.index(&env, &RecordIdKey::Number(i), None, Some(v)).await?;
+		}
+		let plan2 = HnswIndex::prepare_compaction(&env, &ikb(), h.format_version()).await?;
+		assert_eq!(h.apply_compaction(&env, plan2).await?, HnswCompactionOutcome::Staged);
+		env.tx().commit().await?;
+
+		let env = ds.env(TransactionType::Read).await;
+		h.check_state(&env).await?;
+		h.check_hnsw_properties(40).await;
+		env.tx().cancel().await?;
 		Ok(())
 	}
 }

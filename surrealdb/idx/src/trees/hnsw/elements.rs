@@ -122,7 +122,8 @@ impl HnswElements {
 	}
 
 	/// The stored vectors of `e_ids`, one per id in input order, read through
-	/// the read view when this has one, and through `tx` otherwise.
+	/// the read view when this has one, and falling back to `tx` for any
+	/// element written earlier in `tx` and not yet visible in the view.
 	async fn read_stored(
 		&self,
 		tx: &Transaction,
@@ -142,10 +143,27 @@ impl HnswElements {
 			keys.len()
 		);
 		// A stored vector's decoding takes nothing from its key.
-		fetched
+		let mut decoded: Vec<Option<SerializedVector>> = fetched
 			.into_iter()
 			.map(|val| val.map(|val| SerializedVector::kv_decode_value(&val, ())).transpose())
-			.collect()
+			.collect::<Result<_>>()?;
+		if decoded.iter().any(Option::is_none) {
+			let missing_keys: Vec<_> = keys
+				.into_iter()
+				.zip(&decoded)
+				.filter_map(|(key, val)| val.is_none().then_some(key))
+				.collect();
+			let fallback = tx.get_many_key(missing_keys, None).await?;
+			let mut fallback_iter = fallback.into_iter();
+			for slot in &mut decoded {
+				if slot.is_none()
+					&& let Some(val) = fallback_iter.next()
+				{
+					*slot = val;
+				}
+			}
+		}
+		Ok(decoded)
 	}
 
 	/// Enters committed element vectors into the process-wide cache.

@@ -19,7 +19,7 @@ use crate::env::IndexEnv;
 use crate::error::Error;
 pub use crate::trees::hnsw::HNSW_COMPACTION_MAX_PENDING_KEYS;
 use crate::trees::hnsw::cache::VectorCache;
-pub use crate::trees::hnsw::outcome::HnswCompactionOutcome;
+pub use crate::trees::hnsw::outcome::{HnswCompactionError, HnswCompactionOutcome};
 use crate::trees::{KnnCondFilter, KnnIteratorResult};
 use crate::val::{Number, RecordIdKey, Value};
 
@@ -117,7 +117,7 @@ impl HnswIndex {
 		&self,
 		_env: &dyn IndexEnv,
 		_plan: HnswCompactionPlan,
-	) -> Result<HnswCompactionOutcome> {
+	) -> std::result::Result<HnswCompactionOutcome, HnswCompactionError> {
 		match self.0 {}
 	}
 

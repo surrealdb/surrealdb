@@ -37,7 +37,9 @@ use crate::ft::fulltext::{FullTextCompactionPlan, FullTextIndex};
 use crate::kernels::btree::{IndexKeyspace, StoredKey};
 #[cfg(diskann)]
 use crate::trees::diskann::index::{DiskAnnCompactionPlan, DiskAnnIndex};
-use crate::trees::hnsw::index::{HnswCompactionOutcome, HnswCompactionPlan, HnswIndex};
+use crate::trees::hnsw::index::{
+	HnswCompactionError, HnswCompactionOutcome, HnswCompactionPlan, HnswIndex,
+};
 use crate::trees::store::IndexStores;
 use crate::val::{Array, RecordId, TableName, Value};
 use crate::{CompactionApply, Error as IdxError, IndexKeyBase, key};
@@ -733,7 +735,8 @@ impl<'a> IndexOperation<'a> {
 	/// table is gone, and [`HnswCompactionOutcome::LostRace`] when another
 	/// compactor advanced the generation first or a captured pending key changed
 	/// before the write. What the other outcomes owe a caller whose commit then
-	/// fails is on [`HnswCompactionOutcome`].
+	/// fails is on [`HnswCompactionOutcome`]; on error, [`HnswCompactionError::in_place`]
+	/// tells the caller whether the resident graph was mutated before the failure.
 	pub async fn apply_hnsw_compaction(
 		env: &dyn IndexEnv,
 		ixs: &IndexStores,
@@ -741,13 +744,20 @@ impl<'a> IndexOperation<'a> {
 		p: &HnswParams,
 		format_version: u16,
 		plan: HnswCompactionPlan,
-	) -> Result<HnswCompactionOutcome> {
+	) -> std::result::Result<HnswCompactionOutcome, HnswCompactionError> {
 		if !plan.has_work() {
 			return Ok(HnswCompactionOutcome::Empty);
 		}
 		let tx = env.tx();
-		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? {
-			let hnsw = ixs.get_index_hnsw(env, tb.table_id, ikb, p, format_version).await?;
+		if let Some(tb) = tx
+			.get_tb(ikb.ns(), ikb.db(), ikb.table(), None)
+			.await
+			.map_err(HnswCompactionError::untouched)?
+		{
+			let hnsw = ixs
+				.get_index_hnsw(env, tb.table_id, ikb, p, format_version)
+				.await
+				.map_err(HnswCompactionError::untouched)?;
 			return hnsw.apply_compaction(env, plan).await;
 		}
 		Ok(HnswCompactionOutcome::Empty)

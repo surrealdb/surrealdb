@@ -26,38 +26,40 @@ value = "[{ id: t:3, text: 'gamma delta', vec: [1f, 1f] }]"
 [[test.results]]
 value = "NONE"
 
+# `building.queued` and `building.active` follow the background compaction drain,
+# which a server runs and the in-process harness does not, so they are not pinned.
 [[test.results]]
-value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
 value = "[{ id: t:1 }, { id: t:2 }]"

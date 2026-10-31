@@ -74,6 +74,9 @@ pub mod scope {
 	/// Background maintenance job passes: throughput, duration, queue lag,
 	/// lease standing.
 	pub static TASK: &str = "surrealdb.task";
+	/// Index compaction passes, plan execution, retries, HNSW cache discards,
+	/// and read-time pending-delta backlog.
+	pub static INDEX: &str = "surrealdb.index";
 
 	/// Every scope known to the unified provider. Tests assert this list
 	/// matches what observers actually register.
@@ -84,6 +87,7 @@ pub mod scope {
 		DS,
 		GRAPHQL,
 		HTTP,
+		INDEX,
 		LIVE_QUERY,
 		MCP,
 		NETWORK,
@@ -228,6 +232,39 @@ pub mod names {
 	/// still pending, by job. A sustained rate means the job is not keeping
 	/// up with its queue.
 	pub static TASK_BACKLOG: &str = "surrealdb.task.backlog";
+
+	// --- Index compaction & backlog (scope: INDEX) ---------------------
+
+	/// Cumulative count of per-index compaction passes, labelled by index
+	/// kind, trigger (`queue` / `after_commit`), and outcome.
+	pub static INDEX_COMPACTION_PASS: &str = "surrealdb.index.compaction.pass";
+	/// Distribution of per-index compaction pass duration, labelled by index
+	/// kind, trigger, and outcome.
+	pub static INDEX_COMPACTION_PASS_DURATION: &str = "surrealdb.index.compaction.pass.duration";
+	/// Cumulative count of committed `MaterialisePlan`s that folded at least
+	/// one pending key, labelled by index kind and plan mode (`folded` /
+	/// `staged` / `in_place`).
+	pub static INDEX_COMPACTION_PLANS: &str = "surrealdb.index.compaction.plans";
+	/// Distribution of the duration of the plans counted by
+	/// [`INDEX_COMPACTION_PLANS`], labelled by index kind and plan mode.
+	pub static INDEX_COMPACTION_PLAN_DURATION: &str = "surrealdb.index.compaction.plan.duration";
+	/// Cumulative count of pending delta keys folded into compacted index
+	/// structures, labelled by index kind and plan mode.
+	pub static INDEX_COMPACTION_PENDING_KEYS_FOLDED: &str =
+		"surrealdb.index.compaction.pending_keys_folded";
+	/// Cumulative count of index compaction batch retries, labelled by index
+	/// kind and retry reason (`txn_conflict` / `lost_race`).
+	pub static INDEX_COMPACTION_RETRIES: &str = "surrealdb.index.compaction.retries";
+	/// Cumulative count of compaction passes that owed their index a fresh
+	/// `!ic` compaction request and failed to queue it, labelled by index kind
+	/// and trigger.
+	pub static INDEX_COMPACTION_UNQUEUED: &str = "surrealdb.index.compaction.unqueued";
+	/// Cumulative count of in-memory HNSW graph caches discarded because a
+	/// compaction write transaction failed after mutating the graph in place.
+	pub static INDEX_HNSW_CACHE_DISCARDS: &str = "surrealdb.index.hnsw.cache_discards";
+	/// Distribution of uncompacted pending delta keys merged per query-time
+	/// pending-delta read that merged any, labelled by index kind.
+	pub static INDEX_PENDING_KEYS_READ: &str = "surrealdb.index.pending_keys_read";
 }
 
 /// Attribute keys recorded on labelled instruments. Centralised here so
@@ -292,6 +329,15 @@ pub mod attrs {
 	pub static MCP_TOOL: &str = "tool";
 	/// MCP transport (`stdio` / `http`).
 	pub static MCP_TRANSPORT: &str = "transport";
+	/// Bounded index compaction kind (`count` / `fulltext` / `hnsw` / `diskann`,
+	/// or sentinel `"-"` when unresolved).
+	pub static INDEX_KIND: &str = "kind";
+	/// Index compaction pass trigger (`queue` / `after_commit`).
+	pub static COMPACTION_TRIGGER: &str = "trigger";
+	/// Index compaction plan mode (`folded` / `staged` / `in_place`).
+	pub static COMPACTION_MODE: &str = "mode";
+	/// Index compaction retry reason (`txn_conflict` / `lost_race`).
+	pub static RETRY_REASON: &str = "reason";
 }
 
 /// Re-export the core's bounded error-classification constants so server-side
@@ -330,8 +376,18 @@ mod tests {
 			names::HTTP_REQUEST_SIZE,
 			names::HTTP_REQUEST_TOTAL,
 			names::HTTP_RESPONSE_SIZE,
+			names::INDEX_COMPACTION_PASS,
+			names::INDEX_COMPACTION_PASS_DURATION,
+			names::INDEX_COMPACTION_PENDING_KEYS_FOLDED,
+			names::INDEX_COMPACTION_PLANS,
+			names::INDEX_COMPACTION_PLAN_DURATION,
+			names::INDEX_COMPACTION_RETRIES,
+			names::INDEX_COMPACTION_UNQUEUED,
+			names::INDEX_HNSW_CACHE_DISCARDS,
+			names::INDEX_PENDING_KEYS_READ,
 			names::LIVE_QUERY_ACTIVE,
 			names::LIVE_QUERY_NOTIFICATIONS,
+			names::LIVE_QUERY_ORPHANED,
 			names::MCP_SESSION_ACTIVE,
 			names::MCP_TOOL_DURATION,
 			names::MCP_TOOL_INVOCATION,

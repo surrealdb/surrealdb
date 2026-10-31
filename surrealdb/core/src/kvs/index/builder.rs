@@ -382,6 +382,25 @@ impl PendingDeletes {
 	}
 }
 
+/// A materialiser pass over one index running in this process, from
+/// [`IndexBuilder::enter_pass`] until it drops.
+pub(crate) struct ActivePass {
+	passes: Arc<parking_lot::Mutex<HashMap<IndexKeyBase, usize>>>,
+	ikb: IndexKeyBase,
+}
+
+impl Drop for ActivePass {
+	fn drop(&mut self) {
+		let mut passes = self.passes.lock();
+		if let Some(count) = passes.get_mut(&self.ikb) {
+			*count -= 1;
+			if *count == 0 {
+				passes.remove(&self.ikb);
+			}
+		}
+	}
+}
+
 /// Process-local launcher for durable index builds.
 ///
 /// The active-builder map is not the source of truth for build status. It only
@@ -400,6 +419,10 @@ pub(crate) struct IndexBuilder {
 	/// ([`Self::materialise_lock`]). Held weakly: an entry lives only while a
 	/// pass holds or waits for it, and a dead one is replaced on the next ask.
 	materialising: Arc<parking_lot::Mutex<HashMap<IndexKeyBase, Weak<tokio::sync::Mutex<()>>>>>,
+	/// Per index, the materialiser passes running over it in this process
+	/// ([`Self::enter_pass`]). An index is present only while at least one
+	/// runs.
+	active_passes: Arc<parking_lot::Mutex<HashMap<IndexKeyBase, usize>>>,
 	/// Per HNSW index, the pending entries this process's compaction passes
 	/// have deleted since its pending range was last compacted in storage
 	/// ([`Self::take_pending_range_compaction`]).
@@ -643,6 +666,7 @@ impl IndexBuilder {
 			shutting_down: Default::default(),
 			indexes: Default::default(),
 			materialising: Default::default(),
+			active_passes: Default::default(),
 			pending_deletes: Default::default(),
 			closing_settled: Default::default(),
 			#[cfg(test)]
@@ -696,6 +720,27 @@ impl IndexBuilder {
 		let lock = Arc::new(tokio::sync::Mutex::new(()));
 		materialising.insert(ikb.clone(), Arc::downgrade(&lock));
 		lock
+	}
+
+	/// Marks a materialiser pass over `ikb` as running in this process until
+	/// the returned guard drops, which ends it on every exit, a dropped pass
+	/// future included.
+	pub(crate) fn enter_pass(&self, ikb: &IndexKeyBase) -> ActivePass {
+		*self.active_passes.lock().entry(ikb.clone()).or_default() += 1;
+		ActivePass {
+			passes: Arc::clone(&self.active_passes),
+			ikb: ikb.clone(),
+		}
+	}
+
+	/// Whether a materialiser pass over `ikb` is running in this process, as
+	/// `INFO FOR INDEX` reports it in `building.active`.
+	///
+	/// Node-local: a pass another node runs, under the cluster's compaction
+	/// lease, is not seen here. It reads a count the passes keep and never
+	/// touches the materialise mutex, so asking cannot delay a pass taking it.
+	pub(crate) fn is_materialising(&self, ikb: &IndexKeyBase) -> bool {
+		self.active_passes.lock().contains_key(ikb)
 	}
 
 	/// Records that a committed HNSW compaction batch deleted `deleted` pending

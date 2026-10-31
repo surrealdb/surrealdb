@@ -7974,6 +7974,7 @@ dependencies = [
  "surrealdb-expr",
  "surrealdb-kvs",
  "surrealdb-kvs-any",
+ "surrealdb-observe",
  "surrealdb-runtime",
  "surrealdb-strand",
  "surrealdb-types",

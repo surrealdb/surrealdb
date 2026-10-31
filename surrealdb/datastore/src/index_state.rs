@@ -24,8 +24,8 @@ use crate::catalog::{
 use crate::key::schema::DiskannRecordPendingPrefix;
 use crate::key::schema::{
 	BuildStateKey, DocStatsBatchPrefix, DocStatsKey, HnswPendingLegacyPrefix,
-	HnswRecordPendingPrefix, IndexCountKey, IndexCountPrefix, TermChangeBatchPrefix,
-	TermChangesKey, TermDocsResidualPrefix,
+	HnswRecordPendingPrefix, IndexCompactionIxPrefix, IndexCountKey, IndexCountPrefix,
+	TermChangeBatchPrefix, TermChangesKey, TermDocsResidualPrefix,
 };
 use crate::pending_guard::{GuardedIndex, PENDING_GUARD_SHARDS, PendingGuardFamily};
 use crate::val::{Object, TableName, Value};
@@ -198,21 +198,130 @@ async fn guards_non_empty(tx: &Transaction, index: &GuardedIndex) -> Result<bool
 	if tx.buffered_pending_guard_shards(index) != 0 {
 		return Ok(true);
 	}
+	Ok(armed_guard_shards(tx, index).await? > 0)
+}
+
+/// How many pending-state guard shards of `index` read `NonEmpty`, as
+/// `INFO FOR INDEX` reports them in `building.armed_shards`.
+///
+/// A transaction that has buffered shards of its own counts those alone and
+/// does not read the stored guards, so inside an uncommitted writer the count
+/// is that writer's shards, not the stored ones: the index is known to be
+/// pending, and a read of the guards would enter them into the read set of a
+/// write transaction on a store that validates reads, so a writer arming
+/// another shard would fail its commit. Otherwise the stored guards are
+/// scanned, and the read is noted ([`Transaction::note_pending_guards_read`])
+/// as every read of them is, so a write this transaction makes afterwards is
+/// covered by its own commit rather than conflicting with the arming one.
+async fn armed_guard_shards(tx: &Transaction, index: &GuardedIndex) -> Result<u32> {
+	let mut armed = tx.buffered_pending_guard_shards(index);
+	if armed != 0 {
+		return Ok(armed.count_ones());
+	}
 	let guards: Vec<(Vec<u8>, DiskAnnPendingState)> =
 		tx.scan(index.guards()?, PENDING_GUARD_SHARDS.into(), 0, None).await?;
 	tx.note_pending_guards_read(index);
-	Ok(guards.iter().any(|(_, state)| state.kind == DiskAnnPendingStateKind::NonEmpty))
+	for (raw, state) in guards {
+		if state.kind == DiskAnnPendingStateKind::NonEmpty {
+			let shard = index.decode_guard_shard(&raw)?;
+			if shard < PENDING_GUARD_SHARDS {
+				armed |= 1u64 << shard;
+			}
+		}
+	}
+	Ok(armed.count_ones())
+}
+
+/// Whether `ix` has unmaterialised updates and, for a guarded vector index,
+/// how many of its pending-state guard shards read `NonEmpty`.
+async fn index_unmaterialised_and_armed_shards(
+	tx: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	ix: &IndexDefinition,
+) -> Result<(bool, u32)> {
+	let tb = Cow::Borrowed(&ix.table_name);
+	match ix.index {
+		Index::Hnsw(_) if guards_hnsw_pending(ix.format_version) => {
+			let guarded = GuardedIndex::new(
+				PendingGuardFamily::Hnsw,
+				ns,
+				db,
+				ix.table_name.clone(),
+				ix.index_id,
+			);
+			let armed = armed_guard_shards(tx, &guarded).await?;
+			if armed > 0 {
+				Ok((true, armed))
+			} else {
+				let legacy = HnswRecordPendingPrefix::new(ns, db, tb, ix.index_id).range()?;
+				Ok((!tx.keys(legacy, 1, 0, None).await?.is_empty(), 0))
+			}
+		}
+		#[cfg(diskann)]
+		Index::DiskAnn(_) => {
+			let guarded = GuardedIndex::new(
+				PendingGuardFamily::DiskAnn,
+				ns,
+				db,
+				ix.table_name.clone(),
+				ix.index_id,
+			);
+			let armed = armed_guard_shards(tx, &guarded).await?;
+			if armed > 0 {
+				Ok((true, armed))
+			} else {
+				let legacy = DiskannRecordPendingPrefix::new(ns, db, tb, ix.index_id).range()?;
+				Ok((!tx.keys(legacy, 1, 0, None).await?.is_empty(), 0))
+			}
+		}
+		_ => Ok((index_has_unmaterialised_updates(tx, ns, db, ix).await?, 0)),
+	}
+}
+
+/// Whether `ix` has a compaction trigger buffered in `tx` or stored under
+/// `/!ic`.
+///
+/// Unless `tx` buffered a trigger of its own, this scans the stored triggers
+/// in `tx`, as the pending-prefix scans behind `compacting` scan theirs. Each
+/// write to the index stores a trigger under its own key and a compaction
+/// pass deletes them, so neither touches a key every writer shares, unlike
+/// the pending-state guards [`armed_guard_shards`] keeps out of a writer's
+/// read set. On a store that validates reads, a write transaction that runs
+/// `INFO FOR INDEX` can still fail its commit when a writer or a pass changes
+/// those keys before it commits, as it can for `compacting`.
+async fn index_is_queued_for_compaction(
+	tx: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	ix: &IndexDefinition,
+) -> Result<bool> {
+	if !ix.index.queues_compaction() {
+		return Ok(false);
+	}
+	if tx.has_buffered_compaction_trigger(ns, db, &ix.table_name, ix.index_id) {
+		return Ok(true);
+	}
+	let range =
+		IndexCompactionIxPrefix::new(ns, db, Cow::Borrowed(&ix.table_name), ix.index_id).range()?;
+	Ok(!tx.keys(range, 1, 0, None).await?.is_empty())
 }
 
 fn index_building_status_value(
 	ix: &IndexDefinition,
 	state: Option<IndexBuildState>,
 	unmaterialised: bool,
+	active: bool,
+	queued: bool,
+	armed_shards: u32,
 ) -> Value {
 	let Some(state) = state else {
 		let mut out = Object::default();
-		out.insert("status", IndexBuildReportStatus::Ready.as_str().into());
+		out.insert("active", active.into());
+		out.insert("armed_shards", i64::from(armed_shards).into());
 		out.insert("compacting", unmaterialised.into());
+		out.insert("queued", queued.into());
+		out.insert("status", IndexBuildReportStatus::Ready.as_str().into());
 		return out.into();
 	};
 	let status = state.report_status.unwrap_or_else(|| report_status_from_phase(state.phase));
@@ -229,8 +338,11 @@ fn index_building_status_value(
 	if status == IndexBuildReportStatus::Error {
 		out.insert("error", durable_index_error_reason(ix, &state).into());
 	}
-	out.insert("status", status.as_str().into());
+	out.insert("active", active.into());
+	out.insert("armed_shards", i64::from(armed_shards).into());
 	out.insert("compacting", unmaterialised.into());
+	out.insert("queued", queued.into());
+	out.insert("status", status.as_str().into());
 	out.into()
 }
 
@@ -238,11 +350,17 @@ fn index_building_status_value(
 ///
 /// Missing state is treated as ready so indexes created before this protocol
 /// remain queryable and report the same shape as completed durable builds.
+///
+/// Every field but `active` is read from the store and answers alike on every
+/// node. `active` is the caller's: whether a compaction pass over the index
+/// runs in the caller's process, so a node not holding the compaction lease
+/// reports `false` while another node compacts.
 pub async fn index_building_info(
 	tx: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
 	ix: &IndexDefinition,
+	active: bool,
 ) -> Result<Value> {
 	let state_key = BuildStateKey {
 		ns,
@@ -251,9 +369,14 @@ pub async fn index_building_info(
 		ix: ix.index_id,
 	};
 	let status = tx.get_key(&state_key, None).await?;
-	let unmaterialised = index_has_unmaterialised_updates(tx, ns, db, ix).await?;
+	let (unmaterialised, armed_shards) =
+		index_unmaterialised_and_armed_shards(tx, ns, db, ix).await?;
+	let queued = index_is_queued_for_compaction(tx, ns, db, ix).await?;
 	let mut out = Object::default();
-	out.insert("building", index_building_status_value(ix, status, unmaterialised));
+	out.insert(
+		"building",
+		index_building_status_value(ix, status, unmaterialised, active, queued, armed_shards),
+	);
 	Ok(out.into())
 }
 

@@ -1,8 +1,10 @@
 //! The [`ExecutionObserver`] trait and the no-op default implementation.
 
 use super::events::{
-	AuthEvent, BucketOperationEvent, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent,
-	QueryEvent, RpcEvent, SessionEvent, StatementEvent, TaskPassEvent, TransactionEvent,
+	AuthEvent, BucketOperationEvent, HttpRequestEvent, HttpRequestStartEvent,
+	IndexCompactionPassEvent, IndexCompactionPlanEvent, IndexCompactionRetryEvent,
+	IndexHnswCacheDiscardEvent, IndexPendingReadEvent, NetworkBytesEvent, QueryEvent, RpcEvent,
+	SessionEvent, StatementEvent, TaskPassEvent, TransactionEvent,
 };
 
 /// Hook surface for receiving structured observability events from the core
@@ -72,6 +74,30 @@ pub trait ExecutionObserver: Send + Sync + 'static {
 	/// has no tenant `ctx` — passes run below the session layer.
 	fn on_task_pass(&self, _event: &TaskPassEvent) {}
 
+	/// Called once per per-index compaction pass (`consume`), whether invoked
+	/// by the background queue drain or by the post-commit hook.
+	fn on_index_compaction_pass(&self, _event: &IndexCompactionPassEvent) {}
+
+	/// Called once per index compaction plan that committed and folded at
+	/// least one pending key.
+	fn on_index_compaction_plan(&self, _event: &IndexCompactionPlanEvent) {}
+
+	/// Called when an in-place HNSW compaction plan that had mutated the
+	/// resident graph does not commit, and the process-local index is
+	/// discarded.
+	fn on_index_hnsw_cache_discard(&self, _event: &IndexHnswCacheDiscardEvent) {}
+
+	/// Called when an index compaction batch attempt retries due to a
+	/// transaction conflict or a concurrent worker race.
+	fn on_index_compaction_retry(&self, _event: &IndexCompactionRetryEvent) {}
+
+	/// Called when a query merges at least one uncompacted pending-delta key of
+	/// an index at query time, once per pending-delta read: a BM25 full-text
+	/// lookup reports its terms' changes and its document statistics' deltas
+	/// apart. A read that finds no pending key is not reported, so a fully
+	/// compacted index costs its queries no event.
+	fn on_index_pending_read(&self, _event: &IndexPendingReadEvent) {}
+
 	/// Returns `true` when the observer is a no-op shell that ignores
 	/// every event. The only implementation that should override this
 	/// is [`NoopObserver`]; downstream emit sites use it to short-circuit
@@ -115,13 +141,18 @@ mod tests {
 		AuthAction, AuthEvent, AuthEventCtx, AuthEventSafe, AuthScope, BucketOp,
 		BucketOperationEvent, BucketOperationEventCtx, BucketOperationEventSafe, HttpMethod,
 		HttpRequestEvent, HttpRequestEventCtx, HttpRequestEventSafe, HttpRequestStartEvent,
-		HttpRequestStartEventSafe, HttpVersion, NetworkBytesEvent, NetworkBytesEventCtx,
-		NetworkBytesEventSafe, NetworkDirection, Outcome, QueryCounters, QueryEvent, QueryEventCtx,
-		QueryEventSafe, RpcEvent, RpcEventCtx, RpcEventSafe, SessionAction, SessionEvent,
-		SessionEventCtx, SessionEventSafe, SessionProtocol, StatementEvent, StatementEventCtx,
-		StatementEventSafe, StatementType, TaskLeaseState, TaskPassEvent, TaskPassEventCtx,
-		TaskPassEventSafe, TransactionEvent, TransactionEventCtx, TransactionEventSafe,
-		TransactionMetricsSnapshot,
+		HttpRequestStartEventSafe, HttpVersion, IndexCompactionKind, IndexCompactionPassEvent,
+		IndexCompactionPassEventCtx, IndexCompactionPassEventSafe, IndexCompactionPassOutcome,
+		IndexCompactionPlanEvent, IndexCompactionPlanEventCtx, IndexCompactionPlanEventSafe,
+		IndexCompactionPlanMode, IndexCompactionRetryEvent, IndexCompactionRetryEventCtx,
+		IndexCompactionRetryEventSafe, IndexCompactionRetryReason, IndexCompactionTrigger,
+		IndexPendingReadEvent, IndexPendingReadEventCtx, IndexPendingReadEventSafe,
+		NetworkBytesEvent, NetworkBytesEventCtx, NetworkBytesEventSafe, NetworkDirection, Outcome,
+		QueryCounters, QueryEvent, QueryEventCtx, QueryEventSafe, RpcEvent, RpcEventCtx,
+		RpcEventSafe, SessionAction, SessionEvent, SessionEventCtx, SessionEventSafe,
+		SessionProtocol, StatementEvent, StatementEventCtx, StatementEventSafe, StatementType,
+		TaskLeaseState, TaskPassEvent, TaskPassEventCtx, TaskPassEventSafe, TransactionEvent,
+		TransactionEventCtx, TransactionEventSafe, TransactionMetricsSnapshot,
 	};
 	use super::*;
 
@@ -242,6 +273,39 @@ mod tests {
 				backlog: false,
 			},
 			ctx: TaskPassEventCtx::default(),
+		});
+		obs.on_index_compaction_pass(&IndexCompactionPassEvent {
+			safe: IndexCompactionPassEventSafe {
+				kind: Some(IndexCompactionKind::Count),
+				trigger: IndexCompactionTrigger::Queue,
+				outcome: IndexCompactionPassOutcome::Short,
+				duration: Duration::from_millis(1),
+				unqueued: true,
+			},
+			ctx: IndexCompactionPassEventCtx::default(),
+		});
+		obs.on_index_compaction_plan(&IndexCompactionPlanEvent {
+			safe: IndexCompactionPlanEventSafe {
+				kind: IndexCompactionKind::Count,
+				mode: IndexCompactionPlanMode::Folded,
+				duration: Duration::from_millis(1),
+				pending_entries: 4,
+			},
+			ctx: IndexCompactionPlanEventCtx::default(),
+		});
+		obs.on_index_compaction_retry(&IndexCompactionRetryEvent {
+			safe: IndexCompactionRetryEventSafe {
+				kind: IndexCompactionKind::Hnsw,
+				reason: IndexCompactionRetryReason::TxnConflict,
+			},
+			ctx: IndexCompactionRetryEventCtx::default(),
+		});
+		obs.on_index_pending_read(&IndexPendingReadEvent {
+			safe: IndexPendingReadEventSafe {
+				kind: IndexCompactionKind::Hnsw,
+				keys: 8,
+			},
+			ctx: IndexPendingReadEventCtx::default(),
 		});
 		// Default answer for `needs_statement_text` is critical: enabling it on a
 		// community build would cause the executor to populate `StatementEventCtx`

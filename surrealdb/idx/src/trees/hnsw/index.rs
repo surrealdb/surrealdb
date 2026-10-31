@@ -34,7 +34,7 @@ use crate::trees::hnsw::cache::VectorCache;
 use crate::trees::hnsw::docs::{ElementSink, HnswDocs, InPlace, VecDocs};
 use crate::trees::hnsw::filter::{FilterCache, HnswTruthyDocumentFilter};
 use crate::trees::hnsw::flavor::{HnswFlavor, with_hnsw};
-pub use crate::trees::hnsw::outcome::HnswCompactionOutcome;
+pub use crate::trees::hnsw::outcome::{HnswCompactionError, HnswCompactionOutcome};
 use crate::trees::hnsw::{
 	ElementId, HnswRecordPendingMember, HnswRecordPendingUpdate, HnswSearch, VectorId,
 	VectorPendingUpdate,
@@ -1161,8 +1161,10 @@ impl HnswIndex {
 	///   configured for [`BuildParallelism::Serial`]: its graph changes are built on
 	///   `hnsw_build_parallelism` tasks against the committed graph, written into the transaction,
 	///   and taken by the resident graph when the transaction commits.
-	/// * Any other plan is applied **in place**, one operation at a time, under the graph write
-	///   lock.
+	/// * Any other plan is applied **in place** under the graph write lock: baseline removals run
+	///   serially first, and when `hnsw_build_parallelism` is not [`BuildParallelism::Serial`], new
+	///   elements are allocated and linked into the post-removal graph on `hnsw_build_parallelism`
+	///   tasks by [`batch::build`] before installing into the resident graph.
 	///
 	/// A transaction may carry more than one apply for an index. Each then
 	/// reads the graph back through that transaction, and every batch's
@@ -1172,7 +1174,7 @@ impl HnswIndex {
 		&self,
 		env: &dyn IndexEnv,
 		plan: HnswCompactionPlan,
-	) -> Result<HnswCompactionOutcome> {
+	) -> std::result::Result<HnswCompactionOutcome, HnswCompactionError> {
 		let HnswCompactionPlan {
 			generation,
 			captured_keys,
@@ -1187,7 +1189,10 @@ impl HnswIndex {
 		if captured_keys.is_empty() {
 			return Ok(HnswCompactionOutcome::Empty);
 		}
-		if !bump_compaction_generation(&tx, &self.ikb.new_hg_key(), generation).await? {
+		if !bump_compaction_generation(&tx, &self.ikb.new_hg_key(), generation)
+			.await
+			.map_err(HnswCompactionError::untouched)?
+		{
 			return Ok(HnswCompactionOutcome::LostRace);
 		}
 		for captured in &captured_keys {
@@ -1196,44 +1201,129 @@ impl HnswIndex {
 				Err(e) if is_transaction_condition_not_met(&e) => {
 					return Ok(HnswCompactionOutcome::LostRace);
 				}
-				Err(e) => return Err(e),
+				Err(e) => return Err(HnswCompactionError::untouched(e)),
 			}
 		}
 		let parallelism = env.config().hnsw_build_parallelism;
 		if parallelism != BuildParallelism::Serial
 			&& pending.iter().all(|pending| pending.old_vectors.is_empty())
 		{
-			self.apply_staged(env, pending, parallelism.tasks()).await?;
+			self.apply_staged(env, pending, parallelism.tasks())
+				.await
+				.map_err(HnswCompactionError::untouched)?;
 			return Ok(HnswCompactionOutcome::Staged);
 		}
-		self.apply_in_place(env, pending).await?;
+		self.apply_in_place(env, pending, parallelism).await?;
 		Ok(HnswCompactionOutcome::InPlace)
 	}
 
-	/// Applies a plan to the resident graph, one operation at a time, under
-	/// the graph write lock.
+	/// Applies a plan to the resident graph under the graph write lock.
+	///
+	/// Under [`BuildParallelism::Serial`], operations run one at a time via
+	/// [`Self::apply_pending_operation`]. Otherwise every operation's baseline
+	/// removals run first, and any remaining vector additions are staged against
+	/// the post-removal graph, linked on `parallelism.tasks()` tasks by
+	/// [`batch::build`], written to the transaction, and installed into the
+	/// resident graph while the write lock remains held.
 	async fn apply_in_place(
 		&self,
 		env: &dyn IndexEnv,
 		pending: Vec<PendingOperation>,
-	) -> Result<()> {
-		let mut hnsw = self.hnsw.write().await;
-		self.reconcile(&mut hnsw, env).await?;
+		parallelism: BuildParallelism,
+	) -> std::result::Result<(), HnswCompactionError> {
+		let tx = env.tx();
+		let mut resident = Arc::clone(&self.hnsw).write_owned().await;
+		self.reconcile(&mut resident, env).await.map_err(HnswCompactionError::untouched)?;
 		// Registered before the first operation reaches the graph: from here
 		// on, a transaction that does not commit leaves the resident graph and
 		// the vector cache holding what the store never took.
-		env.tx()
-			.on_rollback(Box::new(InvalidateResident {
-				invalidations: Arc::clone(&self.invalidations),
-				elements: hnsw.elements().view(None),
-			}))
-			.await;
-		let ctx = self.new_hnsw_context(env);
-		let docs = HnswDocs::with_format_version(self.ikb.clone(), self.format_version);
-		for pending in pending {
-			self.apply_pending_operation(&ctx, &docs, &mut hnsw.graph, pending).await?;
+		tx.on_rollback(Box::new(InvalidateResident {
+			invalidations: Arc::clone(&self.invalidations),
+			elements: resident.elements().view(None),
+		}))
+		.await;
+		async {
+			let docs = HnswDocs::with_format_version(self.ikb.clone(), self.format_version);
+			if parallelism == BuildParallelism::Serial {
+				let ctx = self.new_hnsw_context(env);
+				for pending in pending {
+					self.apply_pending_operation(&ctx, &docs, &mut resident.graph, pending).await?;
+				}
+				return Ok(());
+			}
+			let mut additions = Vec::with_capacity(pending.len());
+			{
+				let ctx = self.new_hnsw_context(env);
+				for mut pending in pending {
+					if let VectorId::DocId(doc_id) = &pending.id {
+						for vector in std::mem::take(&mut pending.old_vectors) {
+							let vector = Vector::from(vector);
+							self.vec_docs
+								.remove(&ctx, &vector, *doc_id, &mut resident.graph)
+								.await?;
+						}
+					}
+					if pending.new_vectors.is_empty() {
+						self.add_pending_vectors(
+							&ctx,
+							&docs,
+							&mut InPlace(&mut resident.graph),
+							pending,
+						)
+						.await?;
+					} else {
+						additions.push(pending);
+					}
+				}
+			}
+			if additions.is_empty() {
+				return Ok(());
+			}
+			let base = with_hnsw!(&resident.graph, h => GraphBase::of(h));
+			let mut staging = Staging::new(base.next_element_id());
+			{
+				let ctx = self.new_hnsw_context(env);
+				let mut sink = Staged {
+					graph: &mut resident.graph,
+					staging: &mut staging,
+				};
+				for pending in additions {
+					self.add_pending_vectors(&ctx, &docs, &mut sink, pending).await?;
+				}
+			}
+			let adds_nothing = staging.adds_nothing();
+			let (elements, doc_sets) = staging.into_parts();
+			for (element, _) in doc_sets {
+				self.vec_docs.remove_cached_doc_set(element).await;
+			}
+			if adds_nothing {
+				return Ok(());
+			}
+			let vectors: Vec<(ElementId, SharedVector)> =
+				elements.iter().map(|e| (e.id, e.vector.clone())).collect();
+			let committed = resident.elements().view(None);
+			let resident = Arc::new(resident);
+			let staged = batch::build(
+				Arc::clone(&resident),
+				Arc::clone(&tx),
+				base,
+				elements,
+				&env.places(),
+				parallelism.tasks(),
+			)
+			.await?;
+			with_hnsw!(&resident.graph, h => staged.write(h, &tx).await)?;
+			let mut resident = Arc::into_inner(resident).ok_or_else(|| {
+				anyhow::anyhow!("HNSW write guard remained shared after parallel batch build")
+			})?;
+			with_hnsw!(&mut resident.graph, h => {
+				staged.install(h);
+			});
+			committed.cache_committed(vectors.into_iter()).await;
+			Ok(())
 		}
-		Ok(())
+		.await
+		.map_err(HnswCompactionError::in_place)
 	}
 
 	/// Stages a plan whose operations only add vectors.
@@ -1351,7 +1441,8 @@ impl HnswIndex {
 	pub(crate) async fn index_pendings(&self, env: &dyn IndexEnv) -> Result<usize> {
 		let plan = Self::prepare_compaction(env, &self.ikb, self.format_version).await?;
 		let count = plan.len();
-		if self.apply_compaction(env, plan).await?.applied() {
+		// The apply's own error, not its wrapper, so a caller can downcast it.
+		if self.apply_compaction(env, plan).await.map_err(|e| e.error)?.applied() {
 			Ok(count)
 		} else {
 			Ok(0)
@@ -2091,6 +2182,16 @@ impl HnswIndex {
 		}
 		self.score_pending_batch(ctx, search, filter, builder, &mut scan).await?;
 		scan.finish();
+		let keys_read = scan.entries() as u64;
+		if keys_read > 0 {
+			tx.observer().on_index_pending_read(&surrealdb_observe::IndexPendingReadEvent {
+				safe: surrealdb_observe::IndexPendingReadEventSafe {
+					kind: surrealdb_observe::IndexCompactionKind::Hnsw,
+					keys: keys_read,
+				},
+				ctx: surrealdb_observe::IndexPendingReadEventCtx::default(),
+			});
+		}
 		if all_existing_docs.is_empty() {
 			return Ok(None);
 		}

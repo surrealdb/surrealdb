@@ -938,6 +938,19 @@ impl FullTextDocIds {
 /// trips per round.
 const TERM_DELTA_SCAN_PAGE: u32 = 4_096;
 
+/// Terms whose stored postings (`!tk` block lists or `!td` bitmaps) one read of
+/// a compaction round's fold fetches together, along with, for an index that
+/// keeps its postings in blocks, the stored postings and lengths (`!dt`, `!dl`)
+/// of the documents those terms fold.
+///
+/// A round is bounded by the entries it captures, not by the size of what its
+/// terms already store, so reading every term's postings at once would hold the
+/// sum of them in memory where folding one term at a time holds one. Reading
+/// them a chunk at a time keeps the batched round trip while bounding what is
+/// resident to this many terms' postings and documents. A document named by
+/// terms in several chunks is read once per chunk.
+const TERM_FOLD_PREFETCH: usize = 64;
+
 /// Snapshot gathered by the read phase of full-text compaction.
 ///
 /// The plan contains only the exact delta keys observed at the snapshot — in
@@ -959,6 +972,15 @@ impl FullTextCompactionPlan {
 	/// Returns true when at least one full-text delta range has more entries.
 	pub fn has_more(&self) -> bool {
 		self.doc_lengths.has_more() || self.term_docs.has_more()
+	}
+
+	/// Returns the number of delta and residual keys captured in this plan.
+	pub fn captured_len(&self) -> usize {
+		self.doc_lengths.deltas.legacy.len()
+			+ self.doc_lengths.deltas.batched.len()
+			+ self.term_docs.tt_keys.len()
+			+ self.term_docs.tx_keys.len()
+			+ self.term_docs.standalone_residuals.len()
 	}
 }
 
@@ -1465,6 +1487,32 @@ impl FullTextIndex {
 		Ok(())
 	}
 
+	/// Reports the uncompacted term-change keys (`!tt`, `!tx`) read for
+	/// `states` to `tx`'s execution observer. A term's residual (`!tr`) is not
+	/// counted: it is at most one key per term, bounded rather than a log, and
+	/// may have been served from the term cache rather than read. A read that
+	/// met none reports nothing.
+	pub fn record_pending_read(tx: &Transaction, states: &[TermState]) {
+		let keys_read: u64 =
+			states.iter().map(|s| (s.change_keys.len() + s.batches.len()) as u64).sum();
+		Self::report_pending_read(tx, keys_read);
+	}
+
+	/// Reports `keys` uncompacted keys a query read of this index merged to
+	/// `tx`'s execution observer, unless there were none.
+	fn report_pending_read(tx: &Transaction, keys: u64) {
+		if keys == 0 {
+			return;
+		}
+		tx.observer().on_index_pending_read(&surrealdb_observe::IndexPendingReadEvent {
+			safe: surrealdb_observe::IndexPendingReadEventSafe {
+				kind: surrealdb_observe::IndexCompactionKind::FullText,
+				keys,
+			},
+			ctx: surrealdb_observe::IndexPendingReadEventCtx::default(),
+		});
+	}
+
 	/// The changes to `term` the transaction `tx` buffered and has not yet
 	/// written: the documents it added and those it removed.
 	pub fn pending_term_changes(
@@ -1599,6 +1647,7 @@ impl FullTextIndex {
 			fills,
 			compacted.into_iter().zip(residuals),
 		)?;
+		Self::record_pending_read(&tx, &states);
 		Ok(plan.resolve_judging(states, judging)?.with_scope(scope))
 	}
 
@@ -1634,12 +1683,12 @@ impl FullTextIndex {
 		&self,
 		tx: &Transaction,
 		term: &str,
+		mut docs: RoaringTreemap,
 		mut totals: HashMap<DocId, i64>,
 		residual: Option<TermDocsResidual>,
 		captured_whole: bool,
 	) -> Result<()> {
 		let td = self.ikb.new_td_root(term);
-		let mut docs: RoaringTreemap = tx.get_key(&td, None).await?.unwrap_or_default();
 
 		let carried = residual.unwrap_or_default().counts;
 		for (doc_id, count) in carried.iter() {
@@ -1726,6 +1775,7 @@ impl FullTextIndex {
 		&self,
 		tx: &Transaction,
 		term: &str,
+		listed: Option<TermBlocks>,
 		mut totals: HashMap<DocId, i64>,
 		residual: Option<TermDocsResidual>,
 		captured_whole: bool,
@@ -1733,7 +1783,6 @@ impl FullTextIndex {
 		stored: &HashMap<DocId, StoredDocument>,
 	) -> Result<()> {
 		let tk = self.ikb.new_tk(term);
-		let listed: Option<TermBlocks> = tx.get_key(&tk, None).await?;
 		let had_blocks = listed.is_some();
 		let mut window = BlockWindow::new(listed);
 
@@ -2134,24 +2183,56 @@ impl FullTextIndex {
 		let residuals: Vec<Option<TermDocsResidual>> = tx.get_many_key(keys, None).await?;
 		if self.blocks {
 			let changed = self.changed_postings(&plan, &folded);
-			let terms: HashSet<String> = folded.iter().map(|(term, ..)| term.clone()).collect();
-			let stored = self.stored_postings(tx, &folded, &residuals, &changed, &terms).await?;
-			for ((term, deltas, captured_whole), residual) in folded.into_iter().zip(residuals) {
-				let changed = changed.get(&term);
-				self.fold_term_blocks(
-					tx,
-					&term,
-					deltas,
-					residual,
-					captured_whole,
-					changed,
-					&stored,
-				)
-				.await?;
+			let mut pending = folded.into_iter().zip(residuals).peekable();
+			while pending.peek().is_some() {
+				let (chunk, chunk_residuals): (Vec<_>, Vec<_>) =
+					pending.by_ref().take(TERM_FOLD_PREFETCH).unzip();
+				// The documents the chunk's terms fold, with their frequencies of
+				// those terms only: a document several chunks name is read once
+				// per chunk.
+				let terms: HashSet<String> = chunk.iter().map(|(term, ..)| term.clone()).collect();
+				let stored =
+					self.stored_postings(tx, &chunk, &chunk_residuals, &changed, &terms).await?;
+				let tk_keys: Vec<_> =
+					chunk.iter().map(|(term, ..)| self.ikb.new_tk(term)).collect();
+				let listed_blocks: Vec<Option<TermBlocks>> = tx.get_many_key(tk_keys, None).await?;
+				for (((term, deltas, captured_whole), residual), listed) in
+					chunk.into_iter().zip(chunk_residuals).zip(listed_blocks)
+				{
+					let changed = changed.get(&term);
+					self.fold_term_blocks(
+						tx,
+						&term,
+						listed,
+						deltas,
+						residual,
+						captured_whole,
+						changed,
+						&stored,
+					)
+					.await?;
+				}
 			}
 		} else {
-			for ((term, deltas, captured_whole), residual) in folded.into_iter().zip(residuals) {
-				self.fold_term_docs(tx, &term, deltas, residual, captured_whole).await?;
+			let mut pending = folded.into_iter().zip(residuals).peekable();
+			while pending.peek().is_some() {
+				let chunk: Vec<_> = pending.by_ref().take(TERM_FOLD_PREFETCH).collect();
+				let td_keys: Vec<_> =
+					chunk.iter().map(|((term, ..), _)| self.ikb.new_td_root(term)).collect();
+				let term_docs: Vec<Option<RoaringTreemap>> = tx.get_many_key(td_keys, None).await?;
+				for (((term, deltas, captured_whole), residual), docs) in
+					chunk.into_iter().zip(term_docs)
+				{
+					self.fold_term_docs(
+						tx,
+						&term,
+						docs.unwrap_or_default(),
+						deltas,
+						residual,
+						captured_whole,
+					)
+					.await?;
+				}
 			}
 		}
 		for key in &plan.tt_keys {
@@ -2402,7 +2483,11 @@ impl FullTextIndex {
 	pub async fn new_scorer(&self, env: &dyn IndexEnv) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			let tx = env.tx();
-			let (committed, _) = collect_committed_doc_length_and_count_for(&tx, &self.ikb).await?;
+			let (committed, deltas) =
+				collect_committed_doc_length_and_count_for(&tx, &self.ikb).await?;
+			// The document statistics' uncompacted deltas (`!dc`, `!dx`) the
+			// scorer summed, reported apart from the terms' changes.
+			Self::report_pending_read(&tx, (deltas.legacy.len() + deltas.batched.len()) as u64);
 			let sc = Scorer::new(committed, self.ikb.pending_dx(&tx), *bm25);
 			return Ok(Some(sc));
 		}
@@ -3607,8 +3692,8 @@ mod tests {
 	use uuid::Uuid;
 
 	use super::{
-		DocId, DocumentTerms, FullTextIndex, Scorer, TermChangeBatchKey, TermChangeKey,
-		TermDocsResidual, TermDocument,
+		DocId, DocumentTerms, FullTextIndex, Scorer, TERM_FOLD_PREFETCH, TermChangeBatchKey,
+		TermChangeKey, TermDocsResidual, TermDocument,
 	};
 	use crate::catalog::{AnalyzerDefinition, DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::expr::Tokenizer;
@@ -4123,6 +4208,70 @@ mod tests {
 					bitmaps.scores(query, &rids).await,
 					"step {step}, `{query}`"
 				);
+			}
+		}
+	}
+
+	/// A round folding more terms than one read of their stored postings
+	/// fetches ([`TERM_FOLD_PREFETCH`]) folds every term to the documents that
+	/// hold it, in both the bitmap and the block formats: each chunk's postings
+	/// are paired with that chunk's terms, and a term is answered after the round
+	/// by its compacted postings alone.
+	#[test(tokio::test)]
+	async fn a_round_wider_than_one_prefetch_folds_every_term() {
+		let words: Vec<String> =
+			(0..TERM_FOLD_PREFETCH * 2 + 21).map(|i| format!("w{i}")).collect();
+		let queries =
+			[words[0].clone(), words[TERM_FOLD_PREFETCH].clone(), words[words.len() - 1].clone()];
+		for format in [
+			crate::catalog::DOC_IDS_FORMAT_VERSION,
+			crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION,
+		] {
+			let test = TestContext::at_format(format).await;
+			let rids: Vec<RecordId> =
+				(0..30).map(|i| RecordId::new("t".into(), format!("d{i}"))).collect();
+			// Document `d` holds every word whose index is congruent to `d` modulo
+			// 3, or to 0 modulo 5, so each term has a distinct set of documents.
+			let text = |d: usize, shift: usize| {
+				words
+					.iter()
+					.enumerate()
+					.filter(|(i, _)| (i + shift) % 3 == d % 3 || i % 5 == 0)
+					.map(|(_, w)| w.as_str())
+					.collect::<Vec<_>>()
+					.join(" ")
+			};
+			let mut held: Vec<Option<String>> = vec![None; rids.len()];
+			for (step, shift) in [0, 1].into_iter().enumerate() {
+				for (d, rid) in rids.iter().enumerate() {
+					let new = text(d, shift);
+					test.rewrite(rid, held[d].as_deref(), Some(&new)).await;
+					held[d] = Some(new);
+				}
+				// One round takes every term, more than two prefetch chunks of them.
+				assert_eq!(test.drain_term_docs(1_000_000).await, 1);
+				let tx = test.new_tx(TransactionType::Read).await;
+				let mut doc_ids = Vec::new();
+				for rid in &rids {
+					doc_ids.push(test.fti.get_doc_id(&tx, rid).await.unwrap().unwrap());
+				}
+				tx.cancel().await.unwrap();
+				for (i, word) in words.iter().enumerate() {
+					let expected: RoaringTreemap = doc_ids
+						.iter()
+						.enumerate()
+						.filter(|(d, _)| (i + shift) % 3 == d % 3 || i % 5 == 0)
+						.map(|(_, doc_id)| *doc_id)
+						.collect();
+					assert_eq!(
+						test.query_docs(word).await,
+						expected,
+						"format {format}, step {step}, `{word}`"
+					);
+				}
+				for query in &queries {
+					test.check_reference_scores(query, &rids, format, step).await;
+				}
 			}
 		}
 	}

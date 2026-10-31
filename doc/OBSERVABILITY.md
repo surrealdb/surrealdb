@@ -325,6 +325,70 @@ The server bridge registers each entry as an OTel observable gauge under
 the `surrealdb.storage.<backend>.<metric>` namespace; the Prometheus
 exporter renders them as `surrealdb_storage_<backend>_<metric>`.
 
+### Index compaction (`surrealdb.index` scope)
+
+Indexes that compact in the background — count, full-text, HNSW and
+DiskANN — queue each write as a pending delta, and a compaction pass later
+folds the queued deltas into the index. A query merges the deltas still
+pending into what it reads. These families describe both sides. They are
+labelled by index kind, never by index, so their cardinality is fixed. All
+of them require authentication: the pass rate by kind follows write activity
+on those indexes, and the `fenced` and `not_visible` outcomes show when a
+vector-index build runs.
+
+| Family (Prom name) | Type | Labels | Notes |
+| --- | --- | --- | --- |
+| `surrealdb_index_compaction_pass_total` | counter | `kind, trigger, outcome` | One per compaction pass over one index. |
+| `surrealdb_index_compaction_pass_duration_seconds` | histogram | `kind, trigger, outcome` | Pass duration, on the second-scale `*.duration` buckets. |
+| `surrealdb_index_compaction_plans_total` | counter | `kind, mode` | Committed plans that folded at least one pending key. A plan that folded none, such as an HNSW or DiskANN guard-only step, records nothing. |
+| `surrealdb_index_compaction_plan_duration_seconds` | histogram | `kind, mode` | Duration of those plans. |
+| `surrealdb_index_compaction_pending_keys_folded_total` | counter | `kind, mode` | Pending delta keys those plans folded. |
+| `surrealdb_index_compaction_retries_total` | counter | `kind, reason` | Plan attempts that had to be retried. |
+| `surrealdb_index_compaction_unqueued_total` | counter | `kind, trigger` | Passes that stopped with work remaining and failed to queue a fresh compaction request for it, so that work rests on the requests that started the pass. Alert on any increase. |
+| `surrealdb_index_hnsw_cache_discards_total` | counter | none | In-place HNSW plans whose commit failed after they changed the resident graph, so the graph was discarded and is reloaded from storage on next use. |
+| `surrealdb_index_pending_keys_read` | histogram | `kind` | Pending delta keys merged by one query-time pending-delta read. A read that merged none records no sample, so `_count` counts reads that met a backlog, not lookups. A BM25 full-text lookup makes up to two such reads: its terms' changes, and the document-statistics deltas its scorer sums. Buckets: `1, 4, 16, 64, 256, 512, 1024, 4096, 16384`. |
+
+Label values:
+
+- `kind`: `count`, `fulltext`, `hnsw`, `diskann`. A pass that ended before it
+  resolved the index definition (`not_visible`, and an early `fenced` or
+  `error`) reports the `"-"` sentinel.
+- `trigger`: `queue` (the background drain of queued compaction requests,
+  on its periodic tick or woken by a commit that queued compaction) or
+  `after_commit` (the wait of a blocking `DEFINE INDEX` or `REBUILD INDEX`
+  after its commit, which runs compaction passes inline until its index is
+  materialised).
+- `outcome` on the pass families is the pass outcome, not the
+  `success` / `error` / `cancelled` set the other families use:
+  - `empty`: nothing was pending, or the index was removed.
+  - `short`: everything the pass saw was folded within its budget.
+  - `budget`: the pass reached its plan budget, or lost its lease, with work
+    remaining, and queued the index again.
+  - `lost_race`: another compactor kept changing the plan's input, and the pass
+    ran out of retries and queued the index again.
+  - `fenced`: a running build owns the vector index, so the pass deferred to it
+    and kept the request.
+  - `not_visible`: the index definition is not yet visible at this node's
+    snapshot while a build owns it, so the pass kept the request.
+  - `error`: the pass failed.
+  - `cancelled`: the pass was cancelled, at shutdown for instance.
+- `mode`: `folded` (deltas folded in a guarded write transaction: count,
+  full-text, and DiskANN), `staged` (an HNSW add-only
+  batch linked against the committed graph and published on commit), or
+  `in_place` (an HNSW batch applied to the resident graph under its write
+  lock).
+- `reason`: `txn_conflict` (the write transaction conflicted at commit) or
+  `lost_race` (a concurrent compactor folded part of the batch first).
+
+A sustained rate of `budget` passes, or a rising
+`surrealdb_index_pending_keys_read` sum, means compaction is not keeping up
+with writes, and queries pay to merge the backlog. `INFO FOR INDEX` reports
+the state of one index: its `building` object carries `compacting`,
+`queued` (a compaction request is stored or buffered for it), `active` (a
+compaction pass over it runs on the queried node; another node may be
+compacting it while this reads `false`), and `armed_shards` (HNSW and
+DiskANN pending-state guard shards that report pending entries).
+
 ### Not a metric — index pending-queue depth
 
 Indexes that compact in the background (full-text, HNSW, DiskANN) queue
@@ -341,7 +405,9 @@ as a gauge, for two reasons:
   range scan per index on every collection — the same O(backlog) work
   the depth is a warning about.
 
-The signal is published as a **log record** instead, from the read path
+The per-kind `surrealdb_index_pending_keys_read` histogram above shows the
+backlog that queries merge, but not which index holds it. The per-index
+signal is published as a **log record** instead, from the read path
 that already walks the queue and so counts it for free. An HNSW or
 DiskANN kNN search emits a `WARN` naming the index and the engine the
 first time one of its scans reads more pending data than a single

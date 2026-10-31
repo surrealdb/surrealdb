@@ -46,6 +46,11 @@ impl IndexCountCompactionPlan {
 	pub fn has_more(&self) -> bool {
 		self.has_more
 	}
+
+	/// Returns the number of delta `!iu` keys captured in this plan.
+	pub fn captured_len(&self) -> usize {
+		self.keys.iter().filter(|k| k.uid.is_some()).count()
+	}
 }
 
 impl IndexCountThingIterator {
@@ -76,6 +81,7 @@ impl IndexCountThingIterator {
 		if let Some(range) = self.range.take() {
 			let mut count: i64 = 0;
 			let mut loops = 0;
+			let mut delta_keys_read: u64 = 0;
 			let mut current_range = Some(range);
 			while let Some(range) = current_range {
 				let batch = txn.batch_keys(range.clone(), COUNT_BATCH_SIZE, None).await?;
@@ -83,6 +89,9 @@ impl IndexCountThingIterator {
 					loops += 1;
 					env.is_done(Some(loops)).await?;
 					let iu = IndexCountKey::decode_key(key)?;
+					if iu.uid.is_some() {
+						delta_keys_read += 1;
+					}
 					if iu.pos {
 						count += iu.count as i64;
 					} else {
@@ -98,6 +107,15 @@ impl IndexCountThingIterator {
 					_ => None,
 				};
 				env.is_done(None).await?;
+			}
+			if delta_keys_read > 0 {
+				txn.observer().on_index_pending_read(&surrealdb_observe::IndexPendingReadEvent {
+					safe: surrealdb_observe::IndexPendingReadEventSafe {
+						kind: surrealdb_observe::IndexCompactionKind::Count,
+						keys: delta_keys_read,
+					},
+					ctx: surrealdb_observe::IndexPendingReadEventCtx::default(),
+				});
 			}
 			// Add this transaction's own buffered mutations. Count deltas are
 			// aggregated per transaction and flushed at commit, so they are not

@@ -177,6 +177,7 @@ async fn query_terms(
 	}
 	fti.settle_states(scope.as_ref(), &plan, &mut states, cached, fills, read)
 		.context("Failed to extract query terms")?;
+	FullTextIndex::record_pending_read(&txn, &states);
 	let terms = plan.resolve(states).context("Failed to extract query terms")?.with_scope(scope);
 	Ok((fti, terms))
 }

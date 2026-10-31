@@ -93,8 +93,10 @@ value = "NONE"
 # compaction task, which a server runs and the embedded harness does not.
 match = "$result.building.{ initial, pending, status, updated } == { initial: 3, pending: 0, status: 'ready', updated: 0 }"
 
+# `building.queued` and `building.active` follow the background compaction drain,
+# which a server runs and the in-process harness does not, so they are not pinned.
 [[test.results]]
-value = "{ building: { compacting: false, error: 'Index building has been cancelled: Prepare remove.', initial: 0, pending: 0, status: 'error' } }"
+match = "$result.building.{ armed_shards, compacting, error, initial, pending, status } == { armed_shards: 0, compacting: false, error: 'Index building has been cancelled: Prepare remove.', initial: 0, pending: 0, status: 'error' }"
 
 [[test.results]]
 value = "[{ id: user:added }]"

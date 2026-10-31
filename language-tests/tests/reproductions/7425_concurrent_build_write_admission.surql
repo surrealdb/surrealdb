@@ -52,8 +52,10 @@ value = "NONE"
 [[test.results]]
 value = "[]"
 
+# `building.queued` and `building.active` follow the background compaction drain,
+# which a server runs and the in-process harness does not, so they are not pinned.
 [[test.results]]
-value = "{ building: { compacting: false, initial: 500, pending: 0, status: 'ready', updated: 1 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 500, pending: 0, status: 'ready', updated: 1 }"
 
 [[test.results]]
 value = "[item:1, item:2]"

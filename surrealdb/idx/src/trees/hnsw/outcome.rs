@@ -31,3 +31,46 @@ impl HnswCompactionOutcome {
 		matches!(self, Self::Staged | Self::InPlace)
 	}
 }
+
+/// An error returned while applying an HNSW compaction plan, paired with
+/// whether the resident graph had already begun in-place mutation.
+#[derive(Debug)]
+pub struct HnswCompactionError {
+	/// The underlying apply error.
+	pub error: anyhow::Error,
+	/// `true` once `apply_in_place` has registered `InvalidateResident` and
+	/// started mutating the resident graph; `false` when the failure happened
+	/// before the resident graph was touched (catalog lookup, compaction guards,
+	/// `apply_staged`, or `reconcile`).
+	pub in_place: bool,
+}
+
+impl HnswCompactionError {
+	/// Wraps an error that occurred before the resident graph was mutated in place.
+	pub(crate) fn untouched(error: anyhow::Error) -> Self {
+		Self {
+			error,
+			in_place: false,
+		}
+	}
+
+	/// Wraps an error that occurred after `apply_in_place` began mutating the resident graph.
+	pub(crate) fn in_place(error: anyhow::Error) -> Self {
+		Self {
+			error,
+			in_place: true,
+		}
+	}
+}
+
+impl std::fmt::Display for HnswCompactionError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		std::fmt::Display::fmt(&self.error, f)
+	}
+}
+
+impl std::error::Error for HnswCompactionError {
+	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+		self.error.source()
+	}
+}

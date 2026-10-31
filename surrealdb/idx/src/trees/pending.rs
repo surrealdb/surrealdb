@@ -345,7 +345,6 @@ impl<'a> PendingScan<'a> {
 	}
 
 	/// Entries this scan has read so far.
-	#[cfg(diskann)]
 	pub(crate) fn entries(&self) -> usize {
 		self.entries
 	}

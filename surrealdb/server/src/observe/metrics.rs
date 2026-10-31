@@ -52,8 +52,10 @@ use surrealdb_core::mem::{RefusalSite, refusal_count};
 use surrealdb_core::observe::process_snapshot;
 use surrealdb_observe::{
 	AuthEvent, BucketOperationEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent,
-	NetworkBytesEvent, NetworkDirection, Outcome, QueryEvent, RpcEvent, SessionAction,
-	SessionEvent, StatementEvent, TaskPassEvent, TransactionEvent, TransactionMetricsSnapshot,
+	IndexCompactionPassEvent, IndexCompactionPlanEvent, IndexCompactionRetryEvent,
+	IndexHnswCacheDiscardEvent, IndexPendingReadEvent, NetworkBytesEvent, NetworkDirection,
+	Outcome, QueryEvent, RpcEvent, SessionAction, SessionEvent, StatementEvent, TaskPassEvent,
+	TransactionEvent, TransactionMetricsSnapshot,
 };
 
 use super::instruments::{NONE_LABEL, attrs, names, scope};
@@ -69,6 +71,13 @@ const TASK_QUEUE_AGE_BUCKETS: &[f64] = &[
 	0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0,
 	3600.0, 7200.0, 21600.0, 86400.0,
 ];
+
+/// Bucket boundaries for `surrealdb.index.pending_keys_read`: counts of
+/// uncompacted pending delta keys merged on a single query read, spanning a
+/// single key through single-batch (<= 512) and multi-batch backlog. A read
+/// that merges no pending key records no sample.
+const INDEX_PENDING_KEYS_READ_BUCKETS: &[f64] =
+	&[1.0, 4.0, 16.0, 64.0, 256.0, 512.0, 1024.0, 4096.0, 16384.0];
 
 /// Resolve an `Option<&str>` ctx field into a stable attribute value.
 ///
@@ -152,6 +161,16 @@ pub struct MetricsObserver {
 	task_items: Counter<u64>,
 	task_queue_age: Histogram<f64>,
 	task_backlog: Counter<u64>,
+	// Index compaction & backlog (scope: surrealdb.index)
+	index_compaction_pass: Counter<u64>,
+	index_compaction_pass_duration: Histogram<f64>,
+	index_compaction_plans: Counter<u64>,
+	index_compaction_plan_duration: Histogram<f64>,
+	index_compaction_pending_keys_folded: Counter<u64>,
+	index_compaction_retries: Counter<u64>,
+	index_compaction_unqueued: Counter<u64>,
+	index_hnsw_cache_discards: Counter<u64>,
+	index_pending_keys_read: Histogram<f64>,
 }
 
 /// The KV operations a transaction made, by op, as the `kv_op` attribute names them.
@@ -632,6 +651,7 @@ impl MetricsObserver {
 		let gql = runtime.meter(scope::GRAPHQL);
 		let mcp = runtime.meter(scope::MCP);
 		let task = runtime.meter(scope::TASK);
+		let idx = runtime.meter(scope::INDEX);
 
 		let gathered = Arc::new(Gathered {
 			statement_total: stmt
@@ -847,6 +867,69 @@ impl MetricsObserver {
 					"Cumulative count of background maintenance passes that stopped at their \
 					 budget with work still pending",
 				)
+				.build(),
+			index_compaction_pass: idx
+				.u64_counter(names::INDEX_COMPACTION_PASS)
+				.with_description(
+					"Cumulative count of per-index compaction passes, by index kind, trigger, \
+					 and outcome",
+				)
+				.build(),
+			index_compaction_pass_duration: idx
+				.f64_histogram(names::INDEX_COMPACTION_PASS_DURATION)
+				.with_description("Distribution of per-index compaction pass duration")
+				.with_unit("s")
+				.build(),
+			index_compaction_plans: idx
+				.u64_counter(names::INDEX_COMPACTION_PLANS)
+				.with_description(
+					"Cumulative count of committed index compaction plans that folded at least \
+					 one pending key, by index kind and plan mode",
+				)
+				.build(),
+			index_compaction_plan_duration: idx
+				.f64_histogram(names::INDEX_COMPACTION_PLAN_DURATION)
+				.with_description(
+					"Distribution of the duration of committed index compaction plans that \
+					 folded at least one pending key",
+				)
+				.with_unit("s")
+				.build(),
+			index_compaction_pending_keys_folded: idx
+				.u64_counter(names::INDEX_COMPACTION_PENDING_KEYS_FOLDED)
+				.with_description(
+					"Cumulative count of pending delta keys folded into compacted index \
+					 structures, by index kind and plan mode",
+				)
+				.build(),
+			index_compaction_retries: idx
+				.u64_counter(names::INDEX_COMPACTION_RETRIES)
+				.with_description(
+					"Cumulative count of index compaction batch retries, by index kind and \
+					 retry reason",
+				)
+				.build(),
+			index_compaction_unqueued: idx
+				.u64_counter(names::INDEX_COMPACTION_UNQUEUED)
+				.with_description(
+					"Cumulative count of compaction passes that owed their index a fresh \
+					 compaction request and failed to queue it, by index kind and trigger",
+				)
+				.build(),
+			index_hnsw_cache_discards: idx
+				.u64_counter(names::INDEX_HNSW_CACHE_DISCARDS)
+				.with_description(
+					"Cumulative count of resident HNSW graph caches discarded after a failed \
+					 compaction commit",
+				)
+				.build(),
+			index_pending_keys_read: idx
+				.f64_histogram(names::INDEX_PENDING_KEYS_READ)
+				.with_description(
+					"Distribution of uncompacted pending delta keys merged per query-time \
+					 pending-delta read that merged any, by index kind",
+				)
+				.with_boundaries(INDEX_PENDING_KEYS_READ_BUCKETS.to_vec())
 				.build(),
 		})
 	}
@@ -1364,6 +1447,52 @@ impl ExecutionObserver for MetricsObserver {
 		if event.safe.backlog {
 			self.task_backlog.add(1, &job);
 		}
+	}
+
+	fn on_index_compaction_pass(&self, event: &IndexCompactionPassEvent) {
+		let kind_label = event.safe.kind.map_or(NONE_LABEL, |k| k.as_label());
+		let trigger_label = event.safe.trigger.as_label();
+		let attrs = [
+			KeyValue::new(attrs::INDEX_KIND, kind_label),
+			KeyValue::new(attrs::COMPACTION_TRIGGER, trigger_label),
+			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
+		];
+		self.index_compaction_pass.add(1, &attrs);
+		self.index_compaction_pass_duration.record(event.safe.duration.as_secs_f64(), &attrs);
+		if event.safe.unqueued {
+			let unqueued_attrs = [
+				KeyValue::new(attrs::INDEX_KIND, kind_label),
+				KeyValue::new(attrs::COMPACTION_TRIGGER, trigger_label),
+			];
+			self.index_compaction_unqueued.add(1, &unqueued_attrs);
+		}
+	}
+
+	fn on_index_compaction_plan(&self, event: &IndexCompactionPlanEvent) {
+		let attrs = [
+			KeyValue::new(attrs::INDEX_KIND, event.safe.kind.as_label()),
+			KeyValue::new(attrs::COMPACTION_MODE, event.safe.mode.as_label()),
+		];
+		self.index_compaction_plans.add(1, &attrs);
+		self.index_compaction_plan_duration.record(event.safe.duration.as_secs_f64(), &attrs);
+		self.index_compaction_pending_keys_folded.add(event.safe.pending_entries, &attrs);
+	}
+
+	fn on_index_hnsw_cache_discard(&self, _event: &IndexHnswCacheDiscardEvent) {
+		self.index_hnsw_cache_discards.add(1, &[]);
+	}
+
+	fn on_index_compaction_retry(&self, event: &IndexCompactionRetryEvent) {
+		let attrs = [
+			KeyValue::new(attrs::INDEX_KIND, event.safe.kind.as_label()),
+			KeyValue::new(attrs::RETRY_REASON, event.safe.reason.as_label()),
+		];
+		self.index_compaction_retries.add(1, &attrs);
+	}
+
+	fn on_index_pending_read(&self, event: &IndexPendingReadEvent) {
+		let attrs = [KeyValue::new(attrs::INDEX_KIND, event.safe.kind.as_label())];
+		self.index_pending_keys_read.record(event.safe.keys as f64, &attrs);
 	}
 
 	fn on_http_request_started(&self, event: &HttpRequestStartEvent) {
@@ -2261,6 +2390,109 @@ mod tests {
 			})
 			.expect("the queue age is recorded");
 		assert_eq!(bounds, TASK_QUEUE_AGE_BUCKETS);
+		provider.shutdown().expect("shutdown");
+	}
+
+	#[tokio::test]
+	async fn index_compaction_and_pending_read_record_under_index_scope() {
+		use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+		use surrealdb_observe::{
+			IndexCompactionKind, IndexCompactionPassEvent, IndexCompactionPassEventCtx,
+			IndexCompactionPassEventSafe, IndexCompactionPassOutcome, IndexCompactionPlanEvent,
+			IndexCompactionPlanEventCtx, IndexCompactionPlanEventSafe, IndexCompactionPlanMode,
+			IndexCompactionRetryEvent, IndexCompactionRetryEventCtx, IndexCompactionRetryEventSafe,
+			IndexCompactionRetryReason, IndexCompactionTrigger, IndexHnswCacheDiscardEvent,
+			IndexPendingReadEvent, IndexPendingReadEventCtx, IndexPendingReadEventSafe,
+		};
+		let (provider, reader, runtime) = fresh_runtime();
+		let obs = MetricsObserver::new(&runtime).expect("observer");
+		obs.on_index_compaction_pass(&IndexCompactionPassEvent {
+			safe: IndexCompactionPassEventSafe {
+				kind: Some(IndexCompactionKind::Hnsw),
+				trigger: IndexCompactionTrigger::Queue,
+				outcome: IndexCompactionPassOutcome::Short,
+				duration: Duration::from_millis(12),
+				unqueued: true,
+			},
+			ctx: IndexCompactionPassEventCtx::default(),
+		});
+		obs.on_index_compaction_plan(&IndexCompactionPlanEvent {
+			safe: IndexCompactionPlanEventSafe {
+				kind: IndexCompactionKind::Hnsw,
+				mode: IndexCompactionPlanMode::Staged,
+				duration: Duration::from_millis(8),
+				pending_entries: 42,
+			},
+			ctx: IndexCompactionPlanEventCtx::default(),
+		});
+		obs.on_index_hnsw_cache_discard(&IndexHnswCacheDiscardEvent::default());
+		obs.on_index_compaction_retry(&IndexCompactionRetryEvent {
+			safe: IndexCompactionRetryEventSafe {
+				kind: IndexCompactionKind::Hnsw,
+				reason: IndexCompactionRetryReason::TxnConflict,
+			},
+			ctx: IndexCompactionRetryEventCtx::default(),
+		});
+		obs.on_index_pending_read(&IndexPendingReadEvent {
+			safe: IndexPendingReadEventSafe {
+				kind: IndexCompactionKind::Hnsw,
+				keys: 16,
+			},
+			ctx: IndexPendingReadEventCtx::default(),
+		});
+
+		let names_seen = collect_names(&reader);
+		for expected in [
+			names::INDEX_COMPACTION_PASS,
+			names::INDEX_COMPACTION_PASS_DURATION,
+			names::INDEX_COMPACTION_PLANS,
+			names::INDEX_COMPACTION_PLAN_DURATION,
+			names::INDEX_COMPACTION_PENDING_KEYS_FOLDED,
+			names::INDEX_COMPACTION_RETRIES,
+			names::INDEX_COMPACTION_UNQUEUED,
+			names::INDEX_HNSW_CACHE_DISCARDS,
+			names::INDEX_PENDING_KEYS_READ,
+		] {
+			assert!(
+				names_seen.iter().any(|(s, n)| s == scope::INDEX && n == expected),
+				"missing `{expected}` under `{}`: {names_seen:?}",
+				scope::INDEX,
+			);
+		}
+
+		let mut rm = ResourceMetrics::default();
+		reader.collect(&mut rm).expect("collect");
+		let counter_sum = |name: &str| -> u64 {
+			rm.scope_metrics()
+				.flat_map(|sm| sm.metrics())
+				.filter(|m| m.name() == name)
+				.find_map(|m| match m.data() {
+					AggregatedMetrics::U64(MetricData::Sum(s)) => {
+						Some(s.data_points().map(|dp| dp.value()).sum())
+					}
+					AggregatedMetrics::F64(_)
+					| AggregatedMetrics::U64(_)
+					| AggregatedMetrics::I64(_) => None,
+				})
+				.expect("counter is recorded")
+		};
+		assert_eq!(counter_sum(names::INDEX_COMPACTION_PLANS), 1);
+		assert_eq!(counter_sum(names::INDEX_HNSW_CACHE_DISCARDS), 1);
+		assert_eq!(counter_sum(names::INDEX_COMPACTION_PENDING_KEYS_FOLDED), 42);
+		let bounds: Vec<f64> = rm
+			.scope_metrics()
+			.flat_map(|sm| sm.metrics())
+			.filter(|m| m.name() == names::INDEX_PENDING_KEYS_READ)
+			.find_map(|m| match m.data() {
+				AggregatedMetrics::F64(MetricData::Histogram(h)) => {
+					h.data_points().next().map(|dp| dp.bounds().collect())
+				}
+				AggregatedMetrics::F64(_)
+				| AggregatedMetrics::U64(_)
+				| AggregatedMetrics::I64(_) => None,
+			})
+			.expect("pending_keys_read histogram is recorded");
+		assert_eq!(bounds, INDEX_PENDING_KEYS_READ_BUCKETS);
 		provider.shutdown().expect("shutdown");
 	}
 }

@@ -28,6 +28,13 @@ use std::time::Duration;
 use anyhow::Result;
 use common::time::sleep;
 use surrealdb_datastore::close::{AfterCommitDeadline, AfterCommitWait};
+use surrealdb_observe::{
+	ExecutionObserver, IndexCompactionKind, IndexCompactionPassEvent, IndexCompactionPassEventCtx,
+	IndexCompactionPassEventSafe, IndexCompactionPassOutcome, IndexCompactionPlanEvent,
+	IndexCompactionPlanEventCtx, IndexCompactionPlanEventSafe, IndexCompactionPlanMode,
+	IndexCompactionRetryEvent, IndexCompactionRetryEventCtx, IndexCompactionRetryEventSafe,
+	IndexCompactionRetryReason, IndexCompactionTrigger, IndexHnswCacheDiscardEvent,
+};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use web_time::Instant;
@@ -127,6 +134,28 @@ impl CompactionPassOutcome {
 	pub(crate) fn retains_request(self) -> bool {
 		matches!(self, Self::Fenced | Self::NotVisible)
 	}
+
+	fn observe_outcome(self) -> IndexCompactionPassOutcome {
+		match self {
+			Self::Empty => IndexCompactionPassOutcome::Empty,
+			Self::Short => IndexCompactionPassOutcome::Short,
+			Self::Budget => IndexCompactionPassOutcome::Budget,
+			Self::LostRace => IndexCompactionPassOutcome::LostRace,
+			Self::Fenced => IndexCompactionPassOutcome::Fenced,
+			Self::NotVisible => IndexCompactionPassOutcome::NotVisible,
+		}
+	}
+}
+
+fn compaction_kind(index: &Index) -> Option<IndexCompactionKind> {
+	match index {
+		Index::FullText(_) => Some(IndexCompactionKind::FullText),
+		Index::Count(_) => Some(IndexCompactionKind::Count),
+		Index::Hnsw(_) => Some(IndexCompactionKind::Hnsw),
+		#[cfg(diskann)]
+		Index::DiskAnn(_) => Some(IndexCompactionKind::DiskAnn),
+		_ => None,
+	}
 }
 
 /// How one pass over an index ended, as the queue batch that ran it needs to
@@ -141,15 +170,25 @@ pub(crate) struct CompactionPassReport {
 }
 
 /// A compaction pass's progress through its plan budget and its retries.
-#[derive(Default)]
 struct CompactionPassProgress {
+	kind: IndexCompactionKind,
+	observer: Arc<dyn ExecutionObserver>,
 	/// Plans the pass has applied.
 	applied: usize,
-	/// Retryable conflicts the pass has retried.
+	/// Retryable conflicts and lost races the pass has retried.
 	retries: usize,
 }
 
 impl CompactionPassProgress {
+	fn new(kind: IndexCompactionKind, observer: Arc<dyn ExecutionObserver>) -> Self {
+		Self {
+			kind,
+			observer,
+			applied: 0,
+			retries: 0,
+		}
+	}
+
 	/// How the pass ends on a plan with nothing to apply.
 	fn nothing_to_apply(&self) -> CompactionPassOutcome {
 		if self.applied == 0 {
@@ -159,11 +198,31 @@ impl CompactionPassProgress {
 		}
 	}
 
-	/// Counts an applied plan, and says how the pass ends if it ends there.
-	/// `has_more` is whether that plan stopped at its own cap with entries
-	/// behind it.
-	fn record_applied(&mut self, has_more: bool) -> Option<CompactionPassOutcome> {
+	/// Counts an applied plan, emits its plan event when it folded at least one
+	/// pending key, and says how the pass ends if it ends there. `has_more` is
+	/// whether that plan stopped at its own cap with entries behind it. A plan
+	/// that folded nothing still counts toward the pass's plan budget. Callers
+	/// record a committed plan before they honour cancellation, so the plan
+	/// metrics count every fold that reached storage.
+	fn record_applied(
+		&mut self,
+		mode: IndexCompactionPlanMode,
+		keys_compacted: usize,
+		duration: Duration,
+		has_more: bool,
+	) -> Option<CompactionPassOutcome> {
 		self.applied += 1;
+		if keys_compacted > 0 {
+			self.observer.on_index_compaction_plan(&IndexCompactionPlanEvent {
+				safe: IndexCompactionPlanEventSafe {
+					kind: self.kind,
+					mode,
+					duration,
+					pending_entries: keys_compacted as u64,
+				},
+				ctx: IndexCompactionPlanEventCtx::default(),
+			});
+		}
 		if !has_more {
 			Some(CompactionPassOutcome::Short)
 		} else if self.applied >= INDEX_COMPACTION_PASS_PLAN_BUDGET {
@@ -171,6 +230,12 @@ impl CompactionPassProgress {
 		} else {
 			None
 		}
+	}
+
+	/// Records an in-place HNSW plan that mutated the resident graph and then
+	/// did not commit, so the process-local index was discarded.
+	fn record_discarded_cache(&self) {
+		self.observer.on_index_hnsw_cache_discard(&IndexHnswCacheDiscardEvent::default());
 	}
 
 	/// Whether a plan that lost its race is retried from a fresh plan, while
@@ -182,6 +247,13 @@ impl CompactionPassProgress {
 			return false;
 		}
 		self.retries += 1;
+		self.observer.on_index_compaction_retry(&IndexCompactionRetryEvent {
+			safe: IndexCompactionRetryEventSafe {
+				kind: self.kind,
+				reason: IndexCompactionRetryReason::LostRace,
+			},
+			ctx: IndexCompactionRetryEventCtx::default(),
+		});
 		debug!(target: TARGET, "Index compaction plan for {ikb} lost its race, replanning");
 		true
 	}
@@ -196,6 +268,13 @@ impl CompactionPassProgress {
 			return false;
 		}
 		self.retries += 1;
+		self.observer.on_index_compaction_retry(&IndexCompactionRetryEvent {
+			safe: IndexCompactionRetryEventSafe {
+				kind: self.kind,
+				reason: IndexCompactionRetryReason::TxnConflict,
+			},
+			ctx: IndexCompactionRetryEventCtx::default(),
+		});
 		true
 	}
 }
@@ -296,6 +375,8 @@ enum DiskAnnFrameStep {
 	/// The plan applied and committed; `has_more` says it stopped at a cap.
 	Applied {
 		has_more: bool,
+		keys_compacted: usize,
+		duration: Duration,
 	},
 	/// Nothing to apply: no backlog, or the index is gone or not DiskANN.
 	Empty,
@@ -398,6 +479,8 @@ pub(crate) struct Materialiser {
 	/// canceller only stops it at its next plan boundary. `None` lets every
 	/// frame run to its end.
 	abort_frames: Option<CancellationToken>,
+	/// What scheduled the passes this materialiser runs.
+	trigger: IndexCompactionTrigger,
 }
 
 impl Materialiser {
@@ -418,6 +501,7 @@ impl Materialiser {
 			sequences,
 			node_id: ctx.node_id(),
 			abort_frames: None,
+			trigger: IndexCompactionTrigger::Queue,
 		})
 	}
 
@@ -425,6 +509,12 @@ impl Materialiser {
 	/// tripped.
 	pub(crate) fn with_frame_abort(mut self, abort: CancellationToken) -> Self {
 		self.abort_frames = Some(abort);
+		self
+	}
+
+	/// Sets the compaction trigger reported on pass completion events.
+	pub(crate) fn with_trigger(mut self, trigger: IndexCompactionTrigger) -> Self {
+		self.trigger = trigger;
 		self
 	}
 
@@ -556,6 +646,21 @@ impl Materialiser {
 	/// the report says when that request failed to commit. A pass that fails on
 	/// anything else queues nothing. The kinds that run work in parallel take
 	/// its places through `places`.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "debug",
+			target = "surrealdb::core::kvs::index::materialise",
+			skip_all,
+			fields(
+				ns = %ikb.ns(),
+				db = %ikb.db(),
+				tb = %ikb.table(),
+				ix = ?ikb.index(),
+				trigger = self.trigger.as_label()
+			)
+		)
+	)]
 	pub(crate) async fn run_pass_held(
 		&self,
 		ikb: &IndexKeyBase,
@@ -563,7 +668,13 @@ impl Materialiser {
 		lease: Option<&dyn PassLease>,
 		places: &crate::idx::places::Ticket,
 	) -> CompactionPassReport {
-		let result = self.index_compaction_pass(ikb, canceller, lease, places).await;
+		let _active = self.builder.enter_pass(ikb);
+		let started = Instant::now();
+		let mut kind = None;
+		let result = self.index_compaction_pass(ikb, canceller, lease, places, &mut kind).await;
+		// Read before the requeue below awaits, so a cancellation that trips
+		// during that cleanup does not label an earlier failure `cancelled`.
+		let cancelled = canceller.is_cancelled();
 		let owes_request = match &result {
 			Ok(outcome) => {
 				matches!(outcome, CompactionPassOutcome::Budget | CompactionPassOutcome::LostRace)
@@ -578,6 +689,23 @@ impl Materialiser {
 					true
 				}
 			};
+		let outcome = match &result {
+			Ok(outcome) => outcome.observe_outcome(),
+			Err(_) if cancelled => IndexCompactionPassOutcome::Cancelled,
+			Err(_) => IndexCompactionPassOutcome::Error,
+		};
+		self.builder.transaction_factory().observer().on_index_compaction_pass(
+			&IndexCompactionPassEvent {
+				safe: IndexCompactionPassEventSafe {
+					kind,
+					trigger: self.trigger,
+					outcome,
+					duration: started.elapsed(),
+					unqueued,
+				},
+				ctx: IndexCompactionPassEventCtx::default(),
+			},
+		);
 		CompactionPassReport {
 			result,
 			unqueued,
@@ -651,6 +779,7 @@ impl Materialiser {
 		canceller: &CancellationToken,
 		lease: Option<&dyn PassLease>,
 		places: &crate::idx::places::Ticket,
+		kind_out: &mut Option<IndexCompactionKind>,
 	) -> Result<CompactionPassOutcome> {
 		Datastore::ensure_not_cancelled(canceller)?;
 		// The catalog definition and the index's durable build state, read
@@ -737,18 +866,29 @@ impl Materialiser {
 				return Ok(CompactionPassOutcome::Empty);
 			}
 		};
+		*kind_out = compaction_kind(&ix.index);
 		// A lapsed generation built against what the catalog does not describe
 		// is withdrawn rather than folded through the definition the catalog
 		// holds, and its request dropped: no query reads a withdrawn
 		// generation, and the next build of the index starts over. One the
 		// withdrawal could not settle keeps its request for the next pass.
 		if stale {
-			if self.withdraw_stale_build(ikb).await? {
+			return if self.withdraw_stale_build(ikb).await? {
 				trace!(target: TARGET, "Index compaction: Index {ikb:?} had a lapsed build its catalog does not describe, withdrew it");
-				return Ok(CompactionPassOutcome::Empty);
-			}
-			return Ok(CompactionPassOutcome::Fenced);
+				Ok(CompactionPassOutcome::Empty)
+			} else {
+				Ok(CompactionPassOutcome::Fenced)
+			};
 		}
+		let Some(kind) = *kind_out else {
+			self.builder.forget_pending_deletes(ikb);
+			trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
+			return Ok(CompactionPassOutcome::Empty);
+		};
+		let mut progress = CompactionPassProgress::new(
+			kind,
+			Arc::clone(self.builder.transaction_factory().observer()),
+		);
 		// A vector index whose build is still in flight is left alone until
 		// its owner releases it, because the catalog this pass reads may name
 		// a layout the build is replacing. A `REBUILD INDEX` that migrates
@@ -783,17 +923,22 @@ impl Materialiser {
 			self.builder.forget_pending_deletes(ikb);
 		}
 		match &ix.index {
-			Index::FullText(_) => self.process_fulltext_compaction(ikb, canceller, lease).await,
-			Index::Count(_) => self.process_count_compaction(ikb, canceller, lease).await,
+			Index::FullText(_) => {
+				self.process_fulltext_compaction(ikb, canceller, lease, &mut progress).await
+			}
+			Index::Count(_) => {
+				self.process_count_compaction(ikb, canceller, lease, &mut progress).await
+			}
 			// HNSW compaction owns its pending-key allocation and pending-range
 			// semantics separately from full-text/count compaction.
-			Index::Hnsw(_) => self.process_hnsw_compaction(ikb, canceller, lease, places).await,
-			#[cfg(diskann)]
-			Index::DiskAnn(_) => self.process_diskann_compaction(ikb, canceller, lease, places).await,
-			_ => {
-				trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
-				Ok(CompactionPassOutcome::Empty)
+			Index::Hnsw(_) => {
+				self.process_hnsw_compaction(ikb, canceller, lease, places, &mut progress).await
 			}
+			#[cfg(diskann)]
+			Index::DiskAnn(_) => {
+				self.process_diskann_compaction(ikb, canceller, lease, places, &mut progress).await
+			}
+			_ => Ok(CompactionPassOutcome::Empty),
 		}
 	}
 
@@ -947,9 +1092,10 @@ impl Materialiser {
 		canceller: &CancellationToken,
 		lease: Option<&dyn PassLease>,
 		places: &crate::idx::places::Ticket,
+		progress: &mut CompactionPassProgress,
 	) -> Result<CompactionPassOutcome> {
-		let mut progress = CompactionPassProgress::default();
 		loop {
+			let plan_started = Instant::now();
 			Datastore::ensure_not_cancelled(canceller)?;
 			if lease.is_some_and(|lease| lease.is_lost()) {
 				return Ok(CompactionPassOutcome::Budget);
@@ -1041,7 +1187,7 @@ impl Materialiser {
 			// The apply mutates the wrapper and cache of the format the guard
 			// read, so every failure-side recovery below clears that format.
 			let applied_format = ix.format_version;
-			let res: Result<HnswCompactionOutcome> = async {
+			let res = {
 				let mut ctx = Context::new_child(&self.ctx);
 				ctx.set_transaction(Arc::clone(&txn));
 				ctx.set_index_places(places.clone());
@@ -1055,18 +1201,23 @@ impl Materialiser {
 					plan,
 				)
 				.await
-			}
-			.await;
+			};
 			match res {
 				Ok(outcome) if outcome.applied() => {
 					// Only an in-place batch reaches the graph before its commit; a
 					// staged one publishes from the commit itself, so a transaction
 					// that does not commit leaves its wrapper untouched.
 					let in_place = outcome == HnswCompactionOutcome::InPlace;
+					let plan_mode = if in_place {
+						IndexCompactionPlanMode::InPlace
+					} else {
+						IndexCompactionPlanMode::Staged
+					};
 					if let Err(e) = Datastore::ensure_not_cancelled(canceller) {
 						let _ = txn.cancel().await;
 						if in_place {
 							self.discard_hnsw_index(tb, ikb, applied_format).await;
+							progress.record_discarded_cache();
 						}
 						return Err(e);
 					}
@@ -1078,6 +1229,7 @@ impl Materialiser {
 						let _ = txn.cancel().await;
 						if in_place {
 							self.discard_hnsw_index(tb, ikb, applied_format).await;
+							progress.record_discarded_cache();
 						}
 						return Err(e);
 					}
@@ -1089,6 +1241,7 @@ impl Materialiser {
 						let _ = txn.cancel().await;
 						if in_place {
 							self.discard_hnsw_index(tb, ikb, applied_format).await;
+							progress.record_discarded_cache();
 						}
 						if progress
 							.retry(
@@ -1107,6 +1260,7 @@ impl Materialiser {
 						let _ = txn.cancel().await;
 						if in_place {
 							self.discard_hnsw_index(tb, ikb, applied_format).await;
+							progress.record_discarded_cache();
 						}
 						if progress
 							.retry(
@@ -1130,6 +1284,19 @@ impl Materialiser {
 							target: TARGET,
 							"Failed to step the HNSW pending-state guards after a compaction of {ikb}: {e}"
 						);
+					}
+					let outcome = progress.record_applied(
+						plan_mode,
+						captured,
+						plan_started.elapsed(),
+						has_more,
+					);
+					Datastore::ensure_not_cancelled(canceller)?;
+					if let Some(outcome) = outcome {
+						if !has_more {
+							self.after_hnsw_drain(ikb, applied_format, canceller, lease).await;
+						}
+						return Ok(outcome);
 					}
 				}
 				Ok(HnswCompactionOutcome::LostRace) => {
@@ -1166,13 +1333,31 @@ impl Materialiser {
 							return Err(e);
 						}
 					}
+					Datastore::ensure_not_cancelled(canceller)?;
+					// A plan that captured nothing stopped at its cap counts toward
+					// the pass's plan budget, as a DiskANN frame that applied nothing
+					// with entries behind it does. A guard step with nothing behind
+					// it is not a plan: the pass replans, and ends once a plan finds
+					// nothing left to step.
+					if has_more
+						&& let Some(outcome) = progress.record_applied(
+							IndexCompactionPlanMode::Folded,
+							0,
+							plan_started.elapsed(),
+							has_more,
+						) {
+						return Ok(outcome);
+					}
 				}
-				Err(e) => {
+				Err(err) => {
 					let _ = txn.cancel().await;
-					self.discard_hnsw_index(tb, ikb, applied_format).await;
+					if err.in_place {
+						self.discard_hnsw_index(tb, ikb, applied_format).await;
+						progress.record_discarded_cache();
+					}
 					if progress
 						.retry(
-							&e,
+							&err.error,
 							format!(
 								"Retryable conflict applying HNSW compaction for {ikb}, retrying"
 							),
@@ -1181,15 +1366,8 @@ impl Materialiser {
 					{
 						continue;
 					}
-					return Err(e);
+					return Err(err.error);
 				}
-			}
-			Datastore::ensure_not_cancelled(canceller)?;
-			if let Some(outcome) = progress.record_applied(has_more) {
-				if !has_more {
-					self.after_hnsw_drain(ikb, applied_format, canceller, lease).await;
-				}
-				return Ok(outcome);
 			}
 		}
 	}
@@ -1216,8 +1394,8 @@ impl Materialiser {
 		canceller: &CancellationToken,
 		lease: Option<&dyn PassLease>,
 		places: &crate::idx::places::Ticket,
+		progress: &mut CompactionPassProgress,
 	) -> Result<CompactionPassOutcome> {
-		let mut progress = CompactionPassProgress::default();
 		loop {
 			Datastore::ensure_not_cancelled(canceller)?;
 			if lease.is_some_and(|lease| lease.is_lost()) {
@@ -1239,10 +1417,12 @@ impl Materialiser {
 					"DiskANN compaction frame for {ikb} did not complete: {e}"
 				))),
 			};
-			let has_more = match step {
+			let (has_more, keys_compacted, duration) = match step {
 				Ok(DiskAnnFrameStep::Applied {
 					has_more,
-				}) => has_more,
+					keys_compacted,
+					duration,
+				}) => (has_more, keys_compacted, duration),
 				Ok(DiskAnnFrameStep::Empty) => return Ok(progress.nothing_to_apply()),
 				Ok(DiskAnnFrameStep::Fenced) => return Ok(CompactionPassOutcome::Fenced),
 				Ok(DiskAnnFrameStep::LostRace) => {
@@ -1281,8 +1461,14 @@ impl Materialiser {
 					return Err(e);
 				}
 			};
+			let outcome = progress.record_applied(
+				IndexCompactionPlanMode::Folded,
+				keys_compacted,
+				duration,
+				has_more,
+			);
 			Datastore::ensure_not_cancelled(canceller)?;
-			if let Some(outcome) = progress.record_applied(has_more) {
+			if let Some(outcome) = outcome {
 				return Ok(outcome);
 			}
 		}
@@ -1304,6 +1490,7 @@ impl Materialiser {
 		canceller: &CancellationToken,
 		places: &crate::idx::places::Ticket,
 	) -> std::result::Result<DiskAnnFrameStep, DiskAnnFrameError> {
+		let frame_started = Instant::now();
 		let plan = {
 			let txn = Arc::new(self.transaction(Read).await.map_err(DiskAnnFrameError::Plan)?);
 			let res: Result<Option<crate::idx::trees::diskann::index::DiskAnnCompactionPlan>> =
@@ -1339,6 +1526,7 @@ impl Materialiser {
 			return Ok(DiskAnnFrameStep::Empty);
 		}
 		let has_more = plan.has_more();
+		let captured = plan.captured_len();
 		Datastore::ensure_not_cancelled(canceller).map_err(DiskAnnFrameError::Plan)?;
 
 		let txn = Arc::new(self.transaction(Write).await.map_err(DiskAnnFrameError::Plan)?);
@@ -1411,9 +1599,13 @@ impl Materialiser {
 		match res {
 			Ok(CompactionApply::Applied) => Ok(DiskAnnFrameStep::Applied {
 				has_more,
+				keys_compacted: captured,
+				duration: frame_started.elapsed(),
 			}),
 			Ok(CompactionApply::Empty) if has_more => Ok(DiskAnnFrameStep::Applied {
 				has_more: true,
+				keys_compacted: 0,
+				duration: frame_started.elapsed(),
 			}),
 			Ok(CompactionApply::LostRace) => Ok(DiskAnnFrameStep::LostRace),
 			Ok(CompactionApply::Empty) => Ok(DiskAnnFrameStep::Empty),
@@ -1436,9 +1628,10 @@ impl Materialiser {
 		ikb: &IndexKeyBase,
 		canceller: &CancellationToken,
 		lease: Option<&dyn PassLease>,
+		progress: &mut CompactionPassProgress,
 	) -> Result<CompactionPassOutcome> {
-		let mut progress = CompactionPassProgress::default();
 		loop {
+			let plan_started = Instant::now();
 			Datastore::ensure_not_cancelled(canceller)?;
 			if lease.is_some_and(|lease| lease.is_lost()) {
 				return Ok(CompactionPassOutcome::Budget);
@@ -1481,6 +1674,7 @@ impl Materialiser {
 				return Ok(progress.nothing_to_apply());
 			}
 			let has_more = plan.has_more();
+			let captured = plan.captured_len();
 			Datastore::ensure_not_cancelled(canceller)?;
 
 			let txn = self.transaction(Write).await?;
@@ -1600,8 +1794,14 @@ impl Materialiser {
 					return Err(e);
 				}
 			}
+			let outcome = progress.record_applied(
+				IndexCompactionPlanMode::Folded,
+				captured,
+				plan_started.elapsed(),
+				has_more,
+			);
 			Datastore::ensure_not_cancelled(canceller)?;
-			if let Some(outcome) = progress.record_applied(has_more) {
+			if let Some(outcome) = outcome {
 				return Ok(outcome);
 			}
 		}
@@ -1622,9 +1822,10 @@ impl Materialiser {
 		ikb: &IndexKeyBase,
 		canceller: &CancellationToken,
 		lease: Option<&dyn PassLease>,
+		progress: &mut CompactionPassProgress,
 	) -> Result<CompactionPassOutcome> {
-		let mut progress = CompactionPassProgress::default();
 		loop {
+			let plan_started = Instant::now();
 			Datastore::ensure_not_cancelled(canceller)?;
 			if lease.is_some_and(|lease| lease.is_lost()) {
 				return Ok(CompactionPassOutcome::Budget);
@@ -1639,6 +1840,7 @@ impl Materialiser {
 				return Ok(progress.nothing_to_apply());
 			}
 			let has_more = plan.has_more();
+			let captured = plan.captured_len();
 			#[cfg(test)]
 			crate::kvs::ds::test::before_count_compaction_apply(self.node_id).await;
 			Datastore::ensure_not_cancelled(canceller)?;
@@ -1743,8 +1945,14 @@ impl Materialiser {
 					return Err(e);
 				}
 			}
+			let outcome = progress.record_applied(
+				IndexCompactionPlanMode::Folded,
+				captured,
+				plan_started.elapsed(),
+				has_more,
+			);
 			Datastore::ensure_not_cancelled(canceller)?;
-			if let Some(outcome) = progress.record_applied(has_more) {
+			if let Some(outcome) = outcome {
 				return Ok(outcome);
 			}
 		}
@@ -1899,7 +2107,9 @@ impl MaterialiseAfterCommit {
 		// Tripped only when the query is cancelled: a deadline ends the wait at
 		// a plan boundary, with the frame in progress left to commit.
 		let abort = CancellationToken::new();
-		let materialiser = Materialiser::new(&self.ctx)?.with_frame_abort(abort.clone());
+		let materialiser = Materialiser::new(&self.ctx)?
+			.with_frame_abort(abort.clone())
+			.with_trigger(IndexCompactionTrigger::AfterCommit);
 		// The statement's own registration, where it lent one, so the pass's
 		// parallel work counts as the statement's places.
 		let places = match self.ctx.index_places() {

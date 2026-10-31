@@ -338,6 +338,12 @@ impl IndexDeltaBuffer {
 		frame.insert(index, nid);
 	}
 
+	/// Whether an open frame of this transaction has buffered a compaction
+	/// trigger for `index`.
+	pub fn has_compaction_trigger(&self, index: &BufferedIndex) -> bool {
+		self.compactions.lock().iter().any(|frame| frame.contains_key(index))
+	}
+
 	/// Record that an adjacency scope wants folding once this transaction
 	/// commits. Deduplicated per scope: the queue only needs to name the
 	/// scope once per transaction, not once per tombstoned edge.

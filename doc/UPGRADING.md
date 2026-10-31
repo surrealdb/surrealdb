@@ -128,6 +128,9 @@ is in, and a store may hold both side by side.
   fails, and a `surrealdb.query`, `surrealdb.value` or `surrealdb.functions`
   call that a script catches. Writes that such a failure left behind before
   are now discarded. See below.
+- The `building` object `INFO FOR INDEX` returns gains `active`, `queued`
+  and `armed_shards`, and `/metrics` gains the `surrealdb.index` compaction
+  families. See below.
 
 ### SurrealKV is the only embedded engine
 
@@ -712,26 +715,28 @@ the whole transaction, as before.
 
 ### Index materialisation shares the node's place pool
 
-The parallel work of index materialisation, the staged HNSW batch and the
-background compaction of queued indexes, runs in places from the node's place
-pool, the one parallel queries run their morsel workers in. The pool has one
-place per core beyond the one a statement's own task runs on, and the same
-settings govern both kinds of work: `SURREAL_MORSEL_PLACES` (the most places
-one statement, compaction run or build may hold; unbounded by default),
-`SURREAL_MORSEL_OLTP_RESERVE` (the places kept free for short statements;
-default `1`) and `SURREAL_MORSEL_PLACE_QUANTUM` (how much work a worker does
-before it gives its place to a statement waiting for one; default `8`).
+The parallel work of index materialisation, the staged HNSW batch, the
+additions of an in-place HNSW batch and the background compaction of queued
+indexes, runs in places from the node's place pool, the one parallel queries
+run their morsel workers in. The pool has one place per core beyond the one a
+statement's own task runs on, and the same settings govern both kinds of
+work: `SURREAL_MORSEL_PLACES` (the most places one statement, compaction run
+or build may hold; unbounded by default), `SURREAL_MORSEL_OLTP_RESERVE` (the
+places kept free for short statements; default `1`) and
+`SURREAL_MORSEL_PLACE_QUANTUM` (how much work a worker does before it gives
+its place to a statement waiting for one; default `8`).
 
 - **Narrower runs on small hosts.** With the default reserve of `1`, a host
-  with two cores or fewer has no place to grant, so staged HNSW batches and
+  with two cores or fewer has no place to grant, so HNSW batches and
   background compaction run on one task there. They still complete, and the
   graph they build is the same.
 - **`SURREAL_HNSW_BUILD_PARALLELISM` is a ceiling.** It caps how many tasks a
-  staged batch runs on, the applying task included. The width it actually runs
-  at is what the pool grants under the morsel settings above, and a worker
-  gives its place back early when a query waits for one. This holds on every
-  store, the in-memory one, SurrealKV and TiKV included. `serial` still selects
-  the in-place path for every batch.
+  staged batch, or the additions of an in-place batch, run on, the applying
+  task included. The width it actually runs at is what the pool grants under
+  the morsel settings above, and a worker gives its place back early when a
+  query waits for one. This holds on every store, the in-memory one, SurrealKV
+  and TiKV included. `serial` selects the in-place path for every batch and
+  applies it on one task.
 - **Bounded background compaction.** Background compaction no longer starts
   one task per index with queued work. It compacts one index on its own task
   and starts another only on a place the pool grants, so places bound how many
@@ -743,6 +748,29 @@ index materialisation on two cores or fewer can set
 short statements. A deployment that tuned `SURREAL_HNSW_BUILD_PARALLELISM`
 for throughput checks the morsel settings too, since they now decide the
 width it gets.
+
+### Index compaction in `INFO FOR INDEX` and `/metrics`
+
+The `building` object that `INFO FOR INDEX` returns carries three more fields
+beside `compacting`:
+
+- `queued`: a compaction request for the index is stored, or buffered in the
+  transaction that runs the statement.
+- `active`: a compaction pass over the index runs on the node that answers.
+  It is local to that node, so it reads `false` on a node while another node
+  compacts the index.
+- `armed_shards`: for an HNSW or DiskANN index, how many of its pending-state
+  guard shards report pending entries. Inside a write transaction that has
+  itself written pending entries to the index, it counts only that
+  transaction's shards.
+
+`/metrics` gains the index compaction families under the `surrealdb.index`
+scope, labelled by index kind, never by index; `doc/OBSERVABILITY.md` lists
+them. They are not on the public allowlist, so only a root-authenticated
+scrape sees them.
+
+**What to do**: a script or test that compares the whole `building` object
+compares the fields it needs instead.
 
 ### DiskANN builds write their graph as they scan, and keep several start points
 
