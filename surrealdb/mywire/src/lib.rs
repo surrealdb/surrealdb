@@ -42,6 +42,7 @@ pub mod msg;
 pub mod query;
 mod show;
 pub mod typing;
+mod uservars;
 
 pub use conn::Connection;
 pub use query::translate_query;

@@ -14,7 +14,7 @@ use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::TransactionType;
 use surrealdb_mysql::ast::stmt::{
-	AlterTableAction, SelectStmt, Statement as MyStatement, TableRef,
+	AlterTableAction, SelectStmt, Statement as MyStatement, TableRef, VariableTarget,
 };
 use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_sqlplan::SqlDialect;
@@ -34,6 +34,7 @@ use crate::codec::*;
 use crate::constants::*;
 use crate::msg::*;
 use crate::typing::*;
+use crate::uservars::{UserState, UserValue, bind_placeholders};
 use crate::{AuthRequest, Authenticator, BoxedIo, LOG, Start};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
@@ -75,6 +76,7 @@ pub struct Connection {
 	auth_cache: Arc<FastAuthCache>,
 	prepared_statements: HashMap<u32, PreparedStatement>,
 	next_statement_id: u32,
+	user: UserState,
 }
 
 /// Handle a single incoming MySQL client connection.
@@ -654,6 +656,7 @@ async fn perform_handshake(
 		auth_cache,
 		prepared_statements: HashMap::new(),
 		next_statement_id: 1,
+		user: UserState::default(),
 	};
 
 	// 6. Set initial database if requested, without swallowing errors
@@ -830,6 +833,7 @@ impl Connection {
 						}
 						COM_RESET_CONNECTION => {
 							self.prepared_statements.clear();
+							self.user.clear();
 							self.next_statement_id = 1;
 							self.autocommit = true;
 							if let Some(tx) = self.transaction.take() {
@@ -847,6 +851,225 @@ impl Connection {
 				}
 			}
 		}
+	}
+
+	/// Runs `SET @a = ...`, `PREPARE`, `EXECUTE` and `DEALLOCATE PREPARE`, which act on the
+	/// connection's user state. A `SET` that also assigns system variables is answered with the
+	/// `SET` of those assignments alone, for the ordinary `SET` handling to run.
+	async fn handle_user_statement(
+		&mut self,
+		trimmed: &str,
+		seq: u8,
+		reply: bool,
+	) -> Result<UserStatement> {
+		let first = first_keyword(trimmed);
+		if !["set", "prepare", "execute", "deallocate", "drop"]
+			.iter()
+			.any(|kw| first.eq_ignore_ascii_case(kw))
+		{
+			return Ok(UserStatement::NotOurs);
+		}
+		let Ok(stmt) = surrealdb_mysql::parse_statement(trimmed) else {
+			return Ok(UserStatement::NotOurs);
+		};
+		let outcome = if let MyStatement::Set(set) = &stmt {
+			if !set.assignments.iter().any(|(t, _)| matches!(t, VariableTarget::User(_))) {
+				return Ok(UserStatement::NotOurs);
+			}
+			if let Some(err_pkt) = crate::query::system_variable_refusal(trimmed) {
+				self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+				return Ok(UserStatement::Failed);
+			}
+			let Some(parts) = split_set_assignments(trimmed) else {
+				return Ok(UserStatement::NotOurs);
+			};
+			let before = self.user.variables();
+			let mut system: Vec<String> = Vec::new();
+			for part in parts {
+				let Some((name, expr)) = user_assignment(part) else {
+					system.push(self.user.substitute(part).unwrap_or_else(|| part.to_string()));
+					continue;
+				};
+				match self.evaluate_user_expression(expr).await {
+					Ok(value) => self.user.set(&name, value),
+					Err(err_pkt) => {
+						self.user.restore_variables(before);
+						self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+						return Ok(UserStatement::Failed);
+					}
+				}
+			}
+			if !system.is_empty() {
+				return Ok(UserStatement::Rewritten(format!("SET {}", system.join(", "))));
+			}
+			Ok(())
+		} else if let MyStatement::Prepare(prepare) = &stmt {
+			// A name in use is released before the replacement is read, so a replacement that is
+			// refused leaves no statement under the name.
+			self.user.deallocate(&prepare.name);
+			let sql = if let Some(var) = prepare.query.strip_prefix('@') {
+				self.user.get(var).as_statement_text()
+			} else {
+				Some(prepare.query.clone())
+			};
+			match sql {
+				Some(sql) if split_statements(&sql).is_some_and(|parts| parts.len() > 1) => {
+					Err(ErrPacket::general(
+						1064,
+						b"42000",
+						"You have an error in your SQL syntax; a prepared statement holds one statement",
+					))
+				}
+				Some(sql) if surrealdb_mysql::parse_statement(&sql).is_err() => {
+					let message = surrealdb_mysql::parse_statement(&sql)
+						.err()
+						.map(|e| format!("You have an error in your SQL syntax: {e}"))
+						.unwrap_or_default();
+					Err(ErrPacket::general(1064, b"42000", message))
+				}
+				Some(sql) if !is_preparable(&sql) => Err(ErrPacket::general(
+					1295,
+					b"HY000",
+					"This command is not supported in the prepared statement protocol yet",
+				)),
+				Some(sql) => {
+					self.user.prepare(&prepare.name, sql);
+					Ok(())
+				}
+				None => Err(ErrPacket::general(
+					1064,
+					b"42000",
+					"PREPARE FROM a user variable needs a string value",
+				)),
+			}
+		} else if let MyStatement::Deallocate(dealloc) = &stmt {
+			if self.user.deallocate(&dealloc.name) {
+				Ok(())
+			} else {
+				Err(unknown_statement_handler(&dealloc.name, "DEALLOCATE PREPARE"))
+			}
+		} else if let MyStatement::Execute(execute) = &stmt {
+			let Some(sql) = self.user.statement(&execute.name).map(str::to_string) else {
+				let err_pkt = unknown_statement_handler(&execute.name, "EXECUTE");
+				self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+				return Ok(UserStatement::Failed);
+			};
+			let mut literals = Vec::with_capacity(execute.using.len());
+			for expr in &execute.using {
+				let span = expr.span();
+				let text = &trimmed[span.start..span.end];
+				match self.evaluate_user_expression(text).await {
+					Ok(value) => literals.push(value.literal().to_string()),
+					Err(err_pkt) => {
+						self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+						return Ok(UserStatement::Failed);
+					}
+				}
+			}
+			let Some(bound) = bind_placeholders(&sql, &literals) else {
+				let err_pkt = ErrPacket::general(1210, b"HY000", "Incorrect arguments to EXECUTE");
+				self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+				return Ok(UserStatement::Failed);
+			};
+			Box::pin(self.handle_query(&bound, seq)).await?;
+			return Ok(UserStatement::Answered);
+		} else {
+			return Ok(UserStatement::NotOurs);
+		};
+		match outcome {
+			Ok(()) => {
+				if reply {
+					let ok = self.ok_packet(0, 0);
+					self.writer.write_packet(seq.wrapping_add(1), &ok.serialize()).await?;
+				}
+				Ok(UserStatement::Answered)
+			}
+			Err(err_pkt) => {
+				self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+				Ok(UserStatement::Failed)
+			}
+		}
+	}
+
+	/// Runs the user-state statements of a request that holds several statements. Those ahead of
+	/// the last one must be assignments, `PREPARE` or `DEALLOCATE`, which answer with no rows, and
+	/// are made in order; the last one is then answered like a request of its own. A request with
+	/// no user-state statement is left to the ordinary path.
+	async fn handle_user_request(&mut self, trimmed: &str, seq: u8) -> Result<UserStatement> {
+		let Some(parts) = split_statements(trimmed) else {
+			return self.handle_user_statement(trimmed, seq, true).await;
+		};
+		let Some((last, leading)) = parts.split_last() else {
+			return Ok(UserStatement::NotOurs);
+		};
+		if leading.is_empty() {
+			return self.handle_user_statement(trimmed, seq, true).await;
+		}
+		if !parts.iter().any(|part| acts_on_user_state(part)) {
+			return Ok(UserStatement::NotOurs);
+		}
+		for part in leading {
+			let outcome = if acts_on_user_state(part)
+				&& !first_keyword(part).eq_ignore_ascii_case("execute")
+			{
+				self.handle_user_statement(part, seq, false).await?
+			} else {
+				UserStatement::NotOurs
+			};
+			match outcome {
+				UserStatement::Answered => {}
+				UserStatement::Failed => return Ok(UserStatement::Failed),
+				UserStatement::NotOurs | UserStatement::Rewritten(_) => {
+					let err_pkt = ErrPacket::general(
+						1064,
+						b"42000",
+						"user variables and prepared statements can only be followed by other statements as the last of a request",
+					);
+					self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+					return Ok(UserStatement::Failed);
+				}
+			}
+		}
+		match self.handle_user_statement(last, seq, true).await? {
+			UserStatement::NotOurs => Ok(UserStatement::Rewritten((*last).to_string())),
+			other @ (UserStatement::Answered
+			| UserStatement::Failed
+			| UserStatement::Rewritten(_)) => Ok(other),
+		}
+	}
+
+	/// Evaluates the expression of a user-variable assignment or an `EXECUTE ... USING` argument
+	/// as the single value of `SELECT <expr>`.
+	async fn evaluate_user_expression(
+		&mut self,
+		expr: &str,
+	) -> std::result::Result<UserValue, ErrPacket> {
+		let expr = self.user.substitute(expr).unwrap_or_else(|| expr.to_string());
+		let sql = format!("SELECT {expr}");
+		if let Some(err_pkt) = crate::query::system_variable_refusal(&sql) {
+			return Err(err_pkt);
+		}
+		let req = QueryRequest::new(QuerySource::mysql(&sql), &self.session)
+			.with_optional_transaction(self.transaction.clone());
+		let results = match self.ds.run(req).await {
+			Ok(results) => self.present_all(results),
+			Err(err) => return Err(ErrPacket::from(&err)),
+		};
+		let Some(first) = results.into_iter().next() else {
+			return Ok(UserValue::null());
+		};
+		let value = match first.result {
+			Ok(value) => value,
+			Err(err) => return Err(ErrPacket::from(&err)),
+		};
+		let shape = shape_result("", "", value);
+		let (Some(raw), Some(text)) = (
+			shape.raw_rows.first().and_then(|r| r.first()),
+			shape.rows.first().and_then(|r| r.first()),
+		) else {
+			return Ok(UserValue::null());
+		};
+		Ok(UserValue::from_result(raw, text.as_deref()))
 	}
 
 	/// Commits the open interactive transaction, as MySQL does implicitly before
@@ -892,6 +1115,25 @@ impl Connection {
 			self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
 			return Ok(());
 		}
+
+		let rewritten;
+		let mut trimmed = trimmed;
+		if self.dialect == Dialect::MySql {
+			match self.handle_user_request(trimmed, seq).await? {
+				UserStatement::Answered | UserStatement::Failed => return Ok(()),
+				UserStatement::Rewritten(sql) => {
+					rewritten = sql;
+					trimmed = rewritten.as_str();
+				}
+				UserStatement::NotOurs => {}
+			}
+		}
+		let substituted = if self.dialect == Dialect::MySql {
+			self.user.substitute(trimmed)
+		} else {
+			None
+		};
+		let trimmed = substituted.as_deref().unwrap_or(trimmed);
 
 		// Handle transaction control statements
 		if let Some(op) = mysql_transaction_control(trimmed) {
@@ -2216,6 +2458,169 @@ impl Connection {
 	}
 }
 
+/// What the connection's user state made of a statement.
+enum UserStatement {
+	/// The statement does not act on user state.
+	NotOurs,
+	/// The statement has been answered.
+	Answered,
+	/// The statement failed and the client has been sent the error.
+	Failed,
+	/// The statement that remains once its user-variable assignments were made.
+	Rewritten(String),
+}
+
+/// `sql` past its leading whitespace and comments.
+fn past_comments(sql: &str) -> &str {
+	let mut rest = sql;
+	loop {
+		rest = rest.trim_start();
+		if let Some(after) = rest.strip_prefix("/*") {
+			let Some(end) = after.find("*/") else {
+				return "";
+			};
+			rest = &after[end + 2..];
+		} else if rest.starts_with("--") || rest.starts_with('#') {
+			let Some(end) = rest.find('\n') else {
+				return "";
+			};
+			rest = &rest[end..];
+		} else {
+			return rest;
+		}
+	}
+}
+
+/// The first word of `sql` past whitespace and comments, which is its keyword.
+fn first_keyword(sql: &str) -> &str {
+	past_comments(sql).split(|c: char| c.is_whitespace() || c == ';').next().unwrap_or("")
+}
+
+/// The word after the keyword of `sql`.
+fn second_keyword(sql: &str) -> &str {
+	let rest = past_comments(sql);
+	let after = rest.find(|c: char| c.is_whitespace()).map_or("", |at| &rest[at..]);
+	first_keyword(after)
+}
+
+/// The statements of `sql`, split at the semicolons outside parentheses and strings, as written.
+fn split_statements(sql: &str) -> Option<Vec<&str>> {
+	let tokens = surrealdb_mysql::tokenize(sql).ok()?;
+	let mut parts = Vec::new();
+	let mut depth = 0usize;
+	let mut start = None;
+	for token in &tokens {
+		if matches!(token.kind, surrealdb_mysql::TokenKind::Eof) {
+			break;
+		}
+		if matches!(token.kind, surrealdb_mysql::TokenKind::LParen) {
+			depth += 1;
+		} else if matches!(token.kind, surrealdb_mysql::TokenKind::RParen) {
+			depth = depth.saturating_sub(1);
+		} else if matches!(token.kind, surrealdb_mysql::TokenKind::Semicolon) && depth == 0 {
+			if let Some(from) = start.take() {
+				parts.push(sql.get(from..token.span.start)?.trim());
+			}
+			continue;
+		}
+		start.get_or_insert(token.span.start);
+	}
+	if let Some(from) = start {
+		parts.push(sql.get(from..)?.trim());
+	}
+	Some(parts)
+}
+
+/// Whether `statement` is a `SET` of a user variable, `PREPARE`, `EXECUTE` or `DEALLOCATE`.
+fn acts_on_user_state(statement: &str) -> bool {
+	let first = first_keyword(statement);
+	if ["prepare", "execute", "deallocate"].iter().any(|kw| first.eq_ignore_ascii_case(kw)) {
+		return true;
+	}
+	if first.eq_ignore_ascii_case("drop") {
+		return second_keyword(statement).eq_ignore_ascii_case("prepare");
+	}
+	first.eq_ignore_ascii_case("set")
+		&& surrealdb_mysql::tokenize(statement).is_ok_and(|tokens| {
+			tokens.iter().any(|t| matches!(t.kind, surrealdb_mysql::TokenKind::UserVar(_)))
+		})
+}
+
+/// Whether MySQL accepts `sql` in `PREPARE`: the statements that act on prepared statements
+/// themselves, under any of their spellings, and the ones MySQL leaves out (`LOCK TABLES`,
+/// `UNLOCK TABLES`, `USE` and transaction control) are refused. Refusing `PREPARE` and `EXECUTE`
+/// also keeps `EXECUTE` from running itself. Text that does not parse is refused where it is read.
+fn is_preparable(sql: &str) -> bool {
+	let Ok(statement) = surrealdb_mysql::parse_statement(sql) else {
+		return true;
+	};
+	!matches!(
+		statement,
+		MyStatement::Prepare(_)
+			| MyStatement::Execute(_)
+			| MyStatement::Deallocate(_)
+			| MyStatement::LockTables(_)
+			| MyStatement::UnlockTables(_)
+			| MyStatement::Use(_)
+			| MyStatement::Transaction(_)
+	)
+}
+
+/// The comma-separated assignments of a `SET`, as written.
+fn split_set_assignments(sql: &str) -> Option<Vec<&str>> {
+	let tokens = surrealdb_mysql::tokenize(sql).ok()?;
+	let mut parts = Vec::new();
+	let mut depth = 0usize;
+	let mut start = None;
+	for (index, token) in tokens.iter().enumerate() {
+		if matches!(token.kind, surrealdb_mysql::TokenKind::Eof) {
+			break;
+		}
+		if index == 0 {
+			continue;
+		}
+		if matches!(token.kind, surrealdb_mysql::TokenKind::LParen) {
+			depth += 1;
+		} else if matches!(token.kind, surrealdb_mysql::TokenKind::RParen) {
+			depth = depth.saturating_sub(1);
+		} else if matches!(token.kind, surrealdb_mysql::TokenKind::Comma) && depth == 0 {
+			parts.push(sql.get(start.take()?..token.span.start)?.trim());
+			continue;
+		}
+		start.get_or_insert(token.span.start);
+	}
+	parts.push(sql.get(start?..)?.trim());
+	Some(parts)
+}
+
+/// The variable, as the lexer reads its name, and the expression of a `@name = expr` or
+/// `@name := expr` assignment.
+fn user_assignment(part: &str) -> Option<(String, &str)> {
+	let tokens = surrealdb_mysql::tokenize(part).ok()?;
+	let [name, operator, expr, ..] = tokens.as_slice() else {
+		return None;
+	};
+	let surrealdb_mysql::TokenKind::UserVar(name) = &name.kind else {
+		return None;
+	};
+	if !matches!(
+		operator.kind,
+		surrealdb_mysql::TokenKind::Equal | surrealdb_mysql::TokenKind::ColonEqual
+	) {
+		return None;
+	}
+	Some((name.clone(), part.get(expr.span.start..)?.trim()))
+}
+
+/// MySQL's refusal of a prepared statement name that was never prepared.
+fn unknown_statement_handler(name: &str, command: &str) -> ErrPacket {
+	ErrPacket::general(
+		1243,
+		b"HY000",
+		format!("Unknown prepared statement handler ({name}) given to {command}"),
+	)
+}
+
 /// The refusal of a dialect that belongs to another protocol.
 fn not_over_mywire(dialect: Dialect) -> anyhow::Error {
 	anyhow::anyhow!("the {dialect:?} dialect is not available over the MySQL protocol")
@@ -2582,6 +2987,64 @@ fn extract_dml_counts(val: &surrealdb_types::Value) -> (u64, u64) {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_request_is_split_into_its_statements() {
+		assert_eq!(
+			split_statements("set @a = 1; select f(1;2), ';'; ").unwrap_or_default().len(),
+			2
+		);
+		assert_eq!(split_statements("select 1").unwrap(), vec!["select 1"]);
+		assert_eq!(split_statements("select 1; drop table t").unwrap().len(), 2);
+	}
+
+	#[test]
+	fn user_state_statements_are_recognised() {
+		assert!(acts_on_user_state("SET @a = 1"));
+		assert!(acts_on_user_state("prepare s from 'select 1'"));
+		assert!(acts_on_user_state(" /* c */ DROP  PREPARE s"));
+		assert!(!acts_on_user_state("drop table t"));
+		assert!(!acts_on_user_state("SET autocommit = 1"));
+		assert!(!acts_on_user_state("select @a"));
+	}
+
+	#[test]
+	fn first_keyword_skips_comments() {
+		assert_eq!(first_keyword("  /* c */ -- x\n PREPARE s FROM 'x'"), "PREPARE");
+		assert_eq!(first_keyword("# note\nset @a = 1"), "set");
+		assert_eq!(first_keyword("execute;"), "execute");
+		assert_eq!(first_keyword("/* open"), "");
+	}
+
+	#[test]
+	fn statements_that_prepare_are_not_preparable() {
+		assert!(is_preparable("select 1"));
+		assert!(!is_preparable("EXECUTE s"));
+		assert!(!is_preparable(" /* c */ prepare t from 'select 1'"));
+		assert!(!is_preparable("deallocate prepare s"));
+		assert!(!is_preparable("DROP PREPARE s"));
+		assert!(is_preparable("drop table t"));
+		assert!(!is_preparable("LOCK TABLES t READ"));
+		assert!(!is_preparable("use d"));
+		assert!(!is_preparable("begin"));
+	}
+
+	#[test]
+	fn set_assignments_are_split_at_top_level_commas() {
+		assert_eq!(
+			split_set_assignments("SET @a = f(1, 2), autocommit = 0, @b := 'x,y'").unwrap(),
+			vec!["@a = f(1, 2)", "autocommit = 0", "@b := 'x,y'"]
+		);
+		assert_eq!(
+			split_set_assignments("SET GLOBAL x = 1, @b = 2").unwrap(),
+			vec!["GLOBAL x = 1", "@b = 2"]
+		);
+		assert_eq!(user_assignment("@a = 5 + 1"), Some(("a".to_string(), "5 + 1")));
+		assert_eq!(user_assignment("@b:=7"), Some(("b".to_string(), "7")));
+		assert_eq!(user_assignment("@'x y' = 5"), Some(("x y".to_string(), "5")));
+		assert_eq!(user_assignment("@`q` = 'v'"), Some(("q".to_string(), "'v'")));
+		assert_eq!(user_assignment("autocommit = 0"), None);
+	}
 
 	#[test]
 	fn test_parse_mywire_set_dialect() {
