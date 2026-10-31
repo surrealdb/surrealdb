@@ -54,6 +54,7 @@ use super::copy::{
 use super::error::{PgError, unsupported_construct};
 use super::guc::{GucStore, ShowResult, normalize_name};
 use super::msg::{self, DescribeTarget, Frontend, StartupMessage};
+use super::sqlprepare::{Argument, BindError, PrepareError, SqlPrepared, first_keyword};
 use super::typing::{
 	PgColumn, PgType, ResultShape, shape_result, shape_result_declared, shape_result_jsonb,
 	shape_result_with_descriptor,
@@ -228,6 +229,21 @@ impl PreparedStatement {
 	}
 }
 
+/// What a statement made of SQL-level prepared-statement commands asks of the caller.
+enum SqlPreparedStep {
+	/// The statement is not one of them.
+	NotOurs,
+	/// The statement has been answered.
+	Done,
+	/// The statement to run in place of an `EXECUTE`.
+	Run(String),
+}
+
+/// The refusal of a SQL-level prepared statement name that was never prepared.
+fn missing_sql_statement(name: &str) -> PgError {
+	PgError::new("26000", format!("prepared statement \"{name}\" does not exist"))
+}
+
 /// An extended-protocol statement that is intercepted rather than executed. The
 /// simple-query path intercepts standalone `BEGIN`/`COMMIT`/`ROLLBACK` and
 /// `SET`; classifying them at Parse lets the extended protocol do the same, so
@@ -380,6 +396,7 @@ pub(super) async fn handle(
 		txn_session_snapshot: None,
 		txn_has_local_session_override: false,
 		statements: HashMap::new(),
+		sql_prepared: SqlPrepared::default(),
 		portals: HashMap::new(),
 		prepared_bytes: 0,
 		portal_bytes: 0,
@@ -555,6 +572,7 @@ struct Connection {
 	/// Whether a transaction-local session identity override is active.
 	txn_has_local_session_override: bool,
 	statements: HashMap<String, PreparedStatement>,
+	sql_prepared: SqlPrepared,
 	portals: HashMap<String, Portal>,
 	prepared_bytes: usize,
 	portal_bytes: usize,
@@ -2292,6 +2310,19 @@ impl Connection {
 						continue;
 					}
 					has_statement = true;
+					let expanded;
+					let trimmed_stmt = match self.sql_prepared_step(trimmed_stmt, &mut out) {
+						Ok(SqlPreparedStep::NotOurs) => trimmed_stmt,
+						Ok(SqlPreparedStep::Done) => continue,
+						Ok(SqlPreparedStep::Run(sql)) => {
+							expanded = sql;
+							expanded.as_str()
+						}
+						Err(err) => {
+							self.note_simple_error(&err, &mut out);
+							break;
+						}
+					};
 					if let Some(control) = self.classify_control(trimmed_stmt) {
 						if let Err(err) = self.execute_control(control, &mut out).await {
 							msg::write_error_response(&mut out, &err);
@@ -2360,6 +2391,106 @@ impl Connection {
 			}
 		}
 		self.finish_query(out).await
+	}
+
+	/// Runs `PREPARE`, `DEALLOCATE` and the first half of `EXECUTE` against the connection's
+	/// SQL-level prepared statements. An `EXECUTE` answers with the statement its arguments make,
+	/// for the caller to run in its place.
+	fn sql_prepared_step(
+		&mut self,
+		stmt: &str,
+		out: &mut BytesMut,
+	) -> Result<SqlPreparedStep, PgError> {
+		let first = first_keyword(stmt);
+		if !["prepare", "execute", "deallocate"].iter().any(|kw| first.eq_ignore_ascii_case(kw)) {
+			return Ok(SqlPreparedStep::NotOurs);
+		}
+		let Ok(parsed) = surrealdb_pgsql::parse_statement(stmt) else {
+			return Ok(SqlPreparedStep::NotOurs);
+		};
+		let source = |span: surrealdb_pgsql::Span| stmt.get(span.start as usize..span.end as usize);
+		if let PgStatement::Prepare(prepare) = &parsed {
+			let Some(text) = source(prepare.statement.span()) else {
+				return Ok(SqlPreparedStep::NotOurs);
+			};
+			let preparable = matches!(
+				prepare.statement.as_ref(),
+				PgStatement::Select(_)
+					| PgStatement::Insert(_)
+					| PgStatement::Update(_)
+					| PgStatement::Delete(_)
+			);
+			if !preparable {
+				return Err(PgError::new(
+					"42601",
+					"a prepared statement is a SELECT, INSERT, UPDATE or DELETE",
+				));
+			}
+			let types: Vec<String> = prepare
+				.param_types
+				.iter()
+				.filter_map(|ty| source(ty.span).map(str::to_string))
+				.collect();
+			match self.sql_prepared.prepare(&prepare.name, text.to_string(), types) {
+				Ok(()) => {}
+				Err(PrepareError::Exists) => {
+					return Err(PgError::new(
+						"42P05",
+						format!("prepared statement \"{}\" already exists", prepare.name),
+					));
+				}
+				Err(PrepareError::Full) => {
+					return Err(PgError::new("54000", "too many prepared statements"));
+				}
+				Err(PrepareError::TooManyParameters) => {
+					return Err(PgError::new(
+						"54000",
+						"too many parameters in a prepared statement",
+					));
+				}
+			}
+			msg::write_command_complete(out, "PREPARE");
+			Ok(SqlPreparedStep::Done)
+		} else if let PgStatement::Deallocate(dealloc) = &parsed {
+			match &dealloc.name {
+				Some(name) => {
+					if !self.sql_prepared.deallocate(name) {
+						return Err(missing_sql_statement(name));
+					}
+				}
+				None => self.sql_prepared.deallocate_all(),
+			}
+			msg::write_command_complete(out, "DEALLOCATE");
+			Ok(SqlPreparedStep::Done)
+		} else if let PgStatement::Execute(execute) = &parsed {
+			let arguments: Vec<Argument> = execute
+				.params
+				.iter()
+				.filter_map(|param| source(param.span()).map(Argument::new))
+				.collect();
+			match self.sql_prepared.bind(&execute.name, &arguments) {
+				None => Err(missing_sql_statement(&execute.name)),
+				Some(Ok(bound)) => Ok(SqlPreparedStep::Run(bound)),
+				Some(Err(BindError::WrongCount)) => Err(PgError::new(
+					"42601",
+					format!(
+						"wrong number of parameters for prepared statement \"{}\"",
+						execute.name
+					),
+				)),
+				Some(Err(BindError::Unbound(name))) => {
+					Err(PgError::new("42703", format!("column \"{name}\" does not exist")))
+				}
+				Some(Err(BindError::TooLarge)) => {
+					Err(PgError::new("54000", "the statement an EXECUTE makes is too large"))
+				}
+				Some(Err(BindError::Reused(n))) => Err(PgError::feature_not_supported(format!(
+					"the argument for parameter ${n} must be a single value, as the statement reads it more than once"
+				))),
+			}
+		} else {
+			Ok(SqlPreparedStep::NotOurs)
+		}
 	}
 
 	async fn run_pgsql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {

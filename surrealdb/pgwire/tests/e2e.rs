@@ -1096,12 +1096,22 @@ async fn test_pgwire_honest_session_fail_closed() {
 	let (_, last) = run_simple_query(&mut stream, "ROLLBACK TO SAVEPOINT sp1;").await;
 	assert_eq!(last, b'E', "ROLLBACK TO SAVEPOINT must fail closed");
 
-	// 2. PREPARE / DEALLOCATE in simple query must fail closed
+	// 2. SQL-level PREPARE / DEALLOCATE are kept by the connection, and a name that was never
+	// prepared is refused
 	let (_, last) = run_simple_query(&mut stream, "PREPARE p1 AS SELECT 1;").await;
-	assert_eq!(last, b'E', "SQL PREPARE must fail closed");
+	assert_eq!(last, b'C', "SQL PREPARE must complete");
+
+	let (_, last) = run_simple_query(&mut stream, "PREPARE p1 AS SELECT 2;").await;
+	assert_eq!(last, b'E', "SQL PREPARE of a name in use must fail");
 
 	let (_, last) = run_simple_query(&mut stream, "DEALLOCATE p1;").await;
-	assert_eq!(last, b'E', "SQL DEALLOCATE must fail closed");
+	assert_eq!(last, b'C', "SQL DEALLOCATE must complete");
+
+	let (_, last) = run_simple_query(&mut stream, "DEALLOCATE p1;").await;
+	assert_eq!(last, b'E', "SQL DEALLOCATE of an unknown name must fail");
+
+	let (_, last) = run_simple_query(&mut stream, "EXECUTE p1;").await;
+	assert_eq!(last, b'E', "SQL EXECUTE of an unknown name must fail");
 
 	// 3. Unmodelled SET statements must fail closed
 	let (_, last) = run_simple_query(&mut stream, "SET ROLE admin;").await;

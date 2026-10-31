@@ -68,13 +68,23 @@ fn keyed_targets(targets: &[BoundTarget], keys: Option<Vec<String>>) -> Cow<'_, 
 /// The hidden column a SELECT with set-returning `UNNEST` targets splits on.
 const UNNEST_COLUMN: &str = "__sql_unnest";
 
-/// A select-list target that is a bare set-returning call: its position, the array it reads and
-/// whether it yields the positions of the elements (`GENERATE_SUBSCRIPTS(array, 1)`) rather than
-/// the elements (`UNNEST(array)`).
-type SetReturningTarget<'a> = (usize, &'a BoundExpr, bool);
+/// What a set-returning call yields from its first argument.
+#[derive(Clone, Copy)]
+enum SetValues<'a> {
+	/// `UNNEST(array)`: the elements of the array.
+	Elements,
+	/// `GENERATE_SUBSCRIPTS(array, 1)`: the positions of the elements, from one.
+	Positions,
+	/// `GENERATE_SERIES(start, stop)`: the integers from the argument up to `stop`, inclusive.
+	Series(&'a BoundExpr),
+}
 
-/// The select-list targets that are a bare `UNNEST(array)` or `GENERATE_SUBSCRIPTS(array, 1)`, in
-/// order.
+/// A select-list target that is a bare set-returning call: its position, its first argument and
+/// the values it yields from it.
+type SetReturningTarget<'a> = (usize, &'a BoundExpr, SetValues<'a>);
+
+/// The select-list targets that are a bare `UNNEST(array)`, `GENERATE_SUBSCRIPTS(array, 1)` or
+/// `GENERATE_SERIES(start, stop)`, in order.
 fn unnest_targets(select: &BoundSelect) -> Vec<SetReturningTarget<'_>> {
 	select
 		.targets
@@ -90,12 +100,14 @@ fn unnest_targets(select: &BoundSelect) -> Vec<SetReturningTarget<'_>> {
 				return None;
 			};
 			if name == "unnest" && args.len() == 1 {
-				Some((index, &args[0], false))
+				Some((index, &args[0], SetValues::Elements))
 			} else if name == "generate_subscripts"
 				&& args.len() == 2
 				&& matches!(args[1], BoundExpr::Literal(BoundLiteral::Integer(1)))
 			{
-				Some((index, &args[0], true))
+				Some((index, &args[0], SetValues::Positions))
+			} else if name == "generate_series" && args.len() == 2 {
+				Some((index, &args[0], SetValues::Series(&args[1])))
 			} else {
 				None
 			}
@@ -110,14 +122,37 @@ fn lower_row_count(expr: &BoundExpr, policy: &DialectPolicy) -> Result<LogicalEx
 }
 
 /// The values a set-returning call over `argument` advances through: the elements of the array,
-/// or their positions from one. An argument that is not an array has none.
+/// their positions from one, or the integers of a series. An argument that is not an array has no
+/// elements, and a series that ends before it starts has no integers.
 fn set_returning_values(
 	argument: &BoundExpr,
-	positions: bool,
+	values: SetValues<'_>,
 	policy: &DialectPolicy,
 ) -> Result<LogicalExpr, PlanError> {
+	if let SetValues::Series(stop) = values {
+		if [argument, stop]
+			.iter()
+			.any(|bound| matches!(bound, BoundExpr::Literal(BoundLiteral::Float(_))))
+		{
+			return Err(PlanError::UnsupportedExpression(
+				"GENERATE_SERIES over bounds that are not integers".into(),
+			));
+		}
+		let start = lower_bound_expr(argument, policy)?;
+		let stop = lower_bound_expr(stop, policy)?;
+		// An inclusive range reads each end once and holds the largest integer, and is empty when
+		// `stop` is before `start`.
+		return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+			receiver: Function::Normal("array::range".to_string()),
+			args: vec![LogicalExpr::Binary {
+				left: Box::new(start),
+				op: BinaryOperator::RangeInclusive,
+				right: Box::new(stop),
+			}],
+		})));
+	}
 	let array = lower_bound_expr(argument, policy)?;
-	let elements = if positions {
+	let elements = if matches!(values, SetValues::Positions) {
 		// The first position of an array is one; a vector column of the catalog is numbered
 		// from zero.
 		let first = i64::from(!matches!(
@@ -171,9 +206,12 @@ fn split_unnested(
 	policy: &DialectPolicy,
 ) -> Result<LogicalOp, PlanError> {
 	let mut arrays = Vec::with_capacity(unnested.len());
-	for (_, argument, positions) in unnested {
-		arrays.push(set_returning_values(argument, *positions, policy)?);
+	for (_, argument, values) in unnested {
+		arrays.push(set_returning_values(argument, *values, policy)?);
 	}
+	// A lone target splits its array as it is, so that the array is not copied; several are
+	// zipped into rows of one element each.
+	let lone = arrays.len() == 1;
 	let zipped = match <[LogicalExpr; 1]>::try_from(arrays) {
 		Ok([array]) => array,
 		Err(arrays) => LogicalExpr::Call(Box::new(LogicalCall {
@@ -189,11 +227,41 @@ fn split_unnested(
 		]),
 		omit: vec![],
 	});
-	Ok(LogicalOp::Subquery(LogicalSubquery {
+	// A row whose arrays are all empty splits into a row that holds an empty array instead of an
+	// element, and is dropped.
+	let split = LogicalOp::Subquery(LogicalSubquery {
 		input: Box::new(LogicalOp::Split(LogicalSplit {
 			input: Box::new(with_column),
 			exprs: vec![LogicalExpr::Field(UNNEST_COLUMN.into())],
 		})),
+	});
+	let column = || LogicalExpr::Field(UNNEST_COLUMN.into());
+	let non_empty = LogicalExpr::Binary {
+		left: Box::new(LogicalExpr::Call(Box::new(LogicalCall {
+			receiver: Function::Normal("array::len".to_string()),
+			args: vec![column()],
+		}))),
+		op: BinaryOperator::MoreThan,
+		right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+	};
+	// An element of a lone target may be any value, and only an array can be empty.
+	let predicate = if lone {
+		LogicalExpr::If(Box::new(LogicalIf {
+			branches: vec![(
+				LogicalExpr::Call(Box::new(LogicalCall {
+					receiver: Function::Normal("type::is_array".to_string()),
+					args: vec![column()],
+				})),
+				non_empty,
+			)],
+			otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Bool(true))),
+		}))
+	} else {
+		non_empty
+	};
+	Ok(LogicalOp::Filter(LogicalFilter {
+		input: Box::new(split),
+		predicate,
 	}))
 }
 
@@ -208,7 +276,16 @@ fn unnested_field(target: &BoundTarget, slot: usize, count: usize) -> LogicalFie
 			index: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(slot as i64))),
 		}
 	};
-	let alias = target.alias.clone().unwrap_or_else(|| "unnest".to_owned());
+	let natural = if let BoundExpr::FunctionCall {
+		name,
+		..
+	} = &target.expr
+	{
+		name.clone()
+	} else {
+		"unnest".to_owned()
+	};
+	let alias = target.alias.clone().unwrap_or(natural);
 	LogicalField::user(element, Some(OutputPath::field(alias)))
 }
 
@@ -337,7 +414,7 @@ fn replace_set_returning<'a>(
 	}
 }
 
-/// Whether `expr` holds an `UNNEST` or `GENERATE_SUBSCRIPTS` call.
+/// Whether `expr` holds an `UNNEST`, `GENERATE_SUBSCRIPTS` or `GENERATE_SERIES` call.
 fn contains_set_returning(expr: &BoundExpr) -> bool {
 	match expr {
 		BoundExpr::FunctionCall {
@@ -347,6 +424,7 @@ fn contains_set_returning(expr: &BoundExpr) -> bool {
 		} => {
 			name == "unnest"
 				|| name == "generate_subscripts"
+				|| name == "generate_series"
 				|| args.iter().any(contains_set_returning)
 		}
 		BoundExpr::Binary {
@@ -429,11 +507,11 @@ fn lower_lateral(
 	if !calls.is_empty() {
 		let mut arrays = Vec::with_capacity(calls.len());
 		for call in &calls {
-			let (argument, positions) = match call {
-				SetReturning::Unnest(argument) => (argument, false),
-				SetReturning::Subscripts(argument) => (argument, true),
+			let (argument, values) = match call {
+				SetReturning::Unnest(argument) => (argument, SetValues::Elements),
+				SetReturning::Subscripts(argument) => (argument, SetValues::Positions),
 			};
-			arrays.push(set_returning_values(argument, positions, policy)?);
+			arrays.push(set_returning_values(argument, values, policy)?);
 		}
 		let count = arrays.len();
 		let zipped = match <[LogicalExpr; 1]>::try_from(arrays) {

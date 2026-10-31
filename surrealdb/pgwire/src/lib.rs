@@ -49,6 +49,7 @@ pub mod error;
 pub(crate) mod guc;
 pub mod msg;
 pub mod sasl;
+mod sqlprepare;
 pub mod typing;
 mod vector;
 

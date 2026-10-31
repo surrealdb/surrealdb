@@ -22,7 +22,6 @@ use crate::kvs::{Datastore, QueryRequest, QuerySource};
 /// case.
 const BROKEN: &[(Dialect, &str)] = &[
 	// pgsql
-	(Dialect::Pgsql, r#"SELECT generate_series(1, 3) AS v"#),
 	(Dialect::Pgsql, r#"SELECT generate_series(1, 10, 4) AS v"#),
 	(Dialect::Pgsql, r#"SELECT generate_series(3, 1, -1) AS v"#),
 	(Dialect::Pgsql, r#"SELECT row_number() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),

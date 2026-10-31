@@ -107,8 +107,9 @@ expect "\\bind with a text parameter" "pear" bash -c "
 	'$PSQL' -X -tA '$PG_CONN' -c \"insert into item (id, name, qty) values ('b', 'pear', 5)\" >/dev/null
 	printf 'select name from item where id = \$1 \\\\bind b \\\\g\n' | '$PSQL' -X -tA '$PG_CONN'"
 expect "\\bind with two parameters" "13" bash -c "printf 'select qty + \$1::int from item where id = \$2 \\\\bind 9 a \\\\g\n' | '$PSQL' -X -tA '$PG_CONN'"
-gap "SQL-level PREPARE/EXECUTE is refused; only the extended protocol prepares statements"
-expect "PREPARE and EXECUTE" "pear" psq -c "PREPARE s AS select name from item where id = \$1; EXECUTE s('b')"
+expect "PREPARE and EXECUTE" "PREPARE
+pear
+DEALLOCATE" bash -c "printf '%s\n' \"PREPARE s AS select name from item where id = \\\$1;\" \"EXECUTE s('b');\" \"DEALLOCATE s;\" | '$PSQL' -X -tA '$PG_CONN'"
 
 # --- COPY ---
 expect "\\copy to stdout as csv" "id,name,qty
@@ -128,7 +129,6 @@ seq 0 4999 | awk '{print "big"$1",name"$1","$1}' >>"$WORKDIR/big.csv"
 expect "\\copy of 5000 rows" "COPY 5000" env PGPASSWORD=root "$PSQL" -X -tA "$PG_CONN" -c "\\copy item from '$WORKDIR/big.csv' csv header"
 expect "5000 rows aggregate" "5000|12497500" psq -c "select count(*), sum(qty) from item where id like 'big%'"
 expect "5000 rows stream to the client" "5000" bash -c "'$PSQL' -X -tA '$PG_CONN' -c \"select id from item where id like 'big%'\" | wc -l | tr -d ' '"
-gap "generate_series is not a set-returning function"
 expect "generate_series" "5" bash -c "'$PSQL' -X -tA '$PG_CONN' -c 'select generate_series(1, 5)' | wc -l | tr -d ' '"
 
 # --- dump and benchmark tools ---

@@ -2696,8 +2696,12 @@ fn unnest_targets_split_a_pipeline_of_their_own_and_read_their_position() {
 			.unwrap(),
 	);
 	assert_eq!(exprs, ["__sql_unnest[0]", "__sql_unnest[1]"]);
-	let LogicalOp::Subquery(subquery) = *input else {
-		panic!("expected the split pipeline under the projection, got {input:?}");
+	let LogicalOp::Filter(filter) = *input else {
+		panic!("expected the empty rows dropped under the projection, got {input:?}");
+	};
+	assert_eq!(filter.predicate.to_string(), "array::len(__sql_unnest) > 0");
+	let LogicalOp::Subquery(subquery) = *filter.input else {
+		panic!("expected the split pipeline under the filter, got {:?}", filter.input);
 	};
 	let LogicalOp::Split(split) = *subquery.input else {
 		panic!("expected Split, got {:?}", subquery.input);
@@ -3048,4 +3052,21 @@ fn test_count_of_a_column_folds_the_column_as_written() {
 		!fields.contains("args: [If("),
 		"a per-row test reached an aggregate argument: {fields}"
 	);
+}
+
+#[test]
+fn generate_series_over_fractional_bounds_is_refused_when_planned() {
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	let lower = |sql: &str| {
+		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+		lower_bound_select(&bound, &policy)
+	};
+	assert!(lower("SELECT generate_series(1, 3)").is_ok());
+	assert!(lower("SELECT generate_series(1.5, 3.5)").is_err());
+	assert!(lower("SELECT generate_series(1, 3.5)").is_err());
 }
