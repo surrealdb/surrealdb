@@ -60,6 +60,8 @@ mod null_join_keys_tests;
 #[cfg(test)]
 mod omitted_column_tests;
 #[cfg(test)]
+mod replace_reset_tests;
+#[cfg(test)]
 mod scalar_subquery_tests;
 #[cfg(test)]
 mod vector_tests;

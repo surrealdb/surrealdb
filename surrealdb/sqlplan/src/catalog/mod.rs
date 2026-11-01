@@ -431,6 +431,18 @@ pub trait BinderCatalog: Send + Sync {
 		Vec::new()
 	}
 
+	/// The columns of table `table` that take a default in a row written without a value for them,
+	/// with the expression that gives it: the columns the table declares with a `DEFAULT` clause
+	/// and without a `VALUE` or a `COMPUTED` one. A `REPLACE` over an existing row writes the row
+	/// as a new one, so each of these is set to its default, as each of
+	/// [`null_columns`](Self::null_columns) is set to `NULL`, where an `INSERT` of a new row
+	/// leaves the defaults to the table.
+	///
+	/// Empty where [`null_columns`](Self::null_columns) is, and compared as it is.
+	fn default_columns(&self, _schema: Option<&str>, _table: &str) -> Vec<(String, Expr)> {
+		Vec::new()
+	}
+
 	/// How column `column` of table `table` is declared, for the statements that give a column a
 	/// new type (`ALTER TABLE ... ADD FOREIGN KEY` over a scalar column). The answer is `None` for
 	/// a table or column the catalog does not describe.
@@ -504,6 +516,7 @@ pub struct MemoryCatalog {
 	nullable_links: std::collections::HashSet<(String, String)>,
 	/// The columns that hold NULL in a row written without them, by table.
 	null_columns: HashMap<String, Vec<String>>,
+	default_columns: HashMap<String, Vec<(String, Expr)>>,
 	/// The dimensions of the vector columns, by (table, column).
 	vectors: HashMap<(String, String), usize>,
 	/// The types text is read as when written to a column, by (table, column).
@@ -523,6 +536,7 @@ impl MemoryCatalog {
 			shapes: HashMap::new(),
 			nullable_links: std::collections::HashSet::new(),
 			null_columns: HashMap::new(),
+			default_columns: HashMap::new(),
 			vectors: HashMap::new(),
 			write_types: HashMap::new(),
 			hnsw: HashMap::new(),
@@ -562,6 +576,25 @@ impl MemoryCatalog {
 	/// Declare the NULL-holding columns of a table, as [`Self::add_null_columns`] does.
 	pub fn with_null_columns(mut self, table: &str, columns: &[&str]) -> Self {
 		self.add_null_columns(table, columns.iter().map(|column| (*column).to_owned()).collect());
+		self
+	}
+
+	/// Declare the columns of table `table` that take a default in a row written without them,
+	/// with their default expressions; see [`BinderCatalog::default_columns`].
+	pub fn add_default_columns(&mut self, table: &str, columns: Vec<(String, Expr)>) -> &mut Self {
+		self.default_columns.insert(table.to_owned(), columns);
+		self
+	}
+
+	/// Declare the defaulted columns of a table, as [`Self::add_default_columns`] does.
+	pub fn with_default_columns(mut self, table: &str, columns: &[(&str, Expr)]) -> Self {
+		self.add_default_columns(
+			table,
+			columns
+				.iter()
+				.map(|(column, default)| ((*column).to_owned(), default.clone()))
+				.collect(),
+		);
 		self
 	}
 
@@ -749,6 +782,10 @@ impl BinderCatalog for MemoryCatalog {
 
 	fn null_columns(&self, _schema: Option<&str>, table: &str) -> Vec<String> {
 		self.null_columns.get(table).cloned().unwrap_or_default()
+	}
+
+	fn default_columns(&self, _schema: Option<&str>, table: &str) -> Vec<(String, Expr)> {
+		self.default_columns.get(table).cloned().unwrap_or_default()
 	}
 
 	fn column_shape(&self, schema: Option<&str>, table: &str, column: &str) -> Option<ColumnShape> {

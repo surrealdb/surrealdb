@@ -404,6 +404,14 @@ impl surrealdb_sqlplan::BinderCatalog for BatchCatalog<'_> {
 		self.inner.null_columns(schema, table)
 	}
 
+	fn default_columns(
+		&self,
+		schema: Option<&str>,
+		table: &str,
+	) -> Vec<(String, surrealdb_expr::expr::Expr)> {
+		self.inner.default_columns(schema, table)
+	}
+
 	fn column_shape(
 		&self,
 		schema: Option<&str>,

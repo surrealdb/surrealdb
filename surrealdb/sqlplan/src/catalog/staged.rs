@@ -16,7 +16,7 @@
 //! catalog it wraps answers first, and what the statement declares answers only for a column that
 //! catalog does not describe.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use surrealdb_expr::expr::reference::ReferenceDeleteStrategy;
 use surrealdb_expr::expr::statements::AlterStatement;
@@ -60,10 +60,20 @@ pub struct StagedCatalog<'a> {
 	/// catalog describes; see [`BinderCatalog::null_columns`]. A column that a later statement
 	/// alters or removes is dropped from it.
 	nulls: HashMap<String, BTreeSet<String>>,
+	/// The columns that take a default in a row written without them, with the expression that
+	/// gives it, for each `SCHEMAFULL` table a staged statement creates; see
+	/// [`BinderCatalog::default_columns`]. Kept as `nulls` is.
+	defaults: HashMap<String, BTreeMap<String, Expr>>,
 	/// The columns of tables the wrapped catalog describes that a staged statement defines,
 	/// alters or removes, whose entry in the wrapped catalog's NULL-holding columns is no longer
 	/// known to hold.
 	changed: HashSet<(String, String)>,
+}
+
+/// Whether `default` reads no field of the row it is a default of, and nothing that might.
+fn reads_no_field(default: &Expr) -> bool {
+	let reads = surrealdb_expr::expr::computed_deps::extract_computed_deps(default);
+	reads.is_complete && reads.fields.is_empty()
 }
 
 impl<'a> StagedCatalog<'a> {
@@ -80,6 +90,7 @@ impl<'a> StagedCatalog<'a> {
 			touched: HashSet::new(),
 			replaced_indexes: HashSet::new(),
 			nulls: HashMap::new(),
+			defaults: HashMap::new(),
 			changed: HashSet::new(),
 		}
 	}
@@ -110,6 +121,7 @@ impl<'a> StagedCatalog<'a> {
 				self.created.insert(name.as_str().to_owned());
 				if table.full && table.view.is_none() {
 					self.nulls.insert(name.as_str().to_owned(), BTreeSet::new());
+					self.defaults.insert(name.as_str().to_owned(), BTreeMap::new());
 				}
 			}
 		} else if let DefineStatement::Field(field) = define
@@ -135,8 +147,8 @@ impl<'a> StagedCatalog<'a> {
 				self.changed.insert((table.to_owned(), column.to_owned()));
 			}
 			// A definition that does nothing when the column exists leaves a column that an earlier
-			// statement of the request defined as it is.
-			// On a table the wrapped catalog describes, only a definition that runs adds a column.
+			// statement of the request defined as it is. On a table the wrapped catalog describes,
+			// only a definition that runs adds a column.
 			let own = self.own.contains(table);
 			let applies = field.kind != DefineKind::IfNotExists || (own && !defined_before);
 			if applies && (!own || self.nulls.contains_key(table)) {
@@ -148,6 +160,26 @@ impl<'a> StagedCatalog<'a> {
 				if holds_null {
 					self.nulls.entry(table.to_owned()).or_default().insert(column.to_owned());
 				} else if let Some(columns) = self.nulls.get_mut(table) {
+					columns.remove(column);
+				}
+			}
+			if applies && (!own || self.defaults.contains_key(table)) {
+				let default = if let DefineDefault::Set(default) | DefineDefault::Always(default) =
+					&field.default && column != "id"
+					&& field.value.is_none()
+					&& field.computed.is_none()
+					&& reads_no_field(default)
+				{
+					Some(default)
+				} else {
+					None
+				};
+				if let Some(default) = default {
+					self.defaults
+						.entry(table.to_owned())
+						.or_default()
+						.insert(column.to_owned(), default.clone());
+				} else if let Some(columns) = self.defaults.get_mut(table) {
 					columns.remove(column);
 				}
 			}
@@ -374,14 +406,18 @@ impl<'a> StagedCatalog<'a> {
 		self.indexes.remove(table);
 		self.sequences.retain(|(name, _), _| name != table);
 		self.nulls.remove(table);
+		self.defaults.remove(table);
 		self.changed.retain(|(name, _)| name != table);
 		self.own.insert(table.to_owned());
 	}
 
-	/// Stop saying that `column` of `table` holds NULL in a row written without it, which a staged
-	/// statement alters or removes.
+	/// Stop saying that `column` of `table` holds NULL, or takes a default, in a row written
+	/// without it, which a staged statement alters or removes.
 	fn forget_null_column(&mut self, table: &str, column: &str) {
 		if let Some(columns) = self.nulls.get_mut(table) {
+			columns.remove(column);
+		}
+		if let Some(columns) = self.defaults.get_mut(table) {
 			columns.remove(column);
 		}
 		self.changed.insert((table.to_owned(), column.to_owned()));
@@ -587,6 +623,31 @@ impl BinderCatalog for StagedCatalog<'_> {
 			columns.extend(added.iter().cloned());
 			columns.sort_unstable();
 			columns.dedup();
+		}
+		columns
+	}
+
+	/// As [`Self::null_columns`]: the wrapped catalog's without the columns a staged statement
+	/// changes, or the staged definitions' for a table a staged statement creates or removes.
+	fn default_columns(&self, schema: Option<&str>, table: &str) -> Vec<(String, Expr)> {
+		if self.own.contains(table) {
+			return self
+				.defaults
+				.get(table)
+				.map(|columns| {
+					columns
+						.iter()
+						.map(|(column, default)| (column.clone(), default.clone()))
+						.collect()
+				})
+				.unwrap_or_default();
+		}
+		let mut columns = self.inner.default_columns(schema, table);
+		columns.retain(|(column, _)| !self.changed.contains(&(table.to_owned(), column.clone())));
+		if let Some(added) = self.defaults.get(table) {
+			columns.extend(added.iter().map(|(column, default)| (column.clone(), default.clone())));
+			columns.sort_by(|a, b| a.0.cmp(&b.0));
+			columns.dedup_by(|a, b| a.0 == b.0);
 		}
 		columns
 	}

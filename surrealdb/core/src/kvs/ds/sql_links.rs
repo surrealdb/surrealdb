@@ -42,6 +42,7 @@ use surrealdb_sqlplan::{
 
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{DefineDefault, FieldDefinition, IndexDefinition, TableDefinition, TableType};
+use crate::expr::computed_deps::extract_computed_deps;
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::{Expr, Function, Kind, Literal, Part};
 use crate::kvs::Transaction;
@@ -127,6 +128,11 @@ impl BinderCatalog for RecordingCatalog {
 	}
 
 	fn null_columns(&self, schema: Option<&str>, table: &str) -> Vec<String> {
+		self.note_user_table(schema, table);
+		Vec::new()
+	}
+
+	fn default_columns(&self, schema: Option<&str>, table: &str) -> Vec<(String, Expr)> {
 		self.note_user_table(schema, table);
 		Vec::new()
 	}
@@ -794,6 +800,7 @@ pub(super) async fn describe_tables(
 			let declared = declared_columns(&definition, &fields);
 			described.catalog.add_table(TableSchema::new(table, declared).as_closed());
 			described.catalog.add_null_columns(table, null_columns(&fields));
+			described.catalog.add_default_columns(table, default_columns(&fields));
 			described.shapes_lowering = true;
 		}
 	}
@@ -887,6 +894,34 @@ fn null_columns(fields: &[FieldDefinition]) -> Vec<String> {
 		.collect();
 	columns.sort_unstable();
 	columns.dedup();
+	columns
+}
+
+/// The columns of a table with the field definitions `fields` that take a default in a row written
+/// without them, in name order, with the expression that gives it: a top-level field other than
+/// `id` with a `DEFAULT` clause and with neither a `VALUE` nor a `COMPUTED` one, which the write
+/// computes itself. A default that reads another field of the row (or whose reads cannot be
+/// told) is left out: it is evaluated where it is used, which is not the row it is a default of.
+fn default_columns(fields: &[FieldDefinition]) -> Vec<(String, Expr)> {
+	let mut columns: Vec<(String, Expr)> = fields
+		.iter()
+		.filter(|field| !field.is_key_part())
+		.filter(|field| field.value.is_none() && field.computed.is_none())
+		.filter_map(|field| {
+			let (DefineDefault::Set(default) | DefineDefault::Always(default)) = &field.default
+			else {
+				return None;
+			};
+			let reads = extract_computed_deps(default);
+			if !reads.is_complete || !reads.fields.is_empty() {
+				return None;
+			}
+			let name = field.name.field_name().filter(|name| *name != "id")?;
+			Some((name.to_owned(), default.clone()))
+		})
+		.collect();
+	columns.sort_by(|a, b| a.0.cmp(&b.0));
+	columns.dedup_by(|a, b| a.0 == b.0);
 	columns
 }
 
@@ -1309,5 +1344,68 @@ mod tests {
 			typed("no_type", None),
 		];
 		assert_eq!(null_columns(&fields), ["a", "b", "no_type", "untyped"]);
+	}
+	#[test]
+	fn a_column_with_a_default_and_no_value_of_its_own_takes_the_default_when_left_out() {
+		let int = |n: i64| Expr::Literal(Literal::Integer(n));
+		let fields = vec![
+			FieldDefinition {
+				default: DefineDefault::Set(int(1)),
+				..typed("id", Some(Kind::Int))
+			},
+			FieldDefinition {
+				default: DefineDefault::Set(int(7)),
+				..typed("seven", Some(Kind::Int))
+			},
+			FieldDefinition {
+				default: DefineDefault::Always(int(2)),
+				..typed("always", Some(Kind::Int))
+			},
+			typed("plain", Some(Kind::Int)),
+			FieldDefinition {
+				default: DefineDefault::Set(int(3)),
+				value: Some(int(4)),
+				..typed("valued", Some(Kind::Int))
+			},
+			FieldDefinition {
+				default: DefineDefault::Set(int(3)),
+				computed: Some(int(4)),
+				..typed("computed", Some(Kind::Int))
+			},
+			FieldDefinition {
+				default: DefineDefault::Set(int(5)),
+				name: nested(&["address", "city"]),
+				field_kind: Some(Kind::Int),
+				..Default::default()
+			},
+		];
+		assert_eq!(
+			default_columns(&fields),
+			[("always".to_owned(), int(2)), ("seven".to_owned(), int(7))]
+		);
+		// No column is both given NULL and given a default when it is left out.
+		let nulls = null_columns(&fields);
+		assert!(default_columns(&fields).iter().all(|(column, _)| !nulls.contains(column)));
+	}
+
+	#[test]
+	fn a_default_that_reads_another_field_is_not_listed_but_one_that_draws_a_number_is() {
+		use crate::expr::{FunctionCall, Idiom};
+
+		let draw = Expr::FunctionCall(Box::new(FunctionCall {
+			receiver: Function::Normal("sequence::nextval".to_string()),
+			arguments: vec![Expr::Literal(Literal::String("t_n_seq".into()))],
+		}));
+		let fields = vec![
+			FieldDefinition {
+				default: DefineDefault::Set(Expr::Idiom(Idiom::field("a".to_owned()))),
+				..typed("reads", Some(Kind::Int))
+			},
+			FieldDefinition {
+				default: DefineDefault::Set(draw.clone()),
+				..typed("n", Some(Kind::Int))
+			},
+		];
+		assert_eq!(default_columns(&fields), [("n".to_owned(), draw)]);
 	}
 }

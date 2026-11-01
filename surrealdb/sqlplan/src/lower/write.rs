@@ -96,16 +96,29 @@ impl<'a> IdScope<'a> {
 	/// `listed` a value for them; see [`BinderCatalog::null_columns`].
 	fn omitted_null_columns(&self, listed: &[String]) -> Vec<String> {
 		let mut columns = self.catalog.null_columns(self.schema.as_deref(), &self.table);
-		columns.retain(|column| {
-			!listed.iter().any(|name| {
-				if self.columns_ignore_case {
-					name.eq_ignore_ascii_case(column)
-				} else {
-					name == column
-				}
-			})
-		});
+		columns.retain(|column| !self.is_listed(column, listed));
 		columns
+	}
+
+	/// The columns of the target table that take a default when the statement gives none of
+	/// `listed` a value for them, with their default expressions; see
+	/// [`BinderCatalog::default_columns`].
+	fn omitted_default_columns(&self, listed: &[String]) -> Vec<(String, Expr)> {
+		let mut columns = self.catalog.default_columns(self.schema.as_deref(), &self.table);
+		columns.retain(|(column, _)| !self.is_listed(column, listed));
+		columns
+	}
+
+	/// Whether `column` is one of the `listed` column names, compared as the dialect compares
+	/// column names.
+	fn is_listed(&self, column: &str, listed: &[String]) -> bool {
+		listed.iter().any(|name| {
+			if self.columns_ignore_case {
+				name.eq_ignore_ascii_case(column)
+			} else {
+				name == column
+			}
+		})
 	}
 
 	/// The table the column `column` of the target table holds record links to, if it holds them.
@@ -635,6 +648,24 @@ fn null_entries(scope: &IdScope<'_>, listed: &[String]) -> Vec<(Idiom, Expr)> {
 		.omitted_null_columns(listed)
 		.into_iter()
 		.map(|column| (Idiom::field(column), Expr::Literal(Literal::Null)))
+		.collect()
+}
+
+/// The assignments that make an existing row the row `REPLACE` writes when the statement lists
+/// `listed`: each column it leaves out is set to `NULL`, or to its default.
+fn reset_assignments(scope: &IdScope<'_>, listed: &[String]) -> Vec<Assignment> {
+	let nulls = scope
+		.omitted_null_columns(listed)
+		.into_iter()
+		.map(|column| (column, Expr::Literal(Literal::Null)));
+	let defaults = scope.omitted_default_columns(listed);
+	nulls
+		.chain(defaults)
+		.map(|(column, value)| Assignment {
+			place: Idiom::field(column),
+			operator: AssignOperator::Assign,
+			value,
+		})
 		.collect()
 }
 
@@ -3540,6 +3571,13 @@ pub fn lower_mysql_replace(
 				])),
 			),
 		});
+	}
+	// A statement that lists no columns writes all of them, and one whose rows are not matched to
+	// the listed columns by position leaves out columns that are not known.
+	if !replace.columns.is_empty()
+		&& replace.values.iter().all(|row| row.len() <= replace.columns.len())
+	{
+		update_assignments.extend(reset_assignments(&scope, &replace.columns));
 	}
 	let update = if update_assignments.is_empty() {
 		None
