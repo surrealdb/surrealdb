@@ -1,7 +1,7 @@
 #![recursion_limit = "256"]
 
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use surrealdb_core::dbs::Session;
@@ -14,7 +14,10 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-static SERVERS: std::sync::Mutex<Vec<(std::net::SocketAddr, Arc<Datastore>)>> =
+/// The datastore of every server a test started, oldest first, held weakly so that a server that
+/// has shut down releases it. An entry is never removed, and the system hands a port out again once
+/// its server is gone, so the newest entry of an address is the live server.
+static SERVERS: std::sync::Mutex<Vec<(std::net::SocketAddr, Weak<Datastore>)>> =
 	std::sync::Mutex::new(Vec::new());
 
 /// Runs SurrealQL in the `test`/`test` database of the datastore behind the server at `addr`.
@@ -24,9 +27,10 @@ async fn seed_surrealql(addr: std::net::SocketAddr, sql: &str) {
 		.lock()
 		.expect("lock the servers")
 		.iter()
+		.rev()
 		.find(|(a, _)| *a == addr)
-		.map(|(_, ds)| Arc::clone(ds))
-		.expect("a server started by the test helpers");
+		.and_then(|(_, ds)| ds.upgrade())
+		.expect("a live server started by the test helpers");
 	let sess = Session::owner().with_ns("test").with_db("test");
 	for response in ds.execute(sql, &sess, None).await.expect("seed") {
 		response.result.unwrap_or_else(|err| panic!("{sql}: {err}"));
@@ -43,7 +47,7 @@ async fn start_test_mysql_server() -> (std::net::SocketAddr, CancellationToken) 
 		))
 		.await
 		.expect("Failed to define root user");
-	let ds_for_seed = Arc::clone(&ds);
+	let ds_for_seed = Arc::downgrade(&ds);
 	let ready = Arc::new(AtomicBool::new(true));
 	let shutdown = CancellationToken::new();
 
