@@ -96,6 +96,7 @@ pub(crate) fn order_sig(op: &PhysOp, input: OrderSig) -> OrderSig {
 		}
 		| PhysOp::Project(_)
 		| PhysOp::VersionScope
+		| PhysOp::Window(_)
 		| PhysOp::Materialize {
 			..
 		} => input,

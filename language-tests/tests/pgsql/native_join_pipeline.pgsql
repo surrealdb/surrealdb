@@ -59,10 +59,10 @@ value = "[{ dname: 'Ops2', name: 'Cara' }, { dname: 'Ops2', name: 'Dan' }, { dna
 value = "[{ dname: NONE, name: 'Eve' }, { dname: NONE, name: 'Finn' }, { dname: NONE, name: 'Gus' }, { dname: NONE, name: 'Hana' }, { dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops2', name: 'Dan' }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng' }, { dname: 'Eng' }, { dname: 'Ops' }, { dname: 'Ops' }, { dname: 'Ops2' }, { dname: 'Ops2' }]"
+value = "[{ dname: 'Eng' }, { dname: 'Ops' }, { dname: 'Ops2' }]"
 
 [[test.results]]
-value = "[{ city: 'Berlin' }, { city: 'Berlin' }, { city: 'London' }, { city: 'London' }, { city: 'London' }, { city: 'Paris' }]"
+value = "[{ city: 'Berlin' }, { city: 'London' }, { city: 'Paris' }]"
 
 [[test.results]]
 value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }]"

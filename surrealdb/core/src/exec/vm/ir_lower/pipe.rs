@@ -114,6 +114,7 @@ mod permission;
 mod probe;
 mod projection;
 mod step;
+mod window;
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -1182,6 +1183,7 @@ fn consumer_of_value(ir: &Ir, region: RegionId, value: ValueId) -> Result<Consum
 			}) if ir.enclosing_region(read.user) == region => {}
 			OpKind::Phys(
 				PhysOp::Sort(_)
+				| PhysOp::Window(_)
 				| PhysOp::KnnTopK(_)
 				| PhysOp::Aggregate(_)
 				| PhysOp::Split {
@@ -1818,6 +1820,7 @@ fn open_source(
 		(
 			OpKind::Phys(
 				PhysOp::Sort(_)
+				| PhysOp::Window(_)
 				| PhysOp::KnnTopK(_)
 				| PhysOp::Aggregate(_)
 				| PhysOp::Split {
@@ -1829,6 +1832,7 @@ fn open_source(
 		(
 			OpKind::Phys(
 				PhysOp::Sort(_)
+				| PhysOp::Window(_)
 				| PhysOp::KnnTopK(_)
 				| PhysOp::Aggregate(_)
 				| PhysOp::Split {
@@ -1923,6 +1927,17 @@ fn open_source(
 				},
 			)
 		}
+		OpKind::Phys(PhysOp::Window(shape)) => {
+			let id = window::push_window(em, cx, ir, reads, data, shape)?;
+			(
+				Sink::Split {
+					id,
+				},
+				Source::Split {
+					split: id,
+				},
+			)
+		}
 		OpKind::Phys(PhysOp::Split {
 			targets,
 		}) => {
@@ -1937,15 +1952,18 @@ fn open_source(
 			)
 		}
 		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {
-			return Err(invariant("a breaker that is not a sort, an aggregate or a split"));
+			return Err(invariant(
+				"a breaker that is not a sort, a window, an aggregate or a split",
+			));
 		}
 	};
 	let fed = lower_feeder(em, cx, ir, facts, feeder, &trail, &sink, reads)?;
 	// The rows of a sort are those its feeder handed it, record ids where the feeder's may be.
 	let ids = matches!(source, Source::Sorted { .. }) && reads.fed_ids;
-	// A split rewrites the fields it splits on, so its rows are records when the rows it splits
-	// are and they are no `VALUE` projection. A sort's rows are the rows its feeder handed it, so
-	// they are records when the feeder's are; the rows of a search or a group are records.
+	// A split rewrites the fields it splits on, and a window appends the fields of its calls, so
+	// their rows are records when the rows they read are and they are no `VALUE` projection. A
+	// sort's rows are the rows its feeder handed it, so they are records when the feeder's are;
+	// the rows of a search or a group are records.
 	let objects = match &source {
 		Source::Split {
 			..
@@ -2068,13 +2086,14 @@ fn projects_value(ir: &Ir, rows: ValueId) -> bool {
 	}
 }
 
-/// Whether `op` is a breaker whose rows a pipeline reads as its source: a sort, a brute-force
-/// search, an aggregate, a split, a join or a probe.
+/// Whether `op` is a breaker whose rows a pipeline reads as its source: a sort, a window, a
+/// brute-force search, an aggregate, a split, a join or a probe.
 pub(super) fn is_breaker(ir: &Ir, op: OpId) -> bool {
 	matches!(
 		ir.op(op).map(|data| &data.kind),
 		Some(OpKind::Phys(
 			PhysOp::Sort(_)
+				| PhysOp::Window(_)
 				| PhysOp::KnnTopK(_)
 				| PhysOp::Aggregate(_)
 				| PhysOp::Split { .. }
@@ -3559,6 +3578,7 @@ impl Body<'_, '_, '_> {
 				..
 			}
 			| PhysOp::Sort(_)
+			| PhysOp::Window(_)
 			| PhysOp::Aggregate(_)
 			| PhysOp::Timeout
 			| PhysOp::VersionScope
@@ -4124,6 +4144,7 @@ fn non_step(tag: PhysTag) -> &'static str {
 		| PhysTag::Join
 		| PhysTag::Split
 		| PhysTag::Sort
+		| PhysTag::Window
 		| PhysTag::Aggregate
 		| PhysTag::Timeout
 		| PhysTag::VersionScope

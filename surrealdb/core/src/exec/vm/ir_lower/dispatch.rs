@@ -144,6 +144,7 @@ coverage_table! {
 	Fetch => "phys.fetch", Native;
 	Split => "phys.split", Native;
 	Sort => "phys.sort", Native;
+	Window => "phys.window", Native;
 	Aggregate => "phys.aggregate", Native;
 	Limit => "phys.limit", Native;
 	Project => "phys.project", Native;

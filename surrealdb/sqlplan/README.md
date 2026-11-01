@@ -252,6 +252,33 @@ migration that creates a table and alters it in one request converts the column 
 A nullable foreign key column accepts SQL NULL, stored as `NONE` as above; a `NOT NULL` one refuses
 it (`23502`).
 
+## Window functions
+
+A window function call (`func(args) OVER (...)`) is computed in the select list and the `ORDER BY`
+of a `SELECT`. The window functions `row_number`, `rank`, `dense_rank`, `percent_rank`,
+`cume_dist`, `ntile`, `lag`, `lead`, `first_value`, `last_value` and `nth_value` are supported, and
+so are `sum`, `avg`, `count` (`count(*)` counts rows), `min` and `max` over a window. `OVER w` reads
+the window `w` that the `WINDOW` clause names.
+
+Each distinct call is computed once into a hidden field of every row, `__sql_window_<i>`, which the
+select list and the `ORDER BY` read. Calls over the same `PARTITION BY` and `ORDER BY` are computed
+by one `Window` operator. A select without aggregation computes its windows over the rows that its
+`WHERE` clause keeps, below its `DISTINCT`, `ORDER BY`, `LIMIT` and projection. A select with
+`GROUP BY`, an aggregate or `HAVING` computes them over the groups that `HAVING` keeps: an aggregate
+in a window call reads the output of the aggregation, which computes it under a hidden name
+(`__sql_window_agg_<n>`) when the select list does not select it. `*` and `t.*` do not read the
+hidden fields.
+
+A `ROWS` or `RANGE` frame is kept as it is written; a frame with only a start ends at `CURRENT ROW`.
+Without a frame, a window with an `ORDER BY` reads `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT
+ROW`, and one without reads its whole partition.
+
+These are refused as unsupported (`0A000`): any other aggregate called with `OVER`, `DISTINCT` in a
+window call, a `GROUPS` frame, an `EXCLUDE` clause other than `EXCLUDE NO OTHERS`, a `RANGE` frame
+with an offset, a frame offset that is not a non-negative integer literal, a frame that starts after
+it ends, and a window call in the `ORDER BY` of a set operation. A window call in `WHERE`, `GROUP BY`
+or `HAVING`, or in the arguments of another window call, is an error (`42P20`).
+
 ## Numeric literals
 
 A decimal integer literal that fits 64 bits is an integer, in both dialects. One that does not

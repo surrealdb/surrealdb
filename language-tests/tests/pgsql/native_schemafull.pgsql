@@ -38,7 +38,7 @@ value = "[{ moved: 40, name: 'Ann' }]"
 value = "[{ kind: 'credit', n: 3 }, { kind: 'debit', n: 1 }]"
 
 [[test.results]]
-value = "[{ tier: 'basic' }, { tier: 'basic' }, { tier: 'gold' }, { tier: 'silver' }]"
+value = "[{ tier: 'basic' }, { tier: 'gold' }, { tier: 'silver' }]"
 
 [[test.results]]
 value = "[{ n: 'Ann' }, { n: 'Ben' }, { n: 'Cy' }, { n: 'Di' }, { n: 'credit' }, { n: 'debit' }]"

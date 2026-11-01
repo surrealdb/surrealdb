@@ -215,6 +215,7 @@ fn collect(ir: &Ir, region: RegionId, slots: &mut Vec<Slot>) -> Result<(), IrErr
 				..
 			}
 			| PhysOp::Sort(_)
+			| PhysOp::Window(_)
 			| PhysOp::Aggregate(_)
 			| PhysOp::Limit {
 				..

@@ -65,7 +65,9 @@ use crate::exec::operators::scan::MergeMode;
 use crate::exec::vm::explain::{MeasureKind, MeasureSpec, PlanNode, PlanTree};
 use crate::exec::vm::payload::{JoinBuild, JoinMatch, LOOKUP_EVALUATIONS, ValuesRead};
 use crate::expr::BinaryOperator;
-use crate::expr::logical::{EvalMode, OutputPath};
+use crate::expr::logical::{
+	EvalMode, OutputPath, WindowFrame, WindowFrameBound, WindowFrameUnits, WindowFunction,
+};
 use crate::expr::match_plan::DetachMode;
 use crate::kvs::Direction;
 
@@ -269,9 +271,52 @@ const UNPROJECTED_ROWS: &[&str] = &[
 	"PermissionFilter",
 	"Split",
 	"Sort",
+	"Window",
 	"Limit",
 	"DistinctRecords",
 ];
+
+/// The SQL name of a window function.
+fn window_function_name(function: WindowFunction) -> &'static str {
+	match function {
+		WindowFunction::RowNumber => "row_number",
+		WindowFunction::Rank => "rank",
+		WindowFunction::DenseRank => "dense_rank",
+		WindowFunction::PercentRank => "percent_rank",
+		WindowFunction::CumeDist => "cume_dist",
+		WindowFunction::Ntile => "ntile",
+		WindowFunction::Lag => "lag",
+		WindowFunction::Lead => "lead",
+		WindowFunction::FirstValue => "first_value",
+		WindowFunction::LastValue => "last_value",
+		WindowFunction::NthValue => "nth_value",
+		WindowFunction::Sum => "sum",
+		WindowFunction::Avg => "avg",
+		WindowFunction::Count => "count",
+		WindowFunction::Min => "min",
+		WindowFunction::Max => "max",
+	}
+}
+
+/// A window frame as SQL writes it: its units, then its two bounds.
+fn frame_text(frame: &WindowFrame) -> String {
+	let units = match frame.units {
+		WindowFrameUnits::Rows => "ROWS",
+		WindowFrameUnits::Range => "RANGE",
+	};
+	format!("{units} BETWEEN {} AND {}", bound_text(frame.start), bound_text(frame.end))
+}
+
+/// One end of a window frame as SQL writes it.
+fn bound_text(bound: WindowFrameBound) -> String {
+	match bound {
+		WindowFrameBound::UnboundedPreceding => "UNBOUNDED PRECEDING".to_string(),
+		WindowFrameBound::Preceding(offset) => format!("{offset} PRECEDING"),
+		WindowFrameBound::CurrentRow => "CURRENT ROW".to_string(),
+		WindowFrameBound::Following(offset) => format!("{offset} FOLLOWING"),
+		WindowFrameBound::UnboundedFollowing => "UNBOUNDED FOLLOWING".to_string(),
+	}
+}
 
 /// The name and the attributes of a projection's node.
 type Projected = (&'static str, Vec<(String, String)>);
@@ -473,6 +518,7 @@ impl<'a> TreeWalk<'a> {
 				..
 			}
 			| PhysOp::Sort(_)
+			| PhysOp::Window(_)
 			| PhysOp::Aggregate(_)
 			| PhysOp::Limit {
 				..
@@ -724,8 +770,8 @@ impl<'a> TreeWalk<'a> {
 		}
 	}
 
-	/// Whether the rows `value` holds are those of an aggregate or a count, beneath what sorts and
-	/// pages them alone.
+	/// Whether the rows `value` holds are those of an aggregate or a count, beneath what sorts,
+	/// windows and pages them alone.
 	fn aggregated(&self, value: ValueId) -> bool {
 		let Ok(op) = producer_of(self.ir, value) else {
 			return false;
@@ -737,6 +783,7 @@ impl<'a> TreeWalk<'a> {
 			OpKind::Phys(PhysOp::Aggregate(_) | PhysOp::Count(_)) => true,
 			OpKind::Phys(
 				PhysOp::Sort(_)
+				| PhysOp::Window(_)
 				| PhysOp::Limit {
 					..
 				},
@@ -1534,6 +1581,7 @@ impl<'a> TreeWalk<'a> {
 				..
 			}
 			| PhysOp::Sort(_)
+			| PhysOp::Window(_)
 			| PhysOp::Aggregate(_)
 			| PhysOp::Limit {
 				..
@@ -2006,6 +2054,7 @@ impl<'a> TreeWalk<'a> {
 			| PhysOp::Union
 			| PhysOp::Join(_)
 			| PhysOp::Sort(_)
+			| PhysOp::Window(_)
 			| PhysOp::Aggregate(_)
 			| PhysOp::Timeout
 			| PhysOp::VersionScope
@@ -2203,6 +2252,7 @@ impl<'a> TreeWalk<'a> {
 				..
 			}
 			| PhysOp::Sort(_)
+			| PhysOp::Window(_)
 			| PhysOp::Aggregate(_)
 			| PhysOp::Limit {
 				..
@@ -2346,6 +2396,7 @@ impl<'a> TreeWalk<'a> {
 				..
 			}
 			| PhysOp::Sort(_)
+			| PhysOp::Window(_)
 			| PhysOp::Aggregate(_)
 			| PhysOp::Project(_) => {
 				self.topk =
@@ -2620,6 +2671,64 @@ impl<'a> TreeWalk<'a> {
 					vec![("targets".to_string(), targets.join(", "))],
 					vec![child],
 				))
+			}
+			PhysOp::Window(shape) => {
+				let mut slots = regions.iter().copied();
+				let mut window = Vec::new();
+				if shape.partitions > 0 {
+					let mut keys = Vec::with_capacity(usize::from(shape.partitions));
+					for _ in 0..shape.partitions {
+						let region = slots
+							.next()
+							.ok_or_else(|| invariant("a window lacks a partition key region"))?;
+						keys.push(self.region_text(region)?);
+					}
+					window.push(("partition_by".to_string(), keys.join(", ")));
+				}
+				if !shape.order.is_empty() {
+					let mut keys = Vec::with_capacity(shape.order.len());
+					for key in shape.order.iter() {
+						let region = slots
+							.next()
+							.ok_or_else(|| invariant("a window lacks an order key region"))?;
+						let mut text = format!(
+							"{} {}",
+							self.region_text(region)?,
+							if key.ascending {
+								"ASC"
+							} else {
+								"DESC"
+							}
+						);
+						if key.collate {
+							text.push_str(" COLLATE");
+						}
+						if key.numeric {
+							text.push_str(" NUMERIC");
+						}
+						keys.push(text);
+					}
+					window.push(("order_by".to_string(), keys.join(", ")));
+				}
+				let mut calls = Vec::with_capacity(shape.calls.len());
+				for call in shape.calls.iter() {
+					let mut args = Vec::with_capacity(usize::from(call.args));
+					for _ in 0..call.args {
+						let region = slots
+							.next()
+							.ok_or_else(|| invariant("a window lacks an argument region"))?;
+						args.push(self.region_text(region)?);
+					}
+					calls.push(format!(
+						"{}({}) {} AS {}",
+						window_function_name(call.function),
+						args.join(", "),
+						frame_text(&call.frame),
+						call.output.as_str()
+					));
+				}
+				window.push(("calls".to_string(), calls.join(", ")));
+				Ok(self.node("Window", ContextLevel::Database, window, vec![child]))
 			}
 			PhysOp::Sort(attrs) => {
 				let mut sort = vec![];

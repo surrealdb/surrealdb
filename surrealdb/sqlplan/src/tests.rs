@@ -1830,9 +1830,12 @@ fn test_window_functions_pgsql() {
 	assert!(spec.frame.is_none());
 	let desc = bound.describe(&catalog, &pg_policy);
 	assert_eq!(desc.columns[0].ty, SqlType::Int8);
-	// Lowering fails closed
-	let err = lower_bound_select(&bound, &pg_policy).unwrap_err();
-	assert!(matches!(err, PlanError::UnsupportedExpression(_)));
+	// Lowering computes the call with a `Window` operator under the projection
+	let op = lower_bound_select(&bound, &pg_policy).unwrap();
+	let LogicalOp::Project(project) = &op else {
+		panic!("expected Project, got {op}");
+	};
+	assert!(matches!(&*project.input, LogicalOp::Window(_)), "{op}");
 
 	// 2. Window function with PARTITION BY and ORDER BY
 	let sql = "SELECT rank() OVER (PARTITION BY dept ORDER BY salary DESC) FROM emp;";
@@ -1970,9 +1973,12 @@ fn test_window_functions_mysql() {
 	assert!(spec.frame.is_none());
 	let desc = bound.describe(&catalog, &my_policy);
 	assert_eq!(desc.columns[0].ty, SqlType::Int8);
-	// Lowering fails closed
-	let err = lower_bound_select(&bound, &my_policy).unwrap_err();
-	assert!(matches!(err, PlanError::UnsupportedExpression(_)));
+	// Lowering computes the call with a `Window` operator under the projection
+	let op = lower_bound_select(&bound, &my_policy).unwrap();
+	let LogicalOp::Project(project) = &op else {
+		panic!("expected Project, got {op}");
+	};
+	assert!(matches!(&*project.input, LogicalOp::Window(_)), "{op}");
 
 	// 2. Window function with PARTITION BY and ORDER BY
 	let sql = "SELECT RANK() OVER (PARTITION BY dept ORDER BY salary DESC) FROM emp;";

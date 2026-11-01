@@ -182,7 +182,7 @@ fn phys_work(tag: PhysTag, payload: PayloadId, view: &dyn EgraphView) -> u64 {
 				SORT
 			}
 		}
-		PhysTag::Aggregate | PhysTag::Distinct => GROUPING,
+		PhysTag::Aggregate | PhysTag::Distinct | PhysTag::Window => GROUPING,
 		PhysTag::RecordScan | PhysTag::Count => UNIT,
 		PhysTag::IndexLookup
 		| PhysTag::Vacant

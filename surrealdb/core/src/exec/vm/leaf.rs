@@ -1444,6 +1444,7 @@ fn measured_kind(op: &crate::expr::logical::LogicalOp) -> Option<&'static str> {
 	Some(match op {
 		LogicalOp::Return(_) => "return",
 		LogicalOp::Eval(_) => "expr",
+		LogicalOp::Window(_) => "window",
 		LogicalOp::Source(_)
 		| LogicalOp::Values(_)
 		| LogicalOp::Match(_)

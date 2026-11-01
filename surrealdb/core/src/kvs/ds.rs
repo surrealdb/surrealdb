@@ -167,6 +167,8 @@ mod sql_function_cases;
 mod sql_function_tests;
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 mod sql_links;
+#[cfg(all(test, feature = "kv-mem", any(feature = "postgres", feature = "mysql")))]
+mod sql_window_tests;
 mod table_migration;
 
 pub use builder::Builder;

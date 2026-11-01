@@ -126,6 +126,7 @@ pub(crate) fn additions(op: &PhysOp, catalog: CatalogFacts) -> CatalogAdditions 
 			..
 		}
 		| PhysOp::Sort(..)
+		| PhysOp::Window(..)
 		| PhysOp::Aggregate(..)
 		| PhysOp::Limit {
 			..

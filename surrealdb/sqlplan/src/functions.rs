@@ -9,6 +9,13 @@
 //! an entry with no lowering of its own would otherwise reach the engine as a call to a function of
 //! the same name, which does not exist. `kvs::ds::sql_function_tests` in `surrealdb-core` runs
 //! every entry in each dialect that registers it, and fails for an entry that has no case there.
+//!
+//! A window function (`row_number`, `rank`, `dense_rank`, `percent_rank`, `cume_dist`, `ntile`,
+//! `lag`, `lead`, `first_value`, `last_value`, `nth_value`), and `sum`, `avg`, `count`, `min` and
+//! `max` called with `OVER`, lower to a `Window` operator in the select list and `ORDER BY` of a
+//! `SELECT` (see `lower::window`). Any other aggregate called with `OVER`, `DISTINCT` in a window
+//! call, a `GROUPS` frame, a frame `EXCLUDE` clause, a `RANGE` frame with an offset and a frame
+//! offset that is not a non-negative integer literal are refused as unsupported (`0A000`).
 
 use crate::descriptor::SqlType;
 use crate::dialect::SqlDialect;
@@ -18,7 +25,8 @@ use crate::dialect::SqlDialect;
 pub enum SqlFunctionKind {
 	/// Standard scalar function computed row-by-row.
 	Scalar,
-	/// Aggregate function computing over a grouping set (or usable over a window).
+	/// Aggregate function computing over a grouping set, or over a window when called with
+	/// `OVER`: only `sum`, `avg`, `count`, `min` and `max` lower over a window.
 	Aggregate,
 	/// Window function requiring an OVER clause.
 	Window,

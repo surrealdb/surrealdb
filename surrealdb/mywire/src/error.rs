@@ -40,6 +40,7 @@ const ER_DERIVED_MUST_HAVE_ALIAS: Number = (1248, b"42000");
 const ER_DIVISION_BY_ZERO: Number = (1365, b"22012");
 const ER_DUP_ENTRY: Number = (1062, b"23000");
 const ER_DUP_FIELDNAME: Number = (1060, b"42S21");
+const ER_FIELD_IN_ORDER_NOT_SELECT: Number = (3065, b"HY000");
 const ER_INVALID_GROUP_FUNC_USE: Number = (1111, b"HY000");
 const ER_LOCK_DEADLOCK: Number = (1213, b"40001");
 const ER_NON_UNIQ_ERROR: Number = (1052, b"23000");
@@ -58,6 +59,9 @@ const ER_UNKNOWN_ERROR: Number = (1105, b"HY000");
 const ER_CANT_DROP_FIELD_OR_KEY: Number = (1091, b"42000");
 const ER_UNKNOWN_SYSTEM_VARIABLE: Number = (1193, b"HY000");
 const ER_WINDOW_INVALID_WINDOW_FUNC_USE: Number = (3593, b"HY000");
+const ER_WINDOW_NO_CHILD_PARTITIONING: Number = (3581, b"HY000");
+const ER_WINDOW_NO_INHERIT_FRAME: Number = (3582, b"HY000");
+const ER_WINDOW_NO_REDEFINE_ORDER_BY: Number = (3583, b"HY000");
 const ER_WRONG_FIELD_WITH_GROUP: Number = (1055, b"42000");
 const ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT: Number = (1582, b"42000");
 
@@ -90,9 +94,13 @@ fn plan_number(err: &PlanError) -> Number {
 		| PlanError::InvalidGroupByPosition(_)
 		| PlanError::InvalidOrderByPosition(_) => ER_BAD_FIELD_ERROR,
 		PlanError::AmbiguousColumn(_) => ER_NON_UNIQ_ERROR,
+		PlanError::DistinctOrderByNotSelected => ER_FIELD_IN_ORDER_NOT_SELECT,
 		PlanError::ColumnNotInGroupBy(_) => ER_WRONG_FIELD_WITH_GROUP,
 		PlanError::AggregateNotAllowed(_) => ER_INVALID_GROUP_FUNC_USE,
 		PlanError::WindowNotAllowed(_) => ER_WINDOW_INVALID_WINDOW_FUNC_USE,
+		PlanError::WindowPartitionOverride(_) => ER_WINDOW_NO_CHILD_PARTITIONING,
+		PlanError::WindowOrderOverride(_) => ER_WINDOW_NO_REDEFINE_ORDER_BY,
+		PlanError::WindowFrameCopy(_) => ER_WINDOW_NO_INHERIT_FRAME,
 		PlanError::UndefinedFunction(_) => ER_SP_DOES_NOT_EXIST,
 		PlanError::FunctionArgumentCountMismatch {
 			..
@@ -279,12 +287,32 @@ static PLANNER_FORMS: &[(&str, &str, PlanError)] = &[
 	("GROUP BY position ", " is not in select list", PlanError::InvalidGroupByPosition(0)),
 	("ORDER BY position ", " is not in select list", PlanError::InvalidOrderByPosition(0)),
 	(
+		"for SELECT DISTINCT, ORDER BY expressions must appear in select list",
+		"",
+		PlanError::DistinctOrderByNotSelected,
+	),
+	(
 		"column \"",
 		"\" must appear in the GROUP BY clause or be used in an aggregate function",
 		PlanError::ColumnNotInGroupBy(String::new()),
 	),
 	("aggregate functions are not allowed in ", "", PlanError::AggregateNotAllowed(String::new())),
 	("window functions are not allowed in ", "", PlanError::WindowNotAllowed(String::new())),
+	(
+		"cannot override PARTITION BY clause of window \"",
+		"\"",
+		PlanError::WindowPartitionOverride(String::new()),
+	),
+	(
+		"cannot override ORDER BY clause of window \"",
+		"\"",
+		PlanError::WindowOrderOverride(String::new()),
+	),
+	(
+		"cannot copy window \"",
+		"\" because it has a frame clause",
+		PlanError::WindowFrameCopy(String::new()),
+	),
 	("function \"", "\" does not exist", PlanError::UndefinedFunction(String::new())),
 	(
 		"function \"",
@@ -647,6 +675,10 @@ mod tests {
 				method: "hnsw".to_string(),
 			},
 			PlanError::ExtensionNotAvailable(name()),
+			PlanError::DistinctOrderByNotSelected,
+			PlanError::WindowPartitionOverride(name()),
+			PlanError::WindowOrderOverride(name()),
+			PlanError::WindowFrameCopy(name()),
 			PlanError::Custom("something".to_string()),
 		];
 		cases
@@ -659,9 +691,13 @@ mod tests {
 					| PlanError::InvalidGroupByPosition(_)
 					| PlanError::InvalidOrderByPosition(_) => ER_BAD_FIELD_ERROR,
 					PlanError::AmbiguousColumn(_) => ER_NON_UNIQ_ERROR,
+					PlanError::DistinctOrderByNotSelected => ER_FIELD_IN_ORDER_NOT_SELECT,
 					PlanError::ColumnNotInGroupBy(_) => ER_WRONG_FIELD_WITH_GROUP,
 					PlanError::AggregateNotAllowed(_) => ER_INVALID_GROUP_FUNC_USE,
 					PlanError::WindowNotAllowed(_) => ER_WINDOW_INVALID_WINDOW_FUNC_USE,
+					PlanError::WindowPartitionOverride(_) => ER_WINDOW_NO_CHILD_PARTITIONING,
+					PlanError::WindowOrderOverride(_) => ER_WINDOW_NO_REDEFINE_ORDER_BY,
+					PlanError::WindowFrameCopy(_) => ER_WINDOW_NO_INHERIT_FRAME,
 					PlanError::UndefinedFunction(_) => ER_SP_DOES_NOT_EXIST,
 					PlanError::FunctionArgumentCountMismatch {
 						..

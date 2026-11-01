@@ -117,7 +117,10 @@ pub(crate) fn facts_reading(
 	let chain = chain_facts(source.map(|(_, kind)| kind), source_rows, &step_kinds);
 
 	let mut scanned: Vec<OpId> = steps.iter().map(|(op, _)| *op).collect();
-	if matches!(cut.sink, SinkKind::Sort { .. } | SinkKind::Aggregate | SinkKind::Write) {
+	if matches!(
+		cut.sink,
+		SinkKind::Sort { .. } | SinkKind::Aggregate | SinkKind::Window | SinkKind::Write
+	) {
 		scanned.extend(cut.consumer);
 	}
 	let nesting = scan_expressions(ir, &scanned);
@@ -375,6 +378,7 @@ pub(crate) fn source_kind(source: &PhysOp) -> SourceKind {
 			..
 		}
 		| PhysOp::Sort(..)
+		| PhysOp::Window(..)
 		| PhysOp::Aggregate(..)
 		| PhysOp::Limit {
 			..
@@ -541,6 +545,7 @@ fn sink_of(consumer: &PhysOp, operand: u16) -> Option<SinkKind> {
 		}),
 		PhysOp::KnnTopK(..) => Some(SinkKind::Knn),
 		PhysOp::Aggregate(..) => Some(SinkKind::Aggregate),
+		PhysOp::Window(..) => Some(SinkKind::Window),
 		PhysOp::Write(..) => Some(SinkKind::Write),
 		PhysOp::Split {
 			..

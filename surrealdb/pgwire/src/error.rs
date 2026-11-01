@@ -418,6 +418,7 @@ const NAMED_PLANNER_ERRORS: &[(&str, &str, &str)] = &[
 	("column reference \"", "\" is ambiguous", "42702"),
 	("GROUP BY position ", " is not in select list", "42P10"),
 	("ORDER BY position ", " is not in select list", "42P10"),
+	("for SELECT DISTINCT, ORDER BY expressions must appear in select list", "", "42P10"),
 	(
 		"column \"",
 		"\" must appear in the GROUP BY clause or be used in an aggregate function",
@@ -425,6 +426,9 @@ const NAMED_PLANNER_ERRORS: &[(&str, &str, &str)] = &[
 	),
 	("aggregate functions are not allowed in ", "", "42803"),
 	("window functions are not allowed in ", "", "42P20"),
+	("cannot override PARTITION BY clause of window \"", "\"", "42P20"),
+	("cannot override ORDER BY clause of window \"", "\"", "42P20"),
+	("cannot copy window \"", "\" because it has a frame clause", "42P20"),
 	("function \"", "\" does not exist", "42883"),
 	("function \"", " were provided", "42883"),
 	("function \"", "\" must be called with an OVER clause", "42809"),
@@ -865,9 +869,13 @@ mod tests {
 			PlanError::MissingFromClauseEntry(name()),
 			PlanError::InvalidGroupByPosition(9),
 			PlanError::InvalidOrderByPosition(9),
+			PlanError::DistinctOrderByNotSelected,
 			PlanError::ColumnNotInGroupBy(name()),
 			PlanError::AggregateNotAllowed("WHERE".to_string()),
 			PlanError::WindowNotAllowed("WHERE clause".to_string()),
+			PlanError::WindowPartitionOverride(name()),
+			PlanError::WindowOrderOverride(name()),
+			PlanError::WindowFrameCopy(name()),
 			PlanError::UndefinedFunction(name()),
 			PlanError::UndefinedOperator("boolean + integer".to_string()),
 			PlanError::FunctionArgumentCountMismatch {
@@ -909,11 +917,14 @@ mod tests {
 					PlanError::UndefinedTable(_) | PlanError::MissingFromClauseEntry(_) => "42P01",
 					PlanError::UndefinedColumn(_) => "42703",
 					PlanError::AmbiguousColumn(_) => "42702",
-					PlanError::InvalidGroupByPosition(_) | PlanError::InvalidOrderByPosition(_) => {
-						"42P10"
-					}
+					PlanError::InvalidGroupByPosition(_)
+					| PlanError::InvalidOrderByPosition(_)
+					| PlanError::DistinctOrderByNotSelected => "42P10",
 					PlanError::ColumnNotInGroupBy(_) | PlanError::AggregateNotAllowed(_) => "42803",
-					PlanError::WindowNotAllowed(_) => "42P20",
+					PlanError::WindowNotAllowed(_)
+					| PlanError::WindowPartitionOverride(_)
+					| PlanError::WindowOrderOverride(_)
+					| PlanError::WindowFrameCopy(_) => "42P20",
 					PlanError::UndefinedFunction(_)
 					| PlanError::UndefinedOperator(_)
 					| PlanError::FunctionArgumentCountMismatch {

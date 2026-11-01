@@ -266,6 +266,7 @@ impl LogOp {
 				shape.first_value.hash(hasher);
 			}
 			LogOp::Sort(attrs) => attrs.hash(hasher),
+			LogOp::Window(attrs) => attrs.hash(hasher),
 			LogOp::Limit {
 				limit,
 				start,

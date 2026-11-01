@@ -353,6 +353,8 @@ pub(crate) enum SinkKind {
 	JoinProbe,
 	/// The pairing side of a join.
 	JoinPair,
+	/// A window, which reads every row of a partition in partition-then-order sequence.
+	Window,
 }
 
 /// Physical facts about one pipeline, derived from the placed physical plan ([`PhysicalPlan`]) and
@@ -587,7 +589,11 @@ impl Policy {
 				bounded: false,
 			} => Combine::StableMerge,
 			SinkKind::Aggregate => Combine::Aggregate,
-			SinkKind::Write | SinkKind::Split | SinkKind::JoinProbe | SinkKind::JoinPair => {
+			SinkKind::Write
+			| SinkKind::Split
+			| SinkKind::JoinProbe
+			| SinkKind::JoinPair
+			| SinkKind::Window => {
 				return Err("the sink holds state a part cannot own");
 			}
 		};

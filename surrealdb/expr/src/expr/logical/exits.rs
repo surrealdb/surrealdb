@@ -151,6 +151,7 @@ impl LogicalOp {
 			| LogicalOp::Split(_)
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Sort(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Project(_)

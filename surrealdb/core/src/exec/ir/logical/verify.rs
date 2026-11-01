@@ -566,6 +566,7 @@ pub(crate) fn open_position(log: &LogOp) -> Option<usize> {
 		}
 		| LogOp::Distinct
 		| LogOp::Sort(..)
+		| LogOp::Window(..)
 		| LogOp::Limit {
 			..
 		}

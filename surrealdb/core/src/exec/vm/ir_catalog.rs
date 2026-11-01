@@ -212,6 +212,7 @@ pub(crate) async fn fill(
 			| LogOp::Aggregate(_)
 			| LogOp::Distinct
 			| LogOp::Sort(_)
+			| LogOp::Window(_)
 			| LogOp::Limit {
 				..
 			}
@@ -970,6 +971,7 @@ fn field_statement(ir: &Ir, op: OpId, kind: &LogOp) -> Result<Option<FieldStatem
 		| LogOp::Aggregate(_)
 		| LogOp::Distinct
 		| LogOp::Sort(_)
+		| LogOp::Window(_)
 		| LogOp::Limit {
 			..
 		}

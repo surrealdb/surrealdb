@@ -820,7 +820,7 @@ pub fn lower_bound_expr(
 			let lower_args = if mapped_fn == "count"
 				&& (args.is_empty()
 					|| (args.len() == 1
-						&& (matches!(&args[0], BoundExpr::Column(col) if col.column == "*")
+						&& (matches!(&args[0], BoundExpr::Column(col) if counts_every_row(col))
 							|| matches!(&args[0], BoundExpr::Literal(BoundLiteral::Integer(_))))))
 			{
 				Vec::new()
@@ -1162,14 +1162,12 @@ pub fn lower_bound_expr(
 			let sub_op = lower_bound_subquery(subquery, policy)?;
 			Ok(LogicalExpr::Subquery(Box::new(sub_op)))
 		}
+		// A select computes its window calls with `Window` operators and reads each from the field
+		// it is computed into, so a call reaches here only from a clause that has no rows to
+		// compute it over.
 		BoundExpr::WindowFunction {
 			..
-		} => {
-			crate::observability::global_metrics().record_unsupported_feature("WINDOW");
-			Err(PlanError::UnsupportedExpression(
-				"window functions are not supported in streaming execution engine".into(),
-			))
-		}
+		} => Err(PlanError::WindowNotAllowed("this context".into())),
 	}
 }
 
@@ -1203,6 +1201,13 @@ fn one_row_or_error(rows: LogicalExpr, policy: &DialectPolicy) -> LogicalExpr {
 	}
 }
 
+/// Whether `col`, the argument of a `count`, is a row every row of the select holds: the `*` of
+/// `count(*)`, or the whole row of the `FROM` relation, which no join leaves absent. A joined
+/// relation's row (`r.*`) is absent where an outer join matched none, and is counted as a value.
+pub(crate) fn counts_every_row(col: &BoundColumnRef) -> bool {
+	col.column == "*" && col.relation_index == 0 && col.correlation_depth == 0
+}
+
 /// Lower a column reference to the stored field it names, with no key extraction.
 pub(crate) fn lower_column_raw(col: &BoundColumnRef) -> LogicalExpr {
 	if col.correlation_depth > 0 {
@@ -1217,6 +1222,9 @@ pub(crate) fn lower_column_raw(col: &BoundColumnRef) -> LogicalExpr {
 			base: Box::new(expr),
 			field: Strand::from(col.column.as_str()),
 		}
+	} else if col.column == "*" && col.relation_index > 0 {
+		// A joined relation's whole row, which an outer join leaves absent where it matched none.
+		RelationAlias::new(col.relation_index - 1).field()
 	} else if col.column == "*" {
 		LogicalExpr::Field(Strand::from("*"))
 	} else {

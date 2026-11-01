@@ -440,6 +440,7 @@ pub(super) fn lower_source_under(
 			..
 		}
 		| PhysOp::Sort(_)
+		| PhysOp::Window(_)
 		| PhysOp::Aggregate(_)
 		| PhysOp::Limit {
 			..
@@ -869,6 +870,7 @@ pub(super) fn schema_of(ir: &Ir, op: OpId) -> Option<std::sync::Arc<Schema>> {
 			..
 		}
 		| PhysOp::Sort(_)
+		| PhysOp::Window(_)
 		| PhysOp::Aggregate(_)
 		| PhysOp::Limit {
 			..

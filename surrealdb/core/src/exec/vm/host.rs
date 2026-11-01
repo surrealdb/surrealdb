@@ -861,6 +861,7 @@ async fn start_group(
 	for at in spec.aggregates.clone() {
 		state.reset_aggregate(program, at as usize);
 	}
+	super::window_step::reset_windows(program, group, state);
 	for at in spec.permissions.clone() {
 		state.frames[at as usize] = program.permissions[at as usize].context(frame);
 	}
@@ -1489,7 +1490,10 @@ pub(super) async fn run_pipelines(
 					let held =
 						super::sort::sorted(held, &keys, keep.unwrap_or(usize::MAX), ctx).await?;
 					let held = super::spill::records_of(held, &slab)?;
-					state.sort_accounts[*sort as usize].clear();
+					// The rows the merge still holds stay charged until the drain ends, so a
+					// breaker the sorted rows feed charges against what the sort holds, while
+					// the sort's own account starts again empty for no spill pass to visit.
+					let _draining = state.sort_accounts[*sort as usize].detach();
 					let order = super::spill::sort_order(keys);
 					let mut merge = runs.merge(&memory, held, order, keep, ctx).await?;
 					loop {
@@ -1508,7 +1512,8 @@ pub(super) async fn run_pipelines(
 					}
 					continue;
 				}
-				state.sort_accounts[*sort as usize].clear();
+				// Charged until the drain ends, as above.
+				let _draining = state.sort_accounts[*sort as usize].detach();
 				let rows = std::mem::take(&mut state.sorts[*sort as usize]);
 				let slab = std::mem::take(&mut state.sort_slabs[*sort as usize]);
 				let keep = spec.keep.unwrap_or(usize::MAX);
@@ -1703,6 +1708,16 @@ pub(super) async fn run_pipelines(
 						}
 					}
 					out_of_line(|| flush(state, yielder, flush_at, ctx)).await?;
+				} else if let super::program::SplitKind::Window(_) =
+					&program.splits[*split as usize].kind
+					&& let Some(mut window) = super::window_step::take_window(*split, state)
+				{
+					let drained = out_of_line(|| {
+						drain_window(program, pipeline, &mut window, state, ctx, yielder, flush_at)
+					})
+					.await;
+					window.clear();
+					drained?;
 				}
 			}
 			Source::Join {
@@ -7057,6 +7072,12 @@ async fn run_split(
 				super::binding::Stepped::Delivered(step) => Ok(step),
 			}
 		}
+		super::program::SplitKind::Window(step) => {
+			out_of_line(|| {
+				super::window_step::run_window(program, split, step, row, state, ctx, &mut below)
+			})
+			.await
+		}
 	}
 }
 
@@ -7675,6 +7696,39 @@ impl super::join_spill::Pairer for PlanPairer<'_> {
 /// it deferred once its build side spilled, in the order the in-memory join
 /// pairs them. Nothing where the join kept its build side in memory.
 #[allow(clippy::too_many_arguments)]
+/// Runs the rows window `window` still holds through `pipeline`, the pipeline that reads it, once
+/// the pipeline feeding the window has finished: the run answers its last partition, and its rows
+/// are handed on a chunk at a time, flushed after each, until the run is drained or the pipeline
+/// takes no more. The caller clears the run however this ends.
+async fn drain_window(
+	program: &Program,
+	pipeline: &Pipeline,
+	window: &mut super::window_step::WindowState,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<()> {
+	if !window.finish(ctx).await? {
+		return Ok(());
+	}
+	loop {
+		let chunk = window.next_chunk(ctx).await?;
+		if chunk.is_empty() {
+			break;
+		}
+		for row in chunk {
+			if out_of_line(|| run_value_row(program, pipeline, row, state, ctx)).await?
+				== Ended::Stop
+			{
+				return out_of_line(|| flush(state, yielder, flush_at, ctx)).await;
+			}
+		}
+		out_of_line(|| flush(state, yielder, flush_at, ctx)).await?;
+	}
+	Ok(())
+}
+
 async fn finish_spilled_join(
 	program: &Program,
 	pipeline: &Pipeline,

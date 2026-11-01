@@ -124,6 +124,7 @@ impl LogOp {
 			| LogOp::Aggregate(..)
 			| LogOp::Distinct
 			| LogOp::Sort(..)
+			| LogOp::Window(..)
 			| LogOp::Limit {
 				..
 			}
@@ -328,6 +329,7 @@ impl LogOp {
 			| LogOp::Aggregate(..)
 			| LogOp::Distinct
 			| LogOp::Sort(..)
+			| LogOp::Window(..)
 			| LogOp::Limit {
 				..
 			}
@@ -429,7 +431,8 @@ impl LogOp {
 				..
 			}
 			| LogOp::Aggregate(..)
-			| LogOp::Sort(..) => Fallibility::VALUE,
+			| LogOp::Sort(..)
+			| LogOp::Window(..) => Fallibility::VALUE,
 			LogOp::Only => Fallibility::VALUE.union(Fallibility::DATA),
 			LogOp::VersionScope | LogOp::Sleep => Fallibility::VALUE.union(Fallibility::CONTEXT),
 			LogOp::PermissionFilter {
@@ -555,6 +558,7 @@ impl LogOp {
 			| LogOp::Aggregate(..)
 			| LogOp::Distinct
 			| LogOp::Sort(..)
+			| LogOp::Window(..)
 			| LogOp::Limit {
 				..
 			}
@@ -696,6 +700,14 @@ impl LogOp {
 						.collect()
 				}
 			},
+			LogOp::Window(shape) => {
+				std::iter::repeat_n(RegionKind::Clause(ClauseRole::OrderKey), shape.key_regions())
+					.chain(std::iter::repeat_n(
+						RegionKind::Clause(ClauseRole::Projection),
+						shape.arg_regions(),
+					))
+					.collect()
+			}
 			LogOp::Choose(spec) => {
 				std::iter::repeat_n(RegionKind::ChooseArm, spec.arms.len()).collect()
 			}
@@ -885,6 +897,7 @@ impl LogOp {
 			| LogOp::Aggregate(..)
 			| LogOp::Distinct
 			| LogOp::Sort(..)
+			| LogOp::Window(..)
 			| LogOp::Project(..)
 			| LogOp::Fetch
 			| LogOp::Only
@@ -1040,6 +1053,7 @@ impl LogOp {
 			| LogOp::Aggregate(..)
 			| LogOp::Distinct
 			| LogOp::Sort(..)
+			| LogOp::Window(..)
 			| LogOp::Limit {
 				..
 			}

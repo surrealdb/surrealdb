@@ -98,6 +98,7 @@ impl<'a> ScopeScan<'a> {
 			| PhysOp::Distinct {
 				..
 			}
+			| PhysOp::Window(..)
 			| PhysOp::PermissionFilter(..)
 			| PhysOp::Layer(..)
 			| PhysOp::Filter

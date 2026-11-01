@@ -340,6 +340,7 @@ fn logical_construct(op: &LogOp) -> Option<Construct> {
 		| LogOp::Aggregate(_)
 		| LogOp::Distinct
 		| LogOp::Sort(_)
+		| LogOp::Window(_)
 		| LogOp::Limit {
 			..
 		}

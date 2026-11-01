@@ -647,6 +647,11 @@ pub fn bind_expr(
 					spec: bound_spec,
 				})
 			} else {
+				if crate::functions::FunctionRegistry::is_bound_aggregate(&fn_name)
+					&& bound_args.iter().any(|a| a.contains_window())
+				{
+					return Err(PlanError::WindowNotAllowed("aggregate function calls".into()));
+				}
 				Ok(BoundExpr::FunctionCall {
 					name: fn_name,
 					args: bound_args,
@@ -887,7 +892,11 @@ pub fn bind_expr(
 								.into(),
 						));
 					}
+					// A `DISTINCT` or an `ORDER BY` of the subquery changes no `min` or `max` of
+					// its column, so the aggregate is taken over the rows it reads.
 					let mut transformed_subquery = bound_subquery;
+					transformed_subquery.distinct = None;
+					transformed_subquery.order_by.clear();
 					if transformed_subquery.targets.len() == 1 {
 						let original_expr = transformed_subquery.targets[0].expr.clone();
 						transformed_subquery.targets[0].expr = BoundExpr::FunctionCall {
@@ -1080,6 +1089,13 @@ fn bind_window_spec(
 		let base = scope
 			.resolve_window(name, policy)
 			.ok_or_else(|| PlanError::Custom(format!("window \"{name}\" does not exist")))?;
+		super::check_inherited_window(
+			name,
+			base,
+			!spec.partition_by.is_empty(),
+			!spec.order_by.is_empty(),
+			spec.frame.is_some(),
+		)?;
 		(base.partition_by.clone(), base.order_by.clone(), base.frame.clone())
 	} else {
 		(Vec::new(), Vec::new(), None)

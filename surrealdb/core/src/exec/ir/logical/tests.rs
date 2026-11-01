@@ -19,8 +19,9 @@ use super::ops::{
 	MatchUpdateAttrs, ProjectAttrs, RebuildAttrs, RecurseAttrs, RecurseInstructionShape,
 	RecursePathForm, RemoveAttrs, ShowAttrs, SortAttrs, SortKeyShape, SortShape, SourceAttrs,
 	SourceOrder, SourceRefShape, StepAttrs, Stored, SubscriberAdmission, SubscriberAttrs,
-	SubscriberProjection, TxnRegionEnd, TxnRegionMode, TxnStart, UseTarget, WriteAttrs, WriteGates,
-	WriteImage, WriteMark, WriteSchema, WriteStageKind, WriteStages, WriteStored,
+	SubscriberProjection, TxnRegionEnd, TxnRegionMode, TxnStart, UseTarget, WindowCallShape,
+	WindowShape, WriteAttrs, WriteGates, WriteImage, WriteMark, WriteSchema, WriteStageKind,
+	WriteStages, WriteStored,
 };
 use super::print::LogicalSyntax;
 use super::scope::{LoopExit, loop_exit, return_target};
@@ -67,7 +68,8 @@ use crate::exec::operators::write::plan::{WriteFacts, WriteForm as PlanForm};
 use crate::exec::operators::write::stage::{LightweightReason, RecordImage, StageId, TableTypeFor};
 use crate::expr::logical::{
 	EffectSet, Emission, GuardKind, JoinKind, MisplacedControl, OutputPath, RelationAlias,
-	RequestStatementKind, lower_request,
+	RequestStatementKind, WindowFrame, WindowFrameBound, WindowFrameUnits, WindowFunction,
+	lower_request,
 };
 use crate::expr::lookup::LookupKind;
 use crate::expr::match_plan::DetachMode;
@@ -306,6 +308,20 @@ fn fixture(tag: LogTag) -> LogOp {
 			ordering: SortShape::Random,
 			tempfiles: false,
 		})),
+		LogTag::Window => LogOp::Window(Box::new(WindowShape {
+			partitions: 0,
+			order: Box::new([]),
+			calls: Box::new([WindowCallShape {
+				output: strand("w"),
+				function: WindowFunction::RowNumber,
+				args: 0,
+				frame: WindowFrame {
+					units: WindowFrameUnits::Rows,
+					start: WindowFrameBound::UnboundedPreceding,
+					end: WindowFrameBound::CurrentRow,
+				},
+			}]),
+		})),
 		LogTag::Limit => LogOp::Limit {
 			limit: Some(0),
 			start: None,
@@ -437,7 +453,7 @@ fn declared_class(tag: LogTag) -> Fallibility {
 		| LogTag::BindStep
 		| LogTag::MatchOutput => none,
 		LogTag::Txn | LogTag::Source | LogTag::Fetch => data,
-		LogTag::Limit | LogTag::Aggregate | LogTag::Sort => value,
+		LogTag::Limit | LogTag::Aggregate | LogTag::Sort | LogTag::Window => value,
 		LogTag::Only => value | data,
 		LogTag::VersionScope | LogTag::Sleep => value | context,
 		LogTag::Let => none,
@@ -509,6 +525,7 @@ fn is_opaque(tag: LogTag) -> bool {
 		| LogTag::Aggregate
 		| LogTag::Distinct
 		| LogTag::Sort
+		| LogTag::Window
 		| LogTag::Limit
 		| LogTag::Project
 		| LogTag::Fetch
@@ -1616,6 +1633,7 @@ fn terminators_are_the_control_transfers() {
 			| LogTag::Aggregate
 			| LogTag::Distinct
 			| LogTag::Sort
+			| LogTag::Window
 			| LogTag::Limit
 			| LogTag::Project
 			| LogTag::Fetch

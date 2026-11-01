@@ -341,7 +341,8 @@ fn logical_stream(ir: &Ir, op: OpId, data: &OpData, log: &LogOp, depth: usize) -
 		| LogOp::Limit {
 			..
 		}
-		| LogOp::Sort(_) => input(),
+		| LogOp::Sort(_)
+		| LogOp::Window(_) => input(),
 		LogOp::Distinct => {
 			let fact = input();
 			if fact.key_path == ElemPath::Elem {

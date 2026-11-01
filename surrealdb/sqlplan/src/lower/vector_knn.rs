@@ -42,7 +42,7 @@ pub(super) fn knn_predicate(
 		|| select.distinct.is_some()
 		|| select.having.is_some()
 		|| !select.group_by.is_empty()
-		|| !select.windows.is_empty()
+		|| select.targets.iter().any(|target| target.expr.contains_window())
 		|| select
 			.targets
 			.iter()

@@ -67,7 +67,8 @@ fn predicate(op: &LogicalOp) -> String {
 		| other @ LogicalOp::Break(_)
 		| other @ LogicalOp::Continue(_)
 		| other @ LogicalOp::Info(_)
-		| other @ LogicalOp::Sleep(_) => panic!("no filter under {other:?}"),
+		| other @ LogicalOp::Sleep(_)
+		| other @ LogicalOp::Window(_) => panic!("no filter under {other:?}"),
 	}
 }
 
@@ -130,7 +131,8 @@ fn join_keys(op: &LogicalOp) -> Vec<(String, String)> {
 		| other @ LogicalOp::Break(_)
 		| other @ LogicalOp::Continue(_)
 		| other @ LogicalOp::Info(_)
-		| other @ LogicalOp::Sleep(_) => panic!("no join under {other:?}"),
+		| other @ LogicalOp::Sleep(_)
+		| other @ LogicalOp::Window(_) => panic!("no join under {other:?}"),
 	}
 }
 
@@ -780,7 +782,8 @@ fn ordering(op: &LogicalOp) -> Vec<String> {
 		| other @ LogicalOp::Break(_)
 		| other @ LogicalOp::Continue(_)
 		| other @ LogicalOp::Info(_)
-		| other @ LogicalOp::Sleep(_) => panic!("no sort under {other:?}"),
+		| other @ LogicalOp::Sleep(_)
+		| other @ LogicalOp::Window(_) => panic!("no sort under {other:?}"),
 	}
 }
 

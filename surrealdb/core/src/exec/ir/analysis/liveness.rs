@@ -139,6 +139,9 @@ pub(crate) fn pipeline_demand(ir: &Ir, rows: ValueId, runs: &[(ValueId, &[OpId])
 						..
 					},
 				) => (true, false),
+				// A window reads every key and argument through its regions and delivers the row
+				// on, with its calls' fields appended.
+				OpKind::Phys(PhysOp::Window(_)) => (true, false),
 				// A sort reads its computed keys through its regions and its path keys off the
 				// row, and delivers the row on.
 				OpKind::Phys(PhysOp::Sort(attrs)) => {
@@ -258,6 +261,7 @@ fn role_of(kind: &OpKind) -> Role {
 			..
 		})
 		| OpKind::Logical(LogOp::Sort(_))
+		| OpKind::Logical(LogOp::Window(_))
 		| OpKind::Logical(LogOp::Split {
 			..
 		})

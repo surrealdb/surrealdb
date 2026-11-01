@@ -502,6 +502,26 @@ fn demand_of_rows(
 					None => return Demand::Whole,
 				}
 			}
+			// A window passes its input's rows on with a field per call appended: a demand for one
+			// of those fields is met by the window, not by its input.
+			OpKind::Logical(LogOp::Window(shape)) => {
+				let Some(result) = user.results.first() else {
+					return Demand::Whole;
+				};
+				let passed = match demand_of_rows(ir, facts, cx, *result, depth + 1) {
+					Demand::Fields(fields) => Demand::Fields(
+						fields
+							.into_iter()
+							.filter(|name| {
+								!shape.calls.iter().any(|call| call.output.as_str() == name)
+							})
+							.collect(),
+					),
+					Demand::Whole => Demand::Whole,
+				};
+				demand.join(passed);
+				demand.join(demand_of_regions(ir, facts, cx, &user.regions));
+			}
 			OpKind::Logical(LogOp::Project(attrs)) if attrs.layer => {
 				let Some(result) = user.results.first() else {
 					return Demand::Whole;

@@ -155,6 +155,7 @@ pub(crate) enum BreakerKind {
 	JoinBuild = 6,
 	JoinProbe = 7,
 	JoinOut = 8,
+	WindowBuffer = 9,
 }
 
 impl BreakerKind {
@@ -169,6 +170,7 @@ impl BreakerKind {
 			6 => Self::JoinBuild,
 			7 => Self::JoinProbe,
 			8 => Self::JoinOut,
+			9 => Self::WindowBuffer,
 			_ => return None,
 		})
 	}

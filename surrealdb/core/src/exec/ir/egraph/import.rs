@@ -264,6 +264,7 @@ fn logical_is_node(op: &LogOp) -> bool {
 		| LogTag::Aggregate
 		| LogTag::Distinct
 		| LogTag::Sort
+		| LogTag::Window
 		| LogTag::Limit
 		| LogTag::Fetch
 		| LogTag::Only => true,

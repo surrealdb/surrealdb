@@ -942,9 +942,10 @@ fn is_comparison_or_logical(op: &BinaryOperator) -> bool {
 }
 
 /// Whether the rows the loop `loop_op` reads are the result of an op that changes which rows exist
-/// (a `LIMIT` or `START`, a `DISTINCT`, a grouping, a split), anywhere along the chain of the
-/// loop's source. A filter placed in such a loop's body is judged before that op's paging, which
-/// counts the rows it passes after the body, so the filter must stay above the loop.
+/// or whose values depend on the rows beside them (a `LIMIT` or `START`, a `DISTINCT`, a grouping,
+/// a window, a split), anywhere along the chain of the loop's source. A filter placed in such a
+/// loop's body is judged before that op's paging, which counts the rows it passes after the body,
+/// so the filter must stay above the loop.
 ///
 /// The chain runs through the ops that keep the row set of their first operand, the rows they
 /// take, and ends at any other op: a read of storage, a subquery or loop whose rows its own body
@@ -979,6 +980,7 @@ fn reads_past_row_set_change(cx: &mut LoCx<'_>, loop_op: OpId, beneath: ValueId)
 				}
 				| LogOp::Distinct
 				| LogOp::Aggregate(_)
+				| LogOp::Window(_)
 				| LogOp::Split {
 					..
 				},

@@ -4607,6 +4607,8 @@ pub(super) enum SplitKind {
 	Targets(Vec<crate::exec::operators::SplitTarget>),
 	/// A binding-table step, run by the host ([`super::binding`]).
 	Step(super::binding::ProgramStep),
+	/// A window, run by the host ([`super::window_step`]).
+	Window(super::window_step::WindowStep),
 }
 
 /// A join: how its build rows are matched to a probe row, and the pipeline

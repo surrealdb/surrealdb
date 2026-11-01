@@ -106,9 +106,9 @@ use crate::exec::ir::logical::ops::{
 	RecursePathForm, RemoveAttrs, RepairField, RepairKind, RepairTable, ShowAttrs, SortKeyShape,
 	SortShape, SourceRefShape, StepAttrs, Stored, SubscriberAdmission, SubscriberAttrs,
 	SubscriberLayer, SubscriberProjection, TableDefs, TxnControl, TxnRegionEnd, TxnRegionMode,
-	TxnStart, UseTarget, WriteAttrs, WriteBody, WriteBranching, WriteDerived, WriteGates,
-	WriteImage, WriteIndexes, WriteMark, WriteMaterialized, WriteRepairs, WriteRetry, WriteSchema,
-	WriteStageKind, WriteStored, WriteViews,
+	TxnStart, UseTarget, WindowCallShape, WindowShape, WriteAttrs, WriteBody, WriteBranching,
+	WriteDerived, WriteGates, WriteImage, WriteIndexes, WriteMark, WriteMaterialized, WriteRepairs,
+	WriteRetry, WriteSchema, WriteStageKind, WriteStored, WriteViews,
 };
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::object_extract::PathSegment;
@@ -125,7 +125,10 @@ use crate::exec::vm::payload::{
 	CoarseCutoff, CountCap, CountSelect, JoinBuild, JoinMatch, Spill, TopKKey, ValuesRead,
 };
 use crate::exec::vm::plain::ValueData;
-use crate::expr::logical::{Emission, GuardKind, OutputPath, OutputPathPart, Schema};
+use crate::expr::logical::{
+	Emission, GuardKind, OutputPath, OutputPathPart, Schema, WindowFrame, WindowFrameBound,
+	WindowFrameUnits, WindowFunction,
+};
 use crate::expr::lookup::LookupKind;
 use crate::expr::match_plan::{
 	BindingDef, BindingKind, DetachMode, EdgeQuantifier, EdgeStep, ExpandDirection, NodeStep,
@@ -237,6 +240,7 @@ fn put_op(op: &PhysOp, w: &mut Fields<'_>) {
 		} => w.field("targets", targets),
 		PhysOp::Filter | PhysOp::Fetch => {}
 		PhysOp::Sort(attrs) => attrs.put_fields(w),
+		PhysOp::Window(attrs) => attrs.put_fields(w),
 		PhysOp::Aggregate(attrs) => attrs.put_fields(w),
 		PhysOp::Limit {
 			limit,
@@ -436,6 +440,7 @@ fn get_op(tag: PhysTag, c: &mut Cursor<'_>) -> Result<PhysOp, ParseError> {
 			targets
 		}),
 		PhysTag::Sort => record!(PhysSortAttrs, Sort),
+		PhysTag::Window => record!(WindowShape, Window),
 		PhysTag::Aggregate => record!(AggregateAttrs, Aggregate),
 		PhysTag::Limit => braced(c, |c, first| {
 			let limit = c.field("limit", first)?;
@@ -2880,6 +2885,49 @@ text_struct!(AggregateAttrs {
 	first_value: Vec<usize>,
 	spill: Spill
 });
+text_struct!(WindowShape {
+	partitions: u16,
+	order: Box<[SortKeyShape]>,
+	calls: Box<[WindowCallShape]>
+});
+text_struct!(WindowCallShape {
+	output: Strand,
+	function: WindowFunction,
+	args: u16,
+	frame: WindowFrame
+});
+text_struct!(WindowFrame {
+	units: WindowFrameUnits,
+	start: WindowFrameBound,
+	end: WindowFrameBound
+});
+text_unit_enum!(WindowFrameUnits {
+	Rows,
+	Range
+});
+text_enum!(WindowFrameBound {
+	unit [UnboundedPreceding, CurrentRow, UnboundedFollowing]
+	tuple [Preceding(offset: u64), Following(offset: u64)]
+	named []
+});
+text_unit_enum!(WindowFunction {
+	RowNumber,
+	Rank,
+	DenseRank,
+	PercentRank,
+	CumeDist,
+	Ntile,
+	Lag,
+	Lead,
+	FirstValue,
+	LastValue,
+	NthValue,
+	Sum,
+	Avg,
+	Count,
+	Min,
+	Max
+});
 text_struct!(ProjectedFieldShape { output: FieldPath, aliased: bool, sort_key: Option<u16> });
 text_struct!(PhysWriteAttrs {
 	write: WriteAttrs,
@@ -3857,6 +3905,25 @@ mod tests {
 				first_value: vec![0, 2],
 				spill: Spill::Spillable,
 			})),
+			PhysTag::Window => PhysOp::Window(Box::new(WindowShape {
+				partitions: 1,
+				order: Box::new([SortKeyShape {
+					collate: false,
+					numeric: false,
+					ascending: true,
+					path: false,
+				}]),
+				calls: Box::new([WindowCallShape {
+					output: strand("w"),
+					function: WindowFunction::Lag,
+					args: 1,
+					frame: WindowFrame {
+						units: WindowFrameUnits::Rows,
+						start: WindowFrameBound::Preceding(2),
+						end: WindowFrameBound::Following(1),
+					},
+				}]),
+			})),
 			PhysTag::Limit => PhysOp::Limit {
 				limit: Some(0),
 				start: Some(1),
@@ -4153,6 +4220,7 @@ mod tests {
 			| PhysTag::Fetch
 			| PhysTag::Split
 			| PhysTag::Sort
+			| PhysTag::Window
 			| PhysTag::Aggregate
 			| PhysTag::Limit
 			| PhysTag::Project

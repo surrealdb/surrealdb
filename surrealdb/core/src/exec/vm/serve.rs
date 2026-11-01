@@ -1285,6 +1285,7 @@ pub(crate) fn free_literals(
 		| LogicalOp::Aggregate(_)
 		| LogicalOp::Distinct(_)
 		| LogicalOp::Sort(_)
+		| LogicalOp::Window(_)
 		| LogicalOp::Limit(_)
 		| LogicalOp::Project(_)
 		| LogicalOp::Fetch(_)

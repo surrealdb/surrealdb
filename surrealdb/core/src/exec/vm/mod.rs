@@ -212,6 +212,8 @@ mod tests_write_prefilter;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_write_scan;
 pub(crate) mod units;
+mod window;
+mod window_step;
 mod write;
 
 use std::sync::Arc;

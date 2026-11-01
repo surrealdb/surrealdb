@@ -29,7 +29,9 @@ use crate::exec::ir::iface::{ChooseSpec, ClauseRole, FieldRole, RegionKind, Stat
 use crate::exec::operators::SplitTarget;
 use crate::exec::operators::write::stage::{LightweightReason, RecordImage, TableTypeFor};
 pub(crate) use crate::expr::logical::Emission;
-use crate::expr::logical::{GuardKind, JoinKind, OutputPath, RelationAlias};
+use crate::expr::logical::{
+	GuardKind, JoinKind, OutputPath, RelationAlias, WindowFrame, WindowFunction,
+};
 use crate::expr::lookup::LookupKind;
 use crate::expr::match_plan::{BindingId, DetachMode};
 use crate::expr::part::Recurse;
@@ -71,6 +73,7 @@ define_op_tags! {
 		Aggregate => "logical.aggregate",
 		Distinct => "logical.distinct",
 		Sort => "logical.sort",
+		Window => "logical.window",
 		Limit => "logical.limit",
 		Project => "logical.project",
 		Fetch => "logical.fetch",
@@ -235,6 +238,10 @@ pub(crate) enum LogOp {
 	Distinct,
 	/// `ORDER BY`. Operand: the input. One `Clause(OrderKey)` region per key.
 	Sort(Box<SortAttrs>),
+	/// Window functions over the input, which reaches it sorted on its partition and order keys.
+	/// Operand: the input. One `Clause(OrderKey)` region per partition key, then one per order
+	/// key, then one `Clause(Projection)` region per argument of each call, in call order.
+	Window(Box<WindowShape>),
 	/// `LIMIT` and `START`, evaluated once, `LIMIT` first. Operand: the input, then the slots
 	/// named.
 	Limit {
@@ -388,6 +395,7 @@ impl LogOp {
 			LogOp::Aggregate(_) => LogTag::Aggregate,
 			LogOp::Distinct => LogTag::Distinct,
 			LogOp::Sort(_) => LogTag::Sort,
+			LogOp::Window(_) => LogTag::Window,
 			LogOp::Limit {
 				..
 			} => LogTag::Limit,
@@ -1852,6 +1860,44 @@ pub(crate) struct SortAttrs {
 	pub(crate) ordering: SortShape,
 	/// Whether the sort may spill to temporary files.
 	pub(crate) tempfiles: bool,
+}
+
+/// The attributes of a window, which the logical and the physical op share.
+///
+/// The op reads its input in partition-then-order sequence: the rows of one partition are
+/// adjacent, and within it they are ordered by the order keys. It appends one field per call to
+/// each row and passes every row on, in the order it read them.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct WindowShape {
+	/// How many of the leading `Clause(OrderKey)` regions are partition keys.
+	pub(crate) partitions: u16,
+	/// The flags of each order key, one per order-key region, in order.
+	pub(crate) order: Box<[SortKeyShape]>,
+	/// The calls, in the order their fields are appended. At least one.
+	pub(crate) calls: Box<[WindowCallShape]>,
+}
+
+impl WindowShape {
+	/// The number of key regions: the partition keys, then the order keys.
+	pub(crate) fn key_regions(&self) -> usize {
+		usize::from(self.partitions) + self.order.len()
+	}
+
+	/// The number of argument regions, over every call.
+	pub(crate) fn arg_regions(&self) -> usize {
+		self.calls.iter().map(|call| usize::from(call.args)).sum()
+	}
+}
+
+/// One call of a [`WindowShape`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct WindowCallShape {
+	/// The field the call's value lands under on each row.
+	pub(crate) output: Strand,
+	pub(crate) function: WindowFunction,
+	/// How many argument regions the call owns.
+	pub(crate) args: u16,
+	pub(crate) frame: WindowFrame,
 }
 
 /// Whether `LET` binds a local value or a session parameter.

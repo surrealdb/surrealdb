@@ -499,7 +499,8 @@ impl SpilledJoin {
 			| BreakerKind::DistinctDeferred
 			| BreakerKind::DistinctKept
 			| BreakerKind::JoinBuild
-			| BreakerKind::JoinProbe => self.width + 1,
+			| BreakerKind::JoinProbe
+			| BreakerKind::WindowBuffer => self.width + 1,
 		};
 		RunSpec::new(kind, self.index, arity, RunOrder::Plain)
 	}

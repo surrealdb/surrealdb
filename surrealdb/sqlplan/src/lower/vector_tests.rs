@@ -379,7 +379,7 @@ fn a_select_that_is_not_a_search_of_the_table_is_not_lowered_to_one() {
 		"SELECT id FROM items ORDER BY e <-> (f + 1) LIMIT 5",
 		"SELECT id FROM items ORDER BY inner_product(e, $1) LIMIT 5",
 		"SELECT id FROM items ORDER BY e <-> $1 LIMIT 0",
-		"SELECT DISTINCT id FROM items ORDER BY e <-> $1 LIMIT 5",
+		"SELECT DISTINCT id, e <-> $1 FROM items ORDER BY e <-> $1 LIMIT 5",
 		"SELECT count(*) FROM items ORDER BY e <-> $1 LIMIT 5",
 		"SELECT id FROM items GROUP BY id, e ORDER BY e <-> $1 LIMIT 5",
 		"SELECT a.id FROM items a JOIN items b ON a.id = b.id ORDER BY a.e <-> $1 LIMIT 5",

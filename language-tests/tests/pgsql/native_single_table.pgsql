@@ -41,22 +41,22 @@ value = "[{ who: 'Hana' }, { who: 'Gus' }, { who: 'Finn' }, { who: 'Eve' }, { wh
 value = "[{ name: 'Cara', twice: 241f }, { name: 'Hana', twice: 220 }]"
 
 [[test.results]]
-value = "[{ city: 'Berlin' }, { city: 'Berlin' }, { city: 'London' }, { city: 'London' }, { city: 'London' }, { city: 'Paris' }, { city: 'Paris' }, { city: 'Rome' }]"
+value = "[{ city: 'Berlin' }, { city: 'London' }, { city: 'Paris' }, { city: 'Rome' }]"
 
 [[test.results]]
-value = "[{ dept: 1 }, { dept: 1 }, { dept: 2 }, { dept: 2 }, { dept: 3 }, { dept: 9 }, { dept: NONE }, { dept: NULL }]"
+value = "[{ dept: 1 }, { dept: 2 }, { dept: 3 }, { dept: 9 }, { dept: NONE }, { dept: NULL }]"
 
 [[test.results]]
 value = "[{ city: 'London', dept: 1 }, { city: 'Paris', dept: 1 }, { city: 'Berlin', dept: 2 }, { city: 'London', dept: 2 }, { city: 'Paris', dept: 3 }, { city: 'Rome', dept: 9 }, { city: 'Berlin', dept: NONE }, { city: 'London', dept: NULL }]"
 
 [[test.results]]
-value = "[{ city: 'Berlin' }, { city: 'Berlin' }]"
+value = "[{ city: 'Berlin' }, { city: 'London' }]"
 
 [[test.results]]
-value = "[{ city: 'Berlin' }, { city: 'London' }, { city: 'London' }, { city: 'London' }, { city: 'Paris' }, { city: 'Paris' }, { city: 'Rome' }]"
+value = "[{ city: 'London' }, { city: 'Paris' }, { city: 'Rome' }]"
 
 [[test.results]]
-value = "[{ city: 'London' }, { city: 'Paris' }, { city: 'London' }, { city: 'Berlin' }, { city: 'Paris' }, { city: 'London' }, { city: 'Berlin' }, { city: 'Rome' }]"
+value = "[{ city: 'London' }, { city: 'Paris' }, { city: 'Berlin' }, { city: 'Rome' }]"
 
 [[test.results]]
 value = "[{ n: 8 }]"

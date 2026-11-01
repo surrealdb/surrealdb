@@ -176,6 +176,7 @@ pub(crate) fn subquery_reads_enclosing_row(op: &LogicalOp) -> bool {
 		LogicalOp::Filter(_)
 		| LogicalOp::PermissionFilter(_)
 		| LogicalOp::Project(_)
+		| LogicalOp::Window(_)
 		| LogicalOp::Sort(_) => op.scalars().into_iter().any(references_parent_at_row_level),
 		LogicalOp::Values(_)
 		| LogicalOp::Match(_)

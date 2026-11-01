@@ -1062,7 +1062,10 @@ impl<'a> Planner<'a> {
 		matches!(
 			self.ir.op(op).map(|data| data.kind.tag()),
 			Some(OpTag::Logical(
-				LogTag::Sort | LogTag::Limit | LogTag::Distinct | LogTag::Aggregate
+				LogTag::Sort
+					| LogTag::Window
+					| LogTag::Limit | LogTag::Distinct
+					| LogTag::Aggregate
 			))
 		)
 	}

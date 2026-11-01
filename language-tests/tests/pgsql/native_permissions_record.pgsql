@@ -60,7 +60,7 @@ value = "[{ n: 'Alice' }, { n: 'Bob' }, { n: 'Cara' }, { n: 'Eng' }, { n: 'Eve' 
 value = "[{ n: 'Alice' }, { n: 'Bob' }, { n: 'Cara' }, { n: 'Eve' }]"
 
 [[test.results]]
-value = "[{ dept: 1 }, { dept: 1 }, { dept: 2 }, { dept: 3 }]"
+value = "[{ dept: 1 }, { dept: 2 }, { dept: 3 }]"
 
 [[test.results]]
 value = "[{ name: 'Alice' }, { name: 'Cara' }, { name: 'Eve' }]"

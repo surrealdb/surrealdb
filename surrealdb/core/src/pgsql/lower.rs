@@ -31,9 +31,13 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 			| surrealdb_sqlplan::PlanError::MissingFromClauseEntry(_)
 			| surrealdb_sqlplan::PlanError::InvalidGroupByPosition(_)
 			| surrealdb_sqlplan::PlanError::InvalidOrderByPosition(_)
+			| surrealdb_sqlplan::PlanError::DistinctOrderByNotSelected
 			| surrealdb_sqlplan::PlanError::ColumnNotInGroupBy(_)
 			| surrealdb_sqlplan::PlanError::AggregateNotAllowed(_)
 			| surrealdb_sqlplan::PlanError::WindowNotAllowed(_)
+			| surrealdb_sqlplan::PlanError::WindowPartitionOverride(_)
+			| surrealdb_sqlplan::PlanError::WindowOrderOverride(_)
+			| surrealdb_sqlplan::PlanError::WindowFrameCopy(_)
 			| surrealdb_sqlplan::PlanError::UndefinedFunction(_)
 			| surrealdb_sqlplan::PlanError::UndefinedOperator(_)
 			| surrealdb_sqlplan::PlanError::FunctionArgumentCountMismatch {

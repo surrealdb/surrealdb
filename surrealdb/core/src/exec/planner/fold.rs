@@ -121,6 +121,7 @@ pub(crate) fn permission_subject(input: &LogicalOp) -> Option<(TableName, Arc<Sc
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
 			| LogicalOp::Sort(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Project(_)
 			| LogicalOp::Fetch(_)

@@ -141,6 +141,7 @@ fn own_rules(ir: &Ir, op: OpId, data: &OpData, kind: &PhysOp) -> Result<(), Veri
 			..
 		}
 		| PhysOp::Sort(_)
+		| PhysOp::Window(_)
 		| PhysOp::Aggregate(_)
 		| PhysOp::Limit {
 			..
@@ -699,6 +700,7 @@ impl AccessKey {
 				..
 			}
 			| PhysOp::Sort(_)
+			| PhysOp::Window(_)
 			| PhysOp::Aggregate(_)
 			| PhysOp::Limit {
 				..

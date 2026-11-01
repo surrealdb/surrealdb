@@ -913,6 +913,24 @@ impl Reservation {
 		}
 	}
 
+	/// Hand what the account holds and has reserved to a new account on the
+	/// same memory, which gives it back when it is cleared or dropped. This
+	/// account is left holding nothing, still drawing on the same memory, so a
+	/// breaker that hands its rows on keeps them charged until the last one
+	/// has left while its own account starts again empty.
+	pub(crate) fn detach(&mut self) -> Reservation {
+		Reservation {
+			memory: self.memory.clone(),
+			reserved: std::mem::take(&mut self.reserved),
+			used: std::mem::take(&mut self.used),
+			refused: std::mem::take(&mut self.refused),
+			exceeded: std::mem::take(&mut self.exceeded),
+			beyond: std::mem::take(&mut self.beyond),
+			pinned: self.pinned,
+			counted: std::mem::take(&mut self.counted),
+		}
+	}
+
 	/// Give back everything reserved: the breaker has spilled or finished.
 	pub(crate) fn clear(&mut self) {
 		if let Some(memory) = &self.memory

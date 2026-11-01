@@ -277,6 +277,7 @@ impl PhysOp {
 			| PhysOp::Count(..)
 			| PhysOp::Layer(..)
 			| PhysOp::Sort(..)
+			| PhysOp::Window(..)
 			| PhysOp::Aggregate(..)
 			| PhysOp::Project(..)
 			| PhysOp::Request {

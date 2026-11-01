@@ -331,8 +331,8 @@ fn in_pipeline(ir: &Ir, op: OpId) -> bool {
 /// `MATCH` under a name.
 ///
 /// Every other op is a breaker: it is a source, or it consumes its whole input (a sort, an
-/// aggregation, a split, a join side, a write, any other step of a binding table), or it is not
-/// part of a row pipeline.
+/// aggregation, a window, a split, a join side, a write, any other step of a binding table), or it
+/// is not part of a row pipeline.
 pub(crate) fn streams(op: &PhysOp) -> bool {
 	matches!(
 		op,

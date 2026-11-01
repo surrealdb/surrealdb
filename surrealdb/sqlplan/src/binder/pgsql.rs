@@ -1144,6 +1144,14 @@ pub fn bind_expr(
 			if over.is_some() && func_def.kind == SqlFunctionKind::Scalar {
 				return Err(PlanError::WindowNotAllowed(format!("scalar function '{fn_name}'")));
 			}
+			// A FILTER applies to the rows an aggregate folds; no other function folds rows.
+			if filter.is_some() && func_def.kind != SqlFunctionKind::Aggregate {
+				return Err(PlanError::UnsupportedExpression(if over.is_some() {
+					format!("FILTER on the non-aggregate window function {fn_name}")
+				} else {
+					format!("FILTER on {fn_name}, which is not an aggregate function")
+				}));
+			}
 
 			let bound_args = if let Some(cond) = filter {
 				let bound_cond = bind_expr(cond, scope, catalog, policy)?;
@@ -1225,6 +1233,11 @@ pub fn bind_expr(
 					spec: bound_spec,
 				})
 			} else {
+				if crate::functions::FunctionRegistry::is_bound_aggregate(&fn_name)
+					&& bound_args.iter().any(|a| a.contains_window())
+				{
+					return Err(PlanError::WindowNotAllowed("aggregate function calls".into()));
+				}
 				Ok(BoundExpr::FunctionCall {
 					name: fn_name,
 					args: bound_args,
@@ -1549,7 +1562,11 @@ pub fn bind_expr(
 								.into(),
 						));
 					}
+					// A `DISTINCT` or an `ORDER BY` of the subquery changes no `min` or `max` of
+					// its column, so the aggregate is taken over the rows it reads.
 					let mut transformed_subquery = bound_subquery;
+					transformed_subquery.distinct = None;
+					transformed_subquery.order_by.clear();
 					if transformed_subquery.targets.len() == 1 {
 						let original_expr = transformed_subquery.targets[0].expr.clone();
 						transformed_subquery.targets[0].expr = BoundExpr::FunctionCall {
@@ -1683,6 +1700,13 @@ fn bind_window_spec(
 		let base = scope
 			.resolve_window(name, policy)
 			.ok_or_else(|| PlanError::Custom(format!("window \"{name}\" does not exist")))?;
+		super::check_inherited_window(
+			name,
+			base,
+			!spec.partition_by.is_empty(),
+			!spec.order_by.is_empty(),
+			spec.frame.is_some(),
+		)?;
 		(base.partition_by.clone(), base.order_by.clone(), base.frame.clone())
 	} else {
 		(Vec::new(), Vec::new(), None)

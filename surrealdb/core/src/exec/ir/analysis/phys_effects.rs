@@ -127,6 +127,7 @@ pub(crate) fn of(op: &PhysOp, _cx: &EffectCx<'_>) -> OpEffects {
 			..
 		}
 		| PhysOp::Sort(..)
+		| PhysOp::Window(..)
 		| PhysOp::Aggregate(..)
 		| PhysOp::Limit {
 			..
@@ -317,6 +318,7 @@ fn is_container_or_control(kind: &PhysOp) -> bool {
 			..
 		}
 		| PhysOp::Sort(..)
+		| PhysOp::Window(..)
 		| PhysOp::Aggregate(..)
 		| PhysOp::Limit {
 			..

@@ -75,7 +75,8 @@ fn sort_keys(op: &LogicalOp) -> Vec<String> {
 			| LogicalOp::Break(_)
 			| LogicalOp::Continue(_)
 			| LogicalOp::Info(_)
-			| LogicalOp::Sleep(_) => None,
+			| LogicalOp::Sleep(_)
+			| LogicalOp::Window(_) => None,
 		})
 		.expect("a sort")
 }
@@ -124,7 +125,8 @@ fn aggregation(op: &LogicalOp) -> (Vec<String>, Vec<String>) {
 			| LogicalOp::Break(_)
 			| LogicalOp::Continue(_)
 			| LogicalOp::Info(_)
-			| LogicalOp::Sleep(_) => None,
+			| LogicalOp::Sleep(_)
+			| LogicalOp::Window(_) => None,
 		})
 		.expect("an aggregation")
 }
@@ -330,9 +332,12 @@ fn a_link_that_stands_alone_is_the_link_as_stored() {
 	assert_eq!(projection(&op), ["dept AS dept"]);
 	let op = pg_select("SELECT dept AS d, name FROM emp");
 	assert_eq!(projection(&op), ["dept AS d", "name AS name"]);
+	// The DISTINCT compares the projected rows.
 	let op = pg_select("SELECT DISTINCT dept FROM emp");
-	assert!(nodes(&op).iter().any(|node| matches!(node, LogicalOp::Distinct(_))));
-	assert_eq!(projection(&op), ["dept AS dept"]);
+	let LogicalOp::Distinct(distinct) = &op else {
+		panic!("expected Distinct, got {op:?}");
+	};
+	assert_eq!(projection(&distinct.input), ["dept AS dept"]);
 }
 
 #[test]

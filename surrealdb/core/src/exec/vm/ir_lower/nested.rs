@@ -831,6 +831,7 @@ fn supplies_rows(tag: PhysTag) -> bool {
 		| PhysTag::Fetch
 		| PhysTag::Split
 		| PhysTag::Sort
+		| PhysTag::Window
 		| PhysTag::Aggregate
 		| PhysTag::Limit
 		| PhysTag::Project

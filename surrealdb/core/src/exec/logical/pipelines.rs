@@ -692,6 +692,7 @@ impl<'a> Walker<'_, 'a> {
 			| LogicalOp::Split(_)
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Sort(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Project(_)
@@ -912,6 +913,21 @@ impl<'a> Walker<'_, 'a> {
 				let keys = op.scalars();
 				let raises = self.may_raise_any(&keys);
 				self.finish(open, SinkCombine::StableMerge, keys, raises);
+				Open::Spent(Some(Above::of(op)))
+			}
+			// The window's input is sorted on its partition and order keys before the
+			// window reads it, so its sink is the stable merge of that sort; with no keys
+			// there is no sort and the window reads the input whole.
+			LogicalOp::Window(window) => {
+				let open = self.stream(&window.input);
+				let keys = op.scalars();
+				let raises = self.may_raise_any(&keys);
+				let sink = if window.partition.is_empty() && window.order.is_empty() {
+					SinkCombine::NotSplittable
+				} else {
+					SinkCombine::StableMerge
+				};
+				self.finish(open, sink, keys, raises);
 				Open::Spent(Some(Above::of(op)))
 			}
 			LogicalOp::Distinct(distinct) => {

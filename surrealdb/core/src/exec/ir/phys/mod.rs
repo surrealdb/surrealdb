@@ -170,6 +170,7 @@ impl PhysOp {
 				..
 			}
 			| PhysOp::Sort(..)
+			| PhysOp::Window(..)
 			| PhysOp::Aggregate(..)
 			| PhysOp::Limit {
 				..
@@ -307,6 +308,7 @@ impl PhysOp {
 				..
 			}
 			| PhysOp::Sort(..)
+			| PhysOp::Window(..)
 			| PhysOp::Aggregate(..)
 			| PhysOp::Limit {
 				..
@@ -439,6 +441,7 @@ impl PhysOp {
 			| PhysOp::Layer(..)
 			| PhysOp::Filter
 			| PhysOp::Sort(..)
+			| PhysOp::Window(..)
 			| PhysOp::Aggregate(..)
 			| PhysOp::Limit {
 				..
@@ -614,6 +617,14 @@ impl PhysOp {
 					.count(),
 			)
 			.collect(),
+			PhysOp::Window(shape) => {
+				std::iter::repeat_n(RegionKind::Clause(ClauseRole::OrderKey), shape.key_regions())
+					.chain(std::iter::repeat_n(
+						RegionKind::Clause(ClauseRole::Projection),
+						shape.arg_regions(),
+					))
+					.collect()
+			}
 			PhysOp::Aggregate(attrs) => {
 				let mut kinds: RegionKinds = std::iter::repeat_n(
 					RegionKind::ErrorScope(ErrorScope::ShapeToNone),
@@ -902,6 +913,7 @@ impl PhysOp {
 				..
 			}
 			| PhysOp::Sort(..)
+			| PhysOp::Window(..)
 			| PhysOp::Aggregate(..)
 			| PhysOp::Project(..)
 			| PhysOp::Eval
@@ -1061,6 +1073,7 @@ impl PhysOp {
 			| PhysOp::Union
 			| PhysOp::Join(..)
 			| PhysOp::Sort(..)
+			| PhysOp::Window(..)
 			| PhysOp::KnnTopK(..)
 			| PhysOp::Aggregate(..)
 			| PhysOp::Split {

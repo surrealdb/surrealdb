@@ -232,7 +232,7 @@ async fn a_failed_statement_has_the_number_of_its_kind() {
 		("SELECT * FROM coded GROUP BY sum(age)", 1111, "HY000"),
 		// Arithmetic and constructs the engine does not run.
 		("SELECT 9223372036854775807 + 1", 1690, "22003"),
-		("SELECT row_number() OVER () FROM coded", 1235, "42000"),
+		("SELECT count(DISTINCT age) OVER () FROM coded", 1235, "42000"),
 	];
 	for (sql, code, state) in cases {
 		let answer = query(&mut stream, sql).await;

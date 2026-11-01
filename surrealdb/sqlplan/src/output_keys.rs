@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use crate::ir::{BoundExpr, BoundTarget};
 
 /// The name a projected target has when no other target shares it: its alias, else the column,
-/// function, user variable or system variable it reads, which is the name the engine gives the
-/// field of a select that is not keyed. `None` for any other expression, which has no name of its
-/// own.
+/// function, window function, user variable or system variable it reads, which is the name the
+/// engine gives the field of a select that is not keyed. `None` for any other expression, which
+/// has no name of its own.
 fn natural_name(target: &BoundTarget) -> Option<String> {
 	if let Some(alias) = &target.alias {
 		return Some(alias.clone());
@@ -15,6 +15,10 @@ fn natural_name(target: &BoundTarget) -> Option<String> {
 	match &target.expr {
 		BoundExpr::Column(col) if col.column != "*" => Some(col.column.clone()),
 		BoundExpr::FunctionCall {
+			name,
+			..
+		}
+		| BoundExpr::WindowFunction {
 			name,
 			..
 		} => Some(name.clone()),
@@ -61,10 +65,7 @@ fn natural_name(target: &BoundTarget) -> Option<String> {
 		| BoundExpr::InSubquery {
 			..
 		}
-		| BoundExpr::ArraySubquery(_)
-		| BoundExpr::WindowFunction {
-			..
-		} => None,
+		| BoundExpr::ArraySubquery(_) => None,
 	}
 }
 

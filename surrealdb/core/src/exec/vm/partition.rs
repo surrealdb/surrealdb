@@ -170,7 +170,8 @@ pub(crate) fn route_width(spec: &RunSpec) -> FlowResult<usize> {
 		| BreakerKind::DistinctKept
 		| BreakerKind::JoinBuild
 		| BreakerKind::JoinProbe
-		| BreakerKind::JoinOut => Err(internal("a breaker of this kind is not partitioned")),
+		| BreakerKind::JoinOut
+		| BreakerKind::WindowBuffer => Err(internal("a breaker of this kind is not partitioned")),
 	}
 }
 

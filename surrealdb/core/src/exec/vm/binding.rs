@@ -250,6 +250,8 @@ pub(super) enum StepRun {
 		rows: Vec<Value>,
 		eval: Option<PooledState>,
 	},
+	/// A window's run ([`super::window_step`]), held under the split that reaches it.
+	Window(Box<super::window_step::WindowState>),
 }
 
 impl StepRun {

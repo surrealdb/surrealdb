@@ -13,6 +13,7 @@ mod sql_like;
 mod vector_ddl;
 mod vector_expr;
 mod vector_knn;
+mod window;
 pub mod write;
 mod write_function;
 mod write_null;
@@ -65,6 +66,8 @@ mod replace_reset_tests;
 mod scalar_subquery_tests;
 #[cfg(test)]
 mod vector_tests;
+#[cfg(test)]
+mod window_tests;
 #[cfg(test)]
 mod write_coercion_tests;
 #[cfg(test)]

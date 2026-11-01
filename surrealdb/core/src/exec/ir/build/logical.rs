@@ -98,8 +98,9 @@ use crate::exec::ir::logical::ops::{
 	FieldShape, FieldsShape, ImageLayers, ImageView, LetAttrs, LetBinding, LinkedStages, LogOp,
 	LookupAttrs, LookupSubjectShape, LoopKind, LoopSink, ProjectAttrs, RecurseAttrs,
 	RecurseInstructionShape, RecursePathForm, SortAttrs, SortKeyShape, SortShape, SourceAttrs,
-	SourceOrder, SourceRefShape, StepAttrs, Stored, TxnControl, TxnRegionMode, WriteAttrs,
-	WriteDerived, WriteGates, WriteImage, WriteStageKind, WriteStages, WriteStored,
+	SourceOrder, SourceRefShape, StepAttrs, Stored, TxnControl, TxnRegionMode, WindowCallShape,
+	WindowShape, WriteAttrs, WriteDerived, WriteGates, WriteImage, WriteStageKind, WriteStages,
+	WriteStored,
 };
 use crate::exec::ir::logical::scope::return_target;
 use crate::exec::ir::logical::seam::{
@@ -132,10 +133,10 @@ use crate::expr::logical::{
 	LogicalClosure, LogicalData, LogicalEval, LogicalExpr, LogicalFetch, LogicalField,
 	LogicalFields, LogicalFilter, LogicalForeach, LogicalIfOp, LogicalInsertRows, LogicalJoin,
 	LogicalLet, LogicalLimit, LogicalLiteral, LogicalLookup, LogicalLookupSubject, LogicalOp,
-	LogicalOrdering, LogicalPermissionFilter, LogicalProject, LogicalRecordIdKey,
+	LogicalOrder, LogicalOrdering, LogicalPermissionFilter, LogicalProject, LogicalRecordIdKey,
 	LogicalRecordIdKeyRange, LogicalRecurse, LogicalRecurseInstruction, LogicalRecursePath,
 	LogicalReturn, LogicalSequence, LogicalSleep, LogicalSort, LogicalSource, LogicalSplit,
-	LogicalSubquery, LogicalThrow, LogicalValues, LogicalWrite, LogicalWriteSource,
+	LogicalSubquery, LogicalThrow, LogicalValues, LogicalWindow, LogicalWrite, LogicalWriteSource,
 	LogicalWriteStatement, OutputPath, OutputPathPart, RequestStatementKind, Schema, SourceRef,
 	lower, lower_expr, lower_fields, lower_request,
 };
@@ -646,6 +647,7 @@ pub(crate) fn bind_value_statement(cx: &mut BindCx<'_>, op: &LogicalOp) -> Resul
 		| LogicalOp::Split(_)
 		| LogicalOp::Aggregate(_)
 		| LogicalOp::Distinct(_)
+		| LogicalOp::Window(_)
 		| LogicalOp::Sort(_)
 		| LogicalOp::Limit(_)
 		| LogicalOp::Project(_)
@@ -853,6 +855,7 @@ fn bind_op(cx: &mut BindCx<'_>, op: &LogicalOp, pos: Pos) -> Result<Flow, IrErro
 		| LogicalOp::Split(_)
 		| LogicalOp::Aggregate(_)
 		| LogicalOp::Distinct(_)
+		| LogicalOp::Window(_)
 		| LogicalOp::Sort(_)
 		| LogicalOp::Limit(_)
 		| LogicalOp::Project(_)
@@ -888,6 +891,7 @@ fn runs_as_group(op: &LogicalOp) -> bool {
 		| LogicalOp::Split(_)
 		| LogicalOp::Aggregate(_)
 		| LogicalOp::Distinct(_)
+		| LogicalOp::Window(_)
 		| LogicalOp::Sort(_)
 		| LogicalOp::Limit(_)
 		| LogicalOp::Project(_)
@@ -1125,6 +1129,7 @@ fn starts_a_read(op: &LogicalOp) -> bool {
 			| LogicalOp::Split(_)
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Sort(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Project(_)
@@ -1583,6 +1588,7 @@ fn is_pipeline_node(op: &LogicalOp) -> bool {
 		|| match op {
 			LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Sort(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Timeout(_)
@@ -1634,6 +1640,7 @@ fn per_row_input(op: &LogicalOp) -> Option<&LogicalOp> {
 		| LogicalOp::Join(_)
 		| LogicalOp::Aggregate(_)
 		| LogicalOp::Distinct(_)
+		| LogicalOp::Window(_)
 		| LogicalOp::Sort(_)
 		| LogicalOp::Limit(_)
 		| LogicalOp::Timeout(_)
@@ -1684,6 +1691,7 @@ fn bind_relational(cx: &mut BindCx<'_>, op: &LogicalOp) -> Result<Flow, IrError>
 		| LogicalOp::Fetch(_) => bind_row_run(cx, op),
 		LogicalOp::Aggregate(aggregate) => bind_aggregate(cx, aggregate),
 		LogicalOp::Distinct(distinct) => bind_rows_op(cx, &distinct.input, LogOp::Distinct),
+		LogicalOp::Window(window) => bind_window(cx, window),
 		LogicalOp::Sort(sort) => bind_sort(cx, sort),
 		LogicalOp::Limit(limit) => bind_limit(cx, limit),
 		LogicalOp::Timeout(timeout) => {
@@ -1906,6 +1914,7 @@ fn value_split_over_source(op: &LogicalOp) -> Option<LogicalOp> {
 			| LogicalOp::PermissionFilter(_)
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Timeout(_)
 			| LogicalOp::VersionScope(_)
 			| LogicalOp::Only(_)
@@ -1978,6 +1987,7 @@ fn value_split_over_source(op: &LogicalOp) -> Option<LogicalOp> {
 			| LogicalOp::PermissionFilter(_)
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Sort(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Fetch(_)
@@ -2010,6 +2020,7 @@ fn value_split_over_source(op: &LogicalOp) -> Option<LogicalOp> {
 		| LogicalOp::PermissionFilter(_)
 		| LogicalOp::Aggregate(_)
 		| LogicalOp::Distinct(_)
+		| LogicalOp::Window(_)
 		| LogicalOp::Sort(_)
 		| LogicalOp::Limit(_)
 		| LogicalOp::Timeout(_)
@@ -2185,6 +2196,7 @@ fn version_over_statement_refusal(input: &LogicalOp) -> Option<Refusal> {
 			| LogicalOp::Join(_)
 			| LogicalOp::PermissionFilter(_)
 			| LogicalOp::Distinct(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::VersionScope(_)
 			| LogicalOp::Only(_)
 			| LogicalOp::Explain(_)
@@ -2317,6 +2329,7 @@ fn bind_per_row(cx: &mut BindCx<'_>, node: &LogicalOp, row: ValueId) -> Result<V
 		| LogicalOp::Join(_)
 		| LogicalOp::Aggregate(_)
 		| LogicalOp::Distinct(_)
+		| LogicalOp::Window(_)
 		| LogicalOp::Sort(_)
 		| LogicalOp::Limit(_)
 		| LogicalOp::Timeout(_)
@@ -3235,6 +3248,85 @@ fn bind_sort(cx: &mut BindCx<'_>, sort: &LogicalSort) -> Result<Flow, IrError> {
 		return Ok(Flow::Diverged);
 	};
 	sort_over(cx, rows, &sort.ordering, sort.tempfiles, order_fields.as_ref()).map(Flow::Value)
+}
+
+/// A window over the rows of its input: a sort of the rows on the partition keys, ascending, then
+/// on the order keys, then the window over the sorted rows, with one region per partition key, one
+/// per order key, then one per argument of each call, in call order.
+///
+/// The sort delivers the partition-then-order sequence the window reads; where neither keys are
+/// written the rows are one partition of peers, read as they arrive, and no sort is emitted. A
+/// partition key's direction does not change any value of the window, so it sorts ascending, and
+/// it sorts on the value alone so that rows equal as values share a partition. Neither the sort
+/// nor the window resolves an `ORDER BY` alias of the projection: their keys read the input rows.
+fn bind_window(cx: &mut BindCx<'_>, window: &LogicalWindow) -> Result<Flow, IrError> {
+	let Some(rows) = bind_rows(cx, &window.input)? else {
+		return Ok(Flow::Diverged);
+	};
+	let rows = if window.partition.is_empty() && window.order.is_empty() {
+		rows
+	} else {
+		let keys = window
+			.partition
+			.iter()
+			.map(|key| LogicalOrder {
+				value: key.clone(),
+				collate: false,
+				numeric: false,
+				direction: true,
+			})
+			.chain(window.order.iter().cloned())
+			.collect();
+		sort_over(cx, rows, &LogicalOrdering::Order(keys), false, None)?
+	};
+	let shape = Box::new(window_shape(window)?);
+	let op = cx.emit(OpKind::Logical(LogOp::Window(shape)), &[rows], &[TypeKnowledge::Unknown])?;
+	for key in &window.partition {
+		row_clause(cx, op, ORDER_KEY, key)?;
+	}
+	for key in &window.order {
+		row_clause(cx, op, ORDER_KEY, &key.value)?;
+	}
+	for call in &window.calls {
+		for arg in &call.args {
+			row_clause(cx, op, RegionKind::Clause(ClauseRole::Projection), arg)?;
+		}
+	}
+	first_result(cx, op).map(Flow::Value)
+}
+
+/// The attributes of `window`: its keys' flags and its calls, each owning as many argument regions
+/// as it has arguments. An order key is never read as a path ([`SortKeyShape::path`]): every key
+/// is evaluated by its region.
+fn window_shape(window: &LogicalWindow) -> Result<WindowShape, IrError> {
+	let calls = window
+		.calls
+		.iter()
+		.map(|call| {
+			Ok(WindowCallShape {
+				output: call.output.clone(),
+				function: call.function,
+				args: u16::try_from(call.args.len())
+					.map_err(|_| IrError::Capacity("window arguments"))?,
+				frame: call.frame,
+			})
+		})
+		.collect::<Result<_, IrError>>()?;
+	Ok(WindowShape {
+		partitions: u16::try_from(window.partition.len())
+			.map_err(|_| IrError::Capacity("window partition keys"))?,
+		order: window
+			.order
+			.iter()
+			.map(|key| SortKeyShape {
+				collate: key.collate,
+				numeric: key.numeric,
+				ascending: key.direction,
+				path: false,
+			})
+			.collect(),
+		calls,
+	})
 }
 
 /// The sort of the rows `rows`, which it needs all of, by `ordering`: one region per key. A key

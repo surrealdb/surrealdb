@@ -541,6 +541,8 @@ pub enum LogicalOp {
 	Aggregate(LogicalAggregate),
 	/// Keeps one row per distinct value; see [`LogicalDistinct`].
 	Distinct(LogicalDistinct),
+	/// Window functions over partitions; see [`LogicalWindow`].
+	Window(LogicalWindow),
 	/// `ORDER BY`; see [`LogicalSort`].
 	Sort(LogicalSort),
 	/// `LIMIT` / `START`; see [`LogicalLimit`].
@@ -607,6 +609,7 @@ fn clone_op(op: &LogicalOp) -> LogicalOp {
 		LogicalOp::Split(op) => LogicalOp::Split(op.clone()),
 		LogicalOp::Aggregate(op) => LogicalOp::Aggregate(op.clone()),
 		LogicalOp::Distinct(op) => LogicalOp::Distinct(op.clone()),
+		LogicalOp::Window(op) => LogicalOp::Window(op.clone()),
 		LogicalOp::Sort(op) => LogicalOp::Sort(op.clone()),
 		LogicalOp::Limit(op) => LogicalOp::Limit(op.clone()),
 		LogicalOp::Project(op) => LogicalOp::Project(op.clone()),
@@ -1310,6 +1313,194 @@ pub struct LogicalDistinct {
 	pub input: Box<LogicalOp>,
 }
 
+/// Window functions: each call appends one field to every row of its input,
+/// computed from the other rows of the row's partition.
+///
+/// Rows whose `partition` keys compare equal form a partition; within it,
+/// rows are ordered by `order`, and rows equal on every order key are peers.
+/// The rows leave in partition-then-order sequence, which no clause above may
+/// rely on: an `ORDER BY` above a window still sorts.
+///
+/// A window sits above the filter, aggregation and `HAVING` of its select and
+/// below its `DISTINCT`, `ORDER BY`, `LIMIT` and projection. Its values depend
+/// on every row of a partition, so no rewrite may move a filter, a limit or a
+/// sort below it, and no access path may be offered an ordering above it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LogicalWindow {
+	pub input: Box<LogicalOp>,
+	/// `PARTITION BY`. Empty: the whole input is one partition.
+	pub partition: Vec<LogicalExpr>,
+	/// `ORDER BY` within a partition. Empty: every row of a partition is a
+	/// peer of every other.
+	pub order: Vec<LogicalOrder>,
+	/// The calls, in the order their fields are appended. At least one.
+	pub calls: Vec<LogicalWindowCall>,
+}
+
+impl LogicalWindow {
+	/// Every expression the window evaluates, in order: the partition keys,
+	/// the order keys, then each call's arguments.
+	pub fn for_each_expr<'a>(&'a self, out: &mut dyn FnMut(&'a LogicalExpr)) {
+		for key in &self.partition {
+			out(key);
+		}
+		for key in &self.order {
+			out(&key.value);
+		}
+		for call in &self.calls {
+			for arg in &call.args {
+				out(arg);
+			}
+		}
+	}
+
+	/// [`Self::for_each_expr`], mutably, in the same order.
+	pub fn exprs_mut<'a>(&'a mut self, out: &mut Vec<&'a mut LogicalExpr>) {
+		out.extend(self.partition.iter_mut());
+		out.extend(self.order.iter_mut().map(|key| &mut key.value));
+		for call in &mut self.calls {
+			out.extend(call.args.iter_mut());
+		}
+	}
+
+	/// Whether evaluating every expression of the window only reads.
+	pub fn read_only(&self) -> bool {
+		let mut read_only = true;
+		self.for_each_expr(&mut |expr| read_only &= expr.read_only());
+		read_only
+	}
+
+	/// The input's fields, then one field per call, each typed as its
+	/// function answers.
+	pub fn schema(&self) -> Schema {
+		let mut out = self.input.schema();
+		for call in &self.calls {
+			let path = FieldPath::field(call.output.as_str());
+			let kind = match call.function {
+				WindowFunction::RowNumber
+				| WindowFunction::Rank
+				| WindowFunction::DenseRank
+				| WindowFunction::Ntile
+				| WindowFunction::Count => Kind::Int,
+				WindowFunction::PercentRank | WindowFunction::CumeDist => Kind::Float,
+				WindowFunction::Lag
+				| WindowFunction::Lead
+				| WindowFunction::FirstValue
+				| WindowFunction::LastValue
+				| WindowFunction::NthValue
+				| WindowFunction::Sum
+				| WindowFunction::Avg
+				| WindowFunction::Min
+				| WindowFunction::Max => Kind::Any,
+			};
+			out.fields.retain(|f| f.path != path);
+			out.fields.push(FieldSchema::new(path, kind));
+		}
+		out
+	}
+
+	/// The rendered attributes: the partition, the order, then each call.
+	fn attrs(&self) -> Vec<String> {
+		let mut out = Vec::new();
+		if !self.partition.is_empty() {
+			let keys: Vec<String> = self.partition.iter().map(ToSql::to_sql).collect();
+			out.push(format!("PARTITION BY {}", keys.join(", ")));
+		}
+		if !self.order.is_empty() {
+			out.push(LogicalOrdering::Order(self.order.clone()).to_sql());
+		}
+		for call in &self.calls {
+			let args: Vec<String> = call.args.iter().map(ToSql::to_sql).collect();
+			out.push(format!(
+				"{:?}({}) {:?} AS {}",
+				call.function,
+				args.join(", "),
+				call.frame,
+				call.output.as_str()
+			));
+		}
+		out
+	}
+}
+
+/// One window call of a [`LogicalWindow`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LogicalWindowCall {
+	/// The field the call's value is written to on each row. No two calls of
+	/// a plan share one, and no row read below the window holds one.
+	pub output: Strand,
+	pub function: WindowFunction,
+	/// The arguments, evaluated against each row: the value read (`lag`,
+	/// `sum`, ...) first, then any offset, count or default.
+	pub args: Vec<LogicalExpr>,
+	/// The rows a frame-reading call (`first_value`, `last_value`,
+	/// `nth_value` and the aggregates) reads for each row. Always explicit:
+	/// the front end resolves the SQL default.
+	pub frame: WindowFrame,
+}
+
+/// What a [`LogicalWindowCall`] computes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum WindowFunction {
+	/// 1, 2, 3 ... within the partition.
+	RowNumber,
+	/// The `row_number` of the first peer.
+	Rank,
+	/// The number of distinct peer groups up to and including the row's.
+	DenseRank,
+	/// `(rank - 1) / (partition size - 1)`, `0` for a partition of one.
+	PercentRank,
+	/// The rows up to and including the row's last peer, over the partition size.
+	CumeDist,
+	/// `ntile(n)`: the bucket `1..=n` of the row, the first `size % n`
+	/// buckets one row larger.
+	Ntile,
+	/// `lag(value [, offset = 1 [, default = NULL]])`.
+	Lag,
+	/// `lead(value [, offset = 1 [, default = NULL]])`.
+	Lead,
+	/// The value at the first row of the frame.
+	FirstValue,
+	/// The value at the last row of the frame.
+	LastValue,
+	/// `nth_value(value, n)`: the value at the `n`th row of the frame.
+	NthValue,
+	/// The aggregates over the frame, skipping `NULL` and `NONE`: `Count`
+	/// with no argument counts rows; the others answer `NULL` over no values.
+	Sum,
+	Avg,
+	Count,
+	Min,
+	Max,
+}
+
+/// The rows of the partition a call reads for each row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct WindowFrame {
+	pub units: WindowFrameUnits,
+	pub start: WindowFrameBound,
+	pub end: WindowFrameBound,
+}
+
+/// How a [`WindowFrameBound`] counts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum WindowFrameUnits {
+	/// Offsets count rows.
+	Rows,
+	/// `CURRENT ROW` reaches the row's peers. A range frame has no numeric offset.
+	Range,
+}
+
+/// One end of a [`WindowFrame`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum WindowFrameBound {
+	UnboundedPreceding,
+	Preceding(u64),
+	CurrentRow,
+	Following(u64),
+	UnboundedFollowing,
+}
+
 /// `ORDER BY`. May be eliminated by the physical planner when the input is
 /// already ordered accordingly.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1616,6 +1807,7 @@ op_kinds!(
 	Split,
 	Aggregate,
 	Distinct,
+	Window,
 	Sort,
 	Limit,
 	Project,
@@ -1654,6 +1846,7 @@ impl LogicalOp {
 			LogicalOp::Split(_) => "Split",
 			LogicalOp::Aggregate(_) => "Aggregate",
 			LogicalOp::Distinct(_) => "Distinct",
+			LogicalOp::Window(_) => "Window",
 			LogicalOp::Sort(_) => "Sort",
 			LogicalOp::Limit(_) => "Limit",
 			LogicalOp::Project(_) => "Project",
@@ -1732,6 +1925,10 @@ impl LogicalOp {
 			})
 			| LogicalOp::Distinct(LogicalDistinct {
 				input,
+			})
+			| LogicalOp::Window(LogicalWindow {
+				input,
+				..
 			})
 			| LogicalOp::Sort(LogicalSort {
 				input,
@@ -1836,6 +2033,10 @@ impl LogicalOp {
 			})
 			| LogicalOp::Distinct(LogicalDistinct {
 				input,
+			})
+			| LogicalOp::Window(LogicalWindow {
+				input,
+				..
 			})
 			| LogicalOp::Sort(LogicalSort {
 				input,
@@ -1970,6 +2171,10 @@ impl LogicalOp {
 			LogicalOp::Distinct(mut op) => {
 				op.input = boxed(op.input, &mut f)?;
 				LogicalOp::Distinct(op)
+			}
+			LogicalOp::Window(mut op) => {
+				op.input = boxed(op.input, &mut f)?;
+				LogicalOp::Window(op)
 			}
 			LogicalOp::Sort(mut op) => {
 				op.input = boxed(op.input, &mut f)?;
@@ -2191,6 +2396,7 @@ impl LogicalOp {
 				}
 				fields.for_each_expr(out);
 			}
+			LogicalOp::Window(window) => window.for_each_expr(out),
 			LogicalOp::Sort(LogicalSort {
 				ordering,
 				..
@@ -2352,6 +2558,7 @@ impl LogicalOp {
 				out.extend(group);
 				fields.exprs_mut(&mut out);
 			}
+			LogicalOp::Window(window) => window.exprs_mut(&mut out),
 			LogicalOp::Sort(LogicalSort {
 				ordering,
 				..
@@ -2561,6 +2768,7 @@ impl LogicalOp {
 			| LogicalOp::Split(_)
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Sort(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Project(_)
@@ -2624,6 +2832,7 @@ impl LogicalOp {
 				fields,
 				..
 			}) => group.iter().all(LogicalExpr::read_only) && fields.read_only(),
+			LogicalOp::Window(window) => window.read_only(),
 			LogicalOp::Sort(LogicalSort {
 				ordering,
 				..
@@ -2732,6 +2941,7 @@ impl LogicalOp {
 			| LogicalOp::Info(_)
 			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => Schema::open(),
+			LogicalOp::Window(window) => window.schema(),
 			LogicalOp::Subquery(LogicalSubquery {
 				input,
 			})
@@ -2884,6 +3094,7 @@ impl LogicalOp {
 			| LogicalOp::Split(_)
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Sort(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Project(_)
@@ -2920,6 +3131,7 @@ impl LogicalOp {
 			| LogicalOp::Split(_)
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Sort(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Fetch(_)
@@ -3063,6 +3275,7 @@ impl LogicalOp {
 				};
 				vec![format!("BY {by}"), fields.to_sql()]
 			}
+			LogicalOp::Window(window) => window.attrs(),
 			LogicalOp::Sort(LogicalSort {
 				ordering,
 				tempfiles,
@@ -3230,6 +3443,7 @@ fn leaf_table(mut op: &LogicalOp) -> Option<&TableName> {
 					| LogicalOp::Split(_)
 					| LogicalOp::Aggregate(_)
 					| LogicalOp::Distinct(_)
+					| LogicalOp::Window(_)
 					| LogicalOp::Sort(_)
 					| LogicalOp::Limit(_)
 					| LogicalOp::Project(_)

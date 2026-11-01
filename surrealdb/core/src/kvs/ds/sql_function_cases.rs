@@ -4,8 +4,8 @@
 //! except for the session and catalog functions, whose answer is the engine's own contract, and
 //! the cases a comment marks as written from the documentation. `ERR:`
 //! expects the statement to fail with an error that is not a missing function, and `REFUSED` that
-//! it is refused as unsupported, which is how a window function is answered: the engine has no
-//! window operator, and a refusal says so where a missing function would not.
+//! the statement is refused as unsupported. A refusal is distinct from a missing function, since it
+//! names a construct that the engine does not support.
 
 /// How a case builds its statement.
 pub(super) enum Sql {
@@ -365,57 +365,118 @@ pub(super) const PGSQL: &[Case] = &[
 	Case::stmt(
 		r#"row_number"#,
 		r#"SELECT row_number() OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"1|2|3"#,
 	),
-	Case::stmt(
-		r#"rank"#,
-		r#"SELECT rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
-	),
+	Case::stmt(r#"rank"#, r#"SELECT rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#, r#"1|2|3"#),
 	Case::stmt(
 		r#"dense_rank"#,
 		r#"SELECT dense_rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"1|2|3"#,
 	),
 	Case::stmt(
 		r#"percent_rank"#,
 		r#"SELECT percent_rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"0|0.5|1"#,
 	),
 	Case::stmt(
 		r#"cume_dist"#,
 		r#"SELECT cume_dist() OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"0.3333333333333333|0.6666666666666666|1"#,
 	),
 	Case::stmt(
 		r#"ntile"#,
 		r#"SELECT ntile(2) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"1|1|2"#,
 	),
 	Case::stmt(
 		r#"lead"#,
 		r#"SELECT lead(n) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"2|3|NULL"#,
 	),
 	Case::stmt(
 		r#"lag"#,
 		r#"SELECT lag(n, 1, 0) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"0|1|2"#,
 	),
 	Case::stmt(
 		r#"first_value"#,
 		r#"SELECT first_value(n) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"1|1|1"#,
 	),
 	Case::stmt(
 		r#"last_value"#,
 		r#"SELECT last_value(n) OVER (ORDER BY n ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"3|3|3"#,
 	),
 	Case::stmt(
 		r#"nth_value"#,
 		r#"SELECT nth_value(n, 2) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"NULL|2|2"#,
+	),
+	// The cases below were written from the documented semantics of each function, not
+	// recorded from the reference servers.
+	Case::stmt(
+		r#"rank"#,
+		r#"SELECT rank() OVER (ORDER BY n > 1) AS v FROM t ORDER BY n"#,
+		r#"1|2|2"#,
+	),
+	Case::stmt(
+		r#"dense_rank"#,
+		r#"SELECT dense_rank() OVER (ORDER BY n > 1) AS v FROM t ORDER BY n"#,
+		r#"1|2|2"#,
+	),
+	Case::stmt(
+		r#"percent_rank"#,
+		r#"SELECT percent_rank() OVER (ORDER BY n > 1) AS v FROM t ORDER BY n"#,
+		r#"0|0.5|0.5"#,
+	),
+	Case::stmt(
+		r#"cume_dist"#,
+		r#"SELECT cume_dist() OVER (ORDER BY n > 1) AS v FROM t ORDER BY n"#,
+		r#"0.3333333333333333|1|1"#,
+	),
+	Case::stmt(
+		r#"row_number"#,
+		r#"SELECT row_number() OVER (PARTITION BY n > 1 ORDER BY n) AS v FROM t ORDER BY n"#,
+		r#"1|1|2"#,
+	),
+	Case::stmt(r#"sum"#, r#"SELECT sum(n) OVER (ORDER BY n) AS v FROM t ORDER BY n"#, r#"1|3|6"#),
+	Case::stmt(r#"sum"#, r#"SELECT sum(n) OVER () AS v FROM t ORDER BY n"#, r#"6|6|6"#),
+	Case::stmt(r#"count"#, r#"SELECT count(x) OVER () AS v FROM t ORDER BY n"#, r#"2|2|2"#),
+	Case::stmt(
+		r#"sum"#,
+		r#"SELECT sum(n) OVER (ORDER BY n ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS v FROM t ORDER BY n"#,
+		r#"1|3|5"#,
+	),
+	Case::stmt(
+		r#"max"#,
+		r#"SELECT max(n) OVER (ORDER BY n ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS v FROM t ORDER BY n"#,
+		r#"2|3|3"#,
+	),
+	Case::stmt(
+		r#"row_number"#,
+		r#"SELECT row_number() OVER (ORDER BY x) AS v FROM t ORDER BY n"#,
+		r#"1|2|3"#,
+	),
+	Case::stmt(
+		r#"row_number"#,
+		r#"SELECT row_number() OVER (ORDER BY n) * 10 + rank() OVER (ORDER BY n DESC) AS v FROM t ORDER BY n"#,
+		r#"13|22|31"#,
+	),
+	Case::stmt(
+		r#"row_number"#,
+		r#"SELECT n AS v FROM t ORDER BY row_number() OVER (ORDER BY n DESC)"#,
+		r#"3|2|1"#,
+	),
+	Case::stmt(
+		r#"lead"#,
+		r#"SELECT lead(n, 2) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
+		r#"3|NULL|NULL"#,
+	),
+	Case::stmt(
+		r#"ntile"#,
+		r#"SELECT ntile(3) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
+		r#"1|2|3"#,
 	),
 	// The cases from here to the end of this table give the documented behaviour of the server
 	// and have not been run against it; the cases above were recorded from PostgreSQL 18.4 and
@@ -1176,57 +1237,118 @@ pub(super) const MYSQL: &[Case] = &[
 	Case::stmt(
 		r#"row_number"#,
 		r#"SELECT row_number() OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"1|2|3"#,
 	),
-	Case::stmt(
-		r#"rank"#,
-		r#"SELECT rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
-	),
+	Case::stmt(r#"rank"#, r#"SELECT rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#, r#"1|2|3"#),
 	Case::stmt(
 		r#"dense_rank"#,
 		r#"SELECT dense_rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"1|2|3"#,
 	),
 	Case::stmt(
 		r#"percent_rank"#,
 		r#"SELECT percent_rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"0|0.5|1"#,
 	),
 	Case::stmt(
 		r#"cume_dist"#,
 		r#"SELECT cume_dist() OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"0.3333333333333333|0.6666666666666666|1"#,
 	),
 	Case::stmt(
 		r#"ntile"#,
 		r#"SELECT ntile(2) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"1|1|2"#,
 	),
 	Case::stmt(
 		r#"lead"#,
 		r#"SELECT lead(n) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"2|3|NULL"#,
 	),
 	Case::stmt(
 		r#"lag"#,
 		r#"SELECT lag(n, 1, 0) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"0|1|2"#,
 	),
 	Case::stmt(
 		r#"first_value"#,
 		r#"SELECT first_value(n) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"1|1|1"#,
 	),
 	Case::stmt(
 		r#"last_value"#,
 		r#"SELECT last_value(n) OVER (ORDER BY n ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"3|3|3"#,
 	),
 	Case::stmt(
 		r#"nth_value"#,
 		r#"SELECT nth_value(n, 2) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
-		r#"REFUSED"#,
+		r#"NULL|2|2"#,
+	),
+	// The cases below were written from the documented semantics of each function, not
+	// recorded from the reference servers.
+	Case::stmt(
+		r#"rank"#,
+		r#"SELECT rank() OVER (ORDER BY n > 1) AS v FROM t ORDER BY n"#,
+		r#"1|2|2"#,
+	),
+	Case::stmt(
+		r#"dense_rank"#,
+		r#"SELECT dense_rank() OVER (ORDER BY n > 1) AS v FROM t ORDER BY n"#,
+		r#"1|2|2"#,
+	),
+	Case::stmt(
+		r#"percent_rank"#,
+		r#"SELECT percent_rank() OVER (ORDER BY n > 1) AS v FROM t ORDER BY n"#,
+		r#"0|0.5|0.5"#,
+	),
+	Case::stmt(
+		r#"cume_dist"#,
+		r#"SELECT cume_dist() OVER (ORDER BY n > 1) AS v FROM t ORDER BY n"#,
+		r#"0.3333333333333333|1|1"#,
+	),
+	Case::stmt(
+		r#"row_number"#,
+		r#"SELECT row_number() OVER (PARTITION BY n > 1 ORDER BY n) AS v FROM t ORDER BY n"#,
+		r#"1|1|2"#,
+	),
+	Case::stmt(r#"sum"#, r#"SELECT sum(n) OVER (ORDER BY n) AS v FROM t ORDER BY n"#, r#"1|3|6"#),
+	Case::stmt(r#"sum"#, r#"SELECT sum(n) OVER () AS v FROM t ORDER BY n"#, r#"6|6|6"#),
+	Case::stmt(r#"count"#, r#"SELECT count(x) OVER () AS v FROM t ORDER BY n"#, r#"2|2|2"#),
+	Case::stmt(
+		r#"sum"#,
+		r#"SELECT sum(n) OVER (ORDER BY n ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS v FROM t ORDER BY n"#,
+		r#"1|3|5"#,
+	),
+	Case::stmt(
+		r#"max"#,
+		r#"SELECT max(n) OVER (ORDER BY n ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS v FROM t ORDER BY n"#,
+		r#"2|3|3"#,
+	),
+	Case::stmt(
+		r#"row_number"#,
+		r#"SELECT row_number() OVER (ORDER BY x) AS v FROM t ORDER BY n"#,
+		r#"2|3|1"#,
+	),
+	Case::stmt(
+		r#"row_number"#,
+		r#"SELECT row_number() OVER (ORDER BY n) * 10 + rank() OVER (ORDER BY n DESC) AS v FROM t ORDER BY n"#,
+		r#"13|22|31"#,
+	),
+	Case::stmt(
+		r#"row_number"#,
+		r#"SELECT n AS v FROM t ORDER BY row_number() OVER (ORDER BY n DESC)"#,
+		r#"3|2|1"#,
+	),
+	Case::stmt(
+		r#"lead"#,
+		r#"SELECT lead(n, 2) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
+		r#"3|NULL|NULL"#,
+	),
+	Case::stmt(
+		r#"ntile"#,
+		r#"SELECT ntile(3) OVER (ORDER BY n) AS v FROM t ORDER BY n"#,
+		r#"1|2|3"#,
 	),
 	// The cases from here to the end of this table give the documented behaviour of the server
 	// and have not been run against it; the cases above were recorded from PostgreSQL 18.4 and

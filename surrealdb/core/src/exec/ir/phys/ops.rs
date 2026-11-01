@@ -37,7 +37,7 @@ use crate::exec::ir::logical::ops::{
 	SourceRefShape, StepAttrs, SubscriberAttrs, TxnControl, TxnRegionMode, UseTarget, WriteAttrs,
 	WriteMark, WriteStageKind,
 };
-pub(crate) use crate::exec::ir::logical::ops::{ComputedReadsShape, DerivedReads};
+pub(crate) use crate::exec::ir::logical::ops::{ComputedReadsShape, DerivedReads, WindowShape};
 use crate::exec::operators::SplitTarget;
 use crate::exec::operators::scan::common::DecodeFields;
 use crate::exec::operators::scan::{CountOutput, MergeMode};
@@ -79,6 +79,7 @@ define_op_tags! {
 		Fetch => "phys.fetch",
 		Split => "phys.split",
 		Sort => "phys.sort",
+		Window => "phys.window",
 		Aggregate => "phys.aggregate",
 		Limit => "phys.limit",
 		Project => "phys.project",
@@ -221,6 +222,10 @@ pub(crate) enum PhysOp {
 	},
 	/// `ORDER BY`. Operand: the input. One `Clause(OrderKey)` region per computed key.
 	Sort(Box<SortAttrs>),
+	/// Window functions over the input, which reaches it in partition-then-order sequence. A
+	/// breaker: it may hold rows back until a partition or a peer group ends. Operand and regions
+	/// as [`LogOp::Window`](crate::exec::ir::logical::ops::LogOp::Window) states them.
+	Window(Box<WindowShape>),
 	/// `GROUP BY`. Operand: the input. One `ErrorScope(ShapeToNone)` region per group key, then
 	/// one `Clause(Projection)` region per field.
 	Aggregate(Box<AggregateAttrs>),
@@ -440,6 +445,7 @@ impl PhysOp {
 				..
 			} => PhysTag::Split,
 			PhysOp::Sort(_) => PhysTag::Sort,
+			PhysOp::Window(_) => PhysTag::Window,
 			PhysOp::Aggregate(_) => PhysTag::Aggregate,
 			PhysOp::Limit {
 				..

@@ -2193,3 +2193,72 @@ async fn the_extreme_of_a_unique_index_in_value_position_runs_once() {
 		assert!(made.iter().all(|strategy| *strategy == NestedStrategy::Once), "{sql}: {made:?}");
 	}
 }
+
+/// A window binds over a sort of its rows on its partition keys, ascending, then its order keys:
+/// the sort converts to `phys.sort` and the window to `phys.window` above it, which hosts one key
+/// region per partition and order key. Nothing of the window moves below it, and no `LIMIT` above
+/// it bounds the sort beneath.
+#[tokio::test]
+async fn a_window_binds_over_a_sort_of_its_keys() {
+	use crate::expr::logical::{
+		LogicalOp, LogicalOrdering, LogicalWindow, LogicalWindowCall, WindowFrame,
+		WindowFrameBound, WindowFrameUnits, WindowFunction,
+	};
+	let parsed = crate::syn::parse("SELECT n, w FROM t ORDER BY s, n LIMIT 2")
+		.expect("the statement parses")
+		.expressions;
+	let [TopLevelExpr::Expr(expr)] = parsed.as_slice() else {
+		panic!("one expression statement");
+	};
+	let mut op = lower(expr.clone()).expect("the statement has a logical form");
+	// The window takes the place of the ordering, keyed by its two keys, and the limit stays above
+	// it.
+	let LogicalOp::Project(project) = &mut op else {
+		panic!("a projection: {op:?}");
+	};
+	let LogicalOp::Limit(limit) = &mut *project.input else {
+		panic!("a limit: {:?}", project.input);
+	};
+	let LogicalOp::Sort(sort) = &*limit.input else {
+		panic!("a sort: {:?}", limit.input);
+	};
+	let LogicalOrdering::Order(keys) = &sort.ordering else {
+		panic!("an ordering by keys");
+	};
+	let [partition, order] = keys.as_slice() else {
+		panic!("two keys");
+	};
+	let window = LogicalOp::Window(LogicalWindow {
+		input: sort.input.clone(),
+		partition: vec![partition.value.clone()],
+		order: vec![order.clone()],
+		calls: vec![LogicalWindowCall {
+			output: "w".into(),
+			function: WindowFunction::Rank,
+			args: Vec::new(),
+			frame: WindowFrame {
+				units: WindowFrameUnits::Range,
+				start: WindowFrameBound::UnboundedPreceding,
+				end: WindowFrameBound::CurrentRow,
+			},
+		}],
+	});
+	*limit.input = window;
+	let statements = [RequestStatement::Logical(&op)];
+	let input = RequestInput::request(&statements, request_scope());
+	let planned = plan("DEFINE TABLE t SCHEMALESS;", &input).await.expect("the statement plans");
+	let text = print(&planned.ir, planned.ir.top(), PrintOpts::default());
+	let sort = text.find("phys.sort").unwrap_or_else(|| panic!("a sort: {text}"));
+	let window = text.find("phys.window").unwrap_or_else(|| panic!("a window: {text}"));
+	assert!(sort < window, "the sort feeds the window: {text}");
+	let mut sorts = Vec::new();
+	planned.ir.walk(planned.ir.top(), WalkOrder::PreOrder, &mut |at| {
+		if let Some(data) = planned.ir.op(at)
+			&& let OpKind::Phys(super::phys::ops::PhysOp::Sort(attrs)) = &data.kind
+		{
+			sorts.push(attrs.keep);
+		}
+		Walk::Continue
+	});
+	assert_eq!(sorts, vec![None], "the limit above the window bounds no sort: {text}");
+}

@@ -162,6 +162,7 @@ pub(super) fn rows(ir: &Ir, cx: &PhysCx<'_>, pipeline: OpId, rows: &Rows) -> Opt
 			..
 		}
 		| PhysOp::Sort(_)
+		| PhysOp::Window(_)
 		| PhysOp::Aggregate(_)
 		| PhysOp::Limit {
 			..
@@ -446,6 +447,7 @@ fn hops_in(ir: &Ir, region: RegionId, found: &mut Hops) {
 				..
 			}
 			| PhysOp::Sort(_)
+			| PhysOp::Window(_)
 			| PhysOp::Aggregate(_)
 			| PhysOp::Limit {
 				..

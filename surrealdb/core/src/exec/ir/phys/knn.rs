@@ -1204,6 +1204,7 @@ fn read_beneath(ir: &Ir, looped: OpId) -> Option<bool> {
 				..
 			}
 			| PhysOp::Sort(_)
+			| PhysOp::Window(_)
 			| PhysOp::Aggregate(_)
 			| PhysOp::Limit {
 				..

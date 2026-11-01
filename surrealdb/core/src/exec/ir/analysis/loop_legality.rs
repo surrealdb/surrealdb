@@ -84,7 +84,7 @@ const STREAMING: [LogTag; 6] = [
 ];
 
 /// The operators that read their whole input before delivering a row.
-const BREAKERS: [LogTag; 3] = [LogTag::Sort, LogTag::Aggregate, LogTag::Distinct];
+const BREAKERS: [LogTag; 4] = [LogTag::Sort, LogTag::Aggregate, LogTag::Distinct, LogTag::Window];
 
 /// The operators between a scan and a loop that leave the stream's split as it is.
 const PASSES: [LogTag; 8] = [

@@ -610,6 +610,7 @@ fn reads_deterministically(op: &PhysOp) -> bool {
 			| PhysTag::Fetch
 			| PhysTag::Split
 			| PhysTag::Sort
+			| PhysTag::Window
 			| PhysTag::Aggregate
 			| PhysTag::Limit
 			| PhysTag::Project

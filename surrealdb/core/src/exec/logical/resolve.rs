@@ -211,7 +211,7 @@ use crate::expr::logical::{
 	LogicalLiteral, LogicalOnly, LogicalOp, LogicalPermission, LogicalPermissionFilter,
 	LogicalProject, LogicalRecursePath, LogicalReturn, LogicalSequence, LogicalSort, LogicalSource,
 	LogicalSplit, LogicalSubquery, LogicalTimeout, LogicalUnionAll, LogicalVersionScope,
-	LogicalWrite, LogicalWriteStatement, Schema, SourceRef,
+	LogicalWindow, LogicalWrite, LogicalWriteStatement, Schema, SourceRef,
 };
 use crate::expr::{BinaryOperator, Kind, KindLiteral};
 use crate::kvs::Transaction;
@@ -510,6 +510,7 @@ async fn gather(
 		| LogicalOp::Aggregate(_)
 		| LogicalOp::Distinct(_)
 		| LogicalOp::Sort(_)
+		| LogicalOp::Window(_)
 		| LogicalOp::Limit(_)
 		| LogicalOp::Project(_)
 		| LogicalOp::Fetch(_)
@@ -696,6 +697,7 @@ fn plan_fetches(op: &LogicalOp) -> bool {
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
 			| LogicalOp::Sort(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Project(_)
 			| LogicalOp::Timeout(_)
@@ -756,6 +758,7 @@ fn collect_named(
 		| LogicalOp::Aggregate(_)
 		| LogicalOp::Distinct(_)
 		| LogicalOp::Sort(_)
+		| LogicalOp::Window(_)
 		| LogicalOp::Limit(_)
 		| LogicalOp::Project(_)
 		| LogicalOp::Fetch(_)
@@ -1223,6 +1226,7 @@ impl Resolver<'_> {
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
 			| LogicalOp::Sort(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Project(_)
 			| LogicalOp::Fetch(_)
@@ -1451,6 +1455,7 @@ impl Resolver<'_> {
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
 			| LogicalOp::Sort(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Project(_)
 			| LogicalOp::Fetch(_)
@@ -1543,6 +1548,7 @@ impl Resolver<'_> {
 			| LogicalOp::Aggregate(_)
 			| LogicalOp::Distinct(_)
 			| LogicalOp::Sort(_)
+			| LogicalOp::Window(_)
 			| LogicalOp::Limit(_)
 			| LogicalOp::Project(_)
 			| LogicalOp::Fetch(_)
@@ -2212,6 +2218,7 @@ impl Resolver<'_> {
 				| LogicalOp::Aggregate(_)
 				| LogicalOp::Distinct(_)
 				| LogicalOp::Sort(_)
+				| LogicalOp::Window(_)
 				| LogicalOp::Limit(_)
 				| LogicalOp::Fetch(_)
 				| LogicalOp::Timeout(_)
@@ -3353,6 +3360,10 @@ fn stage_input(op: &mut LogicalOp) -> Option<&mut Box<LogicalOp>> {
 		})
 		| LogicalOp::Distinct(LogicalDistinct {
 			input,
+		})
+		| LogicalOp::Window(LogicalWindow {
+			input,
+			..
 		})
 		| LogicalOp::Sort(LogicalSort {
 			input,

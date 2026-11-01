@@ -218,6 +218,7 @@ fn read_sources(ir: &Ir, value: ValueId, depth: u8) -> (bool, usize) {
 				| LogOp::Filter
 				| LogOp::Project(_)
 				| LogOp::Sort(_)
+				| LogOp::Window(_)
 				| LogOp::Distinct
 				| LogOp::Limit { .. }
 				| LogOp::Split { .. }
@@ -227,6 +228,7 @@ fn read_sources(ir: &Ir, value: ValueId, depth: u8) -> (bool, usize) {
 				| PhysOp::Filter
 				| PhysOp::Project(_)
 				| PhysOp::Sort(_)
+				| PhysOp::Window(_)
 				| PhysOp::Distinct { .. }
 				| PhysOp::Limit { .. }
 				| PhysOp::Split { .. }
@@ -383,9 +385,10 @@ fn apply(rw: &mut Rewriter<'_>, op: OpId, planned: Planned) -> Result<Converted,
 
 /// Checks that the regions the logical op holds are the regions the physical op `kind` declares,
 /// for the shapes whose declaration the op's attributes state: an `IF` and a `FOR` by position, a
-/// `MATCH` and its read stages by count, a group key per region, and a write's return clause. The
-/// attributes are read from the regions the logical op holds, so a mismatch is a binder that
-/// built regions of kinds the op does not declare, which is an invariant break.
+/// `MATCH` and its read stages by count, a group key per region, a window's key and argument
+/// regions, and a write's return clause. The attributes are read from the regions the logical op
+/// holds, so a mismatch is a binder that built regions of kinds the op does not declare, which is
+/// an invariant break.
 fn declared_regions_hold(ir: &Ir, data: &OpData, kind: &PhysOp) -> Result<(), IrError> {
 	let what = if matches!(kind, PhysOp::If { .. }) {
 		"phys.if region kinds"
@@ -404,6 +407,8 @@ fn declared_regions_hold(ir: &Ir, data: &OpData, kind: &PhysOp) -> Result<(), Ir
 		"phys.match_step read regions"
 	} else if matches!(kind, PhysOp::Aggregate(..)) {
 		"phys.aggregate group key regions"
+	} else if matches!(kind, PhysOp::Window(..)) {
+		"phys.window key and argument regions"
 	} else if matches!(kind, PhysOp::Write(..)) {
 		"phys.write regions"
 	} else {
@@ -566,6 +571,7 @@ fn build(ir: &Ir, data: &OpData, log: &LogOp, _cx: &PhysCx<'_>) -> Result<Option
 			spill: Spill::Spillable,
 		},
 		LogOp::Sort(attrs) => sort(ir, data, attrs),
+		LogOp::Window(shape) => PhysOp::Window(shape.clone()),
 		LogOp::Limit {
 			limit,
 			start,
@@ -2962,6 +2968,7 @@ mod region_tests {
 				..
 			}
 			| PhysOp::Sort(_)
+			| PhysOp::Window(_)
 			| PhysOp::Aggregate(_)
 			| PhysOp::Limit {
 				..

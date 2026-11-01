@@ -56,10 +56,10 @@ use super::ops::{
 	RecursePathForm, RemoveAttrs, RepairField, RepairKind, RepairTable, ShowAttrs, SortAttrs,
 	SortKeyShape, SortShape, SourceAttrs, SourceOrder, SourceRefShape, StepAttrs, Stored,
 	SubscriberAdmission, SubscriberAttrs, SubscriberLayer, SubscriberProjection, TableDefs,
-	TxnControl, TxnRegionEnd, TxnRegionMode, TxnStart, UseTarget, WriteAttrs, WriteBody,
-	WriteBranching, WriteDerived, WriteGates, WriteImage, WriteIndexes, WriteMark,
-	WriteMaterialized, WriteRepairs, WriteRetry, WriteSchema, WriteStageKind, WriteStages,
-	WriteStored, WriteViews,
+	TxnControl, TxnRegionEnd, TxnRegionMode, TxnStart, UseTarget, WindowCallShape, WindowShape,
+	WriteAttrs, WriteBody, WriteBranching, WriteDerived, WriteGates, WriteImage, WriteIndexes,
+	WriteMark, WriteMaterialized, WriteRepairs, WriteRetry, WriteSchema, WriteStageKind,
+	WriteStages, WriteStored, WriteViews,
 };
 use crate::doc::Action as DocAction;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
@@ -103,7 +103,8 @@ use crate::expr::graphql_config::{
 use crate::expr::index::{DiskAnnParams, Distance, FullTextParams, HnswParams, VectorType};
 use crate::expr::language::Language;
 use crate::expr::logical::{
-	Emission, GuardKind, JoinKind, OutputPath, OutputPathPart, RelationAlias,
+	Emission, GuardKind, JoinKind, OutputPath, OutputPathPart, RelationAlias, WindowFrame,
+	WindowFrameBound, WindowFrameUnits, WindowFunction,
 };
 use crate::expr::lookup::LookupKind;
 use crate::expr::match_plan::{
@@ -252,6 +253,7 @@ fn put_op(op: &LogOp, w: &mut Fields<'_>) {
 		}
 		LogOp::Aggregate(attrs) => attrs.put_fields(w),
 		LogOp::Sort(attrs) => attrs.put_fields(w),
+		LogOp::Window(attrs) => attrs.put_fields(w),
 		LogOp::Limit {
 			limit,
 			start,
@@ -433,6 +435,7 @@ fn get_op(tag: LogTag, c: &mut Cursor<'_>) -> Result<LogOp, ParseError> {
 		LogTag::Aggregate => LogOp::Aggregate(Box::new(AggregateShape::get_fields(c, first)?)),
 		LogTag::Distinct => LogOp::Distinct,
 		LogTag::Sort => LogOp::Sort(Box::new(SortAttrs::get_fields(c, first)?)),
+		LogTag::Window => LogOp::Window(Box::new(WindowShape::get_fields(c, first)?)),
 		LogTag::Limit => {
 			let limit = c.field("limit", first)?;
 			let start = c.field("start", first)?;
@@ -3075,6 +3078,49 @@ text_struct!(SortKeyShape {
 text_struct!(SortAttrs {
 	ordering: SortShape,
 	tempfiles: bool
+});
+text_struct!(WindowShape {
+	partitions: u16,
+	order: Box<[SortKeyShape]>,
+	calls: Box<[WindowCallShape]>
+});
+text_struct!(WindowCallShape {
+	output: Strand,
+	function: WindowFunction,
+	args: u16,
+	frame: WindowFrame
+});
+text_struct!(WindowFrame {
+	units: WindowFrameUnits,
+	start: WindowFrameBound,
+	end: WindowFrameBound
+});
+text_unit_enum!(WindowFrameUnits {
+	Rows,
+	Range
+});
+text_enum!(WindowFrameBound {
+	unit [UnboundedPreceding, CurrentRow, UnboundedFollowing]
+	tuple [Preceding(offset: u64), Following(offset: u64)]
+	named []
+});
+text_unit_enum!(WindowFunction {
+	RowNumber,
+	Rank,
+	DenseRank,
+	PercentRank,
+	CumeDist,
+	Ntile,
+	Lag,
+	Lead,
+	FirstValue,
+	LastValue,
+	NthValue,
+	Sum,
+	Avg,
+	Count,
+	Min,
+	Max
 });
 text_struct!(AggregateShape {
 	groups: u16,

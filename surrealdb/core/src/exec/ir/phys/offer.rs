@@ -284,6 +284,9 @@ fn offer_walk(ir: &Ir, source: OpId, across: bool) -> Result<Offer, IrError> {
 			}
 			| LogOp::Aggregate(_)
 			| LogOp::Distinct
+			// A window's values depend on every row of a partition: no filter, ordering or limit
+			// above it reaches the access path.
+			| LogOp::Window(_)
 			| LogOp::Fetch
 			| LogOp::Timeout
 			| LogOp::VersionScope
@@ -429,6 +432,7 @@ fn read_body(ir: &Ir, body: RegionId, offer: &mut Offer, state: &mut State) -> R
 			| LogOp::Aggregate(_)
 			| LogOp::Distinct
 			| LogOp::Sort(_)
+			| LogOp::Window(_)
 			| LogOp::Limit {
 				..
 			}

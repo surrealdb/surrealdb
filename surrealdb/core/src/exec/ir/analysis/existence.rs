@@ -624,6 +624,7 @@ fn op_total(ir: &Ir, op: OpId, select_loop: OpId) -> bool {
 			| LogOp::Aggregate(_)
 			| LogOp::Distinct
 			| LogOp::Sort(_)
+			| LogOp::Window(_)
 			| LogOp::Limit {
 				..
 			}

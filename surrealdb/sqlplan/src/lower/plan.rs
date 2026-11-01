@@ -14,8 +14,9 @@ use surrealdb_strand::TableName;
 use crate::dialect::DialectPolicy;
 use crate::error::PlanError;
 use crate::ir::{
-	BoundBinaryOp, BoundColumnRef, BoundExpr, BoundJoinCondition, BoundJoinType, BoundLiteral,
-	BoundOrder, BoundSelect, BoundSetOpKind, BoundSetOperation, BoundTableSource, BoundTarget,
+	BoundBinaryOp, BoundColumnRef, BoundDistinct, BoundExpr, BoundJoinCondition, BoundJoinType,
+	BoundLiteral, BoundOrder, BoundSelect, BoundSetOpKind, BoundSetOperation, BoundTableSource,
+	BoundTarget,
 };
 use crate::lower::expr::{
 	bound_expr_contains_aggregate, lower_bound_expr, lower_bound_order, lower_bound_target,
@@ -23,6 +24,7 @@ use crate::lower::expr::{
 };
 use crate::lower::id_key::{id_column, is_key_or_link, key_of, key_read_as, record_of};
 use crate::lower::link::{LinkOperand, link_column, link_operand, lower_stored, same_table_pair};
+use crate::lower::window::{Windows, aggregate_calls, may_be_volatile};
 use crate::output_keys::output_keys;
 
 mod intersect_except;
@@ -589,13 +591,7 @@ fn lower_bound_select_internal(
 	keyed: bool,
 	policy: &DialectPolicy,
 ) -> Result<LogicalOp, PlanError> {
-	if !select.windows.is_empty() {
-		crate::observability::global_metrics().record_unsupported_feature("WINDOW");
-		return Err(PlanError::UnsupportedExpression(
-			"window functions and WINDOW clauses are not supported in streaming execution engine"
-				.into(),
-		));
-	}
+	let windows = Windows::collect(select)?;
 
 	// 1. FROM clause
 	let mut op = match &select.from {
@@ -643,8 +639,16 @@ fn lower_bound_select_internal(
 	let has_aggregates = select.targets.iter().any(|t| bound_expr_contains_aggregate(&t.expr));
 	let has_having_agg = select.having.as_ref().is_some_and(bound_expr_contains_aggregate);
 	let has_order_agg = select.order_by.iter().any(|o| bound_expr_contains_aggregate(&o.expr));
-	let is_aggregate =
-		grouped || has_aggregates || has_having_agg || has_order_agg || select.having.is_some();
+	let is_aggregate = grouped
+		|| has_aggregates
+		|| has_having_agg
+		|| has_order_agg
+		|| select.having.is_some()
+		|| windows.read_aggregates();
+	// The windows of an aggregate select are computed over its groups, above its aggregation,
+	// which computes every value they read; the windows of any other select over the rows its
+	// WHERE clause keeps.
+	let windowed_aggregate = is_aggregate && !windows.is_empty();
 
 	let unnested = unnest_targets(select);
 	if !unnested.is_empty() {
@@ -655,12 +659,20 @@ fn lower_bound_select_internal(
 		}
 		op = split_unnested(op, &unnested, policy)?;
 	}
+	if !is_aggregate && !windows.is_empty() {
+		op = windows.lower(op, &BoundExpr::clone, policy)?;
+	}
 
 	// The select is read by position only if it is asked to be and its columns are all listed;
 	// the queries of its set operations are read the same way.
 	let keys = keyed.then(|| output_keys(&select.targets)).flatten();
 	let keyed = keys.is_some();
 	let targets = keyed_targets(&select.targets, keys);
+	let targets = if windows.is_empty() {
+		targets
+	} else {
+		Cow::Owned(windows.name_targets(&targets))
+	};
 	let mut aggregate_targets = targets.to_vec();
 
 	// The engine recognises a projected field as a grouping key only when it is the stored path the
@@ -686,14 +698,16 @@ fn lower_bound_select_internal(
 	}
 
 	let mut agg_mapping: Vec<(BoundExpr, String)> = Vec::new();
-	for t in targets.iter() {
+	// A target that reads a window is computed above the aggregation, so no clause reads it from
+	// the aggregation's output.
+	for t in targets.iter().filter(|t| !t.expr.contains_window()) {
 		let col_name = target_output_name(t);
 		agg_mapping.push((t.expr.clone(), col_name));
 	}
 
 	for (index, group) in select.group_by.iter().enumerate() {
 		if !agg_mapping.iter().any(|(expr, _)| expr.is_compatible_with(group)) {
-			let name = format!("__sql_group_{index}");
+			let name = unused_name(&format!("__sql_group_{index}"), &agg_mapping, &targets);
 			aggregate_targets.push(BoundTarget {
 				expr: if stored_keys.contains(&group) {
 					as_stored(group)
@@ -714,8 +728,8 @@ fn lower_bound_select_internal(
 		collect_aggregate_exprs(having_expr, &mut having_aggs);
 		for agg in having_aggs {
 			if !agg_mapping.iter().any(|(e, _)| e.is_compatible_with(&agg)) {
-				let syn_name = format!("__sql_having_{}", synthetic_idx);
-				synthetic_idx += 1;
+				let syn_name =
+					next_unused_name("__sql_having_", &mut synthetic_idx, &agg_mapping, &targets);
 				aggregate_targets.push(BoundTarget {
 					expr: agg.clone(),
 					alias: Some(syn_name.clone()),
@@ -729,12 +743,15 @@ fn lower_bound_select_internal(
 
 	let mut order_syn_idx = 0;
 	for o in &select.order_by {
+		if windowed_aggregate && o.expr.contains_window() {
+			continue;
+		}
 		let mut order_aggs = Vec::new();
 		collect_aggregate_exprs(&o.expr, &mut order_aggs);
 		for agg in order_aggs {
 			if !agg_mapping.iter().any(|(e, _)| e.is_compatible_with(&agg)) {
-				let syn_name = format!("__sql_order_{}", order_syn_idx);
-				order_syn_idx += 1;
+				let syn_name =
+					next_unused_name("__sql_order_", &mut order_syn_idx, &agg_mapping, &targets);
 				aggregate_targets.push(BoundTarget {
 					expr: agg.clone(),
 					alias: Some(syn_name.clone()),
@@ -746,11 +763,49 @@ fn lower_bound_select_internal(
 		}
 	}
 
+	// The aggregation computes each aggregate a clause that reads a window reads, and the windows,
+	// the targets that read them and the ORDER BY are computed above it.
+	if windowed_aggregate {
+		let mut window_aggs = Vec::new();
+		for expr in targets
+			.iter()
+			.map(|t| &t.expr)
+			.chain(select.order_by.iter().map(|o| &o.expr))
+			.filter(|expr| expr.contains_window())
+		{
+			aggregate_calls(expr, &mut window_aggs);
+		}
+		let mut window_agg_idx = 0;
+		for agg in window_aggs {
+			if agg.contains_window() {
+				return Err(PlanError::WindowNotAllowed("aggregate function calls".into()));
+			}
+			if agg_mapping.iter().any(|(e, _)| e.is_compatible_with(&agg)) {
+				continue;
+			}
+			let name =
+				next_unused_name("__sql_window_agg_", &mut window_agg_idx, &agg_mapping, &targets);
+			aggregate_targets.push(BoundTarget {
+				expr: agg.clone(),
+				alias: Some(name.clone()),
+				is_wildcard: false,
+				table_wildcard: None,
+			});
+			agg_mapping.push((agg, name));
+		}
+		aggregate_targets.retain(|t| !t.expr.contains_window());
+	} else if !windows.is_empty() {
+		for t in &mut aggregate_targets {
+			t.expr = windows.replace(&t.expr);
+		}
+	}
+
 	// The projection after an aggregate that keeps its rows as objects reads each selected column
 	// back by `target_output_name`. A target that lowering leaves unnamed, a computed expression,
 	// is given that name so the column is found.
 	let reads_columns_by_name = is_aggregate
-		&& (aggregate_targets.len() > select.targets.len()
+		&& (windowed_aggregate
+			|| aggregate_targets.len() > select.targets.len()
 			|| (as_value
 				&& select.targets.len() == 1
 				&& (select.having.is_some() || !select.order_by.is_empty())));
@@ -766,11 +821,12 @@ fn lower_bound_select_internal(
 	// an ORDER BY keeps its rows as objects, so that those clauses read their columns, and takes
 	// the values from the one column it selects after them.
 	let value_column = as_value && select.targets.len() == 1 && !select.targets[0].is_wildcard;
-	let as_value =
-		as_value && (!is_aggregate || (select.having.is_none() && select.order_by.is_empty()));
+	let as_value = as_value
+		&& !windowed_aggregate
+		&& (!is_aggregate || (select.having.is_none() && select.order_by.is_empty()));
 	let fields = if as_value && select.targets.len() == 1 && !select.targets[0].is_wildcard {
 		let target = &select.targets[0].expr;
-		let expr = lower_bound_expr(target, policy)?;
+		let expr = lower_bound_expr(&windows.replace(target), policy)?;
 		let expr = if matches!(target, BoundExpr::Column(col) if col.id_table.is_none() && col.link_table.is_none())
 		{
 			key_of(expr, true)
@@ -807,12 +863,13 @@ fn lower_bound_select_internal(
 
 	let mut rewritten_order_by = Vec::new();
 	for o in &select.order_by {
+		let expr = windows.replace(&o.expr);
 		let expr = if select.set_op.is_some() {
-			rewrite_aggregates_to_columns(&o.expr, &agg_mapping, false)
+			rewrite_aggregates_to_columns(&expr, &agg_mapping, false)
 		} else if is_aggregate {
-			rewrite_aggregates_to_columns(&o.expr, &agg_mapping, true)
+			rewrite_aggregates_to_columns(&expr, &agg_mapping, true)
 		} else {
-			o.expr.clone()
+			expr
 		};
 		rewritten_order_by.push(BoundOrder {
 			expr,
@@ -855,40 +912,100 @@ fn lower_bound_select_internal(
 			predicate: lower_bound_expr(having_expr, policy)?,
 		});
 	}
+	if windowed_aggregate {
+		let rewrite = |expr: &BoundExpr| rewrite_aggregates_to_columns(expr, &agg_mapping, true);
+		if let Some(column) = windows.ungrouped_column(&rewrite) {
+			return Err(PlanError::ColumnNotInGroupBy(column));
+		}
+		op = windows.lower(op, &rewrite, policy)?;
+	}
+
+	// A `DISTINCT` compares the columns a select selects, so it is taken over the projected rows,
+	// with the `ORDER BY` and `LIMIT` above it. The rows below the projection hold more than those
+	// columns: an `id`, the fields the windows are computed into, and an aggregate select's group
+	// keys and the aggregates only its other clauses read. Each `ORDER BY` key must be a selected
+	// column, as PostgreSQL and MySQL require, and is the expression of that column.
+	let projected_distinct =
+		if select.set_op.is_none() && matches!(select.distinct, Some(BoundDistinct::All)) {
+			let selected = |t: &BoundTarget| {
+				let expr = windows.replace(&t.expr);
+				if is_aggregate {
+					rewrite_aggregates_to_columns(&expr, &agg_mapping, true)
+				} else {
+					expr
+				}
+			};
+			Some(distinct_order_keys(
+				&targets,
+				&selected,
+				&|column| windows.computes(column),
+				&rewritten_order_by,
+			)?)
+		} else {
+			None
+		};
 
 	// 5. DISTINCT clause
-	if select.distinct.is_some() {
+	if select.distinct.is_some() && projected_distinct.is_none() {
 		op = LogicalOp::Distinct(LogicalDistinct {
 			input: Box::new(op),
 		});
 	}
 
 	// 6. ORDER BY clause (if not deferred to set_op)
-	if select.set_op.is_none() && !rewritten_order_by.is_empty() {
-		let mut orders = Vec::new();
-		for o in &rewritten_order_by {
-			orders.extend(lower_bound_order(o, policy)?);
-		}
-		op = LogicalOp::Sort(LogicalSort {
-			input: Box::new(op),
-			ordering: LogicalOrdering::Order(orders),
-			tempfiles: false,
-		});
+	if select.set_op.is_none() && projected_distinct.is_none() {
+		op = sort_by(op, &rewritten_order_by, policy)?;
 	}
 
 	// 7. LIMIT & OFFSET clause (if not deferred to set_op)
-	if select.set_op.is_none() && (select.limit.is_some() || select.offset.is_some()) {
-		let limit = select.limit.as_ref().map(|l| lower_row_count(l, policy)).transpose()?;
-		let start = select.offset.as_ref().map(|o| lower_row_count(o, policy)).transpose()?;
-		op = LogicalOp::Limit(LogicalLimit {
-			input: Box::new(op),
-			start,
-			limit,
-		});
+	if select.set_op.is_none() && projected_distinct.is_none() {
+		op = limit_by(op, select, policy)?;
 	}
 
-	// 8. Projection
+	// 8. Projection. A wildcard does not read the fields the windows are computed into.
 	if !is_aggregate {
+		let omit = if has_wildcard(&targets) {
+			windows.outputs()
+		} else {
+			Vec::new()
+		};
+		op = LogicalOp::Project(LogicalProject {
+			input: Box::new(op),
+			fields,
+			omit,
+		});
+	} else if windowed_aggregate {
+		// Each target is read from the aggregation's output, and one that reads a window is
+		// computed from the window fields and the aggregation's output columns.
+		let read = |t: &BoundTarget| -> Result<LogicalExpr, PlanError> {
+			if t.expr.contains_window() {
+				let expr =
+					rewrite_aggregates_to_columns(&windows.replace(&t.expr), &agg_mapping, true);
+				lower_bound_expr(&expr, policy)
+			} else {
+				Ok(LogicalExpr::Field(target_output_name(t).into()))
+			}
+		};
+		let fields = if value_column {
+			LogicalFields::Value {
+				expr: read(&targets[0])?,
+				alias: None,
+			}
+		} else {
+			LogicalFields::Select(
+				targets
+					.iter()
+					.map(|t| {
+						let col_name = target_output_name(t);
+						if !t.expr.contains_window() && key_outputs.contains(&col_name) {
+							return Ok(key_output_field(col_name));
+						}
+						let alias = t.alias.as_ref().map(|a| OutputPath::field(a.clone()));
+						Ok(LogicalField::user(read(t)?, alias))
+					})
+					.collect::<Result<Vec<_>, PlanError>>()?,
+			)
+		};
 		op = LogicalOp::Project(LogicalProject {
 			input: Box::new(op),
 			fields,
@@ -938,6 +1055,10 @@ fn lower_bound_select_internal(
 		});
 	}
 
+	if let Some(keys) = &projected_distinct {
+		op = distinct_over_projection(op, keys, &targets, select, policy)?;
+	}
+
 	// 9. Set Operations (UNION, INTERSECT, EXCEPT)
 	if let Some(first) = &select.set_op {
 		op = lower_set_operations(&targets, first, op, keyed, policy)?;
@@ -968,6 +1089,242 @@ fn lower_bound_select_internal(
 	}
 
 	Ok(op)
+}
+
+/// `input` sorted by `order`, or `input` where `order` is empty.
+fn sort_by(
+	input: LogicalOp,
+	order: &[BoundOrder],
+	policy: &DialectPolicy,
+) -> Result<LogicalOp, PlanError> {
+	if order.is_empty() {
+		return Ok(input);
+	}
+	let mut orders = Vec::new();
+	for o in order {
+		orders.extend(lower_bound_order(o, policy)?);
+	}
+	Ok(LogicalOp::Sort(LogicalSort {
+		input: Box::new(input),
+		ordering: LogicalOrdering::Order(orders),
+		tempfiles: false,
+	}))
+}
+
+/// `input` under the `LIMIT` and `OFFSET` of `select`, or `input` where it has neither.
+fn limit_by(
+	input: LogicalOp,
+	select: &BoundSelect,
+	policy: &DialectPolicy,
+) -> Result<LogicalOp, PlanError> {
+	if select.limit.is_none() && select.offset.is_none() {
+		return Ok(input);
+	}
+	let limit = select.limit.as_ref().map(|l| lower_row_count(l, policy)).transpose()?;
+	let start = select.offset.as_ref().map(|o| lower_row_count(o, policy)).transpose()?;
+	Ok(LogicalOp::Limit(LogicalLimit {
+		input: Box::new(input),
+		start,
+		limit,
+	}))
+}
+
+/// What a `SELECT DISTINCT` orders its rows by: an `ORDER BY` key, and where its value is read.
+struct DistinctKey {
+	order: BoundOrder,
+	/// The output column the key reads, a selected column that is named; `None` for a key the
+	/// projection computes into a hidden field, a selected column the projection names itself.
+	column: Option<String>,
+}
+
+/// The `ORDER BY` of a `SELECT DISTINCT`. A key that is or names a selected column whose output
+/// name is known reads that column, so the rows are ordered by the very values they answer; a key
+/// that is a selected column the projection names itself is computed again into a hidden field
+/// (`distinct_over_projection`). A column of a relation a wildcard covers is selected: the first
+/// relation's under its own name, a joined relation's computed into a hidden field. A column of a
+/// relation no wildcard covers is not, nor is a window's hidden field, which no wildcard reads.
+/// `selected` computes a target over the rows the projection reads. A key that is no selected
+/// column is refused: the `DISTINCT` cannot order its rows by it.
+fn distinct_order_keys(
+	targets: &[BoundTarget],
+	selected: &dyn Fn(&BoundTarget) -> BoundExpr,
+	hidden: &dyn Fn(&str) -> bool,
+	order: &[BoundOrder],
+) -> Result<Vec<DistinctKey>, PlanError> {
+	order
+		.iter()
+		.map(|key| {
+			let column = targets.iter().filter(|t| !t.is_wildcard).find_map(|t| {
+				let named = t.alias.is_some() || target_names_itself(t);
+				let expr = selected(t);
+				let names = named && names_output(&key.expr, &target_output_name(t));
+				(names || expr.is_compatible_with(&key.expr))
+					.then(|| (expr, named.then(|| target_output_name(t))))
+			});
+			let (expr, column) = match column {
+				Some(found) => found,
+				None => {
+					let BoundExpr::Column(col) = &key.expr else {
+						return Err(PlanError::DistinctOrderByNotSelected);
+					};
+					let covered = col.correlation_depth == 0
+						&& !hidden(&col.column)
+						&& targets.iter().any(|t| t.is_wildcard && wildcard_covers(t, col));
+					if !covered {
+						return Err(PlanError::DistinctOrderByNotSelected);
+					}
+					// The first relation's columns are fields of the row the wildcard projects; a
+					// joined relation's are not, so its column is computed into a hidden field.
+					(key.expr.clone(), (col.relation_index == 0).then(|| col.column.clone()))
+				}
+			};
+			Ok(DistinctKey {
+				order: BoundOrder {
+					expr,
+					direction: key.direction,
+					nulls_first: key.nulls_first,
+				},
+				column,
+			})
+		})
+		.collect()
+}
+
+/// Whether `wildcard`, a wildcard target whose columns are not known, selects `col`: a `*` selects
+/// the columns of every relation, a `t.*` those of `t` alone.
+fn wildcard_covers(wildcard: &BoundTarget, col: &BoundColumnRef) -> bool {
+	match (&wildcard.table_wildcard, &wildcard.expr) {
+		(None, _) => true,
+		(Some(_), BoundExpr::Column(relation)) => relation.relation_index == col.relation_index,
+		(Some(_), _) => false,
+	}
+}
+
+/// The prefix of the hidden field a computed `ORDER BY` key of a `SELECT DISTINCT` is projected
+/// into. A field of that name the select does not compute is answered as the row holds it, unless a
+/// wildcard reads one that shares a hidden field's name.
+const DISTINCT_ORDER_PREFIX: &str = "__sql_distinct_order_";
+
+/// The field the value of a `SELECT DISTINCT` that answers bare values is projected into while
+/// its rows are ordered.
+const DISTINCT_VALUE: &str = "__sql_distinct_value";
+
+/// `projected`, the projection of a `SELECT DISTINCT`, under its `DISTINCT`, `ORDER BY` and
+/// `LIMIT`. With no `ORDER BY` the `DISTINCT` compares the projected rows as they are. Otherwise
+/// the rows are ordered by the selected columns the keys read, and a key the projection names
+/// itself is computed into a hidden field beside the selected columns, which adds nothing the
+/// `DISTINCT` can tell rows apart by, as each key is a selected column; a projection above drops
+/// those fields. A hidden field takes a name no selected column has, and a key that may answer
+/// differently each time it is evaluated is refused there, since it would order the rows by
+/// values other than those they answer. A projection that answers
+/// bare values answers an object holding the value until then, which each key reads.
+fn distinct_over_projection(
+	projected: LogicalOp,
+	keys: &[DistinctKey],
+	targets: &[BoundTarget],
+	select: &BoundSelect,
+	policy: &DialectPolicy,
+) -> Result<LogicalOp, PlanError> {
+	let distinct = |input: LogicalOp| {
+		LogicalOp::Distinct(LogicalDistinct {
+			input: Box::new(input),
+		})
+	};
+	if keys.is_empty() {
+		return limit_by(distinct(projected), select, policy);
+	}
+	let LogicalOp::Project(mut project) = projected else {
+		return Err(PlanError::unsupported("an ORDER BY of a SELECT DISTINCT over bare values"));
+	};
+	let bare = matches!(project.fields, LogicalFields::Value { .. });
+	let mut hidden = Vec::new();
+	let mut omit = Vec::new();
+	let mut order = Vec::with_capacity(keys.len());
+	let mut next = 0;
+	for key in keys {
+		let name = match (&key.column, bare) {
+			(_, true) => DISTINCT_VALUE.to_owned(),
+			(Some(column), false) => column.clone(),
+			(None, false) => {
+				if may_be_volatile(&key.order.expr) {
+					return Err(PlanError::unsupported(
+						"an ORDER BY of a SELECT DISTINCT by a volatile column with no name; name \
+						 the column with AS and order by that name",
+					));
+				}
+				let name = next_unused_name(DISTINCT_ORDER_PREFIX, &mut next, &[], targets);
+				hidden.push(LogicalField::user(
+					lower_bound_expr(&key.order.expr, policy)?,
+					Some(OutputPath::field(name.clone())),
+				));
+				omit.push(LogicalExpr::Field(name.clone().into()));
+				name
+			}
+		};
+		order.push(BoundOrder {
+			expr: output_column(&name),
+			direction: key.order.direction,
+			nulls_first: key.order.nulls_first,
+		});
+	}
+	let value = match std::mem::replace(&mut project.fields, LogicalFields::Select(Vec::new())) {
+		LogicalFields::Value {
+			expr,
+			alias,
+		} => {
+			project.fields = LogicalFields::Select(vec![LogicalField::user(
+				expr,
+				Some(OutputPath::field(DISTINCT_VALUE.to_string())),
+			)]);
+			Some(alias)
+		}
+		LogicalFields::Select(mut fields) => {
+			fields.extend(hidden);
+			project.fields = LogicalFields::Select(fields);
+			None
+		}
+	};
+	let op = sort_by(distinct(LogicalOp::Project(project)), &order, policy)?;
+	let op = limit_by(op, select, policy)?;
+	Ok(match value {
+		Some(alias) => LogicalOp::Project(LogicalProject {
+			input: Box::new(op),
+			fields: LogicalFields::Value {
+				expr: LogicalExpr::Field(DISTINCT_VALUE.into()),
+				alias,
+			},
+			omit: Vec::new(),
+		}),
+		None if omit.is_empty() => op,
+		None => LogicalOp::Project(LogicalProject {
+			input: Box::new(op),
+			fields: LogicalFields::all(),
+			omit,
+		}),
+	})
+}
+
+/// A read of the output column `name` of the select.
+fn output_column(name: &str) -> BoundExpr {
+	BoundExpr::Column(BoundColumnRef {
+		relation_index: 0,
+		relation_name: String::new(),
+		column: name.to_string(),
+		correlation_depth: 0,
+		id_table: None,
+		link_table: None,
+		aggregate_output: false,
+		key_read: crate::ir::KeyRead::None,
+		also_in: Vec::new(),
+		declared_type: crate::SqlType::Unknown,
+	})
+}
+
+/// Whether `key` is a reference the binder resolved to the output column `column` of the select,
+/// as an `ORDER BY` names a column by its alias.
+fn names_output(key: &BoundExpr, column: &str) -> bool {
+	matches!(key, BoundExpr::Column(col)
+		if col.relation_name.is_empty() && col.correlation_depth == 0 && col.column == column)
 }
 
 /// Combine `left`, the lowered first query of a set operation, with the queries chained after it.
@@ -1115,6 +1472,31 @@ fn name_as_first_query(first: &[BoundTarget], branch: &mut BoundSelect) {
 			later.alias = Some(name);
 		}
 	}
+}
+
+/// `name`, or `name` suffixed with `_` until no selected column or computed output of the
+/// aggregation answers to it, so a hidden output never overwrites a column the query selects.
+fn unused_name(name: &str, outputs: &[(BoundExpr, String)], targets: &[BoundTarget]) -> String {
+	let mut name = name.to_owned();
+	while outputs.iter().any(|(_, taken)| *taken == name)
+		|| targets.iter().any(|t| !t.is_wildcard && target_output_name(t) == name)
+	{
+		name.push('_');
+	}
+	name
+}
+
+/// The next hidden output name `{prefix}{n}`, counting `n` up from `next`, that `unused_name`
+/// leaves as it is or extends.
+fn next_unused_name(
+	prefix: &str,
+	next: &mut usize,
+	outputs: &[(BoundExpr, String)],
+	targets: &[BoundTarget],
+) -> String {
+	let name = unused_name(&format!("{prefix}{next}"), outputs, targets);
+	*next += 1;
+	name
 }
 
 fn target_output_name(target: &BoundTarget) -> String {
