@@ -170,7 +170,7 @@ jobs:
     name: Build binary (${{ matrix.arch == 'arm' && 'arm64' || 'amd64' }})
     needs: changes
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.build == 'true' }}
-    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       matrix:
         arch: ${{ (github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
@@ -883,7 +883,7 @@ jobs:
     name: Check crate versions
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
-    runs-on: ubuntu-latest-4-cores
+    runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -925,7 +925,7 @@ jobs:
     name: Check lockfiles
     needs: changes
     if: ${{ needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ubuntu-latest-4-cores
+    runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1045,7 +1045,7 @@ jobs:
     name: SQL client tools (psql, mysql)
     needs: [build, changes]
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.sql == 'true' }}
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1093,7 +1093,7 @@ jobs:
     name: ORM compatibility (Prisma, Drizzle, TypeORM)
     needs: [build, changes]
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.orm == 'true' }}
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     timeout-minutes: 30
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1154,7 +1154,7 @@ jobs:
     name: Integration tests (${{ matrix.arch }})
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1201,7 +1201,7 @@ jobs:
     name: Build workspace tests (${{ matrix.arch }})
     needs: changes
     if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1249,7 +1249,7 @@ jobs:
       CI_SHARD: ${{ matrix.shard }}
       CI_SHARDS: "6"
     # ARM on every trigger; amd64 added on push and scheduled runs.
-    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1539,7 +1539,7 @@ jobs:
     name: Language tests - ${{ matrix.engine }} (${{ matrix.arch }})
     needs: changes
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1591,7 +1591,7 @@ jobs:
     name: Language decline report - ${{ matrix.engine }}
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     # Reports statements the engine declines to run; it never gates a merge and
     # is not a required check.
     continue-on-error: true
@@ -1647,7 +1647,7 @@ jobs:
     name: Upgrade test harness - ${{ matrix.engine }} (${{ matrix.arch }})
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1699,7 +1699,7 @@ jobs:
     name: Upgrade tests - ${{ matrix.engine }} (${{ matrix.arch }})
     needs: [build, upgrade-harness, changes]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1880,7 +1880,7 @@ jobs:
   conformance-tests:
     name: Conformance tests
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     needs: [build, changes]
     steps:
       - name: Harden the runner (Audit all outbound calls)
