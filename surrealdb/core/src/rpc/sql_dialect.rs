@@ -1144,6 +1144,7 @@ mod tests {
 		assert!(control("BEGIN; SELECT 1", Dialect::PgSql).is_none());
 	}
 
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
 	fn modes(control: Option<Control>) -> TxnModes {
 		match control {
 			Some(Control::Begin(modes)) => modes,
