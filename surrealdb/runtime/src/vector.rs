@@ -122,12 +122,16 @@ pub mod distance {
 
 	use super::NumberArray;
 	use crate::util::math::vector::{
-		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance,
+		ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, ManhattanDistance,
 		MinkowskiDistance, check_same_dimension,
 	};
 
 	pub fn chebyshev((a, b): (NumberArray, NumberArray)) -> Result<Value> {
 		Ok(a.chebyshev_distance(&b)?.into())
+	}
+
+	pub fn cosine((a, b): (NumberArray, NumberArray)) -> Result<Value> {
+		Ok(a.cosine_distance(&b)?.into())
 	}
 
 	pub fn euclidean((a, b): (NumberArray, NumberArray)) -> Result<Value> {

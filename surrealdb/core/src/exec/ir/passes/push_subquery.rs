@@ -516,6 +516,11 @@ fn subquery_target(cx: &mut LoCx<'_>, filter: &WhereFilter) -> Option<Target> {
 		let [body_block] = ir.region(*body)?.blocks.as_slice() else {
 			return None;
 		};
+		if ops_in(ir, *body)
+			.any(|op| where_filter(ir, op).is_some_and(|held| filter_has_knn(ir, &held)))
+		{
+			return None;
+		}
 		// Its rows leave through the projection, and nothing stands after it.
 		let ending = ir.op(*ir.block(*body_block)?.ops.last()?)?;
 		let (OpKind::Logical(LogOp::Yield), [projected]) =
@@ -538,6 +543,9 @@ fn subquery_target(cx: &mut LoCx<'_>, filter: &WhereFilter) -> Option<Target> {
 				ir.uses(beneath).len() == 1
 					&& ir.op(held.op).map(|data| data.parent) == Some(projection.parent)
 			});
+		if inner.as_ref().is_some_and(|held| filter_has_knn(ir, held)) {
+			return None;
+		}
 		(project, beneath, inner, identity, inner_loop_op)
 	};
 	if reads_past_row_set_change(cx, inner_loop_op, beneath) {
@@ -554,6 +562,43 @@ fn subquery_target(cx: &mut LoCx<'_>, filter: &WhereFilter) -> Option<Target> {
 		inner,
 		shape,
 	})
+}
+
+/// Whether the predicate of `filter` contains a `NearestNeighbor` (`<|...|>`) operator outside any
+/// nested subquery. A `KNN` filter caps the rows its loop produces to the top-$k$ nearest
+/// neighbours, so pushing an outer `WHERE` into that loop would turn a post-filter over the top-$k$
+/// rows into a pre-filter before the top-$k$ selection.
+fn filter_has_knn(ir: &Ir, filter: &WhereFilter) -> bool {
+	let Some(filter_region) = ir.op(filter.op).and_then(|data| data.regions.first().copied())
+	else {
+		return false;
+	};
+	let mut found = false;
+	ir.walk(filter_region, WalkOrder::PreOrder, &mut |op| {
+		let Some(data) = ir.op(op) else {
+			return Walk::Continue;
+		};
+		if matches!(
+			data.kind,
+			OpKind::Expr(ExprOp::Binary {
+				op: BinaryOperator::NearestNeighbor(_),
+			})
+		) && ancestors(ir, op).take_while(|(region, _)| *region != filter_region).all(
+			|(_, owner)| {
+				!owner.and_then(|o| ir.op(o)).is_some_and(|d| {
+					matches!(
+						d.kind,
+						OpKind::Expr(ExprOp::Subquery(_)) | OpKind::Logical(LogOp::Subquery)
+					)
+				})
+			},
+		) {
+			found = true;
+			return Walk::Stop;
+		}
+		Walk::Continue
+	});
+	found
 }
 
 /// One field of a projection, read out of the container.

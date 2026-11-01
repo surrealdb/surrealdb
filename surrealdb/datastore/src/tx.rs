@@ -2086,6 +2086,25 @@ impl ReferenceTargets {
 	}
 }
 
+/// The indexes among `indexes` that record the value shapes they store
+/// ([`crate::index_shapes`]): B-tree, spatial and vector indexes.
+fn shaped_indexes(indexes: &[catalog::IndexDefinition]) -> Vec<IndexId> {
+	indexes
+		.iter()
+		.filter(|ix| {
+			matches!(
+				ix.index,
+				catalog::Index::Idx
+					| catalog::Index::Uniq
+					| catalog::Index::Spatial
+					| catalog::Index::Hnsw(_)
+					| catalog::Index::DiskAnn(_)
+			)
+		})
+		.map(|ix| ix.index_id)
+		.collect()
+}
+
 impl Transaction {
 	/// Route a request path to the one `DEFINE API` that handles it, compiling
 	/// only that definition.
@@ -4692,8 +4711,9 @@ impl Transaction {
 		}
 	}
 
-	/// The value shapes the B-tree indexes among `indexes`, `tb`'s, have
-	/// stored, as this transaction sees them, read together.
+	/// The value shapes the indexes among `indexes`, `tb`'s, that record them
+	/// ([`shaped_indexes`]) have stored, as this transaction sees them, read
+	/// together.
 	pub async fn table_index_shapes(
 		&self,
 		ns: NamespaceId,
@@ -4701,21 +4721,12 @@ impl Transaction {
 		tb: &TableName,
 		indexes: &[catalog::IndexDefinition],
 	) -> Result<TableIndexShapes> {
-		let btree: Vec<IndexId> = indexes
-			.iter()
-			.filter(|ix| {
-				matches!(
-					ix.index,
-					catalog::Index::Idx | catalog::Index::Uniq | catalog::Index::Spatial
-				)
-			})
-			.map(|ix| ix.index_id)
-			.collect();
+		let btree = shaped_indexes(indexes);
 		self.table_index_shapes_of(ns, db, tb, &btree).await
 	}
 
-	/// The value shapes the B-tree indexes among `indexes`, `tb`'s, have
-	/// stored, for planning a statement that cannot write
+	/// The value shapes the indexes among `indexes`, `tb`'s, that record them
+	/// ([`shaped_indexes`]) have stored, for planning a statement that cannot write
 	/// ([`crate::index_shapes`]).
 	///
 	/// Shared through `cache` under the table's catalog version, for every
@@ -4737,16 +4748,7 @@ impl Transaction {
 		tb: &TableName,
 		indexes: &[catalog::IndexDefinition],
 	) -> Result<TableIndexShapes> {
-		let btree: Vec<IndexId> = indexes
-			.iter()
-			.filter(|ix| {
-				matches!(
-					ix.index,
-					catalog::Index::Idx | catalog::Index::Uniq | catalog::Index::Spatial
-				)
-			})
-			.map(|ix| ix.index_id)
-			.collect();
+		let btree = shaped_indexes(indexes);
 		if btree.is_empty() {
 			return Ok(TableIndexShapes::default());
 		}

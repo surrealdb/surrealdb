@@ -493,6 +493,7 @@ pub static PATHS: phf::Map<UniCase<&'static str>, PathEntry> = phf_map! {
 		UniCase::ascii("vector::subtract") => (PathKind::Function, None, FIRST),
 		UniCase::ascii("vector::sum") => (PathKind::Function, None, FIRST),
 		UniCase::ascii("vector::distance::chebyshev") => (PathKind::Function, None, FIRST),
+		UniCase::ascii("vector::distance::cosine") => (PathKind::Function, None, FIRST),
 		UniCase::ascii("vector::distance::euclidean") => (PathKind::Function, None, FIRST),
 		UniCase::ascii("vector::distance::hamming") => (PathKind::Function, None, FIRST),
 		UniCase::ascii("vector::distance::knn") => (PathKind::Function, None, FIRST),

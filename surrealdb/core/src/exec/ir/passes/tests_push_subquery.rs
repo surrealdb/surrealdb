@@ -170,6 +170,24 @@ async fn a_filter_stays_above_a_limit_or_start() {
 	assert_eq!(push(&mut ir).await.rewrites, 1);
 }
 
+/// A filter stays above a subquery whose `WHERE` clause holds a `NearestNeighbor` (`<|...|>`)
+/// operator, because the inner KNN selection already caps its output to the top-k neighbours and
+/// pushing the outer filter inside would turn post-filtering into pre-filtering.
+#[tokio::test]
+async fn a_filter_stays_above_a_knn_subquery() {
+	for sql in [
+		"SELECT * FROM (SELECT * FROM t WHERE vec <|5, 40|> [0f, 0f]) WHERE category = 'a'",
+		"SELECT * FROM (SELECT * FROM t WHERE tenant = 'x' AND vec <|5, EUCLIDEAN|> [0f, 0f]) WHERE category = 'a'",
+		"SELECT id, category FROM (SELECT id, category, vec FROM t WHERE vec <|3, 40|> $q) WHERE category = 'a'",
+	] {
+		let mut ir = bind(sql).await;
+		let before = filters(&ir);
+		let report = push(&mut ir).await;
+		assert_eq!(report.rewrites, 0, "`{sql}`");
+		assert_eq!(filters(&ir), before, "`{sql}`");
+	}
+}
+
 /// A conjunct that may raise does not move past an earlier conjunct that stays above the
 /// subquery, and no conjunct moves past an earlier conjunct that stays and may raise.
 #[tokio::test]

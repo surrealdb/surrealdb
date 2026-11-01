@@ -502,6 +502,7 @@ pub fn synchronous(
 		"vector::subtract" => vector::subtract,
 		"vector::sum" => vector::sum,
 		"vector::distance::chebyshev" => vector::distance::chebyshev,
+		"vector::distance::cosine" => vector::distance::cosine,
 		"vector::distance::euclidean" => vector::distance::euclidean,
 		"vector::distance::hamming" => vector::distance::hamming,
 		"vector::distance::knn" => vector::distance::knn((ctx, doc)),

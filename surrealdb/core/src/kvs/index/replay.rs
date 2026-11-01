@@ -25,7 +25,7 @@ use crate::exec::analyzer_function::StreamingAnalyzerFunction;
 use crate::idx::PreviousBuildPrimaryKey;
 use crate::idx::docids::TableDocIds;
 use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::index::IndexOperation;
+use crate::idx::index::{IndexOperation, recorded_shapes};
 use crate::key::schema::{
 	BuildAppendKey, BuildReservationKey, DocPendingKey, IndexAppendKey, RecordKey, RecordPrefix,
 };
@@ -698,9 +698,30 @@ impl Building {
 				// takes records. A record with one keeps the write path, which
 				// queues it behind the mutation replay applies on top.
 				if !queued && sink.takes_records() {
+					// The sink records no value shapes: a value it holds no entry for, or
+					// flattens, is recorded here, in the build transaction that takes it.
+					let absent = opt_values
+						.as_ref()
+						.filter(|values| recorded_shapes(values, &self.ix).next().is_some())
+						.cloned();
 					if !sink.take(&mut sink_records, &rid.key, opt_values)? {
 						consumed = i;
 						break;
+					}
+					if absent.is_some() {
+						IndexOperation::new(
+							ctx,
+							self.ix_key.ns,
+							self.ix_key.db,
+							self.tb,
+							&self.ix,
+							None,
+							absent,
+							rid.as_ref(),
+						)
+						.within_build()
+						.record_value_shapes()
+						.await?;
 					}
 					count += 1;
 					continue;

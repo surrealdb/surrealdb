@@ -525,6 +525,11 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 		get(funcs, "vector::distance::chebyshev"),
 	);
 	m.register_typed(
+		"vector_distance_cosine",
+		ValueKind::Array,
+		get(funcs, "vector::distance::cosine"),
+	);
+	m.register_typed(
 		"vector_distance_euclidean",
 		ValueKind::Array,
 		get(funcs, "vector::distance::euclidean"),

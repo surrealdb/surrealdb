@@ -2,7 +2,7 @@
 [env]
 
 [test]
-reason = "Pre-filtered vector search (#548) plan-shape gates: an OR of exactly-coverable equalities joins the allow-list as a BitmapOr; a negated conjunct always stays residual (no table-universe bitmap); a WITH INDEX hint pins the plan and disables the prefilter; a WITH INDEX hint naming a different index is overridden (with a warning) because a KNN operator can only be computed by its KnnScan; an indexed column without a declared array-free field kind is not provably exact and stays residual."
+reason = "Pre-filtered vector search (#548) plan-shape gates: an OR of exactly-coverable equalities joins the allow-list as a BitmapOr; a negated conjunct always stays residual (no table-universe bitmap); a WITH INDEX hint naming only the vector index pins the plan and disables the prefilter; a WITH INDEX hint naming a filter index keeps the KnnScan, since a KNN operator can only be computed by it, and builds the allow-list from the hinted index; an indexed column without a declared array-free field kind is not provably exact and stays residual."
 issue = 548
 
 [[test.results]]
@@ -52,7 +52,8 @@ value = '''
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: category = 'a']
-        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: category = 'a']
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1]
+            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']
 "'''
 
 [[test.results]]
@@ -87,10 +88,9 @@ EXPLAIN SELECT id FROM pts
 -- WITH INDEX pins the plan: no prefilter, the full residual is pushed down.
 EXPLAIN SELECT id FROM pts WITH INDEX hn_pt1
 	WHERE category = 'a' AND point <|2,40|> $pt;
--- WITH INDEX naming a DIFFERENT index is overridden (with a warning): any
--- driver other than the KnnScan would leave the KNN operator in a
--- never-truthy residual and return zero rows. The hint still disables the
--- prefilter, so the equality is pushed down as the residual.
+-- WITH INDEX naming a DIFFERENT index keeps the KnnScan as the driver: any
+-- other would leave the KNN operator in a never-truthy residual and return
+-- zero rows. The hinted index builds the scan's allow-list instead.
 EXPLAIN SELECT id FROM pts WITH INDEX idx_category
 	WHERE category = 'a' AND point <|2,40|> $pt;
 -- Undeclared field kind: `rawcat` is indexed but not provably exact.

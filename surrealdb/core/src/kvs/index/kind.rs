@@ -17,8 +17,8 @@
 //!   once the scan ends, before the scan is marked complete ([`InitialBatchSink::post_scan_step`],
 //!   [`Kind::has_post_scan_pass`]).
 //!
-//! and one step of cleaning an index before its scan: a cleared B-tree index records the shapes of
-//! the values it holds ([`Kind::tracks_value_shapes`]).
+//! and one step of cleaning an index before its scan: a cleared B-tree, spatial or vector index
+//! records the shapes of the values it holds ([`Kind::tracks_value_shapes`]).
 //!
 //! Every hook a batch calls receives the key range that batch covers ([`BatchRange`]), and none
 //! keeps state across batches beyond what its range says, except the COUNT merge, whose progress
@@ -99,7 +99,10 @@ impl<'a> Kind<'a> {
 	/// Whether cleaning this index before its scan starts recording the shapes of the values it
 	/// holds, so every write the scan admits records them too.
 	pub(super) fn tracks_value_shapes(self) -> bool {
-		matches!(self.0.index, Index::Idx | Index::Uniq | Index::Spatial)
+		matches!(
+			self.0.index,
+			Index::Idx | Index::Uniq | Index::Spatial | Index::Hnsw(_) | Index::DiskAnn(_)
+		)
 	}
 
 	/// Whether batches of this kind's initial scan may be indexed concurrently, each in a

@@ -248,6 +248,7 @@ pub const BUILTIN_METHOD_NAMES: &[&str] = &[
 	"vector_angle",
 	"vector_cross",
 	"vector_distance_chebyshev",
+	"vector_distance_cosine",
 	"vector_distance_euclidean",
 	"vector_distance_hamming",
 	"vector_distance_mahalanobis",

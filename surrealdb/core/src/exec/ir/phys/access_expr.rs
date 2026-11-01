@@ -590,6 +590,11 @@ impl Rebuild<'_> {
 				args,
 			});
 		}
+		if let ExprOp::Array = kind {
+			let items =
+				data.operands.iter().map(|op| self.expr(*op)).collect::<Option<Vec<_>>>()?;
+			return Some(LogicalExpr::Array(items));
+		}
 		// `NOT (...)` is parsed as a call of `not`, which negates its argument as the prefix does.
 		if let ExprOp::Call(attrs) = kind
 			&& matches!(&attrs.function, crate::expr::Function::Normal(name) if name == "not")
@@ -599,6 +604,44 @@ impl Rebuild<'_> {
 			return Some(LogicalExpr::Call(Box::new(crate::expr::logical::LogicalCall {
 				receiver: attrs.function.clone(),
 				args: vec![expr],
+			})));
+		}
+		if let ExprOp::Call(attrs) = kind
+			&& matches!(
+				&attrs.function,
+				crate::expr::Function::Normal(name) if name.starts_with("vector::distance::")
+			) && data.operands.len() >= 2
+		{
+			let ValueDef::OpResult {
+				op,
+				..
+			} = self.ir.value(value)?.def
+			else {
+				return None;
+			};
+			let region = self.ir.enclosing_region(op);
+			let mut args = Vec::with_capacity(data.operands.len());
+			for operand in &data.operands {
+				let saved_operands = self.operands.len();
+				let saved_budget = self.budget;
+				if let Some(expr) = self.expr_form(*operand) {
+					args.push(expr);
+				} else {
+					self.operands.truncate(saved_operands);
+					self.budget = saved_budget;
+					if !super::access_regions::reads_region_args(self.ir, region, *operand) {
+						args.push(LogicalExpr::Call(Box::new(crate::expr::logical::LogicalCall {
+							receiver: crate::expr::Function::Normal(String::new()),
+							args: Vec::new(),
+						})));
+					} else {
+						return None;
+					}
+				}
+			}
+			return Some(LogicalExpr::Call(Box::new(crate::expr::logical::LogicalCall {
+				receiver: attrs.function.clone(),
+				args,
 			})));
 		}
 		if let ExprOp::Prefix(op) = kind {

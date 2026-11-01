@@ -1011,6 +1011,7 @@ pub(crate) const FALLIBILITY: &[(FnKind, &str, Fallibility)] = &[
 	(FnKind::Scalar, "vector::angle", Fallibility::VALUE),
 	(FnKind::Scalar, "vector::cross", Fallibility::VALUE),
 	(FnKind::Scalar, "vector::distance::chebyshev", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::distance::cosine", Fallibility::VALUE),
 	(FnKind::Scalar, "vector::distance::euclidean", Fallibility::VALUE),
 	(FnKind::Scalar, "vector::distance::hamming", Fallibility::VALUE),
 	(FnKind::Scalar, "vector::distance::mahalanobis", Fallibility::VALUE),

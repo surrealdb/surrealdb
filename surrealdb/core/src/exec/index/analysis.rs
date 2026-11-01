@@ -55,6 +55,15 @@ pub struct IndexAnalyzer<'a> {
 	/// caller denied the function is never offered the bound: its comparison
 	/// stays a filter, which raises the denial when it is evaluated.
 	clock_allowed: bool,
+	/// The literal count `k` of a `LIMIT k` without `START`, used to satisfy
+	/// `ORDER BY vector::distance::<metric>(field, vec) ASC LIMIT k` via an ANN index.
+	limit_k: Option<u32>,
+	/// Per index of `indexes`, whether an HNSW or DiskANN index is known to
+	/// hold an entry for every record of its table
+	/// ([`super::access_path::ElementColumns::complete_vector`]): only such an
+	/// index answers `ORDER BY vector::distance::<metric>(...) LIMIT k`, which
+	/// orders every record.
+	complete_vector: Option<Arc<[bool]>>,
 	/// Per index of `indexes`, whether a `SPATIAL` index column is known from
 	/// recorded [`super::super::datastore::index_shapes::TableIndexShapes`] to
 	/// have stored only single-cell point geometries (no multi-cell covering
@@ -108,6 +117,8 @@ impl<'a> IndexAnalyzer<'a> {
 			registry,
 			key: None,
 			clock_allowed: false,
+			limit_k: None,
+			complete_vector: None,
 			point_only_spatial: None,
 			non_geometry_spatial: None,
 			elements_or_nullish: None,
@@ -154,6 +165,25 @@ impl<'a> IndexAnalyzer<'a> {
 			.and_then(|flags| flags.get(idx))
 			.copied()
 			.unwrap_or(false)
+	}
+
+	/// Mark the HNSW and DiskANN indexes that `flags` indicates hold an entry
+	/// for every record of their table.
+	pub fn with_complete_vector(mut self, flags: Arc<[bool]>) -> Self {
+		self.complete_vector = Some(flags);
+		self
+	}
+
+	fn is_complete_vector(&self, idx: usize) -> bool {
+		self.complete_vector.as_ref().and_then(|flags| flags.get(idx)).copied().unwrap_or(false)
+	}
+
+	/// Record the literal `LIMIT k` count of the statement so `analyze_order`
+	/// can match `ORDER BY vector::distance::<metric>(field, vec) ASC LIMIT k`
+	/// against an HNSW or DiskANN index.
+	pub fn with_limit(mut self, limit_k: Option<u32>) -> Self {
+		self.limit_k = limit_k;
+		self
 	}
 
 	/// Accept a comparison against `time::now()`, or `time::now() ± <duration
@@ -335,8 +365,12 @@ impl<'a> IndexAnalyzer<'a> {
 		// in a per-row residual where it is never truthy and the query
 		// silently returns zero rows.
 		if let Some(With::Index(names)) = self.with_hints {
-			candidates.retain(|c| {
+			let hint_matches_knn = candidates.iter().any(|c| {
 				matches!(c.access, BTreeAccess::Knn { .. })
+					&& names.iter().any(|n| n.as_str() == c.index_ref.name.as_str())
+			});
+			candidates.retain(|c| {
+				(!hint_matches_knn && matches!(c.access, BTreeAccess::Knn { .. }))
 					|| names.iter().any(|n| n.as_str() == c.index_ref.name.as_str())
 			});
 		}
@@ -1618,8 +1652,7 @@ impl<'a> IndexAnalyzer<'a> {
 		stripped: &LogicalExpr,
 		exact_col: &dyn Fn(&IndexRef, usize) -> bool,
 	) -> Option<KnnPrefilterPlan> {
-		// Explicit hints pin the plan.
-		if self.with_hints.is_some() {
+		if matches!(self.with_hints, Some(With::NoIndex)) {
 			return None;
 		}
 		let mut conjuncts = Vec::new();
@@ -3662,10 +3695,21 @@ impl<'a> IndexAnalyzer<'a> {
 		// when the distance matches the index definition.
 		let (k, user_ef, required_distance) = match nn {
 			NearestNeighbor::Approximate(k, ef) => (*k, Some(*ef), None),
-			NearestNeighbor::K(k, d) => (*k, None, Some(d)),
+			NearestNeighbor::K(k, d) => (*k, None, Some(crate::catalog::Distance::from(d.clone()))),
 			_ => return,
 		};
+		self.analyze_knn_condition(left, right, k, user_ef, required_distance.as_ref(), candidates);
+	}
 
+	fn analyze_knn_condition(
+		&self,
+		left: &LogicalExpr,
+		right: &LogicalExpr,
+		k: u32,
+		user_ef: Option<u32>,
+		required_distance: Option<&crate::catalog::Distance>,
+		candidates: &mut Vec<IndexCandidate>,
+	) {
 		// Extract the field path from the left side
 		if !left.is_path() {
 			return;
@@ -3686,10 +3730,30 @@ impl<'a> IndexAnalyzer<'a> {
 			None
 		};
 		let vector = match resolved {
-			Some(vector) => Arc::clone(vector),
+			Some(vector) => {
+				if required_distance.is_some()
+					&& !vector.is_empty()
+					&& !crate::exec::planner::util::is_rankable_query_vector(vector)
+				{
+					return;
+				}
+				Arc::clone(vector)
+			}
 			None => match classify_knn_vector(right, self.registry) {
-				KnnVectorClass::Vector(KnnQueryVector::Literal(vector)) => vector,
-				KnnVectorClass::Vector(KnnQueryVector::Deferred(_)) => Arc::from(Vec::new()),
+				KnnVectorClass::Vector(KnnQueryVector::Literal(vector)) => {
+					if required_distance.is_some()
+						&& !crate::exec::planner::util::is_rankable_query_vector(&vector)
+					{
+						return;
+					}
+					vector
+				}
+				KnnVectorClass::Vector(KnnQueryVector::Deferred(_)) => {
+					if required_distance.is_some() && try_literal_to_value(right).is_some() {
+						return;
+					}
+					Arc::from(Vec::new())
+				}
 				KnnVectorClass::ReadsRow => return,
 			},
 		};
@@ -3703,7 +3767,8 @@ impl<'a> IndexAnalyzer<'a> {
 			let ef = match &ix_def.index {
 				Index::Hnsw(hnsw) => {
 					if let Some(d) = required_distance
-						&& crate::catalog::Distance::from((*d).clone()) != hnsw.distance
+						&& (*d != hnsw.distance
+							|| (!vector.is_empty() && vector.len() != hnsw.dimension as usize))
 					{
 						continue;
 					}
@@ -3711,7 +3776,8 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 				Index::DiskAnn(diskann) => {
 					if let Some(d) = required_distance
-						&& crate::catalog::Distance::from((*d).clone()) != diskann.distance
+						&& (*d != diskann.distance
+							|| (!vector.is_empty() && vector.len() != diskann.dimension as usize))
 					{
 						continue;
 					}
@@ -3762,6 +3828,97 @@ impl<'a> IndexAnalyzer<'a> {
 	///   that scan would satisfy ORDER BY.
 	fn analyze_order(&self, ordering: &LogicalOrdering, candidates: &mut Vec<IndexCandidate>) {
 		use crate::exec::planner::util::index_covers_ordering;
+
+		// Pass 0 — `ORDER BY vector::distance::<metric>(field, query_vec) [ASC] LIMIT k`:
+		// When an HNSW or DiskANN index known to hold every record exists on `field` with a
+		// matching distance metric, satisfy the top-k vector ordering via KnnScan (and compose with
+		// any WHERE pre-filters). The scan chooses the k records by the index's own ranking, which
+		// is approximate: the graph search may miss a nearer record, and the index measures vectors
+		// converted to its `TYPE`, so records near-tied under the record values may swap. The sort
+		// kept above the scan orders the k it returns by the record values. A query that needs the
+		// exact top k writes `WITH NOINDEX`.
+		if let Some(k) = self.limit_k.filter(|&k| k > 0)
+			&& !candidates.iter().any(|c| matches!(c.access, BTreeAccess::Knn { .. }))
+			&& let LogicalOrdering::Order(keys) = ordering
+			&& let [key] = keys.as_slice()
+			&& key.direction
+			&& !key.collate
+			&& !key.numeric
+			&& let LogicalExpr::Call(call) = &key.value
+			&& let crate::expr::Function::Normal(name) = &call.receiver
+		{
+			let parsed = match (name.as_str(), call.args.as_slice()) {
+				("vector::distance::chebyshev", [a, b]) => {
+					Some((a, b, crate::catalog::Distance::Chebyshev))
+				}
+				("vector::distance::cosine", [a, b]) => {
+					Some((a, b, crate::catalog::Distance::Cosine))
+				}
+				("vector::distance::euclidean", [a, b]) => {
+					Some((a, b, crate::catalog::Distance::Euclidean))
+				}
+				("vector::distance::hamming", [a, b]) => {
+					Some((a, b, crate::catalog::Distance::Hamming))
+				}
+				("vector::distance::manhattan", [a, b]) => {
+					Some((a, b, crate::catalog::Distance::Manhattan))
+				}
+				("vector::distance::minkowski", [a, b, p]) => {
+					if let Some(Value::Number(n)) = try_literal_to_value(p) {
+						Some((a, b, crate::catalog::Distance::Minkowski(n)))
+					} else {
+						None
+					}
+				}
+				_ => None,
+			};
+			if let Some((arg0, arg1, distance)) = parsed {
+				let hint_allows_ann = match self.with_hints {
+					None => true,
+					Some(With::NoIndex) => false,
+					Some(With::Index(names)) => self.indexes.iter().any(|ix| {
+						!ix.prepare_remove
+							&& matches!(ix.index, Index::Hnsw(_) | Index::DiskAnn(_))
+							&& names.iter().any(|n| n.as_str() == ix.name.as_str())
+					}),
+				};
+				if hint_allows_ann {
+					for (field_expr, vec_expr) in [(arg0, arg1), (arg1, arg0)] {
+						let before = candidates.len();
+						self.analyze_knn_condition(
+							field_expr,
+							vec_expr,
+							k,
+							None,
+							Some(&distance),
+							candidates,
+						);
+						// The sort orders every record, and the vector of a record an index holds
+						// no entry for (`NONE` or `NULL`) raises in it: only an index known to hold
+						// every record answers it.
+						let hinted = |name: &str| match self.with_hints {
+							Some(With::Index(names)) => names.iter().any(|n| n.as_str() == name),
+							_ => true,
+						};
+						let mut i = before;
+						while i < candidates.len() {
+							let index = &candidates[i].index_ref;
+							if hinted(index.name.as_str()) && self.is_complete_vector(index.idx) {
+								i += 1;
+							} else {
+								candidates.remove(i);
+							}
+						}
+						if candidates.len() > before {
+							for candidate in &mut candidates[before..] {
+								candidate.covers_order = true;
+							}
+							break;
+						}
+					}
+				}
+			}
+		}
 
 		// Pass 1 — mark existing candidates that the authoritative check
 		// proves can satisfy ORDER BY in either direction.
@@ -6636,6 +6793,173 @@ mod tests {
 				"the KNN candidate must drive the plan: {path:?}"
 			);
 		}
+
+		#[test]
+		fn a_hint_feeding_the_knn_prefilter_is_not_overridden() {
+			use crate::exec::index::access_path::{knn_overrides_hint, select_access_path};
+			let cond = parse_cond("a = 1 AND vec <|2,100|> [0.0, 0.0]");
+			let stripped = parse_cond("a = 1");
+			// `prefiltered`: whether the prefilter is built, as it is unless
+			// prefiltering is off or no hinted index can supply the allow-list.
+			for (hinted, prefiltered, overridden) in [
+				("idx_a", true, false),
+				("idx_a", false, true),
+				("hn_vec", false, false),
+				("idx_z", true, true),
+			] {
+				let names = [hinted.to_owned()];
+				let hint = crate::expr::With::Index(names.to_vec());
+				let az = analyzer(
+					vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])],
+					Some(&hint),
+				);
+				let mut path = select_access_path(
+					az.analyze(Some(&cond), None),
+					Some(&hint),
+					Direction::Forward,
+				);
+				let AccessPath::KnnSearch {
+					prefilter,
+					..
+				} = &mut path
+				else {
+					panic!("the KNN candidate drives: {path:?}");
+				};
+				if prefiltered {
+					*prefilter = az.try_knn_prefilter(&stripped, &|_, _| true);
+				}
+				assert_eq!(
+					knn_overrides_hint(&path, &names),
+					overridden,
+					"`{hinted}`, prefiltered: {prefiltered}"
+				);
+			}
+		}
+
+		#[test]
+		fn with_index_hint_composes_with_knn_and_prefilter() {
+			let hint = crate::expr::With::Index(vec!["idx_a".to_owned()]);
+			let az = analyzer(
+				vec![
+					idx_v2(1, "idx_a", &["a"]),
+					idx_v2(2, "idx_b", &["b"]),
+					idx_hnsw(3, "hn_vec", &["vec"]),
+				],
+				Some(&hint),
+			);
+			let cond = parse_cond("a = 1 AND b = 2 AND vec <|2,100|> [0.0, 0.0]");
+			let candidates = az.analyze(Some(&cond), None);
+			let path = crate::exec::index::access_path::select_access_path(
+				candidates,
+				Some(&hint),
+				Direction::Forward,
+			);
+			assert!(
+				matches!(&path, AccessPath::KnnSearch { index_ref, .. } if index_ref.name == "hn_vec"),
+				"KNN must still be chosen when WITH INDEX names a pre-filter index: {path:?}"
+			);
+			let plan = split(&az, &cond, true).expect("hinted idx_a covers a = 1");
+			assert!(
+				matches!(&plan.root, BitmapPlan::BTree { index_ref, .. } if index_ref.name == "idx_a"),
+				"only hinted idx_a should be in the prefilter bitmap: {:?}",
+				plan.root
+			);
+			let residual = plan.residual.expect("unhinted b = 2 stays residual");
+			assert_eq!(surrealdb_types::ToSql::to_sql(&residual), "b = 2");
+
+			// When multiple ANN indexes exist on `vec` and WITH INDEX names the second one,
+			// `select_access_path` must choose the hinted ANN index rather than the first one.
+			let hint_ann = crate::expr::With::Index(vec!["hn_vec_2".to_owned()]);
+			let az_multi_ann = analyzer(
+				vec![idx_hnsw(3, "hn_vec_1", &["vec"]), idx_hnsw(4, "hn_vec_2", &["vec"])],
+				Some(&hint_ann),
+			);
+			let multi_cands = az_multi_ann.analyze(Some(&cond), None);
+			let multi_path = crate::exec::index::access_path::select_access_path(
+				multi_cands,
+				Some(&hint_ann),
+				Direction::Forward,
+			);
+			assert!(
+				matches!(&multi_path, AccessPath::KnnSearch { index_ref, .. } if index_ref.name == "hn_vec_2"),
+				"WITH INDEX naming a specific ANN index must select it: {multi_path:?}"
+			);
+		}
+
+		#[test]
+		fn order_by_vector_distance_limit_plans_knn_candidate() {
+			let mut ix_cos = idx_hnsw(3, "hn_cos", &["cos_vec"]);
+			if let Index::Hnsw(ref mut p) = ix_cos.index {
+				p.distance = Distance::Cosine;
+			}
+			let indexes = vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"]), ix_cos];
+			let az = analyzer(indexes.clone(), None)
+				.with_limit(Some(5))
+				.with_complete_vector(Arc::from([false, true, true]));
+
+			// 1. Standard ORDER BY vector::distance::euclidean(vec, [0.0, 0.0]) ASC LIMIT 5
+			let (cond, order) =
+				parse_cond_order("a = 1", "vector::distance::euclidean(vec, [0.0, 0.0]) ASC");
+			let cands = az.analyze(Some(&cond), Some(&order));
+			let knn = find_for(&cands, "hn_vec").expect("hn_vec should match euclidean distance");
+			assert!(knn.covers_order);
+			assert!(matches!(
+				knn.access,
+				BTreeAccess::Knn {
+					k: 5,
+					..
+				}
+			));
+
+			// 2. Commuted arguments: vector::distance::cosine([1.0, 0.0], cos_vec)
+			let (_, cos_order) =
+				parse_cond_order("a = 1", "vector::distance::cosine([1.0, 0.0], cos_vec)");
+			let cos_cands = az.analyze(Some(&cond), Some(&cos_order));
+			let cos_knn = find_for(&cos_cands, "hn_cos").expect("hn_cos should match cosine");
+			assert!(cos_knn.covers_order);
+			assert!(matches!(
+				cos_knn.access,
+				BTreeAccess::Knn {
+					k: 5,
+					..
+				}
+			));
+
+			// 3. DESC or mismatched metric or missing LIMIT does not plan KnnScan
+			let (_, desc_order) =
+				parse_cond_order("a = 1", "vector::distance::euclidean(vec, [0.0, 0.0]) DESC");
+			assert_no_candidate(&az.analyze(Some(&cond), Some(&desc_order)), "hn_vec");
+			let (_, mismatch_order) =
+				parse_cond_order("a = 1", "vector::distance::manhattan(vec, [0.0, 0.0]) ASC");
+			assert_no_candidate(&az.analyze(Some(&cond), Some(&mismatch_order)), "hn_vec");
+			let az_no_limit =
+				analyzer(vec![idx_hnsw(2, "hn_vec", &["vec"])], None).with_limit(None);
+			assert_no_candidate(&az_no_limit.analyze(Some(&cond), Some(&order)), "hn_vec");
+
+			// 4. Empty array, wrong dimension, NaN, or non-array literal does not plan KnnScan
+			for invalid_order in [
+				"vector::distance::euclidean(vec, []) ASC",
+				"vector::distance::euclidean(vec, [0.0, 0.0, 0.0]) ASC",
+				"vector::distance::euclidean(vec, [0.0, NaN]) ASC",
+				"vector::distance::euclidean(vec, 'not_a_vec') ASC",
+			] {
+				let (_, bad_order) = parse_cond_order("a = 1", invalid_order);
+				assert_no_candidate(&az.analyze(Some(&cond), Some(&bad_order)), "hn_vec");
+			}
+
+			// 5. An index that may hold no entry for some record (one whose vector is `NONE` or
+			//    `NULL`, or one whose shapes are untracked) does not answer the ordering.
+			let az_incomplete = analyzer(indexes.clone(), None).with_limit(Some(5));
+			assert_no_candidate(&az_incomplete.analyze(Some(&cond), Some(&order)), "hn_vec");
+			let az_cos_only = analyzer(indexes, None)
+				.with_limit(Some(5))
+				.with_complete_vector(Arc::from([false, false, true]));
+			assert_no_candidate(&az_cos_only.analyze(Some(&cond), Some(&order)), "hn_vec");
+			assert!(
+				find_for(&az_cos_only.analyze(Some(&cond), Some(&cos_order)), "hn_cos").is_some(),
+				"a complete index still answers"
+			);
+		}
 	}
 
 	// ------------------------------------------------------------------
@@ -8927,5 +9251,100 @@ mod tests {
 				"Truth-preserving prefix `{truth_preserving}` should push down to spatial index"
 			);
 		}
+	}
+
+	#[tokio::test]
+	async fn knn_with_index_subquery_and_order_by_distance_end_to_end() {
+		use surrealdb_types::ToSql;
+
+		let ds = crate::kvs::Datastore::builder()
+			.with_capabilities(crate::dbs::Capabilities::all())
+			.with_auth(false)
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
+
+		let setup_sql = r#"
+			DEFINE NAMESPACE test;
+			DEFINE DATABASE test;
+			DEFINE TABLE places;
+			DEFINE FIELD cat ON places TYPE string;
+			DEFINE FIELD vec ON places TYPE array<float>;
+			DEFINE INDEX idx_places_cat ON places FIELDS cat;
+			DEFINE INDEX idx_places_vec ON places FIELDS vec HNSW DIMENSION 2 DIST COSINE TYPE F32;
+			CREATE places:near_close SET cat = 'near', vec = [1.0, 0.0];
+			CREATE places:near_far   SET cat = 'near', vec = [0.6, 0.8];
+			CREATE places:far_close  SET cat = 'far',  vec = [1.0, 0.0];
+		"#;
+		let res = ds.execute(setup_sql, &ses, None).await.unwrap();
+		for r in res {
+			r.output().unwrap();
+		}
+
+		// WITH INDEX composability with KNN + pre-filter, subquery post-filtering, and standard
+		// SQL `ORDER BY vector::distance::<metric>(...) LIMIT k`: Note that `places:near_close`
+		// and `places:far_close` both have `vec = [1.0, 0.0]` (cosine distance 0 to `$photo`),
+		// while `places:near_far` has `vec = [0.6, 0.8]` (cosine distance 0.4 to `$photo`).
+		// - Pre-filtered `k = 2` (whether via `<|2, 40|>`, `WITH INDEX`, or `ORDER BY ... LIMIT 2`)
+		//   must return both near places `[places:near_close, places:near_far]`.
+		// - Post-filtered `k = 2` via subquery must take the global top-2 (`places:near_close` and
+		//   `places:far_close`) and then filter by `cat = 'near'`, returning only
+		//   `[places:near_close]`.
+		let knn_ergonomics_sql = r#"
+			LET $photo = [1.0, 0.0];
+			SELECT VALUE id FROM places WITH INDEX idx_places_cat
+				WHERE cat = 'near' AND vec <|2, 40|> $photo;
+			SELECT VALUE id FROM places WITH INDEX idx_places_cat, idx_places_vec
+				WHERE cat = 'near' AND vec <|2, 40|> $photo
+				EXPLAIN;
+			SELECT VALUE id FROM (
+				SELECT id, cat, vec FROM places WHERE vec <|2, 40|> $photo
+			) WHERE cat = 'near';
+			SELECT VALUE id FROM places
+				WHERE cat = 'near'
+				ORDER BY vector::distance::cosine(vec, $photo) ASC
+				LIMIT 2;
+			SELECT VALUE id FROM places
+				WHERE cat = 'near'
+				ORDER BY vector::distance::cosine(vec, $photo) ASC
+				LIMIT 2
+				EXPLAIN;
+		"#;
+		let mut erg_res = ds.execute(knn_ergonomics_sql, &ses, None).await.unwrap();
+		let with_index_val = erg_res.remove(1).output().unwrap();
+		assert_eq!(
+			with_index_val.to_sql(),
+			"[places:near_close, places:near_far]",
+			"WITH INDEX idx_places_cat must preserve pre-filtered KNN semantics and return both near places"
+		);
+		let with_index_explain = erg_res.remove(1).output().unwrap().to_sql();
+		assert!(
+			with_index_explain.contains("KnnScan")
+				&& with_index_explain.contains("idx_places_vec")
+				&& with_index_explain.contains("BitmapIndexScan")
+				&& with_index_explain.contains("idx_places_cat"),
+			"WITH INDEX idx_places_cat, idx_places_vec must plan KnnScan + BitmapIndexScan, got: {with_index_explain}"
+		);
+		let post_filter_val = erg_res.remove(1).output().unwrap();
+		assert_eq!(
+			post_filter_val.to_sql(),
+			"[places:near_close]",
+			"Subquery post-filtering must not push outer WHERE into KNN subquery"
+		);
+		let order_by_val = erg_res.remove(1).output().unwrap();
+		assert_eq!(
+			order_by_val.to_sql(),
+			"[places:near_close, places:near_far]",
+			"ORDER BY vector::distance::cosine(vec, $photo) ASC LIMIT 2 must return pre-filtered top-2 in distance order"
+		);
+		let order_by_explain = erg_res.remove(1).output().unwrap().to_sql();
+		assert!(
+			order_by_explain.contains("KnnScan")
+				&& order_by_explain.contains("idx_places_vec")
+				&& order_by_explain.contains("BitmapIndexScan")
+				&& order_by_explain.contains("idx_places_cat"),
+			"ORDER BY vector::distance::cosine(...) ASC LIMIT 2 must plan KnnScan + BitmapIndexScan, got: {order_by_explain}"
+		);
 	}
 }

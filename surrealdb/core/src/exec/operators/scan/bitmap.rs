@@ -55,6 +55,36 @@ pub(crate) const RESOLVE_BATCH_SIZE: usize = 1000;
 /// filter.
 const AND_CHILD_BUDGET_FACTOR: u64 = 64;
 
+/// Multiplier applied to a KNN search's `ef` to bound how many index entries
+/// each allow-list branch may drain before overflowing to in-traversal
+/// filtering ([`PrefilterTier::Fallback`]).
+const KNN_BRANCH_BUDGET_PER_EF: usize = 512;
+
+/// Floor for the `ef`-scaled KNN allow-list branch budget (before clamping to
+/// [`surrealdb_cnf::BITMAP_BRANCH_BUDGET`]), so small-`ef` searches can still
+/// materialize allow-lists across the exact tier and into the graph tier.
+const KNN_BRANCH_BUDGET_FLOOR: usize = 4_096;
+
+/// Compute the per-branch drained-entry budget for a KNN allow-list bitmap
+/// plan given the search's exploration width `ef`.
+///
+/// Scales linearly with `ef` between a floor above the exact-tier threshold and
+/// [`surrealdb_cnf::BITMAP_BRANCH_BUDGET`], so non-selective predicates on
+/// small-`ef` searches overflow early to in-traversal filtering instead of
+/// draining hundreds of thousands of index keys.
+pub(crate) fn knn_branch_budget(ef: u32) -> usize {
+	let max_budget = *surrealdb_cnf::BITMAP_BRANCH_BUDGET;
+	if max_budget == 0 {
+		return 0;
+	}
+	let exact_floor = usize::try_from(*surrealdb_cnf::KNN_PREFILTER_EXACT_THRESHOLD)
+		.unwrap_or(usize::MAX)
+		.saturating_mul(2)
+		.max(KNN_BRANCH_BUDGET_FLOOR);
+	let scaled = (ef as usize).saturating_mul(KNN_BRANCH_BUDGET_PER_EF).max(exact_floor);
+	scaled.min(max_budget)
+}
+
 /// Reject execution under a version (time-travel) context.
 ///
 /// Doc-ID mappings and index entry bitmaps are not versioned, so a bitmap
@@ -670,6 +700,7 @@ pub(crate) async fn knn_allow_list(
 	ctx: &ExecutionContext,
 	table: &TableName,
 	plan: &BitmapPlan,
+	ef: u32,
 	tally: Option<&BitmapTally>,
 ) -> std::result::Result<Option<RoaringTreemap>, ControlFlow> {
 	reject_versioned_execution(ctx)?;
@@ -685,7 +716,7 @@ pub(crate) async fn knn_allow_list(
 		db,
 		table,
 		doc_ids: &doc_ids,
-		budget: *surrealdb_cnf::BITMAP_BRANCH_BUDGET,
+		budget: knn_branch_budget(ef),
 		strict: true,
 	};
 	match build_bitmap_plan(plan, &bctx, false, tally).await? {
@@ -904,5 +935,21 @@ mod tests {
 			evaluate_fusion_plan(&ctx, &table, &plan, true).await,
 			Ok(FusedCandidates::Bitmap(_))
 		));
+	}
+
+	#[test]
+	fn knn_branch_budget_scales_with_ef_and_respects_bounds() {
+		let max_budget = *surrealdb_cnf::BITMAP_BRANCH_BUDGET;
+		let b_small = knn_branch_budget(10);
+		let b_med = knn_branch_budget(40);
+		let b_large = knn_branch_budget(1_000);
+		assert!(b_small <= b_med, "{b_small} <= {b_med}");
+		assert!(b_med <= b_large, "{b_med} <= {b_large}");
+		assert_eq!(b_large, max_budget);
+		if max_budget == 250_000 {
+			assert_eq!(b_small, 10 * KNN_BRANCH_BUDGET_PER_EF);
+			assert_eq!(b_med, 40 * KNN_BRANCH_BUDGET_PER_EF);
+			assert_eq!(knn_branch_budget(1), KNN_BRANCH_BUDGET_FLOOR);
+		}
 	}
 }

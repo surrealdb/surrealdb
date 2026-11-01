@@ -134,7 +134,21 @@ impl<'a, 's> Parser<'a, 's> {
 			} else {
 				loop {
 					let s = self.tok.start;
-					let i = self.basic_idiom()?;
+					let i = if self.tok.is_ident() && self.peek1().kind == T::PathSep {
+						let call = self.atom(true)?;
+						if self.ast.nodes[call as usize].tag != Tag::Call {
+							return Err(self.unexpected("("));
+						}
+						let tail = self.idiom_tail(call, s)?;
+						if tail == call {
+							let empty = self.empty_list();
+							self.node(Tag::Idiom, 0, call, empty, s, self.depth_of(call))?
+						} else {
+							tail
+						}
+					} else {
+						self.basic_idiom()?
+					};
 					let mut op = 0u8;
 					if self.eat_kw(Kw::Collate) {
 						op |= 2;

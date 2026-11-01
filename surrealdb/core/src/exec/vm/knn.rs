@@ -83,7 +83,7 @@ pub(super) async fn search(
 	let mut in_search = gate.residual;
 	if let Some(prefilter) = gate.prefilter.as_ref().filter(|_| index_def.uses_shared_doc_ids())
 		&& version.is_none()
-		&& let Some(list) = knn_allow_list(ctx, table, &prefilter.root, None).await?
+		&& let Some(list) = knn_allow_list(ctx, table, &prefilter.root, ef, None).await?
 	{
 		in_search = prefilter.residual;
 		allow = Some(list);
@@ -159,12 +159,14 @@ pub(super) async fn search(
 /// Exact scoring of the members of `allow`, without the graph, into a
 /// bounded heap, nearest first.
 ///
-/// With nothing to judge per record (`per_row` is `None`), the members are
-/// scored from the vectors the index stores, and no record is read here: the
-/// caller reads only the `k` winners. An index that keeps no doc-ID →
-/// elements mapping is scored as one with a `per_row` judge is: each member
-/// is read, judged by `per_row` where there is one, and scored against
-/// `vector`, so a record that is rejected takes no slot.
+/// When the index keeps its doc-ID → elements mapping, the members are scored
+/// from the vectors the index stores first. With nothing to judge per record
+/// (`per_row` is `None`), no record is read here: the caller reads only the
+/// `k` winners. With a `per_row` judge, the scored candidates are read and
+/// judged in nearest-first batches until `k` winners pass, so records beyond
+/// the `k`th passing neighbour are never read or judged. An index that keeps
+/// no doc-ID → elements mapping reads, judges and scores each member from its
+/// record.
 ///
 /// `ids` are the table id and key base the index is opened with, where the
 /// caller has read them already.
@@ -200,11 +202,18 @@ async fn exact(
 			)));
 		}
 	};
-	if per_row.is_none()
-		&& let Some(scored) =
-			from_index_vectors(ctx, table, index_def, vector, k, allow, ids).await?
+	let vector_cap = match per_row {
+		None => k,
+		Some(_) if k == 0 => 0,
+		Some(_) => u32::try_from(allow.len()).unwrap_or(u32::MAX),
+	};
+	if let Some(scored) =
+		from_index_vectors(ctx, table, index_def, vector, vector_cap, allow, ids).await?
 	{
-		return Ok(scored);
+		return match per_row {
+			None => Ok(scored),
+			Some(pipeline) => screen_scored_candidates(program, ctx, pipeline, k, scored).await,
+		};
 	}
 	// The indexed column is a stored field, read off each record as a pure
 	// path.
@@ -275,6 +284,74 @@ async fn exact(
 	}
 	// Sized by the neighbours found, not by `k`, which is the user's.
 	Ok(heap.into_sorted_nearest_first().map(|(distance, rid)| (rid, distance.to_float())).collect())
+}
+
+/// Screen `candidates` — already scored from the index's stored vectors and
+/// ordered nearest-first — through `pipeline` in bounded record batches,
+/// stopping as soon as `k` candidates pass.
+async fn screen_scored_candidates(
+	program: &Program,
+	ctx: &ExecutionContext,
+	pipeline: u16,
+	k: u32,
+	candidates: Vec<(RecordId, f64)>,
+) -> FlowResult<Vec<(RecordId, f64)>> {
+	let want = k as usize;
+	if want == 0 || candidates.is_empty() {
+		return Ok(Vec::new());
+	}
+	let mut winners = Vec::with_capacity(want.min(candidates.len()));
+	let mut iter = candidates.into_iter();
+	let mut sizer = BatchSizer::new(ctx, EXACT_BATCH_SIZE);
+	let mut first_batch = true;
+	while winners.len() < want {
+		let needed = want - winners.len();
+		let limit = if first_batch {
+			first_batch = false;
+			sizer.len().min(needed.saturating_mul(2).max(8))
+		} else {
+			sizer.len()
+		};
+		let chunk: Vec<(RecordId, f64)> = iter.by_ref().take(limit).collect();
+		if chunk.is_empty() {
+			break;
+		}
+		super::fuel::tick(ctx, super::fuel::units(chunk.len())).await?;
+		let rids: Vec<RecordId> = chunk.iter().map(|(rid, _)| rid.clone()).collect();
+		let rows = read_sized(ctx, &mut sizer, &rids, None, CachePolicy::ReadOnly).await?;
+		// `read_sized` yields records ordered by storage key (`RecordId`), whereas
+		// `chunk` is ordered nearest-first by distance. Re-index the fetched rows
+		// back into `chunk`'s nearest-first order before screening so that `admits`
+		// evaluation and early stopping at `want` winners strictly preserve distance
+		// rank regardless of `RecordId` order.
+		let mut ordered_rows: Vec<Option<Value>> = (0..chunk.len()).map(|_| None).collect();
+		for row in rows {
+			let Value::Object(object) = &row else {
+				continue;
+			};
+			let Some(Value::RecordId(rid)) = object.get("id") else {
+				continue;
+			};
+			if let Some(slot) =
+				chunk.iter().zip(ordered_rows.iter_mut()).find_map(|((cand_rid, _), slot)| {
+					(slot.is_none() && cand_rid == rid).then_some(slot)
+				}) {
+				*slot = Some(row);
+			}
+		}
+		for ((rid, distance), row) in chunk.into_iter().zip(ordered_rows) {
+			let Some(row) = row else {
+				continue;
+			};
+			if admits(program, pipeline, ctx, &row).await.catch_return()?.is_truthy() {
+				winners.push((rid, distance));
+				if winners.len() == want {
+					break;
+				}
+			}
+		}
+	}
+	Ok(winners)
 }
 
 /// The table id and key base an [`AnnTarget`] opens an ANN index with.

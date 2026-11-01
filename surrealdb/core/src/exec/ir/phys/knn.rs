@@ -52,6 +52,7 @@ use super::access_expr::{Reconstructed, conjunct_values, predicate_of_region};
 use super::access_regions::{cone_is_expr, conjunct_region, defined_in, rowless_value_copy};
 use super::ops::{KnnTargetShape, KnnTopKAttrs, PhysOp};
 use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
@@ -61,8 +62,9 @@ use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::expr::types::result_type;
-use crate::exec::ir::iface::catalog::{ExactAnswer, PhysCx};
+use crate::exec::ir::iface::catalog::{EffectCx, ExactAnswer, PhysCx};
 use crate::exec::ir::iface::conversion::EliminationReason;
+use crate::exec::ir::iface::effects::Determinism;
 use crate::exec::ir::iface::fold::FoldConsumer;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{ClauseRole, RegionKind};
@@ -1821,6 +1823,13 @@ pub(super) fn vector_text(ir: &Ir, region: RegionId, value: ValueId) -> Result<S
 	{
 		return Ok(written(ir, &predicate.operands, &vector));
 	}
+	if defined_in(ir, region, value)
+		|| ir
+			.region(region)
+			.is_some_and(|r| matches!(r.kind, RegionKind::Clause(ClauseRole::OrderKey)))
+	{
+		return Ok(String::new());
+	}
 	Err(IrError::Invariant {
 		what: "knn::vector_text: a KNN query vector with no text",
 	})
@@ -1853,5 +1862,84 @@ pub(super) fn run_time_vector(ir: &Ir, stages: &Stages) -> Option<(RegionId, Val
 			return found;
 		}
 	}
+	sort_key_vector(ir, stages)
+}
+
+/// The query vector of an `ORDER BY vector::distance::<metric>(field, vector)` key over the rows
+/// of `stages`, with the region of the sort key: the first of the call's two leading operands that
+/// reads no row. `None` when no sort over the rows measures a distance.
+fn sort_key_vector(ir: &Ir, stages: &Stages) -> Option<(RegionId, ValueId)> {
+	if let Some(rows) = ir.op(stages.looped).and_then(|d| d.results.first().copied())
+		&& let [only] = ir.uses(rows)
+		&& let Some(user) = ir.op(only.user)
+		&& matches!(user.kind, OpKind::Logical(LogOp::Sort(_)) | OpKind::Phys(PhysOp::Sort(_)))
+		&& let Some(&region) = user.regions.first()
+	{
+		let mut found = None;
+		ir.walk(region, WalkOrder::PreOrder, &mut |inner| {
+			if let Some(data) = ir.op(inner)
+				&& let OpKind::Expr(ExprOp::Call(attrs)) = &data.kind
+				&& matches!(
+					&attrs.function,
+					crate::expr::Function::Normal(name) if name.starts_with("vector::distance::")
+				) && let Some(&vec_val) = data
+				.operands
+				.iter()
+				.take(2)
+				.find(|&&op| !super::access_regions::reads_region_args(ir, region, op))
+			{
+				found = Some((region, vec_val));
+				return Walk::Stop;
+			}
+			Walk::Continue
+		});
+		return found;
+	}
 	None
+}
+
+/// The most ops of a sort key's query vector [`sort_vector_is_stable`] reads; a larger cone is
+/// not shown stable.
+const STABLE_VECTOR_OPS: usize = 1024;
+
+/// Whether the query vector of an `ORDER BY vector::distance::<metric>(...)` key over the rows of
+/// `stages` ([`sort_key_vector`]) answers one value however often it is evaluated. A `KNN` scan
+/// answering that order evaluates the vector once, before the scan, where the sort evaluates it
+/// per row, so only a vector whose cone draws no entropy and has no effect a second evaluation
+/// would repeat may move to the scan. A vector that may raise still moves: its cone reads no
+/// row, so it raises for every row the sort would measure, and the scan differs only in raising
+/// where no row reaches the sort, as a `KNN` operator's vector or a `LIMIT` evaluated before its
+/// scan does. `true` when no sort over the rows measures a distance.
+pub(super) fn sort_vector_is_stable(ir: &Ir, cx: &EffectCx<'_>, stages: &Stages) -> bool {
+	let Some((_, vector)) = sort_key_vector(ir, stages) else {
+		return true;
+	};
+	let mut facts = FactCache::new();
+	let mut seen: FxHashSet<OpId> = FxHashSet::default();
+	let mut pending = vec![vector];
+	while let Some(next) = pending.pop() {
+		let Some(ValueDef::OpResult {
+			op,
+			..
+		}) = ir.value(next).map(|data| data.def)
+		else {
+			continue;
+		};
+		if !seen.insert(op) {
+			continue;
+		}
+		if seen.len() > STABLE_VECTOR_OPS {
+			return false;
+		}
+		let held = effects::of_with(ir, &mut facts, cx, op);
+		if held.determinism == Determinism::NonDeterministic
+			|| !held.set.is_deterministic_but_for_clock()
+		{
+			return false;
+		}
+		if let Some(data) = ir.op(op) {
+			pending.extend(data.operands.iter().copied());
+		}
+	}
+	true
 }

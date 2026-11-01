@@ -330,6 +330,8 @@ pub(crate) struct SortKeys {
 	/// Whether a `LIMIT` can end the read early: the statement pages its rows and does not group
 	/// them.
 	pub(crate) limited: bool,
+	/// The literal count `k` of a `LIMIT k` without `START`, when the statement states one.
+	pub(crate) limit: Option<u32>,
 }
 
 /// The conjuncts a `KNN` scan judges itself, by position in the predicate.
@@ -540,6 +542,7 @@ pub(crate) fn select_access(
 	}
 	let offered = sort.and_then(|sort| sort.ordering.as_ref());
 	let limited = sort.is_some_and(|sort| sort.limited);
+	let limit = sort.and_then(|sort| sort.limit);
 	let prefixes = table.restricted.prefixes();
 	let (ordering, order_withheld) = match offered {
 		Some(order) if prefixes.order_touches(order) => (None, true),
@@ -549,7 +552,15 @@ pub(crate) fn select_access(
 	// A read that meets a catalog change when it runs enforces definitions the answers do not
 	// hold, and a read of a table the catalog does not define may find one defined.
 	let id_bounds = cx.id_bounds && table.defined && !source.may_meet_change;
-	match decide(table, source.with.as_ref(), cond.as_ref(), ordering, limited, cx)? {
+	match decide_with_limit(
+		table,
+		source.with.as_ref(),
+		cond.as_ref(),
+		ordering,
+		limited,
+		limit,
+		cx,
+	)? {
 		Some((path, direction)) => {
 			let mut choice = map_decision(
 				Decision {
@@ -784,6 +795,18 @@ pub(crate) fn decide(
 	limited: bool,
 	cx: &DecisionCx<'_>,
 ) -> Result<Option<(AccessPath, Direction)>, IrError> {
+	decide_with_limit(table, with, cond, order, limited, None, cx)
+}
+
+fn decide_with_limit(
+	table: &TableAnswers,
+	with: Option<&With>,
+	cond: Option<&LogicalExpr>,
+	order: Option<&LogicalOrdering>,
+	limited: bool,
+	limit: Option<u32>,
+	cx: &DecisionCx<'_>,
+) -> Result<Option<(AccessPath, Direction)>, IrError> {
 	let prefixes = table.restricted.prefixes();
 	let inputs = AccessInputs {
 		indexes: Arc::clone(&table.indexes),
@@ -794,6 +817,7 @@ pub(crate) fn decide(
 		allows_clock: table.allows_clock,
 		reads_versioned: table.version != ReadVersion::Current,
 		permissioned: table.permissioned,
+		limit,
 	};
 	decide_access(&inputs, cond, order, with, limited, cx.registry).map_err(|_| {
 		IrError::Invariant {
@@ -1721,6 +1745,16 @@ fn plan_source_choice(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Plann
 		if ranks {
 			knn::withhold_handled(&mut offer.predicate);
 		}
+		// The `LIMIT k` is what lets a `KNN` scan answer `ORDER BY vector::distance::*(..)`, which
+		// evaluates the query vector once where the sort evaluates it per row: a vector two
+		// evaluations may disagree on keeps the sort.
+		if let Some(sort) = offer.sort.as_mut()
+			&& sort.limit.is_some()
+			&& let Some(stages) = stages.as_ref()
+			&& !knn::sort_vector_is_stable(ir, &cx.effects, stages)
+		{
+			sort.limit = None;
+		}
 		// The decision reads each conjunct with the record paths the planner folded from the
 		// current records, unless the read is at another version; the filter keeps it as written.
 		let folded = match answers.version {
@@ -1729,7 +1763,7 @@ fn plan_source_choice(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Plann
 		};
 		let predicate = folded.as_ref().unwrap_or(&offer.predicate);
 		let cond = predicate.condition();
-		let knn_vectors = knn_vectors_of(cx, data, &answers, cond.as_ref())?;
+		let knn_vectors = knn_vectors_of(cx, data, &answers, cond.as_ref(), offer.sort.as_ref())?;
 		let decision = DecisionCx {
 			registry: cx.effects.registry,
 			knn_vectors: &knn_vectors,
@@ -2061,11 +2095,12 @@ fn knn_vectors_of(
 	data: &OpData,
 	answers: &TableAnswers,
 	cond: Option<&LogicalExpr>,
+	sort: Option<&SortKeys>,
 ) -> Result<KnnQueryVectors, IrError> {
 	let mut vectors = KnnQueryVectors::new();
-	let Some(cond) = cond else {
+	if cond.is_none() && sort.is_none() {
 		return Ok(vectors);
-	};
+	}
 	let Some(columns) = &answers.columns else {
 		return Ok(vectors);
 	};
@@ -2073,18 +2108,33 @@ fn knn_vectors_of(
 		return Ok(vectors);
 	}
 	let mut names: Vec<String> = Vec::new();
-	visit_binding_pruning(cond, &mut |expr| {
-		if let LogicalExpr::Binary {
-			op: BinaryOperator::NearestNeighbor(_),
-			right,
-			..
-		} = expr && let LogicalExpr::Param(param) = right.as_ref()
-			&& !names.iter().any(|held| held == param.as_str())
-		{
-			names.push(param.as_str().to_owned());
+	if let Some(cond) = cond {
+		visit_binding_pruning(cond, &mut |expr| {
+			if let LogicalExpr::Binary {
+				op: BinaryOperator::NearestNeighbor(_),
+				right,
+				..
+			} = expr && let LogicalExpr::Param(param) = right.as_ref()
+				&& !names.iter().any(|held| held == param.as_str())
+			{
+				names.push(param.as_str().to_owned());
+			}
+			Descend::Into
+		});
+	}
+	if let Some(LogicalOrdering::Order(keys)) = sort.and_then(|s| s.ordering.as_ref())
+		&& let [key] = keys.as_slice()
+		&& let LogicalExpr::Call(call) = &key.value
+		&& matches!(&call.receiver, Function::Normal(name) if name.starts_with("vector::distance::"))
+	{
+		for arg in call.args.iter().take(2) {
+			if let LogicalExpr::Param(param) = arg
+				&& !names.iter().any(|held| held == param.as_str())
+			{
+				names.push(param.as_str().to_owned());
+			}
 		}
-		Descend::Into
-	});
+	}
 	for name in names {
 		match cx.effects.catalog.free_value_exact(&name, data.frame, FoldConsumer::IndexChoice) {
 			ExactAnswer::Value(Value::Array(array)) if !array.is_empty() => {
@@ -2965,6 +3015,7 @@ mod tests {
 		let sort = order.map(|ordering| SortKeys {
 			ordering: Some(ordering),
 			limited: false,
+			limit: None,
 		});
 		select_access(&source, table, &predicate, sort.as_ref(), &decision())
 	}

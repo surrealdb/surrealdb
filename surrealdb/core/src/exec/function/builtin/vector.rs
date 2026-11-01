@@ -35,6 +35,7 @@ define_pure_function!(VectorScale, "vector::scale", effects: EffectSet::PURE, fa
 
 // Distance functions
 define_pure_function!(VectorDistanceChebyshev, "vector::distance::chebyshev", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::chebyshev);
+define_pure_function!(VectorDistanceCosine, "vector::distance::cosine", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::cosine);
 define_pure_function!(VectorDistanceEuclidean, "vector::distance::euclidean", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::euclidean);
 define_pure_function!(VectorDistanceHamming, "vector::distance::hamming", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::hamming);
 define_pure_function!(VectorDistanceMahalanobis, "vector::distance::mahalanobis", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any, cov: Any) -> Float, crate::fnc::vector::distance::mahalanobis);
@@ -146,6 +147,7 @@ pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
 	&VectorAngle,
 	&VectorCross,
 	&VectorDistanceChebyshev,
+	&VectorDistanceCosine,
 	&VectorDistanceEuclidean,
 	&VectorDistanceHamming,
 	&VectorDistanceMahalanobis,

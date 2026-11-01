@@ -17,8 +17,8 @@
 //! [`Instr::Measure`]: super::program::Instr::Measure
 
 use surrealdb_runtime::util::math::vector::{
-	ChebyshevDistance, CosineSimilarity, DotProduct, EuclideanDistance, HammingDistance,
-	JaccardSimilarity, ManhattanDistance,
+	ChebyshevDistance, CosineDistance, CosineSimilarity, DotProduct, EuclideanDistance,
+	HammingDistance, JaccardSimilarity, ManhattanDistance,
 };
 
 use crate::exec::function::ScalarFunction;
@@ -31,6 +31,7 @@ pub(super) enum MeasureKind {
 	Manhattan,
 	Chebyshev,
 	Hamming,
+	CosineDistance,
 	Cosine,
 	Jaccard,
 	Dot,
@@ -45,6 +46,7 @@ impl MeasureKind {
 			"vector::distance::manhattan" => Self::Manhattan,
 			"vector::distance::chebyshev" => Self::Chebyshev,
 			"vector::distance::hamming" => Self::Hamming,
+			"vector::distance::cosine" => Self::CosineDistance,
 			"vector::similarity::cosine" => Self::Cosine,
 			"vector::similarity::jaccard" => Self::Jaccard,
 			"vector::dot" => Self::Dot,
@@ -61,6 +63,7 @@ impl MeasureKind {
 			Self::Manhattan => a.manhattan_distance(b),
 			Self::Chebyshev => a.chebyshev_distance(b),
 			Self::Hamming => a.hamming_distance(b),
+			Self::CosineDistance => a.cosine_distance(b),
 			Self::Cosine => a.cosine_similarity(b),
 			Self::Jaccard => a.jaccard_similarity(b),
 			Self::Dot => a.dot(b),

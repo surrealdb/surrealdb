@@ -32,11 +32,12 @@
 use std::ops::Range;
 
 use super::access::SortKeys;
-use super::access_expr::{Reconstructed, ordering_of, predicate_of_region};
+use super::access_expr::{Reconstructed, expr_def, ordering_of, predicate_of_region};
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::error::IrError;
-use crate::exec::ir::iface::ids::{OpId, RegionId};
+use crate::exec::ir::expr::ops::ExprOp;
+use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{ClauseRole, FieldRole, RegionKind};
 use crate::exec::ir::logical::ops::{
 	FieldShape, FieldsShape, LogOp, LoopKind, LoopSink, ProjectAttrs, SortShape,
@@ -46,6 +47,7 @@ use crate::exec::logical::{Descend, visit_binding_pruning};
 use crate::exec::planner::util::{expr_contains_matches, has_knn_operator};
 use crate::expr::BinaryOperator;
 use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalOrdering, OutputPathPart};
+use crate::val::{Number, Value};
 
 /// The filter an offer's conjuncts were read from.
 #[derive(Clone, Debug)]
@@ -106,6 +108,7 @@ struct State {
 	ordering_layered: Vec<String>,
 	ordering: Option<LogicalOrdering>,
 	limited: bool,
+	limit: Option<u32>,
 	/// Past resolver layers alone, the first key of each column they write: a `KNN` operator over
 	/// any other path still reads the source's row. `None` while the rows are the source's, or
 	/// once anything else reshapes them.
@@ -134,6 +137,7 @@ fn offer_walk(ir: &Ir, source: OpId, across: bool) -> Result<Offer, IrError> {
 		ordering_layered: Vec::new(),
 		ordering: None,
 		limited: false,
+		limit: None,
 		layered: None,
 	};
 	let Some(mut rows) = ir.op(source).and_then(|data| data.results.first().copied()) else {
@@ -215,9 +219,15 @@ fn offer_walk(ir: &Ir, source: OpId, across: bool) -> Result<Offer, IrError> {
 				}
 			}
 			LogOp::Limit {
-				..
+				limit,
+				start,
 			} => {
 				state.limited = !offer.united;
+				if !offer.united && start.is_none() {
+					state.limit = limit
+						.and_then(|slot| user.operands.get(usize::from(slot)))
+						.and_then(|value| literal_limit_count(ir, *value));
+				}
 				break;
 			}
 			LogOp::Request {
@@ -325,9 +335,24 @@ fn offer_walk(ir: &Ir, source: OpId, across: bool) -> Result<Offer, IrError> {
 		offer.sort = Some(SortKeys {
 			ordering: state.ordering,
 			limited: state.limited,
+			limit: state.limit,
 		});
 	}
 	Ok(offer)
+}
+
+/// The literal positive integer count of a `LIMIT` operand, when it is one.
+fn literal_limit_count(ir: &Ir, value: ValueId) -> Option<u32> {
+	let (ExprOp::Literal(literal), _) = expr_def(ir, value)? else {
+		return None;
+	};
+	if let Value::Number(Number::Int(n)) = &**literal
+		&& *n > 0
+	{
+		u32::try_from(*n).ok()
+	} else {
+		None
+	}
 }
 
 /// Reads the ops of the body of a `Select` row loop in order.
@@ -667,12 +692,78 @@ fn reads_layered(key: &LogicalExpr, columns: &[String]) -> bool {
 	if columns.is_empty() {
 		return false;
 	}
-	if !key.is_path() {
-		return true;
+	if key.is_path() {
+		return match key.output_path().parts().first() {
+			Some(OutputPathPart::Field(name)) => columns.contains(name),
+			Some(OutputPathPart::Lookup(_)) | None => true,
+		};
 	}
-	match key.output_path().parts().first() {
-		Some(OutputPathPart::Field(name)) => columns.contains(name),
-		Some(OutputPathPart::Lookup(_)) | None => true,
+	match key {
+		LogicalExpr::Literal(_) | LogicalExpr::Param(_) => false,
+		LogicalExpr::Array(items) => items.iter().any(|item| reads_layered(item, columns)),
+		LogicalExpr::Call(call) => call.args.iter().any(|arg| reads_layered(arg, columns)),
+		LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => true,
 	}
 }
 

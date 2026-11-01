@@ -505,7 +505,7 @@ impl Measured {
 				let (chosen, walk_ef) = if *versioned {
 					(PrefilterTier::Fallback, None)
 				} else {
-					match knn_allow_list(ctx, table, &spec.root, Some(&tally)).await? {
+					match knn_allow_list(ctx, table, &spec.root, *ef, Some(&tally)).await? {
 						Some(allowed) => {
 							let per_row = *judges_condition
 								|| (*judges_permission && !ctx.root().skip_fetch_perms);

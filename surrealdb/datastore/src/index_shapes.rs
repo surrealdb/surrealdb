@@ -1,7 +1,11 @@
-//! The value shapes a B-tree index has stored, per column.
+//! The value shapes a B-tree, spatial or vector index has stored, per column.
 //!
 //! The index writer lists a record holding an array once per element of it,
-//! and stores every other value whole, at the one place it sorts. On a
+//! and stores every other value whole, at the one place it sorts. An HNSW or
+//! DiskANN index stores no entry for a record whose vector is `NONE` or `NULL`
+//! (`Absent`) and flattens an array of arrays into one vector (`Nested`), so a
+//! scan of it ranks every record as `vector::distance::*` measures it only
+//! where its vector column has stored neither. On a
 //! spatial index, a single in-bounds point is stored at one leaf cell with its
 //! exact coordinates (`Whole`), whereas non-point geometries, out-of-bounds
 //! points, and multi-geometry sets emit multiple covering or coarse ancestor
@@ -68,6 +72,13 @@ pub enum ValueShape {
 	/// a scalar string/number/object, a non-finite point, or a set with no
 	/// geometry elements).
 	NonGeometry,
+	/// A `NONE` or `NULL` in a vector column of an HNSW or DiskANN index,
+	/// which stores no entry for it: the record is absent from the index.
+	Absent,
+	/// An array holding an array in a vector column of an HNSW or DiskANN
+	/// index, which the index flattens into one vector: the record is ranked
+	/// by a vector `vector::distance::*` refuses to measure.
+	Nested,
 }
 
 impl ValueShape {
@@ -78,6 +89,8 @@ impl ValueShape {
 			ValueShape::Whole => 2,
 			ValueShape::MultiCell => 4,
 			ValueShape::NonGeometry => 8,
+			ValueShape::Absent => 16,
+			ValueShape::Nested => 32,
 		}
 	}
 }

@@ -5049,9 +5049,9 @@ impl Building {
 					}
 					return Err(err);
 				}
-				// A cleared B-tree index records its value shapes from here on:
+				// A cleared B-tree, spatial or vector index records its value shapes from here on:
 				// the scan and every write it admits go through the writer that
-				// records them.
+				// records them, or, for a batch a kind's sink takes, record them beside it.
 				let cleaned =
 					match crate::idx::wipe_index_data(&tx, &self.ikb, &self.ix.index).await {
 						Ok(()) if self.kind().tracks_value_shapes() => {

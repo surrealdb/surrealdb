@@ -1542,6 +1542,19 @@ pub(crate) fn with_array_columns_as_elements(
 		.collect();
 	let non_geometry_spatial =
 		non_geometry_spatial.contains(&true).then(|| non_geometry_spatial.into());
+	// A vector index holds no entry for a record whose vector is `NONE` or `NULL`, and ranks an
+	// array of arrays as the one vector it flattens to; only one tracked to have stored neither
+	// ranks every record of its table as `vector::distance::*` measures it.
+	let complete_vector: Vec<bool> = indexes
+		.iter()
+		.map(|ix| {
+			matches!(ix.index, Index::Hnsw(_) | Index::DiskAnn(_))
+				&& shapes.of(ix.index_id).is_some_and(|s| {
+					!s.may_hold(0, ValueShape::Absent) && !s.may_hold(0, ValueShape::Nested)
+				})
+		})
+		.collect();
+	let complete_vector = complete_vector.contains(&true).then(|| complete_vector.into());
 	// An element column the index has recorded storing nothing whole holds
 	// every record under its elements or under `NONE` / `NULL`.
 	let elements_or_nullish: Vec<ColumnFlags> = indexes
@@ -1573,6 +1586,7 @@ pub(crate) fn with_array_columns_as_elements(
 			sets,
 			point_only_spatial,
 			non_geometry_spatial,
+			complete_vector,
 			elements_or_nullish,
 		},
 		None => ElementColumns {
@@ -1580,6 +1594,7 @@ pub(crate) fn with_array_columns_as_elements(
 			sets,
 			point_only_spatial,
 			non_geometry_spatial,
+			complete_vector,
 			elements_or_nullish,
 			..ElementColumns::unchanged(indexes)
 		},
@@ -1913,6 +1928,15 @@ pub(crate) struct ElementColumns {
 	/// which emit no spatial index cells and would cause `geo::distance` to
 	/// raise a type error on a table scan.
 	pub(crate) non_geometry_spatial: Option<Arc<[bool]>>,
+	/// Per index, in order, whether an HNSW or DiskANN index is known from
+	/// recorded [`super::super::datastore::index_shapes::TableIndexShapes`] to
+	/// rank every record as `vector::distance::*` measures it: its vector column
+	/// has stored no `NONE` or `NULL` (recorded under
+	/// [`super::super::datastore::index_shapes::ValueShape::Absent`]) and no
+	/// array of arrays (recorded under
+	/// [`super::super::datastore::index_shapes::ValueShape::Nested`]). `None`
+	/// when none is, or when the shapes were not read.
+	pub(crate) complete_vector: Option<Arc<[bool]>>,
 	/// Per index, in order, whether each column takes every element of a
 	/// path of plain fields and is known from the recorded shapes to have
 	/// stored nothing whole: every record whose value at the path contains a
@@ -1933,6 +1957,7 @@ impl ElementColumns {
 			sets: None,
 			point_only_spatial: None,
 			non_geometry_spatial: None,
+			complete_vector: None,
 			elements_or_nullish: None,
 		}
 	}
@@ -2012,6 +2037,10 @@ impl ElementColumns {
 			Some(flags) => analyzer.with_non_geometry_spatial(Arc::clone(flags)),
 			None => analyzer,
 		};
+		let analyzer = match &self.complete_vector {
+			Some(flags) => analyzer.with_complete_vector(Arc::clone(flags)),
+			None => analyzer,
+		};
 		let analyzer = match &self.elements_or_nullish {
 			Some(flags) => analyzer.with_elements_or_nullish(Arc::clone(flags)),
 			None => analyzer,
@@ -2037,17 +2066,20 @@ impl ElementColumns {
 	}
 }
 
-/// Whether [`with_array_columns_as_elements`] could change or withhold any
-/// column of `indexes`: some b-tree index has a column holding no flatten,
-/// which may be rewritten, or one holding `*`, which may flatten a set.
-/// Callers skip reading the field list when it could not.
+/// Whether [`with_array_columns_as_elements`] could change, withhold or learn
+/// anything of a column of `indexes`: some b-tree index has a column holding no
+/// flatten, which may be rewritten, or one holding `*`, which may flatten a set,
+/// or some vector index may be known to hold every record
+/// ([`ElementColumns::complete_vector`]). Callers skip reading the field list
+/// and the shapes when it could not.
 pub(crate) fn may_have_array_columns(indexes: &[IndexDefinition]) -> bool {
-	indexes.iter().any(|ix| {
-		matches!(ix.index, Index::Idx | Index::Uniq | Index::Spatial)
-			&& ix.cols.iter().any(|c| {
-				c.0.iter().any(|p| matches!(p, Part::All))
-					|| !c.0.iter().any(|p| matches!(p, Part::Flatten))
-			})
+	indexes.iter().any(|ix| match ix.index {
+		Index::Idx | Index::Uniq | Index::Spatial => ix.cols.iter().any(|c| {
+			c.0.iter().any(|p| matches!(p, Part::All))
+				|| !c.0.iter().any(|p| matches!(p, Part::Flatten))
+		}),
+		Index::Hnsw(_) | Index::DiskAnn(_) => true,
+		Index::FullText(_) | Index::Count(_) => false,
 	})
 }
 
@@ -2676,6 +2708,63 @@ pub fn select_access_path(
 	select_access_path_paged(candidates, with_hints, direction, false)
 }
 
+/// Whether a KNN scan overrides a `WITH INDEX` hint naming `names`: the scan's
+/// own index is not hinted, and no hinted index is read by its prefilter's
+/// allow-list. A hinted index the prefilter does not read (prefiltering is
+/// off, the index stores no doc IDs, or it only delivers an `ORDER BY`) leaves
+/// its predicate to be judged per record, so the hint is overridden.
+pub(crate) fn knn_overrides_hint(path: &AccessPath, names: &[String]) -> bool {
+	let hinted = |index_ref: &IndexRef| names.iter().any(|n| n.as_str() == index_ref.name.as_str());
+	let AccessPath::KnnSearch {
+		index_ref,
+		prefilter,
+		..
+	} = path
+	else {
+		return false;
+	};
+	!hinted(index_ref) && !prefilter.as_ref().is_some_and(|p| bitmap_reads(&p.root, &hinted))
+}
+
+/// Whether `plan` reads an index `hinted` accepts.
+fn bitmap_reads(plan: &BitmapPlan, hinted: &impl Fn(&IndexRef) -> bool) -> bool {
+	match plan {
+		BitmapPlan::BTree {
+			index_ref,
+			..
+		}
+		| BitmapPlan::FullText {
+			index_ref,
+			..
+		} => hinted(index_ref),
+		BitmapPlan::Graph {
+			..
+		} => false,
+		BitmapPlan::And(children) | BitmapPlan::Or(children) => {
+			children.iter().any(|c| bitmap_reads(c, hinted))
+		}
+		BitmapPlan::AndNot {
+			base,
+			subtract,
+		} => bitmap_reads(base, hinted) || bitmap_reads(subtract, hinted),
+	}
+}
+
+/// Logs that a KNN scan overrides a `WITH INDEX` hint ([`knn_overrides_hint`]),
+/// as an unmatched hint is logged, so a plan that ignores WITH INDEX can be
+/// traced in the logs.
+fn warn_if_knn_overrides_hint(path: &AccessPath, with: Option<&With>) {
+	if let Some(With::Index(names)) = with
+		&& knn_overrides_hint(path, names)
+	{
+		tracing::warn!(
+			target: "surreal::index",
+			hinted = ?names,
+			"WITH INDEX hint overridden: a KNN operator can only be computed by its KnnScan",
+		);
+	}
+}
+
 /// [`select_access_path`] for a statement that does or does not page its rows
 /// with a `LIMIT`: under one, candidates are ranked by
 /// [`IndexCandidate::rank`], which prefers an index that delivers the
@@ -2698,17 +2787,22 @@ pub fn select_access_path_paged(
 	// outscores KNN, 1000 > 800) and WITH INDEX hints, both of which would
 	// otherwise pick a silently-wrong plan. The sibling predicates feed the
 	// KNN prefilter or the pushed-down residual instead.
-	if let Some(pos) = candidates.iter().position(|c| matches!(c.access, BTreeAccess::Knn { .. })) {
-		// Overriding an explicit hint logs a warning, as an unmatched hint does
-		// below, so a plan that ignores WITH INDEX can be traced in the logs.
-		// The override is never silent.
-		if let Some(With::Index(names)) = with_hints {
-			tracing::warn!(
-				target: "surreal::index",
-				hinted = ?names,
-				"WITH INDEX hint overridden: a KNN operator can only be computed by its KnnScan",
-			);
-		}
+	let knn_pos = if let Some(With::Index(names)) = with_hints {
+		names
+			.iter()
+			.find_map(|name| {
+				candidates.iter().position(|c| {
+					matches!(c.access, BTreeAccess::Knn { .. })
+						&& c.index_ref.name.as_str() == name.as_str()
+				})
+			})
+			.or_else(|| candidates.iter().position(|c| matches!(c.access, BTreeAccess::Knn { .. })))
+	} else {
+		candidates.iter().position(|c| matches!(c.access, BTreeAccess::Knn { .. }))
+	};
+	if let Some(pos) = knn_pos {
+		// Whether this overrides a WITH INDEX hint is known only once the KNN
+		// prefilter is built: `warn_if_knn_overrides_hint`.
 		return candidates.swap_remove(pos).to_access_path(direction);
 	}
 
@@ -2792,6 +2886,8 @@ pub(crate) struct AccessInputs<'a> {
 	/// Whether a table permission predicate is part of the condition, so that a key range over the
 	/// components of the record id takes only literal bounds.
 	pub(crate) permissioned: bool,
+	/// The literal count `k` of a `LIMIT k` without `START`, when the statement states one.
+	pub(crate) limit: Option<u32>,
 }
 
 /// The indexes a read may be served from: `indexes` with, for a versioned read, only the
@@ -2927,7 +3023,8 @@ pub(crate) fn decide_access(
 		.analyzer(with, registry)
 		.with_key(key.clone())
 		.with_clock(inputs.allows_clock)
-		.with_knn_query_vectors(inputs.knn_vectors);
+		.with_knn_query_vectors(inputs.knn_vectors)
+		.with_limit(inputs.limit);
 	let candidates = analyzer.analyze(analysis_cond, order);
 
 	// A key range is chosen unless an index candidate outranks it, and only a candidate that
@@ -3115,18 +3212,19 @@ pub(crate) fn decide_access(
 
 	// Pre-filtered vector search: evaluate the KNN query's exactly index-coverable conjuncts into
 	// an allow-list bitmap before the ANN search, instead of fetching every visited candidate's
-	// record. Gated like bitmap fusion: no WITH hints (the user pinned the plan) and no VERSION
-	// (doc-ID mappings are not time-travel-aware).
+	// record. Gated on no WITH NOINDEX (explicit WITH INDEX hints restrict which secondary indexes
+	// may contribute to the allow-list) and no VERSION (doc-ID mappings are not time-travel-aware).
 	if let AccessPath::KnnSearch {
 		prefilter,
 		..
 	} = &mut path
-		&& with.is_none()
+		&& !matches!(with, Some(With::NoIndex))
 		&& !inputs.reads_versioned
 		&& *surrealdb_cnf::KNN_PREFILTER_ENABLED
 	{
 		*prefilter = knn_prefilter_plan(&analyzer, analysis_cond);
 	}
+	warn_if_knn_overrides_hint(&path, with);
 
 	// When the best single-index path is a full-range scan (ORDER BY only, no WHERE selectivity),
 	// also try a multi-index union for OR conditions. The union reads only matching rows from each

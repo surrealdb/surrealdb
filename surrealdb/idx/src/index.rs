@@ -316,9 +316,9 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	/// Record the shapes of the values `n` this b-tree index stores beyond
-	/// those its columns are expected to ([`recorded_shapes`]), in the
-	/// transaction that writes their entries ([`Transaction::record_index_shapes`]).
+	/// Record the shapes of the values `n` this b-tree, spatial or vector index
+	/// stores beyond those its columns are expected to ([`recorded_shapes`]), in
+	/// the transaction that writes their entries ([`Transaction::record_index_shapes`]).
 	async fn record_shapes(&self, txn: &Transaction, n: &[Value]) -> Result<()> {
 		if recorded_shapes(n, self.ix).next().is_none() {
 			return Ok(());
@@ -331,6 +331,16 @@ impl<'a> IndexOperation<'a> {
 		let shapes: Vec<_> = recorded_shapes(n, self.ix).collect();
 		txn.record_index_shapes(self.ns, self.db, &self.table_name, ix, &shapes, self.shapes_by)
 			.await
+	}
+
+	/// Record the shapes of the new values this operation stores
+	/// ([`Self::record_shapes`]) without writing them, for a build that hands
+	/// the values to the index another way.
+	pub async fn record_value_shapes(&self) -> Result<()> {
+		match &self.n {
+			Some(n) => self.record_shapes(&self.env.tx(), n).await,
+			None => Ok(()),
+		}
 	}
 
 	/// The cancellation checkpoint a b-tree fan-out runs before its `entry`-th
@@ -917,6 +927,7 @@ impl<'a> IndexOperation<'a> {
 			.index_stores()
 			.get_index_hnsw(self.env, self.tb, &self.ikb, p, self.ix.format_version)
 			.await?;
+		self.record_value_shapes().await?;
 		let old_values = self.o.take();
 		let new_values = self.n.take();
 		if old_values.is_some() || new_values.is_some() {
@@ -943,6 +954,7 @@ impl<'a> IndexOperation<'a> {
 				.index_stores()
 				.get_index_diskann(self.ix.format_version, self.tb, &self.ikb, p)
 				.await?;
+			self.record_value_shapes().await?;
 			let old_values = self.o.take();
 			let new_values = self.n.take();
 			if old_values.is_some() || new_values.is_some() {
@@ -1026,14 +1038,26 @@ fn spatial_column_shape(v: &Value) -> ValueShape {
 /// and any other value (including `NONE`, `NULL`, a string, number, or
 /// non-finite point that emits no spatial cells) records
 /// [`ValueShape::NonGeometry`]. For B-tree columns, `NONE` and `NULL` record no
-/// shape.
+/// shape. For the vector column of an HNSW or DiskANN index, `NONE` and `NULL`,
+/// which the index stores no entry for, record [`ValueShape::Absent`], an array
+/// of arrays, which it flattens into one vector, records [`ValueShape::Nested`],
+/// and a flat vector records nothing.
 pub fn stored_shapes<'v>(
 	vals: &'v [Value],
 	ix: &'v IndexDefinition,
 ) -> impl Iterator<Item = (u16, ValueShape)> + 'v {
 	let is_spatial = matches!(ix.index, Index::Spatial);
 	let last_col = ix.cols.len().saturating_sub(1);
+	let is_vector = matches!(ix.index, Index::Hnsw(_) | Index::DiskAnn(_));
 	vals.iter().zip(ix.cols.iter()).zip(0u16..).filter_map(move |((v, col), i)| {
+		if is_vector {
+			if v.is_nullish() {
+				return Some((i, ValueShape::Absent));
+			}
+			let nested =
+				matches!(v, Value::Array(a) if a.iter().any(|e| matches!(e, Value::Array(_))));
+			return nested.then_some((i, ValueShape::Nested));
+		}
 		if is_spatial && usize::from(i) == last_col {
 			return Some((i, spatial_column_shape(v)));
 		}
@@ -1075,10 +1099,14 @@ fn expected_shape(col: &crate::expr::Idiom) -> ValueShape {
 /// to never makes a write record anything ([`recorded_shapes`]): a table's
 /// concurrent writers do not all rewrite one key on their first write.
 pub fn expected_shapes(ix: &IndexDefinition) -> Vec<(u16, ValueShape)> {
+	// A vector index records only the records it holds no entry for, which no column expects.
+	if matches!(ix.index, Index::Hnsw(_) | Index::DiskAnn(_)) {
+		return Vec::new();
+	}
 	ix.cols.iter().zip(0u16..).map(|(col, i)| (i, expected_shape(col))).collect()
 }
 
-/// The shapes of `vals` a write to B-tree index `ix` records: those
+/// The shapes of `vals` a write to B-tree, spatial or vector index `ix` records: those
 /// [`stored_shapes`] yields that their column is not expected to store
 /// ([`expected_shapes`]), which the index has recorded since its build began.
 pub fn recorded_shapes<'v>(
@@ -1936,5 +1964,40 @@ mod value_shapes {
 			recorded_shapes(&[Value::Null], &ix).collect::<Vec<_>>(),
 			[(0, ValueShape::NonGeometry)]
 		);
+	}
+
+	#[test]
+	fn a_vector_column_records_only_a_value_distance_does_not_measure() {
+		let ix = IndexDefinition {
+			index: Index::Hnsw(crate::catalog::HnswParams {
+				dimension: 2,
+				distance: crate::catalog::Distance::Euclidean,
+				vector_type: crate::catalog::VectorType::F32,
+				m: 12,
+				m0: 24,
+				ml: crate::val::Number::from(0.4),
+				ef_construction: 150,
+				extend_candidates: false,
+				keep_pruned_connections: false,
+				use_hashed_vector: false,
+			}),
+			..index(vec![Idiom::field("v")])
+		};
+		assert_eq!(expected_shapes(&ix), []);
+		let vector = Value::Array(Array::from(vec![Value::from(1.0), Value::from(2.0)]));
+		assert_eq!(shapes(std::slice::from_ref(&vector), &ix), []);
+		assert_eq!(recorded_shapes(&[vector], &ix).collect::<Vec<_>>(), []);
+		for absent in [Value::None, Value::Null] {
+			assert_eq!(shapes(std::slice::from_ref(&absent), &ix), [(0, ValueShape::Absent)]);
+			assert_eq!(
+				recorded_shapes(&[absent], &ix).collect::<Vec<_>>(),
+				[(0, ValueShape::Absent)]
+			);
+		}
+		let nested = Value::Array(Array::from(vec![
+			Value::Array(Array::from(vec![Value::from(1.0)])),
+			Value::Array(Array::from(vec![Value::from(2.0)])),
+		]));
+		assert_eq!(recorded_shapes(&[nested], &ix).collect::<Vec<_>>(), [(0, ValueShape::Nested)]);
 	}
 }
