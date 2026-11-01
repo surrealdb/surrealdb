@@ -3,6 +3,8 @@
 //! Converts SQL DDL (`CREATE TABLE`, `CREATE INDEX`, `CREATE VIEW`, `ALTER TABLE`, `DROP`)
 //! directly into SurrealDB `Expr::Define`, `Expr::Remove`, etc., without text serialization.
 
+use std::collections::{BTreeSet, HashMap};
+
 use surrealdb_expr::expr::field::Selector;
 use surrealdb_expr::expr::index_kind::Index;
 use surrealdb_expr::expr::operator::BinaryOperator;
@@ -13,8 +15,8 @@ use surrealdb_expr::expr::statements::define::{
 	DefineSequenceStatement, DefineStatement, DefineTableStatement,
 };
 use surrealdb_expr::expr::statements::remove::{
-	RemoveDatabaseStatement, RemoveFieldStatement, RemoveIndexStatement, RemoveStatement,
-	RemoveTableStatement,
+	RemoveDatabaseStatement, RemoveFieldStatement, RemoveIndexStatement, RemoveSequenceStatement,
+	RemoveStatement, RemoveTableStatement,
 };
 use surrealdb_expr::expr::statements::{IfelseStatement, InfoStatement};
 use surrealdb_expr::expr::table_type::TableType;
@@ -983,6 +985,9 @@ pub fn lower_pgsql_alter_table_with(
 }
 
 /// Lower a PostgreSQL DROP statement into SurrealDB expressions.
+///
+/// `DROP SCHEMA` needs the tables of the database and is refused here; see
+/// [`lower_pgsql_drop_with`].
 pub fn lower_pgsql_drop(drop: &PgDropStmt) -> Result<Vec<Expr>, PlanError> {
 	let mut exprs = Vec::new();
 
@@ -1016,6 +1021,138 @@ pub fn lower_pgsql_drop(drop: &PgDropStmt) -> Result<Vec<Expr>, PlanError> {
 		}
 	}
 
+	Ok(exprs)
+}
+
+/// The names of `tables` in the order they can be removed: a view before the tables it reads, and
+/// otherwise by name.
+///
+/// A topological sort that always takes the first name among the tables no remaining table reads,
+/// in time proportional to the tables and the sources the views read, times a logarithm. A source
+/// that is not among `tables` is ignored.
+fn removal_order(mut tables: Vec<TableSchema>) -> Vec<String> {
+	tables.sort_by(|a, b| a.name.cmp(&b.name));
+	tables.dedup_by(|a, b| a.name == b.name);
+	let position: HashMap<&str, usize> =
+		tables.iter().enumerate().map(|(at, table)| (table.name.as_str(), at)).collect();
+	// `reads[at]` is what table `at` reads, and `readers[at]` how many tables left still read it.
+	let reads: Vec<Vec<usize>> = tables
+		.iter()
+		.map(|table| {
+			let mut sources: Vec<usize> = table
+				.view_over
+				.iter()
+				.filter_map(|name| position.get(name.as_str()).copied())
+				.collect();
+			sources.sort_unstable();
+			sources.dedup();
+			sources
+		})
+		.collect();
+	let mut readers = vec![0usize; tables.len()];
+	for source in reads.iter().flatten() {
+		readers[*source] += 1;
+	}
+	let mut ready: BTreeSet<usize> = (0..tables.len()).filter(|at| readers[*at] == 0).collect();
+	let mut removed = vec![false; tables.len()];
+	let mut order: Vec<String> = Vec::with_capacity(tables.len());
+	while let Some(at) = ready.pop_first() {
+		removed[at] = true;
+		order.push(tables[at].name.clone());
+		for source in &reads[at] {
+			readers[*source] -= 1;
+			if readers[*source] == 0 {
+				ready.insert(*source);
+			}
+		}
+	}
+	// A view cycle, which the engine does not allow, leaves tables that something still reads: they
+	// go last, in name order.
+	order.extend(
+		tables.iter().zip(&removed).filter(|(_, done)| !**done).map(|(t, _)| t.name.clone()),
+	);
+	order
+}
+
+/// The schemas whose contents the front end synthesises, which cannot be dropped.
+const SYSTEM_SCHEMAS: [&str; 3] = ["pg_catalog", "information_schema", "pg_toast"];
+
+/// Lower a PostgreSQL DROP statement against `catalog`, which lists the tables of the database.
+///
+/// A SurrealDB database is one PostgreSQL schema, `public`: `pg_namespace` and
+/// `information_schema` list every user table under it, and `public.t` is the table `t`.
+/// `DROP SCHEMA public CASCADE` therefore removes every table of the database, each as `REMOVE
+/// TABLE` does, and then the sequences their serial and auto-increment columns draw from, so it
+/// needs the role that removing the tables one by one needs, and the whole statement succeeds or
+/// fails together. Without `CASCADE` it is refused (`0A000`) while the
+/// database holds a table, as PostgreSQL refuses a schema that holds objects.
+///
+/// A name that is not `public` is no schema: it is `42P01`, or nothing to do under `IF EXISTS`.
+/// The synthesised schemas (`pg_catalog`, `information_schema`, `pg_toast`) are refused (`0A000`).
+/// A catalog that lists no table (a session that may not view them, or an empty database) removes
+/// nothing, and a catalog that defers its checks to the
+/// schema ([`BinderCatalog::defers_schema_checks`]) is lowered again once the tables are known.
+///
+/// Every other object type lowers as [`lower_pgsql_drop`] does.
+pub fn lower_pgsql_drop_with(
+	drop: &PgDropStmt,
+	catalog: &dyn BinderCatalog,
+) -> Result<Vec<Expr>, PlanError> {
+	if !matches!(drop.object_type, DropObjectType::Schema) {
+		return lower_pgsql_drop(drop);
+	}
+	let mut exprs = Vec::new();
+	for name in &drop.names {
+		let [schema] = name.parts.as_slice() else {
+			return Err(PlanError::unsupported(format!(
+				"DROP SCHEMA of the qualified name {}",
+				name.parts.join(".")
+			)));
+		};
+		if SYSTEM_SCHEMAS.contains(&schema.as_str()) {
+			return Err(PlanError::unsupported(format!(
+				"DROP SCHEMA {schema}: the schema is required by the database system"
+			)));
+		}
+		if schema != "public" {
+			if drop.if_exists {
+				continue;
+			}
+			return Err(PlanError::UndefinedTable(schema.clone()));
+		}
+		let listed = catalog.constraint_tables();
+		let sequences: BTreeSet<String> = listed
+			.iter()
+			.flat_map(|table| &table.columns)
+			.filter_map(|column| column.sequence.clone())
+			.collect();
+		let tables = removal_order(listed);
+		// Asked on every path, so a catalog that records what it is asked lowers the statement
+		// again once it knows the tables.
+		let deferred = catalog.defers_schema_checks();
+		if !drop.cascade && !tables.is_empty() && !deferred {
+			return Err(PlanError::unsupported(
+				"DROP SCHEMA public: the database holds tables that depend on it; use CASCADE",
+			));
+		}
+		if drop.cascade {
+			exprs.extend(tables.iter().map(|table| {
+				Expr::Remove(Box::new(RemoveStatement::Table(RemoveTableStatement {
+					name: Expr::Table(TableName::from(table.as_str())),
+					if_exists: true,
+					expunge: false,
+				})))
+			}));
+			// A sequence outlives the table that draws from it, so the schema's removal takes the
+			// sequences of the serial and auto-increment columns along.
+			exprs.extend(sequences.iter().map(|sequence| {
+				Expr::Remove(Box::new(RemoveStatement::Sequence(RemoveSequenceStatement {
+					name: Expr::Idiom(Idiom::field(sequence.as_str())),
+					if_exists: true,
+				})))
+			}));
+		}
+	}
 	Ok(exprs)
 }
 
@@ -1057,7 +1194,7 @@ fn lower_pgsql_ddl_definitions_over(
 		PgStatement::CreateExtension(s) => super::vector_ddl::lower_create_extension(s),
 		PgStatement::CreateView(s) => lower_pgsql_create_view(s),
 		PgStatement::AlterTable(s) => lower_pgsql_alter_table_with(s, catalog),
-		PgStatement::Drop(s) => lower_pgsql_drop(s),
+		PgStatement::Drop(s) => lower_pgsql_drop_with(s, catalog),
 		PgStatement::Copy(_)
 		| PgStatement::Select(_)
 		| PgStatement::Insert(_)

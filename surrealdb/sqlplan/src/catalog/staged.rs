@@ -44,6 +44,8 @@ pub struct StagedCatalog<'a> {
 	own: HashSet<String>,
 	/// The tables a staged statement creates, which the table listings include.
 	created: HashSet<String>,
+	/// The tables each staged view reads, by view.
+	view_over: HashMap<String, Vec<String>>,
 	/// The foreign keys the staged statements define, by table.
 	keys: HashMap<String, Vec<ForeignKeyInfo>>,
 	/// The ordered and unique indexes the staged statements define, by table.
@@ -84,6 +86,7 @@ impl<'a> StagedCatalog<'a> {
 			tentative: HashSet::new(),
 			own: HashSet::new(),
 			created: HashSet::new(),
+			view_over: HashMap::new(),
 			keys: HashMap::new(),
 			indexes: HashMap::new(),
 			sequences: HashMap::new(),
@@ -119,6 +122,10 @@ impl<'a> StagedCatalog<'a> {
 			{
 				self.forget(name.as_str());
 				self.created.insert(name.as_str().to_owned());
+				if let Some(view) = &table.view {
+					let sources = view.what.iter().map(|source| source.as_str().to_owned());
+					self.view_over.insert(name.as_str().to_owned(), sources.collect());
+				}
 				if table.full && table.view.is_none() {
 					self.nulls.insert(name.as_str().to_owned(), BTreeSet::new());
 					self.defaults.insert(name.as_str().to_owned(), BTreeMap::new());
@@ -405,6 +412,7 @@ impl<'a> StagedCatalog<'a> {
 		self.keys.remove(table);
 		self.indexes.remove(table);
 		self.sequences.retain(|(name, _), _| name != table);
+		self.view_over.remove(table);
 		self.nulls.remove(table);
 		self.defaults.remove(table);
 		self.changed.retain(|(name, _)| name != table);
@@ -512,7 +520,8 @@ impl StagedCatalog<'_> {
 				TableSchema::new(name.as_str(), infos)
 					.with_schema("public")
 					.with_indexes(self.indexes.get(name).cloned().unwrap_or_default())
-					.with_foreign_keys(self.keys.get(name).cloned().unwrap_or_default()),
+					.with_foreign_keys(self.keys.get(name).cloned().unwrap_or_default())
+					.with_view_over(self.view_over.get(name).cloned().unwrap_or_default()),
 			);
 		}
 		listed

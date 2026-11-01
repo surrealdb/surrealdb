@@ -1726,3 +1726,215 @@ fn a_column_with_two_foreign_keys_is_refused() {
 		assert_eq!(err.pg_sqlstate(), "0A000", "{sql}: {err}");
 	}
 }
+
+mod drop_schema {
+	use surrealdb_expr::expr::Expr;
+	use surrealdb_types::ToSql;
+
+	use super::super::ddl::{lower_pgsql_ddl_definitions_with, lower_pgsql_ddl_with};
+	use crate::{BinderCatalog, ColumnInfo, MemoryCatalog, PlanError, StagedCatalog, TableSchema};
+
+	/// A database holding `post` and `plain`, listed out of name order.
+	fn catalog() -> MemoryCatalog {
+		let table = |name: &str| {
+			TableSchema::new(name, vec![ColumnInfo::new("id", 0)]).with_schema("public")
+		};
+		MemoryCatalog::new().with_listed_tables(vec![table("post"), table("plain")])
+	}
+
+	/// A catalog that lists no table and leaves its refusals to the schema, as the recorder the
+	/// datastore lowers with first does.
+	struct Deferring;
+
+	impl BinderCatalog for Deferring {
+		fn get_table(&self, _schema: Option<&str>, _name: &str) -> Option<TableSchema> {
+			None
+		}
+
+		fn defers_schema_checks(&self) -> bool {
+			true
+		}
+	}
+
+	fn lower(catalog: &dyn BinderCatalog, sql: &str) -> Result<Vec<String>, PlanError> {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		lower_pgsql_ddl_definitions_with(&stmt, catalog)
+			.map(|exprs| exprs.iter().map(Expr::to_sql).collect())
+	}
+
+	#[test]
+	fn cascade_removes_every_table_in_name_order() {
+		for sql in ["DROP SCHEMA public CASCADE", "DROP SCHEMA IF EXISTS public CASCADE"] {
+			assert_eq!(
+				lower(&catalog(), sql).unwrap(),
+				["REMOVE TABLE IF EXISTS plain", "REMOVE TABLE IF EXISTS post"],
+				"{sql}"
+			);
+		}
+	}
+
+	#[test]
+	fn a_view_is_removed_before_the_tables_it_reads() {
+		let table = |name: &str, over: &[&str]| {
+			TableSchema::new(name, vec![ColumnInfo::new("id", 0)])
+				.with_schema("public")
+				.with_view_over(over.iter().map(|source| (*source).to_owned()).collect())
+		};
+		let catalog = MemoryCatalog::new().with_listed_tables(vec![
+			table("a_base", &[]),
+			table("m_view", &["a_base"]),
+			table("z_view_of_view", &["m_view"]),
+			table("b_plain", &[]),
+		]);
+		assert_eq!(
+			lower(&catalog, "DROP SCHEMA public CASCADE").unwrap(),
+			[
+				"REMOVE TABLE IF EXISTS b_plain",
+				"REMOVE TABLE IF EXISTS z_view_of_view",
+				"REMOVE TABLE IF EXISTS m_view",
+				"REMOVE TABLE IF EXISTS a_base",
+			]
+		);
+	}
+
+	#[test]
+	fn a_view_created_in_the_same_request_is_removed_before_its_source() {
+		let base = MemoryCatalog::new().with_listed_tables(vec![
+			TableSchema::new("a_base", vec![ColumnInfo::new("id", 0)]).with_schema("public"),
+		]);
+		let mut staged = StagedCatalog::new(&base);
+		let create =
+			surrealdb_pgsql::parse_statement("CREATE VIEW z_view AS SELECT * FROM a_base").unwrap();
+		staged.stage(&lower_pgsql_ddl_with(&create, &staged).unwrap());
+		assert_eq!(
+			lower(&staged, "DROP SCHEMA public CASCADE").unwrap(),
+			["REMOVE TABLE IF EXISTS z_view", "REMOVE TABLE IF EXISTS a_base"]
+		);
+	}
+
+	#[test]
+	fn cascade_removes_the_sequences_the_tables_draw_from() {
+		let table = |name: &str, sequence: Option<&str>| {
+			let mut id = ColumnInfo::new("id", 0);
+			id.sequence = sequence.map(str::to_owned);
+			TableSchema::new(name, vec![id]).with_schema("public")
+		};
+		let catalog = MemoryCatalog::new().with_listed_tables(vec![
+			table("post", Some("post_id_seq")),
+			table("plain", None),
+			table("author", Some("author_id_seq")),
+		]);
+		assert_eq!(
+			lower(&catalog, "DROP SCHEMA public CASCADE").unwrap(),
+			[
+				"REMOVE TABLE IF EXISTS author",
+				"REMOVE TABLE IF EXISTS plain",
+				"REMOVE TABLE IF EXISTS post",
+				"REMOVE SEQUENCE IF EXISTS author_id_seq",
+				"REMOVE SEQUENCE IF EXISTS post_id_seq",
+			]
+		);
+	}
+
+	#[test]
+	fn views_over_many_tables_are_removed_before_their_sources() {
+		const PAIRS: usize = 3_000;
+		let table = |name: String, over: Vec<String>| {
+			TableSchema::new(name, vec![ColumnInfo::new("id", 0)])
+				.with_schema("public")
+				.with_view_over(over)
+		};
+		// Sources sort before the views that read them, so a removal that went by name alone would
+		// take every source first. Each view also reads the previous source, and a source is listed
+		// twice.
+		let mut listed = Vec::new();
+		for at in 0..PAIRS {
+			let mut over = vec![format!("a_{at:05}")];
+			if at > 0 {
+				over.push(format!("a_{:05}", at - 1));
+			}
+			listed.push(table(format!("v_{at:05}"), over));
+			listed.push(table(format!("a_{at:05}"), Vec::new()));
+		}
+		listed.push(table("a_00000".to_owned(), Vec::new()));
+		let catalog = MemoryCatalog::new().with_listed_tables(listed);
+		let removed = lower(&catalog, "DROP SCHEMA public CASCADE").unwrap();
+		assert_eq!(removed.len(), 2 * PAIRS);
+		let removed_at = |name: &str| {
+			removed.iter().position(|sql| sql == &format!("REMOVE TABLE IF EXISTS {name}")).unwrap()
+		};
+		for at in 0..PAIRS {
+			assert!(removed_at(&format!("v_{at:05}")) < removed_at(&format!("a_{at:05}")), "{at}");
+			if at > 0 {
+				assert!(
+					removed_at(&format!("v_{at:05}")) < removed_at(&format!("a_{:05}", at - 1)),
+					"{at}"
+				);
+			}
+		}
+		// Of the tables nothing reads, the first name goes first, and a source is ready as soon as
+		// the last view reading it is gone.
+		assert_eq!(
+			removed[..3],
+			[
+				"REMOVE TABLE IF EXISTS v_00000",
+				"REMOVE TABLE IF EXISTS v_00001",
+				"REMOVE TABLE IF EXISTS a_00000"
+			]
+		);
+	}
+
+	#[test]
+	fn a_view_over_a_table_the_database_does_not_list_is_still_removed() {
+		let table = |name: &str, over: &[&str]| {
+			TableSchema::new(name, vec![ColumnInfo::new("id", 0)])
+				.with_schema("public")
+				.with_view_over(over.iter().map(|source| (*source).to_owned()).collect())
+		};
+		let catalog = MemoryCatalog::new()
+			.with_listed_tables(vec![table("view", &["elsewhere", "base"]), table("base", &[])]);
+		assert_eq!(
+			lower(&catalog, "DROP SCHEMA public CASCADE").unwrap(),
+			["REMOVE TABLE IF EXISTS view", "REMOVE TABLE IF EXISTS base"]
+		);
+	}
+
+	#[test]
+	fn restrict_is_refused_while_the_database_holds_a_table() {
+		let err = lower(&catalog(), "DROP SCHEMA public").unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{err}");
+		assert!(err.to_string().contains("CASCADE"), "{err}");
+		assert!(lower(&MemoryCatalog::new(), "DROP SCHEMA public").unwrap().is_empty());
+	}
+
+	#[test]
+	fn a_database_without_tables_has_nothing_to_remove() {
+		assert!(lower(&MemoryCatalog::new(), "DROP SCHEMA public CASCADE").unwrap().is_empty());
+	}
+
+	#[test]
+	fn a_name_that_is_not_public_is_no_schema() {
+		let err = lower(&catalog(), "DROP SCHEMA nosuch CASCADE").unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "42P01", "{err}");
+		assert!(lower(&catalog(), "DROP SCHEMA IF EXISTS nosuch CASCADE").unwrap().is_empty());
+	}
+
+	#[test]
+	fn the_system_schemas_are_refused_even_under_if_exists() {
+		for name in ["pg_catalog", "information_schema", "pg_toast"] {
+			for sql in [
+				format!("DROP SCHEMA {name} CASCADE"),
+				format!("DROP SCHEMA IF EXISTS {name} CASCADE"),
+			] {
+				let err = lower(&catalog(), &sql).unwrap_err();
+				assert_eq!(err.pg_sqlstate(), "0A000", "{sql}: {err}");
+			}
+		}
+	}
+
+	#[test]
+	fn a_catalog_that_defers_to_the_schema_is_not_refused() {
+		assert!(lower(&Deferring, "DROP SCHEMA public").unwrap().is_empty());
+		assert!(lower(&Deferring, "DROP SCHEMA public CASCADE").unwrap().is_empty());
+	}
+}

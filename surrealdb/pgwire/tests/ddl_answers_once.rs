@@ -139,6 +139,31 @@ async fn test_pgwire_alter_and_drop_of_several_things_answer_once() {
 }
 
 #[tokio::test]
+async fn test_pgwire_drop_schema_public_cascade_removes_every_table_and_answers_once() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect(addr).await;
+
+	for sql in ["CREATE TABLE schema_once_a (id INT)", "CREATE TABLE schema_once_b (id INT)"] {
+		assert_eq!(simple_query(&mut stream, sql).await, 1, "{sql}");
+	}
+	assert_eq!(simple_query(&mut stream, "DROP SCHEMA IF EXISTS public CASCADE").await, 1);
+
+	// Both tables are gone: a table of the same name is defined again, which it could not be if
+	// one were left.
+	for sql in ["CREATE TABLE schema_once_a (id INT)", "CREATE TABLE schema_once_b (id INT)"] {
+		assert_eq!(simple_query(&mut stream, sql).await, 1, "{sql}");
+	}
+	let answer = extended_query(&mut stream, "DROP SCHEMA public CASCADE").await;
+	assert!(!answer.failed);
+	assert_eq!(answer.completions, 1);
+	for sql in ["CREATE TABLE schema_once_a (id INT)", "CREATE TABLE schema_once_b (id INT)"] {
+		assert_eq!(simple_query(&mut stream, sql).await, 1, "{sql}");
+	}
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
 async fn test_pgwire_each_statement_of_a_batch_gets_its_own_answer() {
 	let (addr, shutdown) = start_test_pg_server().await;
 	let mut stream = connect(addr).await;

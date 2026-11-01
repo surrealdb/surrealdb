@@ -174,6 +174,8 @@ async fn test_a_command_answers_with_its_command_tag_alone() {
 		("TRUNCATE TABLE tag_t", "TRUNCATE TABLE"),
 		("DROP TABLE tag_t", "DROP TABLE"),
 		("DROP TABLE IF EXISTS tag_t", "DROP TABLE"),
+		("DROP SCHEMA IF EXISTS tag_schema", "DROP SCHEMA"),
+		("DROP SCHEMA public CASCADE", "DROP SCHEMA"),
 	] {
 		let answer = simple_query(&mut stream, sql).await;
 		assert_eq!(answer.kinds(), vec![b'C'], "{sql}: expected a lone CommandComplete");

@@ -112,6 +112,9 @@ pub struct TableSchema {
 	/// A table whose list is a subset of what a client may read (a system catalog table) or that
 	/// declares no columns (a schemaless table) is not closed.
 	pub closed: bool,
+	/// The tables a view reads, empty for a table that is not a view. A table cannot be removed
+	/// while a view reads it.
+	pub view_over: Vec<String>,
 }
 
 impl TableSchema {
@@ -123,7 +126,13 @@ impl TableSchema {
 			indexes: Vec::new(),
 			foreign_keys: Vec::new(),
 			closed: false,
+			view_over: Vec::new(),
 		}
+	}
+
+	pub fn with_view_over(mut self, tables: Vec<String>) -> Self {
+		self.view_over = tables;
+		self
 	}
 
 	pub fn with_indexes(mut self, indexes: Vec<IndexInfo>) -> Self {

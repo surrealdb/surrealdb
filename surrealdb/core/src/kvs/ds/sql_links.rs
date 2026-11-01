@@ -564,12 +564,19 @@ pub(super) async fn database_tables(
 			txn.all_tb_indexes(ns_id, db_id, &table.name, None),
 		)
 		.await?;
-		anyhow::Ok((table.name.as_str(), fields, indexes))
+		let view_over: Vec<String> = table
+			.view
+			.as_ref()
+			.map(|view| {
+				view.source_tables().iter().map(|source| source.as_str().to_owned()).collect()
+			})
+			.unwrap_or_default();
+		anyhow::Ok((table.name.as_str(), fields, indexes, view_over))
 	}))
 	.await?;
 	let keys: KeyTypes = definitions
 		.iter()
-		.map(|(name, fields, _)| {
+		.map(|(name, fields, ..)| {
 			let id = fields.iter().find(|field| field.name.field_name() == Some("id"));
 			let (data_type, _) = column_type_name(id.and_then(|field| field.field_kind.as_ref()));
 			((*name).to_owned(), data_type)
@@ -577,11 +584,12 @@ pub(super) async fn database_tables(
 		.collect();
 	Ok(definitions
 		.iter()
-		.map(|(name, fields, indexes)| {
+		.map(|(name, fields, indexes, view_over)| {
 			TableSchema::new(*name, table_columns(fields, &keys))
 				.with_schema("public")
 				.with_indexes(table_indexes(indexes))
 				.with_foreign_keys(table_foreign_keys(fields))
+				.with_view_over(view_over.clone())
 		})
 		.collect())
 }

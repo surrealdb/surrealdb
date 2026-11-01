@@ -10,6 +10,35 @@ This crate provides:
 - `BinderCatalog` abstraction for table schema and column resolution.
 - Lowering from Bound IR to SurrealDB `LogicalOp` execution plans.
 
+## Namespaces, databases, schemas and tables
+
+A connection selects one SurrealDB namespace and database: the PostgreSQL startup `database` as
+`namespace/database`, or `options=-c namespace=<ns>` with a database name. A namespace is the level
+above a database. It is the tenant a connection lives in and has no PostgreSQL counterpart; it is
+not a schema.
+
+A SurrealDB database is one PostgreSQL schema, `public`:
+
+- `public.t` and `t` name the table `t`.
+- `pg_namespace` lists `pg_catalog`, `public`, `information_schema` and `pg_toast`.
+  `information_schema.tables`, `pg_class` and the other catalog views list every table of the
+  selected database under `public`.
+- `s.t` with any other schema `s` names the table whose name is `s.t`. No schema `s` exists as an
+  object: `CREATE SCHEMA s` creates nothing, and `DROP SCHEMA s` is `42P01`.
+- `db.public.t` is accepted only when `db` is the selected database.
+
+`DROP SCHEMA public CASCADE` removes every table of the selected database, each as `REMOVE TABLE`
+does: a view before the tables it reads, the statement answering once and succeeding or failing as
+a whole, and the role that removing the tables one by one needs. The sequences that the serial and
+auto-increment columns of those tables draw from go with them, so a table created again numbers
+its rows from the start. Without `CASCADE` it is refused
+(`0A000`) while the database holds a table. A session that may not view the database's tables sees
+none, so the statement removes nothing for it. The schemas the front end synthesises (`pg_catalog`,
+`information_schema` and `pg_toast`) cannot be dropped (`0A000`).
+Tables defined by earlier statements of the same request are removed only when the database already
+held a table before the request, because the catalog lists the staged tables only on top of tables
+it lists.
+
 ## The `id` column
 
 In both SQL dialects the `id` column of a base table is the table's primary key: the key of the

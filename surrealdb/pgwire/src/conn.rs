@@ -21,7 +21,8 @@ use surrealdb_datastore::Transaction;
 use surrealdb_iam::{Actor, Auth, Level, Role};
 use surrealdb_kvs::TransactionType;
 use surrealdb_pgsql::ast::stmt::{
-	CopyDirection, CopyFormat, CopyStmt, CopyTarget, Statement as PgStatement, TableRef,
+	CopyDirection, CopyFormat, CopyStmt, CopyTarget, DropObjectType, Statement as PgStatement,
+	TableRef,
 };
 use surrealdb_pgsql::printer::{print_ident, print_string_literal};
 use surrealdb_rpc::capabilities::RouteTarget;
@@ -109,6 +110,7 @@ enum StatementKind {
 	Delete,
 	CreateTable,
 	DropTable,
+	DropSchema,
 	AlterTable,
 	CreateIndex,
 	CreateView,
@@ -134,7 +136,14 @@ impl StatementKind {
 			PgStatement::CreateSchema(_) => Some((Self::CreateSchema, false)),
 			PgStatement::CreateExtension(_) => Some((Self::CreateExtension, false)),
 			PgStatement::AlterTable(_) => Some((Self::AlterTable, false)),
-			PgStatement::Drop(_) => Some((Self::DropTable, false)),
+			PgStatement::Drop(drop) => Some((
+				if matches!(drop.object_type, DropObjectType::Schema) {
+					Self::DropSchema
+				} else {
+					Self::DropTable
+				},
+				false,
+			)),
 			PgStatement::Select(_)
 			| PgStatement::Copy(_)
 			| PgStatement::Transaction(_)
@@ -159,6 +168,7 @@ impl StatementKind {
 			Self::Delete => format!("DELETE {count}"),
 			Self::CreateTable => "CREATE TABLE".to_string(),
 			Self::DropTable => "DROP TABLE".to_string(),
+			Self::DropSchema => "DROP SCHEMA".to_string(),
 			Self::AlterTable => "ALTER TABLE".to_string(),
 			Self::CreateIndex => "CREATE INDEX".to_string(),
 			Self::CreateView => "CREATE VIEW".to_string(),
@@ -1614,7 +1624,11 @@ impl Connection {
 								returns_rows = false;
 							}
 							PgStatement::Drop(drop) => {
-								kind = StatementKind::DropTable;
+								kind = if matches!(drop.object_type, DropObjectType::Schema) {
+									StatementKind::DropSchema
+								} else {
+									StatementKind::DropTable
+								};
 								returns_rows = false;
 								let cur_db = self
 									.session
@@ -1622,13 +1636,16 @@ impl Connection {
 									.clone()
 									.unwrap_or_else(|| "postgres".to_string());
 								let catalog = MemoryCatalog::new().with_database(&cur_db);
-								if drop.names.iter().all(|n| {
-									surrealdb_sqlplan::resolve_pgsql_table_name(
-										&n.parts,
-										Some(&catalog),
-									)
-									.is_ok()
-								}) && let Ok(exprs) = lower_pgsql_ddl(&stmts[0])
+								// `DROP SCHEMA` lowers against the tables of the database
+								// when the statement runs, so no plan is kept.
+								if !matches!(drop.object_type, DropObjectType::Schema)
+									&& drop.names.iter().all(|n| {
+										surrealdb_sqlplan::resolve_pgsql_table_name(
+											&n.parts,
+											Some(&catalog),
+										)
+										.is_ok()
+									}) && let Ok(exprs) = lower_pgsql_ddl(&stmts[0])
 								{
 									cached_plan = Some(CachedPlan::PgAst(Ast {
 										expressions: exprs
