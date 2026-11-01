@@ -401,7 +401,34 @@ async fn perform_handshake(
 			let ok = OkPacket::new(0, 0);
 			writer.write_packet(cur_seq, &ok.serialize()).await?;
 		} else {
-			if !is_secure {
+			let more_data = AuthMoreData::perform_full_authentication();
+			writer.write_packet(cur_seq, &more_data.serialize()).await?;
+
+			let (resp_seq, first_payload) = reader.read_handshake_packet().await?;
+			cur_seq = resp_seq.wrapping_add(1);
+
+			let password = if !external && first_payload == [crate::rsa_auth::REQUEST_PUBLIC_KEY] {
+				let Some(pem) = crate::rsa_auth::public_key_pem().await else {
+					let err = ErrPacket::general(
+						1045,
+						b"28000",
+						"Authentication requires an encrypted (TLS) connection",
+					);
+					let _ = writer.write_packet(cur_seq, &err.serialize()).await;
+					return Ok(None);
+				};
+				let key = AuthMoreData {
+					data: pem,
+				};
+				writer.write_packet(cur_seq, &key.serialize()).await?;
+				let (enc_seq, encrypted) = reader.read_handshake_packet().await?;
+				cur_seq = enc_seq.wrapping_add(1);
+				crate::rsa_auth::decrypt_password(&encrypted, &auth_salt)
+					.await
+					.map(|plain| clean_password(&plain))
+			} else if is_secure {
+				Some(clean_password(&first_payload))
+			} else {
 				let err = ErrPacket::general(
 					1045,
 					b"28000",
@@ -409,25 +436,23 @@ async fn perform_handshake(
 				);
 				let _ = writer.write_packet(cur_seq, &err.serialize()).await;
 				return Ok(None);
-			}
+			};
 
-			let more_data = AuthMoreData::perform_full_authentication();
-			writer.write_packet(cur_seq, &more_data.serialize()).await?;
-
-			let (resp_seq, pass_payload) = reader.read_handshake_packet().await?;
-			cur_seq = resp_seq.wrapping_add(1);
-
-			let password = clean_password(&pass_payload);
-			let ok = verify_credentials(
-				&ds,
-				authenticator.as_ref(),
-				&mut session,
-				&username,
-				&password,
-				ns_opt,
-				db_opt,
-			)
-			.await;
+			let ok = match password.as_deref() {
+				Some(password) => {
+					verify_credentials(
+						&ds,
+						authenticator.as_ref(),
+						&mut session,
+						&username,
+						password,
+						ns_opt,
+						db_opt,
+					)
+					.await
+				}
+				None => false,
+			};
 
 			if !ok || !ds.allows_query_by_subject(session.au.as_ref()) {
 				let err =
@@ -437,7 +462,12 @@ async fn perform_handshake(
 			}
 
 			if !external {
-				auth_cache.insert(&username, &password, Some(Arc::clone(&session.au)), session.exp);
+				auth_cache.insert(
+					&username,
+					password.as_deref().unwrap_or_default(),
+					Some(Arc::clone(&session.au)),
+					session.exp,
+				);
 			}
 
 			let ok = OkPacket::new(0, 0);

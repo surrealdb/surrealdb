@@ -8116,6 +8116,7 @@ dependencies = [
  "rand 0.9.5",
  "rcgen",
  "ring",
+ "rsa",
  "rustls-pki-types",
  "sha1",
  "sha2 0.10.9",

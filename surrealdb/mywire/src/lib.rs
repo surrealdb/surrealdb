@@ -40,6 +40,7 @@ pub mod constants;
 mod error;
 pub mod msg;
 pub mod query;
+mod rsa_auth;
 mod show;
 pub mod typing;
 mod uservars;

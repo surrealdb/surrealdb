@@ -26,7 +26,6 @@ expect_has "mysqladmin ping over tls" "mysqld is alive" admin_tls ping
 expect "mysql select over tls (verify identity)" "1	x" my_tls -N -e "select 1 as a, 'x' as b"
 expect "mysql select with require" "2" my -N -e "select 2"
 expect "caching_sha2_password over tls" "3" my_tls --default-auth=caching_sha2_password -N -e "select 3"
-gap "caching_sha2_password full authentication without TLS needs the RSA public key exchange, which the server does not implement"
 expect "caching_sha2_password without tls via public key" "4" my_plain --get-server-public-key -N -e "select 4"
 
 # The mysql_native_password client plugin was removed from the 9.x clients. The server answers a
@@ -100,7 +99,6 @@ expect_err "a syntax error is refused by PREPARE" "1064" my -e "prepare e from '
 expect_err "DROP PREPARE releases a statement" "1243" my -e "prepare d from 'select 1'; drop prepare d; execute d"
 expect_has "a refused replacement leaves no statement" "ERROR 1243" bash -c "printf \"prepare r from 'select 1';\\nprepare r from 'selec 2';\\nexecute r;\\n\" | my -f 2>&1"
 expect "PREPARE FROM and EXECUTE USING" "a" my -N -e "prepare s from 'select name from person where age > ? order by id'; set @i = 10; execute s using @i;"
-gap "a column over a bare literal is named '?', not the expression text"
 expect "literal column name" "2" bash -c "my -e 'select 2' | head -1"
 
 # --- scripts and errors ---

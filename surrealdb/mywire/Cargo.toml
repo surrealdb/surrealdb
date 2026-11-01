@@ -38,6 +38,11 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
+# The password exchange of `caching_sha2_password` on a connection without TLS (not built for wasm).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rsa = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
+
 # TLS on `wasm32-unknown-unknown`: ring is the crypto provider, and it and the certificate time source
 # read the host's JavaScript clock and entropy.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
