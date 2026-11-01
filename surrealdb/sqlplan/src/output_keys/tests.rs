@@ -210,10 +210,12 @@ fn an_intersection_compares_the_keys_of_both_queries() {
 	let LogicalOp::Join(join) = distinct.input.as_ref() else {
 		panic!("expected Join, got {:?}", distinct.input);
 	};
+	// The columns are the one key of the join, an array of both of them on each side.
 	let on: Vec<_> = join.on.iter().map(|(l, r)| (l.to_string(), r.to_string())).collect();
-	assert_eq!(on.len(), 2);
-	assert!(on[0].0.contains("?column?1") && on[0].1.contains("?column?1"), "{on:?}");
-	assert!(on[1].0.contains("?column?2") && on[1].1.contains("?column?2"), "{on:?}");
+	assert_eq!(on.len(), 1);
+	for side in [&on[0].0, &on[0].1] {
+		assert!(side.contains("?column?1") && side.contains("?column?2"), "{on:?}");
+	}
 }
 
 #[test]

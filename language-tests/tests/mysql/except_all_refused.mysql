@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_intersect_except_tables.surql"]
+
+[test]
+reason = "the ALL forms count the copies of a row on each side, which is not planned, so EXCEPT ALL is refused rather than answered as EXCEPT"
+
+[test.results]
+request-error = "MySQL SELECT lowering error: unsupported expression: EXCEPT ALL is not supported; use EXCEPT to answer each row once"
+*/
+
+SELECT v FROM ie_left EXCEPT ALL SELECT v FROM ie_right;

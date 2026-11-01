@@ -25,6 +25,8 @@ use crate::lower::id_key::{id_column, is_key_or_link, key_of, key_read_as, recor
 use crate::lower::link::{LinkOperand, link_column, link_operand, lower_stored, same_table_pair};
 use crate::output_keys::output_keys;
 
+mod intersect_except;
+
 /// Lower a fully bound SQL `BoundSelect` into a SurrealDB `LogicalOp` execution plan.
 ///
 /// The plan answers the select to a client, which reads each column by position. When the select's
@@ -1050,38 +1052,12 @@ fn lower_set_operations(
 			let Some((right_op, right_targets)) = branches.pop() else {
 				return Ok(left);
 			};
-			let mut on = Vec::new();
-			for (i, t) in first_targets.iter().enumerate() {
-				let left_name = target_output_name(t);
-				let right_name = if i < right_targets.len() {
-					target_output_name(&right_targets[i])
-				} else {
-					left_name.clone()
-				};
-				let alias = RelationAlias::new(0);
-				on.push((LogicalExpr::Field(left_name.into()), alias.access(right_name)));
-			}
 			let kind = if first.op == BoundSetOpKind::Intersect {
 				JoinKind::Semi
 			} else {
 				JoinKind::Anti
 			};
-			let join = LogicalOp::Join(LogicalJoin::new(
-				left,
-				right_op,
-				kind,
-				on,
-				None,
-				RelationAlias::new(0),
-				EvalFrame::caller(),
-			));
-			Ok(if all {
-				join
-			} else {
-				LogicalOp::Distinct(LogicalDistinct {
-					input: Box::new(join),
-				})
-			})
+			intersect_except::lower(kind, all, first_targets, &right_targets, left, right_op)
 		}
 	}
 }
