@@ -14,17 +14,16 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-  merge_group:
 
 concurrency:
-  # Superseded branch/PR runs are cancelled to release runner capacity.
-  # Runs on main are never cancelled: one runs to completion while at most one
-  # newer run waits, and a still-newer push replaces the waiting run, so the
-  # next run covers the latest main commit rather than every commit between.
-  # Every run on a release branch has its own group and runs to completion: a
-  # versioned release (ce-release.yml) needs the newest push CI run of the
-  # commit it releases to have passed, and that commit need not be the tip.
-  # Explicit workflow_dispatch validations remain independent.
+  # A newer push to the same PR cancels the run in flight. Runs on main are
+  # never cancelled: one runs to completion while at most one newer run waits,
+  # and a still-newer push replaces the waiting run, so the next run covers the
+  # latest main commit rather than every commit between. Every run on a release
+  # branch has its own group and runs to completion: a versioned release
+  # (ce-release.yml) needs the newest push CI run of the commit it releases to
+  # have passed, and that commit need not be the tip. Explicit workflow_dispatch
+  # validations remain independent.
   group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/releases/')) && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
@@ -36,12 +35,20 @@ permissions:
   contents: read
 
 jobs:
-  # Pull requests and the merge queue run the fast gate: format, clippy, the
-  # Wasm check, Miri, the SDK build, the lockfile check, the parser's golden
-  # corpus check and the language tests on mem, all in parallel once `changes`
-  # has classified the diff. Every other job runs on pushes to main and release
-  # branches and on workflow_dispatch, and reports as skipped to
-  # `required-checks` elsewhere.
+  # Pull requests run the fast gate, all in parallel once `changes` has
+  # classified the diff: format, clippy, the Wasm check, the lockfile, revision,
+  # catalog-schema and docs checks, the parser's golden corpus check, the
+  # workspace tests and the language tests on mem. Each of these runs only when
+  # the diff touches the crates it tests (the `changes` outputs): Miri, the CJK
+  # tests, the OPFS Wasm test, the KVS mem tests, the SDK build and the Rust SDK
+  # mem tests, the SQL front ends with the client and ORM suites, and the MCP
+  # server, with the `devopt` server build those suites run against. A job that executes SQL
+  # against the engine also runs when the engine crates change. The release
+  # builds, the amd64 legs, the surrealkv engine legs, the release-profile
+  # checks, the feature, version and dependency checks, and the jobs that run
+  # the built server (Rust SDK server engines, conformance, MCP, upgrade) run on
+  # pushes to main and release branches and on workflow_dispatch, and report as
+  # skipped to `required-checks` elsewhere.
   #
   # Build/test lanes use the pinned nightly parallel frontend. MSRV and Clippy
   # keep the stable compatibility/lint signal; shipping workflows use stable.
@@ -60,15 +67,27 @@ jobs:
     outputs:
       docs_only: ${{ steps.diff.outputs.docs_only }}
       parser: ${{ steps.diff.outputs.parser }}
+      kvs: ${{ steps.diff.outputs.kvs }}
+      sdk: ${{ steps.diff.outputs.sdk }}
       orm: ${{ steps.diff.outputs.orm }}
+      sql: ${{ steps.diff.outputs.sql }}
+      common: ${{ steps.diff.outputs.common }}
+      idx: ${{ steps.diff.outputs.idx }}
+      opfs: ${{ steps.diff.outputs.opfs }}
+      mcp: ${{ steps.diff.outputs.mcp }}
+      build: ${{ steps.diff.outputs.build }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
 
-      # Markdown inside a crate can be compiled into rustdoc (`include_str!`), so
-      # only top-level Markdown, doc/, docs/, img/ and LICENSE count as docs.
+      # `docs_only` is true when every changed file is one that no job in this
+      # workflow reads: top-level Markdown, the documentation, image, packaging
+      # and assistant-configuration directories, GitHub metadata, and the
+      # repository housekeeping and policy files in `docs_pattern`. Markdown
+      # inside a crate can be compiled into rustdoc (`include_str!`), so it never
+      # counts.
       #
       # `parser` is true when the change can alter the SurrealQL parser's golden
       # digests: its corpus, the golden example and every workspace crate
@@ -81,7 +100,7 @@ jobs:
       # harness observes: the SQL front ends and their wire listeners, the
       # engine crates they execute on, the harness itself, the dependency
       # lockfile, the toolchain and the CI wiring. Everything else skips the
-      # harness on pull requests; pushes and the merge queue run it regardless.
+      # harness on pull requests; pushes run it regardless.
       # The crate list is the workspace closure of surrealdb-pgwire plus
       # surrealdb-mywire; extend it when that closure grows.
       - name: Classify changed files
@@ -91,46 +110,77 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           docs_only=false
+          docs_pattern='^(doc|docs|img|\.cursor|\.claude|\.gemini|docker|pkg|supply-chain)/|^\.github/(ISSUE_TEMPLATE|codeql)/|^\.github/(PULL_REQUEST_TEMPLATE\.md|CODEOWNERS|dependabot\.yml|labeler\.yml|security-guide-refs-allow\.txt)$|^(LICENSE|\.codecov\.yml|context7\.json|history\.txt|\.editorconfig|\.pre-commit-config\.yaml|\.envrc|\.dockerignore|\.gitignore|\.gitmodules|flake\.nix|flake\.lock|default\.nix|shell\.nix|deny\.toml|release\.toml)$|^[^/]+\.md$'
           parser=true
+          kvs=true
+          sdk=true
+          sql=true
           orm=true
+          common=true
+          idx=true
+          opfs=true
+          mcp=true
+          build=true
+          # Files every job is built from; a change to one of them reaches all of the outputs.
+          shared='Cargo\.(toml|lock)$|rust-toolchain|\.cargo/|Makefile\.ci\.toml$|\.github/(workflows/ci\.yml$|actions/)'
+          # The crates SurrealQL is parsed, planned and executed by, down to the key-value layer.
+          engine='catalog|cnf|collections|common|core|datastore|expr|iam|idx|keyspace-macro|kvs|kvs-any|kvs-mem|kvs-surrealkv|kvs-test|observe|parse-common|parser-next|rpc|runtime|stored-derive|strand|types'
+          # The engine plus the SQL front ends, the listeners and the server that serves them.
+          sql_stack="surrealdb/($engine|gql|mysql|mywire|pgsql|pgwire|server|sqlfront-derive|sqlfront-spec|sqlplan)/|surrealism/(runtime|types|verify)/|src/"
+          touches() { grep -qE "^($shared|$1)" <<<"$files"; }
           if [[ -n "$PR" ]]; then
             if files=$(gh api "repos/${{ github.repository }}/pulls/$PR/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
-              if [[ -n "$files" ]] && ! grep -qvE '(^(doc|docs|img)/|^LICENSE$|^[^/]+\.md$)' <<<"$files"; then
-                docs_only=true
-              fi
-              if [[ -n "$files" ]] && ! grep -qE '^(Cargo\.(toml|lock)$|rust-toolchain|\.cargo/|Makefile\.ci\.toml$|\.github/(workflows/ci\.yml$|actions/)|language-tests/tests/|surrealdb/(cnf|collections|common|expr|iam|kvs|parse-common|parser-next|stored-derive|strand|types)/)' <<<"$files"; then
-                parser=false
-              fi
-              if [[ -n "$files" ]] && ! grep -qE '^(Cargo\.(toml|lock)$|rust-toolchain|\.cargo/|Makefile\.ci\.toml$|\.github/(workflows/(ci|orm-compat)\.yml$|actions/)|tests/orm-compat/|surrealdb/(catalog|cnf|collections|common|core|datastore|expr|gql|iam|idx|keyspace-macro|kvs|kvs-any|kvs-mem|kvs-surrealkv|kvs-test|mysql|mywire|observe|parse-common|parser-next|pgsql|pgwire|rpc|runtime|sqlfront-derive|sqlfront-spec|sqlplan|stored-derive|strand|types)/|surrealism/(runtime|types|verify)/)' <<<"$files"; then
-                orm=false
+              if [[ -n "$files" ]]; then
+                if ! grep -qvE "$docs_pattern" <<<"$files"; then
+                  docs_only=true
+                fi
+                touches 'language-tests/tests/|surrealdb/(cnf|collections|common|expr|iam|kvs|parse-common|parser-next|stored-derive|strand|types)/' || parser=false
+                touches 'surrealdb/(kvs|kvs-any|kvs-mem|kvs-surrealkv|kvs-test)/|surrealdb/core/src/kvs/' || kvs=false
+                touches "tests/sdk/|surrealdb/(Cargo\.toml|build\.rs)$|surrealdb/(src|tests|engine-api|engine-local|embedded|$engine)/" || sdk=false
+                touches "tests/sql-clients/|$sql_stack" || sql=false
+                touches "tests/orm-compat/|\.github/workflows/orm-compat\.yml$|$sql_stack" || orm=false
+                touches 'surrealdb/(collections|common|parse-common|types)/' || common=false
+                touches 'surrealdb/(catalog|cnf|collections|common|datastore|expr|iam|idx|keyspace-macro|kvs|kvs-any|kvs-mem|kvs-surrealkv|observe|parse-common|parser-next|rpc|runtime|stored-derive|strand|types)/' || idx=false
+                touches 'surrealdb/(cnf|collections|common|kvs|kvs-surrealkv|kvs-test|parse-common|types)/' || opfs=false
+                touches 'surrealdb/(mcp|rpc|iam|server|types)/|tests/mcp-js/|src/|surrealdb/core/src/(syn|dbs|graphql|gql|iam|rpc)/' || mcp=false
+                # The server build exists for the jobs that run it; it runs when any of them does.
+                if [[ "$sql" != true && "$orm" != true && "$mcp" != true ]]; then build=false; fi
               fi
             fi
           fi
           {
             echo "docs_only=$docs_only"
             echo "parser=$parser"
+            echo "kvs=$kvs"
+            echo "sdk=$sdk"
+            echo "sql=$sql"
             echo "orm=$orm"
+            echo "common=$common"
+            echo "idx=$idx"
+            echo "opfs=$opfs"
+            echo "mcp=$mcp"
+            echo "build=$build"
           } >> "$GITHUB_OUTPUT"
 
-  # Every consumer of this job's binary runs on arm on pull requests, and the
-  # job gates all of them, so an amd64 leg there would hold them back for a
-  # binary none of them uses. push and merge_group build both, as the amd
-  # upgrade lanes run there.
+  # The one `devopt` build of the server that the jobs which run `surreal`
+  # download. Every consumer runs on arm on pull requests, so an amd64 leg there
+  # would hold them back for a binary none of them uses. push builds both, as the
+  # amd upgrade lanes run there.
   build:
     name: Build binary (${{ matrix.arch == 'arm' && 'arm64' || 'amd64' }})
     needs: changes
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.build == 'true' }}
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       matrix:
-        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
+        arch: ${{ (github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
     env:
       TARGET: ${{ matrix.arch == 'arm' && 'aarch64-unknown-linux-gnu' || 'x86_64-unknown-linux-gnu' }}
       ARTIFACT_ARCH: ${{ matrix.arch == 'arm' && 'arm64' || 'amd64' }}
       # Verbose cache tracing on the branches whose cache behaviour is worth
       # inspecting. kache writes it to stderr, so it lands in the build step's
       # own log; empty leaves the action's default filter in place.
-      KACHE_LOG: ${{ (github.event_name == 'push' || github.event_name == 'merge_group') && 'kache=debug' || '' }}
+      KACHE_LOG: ${{ (github.event_name == 'push') && 'kache=debug' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -348,7 +398,7 @@ jobs:
   miri:
     name: Test unsafe code with miri
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.common == 'true' }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -408,7 +458,7 @@ jobs:
   check-release:
     name: Check workspace (release)
     needs: changes
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && ((github.event_name == 'push' || github.event_name == 'merge_group') && needs.changes.outputs.docs_only != 'true')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && ((github.event_name == 'push') && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -546,7 +596,7 @@ jobs:
   test-wasm:
     name: Test Wasm (SurrealKV OPFS)
     needs: changes
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
+    if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.opfs == 'true')
     # GitHub-hosted runner: Chrome and chromedriver come preinstalled, which
     # the wasm-bindgen-test browser harness needs.
     runs-on: ubuntu-latest
@@ -580,14 +630,18 @@ jobs:
       - name: Install wasm-pack
         run: cargo install --locked wasm-pack@=0.15.0
 
+      # The whole kvs suite is one wasm-bindgen test, which the runner abandons
+      # after 20 seconds by default; the suite itself takes about as long.
       - name: Test the SurrealKV backend over OPFS in headless Chrome
         working-directory: surrealdb/kvs-surrealkv
+        env:
+          WASM_BINDGEN_TEST_TIMEOUT: "300"
         run: wasm-pack test --headless --chrome
 
   check-revision:
     name: Check revision
     needs: changes
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
+    if: (needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -616,7 +670,7 @@ jobs:
   check-catalog-schema:
     name: Check catalog schema
     needs: changes
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
+    if: (needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -658,7 +712,7 @@ jobs:
   check-docs:
     name: Check docs
     needs: changes
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
+    if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -688,7 +742,7 @@ jobs:
         run: cargo make ci-doctests
 
   # The golden digest of every parser entry point over the corpus. It gates
-  # pull requests and the merge queue, so it is kept to the one check whose
+  # pull requests, so it is kept to the one check whose
   # failure is caught only by the digests, built without LTO (see
   # `ci-parser-golden`). It also runs on pushes so that main publishes the
   # compile cache this job's pull request runs read.
@@ -755,7 +809,7 @@ jobs:
     name: Check feature combinations (${{ matrix.package }})
     needs: changes
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && ((github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.docs_only != 'true')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.docs_only != 'true'
     # Each package gets its own target directory/runner. The old aggregate
     # spawned nine Cargo processes against one target directory, serializing
     # on the build lock and repeatedly replacing each other's feature variants.
@@ -916,12 +970,13 @@ jobs:
         run: ./.github/scripts/test-check-release-layout.sh
 
   # ----------------------------------------
-  # PostgreSQL front end
+  # PostgreSQL and MySQL front ends
   # ----------------------------------------
 
   pgsql:
     name: PostgreSQL front-end checks
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: changes
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.sql == 'true' }}
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -949,13 +1004,47 @@ jobs:
       - name: Run surrealdb-pgsql CI checks
         run: cargo make ci-pgsql
 
-      - name: Run wire protocol integration tests
-        run: cargo make ci-wire
+      - name: Run PostgreSQL wire protocol integration tests
+        run: cargo make ci-pgsql-wire
+
+  mysql:
+    name: MySQL front-end checks
+    needs: changes
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.sql == 'true' }}
+    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          # This task includes Clippy; keep lint behavior on stable.
+          components: clippy
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Run surrealdb-mysql CI checks
+        run: cargo make ci-mysql
+
+      - name: Run MySQL wire protocol integration tests
+        run: cargo make ci-mysql-wire
 
   sql-clients:
     name: SQL client tools (psql, mysql)
-    needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    needs: [build, changes]
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.sql == 'true' }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -986,13 +1075,24 @@ jobs:
       - name: Install tools
         uses: ./.github/actions/install-tools
 
+      - name: Download server binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: surreal-arm64
+          path: target/debug
+
+      - name: Set file permissions
+        run: chmod +x target/debug/surreal
+
       - name: Run SQL client tests
+        env:
+          SURREAL_BIN: ${{ github.workspace }}/target/debug/surreal
         run: cargo make ci-sql-clients
 
   orm-compat:
     name: ORM compatibility (Prisma, Drizzle, TypeORM)
-    needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.orm != 'false' }}
+    needs: [build, changes]
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.orm == 'true' }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     timeout-minutes: 30
     steps:
@@ -1020,7 +1120,18 @@ jobs:
         with:
           node-version: 24
 
+      - name: Download server binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: surreal-arm64
+          path: target/debug
+
+      - name: Set file permissions
+        run: chmod +x target/debug/surreal
+
       - name: Run the ORM compatibility subset
+        env:
+          ORM_COMPAT_SERVER: ${{ github.workspace }}/target/debug/surreal
         run: cargo make ci-orm-compat
 
       - name: Save logs as artifact
@@ -1047,8 +1158,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ARM on every trigger; amd64 added only on merge-queue and push.
-        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
+        # ARM on every trigger; amd64 added only on push.
+        arch: ${{ (github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1094,8 +1205,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ARM on every trigger; amd64 added on merge-queue, push, and scheduled runs.
-        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'schedule') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
+        # ARM on every trigger; amd64 added on push and scheduled runs.
+        arch: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1137,12 +1248,12 @@ jobs:
       RUST_MIN_STACK: "8388608" # 8 MiB — some debug tests overflow nextest's default thread stack
       CI_SHARD: ${{ matrix.shard }}
       CI_SHARDS: "6"
-    # ARM on every trigger; amd64 added on merge-queue, push, and scheduled runs.
+    # ARM on every trigger; amd64 added on push and scheduled runs.
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'schedule') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
+        arch: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
         shard: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1181,7 +1292,7 @@ jobs:
   test-cjk:
     name: Test CJK segmentation
     needs: changes
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
+    if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.idx == 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
@@ -1239,13 +1350,13 @@ jobs:
   kvs-engines:
     name: KVS - ${{ matrix.engine }} engine (${{ matrix.arch }})
     needs: changes
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
+    if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.kvs == 'true')
     runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
-        engine: [mem, surrealkv]
+        arch: ${{ (github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
+        engine: ${{ github.event_name == 'pull_request' && fromJSON('["mem"]') || fromJSON('["mem","surrealkv"]') }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1284,7 +1395,7 @@ jobs:
   sdk-build:
     name: Test SDK build
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.sdk == 'true' }}
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1328,12 +1439,12 @@ jobs:
   sdk-engines:
     name: Rust SDK - ${{ matrix.engine }} engine
     needs: changes
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
+    if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.sdk == 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
-        engine: [mem, surrealkv]
+        engine: ${{ github.event_name == 'pull_request' && fromJSON('["mem"]') || fromJSON('["mem","surrealkv"]') }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1433,7 +1544,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: ${{ github.event_name == 'push' && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
-        # Pull requests and the merge queue run the mem engine on arm;
+        # Pull requests run the mem engine on arm;
         # surrealkv and amd64 run post-merge.
         engine: ${{ github.event_name == 'push' && fromJSON('["mem", "surrealkv"]') || fromJSON('["mem"]') }}
     steps:
@@ -1540,7 +1651,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
+        arch: ${{ (github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
         engine: [surrealkv]
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1592,7 +1703,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
+        arch: ${{ (github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
         engine: [surrealkv]
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1828,7 +1939,7 @@ jobs:
   # against our own in-process assumptions.
   mcp-tests:
     name: MCP tests
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.mcp == 'true' }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     needs: [build, changes]
     steps:
@@ -2003,7 +2114,7 @@ jobs:
     # !cancelled() so the gate runs even when some needs are skipped (e.g. the
     # main-only jobs on a PR). success() || failure() evaluates to false when a
     # need is skipped — which skips this aggregator and leaves the required
-    # check unreported on both PRs and merge_group runs. The step below treats
+    # check unreported on PRs. The step below treats
     # skipped needs as success.
     if: ${{ !cancelled() }}
     needs:
@@ -2058,8 +2169,9 @@ jobs:
       - node-engine
       # Embedded browser engine
       - wasm-engine
-      # PostgreSQL front end
+      # PostgreSQL and MySQL front ends
       - pgsql
+      - mysql
       - sql-clients
       - orm-compat
     steps:
@@ -2113,6 +2225,7 @@ jobs:
             "${{ needs.node-engine.result }}"
             "${{ needs.wasm-engine.result }}"
             "${{ needs.pgsql.result }}"
+            "${{ needs.mysql.result }}"
             "${{ needs.sql-clients.result }}"
             "${{ needs.orm-compat.result }}"
           )
@@ -2126,12 +2239,17 @@ jobs:
             fi
           done
 
-          # pgsql must succeed on every run that schedules it (push and
-          # workflow_dispatch); a skip there is a failure.
-          if [[ "${{ github.event_name }}" == "push" || "${{ github.event_name }}" == "workflow_dispatch" ]] \
-            && [[ "${{ needs.pgsql.result }}" != "success" ]]; then
-            echo "❌ pgsql check did not succeed: ${{ needs.pgsql.result }}"
-            failed=true
+          # pgsql and mysql must succeed on every run that schedules them
+          # (push and workflow_dispatch); a skip there is a failure.
+          if [[ "${{ github.event_name }}" == "push" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ needs.pgsql.result }}" != "success" ]]; then
+              echo "❌ pgsql check did not succeed: ${{ needs.pgsql.result }}"
+              failed=true
+            fi
+            if [[ "${{ needs.mysql.result }}" != "success" ]]; then
+              echo "❌ mysql check did not succeed: ${{ needs.mysql.result }}"
+              failed=true
+            fi
           fi
 
           if [[ "$failed" == "true" ]]; then

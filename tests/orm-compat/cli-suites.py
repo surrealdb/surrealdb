@@ -1,16 +1,17 @@
-import os, json, subprocess, pathlib
+import os, json, subprocess, pathlib, time
 root = pathlib.Path(__file__).resolve().parent
 (root / 'cli-logs').mkdir(exist_ok=True)
 results = []
+# Bounds each schema-tool command; drizzle-kit's introspection of the debug build takes about a minute.
+CLI_TIMEOUT_S = 300
 
-def run(target, orm, name, args, url, extra=None, check=None, timeout=None):
-    if timeout is None:
-        timeout = int(os.environ.get('ORM_COMPAT_CLI_TIMEOUT_S', '30'))
+def run(target, orm, name, args, url, extra=None, check=None, timeout=CLI_TIMEOUT_S):
     env = dict(os.environ, DATABASE_URL=url, PRISMA_HIDE_UPDATE_MESSAGE='1')
     env['NODE_OPTIONS'] = '--require ' + str(root / 'trace-pg.cjs')
     env['ORM_TRACE_PATH'] = str(root / 'cli-logs' / f'{target}-{orm}-{name}-sql.json')
     if extra:
         env.update(extra)
+    started = time.monotonic()
     try:
         r = subprocess.run(args, cwd=root, env=env, capture_output=True, text=True, timeout=timeout)
         log = r.stdout + '\n' + r.stderr
@@ -25,11 +26,13 @@ def run(target, orm, name, args, url, extra=None, check=None, timeout=None):
                 log += '\nSchema verification failed:\n' + verified.stderr
         record = {'target': target, 'orm': orm, 'name': name, 'status': 'pass' if ok else 'fail', 'exit_code': r.returncode, 'command': args, 'log': f'cli-logs/{target}-{orm}-{name}.log'}
     except subprocess.TimeoutExpired as e:
-        log = str(e)
+        out = lambda v: v.decode(errors='replace') if isinstance(v, bytes) else (v or '')
+        log = str(e) + '\n' + out(e.stdout) + '\n' + out(e.stderr)
         record = {'target': target, 'orm': orm, 'name': name, 'status': 'fail', 'error': 'timeout', 'command': args, 'log': f'cli-logs/{target}-{orm}-{name}.log'}
+    record['seconds'] = round(time.monotonic() - started, 1)
     (root / record['log']).write_text(log)
     results.append(record)
-    print(target, orm, name, record['status'], flush=True)
+    print(target, orm, name, record['status'], f"{record['seconds']}s", flush=True)
     return record['status'] == 'pass'
 for target in os.environ.get('ORM_COMPAT_TARGETS', 'reference,surrealdb').split(','):
     ref = target == 'reference'

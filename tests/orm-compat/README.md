@@ -26,11 +26,11 @@ The `ORM compatibility` workflow runs the harness and the upstream suites nightl
 
 ## Pull-request subset
 
-The `ORM compatibility (Prisma, Drizzle, TypeORM)` job in `ci.yml` runs `run.sh pr` (through `cargo make ci-orm-compat`) and is part of the required checks. It builds the listener with the dev profile, runs the runtime checks and the Prisma and Drizzle schema tools against SurrealDB only, and skips the PostgreSQL reference and the upstream suites, which stay nightly. A run takes about a minute after the build.
+The `ORM compatibility (Prisma, Drizzle, TypeORM)` job in `ci.yml` runs `run.sh pr` (through `cargo make ci-orm-compat`) and is part of the required checks. It serves the checks from the `devopt` `surreal` binary that the `build` job produces (`ORM_COMPAT_SERVER`; run locally without it, the script builds the example listener in the dev profile), runs the runtime checks and the Prisma and Drizzle schema tools against SurrealDB only, and skips the PostgreSQL reference and the upstream suites, which stay nightly. A run takes about a minute after the build.
 
 `pr-gate.py` compares every case with `expected-failures.json`, whose entries are `runtime/<orm>/<name>` or `schema/<orm>/<name>`. The run fails on a case that does not pass and is not listed, and on a listed case that passes, so the list shrinks as gaps close. The list is empty when every case passes. Add an entry only for a gap that is understood and tracked; never to silence a regression.
 
-The job runs on pull requests that touch the SQL front ends, the wire listeners, the engine crates they execute on, this directory, the lockfile or the CI wiring (the `orm` output of the `changes` job), and on every push and merge-queue run. `ORM_COMPAT_CLI_TIMEOUT_S` bounds each schema-tool command (default 30 seconds; CI uses 120 because the dev build is slower).
+The job runs on pull requests that touch the SQL front ends, the wire listeners, the engine crates they execute on, this directory, the lockfile or the CI wiring (the `orm` output of the `changes` job), and on every push. `cli-suites.py` bounds each schema-tool command at 300 seconds and reports each command's duration.
 
 The steps below are what the script does, for running them by hand.
 

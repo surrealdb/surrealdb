@@ -6,6 +6,9 @@
 #   ./run.sh pr                     pull-request subset: the targeted probes on SurrealDB only, gated by expected-failures.json
 #   ./run.sh services               start both servers and wait, for manual use (Ctrl-C stops them)
 #
+# ORM_COMPAT_SERVER=/path/to/surreal serves the checks from that server binary, started in memory
+# without authentication, instead of the example listener built here.
+#
 # Ports 15432 (SurrealDB listener) and 15433 (PostgreSQL 18.4 reference) must be free. A second
 # listener on a taken port fails silently, so the script refuses to start instead.
 # Servers are always stopped on exit. `pr` runs in CI on pull requests, `upstream` nightly.
@@ -78,13 +81,19 @@ ensure_npm() {
 }
 
 build_listener() {
+	[ -z "${ORM_COMPAT_SERVER:-}" ] || return 0
 	(cd "$repo" && cargo build --locked ${profile_flag[@]+"${profile_flag[@]}"} -p surrealdb-pgwire --example orm_compat_server)
 }
 
 listener_pid=""
 
 start_listener() {
-	"$listener_bin" >"$logs/listener.log" 2>&1 &
+	if [ -n "${ORM_COMPAT_SERVER:-}" ]; then
+		"$ORM_COMPAT_SERVER" start --log warn --unauthenticated --bind 127.0.0.1:0 \
+			--postgres-bind 127.0.0.1:15432 memory >"$logs/listener.log" 2>&1 &
+	else
+		"$listener_bin" >"$logs/listener.log" 2>&1 &
+	fi
 	listener_pid="$!"
 	pids+=("$listener_pid")
 	wait_for_port 15432 "SurrealDB listener" "$listener_pid" 30

@@ -681,14 +681,15 @@ description = "Check the edge wasm bundles against their size budgets"
 command = "scripts/wasm-size-budget.sh"
 args = ["${@}"]
 
-[tasks.ci-pgsql]
+[tasks.ci-sql-frontend]
+private = true
 category = "CI - CHECK"
-description = "Run comprehensive checks for surrealdb-pgsql"
+description = "Run comprehensive checks for the SQL front ends named in _SQL_FE"
 script = '''
     #!/bin/bash
     set -euo pipefail
 
-    for fe in pgsql mysql; do
+    for fe in ${_SQL_FE}; do
         pkg="surrealdb-$fe"
         dir="surrealdb/$fe"
         echo "Running clippy on $pkg..."
@@ -762,9 +763,21 @@ script = '''
     echo "✅ SQL front-end checks passed successfully!"
 '''
 
-[tasks.ci-wire]
+[tasks.ci-pgsql]
+category = "CI - CHECK"
+description = "Run comprehensive checks for surrealdb-pgsql"
+env = { _SQL_FE = "pgsql" }
+run_task = "ci-sql-frontend"
+
+[tasks.ci-mysql]
+category = "CI - CHECK"
+description = "Run comprehensive checks for surrealdb-mysql"
+env = { _SQL_FE = "mysql" }
+run_task = "ci-sql-frontend"
+
+[tasks.ci-pgsql-wire]
 category = "CI - INTEGRATION TESTS"
-description = "Run wire protocol end-to-end integration tests for PostgreSQL and MySQL"
+description = "Run the PostgreSQL wire protocol end-to-end integration tests"
 script = '''
     #!/bin/bash
     set -euo pipefail
@@ -772,14 +785,31 @@ script = '''
     echo "Running PostgreSQL wire protocol e2e tests..."
     cargo test --locked -p surrealdb-pgwire --test e2e
 
+    echo "✅ PostgreSQL wire protocol integration tests passed successfully!"
+'''
+
+# The cross-dialect suite drives both listeners through the MySQL crate, so it
+# runs with the MySQL lane.
+[tasks.ci-mysql-wire]
+category = "CI - INTEGRATION TESTS"
+description = "Run the MySQL wire protocol end-to-end and cross-dialect integration tests"
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
     echo "Running MySQL wire protocol e2e tests..."
     cargo test --locked -p surrealdb-mywire --test e2e
 
     echo "Running cross-dialect wire protocol integration tests..."
     cargo test --locked -p surrealdb-mywire --test cross_dialect
 
-    echo "✅ Wire protocol integration tests passed successfully!"
+    echo "✅ MySQL wire protocol integration tests passed successfully!"
 '''
+
+[tasks.ci-wire]
+category = "CI - INTEGRATION TESTS"
+description = "Run the wire protocol end-to-end integration tests for PostgreSQL and MySQL"
+run_task = { name = ["ci-pgsql-wire", "ci-mysql-wire"] }
 
 [tasks.ci-sql-clients]
 category = "CI - INTEGRATION TESTS"
@@ -788,7 +818,10 @@ script = '''
     #!/bin/bash
     set -euo pipefail
 
-    cargo build --locked --no-default-features --features storage-mem,http,postgres,mysql
+    # CI hands in the shared `devopt` binary through SURREAL_BIN; locally the binary is built here.
+    if [ -z "${SURREAL_BIN:-}" ]; then
+        cargo build --locked --no-default-features --features storage-mem,http,postgres,mysql
+    fi
 
     # Version-log the clients so a client upgrade shows up next to any failure.
     psql --version
@@ -808,9 +841,9 @@ script = '''
 
     node --version
 
-    # The debug build is what the other jobs cache; its schema-tool commands are slower than the
-    # release build's, so their per-command bound is raised.
-    ORM_COMPAT_PROFILE=dev ORM_COMPAT_CLI_TIMEOUT_S=120 tests/orm-compat/run.sh pr
+    # CI hands in the shared `devopt` server through ORM_COMPAT_SERVER; locally the example listener is
+    # built here, in the dev profile.
+    ORM_COMPAT_PROFILE="${ORM_COMPAT_PROFILE:-dev}" tests/orm-compat/run.sh pr
 
     echo "✅ ORM compatibility subset passed successfully!"
 '''
