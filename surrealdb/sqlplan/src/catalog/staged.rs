@@ -16,7 +16,7 @@
 //! catalog it wraps answers first, and what the statement declares answers only for a column that
 //! catalog does not describe.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use surrealdb_expr::expr::reference::ReferenceDeleteStrategy;
 use surrealdb_expr::expr::statements::AlterStatement;
@@ -27,7 +27,8 @@ use surrealdb_expr::expr::{Expr, Function, Literal};
 
 use super::{
 	BinderCatalog, ColumnAssert, ColumnInfo, ColumnShape, ForeignKeyInfo, IndexInfo,
-	ReferentialAction, TableSchema, kind_admits_none, kind_type_name, link_target,
+	ReferentialAction, TableSchema, kind_admits_none, kind_admits_null, kind_type_name,
+	link_target,
 };
 
 /// A catalog that answers for the columns of the statements staged on it, and otherwise for the
@@ -54,6 +55,15 @@ pub struct StagedCatalog<'a> {
 	touched: HashSet<(String, String)>,
 	/// The indexes, by (table, name), that a staged statement defines or removes.
 	replaced_indexes: HashSet<(String, String)>,
+	/// The columns that hold NULL in a row written without them, for each `SCHEMAFULL` table a
+	/// staged statement creates, and the columns a staged statement adds to a table the wrapped
+	/// catalog describes; see [`BinderCatalog::null_columns`]. A column that a later statement
+	/// alters or removes is dropped from it.
+	nulls: HashMap<String, BTreeSet<String>>,
+	/// The columns of tables the wrapped catalog describes that a staged statement defines,
+	/// alters or removes, whose entry in the wrapped catalog's NULL-holding columns is no longer
+	/// known to hold.
+	changed: HashSet<(String, String)>,
 }
 
 impl<'a> StagedCatalog<'a> {
@@ -69,6 +79,8 @@ impl<'a> StagedCatalog<'a> {
 			sequences: HashMap::new(),
 			touched: HashSet::new(),
 			replaced_indexes: HashSet::new(),
+			nulls: HashMap::new(),
+			changed: HashSet::new(),
 		}
 	}
 
@@ -96,6 +108,9 @@ impl<'a> StagedCatalog<'a> {
 			{
 				self.forget(name.as_str());
 				self.created.insert(name.as_str().to_owned());
+				if table.full && table.view.is_none() {
+					self.nulls.insert(name.as_str().to_owned(), BTreeSet::new());
+				}
 			}
 		} else if let DefineStatement::Field(field) = define
 			&& let (Some(table), Some(column), Some(kind)) =
@@ -107,12 +122,35 @@ impl<'a> StagedCatalog<'a> {
 				!matches!(field.default, DefineDefault::None),
 			);
 			let key = (table.to_owned(), column.to_owned());
+			let defined_before = self.shapes.contains_key(&key);
 			if field.kind == DefineKind::IfNotExists {
 				self.tentative.insert(key.clone());
 			} else {
 				self.tentative.remove(&key);
 			}
 			self.shapes.insert(key, shape);
+			// A definition that does nothing when the column exists may leave what the wrapped
+			// catalog says of the column as it is.
+			if field.kind != DefineKind::IfNotExists {
+				self.changed.insert((table.to_owned(), column.to_owned()));
+			}
+			// A definition that does nothing when the column exists leaves a column that an earlier
+			// statement of the request defined as it is.
+			// On a table the wrapped catalog describes, only a definition that runs adds a column.
+			let own = self.own.contains(table);
+			let applies = field.kind != DefineKind::IfNotExists || (own && !defined_before);
+			if applies && (!own || self.nulls.contains_key(table)) {
+				let holds_null = column != "id"
+					&& kind_admits_null(kind)
+					&& matches!(field.default, DefineDefault::None)
+					&& field.value.is_none()
+					&& field.computed.is_none();
+				if holds_null {
+					self.nulls.entry(table.to_owned()).or_default().insert(column.to_owned());
+				} else if let Some(columns) = self.nulls.get_mut(table) {
+					columns.remove(column);
+				}
+			}
 			// A definition that does nothing when the column exists leaves the foreign key and
 			// the sequence of the column as they are.
 			if field.kind != DefineKind::IfNotExists {
@@ -256,6 +294,7 @@ impl<'a> StagedCatalog<'a> {
 			return;
 		};
 		let key = (table.to_owned(), column.to_owned());
+		self.forget_null_column(table, column);
 		self.stage_reference(table, column, field);
 		// A column the catalog describes changes from the shape it has there, which an alteration
 		// of the assertion or default alone leaves in part as it is.
@@ -296,6 +335,7 @@ impl<'a> StagedCatalog<'a> {
 				(table_name(&field.table_name), column_name(&field.name))
 		{
 			self.shapes.remove(&(table.to_owned(), column.to_owned()));
+			self.forget_null_column(table, column);
 			self.touched.insert((table.to_owned(), column.to_owned()));
 			if let Some(keys) = self.keys.get_mut(table) {
 				keys.retain(|key| key.column != column);
@@ -333,7 +373,18 @@ impl<'a> StagedCatalog<'a> {
 		self.keys.remove(table);
 		self.indexes.remove(table);
 		self.sequences.retain(|(name, _), _| name != table);
+		self.nulls.remove(table);
+		self.changed.retain(|(name, _)| name != table);
 		self.own.insert(table.to_owned());
+	}
+
+	/// Stop saying that `column` of `table` holds NULL in a row written without it, which a staged
+	/// statement alters or removes.
+	fn forget_null_column(&mut self, table: &str, column: &str) {
+		if let Some(columns) = self.nulls.get_mut(table) {
+			columns.remove(column);
+		}
+		self.changed.insert((table.to_owned(), column.to_owned()));
 	}
 }
 
@@ -517,6 +568,27 @@ impl BinderCatalog for StagedCatalog<'_> {
 			None if self.own.contains(table) => false,
 			None => self.inner.link_admits_none(schema, table, column),
 		}
+	}
+
+	/// The columns the wrapped catalog describes, without those a staged statement defines, alters
+	/// or removes; for a table a staged statement creates or removes, whose columns are not those
+	/// the wrapped catalog holds, the columns the staged definitions give.
+	fn null_columns(&self, schema: Option<&str>, table: &str) -> Vec<String> {
+		if self.own.contains(table) {
+			return self
+				.nulls
+				.get(table)
+				.map(|columns| columns.iter().cloned().collect())
+				.unwrap_or_default();
+		}
+		let mut columns = self.inner.null_columns(schema, table);
+		columns.retain(|column| !self.changed.contains(&(table.to_owned(), column.clone())));
+		if let Some(added) = self.nulls.get(table) {
+			columns.extend(added.iter().cloned());
+			columns.sort_unstable();
+			columns.dedup();
+		}
+		columns
 	}
 
 	fn column_shape(&self, schema: Option<&str>, table: &str, column: &str) -> Option<ColumnShape> {

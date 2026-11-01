@@ -92,6 +92,22 @@ impl<'a> IdScope<'a> {
 		self.catalog.write_type(self.schema.as_deref(), &self.table, column)
 	}
 
+	/// The columns of the target table that a row holds NULL in when the statement gives none of
+	/// `listed` a value for them; see [`BinderCatalog::null_columns`].
+	fn omitted_null_columns(&self, listed: &[String]) -> Vec<String> {
+		let mut columns = self.catalog.null_columns(self.schema.as_deref(), &self.table);
+		columns.retain(|column| {
+			!listed.iter().any(|name| {
+				if self.columns_ignore_case {
+					name.eq_ignore_ascii_case(column)
+				} else {
+					name == column
+				}
+			})
+		});
+		columns
+	}
+
 	/// The table the column `column` of the target table holds record links to, if it holds them.
 	/// `id` never holds links.
 	fn link_column(&self, column: &str) -> Option<String> {
@@ -610,6 +626,49 @@ pub(crate) fn link_assignment(table: &str, value: Expr, admits_none: bool) -> Ex
 			close: Some(value),
 		}))
 	})
+}
+
+/// The `(column, NULL)` entries a row is written with for the columns of the target table that
+/// hold NULL in a row that gives them no value, apart from the columns `listed`.
+fn null_entries(scope: &IdScope<'_>, listed: &[String]) -> Vec<(Idiom, Expr)> {
+	scope
+		.omitted_null_columns(listed)
+		.into_iter()
+		.map(|column| (Idiom::field(column), Expr::Literal(Literal::Null)))
+		.collect()
+}
+
+/// A row with no value of its own, as an object of the columns that hold NULL in it.
+fn null_row(scope: &IdScope<'_>) -> Expr {
+	Expr::Literal(Literal::Object(
+		scope
+			.omitted_null_columns(&[])
+			.into_iter()
+			.map(|column| ObjectEntry {
+				key: Strand::from(column.as_str()),
+				value: Expr::Literal(Literal::Null),
+			})
+			.collect(),
+	))
+}
+
+/// Add `NULL AS column` to the items of the `SELECT` that is the source of an `INSERT` of the
+/// columns `listed`, for each column of the target table that holds NULL in a row that gives it no
+/// value. An `INSERT` that lists no columns takes every column of the target from the `SELECT`, so
+/// it is left as it is.
+fn append_null_fields(scope: &IdScope<'_>, listed: &[String], fields: &mut Fields) {
+	let Fields::Select(items) = fields else {
+		return;
+	};
+	if listed.is_empty() {
+		return;
+	}
+	items.extend(null_entries(scope, listed).into_iter().map(|(column, value)| {
+		Field::Single(Selector {
+			expr: value,
+			alias: Some(column),
+		})
+	}));
 }
 
 /// The `value` written to the column `column` of the target table, converted by [`link_assignment`]
@@ -2153,6 +2212,7 @@ fn lower_pgsql_select_stmt(
 			.any(|target| is_wildcard_target(target) || relation_star_qualifier(target).is_some());
 		wrap_positional_links(target, columns, has_wildcard, &mut fields);
 		wrap_positional_vectors(target, columns, has_wildcard, &mut fields)?;
+		append_null_fields(target, columns, &mut fields);
 	}
 
 	let cond = match &select.where_clause {
@@ -2233,19 +2293,18 @@ pub fn lower_pgsql_insert(
 	}
 
 	let data = match (&insert.values, &insert.query) {
-		(None, None) => Data::SingleExpression(Expr::Literal(Literal::Object(Vec::new()))),
-		(Some(rows), None) if rows.is_empty() => {
-			Data::SingleExpression(Expr::Literal(Literal::Object(Vec::new())))
-		}
+		(None, None) => Data::SingleExpression(null_row(&scope)),
+		(Some(rows), None) if rows.is_empty() => Data::SingleExpression(null_row(&scope)),
 		(None, Some(select_stmt)) => {
 			let sel =
 				lower_pgsql_select_stmt(select_stmt, catalog, Some((&scope, &insert.columns)))?;
 			Data::SingleExpression(Expr::Select(Box::new(sel)))
 		}
 		(Some(rows), _) => {
+			let nulls = null_entries(&scope, &insert.columns);
 			let mut values_rows = Vec::with_capacity(rows.len());
 			for row in rows {
-				let mut row_tuples = Vec::with_capacity(row.len());
+				let mut row_tuples = Vec::with_capacity(row.len() + nulls.len());
 				for (idx, val) in row.iter().enumerate() {
 					let col_name = if idx < insert.columns.len() {
 						insert.columns[idx].clone()
@@ -2255,6 +2314,11 @@ pub fn lower_pgsql_insert(
 					let lowered_val =
 						assigned_pgsql_value(&scope, &col_name, lower_pgsql_expr(val)?)?;
 					row_tuples.push((Idiom::field(col_name), lowered_val));
+				}
+				// A row that is not matched to the listed columns by position leaves out columns
+				// that are not known.
+				if row.len() <= insert.columns.len() {
+					row_tuples.extend(nulls.iter().cloned());
 				}
 				values_rows.push(row_tuples);
 			}
@@ -2346,19 +2410,27 @@ fn lower_pgsql_conditional_upsert(
 	scope.excluded = "excluded";
 	let matched = lower_pgsql_predicate(&matched, Some(&scope))?;
 
-	let mut proposed = Vec::with_capacity(row.len());
-	let mut values = Vec::with_capacity(row.len());
-	for (column, value) in insert.columns.iter().zip(row) {
-		let lowered = assigned_pgsql_value(&scope, column, lower_pgsql_expr(value)?)?;
+	// A column the row leaves out holds NULL in the proposed row, as it does in the row inserted.
+	let omitted = scope.omitted_null_columns(&insert.columns);
+	let mut proposed = Vec::with_capacity(row.len() + omitted.len());
+	let mut values = Vec::with_capacity(row.len() + omitted.len());
+	let mut read_excluded = |column: &str, value: Expr| {
 		let read = Expr::Idiom(Idiom(vec![
 			Part::Start(Expr::Param(Param::from("excluded".to_string()))),
-			Part::Field(Strand::from(column.as_str())),
+			Part::Field(Strand::from(column)),
 		]));
-		values.push((Idiom::field(column.clone()), read));
+		values.push((Idiom::field(column), read));
 		proposed.push(ObjectEntry {
-			key: Strand::from(column.as_str()),
-			value: lowered,
+			key: Strand::from(column),
+			value,
 		});
+	};
+	for (column, value) in insert.columns.iter().zip(row) {
+		let lowered = assigned_pgsql_value(&scope, column, lower_pgsql_expr(value)?)?;
+		read_excluded(column, lowered);
+	}
+	for column in &omitted {
+		read_excluded(column, Expr::Literal(Literal::Null));
 	}
 
 	let mut update_assignments = Vec::with_capacity(assignments.len());
@@ -3341,6 +3413,7 @@ fn lower_mysql_select_stmt(
 			)
 		});
 		wrap_positional_links(target, columns, has_wildcard, &mut fields);
+		append_null_fields(target, columns, &mut fields);
 	}
 
 	let cond = match &select.where_clause {
@@ -3401,14 +3474,15 @@ pub fn lower_mysql_insert(
 	}
 
 	let data = if insert.values.is_empty() && insert.query.is_none() {
-		Data::SingleExpression(Expr::Literal(Literal::Object(Vec::new())))
+		Data::SingleExpression(null_row(&scope))
 	} else if let Some(query) = &insert.query {
 		let sel = lower_mysql_select_stmt(query, catalog, Some((&scope, &insert.columns)))?;
 		Data::SingleExpression(Expr::Select(Box::new(sel)))
 	} else {
+		let nulls = null_entries(&scope, &insert.columns);
 		let mut values_rows = Vec::with_capacity(insert.values.len());
 		for row in &insert.values {
-			let mut row_tuples = Vec::with_capacity(row.len());
+			let mut row_tuples = Vec::with_capacity(row.len() + nulls.len());
 			for (idx, val) in row.iter().enumerate() {
 				let col_name = if idx < insert.columns.len() {
 					insert.columns[idx].clone()
@@ -3417,6 +3491,11 @@ pub fn lower_mysql_insert(
 				};
 				let lowered_val = assigned_value(&scope, &col_name, lower_mysql_expr(val)?);
 				row_tuples.push((Idiom::field(col_name), lowered_val));
+			}
+			// A row that is not matched to the listed columns by position leaves out columns that
+			// are not known.
+			if row.len() <= insert.columns.len() {
+				row_tuples.extend(nulls.iter().cloned());
 			}
 			values_rows.push(row_tuples);
 		}
@@ -3469,14 +3548,15 @@ pub fn lower_mysql_replace(
 	};
 
 	let data = if replace.values.is_empty() && replace.query.is_none() {
-		Data::SingleExpression(Expr::Literal(Literal::Object(Vec::new())))
+		Data::SingleExpression(null_row(&scope))
 	} else if let Some(query) = &replace.query {
 		let sel = lower_mysql_select_stmt(query, catalog, Some((&scope, &replace.columns)))?;
 		Data::SingleExpression(Expr::Select(Box::new(sel)))
 	} else {
+		let nulls = null_entries(&scope, &replace.columns);
 		let mut values_rows = Vec::with_capacity(replace.values.len());
 		for row in &replace.values {
-			let mut row_tuples = Vec::with_capacity(row.len());
+			let mut row_tuples = Vec::with_capacity(row.len() + nulls.len());
 			for (idx, val) in row.iter().enumerate() {
 				let col_name = if idx < replace.columns.len() {
 					replace.columns[idx].clone()
@@ -3485,6 +3565,11 @@ pub fn lower_mysql_replace(
 				};
 				let lowered_val = assigned_value(&scope, &col_name, lower_mysql_expr(val)?);
 				row_tuples.push((Idiom::field(col_name), lowered_val));
+			}
+			// A row that is not matched to the listed columns by position leaves out columns that
+			// are not known.
+			if row.len() <= replace.columns.len() {
+				row_tuples.extend(nulls.iter().cloned());
 			}
 			values_rows.push(row_tuples);
 		}

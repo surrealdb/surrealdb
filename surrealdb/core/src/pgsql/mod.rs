@@ -400,6 +400,10 @@ impl surrealdb_sqlplan::BinderCatalog for BatchCatalog<'_> {
 		self.inner.link_admits_none(schema, table, column)
 	}
 
+	fn null_columns(&self, schema: Option<&str>, table: &str) -> Vec<String> {
+		self.inner.null_columns(schema, table)
+	}
+
 	fn column_shape(
 		&self,
 		schema: Option<&str>,

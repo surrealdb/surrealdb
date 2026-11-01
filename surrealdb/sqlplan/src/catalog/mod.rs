@@ -315,6 +315,15 @@ pub fn kind_admits_none(kind: &Kind) -> bool {
 	}
 }
 
+/// Whether a column of `kind` can hold `NULL`: its type is `any`, `null`, or has a member that is.
+pub fn kind_admits_null(kind: &Kind) -> bool {
+	if let Kind::Either(kinds) = kind {
+		kinds.iter().any(kind_admits_null)
+	} else {
+		matches!(kind, Kind::Any | Kind::Null)
+	}
+}
+
 /// Narrow catalog trait required by the binder to resolve table and column names.
 pub trait BinderCatalog: Send + Sync {
 	/// Look up a table schema by optional namespace and table name.
@@ -409,6 +418,19 @@ pub trait BinderCatalog: Send + Sync {
 		false
 	}
 
+	/// The columns of table `table` that hold NULL in a row written without a value for them: the
+	/// columns the table declares whose type admits NULL and that have none of a `DEFAULT`, a
+	/// `VALUE` and a `COMPUTED` clause. A column left out of an `INSERT` is stored as `NONE`
+	/// unless the write names it, and `NONE` and `NULL` are two values to a grouping, a
+	/// `DISTINCT` and a set operation, so an `INSERT` names each of these as `NULL`.
+	///
+	/// Empty for a table the catalog does not describe and for one that does not declare all the
+	/// columns it has, where the columns that are left out are not known. The table is named as the
+	/// lowering names it and compared exactly.
+	fn null_columns(&self, _schema: Option<&str>, _table: &str) -> Vec<String> {
+		Vec::new()
+	}
+
 	/// How column `column` of table `table` is declared, for the statements that give a column a
 	/// new type (`ALTER TABLE ... ADD FOREIGN KEY` over a scalar column). The answer is `None` for
 	/// a table or column the catalog does not describe.
@@ -480,6 +502,8 @@ pub struct MemoryCatalog {
 	shapes: HashMap<(String, String), ColumnShape>,
 	/// The link columns that admit `NONE`, by (table, column).
 	nullable_links: std::collections::HashSet<(String, String)>,
+	/// The columns that hold NULL in a row written without them, by table.
+	null_columns: HashMap<String, Vec<String>>,
 	/// The dimensions of the vector columns, by (table, column).
 	vectors: HashMap<(String, String), usize>,
 	/// The types text is read as when written to a column, by (table, column).
@@ -498,6 +522,7 @@ impl MemoryCatalog {
 			column_types: HashMap::new(),
 			shapes: HashMap::new(),
 			nullable_links: std::collections::HashSet::new(),
+			null_columns: HashMap::new(),
 			vectors: HashMap::new(),
 			write_types: HashMap::new(),
 			hnsw: HashMap::new(),
@@ -524,6 +549,19 @@ impl MemoryCatalog {
 
 	pub fn add_nullable_link(&mut self, table: &str, column: &str) -> &mut Self {
 		self.nullable_links.insert((table.to_owned(), column.to_owned()));
+		self
+	}
+
+	/// Declare the columns of table `table` that hold NULL in a row written without them; see
+	/// [`BinderCatalog::null_columns`].
+	pub fn add_null_columns(&mut self, table: &str, columns: Vec<String>) -> &mut Self {
+		self.null_columns.insert(table.to_owned(), columns);
+		self
+	}
+
+	/// Declare the NULL-holding columns of a table, as [`Self::add_null_columns`] does.
+	pub fn with_null_columns(mut self, table: &str, columns: &[&str]) -> Self {
+		self.add_null_columns(table, columns.iter().map(|column| (*column).to_owned()).collect());
 		self
 	}
 
@@ -707,6 +745,10 @@ impl BinderCatalog for MemoryCatalog {
 
 	fn link_admits_none(&self, _schema: Option<&str>, table: &str, column: &str) -> bool {
 		self.nullable_links.contains(&(table.to_owned(), column.to_owned()))
+	}
+
+	fn null_columns(&self, _schema: Option<&str>, table: &str) -> Vec<String> {
+		self.null_columns.get(table).cloned().unwrap_or_default()
 	}
 
 	fn column_shape(&self, schema: Option<&str>, table: &str, column: &str) -> Option<ColumnShape> {

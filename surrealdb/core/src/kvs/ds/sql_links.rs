@@ -126,6 +126,11 @@ impl BinderCatalog for RecordingCatalog {
 		SqlType::Unknown
 	}
 
+	fn null_columns(&self, schema: Option<&str>, table: &str) -> Vec<String> {
+		self.note_user_table(schema, table);
+		Vec::new()
+	}
+
 	fn hnsw_indexes(&self, schema: Option<&str>, table: &str) -> Vec<(String, VectorMetric)> {
 		self.note_user_table(schema, table);
 		Vec::new()
@@ -788,6 +793,7 @@ pub(super) async fn describe_tables(
 		{
 			let declared = declared_columns(&definition, &fields);
 			described.catalog.add_table(TableSchema::new(table, declared).as_closed());
+			described.catalog.add_null_columns(table, null_columns(&fields));
 			described.shapes_lowering = true;
 		}
 	}
@@ -858,6 +864,30 @@ fn declared_columns(definition: &TableDefinition, fields: &[FieldDefinition]) ->
 		.enumerate()
 		.map(|(ordinal, name)| ColumnInfo::new(name, ordinal))
 		.collect()
+}
+
+/// The columns of a table with the field definitions `fields` that hold NULL in a row written
+/// without them, in name order: a top-level field other than `id` that has no type, or whose
+/// type admits NULL, and that has no `DEFAULT`, `VALUE` or `COMPUTED` clause. A field with one
+/// of those clauses is given its value by the write, and one whose type refuses NULL
+/// (`option<int>`, a link that admits `NONE`) cannot hold it.
+fn null_columns(fields: &[FieldDefinition]) -> Vec<String> {
+	let mut columns: Vec<String> = fields
+		.iter()
+		.filter(|field| !field.is_key_part())
+		.filter(|field| {
+			matches!(field.default, DefineDefault::None)
+				&& field.value.is_none()
+				&& field.computed.is_none()
+				&& field.field_kind.as_ref().is_none_or(surrealdb_sqlplan::kind_admits_null)
+		})
+		.filter_map(|field| field.name.field_name())
+		.filter(|name| *name != "id")
+		.map(str::to_owned)
+		.collect();
+	columns.sort_unstable();
+	columns.dedup();
+	columns
 }
 
 /// The SQL type of the key of `table`, which is the type of its `id` field; a column that links
@@ -1241,5 +1271,43 @@ mod tests {
 				("other".to_owned(), None),
 			]
 		);
+	}
+
+	#[test]
+	fn a_column_that_admits_null_and_has_no_value_of_its_own_holds_null_when_left_out() {
+		let nullable = |kind: Kind| Kind::Either(vec![Kind::None, Kind::Null, kind]);
+		let one = DefineDefault::Set(Expr::Literal(Literal::Integer(1)));
+		let fields = vec![
+			typed("id", Some(nullable(Kind::Int))),
+			typed("b", Some(nullable(Kind::String))),
+			typed("a", Some(nullable(Kind::Int))),
+			typed("untyped", Some(Kind::Any)),
+			typed("required", Some(Kind::Int)),
+			typed("optional", Some(Kind::Either(vec![Kind::None, Kind::Int]))),
+			typed("link", Some(Kind::Either(vec![Kind::None, record("dept")]))),
+			FieldDefinition {
+				default: one,
+				..typed("defaulted", Some(nullable(Kind::Int)))
+			},
+			FieldDefinition {
+				default: DefineDefault::Always(Expr::Literal(Literal::Integer(1))),
+				..typed("always", Some(nullable(Kind::Int)))
+			},
+			FieldDefinition {
+				value: Some(Expr::Literal(Literal::Integer(1))),
+				..typed("valued", Some(nullable(Kind::Int)))
+			},
+			FieldDefinition {
+				computed: Some(Expr::Literal(Literal::Integer(1))),
+				..typed("computed", Some(nullable(Kind::Int)))
+			},
+			FieldDefinition {
+				name: nested(&["address", "city"]),
+				field_kind: Some(nullable(Kind::String)),
+				..Default::default()
+			},
+			typed("no_type", None),
+		];
+		assert_eq!(null_columns(&fields), ["a", "b", "no_type", "untyped"]);
 	}
 }

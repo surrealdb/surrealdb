@@ -23,7 +23,7 @@ pub mod vector;
 pub use catalog::staged::StagedCatalog;
 pub use catalog::{
 	BinderCatalog, ColumnAssert, ColumnInfo, ColumnShape, EmptyCatalog, ForeignKeyInfo, IndexInfo,
-	MemoryCatalog, ReferentialAction, TableSchema, kind_admits_none, link_target,
+	MemoryCatalog, ReferentialAction, TableSchema, kind_admits_none, kind_admits_null, link_target,
 };
 pub use descriptor::{
 	ParameterDescriptor, ResultColumn, ResultDescriptor, SqlType, StatementDescriptor,
