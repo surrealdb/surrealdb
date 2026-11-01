@@ -264,6 +264,9 @@ pub(super) async fn step(
 		| StoreInstr::DiscardTableMigration {
 			..
 		}
+		| StoreInstr::HoldTableForRemoval {
+			..
+		}
 		| StoreInstr::BufferTableChange {
 			..
 		}

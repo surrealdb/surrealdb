@@ -457,6 +457,9 @@ pub struct CommitTriggers {
 	/// or verification so the job starts on the commit instead of waiting
 	/// out its interval.
 	pub table_migration: Notify,
+	/// The tables a transaction open through the datastore is removing, whose rows the table
+	/// migration job leaves alone until that transaction ends; see [`TableRemovals`].
+	pub(crate) table_removals: TableRemovals,
 	/// The transactions open through the datastore, by the epoch they opened
 	/// in; see [`LiveTransactions`].
 	pub(crate) live: LiveTransactions,
@@ -616,9 +619,116 @@ impl CommitTriggers {
 		&self.write_fence
 	}
 
+	/// The tables being removed by transactions open through the datastore; see
+	/// [`TableRemovals`].
+	pub fn table_removals(&self) -> &TableRemovals {
+		&self.table_removals
+	}
+
 	/// Drain the read-observed scopes for the fold task's pass.
 	pub fn drain_graph_fold_observations(&self) -> Vec<GraphFoldScope> {
 		self.graph_fold_observations.lock().drain().collect()
+	}
+}
+
+/// The tables that transactions open through one datastore are removing, each until its
+/// removing transaction ends, so the table migration job does not rewrite their rows meanwhile.
+///
+/// `REMOVE TABLE` deletes the table's rows key by key inside its own transaction, and every row a
+/// page of the job rewrites after that transaction's snapshot is a key both wrote: whichever
+/// commits second fails. A page is short and the removal of a large table is not, so while the job
+/// commits pages the removal loses every attempt. A removal therefore registers its table here
+/// before it reads or deletes anything of it ([`Self::begin`]), and the job commits a page that
+/// rewrites rows only while holding a [`TableRemovalGate`] for the table ([`Self::admit`]), which
+/// is refused while a removal of the table is registered. Registration waits for the table's gate,
+/// held, to be dropped, so no page commits once it returns.
+///
+/// A page that committed between the removing transaction's snapshot and its registration still
+/// fails that transaction's commit, which is then run again or reported as a retryable conflict.
+/// The registrations live in the datastore that runs the removal: a page committed through another
+/// datastore on a shared store is not held back by them.
+#[derive(Default)]
+pub struct TableRemovals {
+	tables: Mutex<HashMap<FencedTable, TableRemovalEntry>>,
+}
+
+/// One table's registrations and gate. Kept while a removal is registered or the gate is held or
+/// waited for, and dropped once neither is, so tables never removed cost nothing.
+#[derive(Default)]
+struct TableRemovalEntry {
+	/// How many open transactions are removing the table.
+	removing: usize,
+	/// Held by the job across the commit of a page that rewrites the table's rows, and by a
+	/// registration while it records the table, so only work on the same table waits on it.
+	gate: Arc<tokio::sync::Mutex<()>>,
+}
+
+/// Leave to commit a page of the table migration job that rewrites a table's rows: no removal of
+/// the table is registered until it is dropped ([`TableRemovals::admit`]).
+pub struct TableRemovalGate<'a> {
+	removals: &'a TableRemovals,
+	table: FencedTable,
+	gate: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl Drop for TableRemovalGate<'_> {
+	fn drop(&mut self) {
+		self.gate.take();
+		self.removals.tidy(&self.table);
+	}
+}
+
+impl TableRemovals {
+	/// Register a removal of `table`, once any page of the job committing meanwhile for the table
+	/// has committed. Every registration is ended by exactly one [`Self::end`].
+	pub async fn begin(&self, table: FencedTable) {
+		let gate = self.gate(&table);
+		let _gate = gate.lock().await;
+		// The entry stands while `gate` is held here ([`Self::tidy`]).
+		self.tables.lock().entry(table).or_default().removing += 1;
+	}
+
+	/// End one registration of a removal of `table`: its transaction has committed, rolled back
+	/// or been dropped.
+	pub fn end(&self, table: &FencedTable) {
+		if let Some(entry) = self.tables.lock().get_mut(table) {
+			entry.removing = entry.removing.saturating_sub(1);
+		}
+		self.tidy(table);
+	}
+
+	/// Whether a removal of `table` is registered now.
+	pub fn removing(&self, table: &FencedTable) -> bool {
+		self.tables.lock().get(table).is_some_and(|entry| entry.removing > 0)
+	}
+
+	/// Leave to commit a page that rewrites rows of `table`, held until the page's commit has
+	/// returned, or `None` while a removal of the table is registered.
+	pub async fn admit(&self, table: &FencedTable) -> Option<TableRemovalGate<'_>> {
+		let gate = self.gate(table).lock_owned().await;
+		let admitted = TableRemovalGate {
+			removals: self,
+			table: table.clone(),
+			gate: Some(gate),
+		};
+		(!self.removing(table)).then_some(admitted)
+	}
+
+	/// The gate of `table`, its entry made if it has none.
+	fn gate(&self, table: &FencedTable) -> Arc<tokio::sync::Mutex<()>> {
+		Arc::clone(&self.tables.lock().entry(table.clone()).or_default().gate)
+	}
+
+	/// Drop the entry of `table` if no removal is registered and nothing holds or waits for its
+	/// gate, every one of which holds a reference to it.
+	fn tidy(&self, table: &FencedTable) {
+		let mut tables = self.tables.lock();
+		if tables
+			.get(table)
+			.is_some_and(|entry| entry.removing == 0 && Arc::strong_count(&entry.gate) == 1)
+		{
+			tables.remove(table);
+		}
 	}
 }
 
@@ -2577,6 +2687,25 @@ mod tests {
 		live.end_hold(&other);
 		live.end_hold(&other_table);
 		assert!(!live.holds_writes());
+	}
+
+	/// A page committing for one table holds back the removal of that table alone, and the
+	/// entries go once nothing registers or holds them.
+	#[tokio::test]
+	async fn a_page_committing_holds_back_only_removals_of_its_own_table() {
+		let removals = TableRemovals::default();
+		let (t, u) = (table(1, 2, "t"), table(1, 2, "u"));
+		let page = removals.admit(&t).await.expect("no removal of t is registered");
+		let wait = std::time::Duration::from_millis(50);
+		tokio::time::timeout(wait, removals.begin(u.clone())).await.expect("u is not held back");
+		assert!(tokio::time::timeout(wait, removals.begin(t.clone())).await.is_err(), "t is");
+		drop(page);
+		removals.begin(t.clone()).await;
+		assert!(removals.removing(&t) && removals.removing(&u));
+		assert!(removals.admit(&t).await.is_none(), "a page of t is refused while it is removed");
+		removals.end(&t);
+		removals.end(&u);
+		assert!(removals.tables.lock().is_empty(), "nothing is left registered");
 	}
 
 	#[tokio::test]

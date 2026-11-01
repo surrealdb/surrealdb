@@ -590,6 +590,15 @@ impl Ddl<'_, '_> {
 				table: tb,
 			},
 		});
+		// The rows are deleted key by key in this transaction, so the table migration job is held
+		// off them before the first write: a page it committed after this transaction's snapshot
+		// would fail this transaction's commit. The checks above only read, and a refused removal
+		// holds nothing.
+		self.store(StoreInstr::HoldTableForRemoval {
+			ns,
+			db,
+			tb,
+		});
 		// Each edge the table holds is also a pointer on each of its endpoints, outside the
 		// table's keyspace, so those go while the edges are still there to name them.
 		self.store(StoreInstr::PurgeEdgePointers {

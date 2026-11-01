@@ -292,6 +292,9 @@ fn dml_inner(
 		| StoreInstr::DiscardTableMigration {
 			..
 		}
+		| StoreInstr::HoldTableForRemoval {
+			..
+		}
 		| StoreInstr::BufferTableChange {
 			..
 		}
@@ -855,6 +858,16 @@ async fn step_inner(
 		} => {
 			let range = range(*route, &read(regs, *key)).map_err(ControlFlow::Err)?;
 			ctx.txn().delr(range).await.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::HoldTableForRemoval {
+			ns,
+			db,
+			tb,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let tb = table_named(&read(regs, *tb))?;
+			ctx.txn().hold_table_for_removal(ns, db, &tb).await.map_err(ControlFlow::Err)?;
 		}
 		StoreInstr::DiscardTableMigration {
 			ns,

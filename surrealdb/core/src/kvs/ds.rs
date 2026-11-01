@@ -1019,6 +1019,9 @@ pub struct Datastore {
 	/// Where the table migration job's walk of its queues stands between
 	/// passes; see [`table_migration::TableMigrationLap`].
 	table_migration_lap: parking_lot::Mutex<table_migration::TableMigrationLap>,
+	/// When the table migration job first saw each removal hold it has found standing; see
+	/// [`table_migration::RemovalHoldsSeen`].
+	removal_holds_seen: table_migration::RemovalHoldsSeen,
 	#[cfg(storage)]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
@@ -1873,6 +1876,7 @@ impl Datastore {
 			),
 			compaction_swept_at: parking_lot::Mutex::new(None),
 			table_migration_lap: parking_lot::Mutex::new(Default::default()),
+			removal_holds_seen: Default::default(),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new(self.config.datastore.datastore_cache_size)),
@@ -1980,6 +1984,7 @@ impl Datastore {
 			),
 			compaction_swept_at: parking_lot::Mutex::new(None),
 			table_migration_lap: parking_lot::Mutex::new(Default::default()),
+			removal_holds_seen: Default::default(),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory.clone(),
 			cache: Arc::new(DatastoreCache::new(self.config.datastore.datastore_cache_size)),

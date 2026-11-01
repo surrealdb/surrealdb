@@ -25,7 +25,17 @@
 //!   table, its database and its namespace, so a removal of any of them that commits first fails
 //!   the page's commit instead of leaving rows written beneath what was removed. No removal writes
 //!   the progress or deletes a request, so a page that commits first fails a removal only through
-//!   the rows it rewrote, which `REMOVE TABLE` deletes in its own transaction.
+//!   the rows it rewrote, which `REMOVE TABLE` deletes key by key in its own transaction. A removal
+//!   therefore holds the job off the table until its transaction ends
+//!   ([`Transaction::hold_table_for_removal`]): on the removing datastore at once
+//!   ([`surrealdb_datastore::triggers::TableRemovals`]), and on every node through a hold recorded
+//!   in the progress ([`crate::key::table_migration::RemovalHold`]), which a page committed after
+//!   it fails on, since the page writes the progress by compare-and-set. A page of a rewrite is
+//!   neither begun nor committed while either stands, and the table is left for a lap after the
+//!   removal ends, which finds it gone or resumes it. A hold whose node is gone, or that has stood
+//!   longer than any transaction lasts, lost its release, and the job takes it out. `REMOVE
+//!   DATABASE` and `REMOVE NAMESPACE` delete only the definition and leave the rows to a background
+//!   reclaim, so a page conflicts with neither.
 //! - At the end of a lap the rewrite is done if the table's newest step is the one the lap began
 //!   under. Otherwise another lap starts. A step minted after the last page's snapshot comes with a
 //!   request that page did not delete, so the next page starts a lap for it. The steps stay in
@@ -66,7 +76,7 @@ use tokio_util::sync::CancellationToken;
 use web_time::Instant;
 
 use super::Datastore;
-use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider};
 use crate::catalog::{
 	Conformance, DatabaseDefinition, DatabaseId, FieldCandidate, Generation, NamespaceDefinition,
 	NamespaceId, TableLayouts, birth_claims_of,
@@ -134,6 +144,41 @@ impl Target {
 /// bounded amount of work however many tables are queued, however many rows they
 /// hold, and however large the catalog is.
 const SLICE_PAGES: usize = 16;
+
+/// How long the table migration job leaves a removal hold standing, from when it first saw it,
+/// when the datastore sets no transaction timeout. A removal's transaction that outlasts this
+/// loses the protection of its hold.
+const REMOVAL_HOLD_LIMIT: Duration = Duration::from_secs(600);
+
+/// How long past the datastore's transaction timeout the job leaves a removal hold standing, for
+/// the transaction that set it to have ended and taken it out.
+const REMOVAL_HOLD_MARGIN: Duration = Duration::from_secs(60);
+
+/// How long the job leaves a removal hold standing before it takes the hold out as lost: past the
+/// longest a transaction may last, or [`REMOVAL_HOLD_LIMIT`] where none is set.
+fn removal_hold_limit(transaction_timeout: Option<Duration>) -> Duration {
+	transaction_timeout.map_or(REMOVAL_HOLD_LIMIT, |timeout| timeout + REMOVAL_HOLD_MARGIN)
+}
+
+/// When the table migration job first saw each removal hold it found standing
+/// ([`crate::key::table_migration::RemovalHold`]), on this datastore's own clock, so the age of a
+/// hold is judged without comparing the clocks of the node that recorded it and of this one. A
+/// hold first seen by a node that took the job's lease over is judged from then.
+#[derive(Default)]
+pub(super) struct RemovalHoldsSeen(parking_lot::Mutex<HashMap<uuid::Uuid, Instant>>);
+
+impl RemovalHoldsSeen {
+	/// Whether the hold `id` has stood for `limit` since it was first seen, recording it as seen
+	/// now if it was not.
+	fn stood(&self, id: uuid::Uuid, limit: Duration) -> bool {
+		self.0.lock().entry(id).or_insert_with(Instant::now).elapsed() >= limit
+	}
+
+	/// Forget the holds first seen longer ago than `age`, which are long since taken out.
+	fn forget_older_than(&self, age: Duration) {
+		self.0.lock().retain(|_, seen| seen.elapsed() < age);
+	}
+}
 
 /// Where the table migration job's walk of its queues stands between passes.
 ///
@@ -429,7 +474,12 @@ impl Datastore {
 						.into_iter()
 						.map(|(key, state)| {
 							let table = match TableMigrationKey::decode_key(&key) {
-								Ok(k) => Some(((k.ns, k.db, k.tb.into_owned()), state.has_work())),
+								// A held entry is visited for its holds, so one whose release
+								// was lost is taken out.
+								Ok(k) => {
+									let visit = state.has_work() || state.held();
+									Some(((k.ns, k.db, k.tb.into_owned()), visit))
+								}
 								Err(e) => {
 									warn!("Skipping undecodable table migration queue entry: {e}");
 									None
@@ -728,7 +778,9 @@ impl Datastore {
 			let progress = txn.get_key(&target.key(), None).await?;
 			let requests =
 				txn.tb_migration_requests(target.ns, target.db, &target.tb, QUEUE_BATCH).await?;
-			if requests.is_empty() && !progress.as_ref().is_some_and(TableMigrationState::has_work)
+			// A held entry is visited for its holds, so one whose release was lost is taken out.
+			if requests.is_empty()
+				&& !progress.as_ref().is_some_and(|state| state.has_work() || state.held())
 			{
 				let _ = txn.cancel().await;
 				return Ok(TableOutcome::Done);
@@ -769,6 +821,45 @@ impl Datastore {
 				let _ = txn.cancel().await;
 				return Ok(TableOutcome::Done);
 			};
+			if state.held() {
+				// A removal of the table is under way: its rows are left alone until it ends, and
+				// the end of the removal's hold, or of the table, brings the job back.
+				let stale = catch!(txn, Self::stale_holds(dbs, &txn, &state).await);
+				if stale.is_empty() {
+					// A verification reads rows and writes none, so it goes on beside the removal.
+					if state.rewrite || !state.has_work() {
+						let _ = txn.cancel().await;
+						return Ok(TableOutcome::Done);
+					}
+				} else {
+					warn!(
+						"Table migration of `{}` takes out {} removal hold(s) whose release was lost",
+						target.tb,
+						stale.len()
+					);
+					let mut kept = state.clone();
+					kept.holds.retain(|hold| !stale.contains(&hold.id));
+					let written = if kept.is_spent() {
+						txn.del_compare_key(&target.key(), Some(&state)).await
+					} else {
+						txn.put_compare_key(&target.key(), &kept, Some(&state)).await
+					};
+					match written {
+						Ok(()) => {
+							Self::page_committed(&txn).await?;
+						}
+						// The progress moved meanwhile; the next page reads it again.
+						Err(e) if crate::kvs::is_conditional_write_conflict(&e) => {
+							let _ = txn.cancel().await;
+						}
+						Err(e) => {
+							let _ = txn.cancel().await;
+							return Err(e);
+						}
+					}
+					continue;
+				}
+			}
 			if state.verifying() && !state.settled && txn.sole_writer() {
 				// The lap judges rows only once no transaction that began before the
 				// verification was folded can still commit one behind its cursor. Every row
@@ -803,6 +894,15 @@ impl Datastore {
 				}
 				continue;
 			}
+			let table = (target.ns, target.db, target.tb.clone());
+			let removals = dbs.commit_triggers().table_removals();
+			if state.rewrite && removals.removing(&table) {
+				// A transaction open through this datastore is removing the table; its removal
+				// wakes the job when it ends, and a lap after that finds the table gone or
+				// resumes it.
+				let _ = txn.cancel().await;
+				return Ok(TableOutcome::Done);
+			}
 			if !catch!(txn, Self::fence(&txn, target).await) {
 				// The database or namespace was removed since the visit began; the next visit
 				// finds it gone and deletes the progress.
@@ -811,22 +911,25 @@ impl Datastore {
 			}
 			let outcome = Self::migration_page(dbs, &txn, target, &state, page).await;
 			match outcome {
-				Ok(more) => match Self::commit_page(&txn).await {
-					Ok(()) => {
-						if !more {
-							return Ok(TableOutcome::Done);
+				Ok(more) => {
+					match Self::commit_unless_removing(&txn, &state, removals, &table).await {
+						Ok(false) => return Ok(TableOutcome::Done),
+						Ok(true) => {
+							if !more {
+								return Ok(TableOutcome::Done);
+							}
+							page = (page * 2).min(PAGE_ROWS);
 						}
-						page = (page * 2).min(PAGE_ROWS);
+						Err(e) if surrealdb_datastore::is_retryable_transaction_conflict(&e) => {
+							// A user write of a row the page rewrote, or a change to the definition
+							// of the table, its database or its namespace, beat the page; take a
+							// fresh snapshot with a smaller page.
+							page = (page / 2).max(1);
+							common::time::sleep(SETTLE_POLL).await;
+						}
+						Err(e) => return Err(e),
 					}
-					Err(e) if surrealdb_datastore::is_retryable_transaction_conflict(&e) => {
-						// A user write of a row the page rewrote, or a change to the definition
-						// of the table, its database or its namespace, beat the page; take a
-						// fresh snapshot with a smaller page.
-						page = (page / 2).max(1);
-						common::time::sleep(SETTLE_POLL).await;
-					}
-					Err(e) => return Err(e),
-				},
+				}
 				// The progress moved under the page: a node that took the lease over replaced it.
 				// The next page reads it again.
 				Err(e) if crate::kvs::is_conditional_write_conflict(&e) => {
@@ -855,6 +958,53 @@ impl Datastore {
 			}
 			Err(e) => Err(e),
 		}
+	}
+
+	/// The ids of the holds in `state` whose release was lost: the removal's node is archived, or
+	/// is not in the cluster where this datastore's own node is (a store whose datastores register
+	/// no nodes judges by age alone), or the hold has stood, since this datastore first saw it,
+	/// longer than any removal's transaction lasts ([`removal_hold_limit`]). A removal that
+	/// outlasts the limit is not held off any longer, and loses its commit to a page as it would
+	/// with no hold.
+	async fn stale_holds(
+		dbs: &Datastore,
+		txn: &Transaction,
+		state: &TableMigrationState,
+	) -> Result<Vec<uuid::Uuid>> {
+		let limit = removal_hold_limit(dbs.transaction_timeout());
+		let mut stale = Vec::new();
+		let registered = txn.get_node(dbs.id()).await?.is_some();
+		for hold in &state.holds {
+			let node_gone = match txn.get_node(hold.node).await? {
+				Some(node) => node.is_archived(),
+				None => registered,
+			};
+			if node_gone || dbs.removal_holds_seen.stood(hold.id, limit) {
+				stale.push(hold.id);
+			}
+		}
+		dbs.removal_holds_seen.forget_older_than(limit * 2);
+		Ok(stale)
+	}
+
+	/// Commit `txn`, a page of the lap `state` describes, as [`Self::commit_page`] does. A page of
+	/// a rewrite is instead cancelled when a transaction open through this datastore is removing
+	/// the table. Answers whether it was committed. No removal of the table is registered while
+	/// the commit is under way ([`surrealdb_datastore::triggers::TableRemovals`]).
+	async fn commit_unless_removing(
+		txn: &Transaction,
+		state: &TableMigrationState,
+		removals: &surrealdb_datastore::triggers::TableRemovals,
+		table: &surrealdb_datastore::triggers::FencedTable,
+	) -> Result<bool> {
+		if !state.rewrite {
+			return Self::commit_page(txn).await.map(|()| true);
+		}
+		let Some(_gate) = removals.admit(table).await else {
+			let _ = txn.cancel().await;
+			return Ok(false);
+		};
+		Self::commit_page(txn).await.map(|()| true)
 	}
 
 	/// Take locked reads of the definitions of `target`'s namespace, database and table in `txn`,

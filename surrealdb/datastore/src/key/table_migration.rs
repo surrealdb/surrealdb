@@ -21,17 +21,26 @@
 //! What the job will do for a table is its progress with every request it has not yet folded
 //! applied in order. Both keys live at the root level, so they survive the removal of the table
 //! they name: the job deletes the progress and the requests of a table, database or namespace that
-//! is gone. No statement deletes either key, so a removal never conflicts with a page of the job.
-//! `REMOVE TABLE` writes a request ([`TableMigrationRequest::Discard`]) instead, so a table
-//! defined again under the name before the job visits it inherits nothing; a namespace or database
-//! defined again is given a new id, under which nothing is queued.
+//! is gone. No statement deletes either key, so a removal never conflicts with a page of the job
+//! through them. `REMOVE TABLE` writes a request ([`TableMigrationRequest::Discard`]) instead, so a
+//! table defined again under the name before the job visits it inherits nothing; a namespace or
+//! database defined again is given a new id, under which nothing is queued.
+//!
+//! `REMOVE TABLE` also deletes the table's rows key by key, so a page that rewrote rows and
+//! committed after the removal's snapshot fails the removal's commit. Before it reads the table, a
+//! removal of a table with work queued therefore records a hold ([`RemovalHold`]) in the progress,
+//! in a transaction of its own that commits at once, and takes it out again once the removal has
+//! ended. A page reads the progress and writes it by compare-and-set, so a page whose snapshot
+//! predates the hold fails its commit, and a page that sees a hold leaves the table's rows alone.
+//! The removing transaction itself never writes the progress, so the hold's commits do not
+//! conflict with it.
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_kvs::impl_kv_value_revisioned;
 
 /// How far the table migration job has got with one table.
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TableMigrationState {
 	/// The lap under way, from 1. A lap reads the whole table once; the job starts another while
@@ -61,6 +70,25 @@ pub struct TableMigrationState {
 	/// when none is queued. An entry of revision 1 holds none.
 	#[revision(start = 2)]
 	pub undeclared: Option<UndeclaredKeys>,
+	/// The removals of the table under way, each of which keeps the job off the table's rows
+	/// until it ends. An entry of revision 1 or 2 holds none.
+	#[revision(start = 3)]
+	pub holds: Vec<RemovalHold>,
+}
+
+/// A removal of a table under way in a transaction on some node, which keeps the table migration
+/// job off the table's rows until that transaction ends.
+///
+/// The removing node takes the hold out once its transaction has committed or rolled back. A hold
+/// whose node is gone, or that has stood longer than the job allows a removal, is one whose
+/// release was lost, and the job takes it out itself.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RemovalHold {
+	/// The hold's own id, by which the removal takes it out.
+	pub id: uuid::Uuid,
+	/// The node running the removal.
+	pub node: uuid::Uuid,
 }
 
 /// A field a verification pass is checking.
@@ -109,7 +137,7 @@ impl TableMigrationRequest {
 	/// The progress `state` becomes once this request is applied to it; `None` for a table with
 	/// no progress that the request gives none.
 	///
-	/// - [`Self::Rewrite`] asks for a rewrite, starting at lap 1 a table with no progress.
+	/// - [`Self::Rewrite`] asks for a rewrite, starting at lap 1 a table with no lap begun.
 	/// - [`Self::Verify`] puts the field in place of any pass over a field of its name, and starts
 	///   the lap over, unsettled, so it reads every row from the start after every transaction
 	///   older than the request has ended.
@@ -119,14 +147,12 @@ impl TableMigrationRequest {
 	///   lap over, unsettled, as [`Self::Verify`] does.
 	/// - [`Self::DropUndeclared`] drops the check, and the progress with it when nothing else is
 	///   left in it ([`TableMigrationState::is_spent`]).
-	/// - [`Self::Discard`] leaves no progress.
+	/// - [`Self::Discard`] leaves no progress, save the holds of removals still under way.
 	pub fn apply(&self, state: Option<TableMigrationState>) -> Option<TableMigrationState> {
 		match self {
 			Self::Rewrite => {
-				let mut state = state.unwrap_or_else(|| TableMigrationState {
-					lap: 1,
-					..Default::default()
-				});
+				let mut state = state.unwrap_or_default();
+				state.lap = state.lap.max(1);
 				state.rewrite = true;
 				Some(state)
 			}
@@ -164,7 +190,15 @@ impl TableMigrationRequest {
 				}
 				(!state.is_spent()).then_some(state)
 			}
-			Self::Discard => None,
+			Self::Discard => {
+				// A hold belongs to a removal still under way, of a table that may be defined
+				// again under the name: it outlives what was queued before it.
+				let holds = state.map(|state| state.holds).unwrap_or_default();
+				(!holds.is_empty()).then(|| TableMigrationState {
+					holds,
+					..Default::default()
+				})
+			}
 		}
 	}
 }
@@ -218,10 +252,18 @@ impl TableMigrationState {
 		self.rewrite || self.verifying()
 	}
 
-	/// Whether nothing is left in the entry: it asks for no lap and reports no finished
-	/// verification or check for undeclared keys, so it is deleted.
+	/// Whether nothing is left in the entry: it asks for no lap, reports no finished
+	/// verification or check for undeclared keys, and holds no removal, so it is deleted.
 	pub fn is_spent(&self) -> bool {
-		!self.has_work() && self.verify.is_empty() && self.undeclared.is_none()
+		!self.has_work()
+			&& self.verify.is_empty()
+			&& self.undeclared.is_none()
+			&& self.holds.is_empty()
+	}
+
+	/// Whether a removal of the table holds the job off its rows.
+	pub fn held(&self) -> bool {
+		!self.holds.is_empty()
 	}
 }
 
@@ -336,6 +378,28 @@ mod tests {
 		])
 		.unwrap();
 		assert_eq!((after.lap, after.rewrite, after.verify), (1, true, vec![]));
+	}
+
+	#[test]
+	fn a_discard_keeps_the_holds_of_removals_under_way() {
+		let hold = RemovalHold {
+			id: uuid::Uuid::from_u128(1),
+			node: uuid::Uuid::from_u128(2),
+		};
+		let mut held = fold(&[TableMigrationRequest::Rewrite]).unwrap();
+		held.holds.push(hold.clone());
+		let discarded = TableMigrationRequest::Discard.apply(Some(held)).unwrap();
+		assert_eq!(
+			discarded,
+			TableMigrationState {
+				holds: vec![hold.clone()],
+				..Default::default()
+			}
+		);
+		assert!(!discarded.has_work() && !discarded.is_spent());
+		// A rewrite queued after the discard starts at lap 1 beneath the hold.
+		let rewritten = TableMigrationRequest::Rewrite.apply(Some(discarded)).unwrap();
+		assert_eq!((rewritten.lap, rewritten.rewrite, rewritten.holds), (1, true, vec![hold]));
 	}
 
 	#[test]

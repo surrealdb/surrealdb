@@ -795,6 +795,7 @@ impl Builder {
 			),
 			compaction_swept_at: parking_lot::Mutex::new(None),
 			table_migration_lap: parking_lot::Mutex::new(Default::default()),
+			removal_holds_seen: Default::default(),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new(config.datastore.datastore_cache_size)),

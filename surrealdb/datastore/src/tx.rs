@@ -819,6 +819,9 @@ pub struct Transaction {
 	trigger_graph_fold: AtomicBool,
 	/// Whether a commit of this transaction queued table migration work.
 	trigger_table_migration: AtomicBool,
+	/// The keys of the table migration requests this transaction wrote, which no other
+	/// transaction sees until it commits ([`Self::hold_table_for_removal`]).
+	migration_requests_made: parking_lot::Mutex<Vec<Vec<u8>>>,
 	/// The live-transaction bucket this transaction counted itself into
 	/// ([`crate::triggers::LiveTransactions`]), or [`crate::triggers::NO_LIVE_BUCKET`].
 	live_bucket: u8,
@@ -1632,6 +1635,301 @@ impl RollbackAction for ReleaseDefinitionHold {
 	}
 }
 
+/// The end of a table removal's registration ([`Transaction::hold_table_for_removal`]):
+/// registered for both outcomes of the transaction, and run by whichever follows, or by dropping
+/// the transaction.
+struct ReleaseTableRemoval(Arc<TableRemovalEnd>);
+
+struct TableRemovalEnd {
+	table: crate::triggers::FencedTable,
+	triggers: Arc<CommitTriggers>,
+	/// The hold recorded in the table's migration progress, and the allocators to open the
+	/// transaction that takes it out; `None` when none was recorded.
+	hold: Option<(crate::key::table_migration::RemovalHold, Sequences)>,
+	ended: AtomicBool,
+}
+
+impl TableRemovalEnd {
+	/// End the registration, take out the hold recorded in the progress, and wake the table
+	/// migration job, which resumes the table if the removal did not commit. Run by the
+	/// transaction's commit and rollback, so the hold is out before either returns. Idempotent,
+	/// so whichever runs first ends it.
+	async fn end(&self) {
+		if self.ended.swap(true, Ordering::SeqCst) {
+			return;
+		}
+		self.triggers.table_removals.end(&self.table);
+		if let Some((hold, sequences)) = &self.hold {
+			release_removal_hold(sequences, &self.table, hold).await;
+		}
+		self.triggers.table_migration.notify_one();
+	}
+
+	/// End as [`Self::end`] does, for a removal dropped with neither a commit nor a rollback,
+	/// taking the hold out on a task of its own.
+	fn end_dropped(&self) {
+		if self.ended.swap(true, Ordering::SeqCst) {
+			return;
+		}
+		self.triggers.table_removals.end(&self.table);
+		match self.hold.clone().filter(|_| can_spawn()) {
+			Some((hold, sequences)) => {
+				let (table, triggers) = (self.table.clone(), Arc::clone(&self.triggers));
+				common::rt::spawn_detached(async move {
+					release_removal_hold(&sequences, &table, &hold).await;
+					triggers.table_migration.notify_one();
+				});
+			}
+			None => self.triggers.table_migration.notify_one(),
+		}
+	}
+}
+
+/// Whether a task can be spawned here. A transaction dropped outside the runtime, as a process
+/// tears down, leaves its hold for the job to take out as lost.
+fn can_spawn() -> bool {
+	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+	{
+		tokio::runtime::Handle::try_current().is_ok()
+	}
+	#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+	{
+		true
+	}
+}
+
+/// How many times the hold of a removal is recorded, or taken out, before it is given up on: each
+/// attempt loses only to a page of the job or another removal's hold committing first.
+const REMOVAL_HOLD_ATTEMPTS: u32 = 8;
+
+/// Record `hold` in the migration progress of `table`, in a transaction of its own committed at
+/// once, writing a progress that holds only it where the job has not yet folded the table's
+/// requests into one. `seen` is the progress as the removing transaction's snapshot holds it,
+/// `oldest_request` the key of the oldest request it sees queued, if any, and `queued_lap` the
+/// lap of the rewrite it sees queued, with every request applied. The job folds requests oldest
+/// first and deletes each it folds, so the snapshot's requests are all still unfolded while the
+/// oldest of them stands.
+///
+/// Fails with a retryable conflict unless the progress shows that no page of rows has committed
+/// since that snapshot, so the removal fails before it deletes any row a page rewrote, which would
+/// fail its commit ([`rewrite_untouched`]). A commit whose outcome is unknown is retried, and the
+/// next attempt finds the hold if it was recorded. A hold that cannot be recorded fails the
+/// removal, with a retryable conflict where every attempt lost one, since no other node is held
+/// off without it.
+async fn record_removal_hold(
+	sequences: &Sequences,
+	table: &crate::triggers::FencedTable,
+	hold: &crate::key::table_migration::RemovalHold,
+	seen: Option<&TableMigrationState>,
+	oldest_request: Option<&[u8]>,
+	queued_lap: u64,
+) -> Result<()> {
+	let (ns, db, tb) = table;
+	let key = Transaction::migration_job_key(*ns, *db, tb);
+	for attempt in 1..=REMOVAL_HOLD_ATTEMPTS {
+		// `Ok(false)`: a page of rows may have committed since the removal's snapshot.
+		let outcome: Result<bool> = async {
+			let txn = sequences
+				.transaction_factory()
+				.transaction(TransactionType::Write, sequences.clone())
+				.await?;
+			let progress = txn.get_key(&key, None).await?;
+			// An earlier attempt whose commit outcome was unknown recorded it.
+			if progress.as_ref().is_some_and(|state| state.holds.contains(hold)) {
+				txn.cancel().await?;
+				return Ok(true);
+			}
+			let unfolded = match oldest_request {
+				Some(request) => {
+					txn.exists_encoded(surrealdb_kvs::Key::from(request), None).await?
+				}
+				None => false,
+			};
+			if !rewrite_untouched(seen, progress.as_ref(), unfolded, queued_lap) {
+				txn.cancel().await?;
+				return Ok(false);
+			}
+			let mut held = progress.clone().unwrap_or_default();
+			held.holds.push(hold.clone());
+			if let Err(e) = txn.put_compare_key(&key, &held, progress.as_ref()).await {
+				let _ = txn.cancel().await;
+				return Err(e);
+			}
+			txn.commit().await?;
+			Ok(true)
+		}
+		.await;
+		match outcome {
+			Ok(true) => return Ok(()),
+			Ok(false) => {
+				return Err(KvsError::TransactionConflict(format!(
+					"the migration of table `{tb}` rewrote rows after this transaction began"
+				))
+				.into());
+			}
+			// The next attempt reads the progress again and finds the hold there or records it.
+			Err(e) if removal_hold_write_lost(&e) => {
+				sleep(Duration::from_millis(5 * u64::from(attempt))).await;
+			}
+			Err(e) => return Err(e),
+		}
+	}
+	Err(KvsError::TransactionConflict(format!(
+		"the hold of this removal on the migration of table `{tb}` lost every attempt to record it"
+	))
+	.into())
+}
+
+/// Whether no page of rows of a rewrite can have committed between a snapshot that saw `seen` as
+/// the progress, with a rewrite queued whose lap is `queued_lap` once every request is applied,
+/// and a later read that sees `now`, with `unfolded` telling whether the requests the snapshot saw
+/// are still queued.
+///
+/// Only these are untouched: no progress yet, with the requests still unfolded; a progress whose
+/// lap has not moved, rewriting or with the requests still unfolded; or a rewrite the job folded
+/// since, still on the lap the snapshot saw queued with no row scanned, where the snapshot saw no
+/// rewrite folded. The job folds every request it sees before it begins a page, so no page ran
+/// before that fold; where the snapshot already saw a rewrite folded, a page open then may have
+/// committed rows before a later fold restarted the lap. A rewrite finished since, a progress
+/// deleted, a lap restarted or a lap advanced counts as touched: each may follow pages that
+/// rewrote rows.
+fn rewrite_untouched(
+	seen: Option<&TableMigrationState>,
+	now: Option<&TableMigrationState>,
+	unfolded: bool,
+	queued_lap: u64,
+) -> bool {
+	let position = |state: &TableMigrationState| (state.lap, state.scanned, state.cursor.clone());
+	match now {
+		None => seen.is_none() && unfolded,
+		Some(now) => {
+			let unmoved = seen.is_some_and(|seen| position(seen) == position(now));
+			let folded_unscanned = now.rewrite
+				&& seen.is_none_or(|seen| !seen.rewrite)
+				&& now.lap == queued_lap
+				&& now.scanned == 0
+				&& now.cursor.is_none();
+			(unmoved && (now.rewrite || unfolded)) || folded_unscanned
+		}
+	}
+}
+
+/// Whether a write of a removal hold lost to another writer of the progress, or committed with an
+/// unknown outcome, so the next attempt reads the progress again.
+fn removal_hold_write_lost(e: &anyhow::Error) -> bool {
+	crate::is_retryable_transaction_conflict(e)
+		|| crate::is_indeterminate_commit(e)
+		|| matches!(
+			crate::storage_error(e),
+			Some(
+				surrealdb_kvs::Error::TransactionConditionNotMet
+					| surrealdb_kvs::Error::TransactionKeyAlreadyExists
+			)
+		)
+}
+
+/// Take `hold` out of the migration progress of `table`, if it is there. One that cannot be taken
+/// out is left for the job, which takes out a hold whose node is gone or which has stood longer
+/// than it allows a removal.
+async fn release_removal_hold(
+	sequences: &Sequences,
+	(ns, db, tb): &crate::triggers::FencedTable,
+	hold: &crate::key::table_migration::RemovalHold,
+) {
+	let key = Transaction::migration_job_key(*ns, *db, tb);
+	for attempt in 1..=REMOVAL_HOLD_ATTEMPTS {
+		let outcome: Result<()> = async {
+			let txn = sequences
+				.transaction_factory()
+				.transaction(TransactionType::Write, sequences.clone())
+				.await?;
+			let Some(progress) = txn.get_key(&key, None).await? else {
+				txn.cancel().await?;
+				return Ok(());
+			};
+			if !progress.holds.contains(hold) {
+				txn.cancel().await?;
+				return Ok(());
+			}
+			let mut released = progress.clone();
+			released.holds.retain(|held| held != hold);
+			let written = if released.is_spent() {
+				txn.del_compare_key(&key, Some(&progress)).await
+			} else {
+				txn.put_compare_key(&key, &released, Some(&progress)).await
+			};
+			if let Err(e) = written {
+				let _ = txn.cancel().await;
+				return Err(e);
+			}
+			// A rewrite no longer held is requested again, which changes nothing it folds into, so
+			// a host that wakes the job only on a request wakes it to resume the rows.
+			if released.rewrite
+				&& !released.held()
+				&& let Err(e) =
+					txn.request_tb_migration(*ns, *db, tb, TableMigrationRequest::Rewrite).await
+			{
+				let _ = txn.cancel().await;
+				return Err(e);
+			}
+			txn.commit().await
+		}
+		.await;
+		match outcome {
+			Ok(()) => return,
+			// The next attempt reads the progress again and does nothing if the hold is gone.
+			Err(e) if removal_hold_write_lost(&e) => {
+				sleep(Duration::from_millis(5 * u64::from(attempt))).await;
+			}
+			Err(e) => {
+				tracing::warn!(
+					"the hold of a removal of `{tb}` on its migration was not taken out: {e}"
+				);
+				return;
+			}
+		}
+	}
+	tracing::warn!(
+		"the hold of a removal of `{tb}` on its migration lost every attempt to take it out"
+	);
+}
+
+impl Drop for TableRemovalEnd {
+	fn drop(&mut self) {
+		self.end_dropped();
+	}
+}
+
+impl CommitAction for ReleaseTableRemoval {
+	fn run(self: Box<Self>) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
+		Box::pin(async move { self.0.end().await })
+	}
+
+	/// The commit half of a pair registered on both outcomes, which a rollback of a save point
+	/// must not discard, or the transaction's end would not end the registration.
+	fn scope(&self) -> ActionScope {
+		ActionScope::Transaction
+	}
+}
+
+impl RollbackAction for ReleaseTableRemoval {
+	fn run(
+		self: Box<Self>,
+		_drain_started_at: Instant,
+	) -> std::pin::Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+		Box::pin(async move {
+			self.0.end().await;
+			Ok(())
+		})
+	}
+
+	/// The rollback half of the same pair: a save point rollback leaves it queued, so the
+	/// registration lasts until the transaction itself ends.
+	fn scope(&self) -> ActionScope {
+		ActionScope::Transaction
+	}
+}
+
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		if self.live_bucket != crate::triggers::NO_LIVE_BUCKET {
@@ -2093,6 +2391,7 @@ impl Transaction {
 			trigger_index_compaction: AtomicBool::new(false),
 			trigger_graph_fold: AtomicBool::new(false),
 			trigger_table_migration: AtomicBool::new(false),
+			migration_requests_made: parking_lot::Mutex::default(),
 			live_bucket: crate::triggers::NO_LIVE_BUCKET,
 			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
 			live_shard: crate::triggers::LiveShard::default(),
@@ -5786,6 +6085,81 @@ impl Transaction {
 		self.request_tb_migration(ns, db, tb, TableMigrationRequest::Restart).await
 	}
 
+	/// Keep the table migration job from rewriting the rows of `tb` until this transaction ends,
+	/// in the transaction that removes it, before it reads or deletes anything of the table.
+	///
+	/// A page of the job that rewrote rows and committed after this transaction's snapshot would
+	/// fail its commit, since the removal deletes every row. On this datastore the removal is
+	/// registered at once ([`crate::triggers::TableRemovals`]), so no page through it commits a row
+	/// of the table afterwards. Where a rewrite of the table was queued before this transaction's
+	/// snapshot, by the progress and the requests other transactions committed, a hold is also
+	/// recorded in the job's progress
+	/// ([`crate::key::table_migration::RemovalHold`]), in a transaction of its own committed
+	/// before this returns, so no page through any datastore commits a row of the table after
+	/// that. A page committed between this transaction's snapshot and the hold would still fail
+	/// the removal's commit, so this fails with a retryable conflict, before any row is deleted,
+	/// when the lap has moved since the snapshot; the statement is then run again or the conflict
+	/// reported.
+	///
+	/// Both end however the transaction ends: its commit and its rollback each take the hold out
+	/// before they return, and dropping the transaction without either takes it out on a task of
+	/// its own. A speculative run, or the removal of a table that never had a migration minted,
+	/// registers nothing.
+	pub async fn hold_table_for_removal(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<()> {
+		// A rewrite is queued only by the minting of a migration, which the table's layouts,
+		// cached, record; a table that never had one has nothing for the job to rewrite.
+		if self.speculating() || self.newest_tb_migration(ns, db, tb).await?.is_none() {
+			return Ok(());
+		}
+		let table = (ns, db, tb.clone());
+		self.triggers.table_removals.begin(table.clone()).await;
+		// Registered at once, so the registration ends however the rest of this goes.
+		let mut end = TableRemovalEnd {
+			table,
+			triggers: Arc::clone(&self.triggers),
+			hold: None,
+			ended: AtomicBool::new(false),
+		};
+		let seen = self.get_key(&Self::migration_job_key(ns, db, tb), None).await?;
+		// Only requests committed before this transaction's snapshot can have reached the job: one
+		// this transaction made is seen neither by the job nor by the transaction recording the
+		// hold.
+		let mut requests = self.getr(Self::migration_requests(ns, db, tb).range()?, None).await?;
+		{
+			let made = self.migration_requests_made.lock();
+			requests.retain(|(key, _)| !made.contains(key));
+		}
+		let queued = requests.iter().fold(seen.clone(), |state, (_, request)| request.apply(state));
+		if let Some(queued) = queued.filter(|state| state.rewrite) {
+			let hold = crate::key::table_migration::RemovalHold {
+				id: Uuid::now_v7(),
+				node: self.sequences.node_id(),
+			};
+			// Set before the hold is recorded, so a removal dropped part-way takes out whatever
+			// was recorded; taking out a hold that is not there does nothing.
+			end.hold = Some((hold.clone(), self.sequences.clone()));
+			let oldest_request = requests.first().map(|(key, _)| key.as_slice());
+			record_removal_hold(
+				&self.sequences,
+				&end.table,
+				&hold,
+				seen.as_ref(),
+				oldest_request,
+				queued.lap,
+			)
+			.await?;
+		}
+		let end = Arc::new(end);
+		self.on_commit(Box::new(ReleaseTableRemoval(Arc::clone(&end)))).await;
+		self.on_rollback(Box::new(ReleaseTableRemoval(end))).await;
+		Ok(())
+	}
+
 	/// Discard what the table migration job holds for table `tb`, in the transaction that
 	/// removes it, so a table defined again under the name starts with nothing queued.
 	///
@@ -5824,6 +6198,7 @@ impl Transaction {
 			uid: Uuid::now_v7(),
 		};
 		self.put_key(&key, &request).await?;
+		self.migration_requests_made.lock().push(key.encode_key()?.to_vec());
 		self.trigger_table_migration();
 		Ok(())
 	}
@@ -10342,6 +10717,7 @@ impl Transaction {
 			trigger_index_compaction: AtomicBool::new(false),
 			trigger_graph_fold: AtomicBool::new(false),
 			trigger_table_migration: AtomicBool::new(false),
+			migration_requests_made: parking_lot::Mutex::default(),
 			live_bucket: crate::triggers::NO_LIVE_BUCKET,
 			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
 			live_shard: crate::triggers::LiveShard::default(),
@@ -19455,5 +19831,59 @@ mod save_point_buffer_tests {
 		tx.rollback_to_save_point().await.unwrap();
 		assert_eq!(flushed(&tx), (vec![record("kept")], vec![record("kept")]));
 		tx.cancel().await.unwrap();
+	}
+}
+
+#[cfg(test)]
+mod removal_hold_tests {
+	use super::rewrite_untouched;
+	use crate::key::table_migration::TableMigrationState;
+
+	fn rewriting(lap: u64, scanned: u64) -> TableMigrationState {
+		TableMigrationState {
+			lap,
+			scanned,
+			rewrite: true,
+			..Default::default()
+		}
+	}
+
+	/// What a snapshot that saw a rewrite queued still finds untouched: requests not yet folded,
+	/// a lap that has not moved, and a fold since that has scanned no row.
+	#[test]
+	fn a_rewrite_no_page_has_reached_is_untouched() {
+		assert!(rewrite_untouched(None, None, true, 1), "the requests are still queued");
+		let seen = rewriting(1, 40);
+		assert!(rewrite_untouched(Some(&seen), Some(&seen), false, 1), "the lap has not moved");
+		let folded = rewriting(2, 0);
+		assert!(rewrite_untouched(None, Some(&folded), false, 2), "folded, no row scanned");
+		let verifying = TableMigrationState {
+			lap: 1,
+			..Default::default()
+		};
+		assert!(
+			rewrite_untouched(Some(&verifying), Some(&verifying), true, 1),
+			"the rewrite's request is still queued beside a verification"
+		);
+	}
+
+	/// What follows a page of rows: a lap that moved, finished, restarted or was deleted.
+	#[test]
+	fn a_rewrite_a_page_has_reached_is_touched() {
+		let seen = rewriting(1, 40);
+		assert!(!rewrite_untouched(Some(&seen), Some(&rewriting(1, 80)), false, 1), "moved");
+		let finished = TableMigrationState {
+			lap: 1,
+			..Default::default()
+		};
+		assert!(!rewrite_untouched(Some(&seen), Some(&finished), false, 1), "finished");
+		assert!(!rewrite_untouched(Some(&seen), Some(&rewriting(2, 0)), false, 1), "restarted");
+		assert!(!rewrite_untouched(Some(&seen), None, false, 1), "finished and deleted");
+		assert!(!rewrite_untouched(None, None, false, 1), "folded, finished and deleted");
+		assert!(!rewrite_untouched(None, Some(&rewriting(3, 0)), false, 2), "a lap past the fold");
+		assert!(
+			!rewrite_untouched(Some(&rewriting(1, 0)), Some(&rewriting(2, 0)), false, 2),
+			"a restart folded over a rewrite a page may have reached"
+		);
 	}
 }

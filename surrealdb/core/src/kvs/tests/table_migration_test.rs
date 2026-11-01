@@ -1274,3 +1274,348 @@ async fn a_host_drives_the_job_with_bounded_passes() {
 	assert_eq!(run(&ds, "SELECT VALUE f FROM tb:1; SELECT VALUE f FROM tb:4999;").await, before);
 	assert_eq!(run(&ds, progress).await, vec![Value::None], "no rewrite is under way");
 }
+
+/// A table of more rows than a page holds, with a rewrite of them queued and not yet begun.
+async fn table_under_rewrite(ds: &Datastore) {
+	let mut setup = String::from("DEFINE TABLE t SCHEMAFULL; DEFINE FIELD f ON t TYPE int;");
+	for i in 0..600 {
+		setup.push_str(&format!("CREATE t:{i} SET f = {i} RETURN NONE;"));
+	}
+	setup.push_str(
+		"ALTER FIELD f ON t TYPE float MIGRATE EXISTING ROWS AS to_float USING <float>$value FALLBACK 0f;",
+	);
+	run(ds, &setup).await;
+}
+
+/// Run a pass of the job inside each of the next `commits` commits through `ds`, after that
+/// transaction's writes and before its storage commit, counting the passes run. A removal commits
+/// its hold on the job's progress before its own commit, so the pass that matters runs inside the
+/// last of them.
+fn pass_inside_commits(ds: &Arc<Datastore>, commits: usize) -> Arc<std::sync::atomic::AtomicUsize> {
+	let ran = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+	arm_pass(Arc::clone(ds), Arc::clone(&ran), commits);
+	ran
+}
+
+fn arm_pass(ds: Arc<Datastore>, ran: Arc<std::sync::atomic::AtomicUsize>, left: usize) {
+	if left == 0 {
+		return;
+	}
+	let triggers = Arc::clone(ds.commit_triggers());
+	triggers.set_before_commit_hook(Box::new(move || {
+		Box::pin(async move {
+			// On a task of its own, as the job runs, so it reads the catalog as the job does
+			// whatever the committing work around it may read.
+			let job = Arc::clone(&ds);
+			let pass = Datastore::table_migration_with_pages(job, Duration::from_secs(1), 4);
+			tokio::spawn(pass).await.unwrap().unwrap();
+			ran.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+			arm_pass(ds, ran, left - 1);
+		})
+	}));
+}
+
+/// `REMOVE TABLE` deletes the table's rows key by key in its own transaction, so a page of the
+/// job that rewrote rows and committed while the removal ran would fail the removal's commit. A
+/// removal holds the job off the table, so the job's pass skips it and the removal commits; the
+/// table's rows and its migration go with it.
+#[tokio::test]
+async fn removing_a_table_under_rewrite_holds_the_job_off_its_rows() {
+	let ds = ds().await;
+	table_under_rewrite(&ds).await;
+	let ran = pass_inside_commits(&ds, 2);
+	let removed = attempt(&ds, "BEGIN; REMOVE TABLE t; COMMIT;").await;
+	assert!(removed.iter().all(Result::is_ok), "{removed:?}");
+	assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 2, "the job ran inside the removal");
+	drain(&ds).await;
+	let (ns, db) = ids(&ds).await;
+	assert_eq!(queued_requests(&ds, (ns, db), "t").await, 0, "the requests are discarded");
+	let again = run(
+		&ds,
+		"DEFINE TABLE t SCHEMAFULL; DEFINE FIELD f ON t TYPE int;
+		 SELECT VALUE id FROM t;
+		 (INFO FOR TABLE t).migrations.progress;",
+	)
+	.await;
+	assert_eq!(again[2], Value::Array(Default::default()), "the rows went with the table");
+	assert_eq!(again[3], Value::None, "the table defined again inherits no rewrite");
+}
+
+/// A rewrite queued by the removing transaction itself is seen by no page, so it holds nothing off
+/// and the removal commits with it.
+#[tokio::test]
+async fn a_rewrite_queued_by_the_removing_transaction_does_not_fail_it() {
+	let ds = ds().await;
+	run(&ds, "DEFINE TABLE t SCHEMAFULL; DEFINE FIELD f ON t TYPE int; CREATE t:1 SET f = 1;")
+		.await;
+	let removed = attempt(
+		&ds,
+		"BEGIN;
+		 ALTER FIELD f ON t TYPE float MIGRATE EXISTING ROWS AS to_float USING <float>$value FALLBACK 0f;
+		 REMOVE TABLE t;
+		 COMMIT;",
+	)
+	.await;
+	assert!(removed.iter().all(Result::is_ok), "{removed:?}");
+	assert!(progress(&ds).await.is_none(), "no hold was recorded");
+}
+
+/// `REMOVE DATABASE` deletes only the definition and leaves the rows to a background reclaim, so
+/// a page of the job that commits while the removal runs conflicts with nothing it writes.
+#[tokio::test]
+async fn removing_a_database_under_rewrite_commits() {
+	let ds = ds().await;
+	table_under_rewrite(&ds).await;
+	let ran = pass_inside_commits(&ds, 1);
+	let removed = attempt(&ds, "BEGIN; REMOVE DATABASE test; COMMIT;").await;
+	assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 1, "the job ran inside the removal");
+	assert!(removed.iter().all(Result::is_ok), "{removed:?}");
+	drain(&ds).await;
+	let txn = ds.transaction(Read).await.unwrap();
+	assert!(txn.get_db_by_name("test", "test", None).await.unwrap().is_none());
+	txn.cancel().await.unwrap();
+}
+
+/// The hold lasts as long as the removing transaction: the job does not rewrite the table's rows
+/// while it is open, and resumes them once it rolls back.
+#[tokio::test]
+async fn a_rolled_back_removal_releases_the_rows_to_the_job() {
+	let ds = ds().await;
+	table_under_rewrite(&ds).await;
+	let (ns, db) = ids(&ds).await;
+	let before = stamp(&ds, "t", 599).await;
+	assert_ne!(before, head(&ds, "t").await, "the rows are behind the newest step");
+	let removal = ds.transaction(Write).await.unwrap();
+	removal.hold_table_for_removal(ns, db, &TableName::from("t")).await.unwrap();
+	assert!(ds.commit_triggers().table_removals().removing(&(ns, db, TableName::from("t"))));
+	drain(&ds).await;
+	assert_eq!(stamp(&ds, "t", 599).await, before, "no row is rewritten under the hold");
+	removal.cancel().await.unwrap();
+	// Counted among the transactions the verification waits out until dropped.
+	drop(removal);
+	assert!(!ds.commit_triggers().table_removals().removing(&(ns, db, TableName::from("t"))));
+	hold_taken_out(&ds).await;
+	drain(&ds).await;
+	assert_eq!(stamp(&ds, "t", 599).await, head(&ds, "t").await, "the rewrite resumes");
+}
+
+/// Wait for the end of a removal to take its hold out of the progress through `t`, which it does
+/// on a task of its own.
+async fn hold_taken_out(ds: &Datastore) {
+	let out = async {
+		while progress(ds).await.is_some_and(|state| state.held()) {
+			tokio::time::sleep(Duration::from_millis(5)).await;
+		}
+	};
+	tokio::time::timeout(Duration::from_secs(5), out).await.expect("the hold is taken out");
+}
+
+/// The job's progress through `t`, as stored.
+async fn progress(ds: &Datastore) -> Option<crate::key::table_migration::TableMigrationState> {
+	let (ns, db) = ids(ds).await;
+	let txn = ds.transaction(Read).await.unwrap();
+	let key = crate::key::schema::TableMigrationKey {
+		ns,
+		db,
+		tb: std::borrow::Cow::Owned(TableName::from("t")),
+	};
+	let state = txn.get_key(&key, None).await.unwrap();
+	txn.cancel().await.unwrap();
+	state
+}
+
+/// Write `change` of the job's progress through `t` in a transaction of its own, as a removal on
+/// another node records and takes out its hold.
+async fn change_progress(
+	ds: &Datastore,
+	change: impl FnOnce(&mut crate::key::table_migration::TableMigrationState),
+) {
+	let (ns, db) = ids(ds).await;
+	let txn = ds.transaction(Write).await.unwrap();
+	let key = crate::key::schema::TableMigrationKey {
+		ns,
+		db,
+		tb: std::borrow::Cow::Owned(TableName::from("t")),
+	};
+	let before = txn.get_key(&key, None).await.unwrap();
+	let mut after = before.clone().unwrap_or_default();
+	change(&mut after);
+	txn.put_compare_key(&key, &after, before.as_ref()).await.unwrap();
+	txn.commit().await.unwrap();
+}
+
+fn hold(node: uuid::Uuid) -> crate::key::table_migration::RemovalHold {
+	crate::key::table_migration::RemovalHold {
+		id: uuid::Uuid::now_v7(),
+		node,
+	}
+}
+
+/// A hold in the progress keeps the job off the table's rows whichever node recorded it, without
+/// the removing datastore's own registration, and the rewrite resumes once it is taken out.
+#[tokio::test]
+async fn a_hold_in_the_progress_keeps_the_job_off_the_rows() {
+	let ds = ds().await;
+	table_under_rewrite(&ds).await;
+	let before = stamp(&ds, "t", 0).await;
+	let held = hold(ds.id());
+	change_progress(&ds, |state| state.holds.push(held.clone())).await;
+	drain(&ds).await;
+	assert_eq!(stamp(&ds, "t", 0).await, before, "no row is rewritten under the hold");
+	let state = progress(&ds).await.expect("the requests are folded beneath the hold");
+	assert_eq!((state.rewrite, state.holds.clone()), (true, vec![held.clone()]));
+	change_progress(&ds, |state| state.holds.retain(|h| *h != held)).await;
+	drain(&ds).await;
+	assert_eq!(stamp(&ds, "t", 0).await, head(&ds, "t").await, "the rewrite resumes");
+}
+
+/// A page whose snapshot was taken before a hold committed writes the progress by
+/// compare-and-set, so its commit fails and its rows are not rewritten: a removal's hold is in
+/// force from its commit on, not from the next page.
+#[tokio::test]
+async fn a_page_begun_before_a_hold_commits_nothing() {
+	let ds = ds().await;
+	table_under_rewrite(&ds).await;
+	let pass = |pages| {
+		Datastore::table_migration_with_pages(Arc::clone(&ds), Duration::from_secs(60), pages)
+	};
+	// Single pages until the requests are folded into a progress, before any row is read: the
+	// lease is taken and the queues read by then, so the next commit is a page of rows.
+	while progress(&ds).await.is_none() {
+		pass(1).await.unwrap();
+	}
+	let before = stamp(&ds, "t", 0).await;
+	assert_ne!(before, head(&ds, "t").await, "no row is rewritten yet");
+	let held = hold(ds.id());
+	let recorder = Arc::clone(&ds);
+	let recorded = Arc::new(std::sync::atomic::AtomicBool::new(false));
+	let flag = Arc::clone(&recorded);
+	// The hold commits inside the next commit, after that page read and rewrote its rows.
+	ds.commit_triggers().set_before_commit_hook(Box::new(move || {
+		Box::pin(async move {
+			change_progress(&recorder, |state| state.holds.push(held)).await;
+			flag.store(true, std::sync::atomic::Ordering::SeqCst);
+		})
+	}));
+	while !recorded.load(std::sync::atomic::Ordering::SeqCst) {
+		pass(1).await.unwrap();
+	}
+	assert_eq!(stamp(&ds, "t", 0).await, before, "the page that lost to the hold wrote nothing");
+	pass(8).await.unwrap();
+	assert_eq!(stamp(&ds, "t", 0).await, before, "no later page passes the hold");
+	assert_eq!(progress(&ds).await.expect("progress").scanned, 0, "the lap has not moved");
+}
+
+/// A hold whose node is not in the cluster lost its release: the job takes it out and the
+/// rewrite goes on. Judged so only where this datastore's own node is registered.
+#[tokio::test]
+async fn a_hold_of_a_node_that_is_gone_is_taken_out() {
+	let ds = ds().await;
+	ds.insert_node().await.unwrap();
+	table_under_rewrite(&ds).await;
+	change_progress(&ds, |state| state.holds.push(hold(uuid::Uuid::now_v7()))).await;
+	drain(&ds).await;
+	assert_eq!(stamp(&ds, "t", 599).await, head(&ds, "t").await, "the rewrite went on");
+	assert!(progress(&ds).await.is_none_or(|state| state.holds.is_empty()), "the hold is gone");
+}
+
+/// A progress holding nothing but a hold whose release was lost, as one is once the removal's
+/// discard is folded and the release never comes, is visited for its hold: the job takes it out
+/// and deletes the spent progress, so the table defined again inherits no hold.
+#[tokio::test]
+async fn a_lost_hold_left_alone_in_the_progress_is_taken_out() {
+	let ds = ds().await;
+	ds.insert_node().await.unwrap();
+	run(&ds, "DEFINE TABLE t SCHEMAFULL;").await;
+	change_progress(&ds, |state| state.holds.push(hold(uuid::Uuid::now_v7()))).await;
+	let held = progress(&ds).await.expect("the hold made a progress");
+	assert!(held.held() && !held.has_work(), "{held:?}");
+	drain(&ds).await;
+	assert!(progress(&ds).await.is_none(), "the spent progress is deleted");
+}
+
+/// A removal through `REMOVE TABLE` records its hold in the progress where the table has work
+/// queued, and takes it out when it rolls back.
+#[tokio::test]
+async fn a_removal_records_its_hold_and_takes_it_out_when_it_ends() {
+	let ds = ds().await;
+	table_under_rewrite(&ds).await;
+	let (ns, db) = ids(&ds).await;
+	let removal = ds.transaction(Write).await.unwrap();
+	removal.hold_table_for_removal(ns, db, &TableName::from("t")).await.unwrap();
+	let holds = progress(&ds).await.expect("the hold made a progress").holds;
+	assert_eq!(holds.len(), 1, "{holds:?}");
+	assert_eq!(holds[0].node, ds.id());
+	removal.cancel().await.unwrap();
+	drop(removal);
+	hold_taken_out(&ds).await;
+	drain(&ds).await;
+	assert_eq!(stamp(&ds, "t", 599).await, head(&ds, "t").await, "the rewrite resumes");
+}
+
+/// A removal whose snapshot predates a page of rows the job has since committed would fail its
+/// commit on those rows, so it fails with a retryable conflict when it records its hold, before
+/// it deletes anything.
+#[tokio::test]
+async fn a_removal_a_page_has_beaten_fails_before_it_deletes() {
+	let ds = ds().await;
+	table_under_rewrite(&ds).await;
+	let (ns, db) = ids(&ds).await;
+	let page =
+		|| Datastore::table_migration_with_pages(Arc::clone(&ds), Duration::from_secs(60), 1);
+	// The lap first waits out every transaction older than its verification, so the removal
+	// begins once the lap is past that.
+	for _ in 0..16 {
+		if progress(&ds).await.is_some_and(|state| state.settled || !state.verifying()) {
+			break;
+		}
+		page().await.unwrap();
+	}
+	let position = |state: Option<crate::key::table_migration::TableMigrationState>| {
+		state.map(|state| (state.lap, state.scanned))
+	};
+	let removal = ds.transaction(Write).await.unwrap();
+	let seen = position(progress(&ds).await);
+	for _ in 0..16 {
+		if position(progress(&ds).await) != seen {
+			break;
+		}
+		page().await.unwrap();
+	}
+	assert!(progress(&ds).await.is_some_and(|state| state.rewrite && state.scanned > 0));
+	let refused = removal.hold_table_for_removal(ns, db, &TableName::from("t")).await;
+	let e = refused.expect_err("the removal is refused before it deletes");
+	assert!(crate::kvs::is_retryable_transaction_conflict(&e), "{e}");
+	removal.cancel().await.unwrap();
+	assert!(!ds.commit_triggers().table_removals().removing(&(ns, db, TableName::from("t"))));
+}
+
+/// A rewrite that finished after the removal's snapshot rewrote rows the removal would fail its
+/// commit on, though its progress no longer asks for a rewrite, so the removal fails before it
+/// deletes anything.
+#[tokio::test]
+async fn a_removal_a_finished_rewrite_has_beaten_fails_before_it_deletes() {
+	let ds = ds().await;
+	table_under_rewrite(&ds).await;
+	let (ns, db) = ids(&ds).await;
+	let page =
+		|| Datastore::table_migration_with_pages(Arc::clone(&ds), Duration::from_secs(60), 1);
+	for _ in 0..16 {
+		if progress(&ds).await.is_some_and(|state| state.settled || !state.verifying()) {
+			break;
+		}
+		page().await.unwrap();
+	}
+	let removal = ds.transaction(Write).await.unwrap();
+	for _ in 0..64 {
+		if progress(&ds).await.is_none_or(|state| !state.rewrite) {
+			break;
+		}
+		page().await.unwrap();
+	}
+	assert!(progress(&ds).await.is_none_or(|state| !state.rewrite), "the rewrite finished");
+	let refused = removal.hold_table_for_removal(ns, db, &TableName::from("t")).await;
+	let e = refused.expect_err("the removal is refused before it deletes");
+	assert!(crate::kvs::is_retryable_transaction_conflict(&e), "{e}");
+	removal.cancel().await.unwrap();
+}

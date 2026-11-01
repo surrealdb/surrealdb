@@ -410,6 +410,9 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::DiscardTableMigration {
 			..
 		}
+		| StoreInstr::HoldTableForRemoval {
+			..
+		}
 		| StoreInstr::BufferTableChange {
 			..
 		}

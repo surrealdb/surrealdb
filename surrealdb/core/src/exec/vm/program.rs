@@ -1564,6 +1564,16 @@ pub(crate) enum StoreInstr {
 		tb: Reg,
 		expunge: bool,
 	},
+	/// Keep the table migration job from rewriting the rows of the table `tb`
+	/// of the database `ns`, `db`, which the statement removes, until the
+	/// statement's transaction ends
+	/// ([`crate::kvs::Transaction::hold_table_for_removal`]). Skipped by a
+	/// speculative run.
+	HoldTableForRemoval {
+		ns: Reg,
+		db: Reg,
+		tb: Reg,
+	},
 	/// Discard what the table migration job holds for the table `tb` of the
 	/// database `ns`, `db`, which the statement removes
 	/// ([`crate::kvs::Transaction::discard_tb_migration`]).
