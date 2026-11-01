@@ -101,6 +101,7 @@ pub fn is_system_catalog_table(schema: Option<&str>, name: &str) -> bool {
 					| "views" | "sequences"
 					| "table_constraints"
 					| "constraint_column_usage"
+					| "column_statistics"
 			)
 		}
 		None => {
@@ -853,6 +854,11 @@ pub fn get_system_table_schema(schema: Option<&str>, name: &str) -> Option<Table
 				"generation_expression",
 				"is_updatable",
 			],
+		)),
+		(Some("information_schema"), "column_statistics") => Some(make_schema(
+			Some("information_schema"),
+			"column_statistics",
+			&["schema_name", "table_name", "column_name", "histogram"],
 		)),
 		(Some("information_schema"), "schemata") => Some(make_schema(
 			Some("information_schema"),
@@ -2365,6 +2371,9 @@ pub fn get_system_table_rows(
 				("sql_path", null_val()),
 			]),
 		]),
+
+		// No column has a histogram.
+		(Some("information_schema"), "column_statistics") => Some(Vec::new()),
 
 		// information_schema.views
 		(Some("information_schema"), "views") => Some(

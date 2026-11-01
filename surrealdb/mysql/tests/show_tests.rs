@@ -411,3 +411,39 @@ fn show_columns_needs_from_or_in() {
 	assert!(parse_statement("SHOW COLUMNS t").is_err());
 	assert!(parse_statement("SHOW COLUMNS").is_err());
 }
+
+#[test]
+fn show_table_status_takes_from_or_in_and_like() {
+	for sql in
+		["SHOW TABLE STATUS", "SHOW TABLE STATUS FROM db LIKE 'a%'", "SHOW TABLE STATUS IN db"]
+	{
+		assert!(matches!(parse(sql), Statement::Show(ShowStmt::TableStatus { .. })), "{sql}");
+	}
+	let columns = column_names("SHOW TABLE STATUS", "shop");
+	assert_eq!(columns.first().map(String::as_str), Some("Name"));
+	assert_eq!(columns.last().map(String::as_str), Some("Comment"));
+	assert_eq!(columns.len(), 18);
+}
+
+#[test]
+fn show_triggers_answers_with_its_columns() {
+	for sql in ["SHOW TRIGGERS", "SHOW TRIGGERS LIKE 'person'", "SHOW TRIGGERS FROM db"] {
+		assert!(matches!(parse(sql), Statement::Show(ShowStmt::Triggers { .. })), "{sql}");
+	}
+	assert_eq!(column_names("SHOW TRIGGERS", "shop").len(), 11);
+}
+
+#[test]
+fn a_select_skips_its_cache_hints() {
+	for sql in [
+		"SELECT SQL_NO_CACHE * FROM t",
+		"SELECT /*!40001 SQL_NO_CACHE */ * FROM t",
+		"SELECT DISTINCT HIGH_PRIORITY SQL_BIG_RESULT a FROM t",
+	] {
+		assert!(matches!(parse(sql), Statement::Select(_)), "{sql}");
+	}
+	assert_eq!(
+		translate_sql("SELECT SQL_NO_CACHE a FROM t").expect("translates"),
+		translate_sql("SELECT a FROM t").expect("translates")
+	);
+}

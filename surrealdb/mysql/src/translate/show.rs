@@ -101,6 +101,28 @@ const COLLATION_COLUMNS: &[(&str, ShowColumnKind)] = &[
 	("Pad_attribute", ShowColumnKind::Text),
 ];
 
+/// The columns of the result of `SHOW TABLE STATUS`, with the kind of each.
+const TABLE_STATUS_COLUMNS: &[(&str, ShowColumnKind)] = &[
+	("Name", ShowColumnKind::Text),
+	("Engine", ShowColumnKind::Text),
+	("Version", ShowColumnKind::Int),
+	("Row_format", ShowColumnKind::Text),
+	("Rows", ShowColumnKind::BigInt),
+	("Avg_row_length", ShowColumnKind::BigInt),
+	("Data_length", ShowColumnKind::BigInt),
+	("Max_data_length", ShowColumnKind::BigInt),
+	("Index_length", ShowColumnKind::BigInt),
+	("Data_free", ShowColumnKind::BigInt),
+	("Auto_increment", ShowColumnKind::BigInt),
+	("Create_time", ShowColumnKind::Text),
+	("Update_time", ShowColumnKind::Text),
+	("Check_time", ShowColumnKind::Text),
+	("Collation", ShowColumnKind::Text),
+	("Checksum", ShowColumnKind::BigInt),
+	("Create_options", ShowColumnKind::Text),
+	("Comment", ShowColumnKind::Text),
+];
+
 /// The columns of the result of `SHOW CHARACTER SET`, with the kind of each.
 const CHARSET_COLUMNS: &[(&str, ShowColumnKind)] = &[
 	("Charset", ShowColumnKind::Text),
@@ -130,6 +152,24 @@ pub fn show_columns(stmt: &Statement, database: &str) -> Option<Vec<ShowColumn>>
 			}
 			columns
 		}
+		ShowStmt::TableStatus {
+			..
+		} => typed_columns(TABLE_STATUS_COLUMNS),
+		ShowStmt::Triggers {
+			..
+		} => text_columns(&[
+			"Trigger",
+			"Event",
+			"Table",
+			"Statement",
+			"Timing",
+			"Created",
+			"sql_mode",
+			"Definer",
+			"character_set_client",
+			"collation_connection",
+			"Database Collation",
+		]),
 		ShowStmt::Databases {
 			..
 		} => text_columns(&["Database"]),
@@ -204,6 +244,11 @@ pub fn translate_show(show: &ShowStmt, out: &mut String) -> Result<(), Translati
 			like,
 			..
 		} => translate_tables(*full, database.as_deref(), like.as_deref(), out),
+		ShowStmt::TableStatus {
+			database,
+			like,
+			..
+		} => translate_table_status(database.as_deref(), like.as_deref(), out),
 		ShowStmt::Databases {
 			like,
 			..
@@ -237,6 +282,9 @@ pub fn translate_show(show: &ShowStmt, out: &mut String) -> Result<(), Translati
 			Ok(())
 		}
 		ShowStmt::Status {
+			..
+		}
+		| ShowStmt::Triggers {
 			..
 		}
 		| ShowStmt::Processlist {
@@ -323,6 +371,33 @@ fn translate_tables(
 		push_like_filter(out, "$t", "$t", like, false)?;
 		out.push_str(".map(|$t| object::from_entries([['Tables_in_' + session::db(), $t]]));");
 	}
+	out.push_str(" }");
+	Ok(())
+}
+
+/// `SHOW TABLE STATUS`: a row per table of the database. The storage figures and the times are
+/// not tracked, so the sizes are zero and the rest `NULL`; `Comment` is `VIEW` for a view, as
+/// MySQL reports it, which is how a dump tool tells a view from a table.
+fn translate_table_status(
+	database: Option<&str>,
+	like: Option<&str>,
+	out: &mut String,
+) -> Result<(), TranslationError> {
+	out.push_str("{ ");
+	if let Some(database) = database {
+		push_database_guard(out, database, database)?;
+	}
+	out.push_str("RETURN object::entries((INFO FOR DB).tables)");
+	push_like_filter(out, "$e", "$e[0]", like, false)?;
+	write!(
+		out,
+		".map(|$e| {{ Name: $e[0], Engine: 'InnoDB', Version: 10, Row_format: 'Dynamic', Rows: \
+		 0, Avg_row_length: 0, Data_length: 0, Max_data_length: 0, Index_length: 0, Data_free: 0, \
+		 Auto_increment: NULL, Create_time: NULL, Update_time: NULL, Check_time: NULL, \
+		 Collation: {}, Checksum: NULL, Create_options: '', Comment: IF string::contains($e[1], ' \
+		 AS SELECT ') {{ 'VIEW' }} ELSE {{ '' }} }});",
+		surql_string(MYSQL_DEFAULT_COLLATION)
+	)?;
 	out.push_str(" }");
 	Ok(())
 }

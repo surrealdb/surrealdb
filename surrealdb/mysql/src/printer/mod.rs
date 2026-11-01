@@ -891,6 +891,34 @@ impl ToMySql for ShowStmt {
 				}
 				Ok(())
 			}
+			Self::Triggers {
+				database,
+				like,
+				..
+			} => {
+				write!(f, "SHOW TRIGGERS")?;
+				if let Some(db) = database {
+					write!(f, " FROM {}", escape_mysql_ident(db))?;
+				}
+				if let Some(l) = like {
+					write!(f, " LIKE '{l}'")?;
+				}
+				Ok(())
+			}
+			Self::TableStatus {
+				database,
+				like,
+				..
+			} => {
+				write!(f, "SHOW TABLE STATUS")?;
+				if let Some(db) = database {
+					write!(f, " FROM {}", escape_mysql_ident(db))?;
+				}
+				if let Some(l) = like {
+					write!(f, " LIKE '{l}'")?;
+				}
+				Ok(())
+			}
 			Self::Databases {
 				like,
 				..

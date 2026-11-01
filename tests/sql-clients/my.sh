@@ -131,8 +131,8 @@ expect "5000 rows stream to the client" "5000" bash -c "my -N -e \"select id fro
 expect_has "mysqladmin version" "Server version" admin_tls version
 expect_has "mysqladmin status" "Uptime" admin_tls status
 expect_has "mysqladmin variables" "version" admin_tls variables
-gap "mysqldump queries performance_schema.column_masking_policy and SHOW TABLE STATUS, neither of which is served"
-expect_has "mysqldump of a table" "person" "$MYSQLDUMP" --no-defaults -h127.0.0.1 -P"$MY_TLS_PORT" -uroot "$MY_PW" --protocol=tcp --ssl-mode=REQUIRED --no-tablespaces --skip-lock-tables "$MY_DB" person
+expect "the column histogram probe of mysqldump 8.0 finds none" "" my -N -e "SELECT COLUMN_NAME, JSON_EXTRACT(HISTOGRAM, '\$.\"number-of-buckets-specified\"') FROM information_schema.COLUMN_STATISTICS WHERE SCHEMA_NAME = 't/t' AND TABLE_NAME = 'person'"
+expect_has "mysqldump of a table" "INSERT INTO \`person\` VALUES" "$MYSQLDUMP" --no-defaults -h127.0.0.1 -P"$MY_TLS_PORT" -uroot "$MY_PW" --protocol=tcp --ssl-mode=REQUIRED --no-tablespaces --skip-lock-tables "$MY_DB" person
 expect_has "mysqlslap runs concurrent clients" "Number of clients running queries: 4" \
 	"$MYSQLSLAP" --no-defaults -h127.0.0.1 -P"$MY_TLS_PORT" -uroot "$MY_PW" --protocol=tcp --ssl-mode=REQUIRED \
 	--create-schema="$MY_DB" --concurrency=4 --iterations=2 --number-of-queries=40 --query="select 1"

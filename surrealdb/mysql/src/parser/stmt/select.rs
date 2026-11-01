@@ -160,6 +160,24 @@ impl<'a> Parser<'a> {
 			false
 		};
 
+		// Optimizer and cache hints, which change no result. A hint is a reserved word, so one
+		// followed by a separator is a quoted identifier of that name instead.
+		while [
+			"SQL_NO_CACHE",
+			"SQL_CACHE",
+			"SQL_SMALL_RESULT",
+			"SQL_BIG_RESULT",
+			"SQL_BUFFER_RESULT",
+			"HIGH_PRIORITY",
+		]
+		.iter()
+		.any(|word| self.peek_is_word(word))
+			&& !matches!(self.peek_nth(1).kind, TokenKind::Comma | TokenKind::Dot)
+			&& self.peek_nth_keyword(1) != Some(Keyword::From)
+		{
+			self.bump();
+		}
+
 		// Projection list
 		let mut projection = Vec::new();
 		loop {

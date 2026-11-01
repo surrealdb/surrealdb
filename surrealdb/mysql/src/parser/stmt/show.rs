@@ -53,6 +53,41 @@ impl<'a> Parser<'a> {
 			});
 		}
 
+		if self.peek_is_word("TRIGGERS") {
+			self.bump();
+			let database = if self.eat_from_or_in() {
+				Some(self.parse_ident()?.0)
+			} else {
+				None
+			};
+			let like = self.parse_optional_like()?;
+			let end = self.peek().span;
+			return Ok(ShowStmt::Triggers {
+				database,
+				like,
+				span: start.merge(end),
+			});
+		}
+
+		if self.peek_keyword() == Some(Keyword::Table)
+			&& self.peek_nth_keyword(1) == Some(Keyword::Status)
+		{
+			self.bump();
+			self.bump();
+			let database = if self.eat_from_or_in() {
+				Some(self.parse_ident()?.0)
+			} else {
+				None
+			};
+			let like = self.parse_optional_like()?;
+			let end = self.peek().span;
+			return Ok(ShowStmt::TableStatus {
+				database,
+				like,
+				span: start.merge(end),
+			});
+		}
+
 		if self.peek_keyword() == Some(Keyword::Tables) {
 			self.bump();
 			let database = if self.eat_from_or_in() {
@@ -201,7 +236,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Whether the next token is the identifier `word`, which MySQL reads as a keyword here.
-	fn peek_is_word(&self, word: &str) -> bool {
+	pub(crate) fn peek_is_word(&self, word: &str) -> bool {
 		matches!(&self.peek().kind, TokenKind::Ident(ident) if ident.eq_ignore_ascii_case(word))
 	}
 

@@ -1337,6 +1337,23 @@ impl Connection {
 
 		// Handle common introspection queries from drivers
 		let lower = trimmed.to_ascii_lowercase();
+		if self.dialect == Dialect::MySql
+			&& lower.trim_end_matches(';').trim_end()
+				== "select policy_name from performance_schema.column_masking_policy"
+		{
+			// No column masking policy exists, which a dump tool asks before dumping a table.
+			let descriptor = surrealdb_sqlplan::ResultDescriptor {
+				columns: vec![surrealdb_sqlplan::ResultColumn {
+					name: "policy_name".to_string(),
+					ty: surrealdb_sqlplan::SqlType::Text,
+					..surrealdb_sqlplan::ResultColumn::default()
+				}],
+			};
+			let mut res_seq = seq.wrapping_add(1);
+			let none = surrealdb_types::Value::Array(surrealdb_types::Array::new());
+			self.emit_value_result(Some(&descriptor), none, &mut res_seq).await?;
+			return Ok(());
+		}
 		if lower == "select database()" {
 			let db_name = self.current_db.clone().unwrap_or_else(|| "test".to_string());
 			let mut res_seq = seq.wrapping_add(1);
@@ -2701,6 +2718,10 @@ fn is_mysql_driver_noise_set(sql: &str) -> bool {
 		"net_write_timeout",
 		"wait_timeout",
 		"interactive_timeout",
+		"sql_quote_show_create",
+		"unique_checks",
+		"foreign_key_checks",
+		"sql_notes",
 	];
 
 	for part in rest.split(',') {

@@ -475,6 +475,16 @@ pub enum ShowStmt {
 		like: Option<String>,
 		span: Span,
 	},
+	TableStatus {
+		database: Option<String>,
+		like: Option<String>,
+		span: Span,
+	},
+	Triggers {
+		database: Option<String>,
+		like: Option<String>,
+		span: Span,
+	},
 	Databases {
 		like: Option<String>,
 		span: Span,
@@ -805,6 +815,14 @@ impl Statement {
 					span,
 					..
 				}
+				| ShowStmt::TableStatus {
+					span,
+					..
+				}
+				| ShowStmt::Triggers {
+					span,
+					..
+				}
 				| ShowStmt::Databases {
 					span,
 					..
@@ -1104,6 +1122,14 @@ impl Statement {
 					table.span = zero;
 				}
 				ShowStmt::Tables {
+					span,
+					..
+				}
+				| ShowStmt::TableStatus {
+					span,
+					..
+				}
+				| ShowStmt::Triggers {
 					span,
 					..
 				}
