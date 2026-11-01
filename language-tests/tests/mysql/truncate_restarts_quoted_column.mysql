@@ -1,0 +1,103 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "TRUNCATE TABLE starts over the AUTO_INCREMENT count of a column whose name needs quoting (a space, a dot, a non-ASCII letter) and never that of another table: trunc_dot with the column r.n and `trunc_dot.r` with the column n are counted apart"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+match = "$result.len() = 2"
+
+[[test.results]]
+match = "$result.len() = 2"
+
+[[test.results]]
+match = "$result.len() = 2"
+
+[[test.results]]
+match = "$result.len() = 2"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+match = "$result.len() = 1"
+
+[[test.results]]
+match = "$result.len() = 1"
+
+[[test.results]]
+match = "$result.len() = 1"
+
+[[test.results]]
+match = "$result.len() = 1"
+
+[[test.results]]
+value = "[{ num: 1i32 }]"
+
+[[test.results]]
+value = "[{ num: 1i32 }]"
+
+[[test.results]]
+value = "[{ num: 1i32 }, { num: 2i32 }, { num: 3i32 }]"
+
+[[test.results]]
+value = "[{ num: 1i32 }]"
+*/
+
+CREATE TABLE trunc_q1 (`row no` INT AUTO_INCREMENT UNIQUE, name VARCHAR(20));
+
+CREATE TABLE trunc_dot (`r.n` INT AUTO_INCREMENT UNIQUE, name VARCHAR(20));
+
+CREATE TABLE `trunc_dot.r` (n INT AUTO_INCREMENT UNIQUE, name VARCHAR(20));
+
+CREATE TABLE trunc_uni (`naïve` INT AUTO_INCREMENT UNIQUE, name VARCHAR(20));
+
+INSERT INTO trunc_q1 (name) VALUES ('a'), ('b');
+
+INSERT INTO trunc_dot (name) VALUES ('a'), ('b');
+
+INSERT INTO `trunc_dot.r` (name) VALUES ('a'), ('b');
+
+INSERT INTO trunc_uni (name) VALUES ('a'), ('b');
+
+TRUNCATE TABLE trunc_q1;
+
+TRUNCATE TABLE trunc_dot;
+
+TRUNCATE TABLE trunc_uni;
+
+INSERT INTO trunc_q1 (name) VALUES ('c');
+
+INSERT INTO trunc_dot (name) VALUES ('c');
+
+INSERT INTO `trunc_dot.r` (name) VALUES ('c');
+
+INSERT INTO trunc_uni (name) VALUES ('c');
+
+SELECT `row no` AS num FROM trunc_q1;
+
+SELECT `r.n` AS num FROM trunc_dot;
+
+SELECT n AS num FROM `trunc_dot.r` ORDER BY n;
+
+SELECT `naïve` AS num FROM trunc_uni;

@@ -605,7 +605,11 @@ impl ToPgSql for DeleteStmt {
 impl ToPgSql for TruncateStmt {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.write_str("TRUNCATE TABLE ")?;
-		self.table.to_pgsql(f)
+		self.table.to_pgsql(f)?;
+		if self.restart_identity {
+			f.write_str(" RESTART IDENTITY")?;
+		}
+		Ok(())
 	}
 }
 

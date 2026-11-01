@@ -1,0 +1,30 @@
+/**
+[env]
+namespace = true
+database = true
+auth = { namespace = "test", database = "test", level = "editor" }
+imports = ["mysql/_truncate_restart.surql"]
+
+[test]
+reason = "Starting a count over needs the right to define a sequence, which an editor lacks: an editor's TRUNCATE TABLE of a table with a generated column is refused as a whole and the rows stay, and a table without one is truncated as usual"
+
+[[test.results]]
+error = "IAM error: Not enough permissions to perform this action"
+
+[[test.results]]
+value = "[{ n: 3 }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ n: 0 }]"
+*/
+
+TRUNCATE TABLE trunc_editor_gen;
+
+SELECT COUNT(*) AS n FROM trunc_editor_gen;
+
+TRUNCATE TABLE trunc_editor_plain;
+
+SELECT COUNT(*) AS n FROM trunc_editor_plain;

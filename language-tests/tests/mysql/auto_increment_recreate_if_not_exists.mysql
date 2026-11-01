@@ -1,0 +1,53 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A CREATE TABLE IF NOT EXISTS that creates the table, because a dropped table of the name is gone, counts its AUTO_INCREMENT column from 1; one that finds the table leaves the count alone"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, name: 'a' }, { id: 2, name: 'b' }, { id: 3, name: 'c' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, name: 'd' }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'd' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 2, name: 'e' }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'd' }, { id: 2, name: 'e' }]"
+*/
+
+CREATE TABLE auto_ine (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(10));
+
+INSERT INTO auto_ine (name) VALUES ('a'), ('b'), ('c');
+
+DROP TABLE auto_ine;
+
+CREATE TABLE IF NOT EXISTS auto_ine (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(10));
+
+INSERT INTO auto_ine (name) VALUES ('d');
+
+SELECT id, name FROM auto_ine ORDER BY id;
+
+CREATE TABLE IF NOT EXISTS auto_ine (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(10));
+
+INSERT INTO auto_ine (name) VALUES ('e');
+
+SELECT id, name FROM auto_ine ORDER BY id;

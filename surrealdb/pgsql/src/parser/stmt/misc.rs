@@ -281,16 +281,19 @@ impl<'a> Parser<'a> {
 		self.eat(&TokenKind::Keyword(Keyword::Table))?;
 		self.eat(&TokenKind::Keyword(Keyword::Only))?;
 		let table = self.parse_qualified_name()?;
-		if self.eat(&TokenKind::Keyword(Keyword::Restart))?
-			|| self.eat(&TokenKind::Keyword(Keyword::Continue))?
-		{
-			let _ = self.eat(&TokenKind::Keyword(Keyword::Identity));
+		let mut restart_identity = false;
+		if self.eat(&TokenKind::Keyword(Keyword::Restart))? {
+			restart_identity = true;
+			self.eat(&TokenKind::Keyword(Keyword::Identity))?;
+		} else if self.eat(&TokenKind::Keyword(Keyword::Continue))? {
+			self.eat(&TokenKind::Keyword(Keyword::Identity))?;
 		}
 		let _ = self.eat(&TokenKind::Keyword(Keyword::Cascade))?;
 		let _ = self.eat(&TokenKind::Keyword(Keyword::Restrict))?;
 		let span = start.merge(table.span);
 		Ok(TruncateStmt {
 			table,
+			restart_identity,
 			span,
 		})
 	}

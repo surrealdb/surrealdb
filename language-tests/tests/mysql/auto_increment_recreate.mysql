@@ -1,0 +1,53 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A MySQL table created again under the name of a dropped table counts its AUTO_INCREMENT column from 1, a CREATE TABLE IF NOT EXISTS and a CREATE TABLE that fails on a table that exists leave the count of that table alone"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, name: 'a' }, { id: 2, name: 'b' }, { id: 3, name: 'c' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, name: 'd' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 2, name: 'e' }]"
+
+[[test.results]]
+error = "The table 'auto_again' already exists"
+
+[[test.results]]
+value = "[{ id: 3, name: 'f' }]"
+*/
+
+CREATE TABLE auto_again (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(20));
+
+INSERT INTO auto_again (name) VALUES ('a'), ('b'), ('c');
+
+DROP TABLE auto_again;
+
+CREATE TABLE auto_again (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(20));
+
+INSERT INTO auto_again (name) VALUES ('d');
+
+CREATE TABLE IF NOT EXISTS auto_again (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(20));
+
+INSERT INTO auto_again (name) VALUES ('e');
+
+CREATE TABLE auto_again (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(20));
+
+INSERT INTO auto_again (name) VALUES ('f');

@@ -57,11 +57,13 @@ impl ToPgQueryJson for Statement {
 					span: s.table.span,
 				}
 				.to_pg_query_json();
-				json!({
-					"TruncateStmt": {
-						"relations": [tbl_json],
-					}
-				})
+				let mut truncate = json!({
+					"relations": [tbl_json],
+				});
+				if s.restart_identity {
+					truncate["restart_seqs"] = json!(true);
+				}
+				json!({ "TruncateStmt": truncate })
 			}
 			Self::CreateTable(s) => s.to_pg_query_json(),
 			Self::Drop(s) => s.to_pg_query_json(),

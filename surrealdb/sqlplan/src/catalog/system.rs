@@ -15,7 +15,8 @@ use surrealdb_expr::expr::logical::{LogicalExpr, LogicalLiteral};
 use surrealdb_strand::Strand;
 
 use super::relations::{
-	IndexEntry, default_opclass, oid_of_table, serial_columns, user_constraints, user_indexes,
+	IndexEntry, default_opclass, oid_of_table, user_constraints, user_indexes,
+	visible_serial_columns, with_visible_sequence_names,
 };
 use super::{ColumnInfo, TableSchema};
 
@@ -935,6 +936,8 @@ pub fn get_system_table_rows(
 	user_tables: &[TableSchema],
 	database: &str,
 ) -> Option<Vec<LogicalExpr>> {
+	let visible_tables = with_visible_sequence_names(user_tables);
+	let user_tables = &*visible_tables;
 	let (norm_schema, norm_name) = normalize_table_name(schema, name);
 	match (norm_schema, norm_name) {
 		(Some("pg_catalog") | None, "pg_namespace") => Some(vec![
@@ -1964,7 +1967,7 @@ pub fn get_system_table_rows(
 
 		// A default for each column a sequence numbers; the other columns have none.
 		(Some("pg_catalog") | None, "pg_attrdef") => Some(
-			serial_columns(user_tables)
+			visible_serial_columns(user_tables)
 				.into_iter()
 				.enumerate()
 				.map(|(i, column)| {
@@ -2510,6 +2513,80 @@ mod tests {
 			panic!("a row is an object");
 		};
 		&fields.iter().find(|(key, _)| key == name).expect("the row has the field").1
+	}
+
+	/// A table whose `column` is numbered by `sequence`.
+	fn numbered(table: &str, column: &str, sequence: &str) -> TableSchema {
+		TableSchema::new(
+			table,
+			vec![
+				crate::ColumnInfo::new("id", 0),
+				crate::ColumnInfo::new(column, 1).with_sequence(sequence),
+			],
+		)
+		.with_schema("public")
+	}
+
+	fn sequence_names(tables: &[TableSchema]) -> Vec<String> {
+		let rows = get_system_table_rows(None, "pg_sequences", tables, "test").unwrap();
+		rows.iter()
+			.map(|row| {
+				let LogicalExpr::Literal(LogicalLiteral::String(name)) = field(row, "sequencename")
+				else {
+					panic!("a sequence is named by a string");
+				};
+				name.to_string()
+			})
+			.collect()
+	}
+
+	#[test]
+	fn the_sequence_the_ddl_defines_for_a_column_is_listed_as_postgresql_names_it() {
+		let tables = [
+			numbered("Counter", "id", "Counter.id"),
+			numbered("s.t", "n", "s.t.n"),
+			numbered("t", "a b", "t.`a b`"),
+		];
+		assert_eq!(sequence_names(&tables), ["Counter_id_seq", "s_t_n_seq", "t_a b_seq"]);
+
+		let serial = crate::catalog::relations::serial_columns(&tables);
+		let names: Vec<_> = serial.iter().map(|c| c.sequence.as_str()).collect();
+		assert_eq!(names, ["Counter_id_seq", "s_t_n_seq", "t_a b_seq"]);
+	}
+
+	#[test]
+	fn a_sequence_the_ddl_did_not_define_for_the_column_keeps_its_name() {
+		// `draws` is named in a `DEFAULT`; the column of `t` takes the conventional name, which
+		// the other sequence does not hold.
+		let tables = [numbered("t", "id", "draws"), numbered("t2", "id", "t2.id")];
+		assert_eq!(sequence_names(&tables), ["draws", "t2_id_seq"]);
+
+		// One that holds the conventional name keeps it, and the column the DDL numbered takes the
+		// next free one.
+		let tables = [numbered("t", "id", "t.id"), numbered("u", "id", "t_id_seq")];
+		assert_eq!(sequence_names(&tables), ["t_id_seq1", "t_id_seq"]);
+	}
+
+	#[test]
+	fn columns_whose_conventional_names_collide_get_distinct_names() {
+		// `a_b` with `c` and `a` with `b_c` both run together as `a_b_c_seq`. The names depend on
+		// the tables alone, not on the order they are listed in.
+		let one = [numbered("a_b", "c", "a_b.c"), numbered("a", "b_c", "a.b_c")];
+		let other = [numbered("a", "b_c", "a.b_c"), numbered("a_b", "c", "a_b.c")];
+		assert_eq!(sequence_names(&one), ["a_b_c_seq1", "a_b_c_seq"]);
+		assert_eq!(sequence_names(&other), ["a_b_c_seq", "a_b_c_seq1"]);
+
+		let serial = crate::catalog::relations::serial_columns(&one);
+		let names: Vec<_> =
+			serial.iter().map(|c| (c.table.as_str(), c.sequence.as_str())).collect();
+		assert_eq!(names, [("a_b", "a_b_c_seq1"), ("a", "a_b_c_seq")]);
+
+		// Naming the names again changes nothing.
+		let named = crate::catalog::relations::with_visible_sequence_names(&one).into_owned();
+		assert_eq!(
+			crate::catalog::relations::with_visible_sequence_names(&named).as_ref(),
+			named.as_slice()
+		);
 	}
 
 	#[test]

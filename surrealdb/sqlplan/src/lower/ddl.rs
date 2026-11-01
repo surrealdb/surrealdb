@@ -16,9 +16,11 @@ use surrealdb_expr::expr::statements::remove::{
 	RemoveDatabaseStatement, RemoveFieldStatement, RemoveIndexStatement, RemoveStatement,
 	RemoveTableStatement,
 };
+use surrealdb_expr::expr::statements::{IfelseStatement, InfoStatement};
 use surrealdb_expr::expr::table_type::TableType;
 use surrealdb_expr::expr::{
-	Cond, Expr, Field, Fields, Function, FunctionCall, Idiom, Kind, Literal, Param, Part, View,
+	Block, Cond, Expr, Field, Fields, Function, FunctionCall, Idiom, Kind, Literal, Param, Part,
+	View,
 };
 use surrealdb_mysql::ast::stmt::{
 	AlterTableAction as MyAlterTableAction, AlterTableStmt as MyAlterTableStmt,
@@ -217,28 +219,85 @@ fn is_serial(type_name: &surrealdb_pgsql::ast::expr::TypeName) -> bool {
 		})
 }
 
-/// The sequence that numbers the serial or auto-increment `column` of `table`, named as
-/// PostgreSQL names it (`<table>_<column>_seq`) and starting at 1, and the `DEFAULT` of the column
-/// that draws its next value. The `id` column's `DEFAULT` is its record key when a write names no
-/// id.
+/// The name of the sequence that numbers the generated `column` of `table`: the table's name and
+/// the column's name as SurrealQL spells a field (bare when it parses bare, quoted otherwise),
+/// joined by a dot.
 ///
-/// The sequence is defined only if it does not exist, so a `CREATE TABLE IF NOT EXISTS` of a table
-/// that exists leaves its numbering alone. A sequence outlives its table, so a table created again
-/// under a dropped one's name carries on from the last number the old one drew.
-fn column_sequence(table: &str, column: &str) -> (Expr, DefineDefault) {
-	let name = format!("{}_{column}_seq", table.replace('.', "_"));
-	let define = DefineSequenceStatement {
-		kind: DefineKind::IfNotExists,
-		name: Expr::Idiom(Idiom::field(name.as_str())),
+/// No two generated columns share a sequence: a quoted column name is escaped, so a dot or a
+/// backtick inside it cannot read as the end of the table's name. Starting the sequence of a new
+/// table over therefore never resets the numbering of another table's column. The column's part is
+/// also how `INFO FOR TABLE` names the field, which is how a `TRUNCATE` finds the sequences of a
+/// table again (`lower::ddl_truncate`).
+pub(crate) fn sequence_name(table: &str, column: &str) -> String {
+	format!("{table}.{}", surrealdb_types::ToSql::to_sql(&Idiom::field(column)))
+}
+
+/// `DEFINE SEQUENCE` of the generated-key sequence `name`, counting from 1 in batches of 1000.
+pub(super) fn define_sequence(kind: DefineKind, name: Expr) -> Expr {
+	Expr::Define(Box::new(DefineStatement::Sequence(DefineSequenceStatement {
+		kind,
+		name,
 		batch: Expr::Literal(Literal::Integer(1000)),
 		start: Expr::Literal(Literal::Integer(1)),
 		..Default::default()
+	})))
+}
+
+/// The sequence that numbers the serial or auto-increment `column` of `table`, starting at 1, and
+/// the `DEFAULT` of the column that draws its next value. The `id` column's `DEFAULT` is its record
+/// key when a write names no id.
+///
+/// The sequence is named by [`sequence_name`].
+///
+/// `if_not_exists` is set for a statement that may find its table already there (`CREATE TABLE IF
+/// NOT EXISTS`): the sequence is defined only if it does not exist, so numbering under way carries
+/// on, and [`restart_sequence_of_new_table`] starts it over when the statement creates the table.
+/// Otherwise the statement creates the table, and the sequence is defined over one a dropped
+/// table of the same name left, so the new table counts from 1 as in PostgreSQL and MySQL. That
+/// relies on the table's definition coming first among the statement's expressions and on the
+/// caller running them as one all-or-nothing block: a statement that finds its table there fails
+/// on the table before the sequence is reached, so a live table's numbering is never reset.
+fn column_sequence(table: &str, column: &str, if_not_exists: bool) -> (Expr, DefineDefault) {
+	let name = sequence_name(table, column);
+	let kind = if if_not_exists {
+		DefineKind::IfNotExists
+	} else {
+		DefineKind::Overwrite
 	};
+	let name = Expr::Literal(Literal::String(Strand::from(name.as_str())));
 	let next = Expr::FunctionCall(Box::new(FunctionCall {
 		receiver: Function::Normal("sequence::nextval".to_string()),
-		arguments: vec![Expr::Literal(Literal::String(Strand::from(name.as_str())))],
+		arguments: vec![name.clone()],
 	}));
-	(Expr::Define(Box::new(DefineStatement::Sequence(define))), DefineDefault::Set(next))
+	(define_sequence(kind, name), DefineDefault::Set(next))
+}
+
+/// The expression that starts the sequence of the generated `column` of `table` over when `CREATE
+/// TABLE IF NOT EXISTS` creates the table: `IF (INFO FOR DB).tables['table'] = NONE { DEFINE
+/// SEQUENCE OVERWRITE ... }`. A sequence a dropped table of the same name left would otherwise be
+/// kept, and the new table would carry on from its count.
+///
+/// It must run before the statement's definition of the table, which makes the answer true: it is
+/// the first of the statement's expressions. A statement that finds its table there leaves the
+/// sequence alone.
+fn restart_sequence_of_new_table(table: &str, column: &str) -> Expr {
+	let name = Expr::Literal(Literal::String(Strand::from(sequence_name(table, column).as_str())));
+	let table_is_absent = Expr::Binary {
+		left: Box::new(Expr::Idiom(Idiom(vec![
+			Part::Start(Expr::Info(Box::new(InfoStatement::Db(false, None)))),
+			Part::Field(Strand::from("tables")),
+			Part::Value(Expr::Literal(Literal::String(Strand::from(table)))),
+		]))),
+		op: BinaryOperator::Equal,
+		right: Box::new(Expr::Literal(Literal::None)),
+	};
+	Expr::IfElse(Box::new(IfelseStatement {
+		exprs: vec![(
+			table_is_absent,
+			Expr::Block(Box::new(Block(vec![define_sequence(DefineKind::Overwrite, name)]))),
+		)],
+		close: None,
+	}))
 }
 
 pub(crate) fn not_null_assertion() -> Expr {
@@ -264,6 +323,8 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 
 	let mut exprs = Vec::new();
 	let mut index_exprs = Vec::new();
+	// What must run before the table is defined.
+	let mut before = Vec::new();
 
 	let table_def = DefineTableStatement {
 		name: Expr::Table(TableName::from(tbl_name)),
@@ -401,7 +462,10 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 		}
 
 		if serial && matches!(field_def.default, DefineDefault::None) {
-			let (sequence, default) = column_sequence(tbl_name, &col.name);
+			let (sequence, default) = column_sequence(tbl_name, &col.name, create.if_not_exists);
+			if create.if_not_exists {
+				before.push(restart_sequence_of_new_table(tbl_name, &col.name));
+			}
 			exprs.push(sequence);
 			field_def.default = default;
 		}
@@ -463,7 +527,8 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 
 	exprs.extend(index_exprs);
 	let _ = index_counter;
-	Ok(exprs)
+	before.extend(exprs);
+	Ok(before)
 }
 
 /// Lower a PostgreSQL CREATE INDEX statement into SurrealDB expressions.
@@ -1023,6 +1088,8 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 
 	let mut exprs = Vec::new();
 	let mut index_exprs = Vec::new();
+	// What must run before the table is defined.
+	let mut before = Vec::new();
 
 	let table_def = DefineTableStatement {
 		name: Expr::Table(TableName::from(tbl_name)),
@@ -1039,7 +1106,7 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 
 	for col in &create.columns {
 		let is_id = col.name == "id";
-		let is_not_null = is_id || col.not_null || col.primary_key;
+		let is_not_null = is_id || col.not_null || col.primary_key || col.auto_increment;
 		let base_kind = map_mysql_type(&col.data_type);
 		let field_kind = if is_not_null || matches!(base_kind, Kind::Any) {
 			base_kind
@@ -1067,7 +1134,10 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 		if let Some(def) = &col.default {
 			field_def.default = DefineDefault::Set(lower_mysql_expr(def)?);
 		} else if col.auto_increment {
-			let (sequence, default) = column_sequence(tbl_name, &col.name);
+			let (sequence, default) = column_sequence(tbl_name, &col.name, create.if_not_exists);
+			if create.if_not_exists {
+				before.push(restart_sequence_of_new_table(tbl_name, &col.name));
+			}
 			exprs.push(sequence);
 			field_def.default = default;
 		}
@@ -1188,7 +1258,8 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 
 	exprs.extend(index_exprs);
 
-	Ok(exprs)
+	before.extend(exprs);
+	Ok(before)
 }
 
 /// Lower a MySQL DROP TABLE statement into SurrealDB expressions.

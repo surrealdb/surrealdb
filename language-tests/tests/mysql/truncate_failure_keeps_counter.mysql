@@ -1,0 +1,24 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_truncate_restart.surql"]
+
+[test]
+reason = "A TRUNCATE TABLE that fails leaves the rows of its table and the AUTO_INCREMENT count as they were: the count restarts only with the rows it was counting"
+
+[[test.results]]
+error = "Error while processing event trunc_guarded_rows_stay: An error occurred: rows stay"
+
+[[test.results]]
+value = "[{ n: 3 }]"
+
+[[test.results]]
+value = "[{ id: 4, name: 'd' }]"
+*/
+
+TRUNCATE TABLE trunc_guarded;
+
+SELECT COUNT(*) AS n FROM trunc_guarded;
+
+INSERT INTO trunc_guarded (name) VALUES ('d');

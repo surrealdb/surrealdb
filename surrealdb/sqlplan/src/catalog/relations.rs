@@ -10,7 +10,11 @@
 //! and from the order of its indexes and foreign keys, so every view that lists the same tables
 //! agrees on them.
 
+use std::borrow::Cow;
+use std::collections::HashSet;
+
 use super::{ReferentialAction, TableSchema};
+use crate::lower::ddl::sequence_name;
 
 /// The oid of the `i`-th user table, as `pg_class` lists it.
 pub(crate) const fn oid_of_table(i: usize) -> i64 {
@@ -308,8 +312,59 @@ pub struct SerialColumn {
 	pub sequence: String,
 }
 
-/// The columns of `tables` that a sequence numbers.
+/// `tables`, with each sequence the SQL DDL defined for a generated column listed under the name
+/// PostgreSQL gives it, `<table>_<column>_seq`. A name another sequence already has takes the
+/// smallest number that makes it unique (`a_b_c_seq`, `a_b_c_seq1`), as PostgreSQL does; the
+/// columns are taken in the order of their table's name and then their position, so the names a
+/// request sees depend on the tables alone. A sequence the DDL did not define for the column, such
+/// as one named in a user's `DEFAULT`, keeps its own name, and no generated name takes it.
+///
+/// The tables are borrowed when no column has such a sequence. Applying this to its own result
+/// changes nothing.
+pub(crate) fn with_visible_sequence_names(tables: &[TableSchema]) -> Cow<'_, [TableSchema]> {
+	let defined = |table: &TableSchema, column: &super::ColumnInfo| {
+		column.sequence.as_deref() == Some(sequence_name(&table.name, &column.name).as_str())
+	};
+	let mut generated: Vec<(usize, usize)> = Vec::new();
+	let mut taken: HashSet<&str> = HashSet::new();
+	for (t, table) in tables.iter().enumerate() {
+		for (c, column) in table.columns.iter().enumerate() {
+			if defined(table, column) {
+				generated.push((t, c));
+			} else if let Some(sequence) = column.sequence.as_deref() {
+				taken.insert(sequence);
+			}
+		}
+	}
+	if generated.is_empty() {
+		return Cow::Borrowed(tables);
+	}
+	generated
+		.sort_by(|(t1, c1), (t2, c2)| tables[*t1].name.cmp(&tables[*t2].name).then(c1.cmp(c2)));
+	let mut named = tables.to_vec();
+	let mut used: HashSet<String> = taken.into_iter().map(str::to_owned).collect();
+	for (t, c) in generated {
+		let base =
+			format!("{}_{}_seq", tables[t].name.replace('.', "_"), tables[t].columns[c].name);
+		let mut name = base.clone();
+		let mut number = 0;
+		while !used.insert(name.clone()) {
+			number += 1;
+			name = format!("{base}{number}");
+		}
+		named[t].columns[c].sequence = Some(name);
+	}
+	Cow::Owned(named)
+}
+
+/// The columns of `tables` that a sequence numbers, under the sequence names PostgreSQL clients
+/// see ([`with_visible_sequence_names`]).
 pub fn serial_columns(tables: &[TableSchema]) -> Vec<SerialColumn> {
+	visible_serial_columns(&with_visible_sequence_names(tables))
+}
+
+/// The columns of `tables` that a sequence numbers, under the names the tables list.
+pub(crate) fn visible_serial_columns(tables: &[TableSchema]) -> Vec<SerialColumn> {
 	let mut columns = Vec::new();
 	for (position, table) in tables.iter().enumerate() {
 		for (index, column) in table.columns.iter().enumerate() {

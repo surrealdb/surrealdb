@@ -1,6 +1,7 @@
 //! Lowering from Bound IR to SurrealDB `LogicalOp`.
 
 pub mod ddl;
+pub mod ddl_truncate;
 pub mod expr;
 mod foreign_key;
 mod functions;
@@ -21,6 +22,7 @@ pub use ddl::{
 	lower_pgsql_create_index, lower_pgsql_create_table, lower_pgsql_create_view, lower_pgsql_ddl,
 	lower_pgsql_drop, map_mysql_type, map_pgsql_type,
 };
+pub use ddl_truncate::{lower_mysql_truncate, lower_pgsql_truncate};
 /// Whether `type_name` is a cast target that is a vector: see [`vector_ddl::cast_target`].
 pub(crate) fn vector_cast_target(
 	type_name: &surrealdb_pgsql::ast::expr::TypeName,
@@ -31,14 +33,16 @@ pub(crate) fn vector_cast_target(
 pub use plan::{lower_bound_select, lower_bound_subquery};
 pub use write::{
 	lower_mysql_delete, lower_mysql_expr, lower_mysql_insert, lower_mysql_replace,
-	lower_mysql_truncate, lower_mysql_update, lower_pgsql_delete, lower_pgsql_expr,
-	lower_pgsql_insert, lower_pgsql_truncate, lower_pgsql_update,
+	lower_mysql_update, lower_pgsql_delete, lower_pgsql_expr, lower_pgsql_insert,
+	lower_pgsql_update,
 };
 
 #[cfg(test)]
 mod all_columns_tests;
 #[cfg(test)]
 mod ddl_tests;
+#[cfg(test)]
+mod generated_key_tests;
 #[cfg(test)]
 mod id_key_tests;
 #[cfg(test)]

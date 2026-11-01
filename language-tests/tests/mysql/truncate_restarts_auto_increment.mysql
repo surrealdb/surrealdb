@@ -1,0 +1,108 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "TRUNCATE TABLE starts the AUTO_INCREMENT count of its table over (after rows were inserted, after an explicit id, on an empty table), leaves the count of every other table alone, and needs no generated column: all in one request, so the table is read as it was created"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, name: 'a' }, { id: 2, name: 'b' }, { id: 3, name: 'c' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ n: 0 }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'd' }]"
+
+[[test.results]]
+value = "[{ id: 100, name: 'x' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'e' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'f' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, name: 'k' }, { id: 2, name: 'l' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: 3, name: 'm' }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'g' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+match = "$result.len() = 1"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ n: 0 }]"
+*/
+
+CREATE TABLE trunc_auto (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(20));
+
+INSERT INTO trunc_auto (name) VALUES ('a'), ('b'), ('c');
+
+TRUNCATE TABLE trunc_auto;
+
+SELECT COUNT(*) AS n FROM trunc_auto;
+
+INSERT INTO trunc_auto (name) VALUES ('d');
+
+INSERT INTO trunc_auto (id, name) VALUES (100, 'x');
+
+TRUNCATE trunc_auto;
+
+INSERT INTO trunc_auto (name) VALUES ('e');
+
+TRUNCATE TABLE trunc_auto;
+
+TRUNCATE TABLE trunc_auto;
+
+INSERT INTO trunc_auto (name) VALUES ('f');
+
+CREATE TABLE trunc_auto_keep (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(20));
+
+INSERT INTO trunc_auto_keep (name) VALUES ('k'), ('l');
+
+TRUNCATE TABLE trunc_auto;
+
+INSERT INTO trunc_auto_keep (name) VALUES ('m');
+
+INSERT INTO trunc_auto (name) VALUES ('g');
+
+CREATE TABLE trunc_plain (a INT, b INT);
+
+INSERT INTO trunc_plain (a, b) VALUES (1, 2);
+
+TRUNCATE TABLE trunc_plain;
+
+SELECT COUNT(*) AS n FROM trunc_plain;

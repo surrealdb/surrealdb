@@ -380,10 +380,15 @@ fn test_lower_mysql_create_table() {
 	.expect("parse");
 
 	let exprs = lower_mysql_ddl_definitions(&stmt).expect("lower");
-	// 1 DefineTable + 1 DefineSequence (id) + 7 DefineField + 2 DefineIndex (id PK + sku UNIQUE)
-	assert_eq!(exprs.len(), 11);
+	// 1 sequence restart (id) + 1 DefineTable + 1 DefineSequence (id) + 7 DefineField
+	// + 2 DefineIndex (id PK + sku UNIQUE)
+	assert_eq!(exprs.len(), 12);
+	assert!(
+		matches!(&exprs[0], Expr::IfElse(_)),
+		"the restart of the numbering comes before the table's definition"
+	);
 
-	let Expr::Define(d) = &exprs[0] else {
+	let Expr::Define(d) = &exprs[1] else {
 		panic!("Expected Expr::Define");
 	};
 	let DefineStatement::Table(t) = &**d else {
@@ -1021,25 +1026,25 @@ fn serial_and_auto_increment_columns_draw_from_a_sequence_of_their_own() {
 	let sql = statements_sql(&lower_pgsql_ddl_definitions(&stmt).expect("lower"));
 	let defines = |name: &str| sql.iter().filter(|s| s.contains(name)).cloned().collect::<Vec<_>>();
 	for column in ["id", "n"] {
-		let sequence = format!("gen_{column}_seq");
+		let sequence = format!("gen.{column}");
 		let lines = defines(&sequence);
 		assert_eq!(lines.len(), 2, "{lines:?}");
-		assert!(lines[0].starts_with("DEFINE SEQUENCE IF NOT EXISTS"), "{lines:?}");
+		assert!(lines[0].starts_with("DEFINE SEQUENCE OVERWRITE"), "{lines:?}");
 		assert!(lines[0].contains("START 1"), "{lines:?}");
 		assert!(lines[1].starts_with("DEFINE FIELD"), "{lines:?}");
 		assert!(lines[1].contains(&format!("::nextval('{sequence}')")), "{lines:?}");
 		assert!(!lines[1].contains("option<"), "a serial column is NOT NULL: {lines:?}");
 	}
-	assert!(defines("gen_m_seq").is_empty());
-	assert!(defines("gen_d_seq").is_empty(), "an explicit DEFAULT is kept");
+	assert!(defines("gen.m").is_empty());
+	assert!(defines("gen.d").is_empty(), "an explicit DEFAULT is kept");
 
 	let stmt = surrealdb_mysql::parse_statement(
 		"CREATE TABLE gen (id INT AUTO_INCREMENT PRIMARY KEY, name TEXT);",
 	)
 	.expect("parse");
 	let sql = statements_sql(&lower_mysql_ddl_definitions(&stmt).expect("lower"));
-	assert_eq!(sql.iter().filter(|s| s.contains("gen_id_seq")).count(), 2, "{sql:?}");
-	assert!(!sql.iter().any(|s| s.contains("gen_name_seq")), "{sql:?}");
+	assert_eq!(sql.iter().filter(|s| s.contains("gen.id")).count(), 2, "{sql:?}");
+	assert!(!sql.iter().any(|s| s.contains("gen.name")), "{sql:?}");
 }
 
 fn delete_strategy_of(sql: &str, column: &str) -> ReferenceDeleteStrategy {

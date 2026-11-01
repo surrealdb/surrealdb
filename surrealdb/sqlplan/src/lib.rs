@@ -43,11 +43,12 @@ pub use lower::ddl::{
 	lower_pgsql_ddl, lower_pgsql_ddl_over, lower_pgsql_ddl_with, lower_pgsql_drop, map_mysql_type,
 	map_pgsql_type,
 };
+pub use lower::ddl_truncate::{lower_mysql_truncate, lower_pgsql_truncate};
 pub use lower::id_key::UNTYPED_PARAMS_VAR;
 pub use lower::write::{
 	lower_mysql_delete, lower_mysql_expr, lower_mysql_insert, lower_mysql_replace,
-	lower_mysql_truncate, lower_mysql_update, lower_pgsql_delete, lower_pgsql_expr,
-	lower_pgsql_insert, lower_pgsql_truncate, lower_pgsql_update,
+	lower_mysql_update, lower_pgsql_delete, lower_pgsql_expr, lower_pgsql_insert,
+	lower_pgsql_update,
 };
 pub use lower::{lower_bound_select, lower_bound_subquery};
 pub use namespace::{resolve_mysql_table_name, resolve_pgsql_table_name};

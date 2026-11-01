@@ -1,0 +1,43 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL AUTO_INCREMENT columns of different tables count apart even when the table and column names run together alike (auto_x_y with z, auto_x with y_z)"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+match = "$result.len() = 2"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+match = "$result.len() = 1"
+
+[[test.results]]
+match = "$result.len() = 1"
+
+[[test.results]]
+value = "[{ name: 'a', z: 1i32 }, { name: 'b', z: 2i32 }, { name: 'd', z: 3i32 }]"
+
+[[test.results]]
+value = "[{ name: 'c', y_z: 1i32 }]"
+*/
+
+CREATE TABLE auto_x_y (z INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(20));
+
+INSERT INTO auto_x_y (name) VALUES ('a'), ('b');
+
+CREATE TABLE auto_x (y_z INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(20));
+
+INSERT INTO auto_x (name) VALUES ('c');
+
+INSERT INTO auto_x_y (name) VALUES ('d');
+
+SELECT z, name FROM auto_x_y ORDER BY z;
+
+SELECT y_z, name FROM auto_x;

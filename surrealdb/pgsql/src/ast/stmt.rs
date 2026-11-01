@@ -779,6 +779,9 @@ pub struct DeallocateStmt {
 pub struct TruncateStmt {
 	/// Target table name.
 	pub table: QualifiedName,
+	/// Whether the statement says `RESTART IDENTITY`: the sequences owned by the table's columns
+	/// start over. `CONTINUE IDENTITY`, the default, leaves them running.
+	pub restart_identity: bool,
 	/// Source span.
 	pub span: Span,
 }
