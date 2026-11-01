@@ -85,7 +85,12 @@ pub fn is_system_catalog_table(schema: Option<&str>, name: &str) -> bool {
 					| "pg_constraint"
 					| "pg_sequences"
 					| "pg_attrdef" | "pg_opclass"
-					| "pg_policies" | "pg_stat_user_indexes"
+					| "pg_policies" | "pg_policy"
+					| "pg_statistic_ext"
+					| "pg_inherits" | "pg_publication"
+					| "pg_publication_rel"
+					| "pg_publication_namespace"
+					| "pg_stat_user_indexes"
 					| "pg_views" | "pg_matviews"
 					| "pg_language" | "pg_extension"
 					| "pg_foreign_data_wrapper"
@@ -118,7 +123,12 @@ pub fn is_system_catalog_table(schema: Option<&str>, name: &str) -> bool {
 					| "pg_constraint"
 					| "pg_sequences"
 					| "pg_attrdef" | "pg_opclass"
-					| "pg_policies" | "pg_stat_user_indexes"
+					| "pg_policies" | "pg_policy"
+					| "pg_statistic_ext"
+					| "pg_inherits" | "pg_publication"
+					| "pg_publication_rel"
+					| "pg_publication_namespace"
+					| "pg_stat_user_indexes"
 					| "pg_views" | "pg_matviews"
 					| "pg_language" | "pg_extension"
 					| "pg_foreign_data_wrapper"
@@ -616,6 +626,65 @@ pub fn get_system_table_schema(schema: Option<&str>, name: &str) -> Option<Table
 				"cmd",
 				"qual",
 				"with_check",
+			],
+		)),
+		(Some("pg_catalog") | None, "pg_statistic_ext") => Some(make_schema(
+			Some("pg_catalog"),
+			"pg_statistic_ext",
+			&[
+				"oid",
+				"stxrelid",
+				"stxname",
+				"stxnamespace",
+				"stxowner",
+				"stxstattarget",
+				"stxkeys",
+				"stxkind",
+				"stxexprs",
+			],
+		)),
+		(Some("pg_catalog") | None, "pg_inherits") => Some(make_schema(
+			Some("pg_catalog"),
+			"pg_inherits",
+			&["inhrelid", "inhparent", "inhseqno", "inhdetachpending"],
+		)),
+		(Some("pg_catalog") | None, "pg_publication") => Some(make_schema(
+			Some("pg_catalog"),
+			"pg_publication",
+			&[
+				"oid",
+				"pubname",
+				"pubowner",
+				"puballtables",
+				"pubinsert",
+				"pubupdate",
+				"pubdelete",
+				"pubtruncate",
+				"pubviaroot",
+			],
+		)),
+		(Some("pg_catalog") | None, "pg_publication_rel") => Some(make_schema(
+			Some("pg_catalog"),
+			"pg_publication_rel",
+			&["oid", "prpubid", "prrelid", "prqual", "prattrs"],
+		)),
+		(Some("pg_catalog") | None, "pg_publication_namespace") => Some(make_schema(
+			Some("pg_catalog"),
+			"pg_publication_namespace",
+			&["oid", "pnpubid", "pnnspid"],
+		)),
+		(Some("pg_catalog") | None, "pg_policy") => Some(make_schema(
+			Some("pg_catalog"),
+			"pg_policy",
+			&[
+				"oid",
+				"polname",
+				"polrelid",
+				"polcmd",
+				"polpermissive",
+				"polroles",
+				"polqual",
+				"polwithcheck",
 			],
 		)),
 		(Some("pg_catalog") | None, "pg_stat_user_indexes") => Some(make_schema(
@@ -2016,8 +2085,18 @@ pub fn get_system_table_rows(
 			.collect(),
 		),
 
-		// No row-level security policy is ever defined.
-		(Some("pg_catalog") | None, "pg_policies") => Some(Vec::new()),
+		// Row-level security policies, extended statistics, table inheritance and publications are
+		// not supported, so these catalogs are always empty.
+		(
+			Some("pg_catalog") | None,
+			"pg_policies"
+			| "pg_policy"
+			| "pg_statistic_ext"
+			| "pg_inherits"
+			| "pg_publication"
+			| "pg_publication_rel"
+			| "pg_publication_namespace",
+		) => Some(Vec::new()),
 
 		// The languages a function of the catalog is written in: its own (`internal`), C and SQL.
 		(Some("pg_catalog") | None, "pg_language") => Some(

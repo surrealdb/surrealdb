@@ -433,6 +433,27 @@ fn test_parse_empty_select_list_and_keyword_aliases() {
 }
 
 #[test]
+fn test_parse_schema_qualified_operator() {
+	for sql in [
+		"SELECT a FROM t WHERE a OPERATOR(pg_catalog.~) '^(x)$'",
+		"SELECT a OPERATOR(pg_catalog.=) b, a OPERATOR(+) 1 FROM t",
+		"SELECT a FROM t WHERE a OPERATOR(pg_catalog.~) '^(x)$' COLLATE pg_catalog.default",
+	] {
+		parse_statement(sql).unwrap_or_else(|e| panic!("`{sql}` did not parse: {e}"));
+	}
+	let plain = parse_statement("SELECT a FROM t WHERE a ~ 'x'").expect("plain");
+	let qualified =
+		parse_statement("SELECT a FROM t WHERE a OPERATOR(pg_catalog.~) 'x'").expect("qualified");
+	assert_eq!(plain.to_pgsql_string(), qualified.to_pgsql_string());
+	parse_statement("SELECT a operator FROM t").expect("operator as an alias");
+	for sql in
+		["SELECT a OPERATOR pg_catalog.~ b FROM t", "SELECT a OPERATOR(pg_catalog.) b FROM t"]
+	{
+		assert!(parse_statement(sql).is_err(), "{sql}");
+	}
+}
+
+#[test]
 fn test_parse_create_table_with_storage_parameters() {
 	let stmt = parse_statement("CREATE TABLE t (a int not null, b char(84)) WITH (fillfactor=100)")
 		.expect("storage parameters after the column list");

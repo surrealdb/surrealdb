@@ -286,6 +286,31 @@ pub(super) const PGSQL: &[Case] = &[
 	Case::call(r#"pg_typeof"#, r#"pg_typeof({0})"#, &[r#"CAST('a' AS text)"#], r#"text"#),
 	Case::call(r#"pg_get_userbyid"#, r#"pg_get_userbyid({0})"#, &[r#"10"#], r#"root"#),
 	Case::call(
+		r#"array_upper"#,
+		r#"array_upper(string_to_array({0}, {1}), 1)"#,
+		&[r#"'a,b,c'"#, r#"','"#],
+		r#"3"#,
+	),
+	Case::call(r#"pg_encoding_to_char"#, r#"pg_encoding_to_char({0})"#, &[r#"6"#], r#"UTF8"#),
+	Case::call(
+		r#"pg_partition_ancestors"#,
+		r#"pg_partition_ancestors({0})"#,
+		&[r#"16384"#],
+		r#"16384"#,
+	),
+	Case::call(
+		r#"pg_get_statisticsobjdef_columns"#,
+		r#"pg_get_statisticsobjdef_columns({0})"#,
+		&[r#"1"#],
+		r#"NULL"#,
+	),
+	Case::call(
+		r#"pg_relation_is_publishable"#,
+		r#"pg_relation_is_publishable({0})"#,
+		&[r#"1"#],
+		r#"f"#,
+	),
+	Case::call(
 		r#"set_config"#,
 		r#"set_config({0}, {1}, false)"#,
 		&[r#"'search_path'"#, r#"'public'"#],

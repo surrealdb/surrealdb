@@ -584,6 +584,40 @@ pub fn lower_bound_expr(
 				"pg_get_userbyid" => {
 					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from("root"))));
 				}
+				"pg_get_statisticsobjdef_columns" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
+				}
+				"pg_relation_is_publishable" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Bool(false)));
+				}
+				"pg_partition_ancestors" if args.len() == 1 => {
+					// No table is partitioned, so a relation's ancestors are the relation alone.
+					if let BoundExpr::Literal(BoundLiteral::String(text)) = &args[0]
+						&& let Ok(oid) = text.trim().parse::<i64>()
+					{
+						return Ok(LogicalExpr::Literal(LogicalLiteral::Integer(oid)));
+					}
+					return lower_bound_expr(&args[0], policy);
+				}
+				"pg_encoding_to_char" if args.len() == 1 => {
+					// The server encoding is UTF8, whose number is 6; an unknown number has no
+					// name.
+					let encoding = lower_bound_expr(&args[0], policy)?;
+					let utf8 = LogicalExpr::Binary {
+						left: Box::new(encoding),
+						op: BinaryOperator::Equal,
+						right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(6))),
+					};
+					return Ok(LogicalExpr::If(Box::new(LogicalIf {
+						branches: vec![(
+							utf8,
+							LogicalExpr::Literal(LogicalLiteral::String(Strand::from("UTF8"))),
+						)],
+						otherwise: Some(LogicalExpr::Literal(LogicalLiteral::String(
+							Strand::from(""),
+						))),
+					})));
+				}
 				"format_type" if !args.is_empty() => {
 					if let BoundExpr::Literal(BoundLiteral::Integer(oid)) = &args[0] {
 						let name = PG_TYPES

@@ -202,7 +202,7 @@ impl<'a> Parser<'a> {
 			// 3. COLLATE
 			if op_tok.kind == TokenKind::Keyword(Keyword::Collate) {
 				self.bump()?; // consume 'COLLATE'
-				let collation = self.parse_qualified_name()?;
+				let collation = self.parse_qualified_name_with_labels()?;
 				let span = left.span().merge(collation.span);
 				left = Expr::Collate {
 					expr: Box::new(left),
@@ -359,8 +359,21 @@ impl<'a> Parser<'a> {
 			}
 
 			// 8. General Binary Operator
+			let schema_qualified = op_tok.kind == TokenKind::Keyword(Keyword::Operator);
 			self.bump()?; // consume operator
-			let binary_op = if op_tok.kind == TokenKind::Keyword(Keyword::Like) && negated {
+			let binary_op = if schema_qualified {
+				// gram.y: qual_Op: OPERATOR '(' any_operator ')'; any_operator: all_Op | ColId '.'
+				// any_operator. The schema names nothing the operator does not already mean.
+				self.expect(&TokenKind::LParen, "'(' after OPERATOR")?;
+				while self.peek2()?.kind == TokenKind::Dot {
+					self.parse_ident()?;
+					self.expect(&TokenKind::Dot, "'.'")?;
+				}
+				let operator = self.bump()?;
+				let binary_op = token_to_binary_op(&operator.kind)?;
+				self.expect(&TokenKind::RParen, "')' closing OPERATOR")?;
+				binary_op
+			} else if op_tok.kind == TokenKind::Keyword(Keyword::Like) && negated {
 				BinaryOperator::NotLike
 			} else if op_tok.kind == TokenKind::Keyword(Keyword::Ilike) && negated {
 				BinaryOperator::NotILike
@@ -1006,6 +1019,22 @@ impl<'a> Parser<'a> {
 
 		let span = start_span.merge(end_span);
 		Ok(QualifiedName::new(parts, span))
+	}
+
+	/// Parse a qualified name whose parts after the first may be any keyword.
+	///
+	/// gram.y: any_name: ColId attrs; attrs: '.' attr_name; attr_name: ColLabel. A collation is
+	/// named so (`pg_catalog.default`).
+	fn parse_qualified_name_with_labels(&mut self) -> ParseResult<QualifiedName> {
+		let (first, start_span) = self.parse_ident()?;
+		let mut parts = vec![first];
+		let mut end_span = start_span;
+		while self.eat(&TokenKind::Dot)? {
+			let (part, part_span) = self.parse_col_label()?;
+			parts.push(part);
+			end_span = part_span;
+		}
+		Ok(QualifiedName::new(parts, start_span.merge(end_span)))
 	}
 
 	/// Parse a single identifier token.

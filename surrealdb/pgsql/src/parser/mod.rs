@@ -198,6 +198,14 @@ impl<'a> Parser<'a> {
 			} else {
 				Ok(None)
 			}
+		} else if self.peek().kind == TokenKind::Keyword(crate::lexer::keyword::Keyword::Operator) {
+			// gram.y: `%left Op OPERATOR`, so `OPERATOR(schema.op)` binds as any other operator.
+			// Without its parenthesis the word is a name, such as a column alias.
+			if self.peek2()?.kind == TokenKind::LParen {
+				Ok(Some((65, 66, precedence::Associativity::Left)))
+			} else {
+				Ok(None)
+			}
 		} else {
 			Ok(precedence::infix_binding_power(&self.peek().kind))
 		}

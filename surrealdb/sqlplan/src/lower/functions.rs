@@ -2026,7 +2026,8 @@ pub(super) fn lower_function(
 		("lpad" | "rpad", _) => lower_pad(name, args, policy)?,
 		("btrim", _) => lower_trim(name, Trim::Both, args, policy)?,
 		("translate", _) => lower_translate(args, policy)?,
-		("array_length", _) => lower_array_length(args, policy)?,
+		// Arrays are one-based, so the upper bound of the first dimension is its length.
+		("array_length" | "array_upper", _) => lower_array_length(args, policy)?,
 		("string_to_array", _) => lower_string_to_array(args, policy)?,
 		("quote_literal" | "quote_nullable", _) => lower_quote_literal(name, args, policy)?,
 		("to_timestamp", _) => lower_to_timestamp(args, policy)?,

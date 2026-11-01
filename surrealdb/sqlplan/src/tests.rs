@@ -2933,6 +2933,29 @@ fn pg_get_serial_sequence_reads_the_sequences_the_catalog_lists() {
 }
 
 #[test]
+fn psql_database_listing_functions_lower() {
+	let catalog = MemoryCatalog::new();
+	let plan = |sql: &str| format!("{:?}", lower_pgsql_select(&catalog, sql).unwrap());
+	assert!(plan("SELECT pg_encoding_to_char(6)").contains("UTF8"));
+	assert!(plan("SELECT array_upper(string_to_array('a,b', ','), 1)").contains("array::len"));
+	let collated = plan("SELECT 'a' COLLATE pg_catalog.default");
+	assert!(!collated.contains("Collate"), "{collated}");
+	assert!(lower_pgsql_select(&catalog, "SELECT 'a' COLLATE \"de_DE\"").is_err());
+}
+
+#[test]
+fn text_compared_with_an_oid_column_is_read_as_an_oid() {
+	let catalog = MemoryCatalog::new();
+	let plan = format!(
+		"{:?}",
+		lower_pgsql_select(&catalog, "SELECT relkind FROM pg_catalog.pg_class WHERE oid = '1259'")
+			.unwrap()
+	);
+	assert!(!plan.contains("String(\"1259\")") && !plan.contains("'1259'"), "{plan}");
+	assert!(plan.contains("1259"), "{plan}");
+}
+
+#[test]
 fn a_regclass_cast_compared_with_an_oid_column_names_the_oid_of_the_table() {
 	let listed = MemoryCatalog::new().with_listed_tables(vec![
 		TableSchema::new("first", vec![ColumnInfo::new("id", 0)]).with_schema("public"),

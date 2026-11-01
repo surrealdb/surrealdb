@@ -1096,27 +1096,7 @@ pub fn bind_expr(
 					return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}")));
 				}
 			};
-			let (l, r) = if matches!(bound_op, BoundBinaryOp::Equal | BoundBinaryOp::NotEqual) {
-				match (&l, &r) {
-					(
-						BoundExpr::Column(_),
-						BoundExpr::Cast {
-							target_type,
-							..
-						},
-					) if is_regclass(target_type) => (l, regclass_as_oid(r, catalog)),
-					(
-						BoundExpr::Cast {
-							target_type,
-							..
-						},
-						BoundExpr::Column(_),
-					) if is_regclass(target_type) => (regclass_as_oid(l, catalog), r),
-					_ => (l, r),
-				}
-			} else {
-				(l, r)
-			};
+			let (l, r) = coerce_comparison_operands(bound_op, l, r, catalog);
 			Ok(BoundExpr::Binary {
 				left: Box::new(l),
 				op: bound_op,
@@ -1604,6 +1584,17 @@ pub fn bind_expr(
 			],
 			distinct: false,
 		}),
+		Expr::Collate {
+			expr: inner,
+			collation,
+			..
+		} => {
+			if is_byte_order_collation(&collation.parts) {
+				bind_expr(inner, scope, catalog, policy)
+			} else {
+				Err(unsupported_collation(&collation.parts))
+			}
+		}
 		Expr::Slice {
 			..
 		}
@@ -1614,9 +1605,6 @@ pub fn bind_expr(
 			..
 		}
 		| Expr::IsUnknown {
-			..
-		}
-		| Expr::Collate {
 			..
 		}
 		| Expr::ArrayConstructor {
@@ -1856,6 +1844,15 @@ fn vector_operand(operand: BoundExpr) -> BoundExpr {
 	}
 }
 
+/// The integer a text stands for when it meets an `oid` column, as the text of an `oid` constant
+/// is read.
+fn oid_literal(text: &str) -> Option<BoundExpr> {
+	text.trim()
+		.parse::<u32>()
+		.ok()
+		.map(|oid| BoundExpr::Literal(BoundLiteral::Integer(i64::from(oid))))
+}
+
 fn is_regclass(target_type: &str) -> bool {
 	target_type.eq_ignore_ascii_case("regclass")
 		|| target_type.eq_ignore_ascii_case("pg_catalog.regclass")
@@ -1909,4 +1906,67 @@ fn regclass_as_oid(cast: BoundExpr, catalog: &dyn BinderCatalog) -> BoundExpr {
 		branches,
 		else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
 	}
+}
+
+/// The operands of a comparison, with a text that meets an `oid` column read as the oid and a
+/// `regclass` cast that meets one read as the oid of the table it names. Kept out of
+/// [`bind_expr`] so that its frame stays small for deeply nested expressions.
+#[inline(never)]
+fn coerce_comparison_operands(
+	op: BoundBinaryOp,
+	l: BoundExpr,
+	r: BoundExpr,
+	catalog: &dyn BinderCatalog,
+) -> (BoundExpr, BoundExpr) {
+	if !matches!(op, BoundBinaryOp::Equal | BoundBinaryOp::NotEqual) {
+		return (l, r);
+	}
+	match (&l, &r) {
+		(BoundExpr::Column(col), BoundExpr::Literal(BoundLiteral::String(text)))
+			if col.declared_type == crate::SqlType::Oid =>
+		{
+			let r = oid_literal(text).unwrap_or(r);
+			(l, r)
+		}
+		(BoundExpr::Literal(BoundLiteral::String(text)), BoundExpr::Column(col))
+			if col.declared_type == crate::SqlType::Oid =>
+		{
+			let l = oid_literal(text).unwrap_or(l);
+			(l, r)
+		}
+		(
+			BoundExpr::Column(_),
+			BoundExpr::Cast {
+				target_type,
+				..
+			},
+		) if is_regclass(target_type) => (l, regclass_as_oid(r, catalog)),
+		(
+			BoundExpr::Cast {
+				target_type,
+				..
+			},
+			BoundExpr::Column(_),
+		) if is_regclass(target_type) => (regclass_as_oid(l, catalog), r),
+		_ => (l, r),
+	}
+}
+
+/// Whether a collation name means comparison by bytes, which is how every string compares:
+/// `default`, `C`, `POSIX` and `ucs_basic`, bare or in `pg_catalog`.
+fn is_byte_order_collation(parts: &[String]) -> bool {
+	let named = parts.last().is_some_and(|name| {
+		["default", "c", "posix", "ucs_basic"]
+			.iter()
+			.any(|byte_order| name.eq_ignore_ascii_case(byte_order))
+	});
+	named && (parts.len() == 1 || (parts.len() == 2 && parts[0].eq_ignore_ascii_case("pg_catalog")))
+}
+
+#[inline(never)]
+fn unsupported_collation(parts: &[String]) -> PlanError {
+	PlanError::UnsupportedExpression(format!(
+		"COLLATE {}: only the byte-order collations default, C, POSIX and ucs_basic are supported",
+		parts.join(".")
+	))
 }

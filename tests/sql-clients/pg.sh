@@ -96,10 +96,9 @@ expect "\\dt lists tables" "public|item|table|root" psq -c '\dt'
 expect "\\dn lists schemas" "public|root" psq -c '\dn'
 expect_has "\\du lists roles" "root" "$PSQL" -X -tA "$PG_CONN" -c '\du'
 expect_has "\\di lists indexes" "item_pkey" "$PSQL" -X -tA "$PG_CONN" -c '\di'
-gap "psql \\d <table> sends a catalog query using OPERATOR(pg_catalog.~) that the translator rejects"
+gap "psql \\d <table> reaches its publication query, which reads generate_series in FROM with an argument of the outer query"
 expect_has "\\d item describes the table" "qty" "$PSQL" -X "$PG_CONN" -c '\d item'
-gap "psql \\l needs pg_encoding_to_char"
-expect_has "\\l lists databases" "t" "$PSQL" -X "$PG_CONN" -c '\l'
+expect_has "\\l lists databases" "UTF8" "$PSQL" -X "$PG_CONN" -c '\l'
 
 # --- extended protocol: \bind from stdin ---
 expect "\\bind with an integer parameter" "42" bash -c "printf 'select \$1::int + 1 \\\\bind 41 \\\\g\n' | '$PSQL' -X -tA '$PG_CONN'"
