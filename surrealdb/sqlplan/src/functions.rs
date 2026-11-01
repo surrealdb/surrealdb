@@ -1528,6 +1528,16 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		mysql: false,
 	},
 	SqlFunctionDef {
+		name: "set_config",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 3,
+		max_args: Some(3),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Text),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
 		name: "current_user",
 		kind: SqlFunctionKind::Scalar,
 		min_args: 0,

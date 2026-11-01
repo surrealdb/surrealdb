@@ -47,6 +47,7 @@ mod copy;
 pub mod encode;
 pub mod error;
 pub(crate) mod guc;
+mod maintenance;
 pub mod msg;
 pub mod sasl;
 mod sqlprepare;

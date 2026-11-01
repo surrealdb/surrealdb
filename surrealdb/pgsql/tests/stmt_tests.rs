@@ -431,3 +431,15 @@ fn test_parse_empty_select_list_and_keyword_aliases() {
 	// Without `AS`, a reserved keyword is no alias.
 	assert!(parse_statement("SELECT a to FROM t").is_err());
 }
+
+#[test]
+fn test_parse_create_table_with_storage_parameters() {
+	let stmt = parse_statement("CREATE TABLE t (a int not null, b char(84)) WITH (fillfactor=100)")
+		.expect("storage parameters after the column list");
+	let Statement::CreateTable(create) = stmt else {
+		panic!("expected CREATE TABLE");
+	};
+	assert_eq!(create.columns.len(), 2);
+	assert!(parse_statement("CREATE TABLE t (a int) WITH (fillfactor)").is_ok());
+	assert!(parse_statement("CREATE TABLE t (a int) WITH fillfactor").is_err());
+}

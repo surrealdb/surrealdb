@@ -709,6 +709,11 @@ pub fn lower_bound_expr(
 				"pg_relation_size" | "pg_total_relation_size" => {
 					return Ok(LogicalExpr::Literal(LogicalLiteral::Integer(0)));
 				}
+				// A planned statement has no session to keep the setting in: the call answers
+				// with the value it was asked to set, as the function does.
+				"set_config" => {
+					return lower_bound_expr(&args[1], policy);
+				}
 				"current_setting" => {
 					let BoundExpr::Literal(BoundLiteral::String(s)) = &args[0] else {
 						return Err(PlanError::UnsupportedExpression(

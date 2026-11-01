@@ -51,14 +51,20 @@ impl ToPgQueryJson for Statement {
 			Self::Update(s) => s.to_pg_query_json(),
 			Self::Delete(s) => s.to_pg_query_json(),
 			Self::Truncate(s) => {
-				let tbl_json = TableRef::Table {
-					name: s.table.clone(),
-					alias: None,
-					span: s.table.span,
-				}
-				.to_pg_query_json();
+				let relations: Vec<Value> = s
+					.tables
+					.iter()
+					.map(|table| {
+						TableRef::Table {
+							name: table.clone(),
+							alias: None,
+							span: table.span,
+						}
+						.to_pg_query_json()
+					})
+					.collect();
 				let mut truncate = json!({
-					"relations": [tbl_json],
+					"relations": relations,
 				});
 				if s.restart_identity {
 					truncate["restart_seqs"] = json!(true);

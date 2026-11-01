@@ -280,7 +280,11 @@ impl<'a> Parser<'a> {
 		let start = self.expect(&TokenKind::Keyword(Keyword::Truncate), "'TRUNCATE'")?.span;
 		self.eat(&TokenKind::Keyword(Keyword::Table))?;
 		self.eat(&TokenKind::Keyword(Keyword::Only))?;
-		let table = self.parse_qualified_name()?;
+		let mut tables = vec![self.parse_qualified_name()?];
+		while self.eat(&TokenKind::Comma)? {
+			self.eat(&TokenKind::Keyword(Keyword::Only))?;
+			tables.push(self.parse_qualified_name()?);
+		}
 		let mut restart_identity = false;
 		if self.eat(&TokenKind::Keyword(Keyword::Restart))? {
 			restart_identity = true;
@@ -290,9 +294,9 @@ impl<'a> Parser<'a> {
 		}
 		let _ = self.eat(&TokenKind::Keyword(Keyword::Cascade))?;
 		let _ = self.eat(&TokenKind::Keyword(Keyword::Restrict))?;
-		let span = start.merge(table.span);
+		let span = tables.iter().fold(start, |span, table| span.merge(table.span));
 		Ok(TruncateStmt {
-			table,
+			tables,
 			restart_identity,
 			span,
 		})

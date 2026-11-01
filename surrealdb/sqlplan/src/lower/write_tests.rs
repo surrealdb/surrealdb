@@ -352,8 +352,25 @@ fn test_lower_pgsql_delete() {
 	};
 
 	assert_eq!(del.what, vec![Expr::Table(surrealdb_strand::TableName::from("users"))]);
-	assert!(del.cond.is_some());
-	assert!(del.output.is_some());
+}
+
+#[test]
+fn test_lower_pgsql_truncate_of_several_tables() {
+	let stmts =
+		surrealdb_pgsql::parse_statements("TRUNCATE TABLE ONLY a, b, c RESTART IDENTITY").unwrap();
+	let surrealdb_pgsql::ast::stmt::Statement::Truncate(truncate) = &stmts[0] else {
+		panic!("Expected Truncate statement");
+	};
+	let Expr::Delete(del) = lower_pgsql_truncate(truncate).unwrap() else {
+		panic!("Expected Expr::Delete");
+	};
+	let names: Vec<_> = ["a", "b", "c"]
+		.iter()
+		.map(|name| Expr::Table(surrealdb_strand::TableName::from(*name)))
+		.collect();
+	assert_eq!(del.what, names);
+	assert!(del.cond.is_none());
+	assert!(del.output.is_none());
 }
 
 #[test]

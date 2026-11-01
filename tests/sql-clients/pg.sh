@@ -132,12 +132,13 @@ expect "5000 rows stream to the client" "5000" bash -c "'$PSQL' -X -tA '$PG_CONN
 expect "generate_series" "5" bash -c "'$PSQL' -X -tA '$PG_CONN' -c 'select generate_series(1, 5)' | wc -l | tr -d ' '"
 
 # --- dump and benchmark tools ---
-gap "pg_dump's first query, set_config(), is not a registered function, and its catalog queries are not served"
+gap "pg_dump's catalog queries are not served"
 expect_ok "pg_dump" "$PG_DUMP" "$PG_CONN"
 gap "pg_restore has no archive to read while pg_dump fails"
 expect_ok "pg_dump custom format restores listing" bash -c "'$PG_DUMP' -Fc '$PG_CONN' -f '$WORKDIR/db.dump' && '$PG_RESTORE' --list '$WORKDIR/db.dump'"
-gap "pgbench -i creates tables with a WITH (fillfactor=...) clause the translator rejects"
-expect_ok "pgbench -i initialises" "$PGBENCH" -h 127.0.0.1 -p "$PG_PORT" -U root -i t/t
+expect_ok "pgbench -i without data generation" env PGPASSWORD=root "$PGBENCH" -h 127.0.0.1 -p "$PG_PORT" -U root -i -I dtpv t/t
+gap "pgbench -i loads its tables with COPY and no column list, and the catalog does not record the order the columns were declared in"
+expect_ok "pgbench -i initialises" env PGPASSWORD=root "$PGBENCH" -h 127.0.0.1 -p "$PG_PORT" -U root -i t/t
 
 PGB_SCRIPT="$WORKDIR/bench.sql"
 cat >"$PGB_SCRIPT" <<'SQL'

@@ -2635,9 +2635,13 @@ pub fn lower_pgsql_delete(
 pub fn lower_pgsql_truncate(
 	truncate: &surrealdb_pgsql::ast::stmt::TruncateStmt,
 ) -> Result<Expr, PlanError> {
-	let (_, table_name) = crate::namespace::resolve_pgsql_table_name(&truncate.table.parts, None)?;
+	let mut what = Vec::with_capacity(truncate.tables.len());
+	for table in &truncate.tables {
+		let (_, table_name) = crate::namespace::resolve_pgsql_table_name(&table.parts, None)?;
+		what.push(Expr::Table(TableName::from(table_name)));
+	}
 	Ok(Expr::Delete(Box::new(DeleteStatement {
-		what: vec![Expr::Table(TableName::from(table_name))],
+		what,
 		cond: None,
 		output: None,
 		..Default::default()

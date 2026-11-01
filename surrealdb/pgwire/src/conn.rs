@@ -1523,11 +1523,13 @@ impl Connection {
 									.clone()
 									.unwrap_or_else(|| "postgres".to_string());
 								let catalog = MemoryCatalog::new().with_database(&cur_db);
-								if surrealdb_sqlplan::resolve_pgsql_table_name(
-									&truncate.table.parts,
-									Some(&catalog),
-								)
-								.is_ok() && let Ok(expr) = lower_pgsql_truncate(truncate)
+								if truncate.tables.iter().all(|table| {
+									surrealdb_sqlplan::resolve_pgsql_table_name(
+										&table.parts,
+										Some(&catalog),
+									)
+									.is_ok()
+								}) && let Ok(expr) = lower_pgsql_truncate(truncate)
 								{
 									cached_plan = Some(CachedPlan::PgAst(Ast {
 										expressions: vec![TopLevelExpr::Expr(expr)],
@@ -2327,6 +2329,10 @@ impl Connection {
 						continue;
 					}
 					has_statement = true;
+					if let Some(tag) = crate::maintenance::command_tag(trimmed_stmt) {
+						msg::write_command_complete(&mut out, tag);
+						continue;
+					}
 					let expanded;
 					let trimmed_stmt = match self.sql_prepared_step(trimmed_stmt, &mut out) {
 						Ok(SqlPreparedStep::NotOurs) => trimmed_stmt,
@@ -2606,12 +2612,17 @@ impl Connection {
 						}
 					}
 					PgStatement::Truncate(truncate) => {
-						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
-							&truncate.table.parts,
-							Some(&catalog),
-						) {
-							self.note_simple_error(&PgError::undefined_table(e.to_string()), out);
-							return Ok(());
+						for table in &truncate.tables {
+							if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
+								&table.parts,
+								Some(&catalog),
+							) {
+								self.note_simple_error(
+									&PgError::undefined_table(e.to_string()),
+									out,
+								);
+								return Ok(());
+							}
 						}
 					}
 					PgStatement::CreateTable(create) => {

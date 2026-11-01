@@ -29,7 +29,7 @@ pub fn lower_mysql_truncate(truncate: &MyTruncateStmt) -> Result<Expr, PlanError
 
 /// Lower a PostgreSQL `TRUNCATE` into the one expression that answers it: the removal of every
 /// row ([`write::lower_pgsql_truncate`](super::write::lower_pgsql_truncate)) and, for `RESTART
-/// IDENTITY`, the restart of the numbering of every generated column of the table, as one block as
+/// IDENTITY`, the restart of the numbering of every generated column of each table, as one block as
 /// for MySQL. `CONTINUE IDENTITY`, the default, leaves the numbering alone, and the expression is
 /// the removal of the rows.
 pub fn lower_pgsql_truncate(truncate: &PgTruncateStmt) -> Result<Expr, PlanError> {
@@ -37,8 +37,13 @@ pub fn lower_pgsql_truncate(truncate: &PgTruncateStmt) -> Result<Expr, PlanError
 	if !truncate.restart_identity {
 		return Ok(delete);
 	}
-	let (_, table) = resolve_pgsql_table_name(&truncate.table.parts, None)?;
-	Ok(restarting(delete, &table))
+	let mut exprs = vec![delete];
+	for table in &truncate.tables {
+		let (_, table) = resolve_pgsql_table_name(&table.parts, None)?;
+		exprs.push(restart_generated_keys(&table));
+	}
+	exprs.push(Expr::Literal(Literal::Array(Vec::new())));
+	Ok(Expr::Block(Box::new(Block(exprs))))
 }
 
 /// The block that removes the rows, restarts the numbering, and answers the empty array.

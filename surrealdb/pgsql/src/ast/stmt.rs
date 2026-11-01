@@ -777,9 +777,9 @@ pub struct DeallocateStmt {
 /// A PostgreSQL `TRUNCATE` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TruncateStmt {
-	/// Target table name.
-	pub table: QualifiedName,
-	/// Whether the statement says `RESTART IDENTITY`: the sequences owned by the table's columns
+	/// Target table names, in the order written; at least one.
+	pub tables: Vec<QualifiedName>,
+	/// Whether the statement says `RESTART IDENTITY`: the sequences owned by the tables' columns
 	/// start over. `CONTINUE IDENTITY`, the default, leaves them running.
 	pub restart_identity: bool,
 	/// Source span.
@@ -1107,7 +1107,9 @@ impl Statement {
 			}
 			Self::Truncate(s) => {
 				s.span = zero;
-				s.table.span = zero;
+				for table in &mut s.tables {
+					table.span = zero;
+				}
 			}
 			Self::CreateTable(s) => {
 				s.span = zero;

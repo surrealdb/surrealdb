@@ -285,6 +285,12 @@ pub(super) const PGSQL: &[Case] = &[
 	Case::call(r#"pg_typeof"#, r#"pg_typeof({0})"#, &[r#"true"#], r#"boolean"#),
 	Case::call(r#"pg_typeof"#, r#"pg_typeof({0})"#, &[r#"CAST('a' AS text)"#], r#"text"#),
 	Case::call(r#"pg_get_userbyid"#, r#"pg_get_userbyid({0})"#, &[r#"10"#], r#"root"#),
+	Case::call(
+		r#"set_config"#,
+		r#"set_config({0}, {1}, false)"#,
+		&[r#"'search_path'"#, r#"'public'"#],
+		r#"public"#,
+	),
 	Case::literal(r#"format_type"#, r#"format_type({0}, NULL)"#, &[r#"23"#], r#"integer"#),
 	Case::call(r#"pg_table_is_visible"#, r#"pg_table_is_visible({0})"#, &[r#"1"#], r#"t"#),
 	Case::call(r#"pg_type_is_visible"#, r#"pg_type_is_visible({0})"#, &[r#"1"#], r#"t"#),

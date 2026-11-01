@@ -76,6 +76,37 @@ impl<'a> Parser<'a> {
 		Ok(Statement::CreateTable(Box::new(s)))
 	}
 
+	/// Parse an optional `WITH (name [= value], ...)` list of storage parameters.
+	///
+	/// gram.y: opt_reloptions
+	fn parse_opt_reloptions(&mut self) -> ParseResult<Vec<RelOption>> {
+		if !self.eat(&TokenKind::Keyword(Keyword::With))? {
+			return Ok(Vec::new());
+		}
+		self.expect(&TokenKind::LParen, "'('")?;
+		let mut options = Vec::new();
+		loop {
+			let (name, name_span) = self.parse_ident()?;
+			let (value, span) = if self.eat(&TokenKind::Operator("="))? {
+				let value = self.parse_expr()?;
+				let span = name_span.merge(value.span());
+				(Some(value), span)
+			} else {
+				(None, name_span)
+			};
+			options.push(RelOption {
+				name,
+				value,
+				span,
+			});
+			if !self.eat(&TokenKind::Comma)? {
+				break;
+			}
+		}
+		self.expect(&TokenKind::RParen, "')'")?;
+		Ok(options)
+	}
+
 	/// Parse a PostgreSQL `CREATE TABLE` statement given an already consumed `CREATE` (and optional
 	/// `TEMP`).
 	pub fn parse_create_table_stmt_tail(
@@ -123,6 +154,9 @@ impl<'a> Parser<'a> {
 
 		let r_paren = self.expect(&TokenKind::RParen, "')'")?;
 		let span = start_span.merge(r_paren.span);
+
+		// Storage parameters tune a heap layout the engine does not have.
+		self.parse_opt_reloptions()?;
 
 		Ok(CreateTableStmt {
 			name,
@@ -237,32 +271,7 @@ impl<'a> Parser<'a> {
 		self.expect(&TokenKind::RParen, "')'")?;
 
 		// gram.y: opt_reloptions
-		let options = if self.eat(&TokenKind::Keyword(Keyword::With))? {
-			self.expect(&TokenKind::LParen, "'('")?;
-			let mut options = Vec::new();
-			loop {
-				let (name, name_span) = self.parse_ident()?;
-				let (value, span) = if self.eat(&TokenKind::Operator("="))? {
-					let value = self.parse_expr()?;
-					let span = name_span.merge(value.span());
-					(Some(value), span)
-				} else {
-					(None, name_span)
-				};
-				options.push(RelOption {
-					name,
-					value,
-					span,
-				});
-				if !self.eat(&TokenKind::Comma)? {
-					break;
-				}
-			}
-			self.expect(&TokenKind::RParen, "')'")?;
-			options
-		} else {
-			Vec::new()
-		};
+		let options = self.parse_opt_reloptions()?;
 
 		let predicate = if self.eat(&TokenKind::Keyword(Keyword::Where))? {
 			Some(self.parse_expr()?)

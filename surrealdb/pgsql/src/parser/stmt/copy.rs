@@ -149,7 +149,12 @@ impl<'a> Parser<'a> {
 					}
 				}
 				_ => {
-					// Ignore unknown options gracefully (e.g. freeze, default, etc.)
+					// An option the server has no use for (e.g. `FREEZE`) is read with its value
+					// and ignored.
+					self.eat(&TokenKind::Operator("="))?;
+					if !matches!(self.peek().kind, TokenKind::Comma | TokenKind::RParen) {
+						self.bump()?;
+					}
 				}
 			}
 			if !self.eat(&TokenKind::Comma)? {

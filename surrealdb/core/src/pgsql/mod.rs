@@ -101,8 +101,10 @@ pub(crate) fn lower_statements(
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_pgsql::ast::stmt::Statement::Truncate(truncate) => {
-				surrealdb_sqlplan::resolve_pgsql_table_name(&truncate.table.parts, Some(catalog))
-					.map_err(|e| anyhow::anyhow!("PostgreSQL TRUNCATE lowering error: {e}"))?;
+				for table in &truncate.tables {
+					surrealdb_sqlplan::resolve_pgsql_table_name(&table.parts, Some(catalog))
+						.map_err(|e| anyhow::anyhow!("PostgreSQL TRUNCATE lowering error: {e}"))?;
+				}
 				let expr = surrealdb_sqlplan::lower_pgsql_truncate(truncate)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL TRUNCATE lowering error: {e}"))?;
 				statements

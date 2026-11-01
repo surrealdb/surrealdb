@@ -2933,6 +2933,22 @@ fn pg_get_serial_sequence_reads_the_sequences_the_catalog_lists() {
 }
 
 #[test]
+fn a_regclass_cast_compared_with_an_oid_column_names_the_oid_of_the_table() {
+	let listed = MemoryCatalog::new().with_listed_tables(vec![
+		TableSchema::new("first", vec![ColumnInfo::new("id", 0)]).with_schema("public"),
+		TableSchema::new("second", vec![ColumnInfo::new("id", 0)]).with_schema("public"),
+	]);
+	let sql = "SELECT relkind FROM pg_catalog.pg_class WHERE oid = $1::pg_catalog.regclass";
+	let plan = format!("{:?}", lower_pgsql_select(&listed, sql).unwrap());
+	for oid in ["16384", "16385"] {
+		assert!(plan.contains(oid), "{plan}");
+	}
+	let reversed = "SELECT relkind FROM pg_catalog.pg_class WHERE $1::regclass = oid";
+	let plan = format!("{:?}", lower_pgsql_select(&listed, reversed).unwrap());
+	assert!(plan.contains("16385"), "{plan}");
+}
+
+#[test]
 fn a_regtype_array_constant_names_the_oids_of_its_types() {
 	let catalog = MemoryCatalog::new();
 	let plan = format!(

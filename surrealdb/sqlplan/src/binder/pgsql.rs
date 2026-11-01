@@ -1096,6 +1096,27 @@ pub fn bind_expr(
 					return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}")));
 				}
 			};
+			let (l, r) = if matches!(bound_op, BoundBinaryOp::Equal | BoundBinaryOp::NotEqual) {
+				match (&l, &r) {
+					(
+						BoundExpr::Column(_),
+						BoundExpr::Cast {
+							target_type,
+							..
+						},
+					) if is_regclass(target_type) => (l, regclass_as_oid(r, catalog)),
+					(
+						BoundExpr::Cast {
+							target_type,
+							..
+						},
+						BoundExpr::Column(_),
+					) if is_regclass(target_type) => (regclass_as_oid(l, catalog), r),
+					_ => (l, r),
+				}
+			} else {
+				(l, r)
+			};
 			Ok(BoundExpr::Binary {
 				left: Box::new(l),
 				op: bound_op,
@@ -1832,5 +1853,60 @@ fn vector_operand(operand: BoundExpr) -> BoundExpr {
 		}
 	} else {
 		operand
+	}
+}
+
+fn is_regclass(target_type: &str) -> bool {
+	target_type.eq_ignore_ascii_case("regclass")
+		|| target_type.eq_ignore_ascii_case("pg_catalog.regclass")
+}
+
+/// A `regclass` cast read as the oid it names, for a comparison with a column of oids: the name of
+/// a user table, written as its SQL text qualified or not and quoted or not, or the oid itself as
+/// text, answers with the oid `pg_class` lists for the table. A name that is none of them is the
+/// cast's own value, which matches no oid.
+fn regclass_as_oid(cast: BoundExpr, catalog: &dyn BinderCatalog) -> BoundExpr {
+	let BoundExpr::Cast {
+		expr,
+		..
+	} = cast
+	else {
+		return cast;
+	};
+	let branches: Vec<(BoundExpr, BoundExpr)> = catalog
+		.constraint_tables()
+		.iter()
+		.enumerate()
+		.map(|(i, table)| {
+			let oid = crate::catalog::relations::oid_of_table(i);
+			let quoted = format!("\"{}\"", table.name.replace('"', "\"\""));
+			let schema = table.schema.as_deref().unwrap_or("public");
+			let names = [
+				table.name.clone(),
+				quoted.clone(),
+				format!("{schema}.{}", table.name),
+				format!("{schema}.{quoted}"),
+				oid.to_string(),
+			];
+			(
+				BoundExpr::InList {
+					expr: expr.clone(),
+					list: names
+						.into_iter()
+						.map(|name| BoundExpr::Literal(BoundLiteral::String(name)))
+						.collect(),
+					negated: false,
+				},
+				BoundExpr::Literal(BoundLiteral::Integer(oid)),
+			)
+		})
+		.collect();
+	if branches.is_empty() {
+		return BoundExpr::Literal(BoundLiteral::Null);
+	}
+	BoundExpr::Case {
+		operand: None,
+		branches,
+		else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
 	}
 }
