@@ -48,6 +48,8 @@ pub enum SelectItem {
 	Expr {
 		expr: Expr,
 		alias: Option<String>,
+		/// The source text of the expression as written, parentheses included and the alias
+		/// left out.
 		span: Span,
 	},
 }

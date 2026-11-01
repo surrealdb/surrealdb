@@ -223,6 +223,15 @@ impl<'a> Parser<'a> {
 		})
 	}
 
+	/// The span of the token consumed last, or an empty span at offset 0 before any is consumed.
+	#[inline]
+	pub fn last_span(&self) -> Span {
+		self.cursor
+			.checked_sub(1)
+			.and_then(|index| self.tokens.get(index))
+			.map_or(Span::empty(0), |token| token.span)
+	}
+
 	#[inline]
 	pub fn peek_nth(&self, n: usize) -> &'a Token {
 		self.tokens.get(self.cursor + n).unwrap_or_else(|| {

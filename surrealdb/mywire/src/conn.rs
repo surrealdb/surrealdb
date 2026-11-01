@@ -1637,6 +1637,7 @@ impl Connection {
 					bind_select(select, &catalog, &policy, None)
 						.ok()
 						.map(|bound| bound.describe(&catalog, &policy))
+						.map(|descriptor| name_columns_as_written(descriptor, select, trimmed))
 				} else {
 					None
 				}
@@ -2051,6 +2052,7 @@ impl Connection {
 					bind_select(select, &catalog, &policy, None)
 						.ok()
 						.and_then(|bound| bound.describe_static(&catalog, &policy))
+						.map(|descriptor| name_columns_as_written(descriptor, select, trimmed))
 				} else {
 					None
 				}
@@ -2334,6 +2336,7 @@ impl Connection {
 					bind_select(select, &catalog, &policy, None)
 						.ok()
 						.map(|bound| bound.describe(&catalog, &policy))
+						.map(|descriptor| name_columns_as_written(descriptor, select, trimmed))
 				} else {
 					None
 				}

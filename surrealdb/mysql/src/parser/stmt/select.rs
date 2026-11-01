@@ -190,7 +190,11 @@ impl<'a> Parser<'a> {
 				projection
 					.push(SelectItem::QualifiedWildcard(vec![database, table], start.merge(end)));
 			} else {
+				let first = self.peek().span;
 				let expr = self.parse_expr()?;
+				// The tokens of the item, parentheses included, which the spans inside `expr`
+				// leave out.
+				let span = first.merge(self.last_span());
 				let alias = if self.peek_keyword() == Some(Keyword::As) {
 					self.bump();
 					Some(self.parse_ident()?.0)
@@ -201,7 +205,6 @@ impl<'a> Parser<'a> {
 				} else {
 					None
 				};
-				let span = expr.span();
 				projection.push(SelectItem::Expr {
 					expr,
 					alias,

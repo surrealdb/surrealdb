@@ -3,6 +3,12 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Result, ensure};
+use surrealdb_mysql::ast::expr::Expr;
+use surrealdb_mysql::ast::literal::Literal;
+use surrealdb_mysql::ast::operator::UnaryOperator;
+use surrealdb_mysql::ast::stmt::{SelectItem, SelectStmt};
+use surrealdb_mysql::lexer::span::Span;
+use surrealdb_sqlplan::ResultDescriptor;
 use surrealdb_types::{Number, ToSql, Value, Wide};
 
 use crate::codec::{read_lenenc_bytes, write_lenenc_str};
@@ -209,6 +215,85 @@ pub struct ResultShape {
 	pub columns: Vec<ColumnDefinition41>,
 	pub rows: Vec<Vec<Option<String>>>,
 	pub raw_rows: Vec<Vec<Value>>,
+}
+
+/// The longest name, in bytes, that MySQL reports for a column that has no alias.
+const MAX_UNALIASED_COLUMN_NAME: usize = 255;
+
+/// Name each unaliased expression column of `descriptor` as MySQL names it, so that a client
+/// reading a result by name finds `COUNT(*)` and `a + b` where it wrote them.
+///
+/// `select` is the statement `descriptor` describes and `sql` the text it was parsed from.
+/// MySQL names such a column with the text of the expression as it was written, comments,
+/// spacing and letter case included, cut to 255 bytes at a character boundary. Five kinds of
+/// expression have a name of their own, which parentheses and a leading `+` leave alone: a
+/// column reference is named by its identifier as written, a number or a `?` placeholder by its
+/// own text, `NULL` by `NULL`, and a string by its value without the leading whitespace.
+///
+/// Only the names shown to the client are set; the field each column's values are read from
+/// (`ResultColumn::key`) is not touched. The descriptor is returned as it is when its columns
+/// do not line up with the select list, which is the case once a wildcard has been expanded.
+pub fn name_columns_as_written(
+	mut descriptor: ResultDescriptor,
+	select: &SelectStmt,
+	sql: &str,
+) -> ResultDescriptor {
+	if descriptor.columns.len() != select.projection.len() {
+		return descriptor;
+	}
+	for (column, item) in descriptor.columns.iter_mut().zip(&select.projection) {
+		let SelectItem::Expr {
+			expr,
+			alias: None,
+			span,
+		} = item
+		else {
+			continue;
+		};
+		if let Some(name) = written_name(expr, *span, sql) {
+			column.name = name;
+		}
+	}
+	descriptor
+}
+
+/// The name MySQL gives the unaliased select item `expr`, written at `item` in `sql`, or `None`
+/// when `item` is not a range of `sql`.
+fn written_name(expr: &Expr, item: Span, sql: &str) -> Option<String> {
+	let mut atom = expr;
+	while let Expr::UnaryOp {
+		op: UnaryOperator::Plus,
+		expr: operand,
+		..
+	} = atom
+	{
+		atom = operand;
+	}
+	let text = |span: Span| sql.get(span.start..span.end);
+	let name = if let Expr::ColumnRef(column) = atom {
+		column.fields.last()?.as_str()
+	} else if let Expr::Literal(Literal::Null, _) = atom {
+		"NULL"
+	} else if let Expr::Literal(
+		Literal::String(value)
+		| Literal::IntroducedString {
+			value,
+			..
+		},
+		_,
+	) = atom
+	{
+		value.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c'])
+	} else if let Expr::Literal(Literal::Integer(0..) | Literal::Float(_), span)
+	| Expr::Param(_, span) = atom
+	{
+		// A negative integer is the folded minimum 64-bit integer, which is written with its
+		// minus and so has no name of its own.
+		text(*span)?
+	} else {
+		text(item)?
+	};
+	Some(name[..name.floor_char_boundary(MAX_UNALIASED_COLUMN_NAME)].to_string())
 }
 
 /// Reshape a SurrealDB query result `Value` into tabular column definitions and string rows.
