@@ -385,7 +385,9 @@ pub async fn generate_schema(
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
-	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
+	// `decimal` stands for both `decimal` and `bigdecimal`, so it admits the wider of the two;
+	// the field's own kind refuses a value too wide for a `decimal` when it is converted.
+	scalar_debug_validated!(schema, "decimal", Kind::BigDecimal);
 	scalar_debug_validated!(schema, "number", Kind::Number);
 	scalar_debug_validated!(schema, "u32", Kind::U32);
 	scalar_debug_validated!(schema, "u64", Kind::U64);
