@@ -315,3 +315,37 @@ impl McpSession {
 		(session.ns.clone(), session.db.clone())
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_core::dbs::{ScopePin, Session};
+	use surrealdb_core::kvs::Datastore;
+
+	use super::*;
+
+	/// A session pinned by a scoped URL (`/ns/foo/db/bar/mcp`) cannot be pointed
+	/// at another database by a per-call scope, `execute_in`, or `use`.
+	#[tokio::test]
+	async fn a_pinned_session_cannot_be_redirected_per_call() {
+		let ds = Datastore::new("memory").await.expect("datastore");
+		let mut base = Session::owner().with_ns("foo").with_db("bar");
+		base.pin = Some(ScopePin {
+			ns: "foo".to_owned(),
+			db: Some("bar".to_owned()),
+		});
+		let session = McpSession::new(ds, base);
+		let res = session.execute("RETURN session::db()", None).await.expect("results");
+		assert!(res[0].result.is_ok(), "{res:?}");
+
+		let scoped = session.derive_scoped(None, Some("other".to_owned())).await;
+		let res = scoped.execute("RETURN session::db()", None).await.expect("results");
+		assert!(res[0].result.is_err(), "{res:?}");
+
+		let res = session.execute_in("foo", "other", "RETURN 1", None).await.expect("results");
+		assert!(res[0].result.is_err(), "{res:?}");
+
+		session.use_db("other").await.expect("use");
+		let res = session.execute("RETURN 1", None).await.expect("results");
+		assert!(res[0].result.is_err(), "{res:?}");
+	}
+}

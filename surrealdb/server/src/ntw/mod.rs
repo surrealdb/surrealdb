@@ -24,6 +24,7 @@ mod rate_limit;
 mod ready;
 pub mod refresh;
 pub mod rpc;
+mod scope;
 mod signals;
 pub mod signin;
 pub mod signout;
@@ -645,6 +646,11 @@ impl SurrealRouter {
 
 		// Apply state
 		let axum_app = axum_app.with_state(Arc::clone(&rpc_state));
+
+		// Add the `/ns/{ns}[/db/{db}]/{method}` forms. This wraps the finished
+		// router, so a scoped request is rewritten before any middleware reads
+		// its path.
+		let axum_app = scope::mount(axum_app);
 
 		Ok(Self {
 			router: axum_app,

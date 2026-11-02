@@ -3,6 +3,7 @@ use std::task::{Context, Poll};
 
 use anyhow::{Result, bail};
 use axum::body::Body;
+use axum::response::IntoResponse;
 use axum::{Extension, RequestPartsExt};
 use axum_extra::TypedHeader;
 use axum_extra::headers::authorization::{Basic, Bearer};
@@ -30,6 +31,7 @@ use super::headers::{
 	SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId, SurrealNamespace,
 	parse_typed_header,
 };
+use super::scope::PathScope;
 use crate::ntw::error::Error as NetError;
 
 /// Tower layer applying [`SurrealAuthService`] to a wrapped service.
@@ -121,6 +123,12 @@ where
 					Ok(response)
 				}
 				Err(err) => {
+					// A scope the path and a header name differently is a malformed
+					// request, not a failed authentication.
+					if let Some(&NetError::ScopeConflict(level)) = err.downcast_ref::<NetError>() {
+						debug!("Request scope rejected: {err}");
+						return Ok(NetError::ScopeConflict(level).into_response());
+					}
 					debug!("Request authentication failed: {err}");
 					let unauthorized = Response::builder()
 						.status(StatusCode::UNAUTHORIZED)
@@ -194,6 +202,12 @@ async fn check_auth(parts: &mut Parts, use_credentials: bool) -> Result<(Session
 	let db = parse_typed_header::<SurrealDatabase>(
 		parts.extract::<TypedHeader<SurrealDatabase>>().await,
 	)?;
+
+	// A scope in the URL path selects the namespace and database. A header that
+	// names a different one is refused rather than overridden.
+	let scope = parts.extensions.get::<PathScope>().cloned();
+	let ns = resolve_scope("namespace", scope.as_ref().and_then(|s| s.ns.clone()), ns)?;
+	let db = resolve_scope("database", scope.as_ref().and_then(|s| s.db.clone()), db)?;
 
 	// Extract the authentication namespace and database from the headers.
 	let auth_ns = parse_typed_header::<SurrealAuthNamespace>(
@@ -281,6 +295,19 @@ async fn check_auth(parts: &mut Parts, use_credentials: bool) -> Result<(Session
 		}
 	}
 
+	// Credentials must belong to the namespace and database the URL path names.
+	// A token selects its own namespace and database, and Basic authentication
+	// against `surreal-auth-ns`/`surreal-auth-db` yields a principal of another
+	// tenant; either way a mismatch is refused, because the path states where
+	// the request runs. The session is then pinned to the scope, so nothing it
+	// runs can select another namespace or database.
+	if let Some(pin) = scope.as_ref().and_then(PathScope::pin) {
+		if !pin.admits(&session) {
+			bail!(NetError::InvalidAuth);
+		}
+		session.pin = Some(pin);
+	}
+
 	// SECURITY (GHSA-2v9j): the `Surreal-NS`/`Surreal-DB` headers select the
 	// session's namespace/database independently of the authenticated level —
 	// Basic auth verifies credentials against `Surreal-Auth-NS`/`Surreal-Auth-DB`,
@@ -297,6 +324,20 @@ async fn check_auth(parts: &mut Parts, use_credentials: bool) -> Result<(Session
 	}
 
 	Ok((session, clear_cookie))
+}
+
+/// Chooses the namespace or database for a request from its URL path and its
+/// header. Either one alone is used; both must agree.
+fn resolve_scope(
+	level: &'static str,
+	path: Option<String>,
+	header: Option<String>,
+) -> Result<Option<String>> {
+	match (path, header) {
+		(Some(path), Some(header)) if path != header => bail!(NetError::ScopeConflict(level)),
+		(Some(path), _) => Ok(Some(path)),
+		(None, header) => Ok(header),
+	}
 }
 
 /// The name of the cookie carrying the access token.

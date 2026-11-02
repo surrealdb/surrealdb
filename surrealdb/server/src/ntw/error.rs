@@ -53,6 +53,9 @@ pub enum Error {
 	#[error("There was a problem parsing the header {0}: {1}")]
 	InvalidHeader(HeaderName, String),
 
+	#[error("The {0} in the URL path does not match the {0} the request names")]
+	ScopeConflict(&'static str),
+
 	#[error("Too many authentication attempts, please try again later")]
 	TooManyRequests(u64),
 }
@@ -152,6 +155,7 @@ impl IntoResponse for Error {
 			Error::Request
 			| Error::Remote(_)
 			| Error::CookieUnbounded
+			| Error::ScopeConflict(_)
 			| Error::InvalidHeader(..) => ErrorMessage {
 				code: StatusCode::BAD_REQUEST,
 				details: Some("Request problems detected".to_string()),

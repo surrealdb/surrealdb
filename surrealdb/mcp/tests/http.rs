@@ -815,3 +815,60 @@ async fn matching_credentials_on_existing_session_are_accepted() {
 		"matching credentials must pass verification; body: {body}"
 	);
 }
+
+/// An owner session pinned to `ns`/`db`, as the server attaches to a request
+/// on a scoped URL (`/ns/{ns}/db/{db}/mcp`).
+fn pinned_owner_session(ns: &str, db: &str) -> Session {
+	let mut session = owner_session().with_ns(ns).with_db(db);
+	session.pin = Some(surrealdb_core::dbs::ScopePin {
+		ns: ns.to_owned(),
+		db: Some(db.to_owned()),
+	});
+	session
+}
+
+/// An MCP session id is bound to the URL scope it was initialised under: reusing
+/// it under another scope, or under none, is refused, so a request never runs on
+/// a handshake session pinned to a scope its URL does not name.
+#[tokio::test]
+async fn session_reused_under_another_url_scope_is_rejected() {
+	let req = json!({
+		"jsonrpc": "2.0",
+		"id": 10,
+		"method": "tools/call",
+		"params": { "name": "query", "arguments": { "query": "RETURN 1" } },
+	});
+	let error_of = |body: &str| {
+		parse_sse_json(body)
+			.get("error")
+			.and_then(|err| err.get("message"))
+			.and_then(|m| m.as_str())
+			.map(str::to_owned)
+	};
+
+	// Initialised unscoped, reused under a scope.
+	let service = setup_service(test_datastore().await);
+	let (session_id, _) = initialize(&service, Some(owner_session())).await;
+	complete_handshake(&service, &session_id).await;
+	let resp = service
+		.handle(post_request(&req, Some(&session_id), Some(pinned_owner_session("foo", "bar"))))
+		.await;
+	let message = error_of(&body_to_string(resp).await).expect("an error");
+	assert!(message.contains("another URL scope"), "{message}");
+
+	// Initialised under one scope, reused under another and under none.
+	let service = setup_service(test_datastore().await);
+	let (session_id, _) = initialize(&service, Some(pinned_owner_session("foo", "bar"))).await;
+	complete_handshake(&service, &session_id).await;
+	for other in [pinned_owner_session("foo", "other"), owner_session()] {
+		let resp = service.handle(post_request(&req, Some(&session_id), Some(other))).await;
+		let message = error_of(&body_to_string(resp).await).expect("an error");
+		assert!(message.contains("another URL scope"), "{message}");
+	}
+
+	// Reused under the same scope, it is served.
+	let resp = service
+		.handle(post_request(&req, Some(&session_id), Some(pinned_owner_session("foo", "bar"))))
+		.await;
+	assert_eq!(error_of(&body_to_string(resp).await), None);
+}

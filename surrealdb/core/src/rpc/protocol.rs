@@ -40,6 +40,12 @@ use crate::types::{
 	PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables, SurrealValue,
 };
 
+/// The error for signin or signup credentials that name another namespace or
+/// database than the session's pin.
+fn pin_conflict(level: &'static str) -> surrealdb_types::Error {
+	invalid_params(format!("The credentials name another {level} than the connection's scope"))
+}
+
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
 	if let PublicValue::String(s) = value {
@@ -846,6 +852,14 @@ pub trait RpcProtocol {
 					return Err(surrealdb_types::Error::not_allowed(err.to_string(), None));
 				}
 			}
+			// A pinned session keeps its selection within the pin. An empty `use`
+			// changes nothing on a pinned session, which always has a namespace.
+			if let Some(pin) = &session.pin
+				&& !(ns.is_none() && db.is_none())
+			{
+				pin.check_selection(resolved_ns, resolved_db)
+					.map_err(|err| surrealdb_types::Error::not_allowed(err.to_string(), None))?;
+			}
 		}
 		// Empty USE call: apply defaults only if session doesn't already have ns/db
 		if ns.is_none() && db.is_none() {
@@ -1045,11 +1059,18 @@ pub trait RpcProtocol {
 		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		let snapshot = AuthPrincipalSnapshot::capture(&session);
+		// A pinned session refuses credentials that name another namespace or
+		// database. Credentials that name none sign in at the root.
+		let vars: PublicVariables = params.into();
+		if let Some(pin) = &session.pin {
+			pin.check_credentials(&vars).map_err(pin_conflict)?;
+		}
 		// Attempt signup, mutating the session
-		let out: Result<PublicValue> =
-			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
-				.await
-				.map(SurrealValue::into_value);
+		let mut next = session.clone();
+		let out: Result<PublicValue> = crate::iam::signup::signup(self.kvs(), &mut next, vars)
+			.await
+			.map(SurrealValue::into_value);
+		let out = session.settle_authentication(next, out);
 		let principal_changed = snapshot.differs_from(&session);
 		drop(session);
 		if principal_changed {
@@ -1079,11 +1100,18 @@ pub trait RpcProtocol {
 		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		let snapshot = AuthPrincipalSnapshot::capture(&session);
+		// A pinned session refuses credentials that name another namespace or
+		// database. Credentials that name none sign in at the root.
+		let vars: PublicVariables = params.into();
+		if let Some(pin) = &session.pin {
+			pin.check_credentials(&vars).map_err(pin_conflict)?;
+		}
 		// Attempt signin, mutating the session
-		let out: Result<PublicValue> =
-			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
-				.await
-				.map(SurrealValue::into_value);
+		let mut next = session.clone();
+		let out: Result<PublicValue> = crate::iam::signin::signin(self.kvs(), &mut next, vars)
+			.await
+			.map(SurrealValue::into_value);
+		let out = session.settle_authentication(next, out);
 		let principal_changed = snapshot.differs_from(&session);
 		drop(session);
 		if principal_changed {
@@ -1119,10 +1147,12 @@ pub trait RpcProtocol {
 			session_id, session.ns, session.db
 		);
 		// Attempt authentication, mutating the session
+		let mut next = session.clone();
 		let out: Result<PublicValue> =
-			crate::iam::verify::token(self.kvs(), &mut session, token.as_str())
+			crate::iam::verify::token(self.kvs(), &mut next, token.as_str())
 				.await
 				.map(|_| PublicValue::None);
+		let out = session.settle_authentication(next, out);
 		// Log after authentication
 		trace!(
 			"Authenticate RPC: session_id={:?}, after: ns={:?}, db={:?}",
@@ -1185,9 +1215,10 @@ pub trait RpcProtocol {
 		// - Revoke the old refresh token
 		// - Create new access and refresh tokens
 		// - Update the session with the new authentication state
-		let out: Result<PublicValue> = crate::iam::token::refresh(token, self.kvs(), &mut session)
-			.await
-			.map(Token::into_value);
+		let mut next = session.clone();
+		let out: Result<PublicValue> =
+			crate::iam::token::refresh(token, self.kvs(), &mut next).await.map(Token::into_value);
+		let out = session.settle_authentication(next, out);
 		let principal_changed = snapshot.differs_from(&session);
 		drop(session);
 		if principal_changed {

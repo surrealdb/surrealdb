@@ -31,6 +31,9 @@ pub struct Options {
 	pub(crate) dive: u32,
 	/// Connection authentication data
 	pub(crate) auth: Arc<Auth>,
+	/// The namespace and database the session is confined to, if any. A `USE`
+	/// that leaves it is refused. See [`crate::dbs::Session::pin`].
+	pub(crate) pin: Option<Arc<crate::dbs::ScopePin>>,
 	/// Should we force tables/events to re-run?
 	pub(crate) force: Force,
 	/// Should we run permissions checks?
@@ -210,6 +213,7 @@ impl Options {
 			force: Force::None,
 			import: false,
 			auth: Arc::new(Auth::default()),
+			pin: None,
 			version: None,
 			for_update: false,
 			async_event_depth: None,
@@ -275,6 +279,12 @@ impl Options {
 	/// code which uses this `Options`, with chaining.
 	pub fn with_auth(mut self, auth: Arc<Auth>) -> Self {
 		self.auth = auth;
+		self
+	}
+
+	/// Confine `USE` to the given pin, with chaining.
+	pub(crate) fn with_pin(mut self, pin: Option<Arc<crate::dbs::ScopePin>>) -> Self {
+		self.pin = pin;
 		self
 	}
 

@@ -1,7 +1,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use axum::extract::MatchedPath;
+use axum::extract::{MatchedPath, OriginalUri};
 use http::header;
 use hyper::{Request, Response};
 use opentelemetry_http::HeaderExtractor;
@@ -42,7 +42,10 @@ impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 			http.route = field::Empty,
 			http.request.method = req.method().as_str(),
 			http.request.body.size = field::Empty,
-			url.path = req.uri().path(),
+			// A scoped request is rewritten before it is traced; record the path
+			// the client sent.
+			url.path =
+				req.extensions().get::<OriginalUri>().map_or(req.uri().path(), |uri| uri.path()),
 			url.scheme = field::Empty,
 			http.request.id = field::Empty,
 			user_agent.original = field::Empty,

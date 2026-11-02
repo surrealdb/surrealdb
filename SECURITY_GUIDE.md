@@ -970,6 +970,28 @@ Flag for detailed review when changes touch:
   must not change in a way that affects already-authorized operations.
 - HTTP `surreal-ns` and `surreal-db` headers must be validated against the
   principal's authorized scope.
+- A namespace or database named in the URL path (`/ns/{ns}[/db/{db}]/…`,
+  `ntw/scope.rs`) is validated the same way. It must equal the `surreal-ns` or
+  `surreal-db` header when both are present (400 otherwise). The namespace and
+  database the credentials select, and the tenant of the authenticated
+  principal, must both fall within the scope (401 otherwise); Basic
+  authentication against `surreal-auth-ns`/`surreal-auth-db` changes only the
+  principal, so the principal is checked on its own. Credentials never redirect
+  a scoped request to another namespace or database.
+- A session whose request or connection URL names a namespace carries a pin
+  (`Session::pin`). Every change of its selected namespace and database stays
+  within the pin: SurrealQL `USE`, RPC `use`, `process_use`, and the RPC
+  `signin`, `signup`, `authenticate` and `refresh` methods refuse a change that
+  leaves it, and `reset` returns to it. Every query preflight
+  (`Datastore::check_session`) refuses a pinned session whose selection or
+  principal is outside the pin, so a caller that sets the selection directly
+  (the MCP tools take a namespace and database per call) cannot leave it.
+  `Datastore::graphql_schema` applies the same check, so no GraphQL transport
+  or `signIn`/`signUp` resolver reaches a schema outside the pin. An
+  MCP session id is bound to the scope of its `initialize` request; a request
+  that reuses it under another URL scope, or none, is refused. Sessions attached to a pinned WebSocket
+  inherit the pin; a stored HTTP RPC session runs pinned to each request's
+  scope. The pin is never persisted; it is applied again from the URL.
 - Each connection must have an independent session. Session identifiers must not
   collide or be reusable across connections.
 - After a `reset`, the session must be in the most restrictive state. If auth is
@@ -1233,6 +1255,16 @@ GraphQL, error formatting
   credential can never be returned in a response body.
 - Cookie authentication requires an explicit, non-empty `--allow-origin` list;
   credentialed CORS is never combined with a wildcard.
+- Scoped requests (`/ns/{ns}[/db/{db}]/{method}/…`) are rewritten to their
+  unscoped route before the router runs (`scope::mount` in `ntw/scope.rs`), so
+  every layer that matches on the path (the readiness gate, the auth rate
+  limiter, the credential-exchange checks in `ntw/auth.rs`) sees the same path
+  for both forms. A layer that matches on the path must run behind that rewrite.
+  A route joins the scoped set only if it applies the scope: the session
+  routes take the namespace and database from the session, and `signin` and
+  `signup` complete their credentials from the path (`scope::credentials`),
+  refusing a body that names another scope. A route that read its scope from
+  elsewhere would ignore it.
 - Server identification headers must be suppressed by default.
 - Per-endpoint body size limits must be proportional to the endpoint's function.
 - When the router is exposed for embedding, the full middleware stack (auth, CORS,

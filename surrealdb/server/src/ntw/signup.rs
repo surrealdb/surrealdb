@@ -54,6 +54,7 @@ where
 async fn handler(
 	Extension(state): Extension<AppState>,
 	Extension(mut session): Extension<Session>,
+	scope: Option<Extension<super::scope::PathScope>>,
 	accept: Option<TypedHeader<Accept>>,
 	body: Bytes,
 ) -> Result<Output, ResponseError> {
@@ -70,7 +71,8 @@ async fn handler(
 	match syn::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match surrealdb_core::iam::signup::signup(kvs, &mut session, vars.into()).await {
+			let vars = super::scope::credentials(scope.as_deref(), vars)?;
+			match surrealdb_core::iam::signup::signup(kvs, &mut session, vars).await {
 				// Authentication was successful
 				Ok(token) => {
 					match accept.as_deref() {
@@ -121,6 +123,7 @@ async fn handler(
 async fn cookie_handler(
 	Extension(state): Extension<AppState>,
 	Extension(mut session): Extension<Session>,
+	scope: Option<Extension<super::scope::PathScope>>,
 	Extension(policy): Extension<CookiePolicy>,
 	headers: HeaderMap,
 	accept: Option<TypedHeader<Accept>>,
@@ -141,7 +144,8 @@ async fn cookie_handler(
 	match syn::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match surrealdb_core::iam::signup::signup(kvs, &mut session, vars.into()).await {
+			let vars = super::scope::credentials(scope.as_deref(), vars)?;
+			match surrealdb_core::iam::signup::signup(kvs, &mut session, vars).await {
 				// Authentication was successful
 				Ok(token) => {
 					let out = token_cookies(kvs, &token, &session, session_scope(&session)).await?;
