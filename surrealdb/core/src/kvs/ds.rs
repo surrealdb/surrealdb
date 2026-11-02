@@ -1383,6 +1383,37 @@ pub struct IndexBuildsRun {
 	pub retry_after: Option<Duration>,
 }
 
+/// What one bounded pass of index compaction did: see [`Datastore::run_index_compaction`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct IndexCompactionRun {
+	/// The compaction passes the call ran, one per index each queue batch it acted on named,
+	/// each a bounded number of plans.
+	pub passes: usize,
+	/// Whether work is left that a call run at once continues: queue batches the call did not
+	/// read, catalog its sweep did not reach, a request a pass queued for the work its budget
+	/// left, or a batch whose cleanup gave up on conflicts and stays queued.
+	pub more: bool,
+	/// Where the call stopped on a batch whose cleanup failed on anything but a conflict, which
+	/// stays queued and no commit announces again, how long a host waits before it calls again.
+	pub retry_after: Option<Duration>,
+}
+
+/// What one call of [`Datastore::index_compaction_drain`] did.
+struct CompactionDrained {
+	/// The queue batches the call acted on.
+	batches: usize,
+	/// The indexes that failed to compact.
+	errors: usize,
+	/// The compaction passes the call ran.
+	passes: usize,
+	/// Whether the call stopped on a batch whose cleanup failed on anything but
+	/// a conflict, which stays queued.
+	stalled: bool,
+	/// The pass report.
+	pass: Pass,
+}
+
 /// What one drain of the compaction queue has left queued so far, which its
 /// later batches do not pass again, so a drain passes each index's kept
 /// requests at most once.
@@ -1432,6 +1463,11 @@ enum Swept {
 	/// Another node took the lease before a page; the walk stays where it was.
 	LeaseLost,
 }
+
+/// How long a host waits before it runs [`Datastore::run_index_compaction`]
+/// again after a call stopped on a batch whose cleanup failed on anything but a
+/// conflict: the batch stays queued, and no commit announces it again.
+const INDEX_COMPACTION_CLEANUP_RETRY: Duration = Duration::from_secs(1);
 
 /// Catalog steps one page of a compaction drain's sweep takes; see
 /// [`INDEX_RESUME_PAGE_SIZE`], which bounds the stalled-build scan's pages the
@@ -6478,16 +6514,42 @@ impl Datastore {
 		canceller: CancellationToken,
 		max_batches: Option<usize>,
 	) -> Result<(usize, usize, Pass)> {
-		// Output function invocation details to logs
-		trace!(target: TARGET, "Attempting index compaction process");
-		// Create a new lease handler
 		let lh =
 			dbs.lease_handler(TaskLeaseType::IndexCompaction, interval * 2, Some(&canceller))?;
+		let drained =
+			Self::index_compaction_drain(dbs, Some(&lh), interval * 2, canceller, max_batches)
+				.await?;
+		Ok((drained.batches, drained.errors, drained.pass))
+	}
+
+	/// The drain of the compaction queue, under the lease `lh` when given one
+	/// and otherwise outside any lease, sweeping the defined indexes at most
+	/// once per `sweep_period` (see [`Self::sweep_after_drain`]).
+	///
+	/// Under a lease, each batch's passes run as [`Self::index_compaction_loop`]
+	/// runs them, and the drain stops where it finds the lease taken by another
+	/// node. Outside one, they run one after another on the calling task
+	/// ([`Self::index_compaction_serial`]), and the pass reports
+	/// [`TaskLeaseState::NotLeased`].
+	async fn index_compaction_drain(
+		dbs: Arc<Datastore>,
+		lh: Option<&LeaseHandler>,
+		sweep_period: Duration,
+		canceller: CancellationToken,
+		max_batches: Option<usize>,
+	) -> Result<CompactionDrained> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Attempting index compaction process");
 		let mut count_iteration = 0;
 		let mut count_error = 0;
+		let mut count_passes = 0;
+		let mut stalled = false;
 		// The batches this call has read, which its budget counts.
 		let mut read = 0;
-		let mut pass = Pass::elsewhere();
+		let mut pass = match lh {
+			Some(_) => Pass::elsewhere(),
+			None => Pass::done(TaskLeaseState::NotLeased),
+		};
 		// The queue range and a rotating window within it. After each batch
 		// the window resumes past the last index that batch covered, so
 		// indexes later in the keyspace are reached even while an
@@ -6520,11 +6582,13 @@ impl Datastore {
 			}
 			// Attempt to acquire a lease for the IndexCompaction task
 			// If we don't get the lease, another node is handling this task
-			if !lh.has_lease().await? {
-				pass.lease = TaskLeaseState::Elsewhere;
-				break 'compaction;
+			if let Some(lh) = lh {
+				if !lh.has_lease().await? {
+					pass.lease = TaskLeaseState::Elsewhere;
+					break 'compaction;
+				}
+				pass.lease = TaskLeaseState::Held;
 			}
-			pass.lease = TaskLeaseState::Held;
 			Self::ensure_not_cancelled(&canceller)?;
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
@@ -6570,8 +6634,8 @@ impl Datastore {
 					// that queued requests is drained by this same drain.
 					match Self::sweep_after_drain(
 						&dbs,
-						interval,
-						&lh,
+						sweep_period,
+						lh,
 						&canceller,
 						&mut cursor.drain,
 						&mut read,
@@ -6631,7 +6695,7 @@ impl Datastore {
 				}
 				let Some(cleanup) = Self::index_compaction_batch(
 					Arc::clone(&dbs),
-					&lh,
+					lh,
 					&keys,
 					&cursor.drain,
 					&canceller,
@@ -6645,6 +6709,7 @@ impl Datastore {
 					break 'compaction;
 				};
 				count_iteration += 1;
+				count_passes += cleanup.passed.len();
 				cursor.lap_passed = true;
 				count_error += cleanup.errors;
 				if !cleanup.deleted {
@@ -6654,6 +6719,8 @@ impl Datastore {
 					// failure waits for the next drain.
 					if cleanup.contended {
 						pass.progress = Progress::More;
+					} else {
+						stalled = true;
 					}
 					break 'compaction;
 				}
@@ -6706,8 +6773,8 @@ impl Datastore {
 				// meanwhile: swept, as a drain that reads it empty sweeps it.
 				match Self::sweep_after_drain(
 					&dbs,
-					interval,
-					&lh,
+					sweep_period,
+					lh,
 					&canceller,
 					&mut cursor.drain,
 					&mut read,
@@ -6740,7 +6807,13 @@ impl Datastore {
 			}
 		}
 		*dbs.compaction_cursor.lock() = cursor;
-		Ok((count_iteration, count_error, pass))
+		Ok(CompactionDrained {
+			batches: count_iteration,
+			errors: count_error,
+			passes: count_passes,
+			stalled,
+			pass,
+		})
 	}
 
 	/// Runs one pass over every distinct index a batch of queue keys names, and
@@ -6768,14 +6841,16 @@ impl Datastore {
 	/// other index whose keys in the batch the drain has all kept, the batch
 	/// keeps them.
 	///
-	/// The batch first confirms the lease. One that finds another node holds
-	/// it runs no pass, queues nothing and deletes nothing, leaving its requests
-	/// to that node, and returns `None`.
+	/// Under the lease `lh`, the batch first confirms it. One that finds another
+	/// node holds it runs no pass, queues nothing and deletes nothing, leaving
+	/// its requests to that node, and returns `None`. Without a lease, the
+	/// batch's passes run on the calling task ([`Self::index_compaction_serial`])
+	/// and it always returns `Some`.
 	///
 	/// Returns what the committed cleanup left queued, for the drain to record.
 	async fn index_compaction_batch(
 		dbs: Arc<Datastore>,
-		lh: &LeaseHandler,
+		lh: Option<&LeaseHandler>,
 		keys: &[Vec<u8>],
 		drain: &CompactionDrain,
 		canceller: &CancellationToken,
@@ -6792,15 +6867,19 @@ impl Datastore {
 			.filter(|ikb| seen.insert(*ikb))
 			.cloned()
 			.collect();
-		let lease = CompactionLease::new(lh);
 		Self::ensure_not_cancelled(canceller)?;
-		if !lease.maintain().await? {
-			trace!(target: TARGET, "Index compaction lease lost, leaving the batch to its holder");
-			return Ok(None);
-		}
-		let report =
-			Self::index_compaction_loop(Arc::clone(&dbs), &lease, &indexes, canceller.clone())
-				.await?;
+		let report = match lh {
+			Some(lh) => {
+				let lease = CompactionLease::new(lh);
+				if !lease.maintain().await? {
+					trace!(target: TARGET, "Index compaction lease lost, leaving the batch to its holder");
+					return Ok(None);
+				}
+				Self::index_compaction_loop(Arc::clone(&dbs), &lease, &indexes, canceller.clone())
+					.await?
+			}
+			None => dbs.index_compaction_serial(&indexes, canceller).await?,
+		};
 		let (deletes, still_queued) =
 			Self::partition_index_compaction_batch(keys, &decoded, drain, &report);
 		let end = Self::delete_index_compaction_batch(&dbs, &deletes, canceller).await?;
@@ -8673,6 +8752,55 @@ impl Datastore {
 		Ok(batch)
 	}
 
+	/// Runs one pass per index in `indexes`, the batch's distinct indexes in
+	/// queue order, one after another on the calling task: outside any lease,
+	/// under a compaction ticket that is never granted a place, so the passes
+	/// spawn nothing and their parallel work runs on this task too, and with no
+	/// timer. A pass that fails is logged and the batch goes on with the next
+	/// index; a pass ended by cancellation ends the batch with its error.
+	///
+	/// On a store other datastores write to, a shard this datastore wrote into
+	/// is covered by its writer lease, and no pass steps a guard under a lease
+	/// that holds, so a drained shard's guard would read `NonEmpty` — and the
+	/// index `compacting` — until the lease went idle and was released. So a
+	/// pass that folded its index's backlog is followed by the release of this
+	/// datastore's writer leases on the index and, where it released any, by
+	/// one more pass, which steps the guards. A lease another datastore holds
+	/// is stepped past by the first pass to reach the index once it expires.
+	/// Elsewhere this datastore holds no lease, and the release finds none.
+	///
+	/// Returns what the passes leave the batch's cleanup to act on.
+	async fn index_compaction_serial(
+		&self,
+		indexes: &[IndexKeyBase],
+		canceller: &CancellationToken,
+	) -> Result<CompactionBatchReport> {
+		let places = crate::idx::places::Ticket::serial();
+		let mut batch = CompactionBatchReport::default();
+		for ikb in indexes {
+			Self::ensure_not_cancelled(canceller)?;
+			let mut report = self.run_index_compaction_pass(ikb, canceller, None, &places).await;
+			let folded = matches!(
+				report.result,
+				Ok(CompactionPassOutcome::Empty | CompactionPassOutcome::Short)
+			);
+			if folded && self.release_writer_leases_on(ikb).await? > 0 {
+				Self::ensure_not_cancelled(canceller)?;
+				report = self.run_index_compaction_pass(ikb, canceller, None, &places).await;
+			}
+			batch.record(ikb.clone(), report, canceller)?;
+		}
+		Ok(batch)
+	}
+
+	/// Releases every writer lease this datastore holds on the index `ikb`, in
+	/// every guard family, and answers how many it released. The release queues
+	/// a compaction request for the index in its own transaction.
+	async fn release_writer_leases_on(&self, ikb: &IndexKeyBase) -> Result<usize> {
+		let index = ikb.guarded(surrealdb_datastore::pending_guard::PendingGuardFamily::Hnsw).index;
+		self.transaction_factory.release_writer_leases_of(&self.sequences, &index).await
+	}
+
 	/// Renews the index-compaction lease while a batch's passes run.
 	///
 	/// A renewal that fails is logged rather than returned: the passes it would
@@ -8734,31 +8862,29 @@ impl Datastore {
 		Materialiser::new(&self.setup_ctx()?.freeze())
 	}
 
-	/// Continues `drain`'s sweep of the defined indexes, a drain of the
-	/// compaction queue whose lease period is twice `interval`, a page at a time
+	/// Continues `drain`'s sweep of the defined indexes, a page at a time
 	/// until a page queues a request for the drain to act on, the sweep ends,
-	/// `max_batches` is reached, or `lh` finds the lease taken by another node,
-	/// each page counting one of `read`. The lease is renewed before every page,
-	/// so a sweep that spans pages never queues requests once another node holds
-	/// it.
+	/// `max_batches` is reached, or `lh`, where the drain holds a lease, finds
+	/// it taken by another node, each page counting one of `read`. The lease is
+	/// renewed before every page, so a sweep that spans pages never queues
+	/// requests once another node holds it.
 	///
 	/// A drain sweeps at most once, and its sweep skips every index the drain
 	/// ran a pass over ([`CompactionDrain::passed`]). A sweep begins only once
-	/// the throttle allows ([`Self::sweep_page`]), and the end of its walk is
-	/// what the throttle counts from. A sweep that fails is logged, ends, and
-	/// is not counted, so the next drain sweeps again. A lease check that fails
-	/// is returned.
+	/// `period` has passed since the end of the last sweep that completed, or
+	/// when none has ([`Self::sweep_page`]). A sweep that fails is logged,
+	/// ends, and is not counted, so the next drain sweeps again. A lease check
+	/// that fails is returned.
 	async fn sweep_after_drain(
 		dbs: &Datastore,
-		interval: Duration,
-		lh: &LeaseHandler,
+		period: Duration,
+		lh: Option<&LeaseHandler>,
 		canceller: &CancellationToken,
 		drain: &mut CompactionDrain,
 		read: &mut usize,
 		max_batches: Option<usize>,
 	) -> Result<Swept> {
 		if matches!(drain.sweep, DrainSweep::Unbegun) {
-			let period = interval * 2;
 			if dbs.compaction_swept_at.lock().is_some_and(|at| at.elapsed() < period) {
 				drain.sweep = DrainSweep::Done;
 				return Ok(Swept::Done);
@@ -8772,7 +8898,9 @@ impl Datastore {
 			if max_batches.is_some_and(|max| *read >= max) {
 				return Ok(Swept::Spent);
 			}
-			if !lh.try_maintain_lease().await? {
+			if let Some(lh) = lh
+				&& !lh.try_maintain_lease().await?
+			{
 				return Ok(Swept::LeaseLost);
 			}
 			*read += 1;
@@ -8816,8 +8944,9 @@ impl Datastore {
 	/// `compacting` ([`index_has_unmaterialised_updates`]).
 	///
 	/// Throttled by [`Self::sweep_after_drain`]: a sweep begins at most once per
-	/// lease period, measured from the end of the last sweep that completed, so
-	/// an idle store pays one existence probe per queued-kind index per period.
+	/// the drain's sweep period (the lease period, for a leased drain), measured
+	/// from the end of the last sweep that completed, so an idle store pays one
+	/// existence probe per queued-kind index per period.
 	/// An index a newer release wrote, or whose table, database or namespace
 	/// one wrote, cannot be read by this build and is passed.
 	///
@@ -9095,6 +9224,69 @@ impl Datastore {
 			}
 		}
 		Ok(run)
+	}
+
+	/// Runs at most `budget` steps of the index compaction drain on the calling task, and reports
+	/// what is left.
+	///
+	/// Full-text, `COUNT` and HNSW writes leave a backlog beside the read-optimised structure, and
+	/// queue a request naming the index (a key [`Self::is_index_compaction_key`] matches). The
+	/// drain reads the queue a batch of [`INDEX_COMPACTION_QUEUE_BATCH_SIZE`] requests at a time,
+	/// runs one compaction pass over each index a batch names, and then deletes the batch's
+	/// requests the passes acted on in a transaction of its own. A step is one such batch, or one
+	/// page of the sweep below; a call with a budget of one still reads a batch. Every plan a pass
+	/// applies is a transaction conditional on the index's compaction generation, so a call stopped
+	/// anywhere — its future dropped, its process gone — loses nothing: a request is deleted only
+	/// after its index was compacted at or after it was written, and a plan that lost its race is
+	/// read again. Reads merge the backlog whatever a pass has folded, so a pass changes what a
+	/// read costs and what `INFO FOR INDEX` reports as `compacting`, never what a read answers.
+	///
+	/// Nothing is spawned, no lease is taken and no timer runs: the passes run one after another on
+	/// the calling task, and their parallel work runs there too. The call continues the drain where
+	/// the previous one stopped, so successive calls rotate through every queued index. A drain
+	/// that reads the queue empty sweeps the defined indexes for backlogs no request names, which
+	/// queues a request for each: the first such drain after the datastore starts, and then at most
+	/// once per `sweep_period`, measured from the end of the last sweep that completed, each page
+	/// of the sweep a step. A drain ends once its sweep queues nothing, and the next call begins
+	/// a drain of its own.
+	///
+	/// A host that builds the datastore
+	/// [`without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks) runs this
+	/// itself: when
+	/// [`CommitTriggers::index_compaction`](surrealdb_datastore::triggers::CommitTriggers::index_compaction)
+	/// on [`Self::commit_triggers`] is notified, which follows every commit that queued a request,
+	/// when a commit wrote a key [`Self::is_index_compaction_key`] matches, again while
+	/// [`IndexCompactionRun::more`] is set, and after [`IndexCompactionRun::retry_after`]. A
+	/// request a pass could not act on — an HNSW index a live build holds, or an index whose
+	/// defining statement has not committed — stays queued, and the build or definition that holds
+	/// it writes the commit that announces it again. A pass that fails on anything else is logged,
+	/// and its index waits for its next write or the next sweep.
+	pub async fn run_index_compaction(
+		self: &Arc<Self>,
+		budget: usize,
+		sweep_period: Duration,
+	) -> Result<IndexCompactionRun> {
+		let drained = Self::index_compaction_drain(
+			Arc::clone(self),
+			None,
+			sweep_period,
+			CancellationToken::new(),
+			Some(budget.max(1)),
+		)
+		.await?;
+		Ok(IndexCompactionRun {
+			passes: drained.passes,
+			more: drained.pass.progress == Progress::More,
+			retry_after: drained.stalled.then_some(INDEX_COMPACTION_CLEANUP_RETRY),
+		})
+	}
+
+	/// Whether `key` is a request of the index compaction queue (`/!ic`), which a commit that
+	/// writes to a full-text, `COUNT` or HNSW index puts, as does a compaction pass that stops with
+	/// work left and a sweep that finds a backlog no request names. A commit that wrote no such
+	/// key queued no compaction work.
+	pub fn is_index_compaction_key(key: &[u8]) -> bool {
+		IndexCompactionKey::decode_key(key).is_ok()
 	}
 
 	/// Whether `key` is the key of an index's build state, which every statement that starts an
@@ -14081,7 +14273,7 @@ pub(crate) mod test {
 		)?;
 		let cleanup = Datastore::index_compaction_batch(
 			Arc::clone(ds),
-			&lh,
+			Some(&lh),
 			&batch,
 			&CompactionDrain::default(),
 			&CancellationToken::new(),
@@ -14592,7 +14784,7 @@ pub(crate) mod test {
 
 		let cleanup = Datastore::index_compaction_batch(
 			Arc::clone(&ds),
-			&lease(ds.id())?,
+			Some(&lease(ds.id())?),
 			&keys,
 			&CompactionDrain::default(),
 			&CancellationToken::new(),
@@ -14639,7 +14831,7 @@ pub(crate) mod test {
 		// One index, so its pass runs on the batch's own task.
 		let res = Datastore::index_compaction_batch(
 			Arc::clone(&ds),
-			&lh,
+			Some(&lh),
 			&keys,
 			&CompactionDrain::default(),
 			&CancellationToken::new(),
@@ -14711,7 +14903,7 @@ pub(crate) mod test {
 		let mut batch = tokio::spawn(async move {
 			Datastore::index_compaction_batch(
 				batch_ds,
-				&lh,
+				Some(&lh),
 				&keys,
 				&CompactionDrain::default(),
 				&CancellationToken::new(),
@@ -14821,7 +15013,7 @@ pub(crate) mod test {
 		let mut batch = tokio::spawn(async move {
 			Datastore::index_compaction_batch(
 				batch_ds,
-				&lh,
+				Some(&lh),
 				&keys,
 				&CompactionDrain::default(),
 				&CancellationToken::new(),
@@ -14917,7 +15109,7 @@ pub(crate) mod test {
 		let mut batch = tokio::spawn(async move {
 			Datastore::index_compaction_batch(
 				batch_ds,
-				&lh,
+				Some(&lh),
 				&batch_keys,
 				&CompactionDrain::default(),
 				&batch_canceller,
@@ -16032,7 +16224,7 @@ pub(crate) mod test {
 		)?;
 		let cleanup = Datastore::index_compaction_batch(
 			Arc::clone(&ds),
-			&lh,
+			Some(&lh),
 			&keys,
 			&CompactionDrain::default(),
 			&CancellationToken::new(),
@@ -16566,6 +16758,242 @@ pub(crate) mod test {
 		Ok(())
 	}
 
+	/// A full-text, a `COUNT` and an HNSW index over one table, and the writes
+	/// that leave each a backlog.
+	const HOST_COMPACTION_SQL: &str = "
+		DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+		DEFINE TABLE t SCHEMALESS;
+		DEFINE INDEX ft ON t FIELDS text FULLTEXT ANALYZER simple BM25;
+		DEFINE INDEX cx ON t COUNT;
+		DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;
+	";
+
+	/// The indexes of [`HOST_COMPACTION_SQL`].
+	const HOST_COMPACTION_INDEXES: [&str; 3] = ["ft", "cx", "hx"];
+
+	/// Queries each index of [`HOST_COMPACTION_SQL`] answers.
+	const HOST_COMPACTION_QUERIES: [&str; 3] = [
+		"SELECT text FROM t WHERE text @@ 'beta' ORDER BY text",
+		"SELECT count() FROM t GROUP ALL",
+		"SELECT vec FROM t WHERE vec <|3,40|> [1.0, 1.0] ORDER BY vec",
+	];
+
+	/// Writes `n` new records, each in a transaction of its own, so each queues
+	/// a compaction request per index.
+	async fn host_compaction_writes(ds: &Datastore, session: &Session, n: usize) -> Result<()> {
+		for i in 0..n {
+			execute_all(
+				ds,
+				session,
+				&format!(
+					"CREATE t SET text = 'alpha beta{i} beta', vec = [{i}.0, 1.0] RETURN NONE;"
+				),
+			)
+			.await?;
+		}
+		Ok(())
+	}
+
+	/// What `INFO FOR INDEX` reports as `compacting` for `index` on `t`.
+	async fn info_compacting(ds: &Datastore, session: &Session, index: &str) -> Result<bool> {
+		let mut results =
+			ds.execute(&format!("INFO FOR INDEX {index} ON t"), session, None).await?;
+		let json = results.remove(0).result?.into_json_value();
+		json.get("building")
+			.and_then(|b| b.get("compacting"))
+			.and_then(|c| c.as_bool())
+			.ok_or_else(|| anyhow::anyhow!("INFO FOR INDEX reported no `compacting`: {json}"))
+	}
+
+	/// The answers of [`HOST_COMPACTION_QUERIES`].
+	async fn host_compaction_answers(ds: &Datastore, session: &Session) -> Result<Vec<String>> {
+		let mut answers = Vec::new();
+		for sql in HOST_COMPACTION_QUERIES {
+			let value = ds.execute(sql, session, None).await?.remove(0).result?;
+			answers.push(value.into_json_value().to_string());
+		}
+		Ok(answers)
+	}
+
+	/// Calls [`Datastore::run_index_compaction`] as a host does, with a budget
+	/// of one step, until a call reports no work left, and answers how many
+	/// calls it took.
+	async fn run_index_compaction_until_done(
+		ds: &Arc<Datastore>,
+		period: Duration,
+	) -> Result<usize> {
+		for calls in 1..=200 {
+			let run = ds.run_index_compaction(1, period).await?;
+			assert_eq!(run.retry_after, None, "{run:?}");
+			if !run.more {
+				return Ok(calls);
+			}
+		}
+		anyhow::bail!("the host-driven drain did not end")
+	}
+
+	/// Deletes every request of the compaction queue, stranding the backlogs
+	/// they named.
+	async fn strand_compaction_backlogs(ds: &Datastore) -> Result<()> {
+		let txn = ds.transaction(Write).await?;
+		let keys =
+			catch!(txn, txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await);
+		for k in &keys {
+			catch!(txn, txn.del(Key::from(k.as_slice())).await);
+		}
+		txn.commit().await
+	}
+
+	/// A host that drives compaction itself, a call at a time with a budget of
+	/// one step and nothing else running, drains a full-text, `COUNT` and HNSW
+	/// backlog that no read or statement folds: each index stops reporting
+	/// `compacting`, the queue is empty, and every query answers as it did.
+	#[tokio::test]
+	async fn host_driven_compaction_drains_each_queued_kind() -> Result<()> {
+		assert_host_driven_compaction_drains_each_queued_kind(false).await
+	}
+
+	/// [`host_driven_compaction_drains_each_queued_kind`] on a store other
+	/// datastores write to, where the HNSW writes leave their shards' guards
+	/// under this datastore's writer leases: the drain releases them, so the
+	/// guards are stepped and the index stops reporting `compacting`.
+	#[tokio::test]
+	async fn host_driven_compaction_drains_each_queued_kind_on_a_shared_store() -> Result<()> {
+		assert_host_driven_compaction_drains_each_queued_kind(true).await
+	}
+
+	async fn assert_host_driven_compaction_drains_each_queued_kind(
+		shared_store: bool,
+	) -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		if shared_store {
+			ds.triggers.assume_shared_store();
+		}
+		execute_all(&ds, &session, HOST_COMPACTION_SQL).await?;
+		host_compaction_writes(&ds, &session, 24).await?;
+		assert!(compaction_queue_len(&ds).await? > 0, "the writes queued requests");
+		for ix in HOST_COMPACTION_INDEXES {
+			assert!(info_compacting(&ds, &session, ix).await?, "{ix} holds a backlog");
+		}
+		let before = host_compaction_answers(&ds, &session).await?;
+
+		let first = ds.run_index_compaction(1, Duration::from_secs(60)).await?;
+		assert!(first.passes > 0, "the first call passes the queued indexes: {first:?}");
+		run_index_compaction_until_done(&ds, Duration::from_secs(60)).await?;
+
+		assert_eq!(compaction_queue_len(&ds).await?, 0, "the queue is drained");
+		for ix in HOST_COMPACTION_INDEXES {
+			assert!(!info_compacting(&ds, &session, ix).await?, "{ix} is folded");
+		}
+		assert_eq!(host_compaction_answers(&ds, &session).await?, before);
+		let idle = ds.run_index_compaction(1, Duration::from_secs(60)).await?;
+		assert_eq!((idle.passes, idle.more), (0, false), "a drained queue runs no pass");
+		Ok(())
+	}
+
+	/// A commit that writes to each index queues a request naming it, notifies
+	/// `index_compaction`, and every request is a key
+	/// [`Datastore::is_index_compaction_key`] matches; the table's own keys —
+	/// the record and the indexes' backlogs — do not match.
+	#[tokio::test]
+	async fn a_queued_compaction_is_signalled_and_its_request_key_recognised() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, HOST_COMPACTION_SQL).await?;
+		run_index_compaction_until_done(&ds, Duration::from_secs(60)).await?;
+		assert_eq!(compaction_queue_len(&ds).await?, 0);
+		let notified = ds.commit_triggers().index_compaction.notified();
+		host_compaction_writes(&ds, &session, 1).await?;
+		tokio::time::timeout(Duration::from_secs(5), notified)
+			.await
+			.map_err(|_| anyhow::anyhow!("the write did not wake index compaction"))?;
+		let txn = ds.transaction(Read).await?;
+		let requests =
+			catch!(txn, txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await);
+		let db = catch!(txn, txn.get_db_by_name("test", "test", None).await).expect("the database");
+		let table = TableName::from("t");
+		let under_table = crate::key::schema::TblRoot {
+			ns: db.namespace_id,
+			db: db.database_id,
+			tb: Cow::Borrowed(&table),
+		}
+		.range_subtree()?;
+		let table_keys = catch!(txn, txn.keys_raw(under_table, u32::MAX, 0, None).await);
+		txn.cancel().await?;
+		let named: HashSet<_> = requests
+			.iter()
+			.map(|k| IndexCompactionKey::decode_key(k).map(|k| k.ix))
+			.collect::<Result<_>>()?;
+		assert_eq!(named.len(), HOST_COMPACTION_INDEXES.len(), "a request names each index");
+		assert!(requests.iter().all(|k| Datastore::is_index_compaction_key(k)));
+		assert!(!table_keys.is_empty());
+		assert!(table_keys.iter().all(|k| !Datastore::is_index_compaction_key(k)));
+		Ok(())
+	}
+
+	/// The host-driven drain sweeps for backlogs no request names on the first
+	/// drain after the datastore starts, and after that at most once per its
+	/// sweep period.
+	#[tokio::test]
+	async fn host_driven_compaction_sweeps_first_and_then_once_per_period() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, HOST_COMPACTION_SQL).await?;
+		host_compaction_writes(&ds, &session, 4).await?;
+		strand_compaction_backlogs(&ds).await?;
+		assert!(info_compacting(&ds, &session, "ft").await?, "a backlog no request names");
+
+		let period = Duration::from_secs(60);
+		run_index_compaction_until_done(&ds, period).await?;
+		for ix in HOST_COMPACTION_INDEXES {
+			assert!(!info_compacting(&ds, &session, ix).await?, "the first drain swept {ix}");
+		}
+
+		host_compaction_writes(&ds, &session, 2).await?;
+		strand_compaction_backlogs(&ds).await?;
+		run_index_compaction_until_done(&ds, period).await?;
+		assert!(
+			info_compacting(&ds, &session, "ft").await?,
+			"a drain within the period does not sweep again"
+		);
+
+		run_index_compaction_until_done(&ds, Duration::ZERO).await?;
+		for ix in HOST_COMPACTION_INDEXES {
+			assert!(!info_compacting(&ds, &session, ix).await?, "the period passed: {ix} swept");
+		}
+		Ok(())
+	}
+
+	/// A host-driven call dropped at a batch boundary — its batch read and
+	/// nothing compacted, or its batch compacted and cleaned up — loses
+	/// nothing: the calls that follow drain every backlog, and every query
+	/// answers as it did.
+	#[tokio::test]
+	async fn a_dropped_host_driven_compaction_call_loses_nothing() -> Result<()> {
+		for stage in [BatchStage::Read, BatchStage::Cleared] {
+			let (ds, session) = new_index_compaction_test_ds().await?;
+			execute_all(&ds, &session, HOST_COMPACTION_SQL).await?;
+			host_compaction_writes(&ds, &session, 8).await?;
+			let before = host_compaction_answers(&ds, &session).await?;
+			COMPACTION_BATCH_HOOKS
+				.lock()
+				.unwrap()
+				.insert((ds.id(), stage), Box::new(|| Box::pin(std::future::pending())));
+			let dropped = tokio::time::timeout(
+				Duration::from_millis(200),
+				ds.run_index_compaction(1, Duration::from_secs(60)),
+			)
+			.await;
+			assert!(dropped.is_err(), "the call waits at the hook until it is dropped");
+
+			run_index_compaction_until_done(&ds, Duration::from_secs(60)).await?;
+			assert_eq!(compaction_queue_len(&ds).await?, 0);
+			for ix in HOST_COMPACTION_INDEXES {
+				assert!(!info_compacting(&ds, &session, ix).await?, "{ix} is folded");
+			}
+			assert_eq!(host_compaction_answers(&ds, &session).await?, before);
+		}
+		Ok(())
+	}
+
 	/// A sweep that finds its lease taken by another node before a page stops
 	/// there, reading no page, so the former holder probes and queues nothing
 	/// once the lease is the new holder's; its walk stays where it stopped.
@@ -16587,8 +17015,8 @@ pub(crate) mod test {
 		let mut read = 0;
 		let swept = Datastore::sweep_after_drain(
 			&ds,
-			interval,
-			&lh,
+			interval * 2,
+			Some(&lh),
 			&CancellationToken::new(),
 			&mut drain,
 			&mut read,

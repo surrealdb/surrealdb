@@ -49,7 +49,7 @@ pub(crate) use consts::{
 	RPC_SESSION_GC_SLICE_BATCHES,
 };
 pub use ds::{
-	Builder, Datastore, IndexBuildsRun, LiveQueryEngine, StatementCacheStats,
+	Builder, Datastore, IndexBuildsRun, IndexCompactionRun, LiveQueryEngine, StatementCacheStats,
 	TransactionBuilderFactory, TransactionBuilderParts,
 };
 pub(crate) use ds::{DocIdsReclaimPending, DocIdsReclaimStep};
