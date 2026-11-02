@@ -388,3 +388,89 @@ async fn a_default_datastore_still_reports_that_this_process_created_it() {
 
 	ds.shutdown().await.unwrap();
 }
+
+/// A datastore shaped as a 3.x release leaves it: `!v` at the legacy major
+/// version, no feature level, and `stamp` at `/!vs` when one is given (3.3.0 is
+/// the first release that writes it).
+///
+/// Built without startup transactions, so nothing settles the feature level or
+/// the version before the shape is written, and the datastore does not count as
+/// one this process created.
+async fn written_by_3x(config: surrealdb_cnf::ConfigMap, stamp: Option<&str>) -> Arc<Datastore> {
+	use surrealdb_kvs::TransactionType::Write;
+
+	use crate::key::schema::StorageVersionKey;
+	use crate::kvs::version::StorageVersion;
+
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.without_startup_transactions()
+		.with_config(config)
+		.build_with_path("memory")
+		.await
+		.unwrap();
+	let txn = ds.transaction(Write).await.unwrap();
+	txn.set_key(&VersionKey {}, &MajorVersion::from(MajorVersion::LEGACY)).await.unwrap();
+	if let Some(stamp) = stamp {
+		txn.set_key(&StorageVersionKey {}, &StorageVersion::parse(stamp).unwrap()).await.unwrap();
+	}
+	txn.commit().await.unwrap();
+	ds
+}
+
+async fn stored_stamp(ds: &Datastore) -> Option<String> {
+	ds.storage_version().await.unwrap().map(|s| s.to_string())
+}
+
+/// A datastore a 3.x release last wrote is refused unless the operator opts in,
+/// whether or not that release wrote the version stamp, and the refusal leaves
+/// it as it was found.
+#[tokio::test]
+async fn a_datastore_written_by_3x_is_refused_by_default() {
+	for (stamp, reported) in [(Some("3.3.2"), "3.3.2"), (None, "3.x (earlier than 3.3.0)")] {
+		let ds = written_by_3x(surrealdb_cnf::ConfigMap::empty(), stamp).await;
+
+		let err = ds.check_version().await.unwrap_err();
+		let Some(DatastoreError::UpgradeFrom3xNotEnabled {
+			stored,
+			..
+		}) = err.downcast_ref::<DatastoreError>()
+		else {
+			panic!("a datastore written by {reported} was not refused: {err}");
+		};
+		assert_eq!(stored, reported);
+		assert!(err.to_string().contains("SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true"));
+		assert_eq!(stored_stamp(&ds).await.as_deref(), stamp, "the refusal changed the stamp");
+		assert!(ds.applied_migration_ids().await.unwrap().is_empty(), "the refusal migrated");
+		assert_eq!(stored_major(&ds).await, Some(MajorVersion::from(MajorVersion::LEGACY)));
+	}
+}
+
+/// With the opt-in, a datastore a 3.x release last wrote is upgraded: its
+/// migrations run and it is stamped with this build, so a later start finds a
+/// datastore of this line and needs no opt-in.
+#[tokio::test]
+async fn a_datastore_written_by_3x_is_upgraded_when_opted_in() {
+	let config =
+		surrealdb_cnf::ConfigMap::empty().with_key_value("experimental_upgrade_from_3x", "true");
+	let ds = written_by_3x(config, Some("3.3.2")).await;
+
+	let (version, is_new) = ds.check_version().await.unwrap();
+	assert_eq!(version, MajorVersion::from(MajorVersion::LEGACY));
+	assert!(!is_new);
+	assert_eq!(
+		stored_stamp(&ds).await,
+		Some(crate::kvs::version::StorageVersion::current().to_string())
+	);
+	ds.refuse_upgrade_from_3x().await.unwrap();
+}
+
+/// A datastore stamped by this line is not refused, at whatever feature level
+/// it stands.
+#[tokio::test]
+async fn a_datastore_stamped_by_this_line_is_not_refused() {
+	let ds = written_by_3x(surrealdb_cnf::ConfigMap::empty(), Some("4.0.0")).await;
+	ds.settle_feature_level().await.unwrap();
+	assert!(ds.feature_cell().level().is_legacy());
+	ds.refuse_upgrade_from_3x().await.unwrap();
+}

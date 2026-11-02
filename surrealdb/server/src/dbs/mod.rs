@@ -916,13 +916,14 @@ where
 /// can resolve on its own.
 fn is_permanent_storage_error(e: &anyhow::Error) -> bool {
 	let message = e.to_string();
-	// `OutdatedStorageVersion`, `MigratedBeyondStorageVersion` and
-	// `InvalidStorageVersion` respectively. The last reaches startup because the
-	// version bootstrap declines to retry a marker it cannot decode; retrying it
-	// here would spend the budget and then report a timeout, which names none of
-	// what an operator has to act on.
+	// `OutdatedStorageVersion`, `MigratedBeyondStorageVersion`,
+	// `UpgradeFrom3xNotEnabled` and `InvalidStorageVersion` respectively. The
+	// last reaches startup because the version bootstrap declines to retry a
+	// marker it cannot decode; retrying it here would spend the budget and then
+	// report a timeout, which names none of what an operator has to act on.
 	message.contains("out-of-date")
 		|| message.contains("cannot be read by this one")
+		|| message.contains("is refused by default")
 		|| message.contains("invalid storage version")
 }
 
@@ -1562,6 +1563,10 @@ mod tests {
 				stored: "3.4.0".to_string(),
 				running: "3.3.0".to_string(),
 				migrations: "2".to_string(),
+			},
+			DatastoreError::UpgradeFrom3xNotEnabled {
+				stored: "3.3.0".to_string(),
+				running: "4.0.0".to_string(),
 			},
 		] {
 			let rendered = error.to_string();

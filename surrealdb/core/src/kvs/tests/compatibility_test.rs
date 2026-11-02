@@ -29,6 +29,20 @@ async fn unsettled() -> Arc<Datastore> {
 	Datastore::builder().without_maintenance_tasks().build_with_path("memory").await.unwrap()
 }
 
+/// An [`unsettled`] datastore that opts in to upgrading a store a 3.x release
+/// wrote, for the tests that make it one.
+async fn unsettled_upgradable() -> Arc<Datastore> {
+	Datastore::builder()
+		.without_maintenance_tasks()
+		.with_config(
+			surrealdb_cnf::ConfigMap::empty()
+				.with_key_value("experimental_upgrade_from_3x", "true"),
+		)
+		.build_with_path("memory")
+		.await
+		.unwrap()
+}
+
 /// The defaults the datastore records, if any.
 async fn recorded(ds: &Datastore) -> Option<StoreDefaults> {
 	let txn = ds.transaction(Read).await.unwrap();
@@ -122,7 +136,7 @@ async fn a_new_store_reopened_after_version_bootstrap_still_defaults_to_level_4(
 /// store no level, read at level 3 too.
 #[tokio::test]
 async fn an_upgraded_store_defaults_to_level_3() {
-	let ds = unsettled().await;
+	let ds = unsettled_upgradable().await;
 	written_by_an_earlier_release(&ds).await;
 	let (_, created) = ds.check_version().await.unwrap();
 	assert!(!created);
@@ -139,7 +153,7 @@ async fn an_upgraded_store_defaults_to_level_3() {
 /// stands: a default an operator set is kept.
 #[tokio::test]
 async fn a_recorded_default_is_kept() {
-	let ds = unsettled().await;
+	let ds = unsettled_upgradable().await;
 	written_by_an_earlier_release(&ds).await;
 	let txn = ds.transaction(Write).await.unwrap();
 	txn.set_default_compatibility(LEVEL_4).await.unwrap();

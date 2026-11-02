@@ -186,6 +186,11 @@ pub(crate) struct DatastoreConfig {
 	/// unless its engine admits no other writer). The builder replaces it with
 	/// the validated pin, or leaves the Legacy hold as it is.
 	pub feature_level: FeatureLevelSetting,
+	/// Whether a datastore a 3.x release last wrote is upgraded in place when it
+	/// is opened (default: false, which refuses to open it). The upgrade is
+	/// experimental and rewrites stored data, so it runs only when the operator
+	/// opts in.
+	pub experimental_upgrade_from_3x: bool,
 }
 
 impl Default for DatastoreConfig {
@@ -196,6 +201,7 @@ impl Default for DatastoreConfig {
 			live_query_engine: LiveQueryEngine::Inline,
 			live_query_retention: Duration::from_secs(3600),
 			feature_level: FeatureLevelSetting::Unset,
+			experimental_upgrade_from_3x: false,
 		}
 	}
 }
@@ -206,6 +212,7 @@ impl cnf::Config for DatastoreConfig {
 			.parse_key("export_batch_size", &mut self.export_batch_size)
 			.parse_key("live_query_engine", &mut self.live_query_engine)
 			.parse_key("feature_level", &mut self.feature_level)
+			.parse_key_bool("experimental_upgrade_from_3x", &mut self.experimental_upgrade_from_3x)
 			.parse_key_with("live_query_retention", &mut self.live_query_retention, |x| {
 				cnf::parse_duration(x).ok()
 			});

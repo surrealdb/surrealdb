@@ -967,6 +967,9 @@ async fn run_startup(datastore: &Arc<Datastore>, startup: Startup) -> Result<()>
 		// set below.
 		let (_, is_new) = datastore.settle_storage_version().await?;
 		datastore.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst);
+		// The maintenance tasks write, so a store this build may not upgrade is
+		// refused before they start.
+		datastore.refuse_upgrade_from_3x().await?;
 		// Every job but the heartbeat waits for the migrations `check_version`
 		// runs, so none reads persisted data while a migration rewrites it.
 		// A datastore this process created has nothing to migrate, and one

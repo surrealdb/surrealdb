@@ -2625,6 +2625,8 @@ impl Datastore {
 		// namespace creation off it would silently skip that on the second pass.
 		let is_new =
 			self.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst) || is_new;
+		// Refused before any migration, so a refused store is left as it was found.
+		self.refuse_upgrade_from_3x().await?;
 		// Bring the datastore's semantic version stamp up to this build, applying
 		// any data migrations the gap between the two calls for. Not wrapped in
 		// `retry`, which caps each attempt at ten seconds: a migration may run for
@@ -2647,6 +2649,46 @@ impl Datastore {
 		self.mark_migrated();
 		// Everything ok
 		Ok((version, is_new))
+	}
+
+	/// Refuses a datastore a 3.x release last wrote, unless the
+	/// `experimental_upgrade_from_3x` configuration key opts in to upgrading it
+	/// in place, in which case it logs a warning and allows it.
+	///
+	/// Judged on the version stamp at `/!vs`. A store stamped below 4.0.0 was
+	/// last advanced by a 3.x release. So was a store with no stamp at
+	/// [`FeatureLevel::Legacy`], which predates the stamp. A store with no stamp
+	/// at a stored feature level was created by this line and has yet to be
+	/// stamped. A store this process created is never refused.
+	///
+	/// Reads only, so a refused store is left as it was found. Call it after the
+	/// feature level is settled and [`Self::created_here`] is latched, and
+	/// before anything writes to the store.
+	pub(crate) async fn refuse_upgrade_from_3x(&self) -> Result<()> {
+		if self.created_here.load(std::sync::atomic::Ordering::SeqCst) {
+			return Ok(());
+		}
+		let stored = match self.storage_version().await? {
+			Some(stored) if stored.triple().0 >= 4 => return Ok(()),
+			Some(stored) => stored.to_string(),
+			None if !self.feature_cell().level().is_legacy() => return Ok(()),
+			None => "3.x (earlier than 3.3.0)".to_owned(),
+		};
+		let running = StorageVersion::current().to_string();
+		if !self.config.datastore.experimental_upgrade_from_3x {
+			bail!(DatastoreError::UpgradeFrom3xNotEnabled {
+				stored,
+				running,
+			});
+		}
+		warn!(
+			target: TARGET,
+			%stored,
+			%running,
+			"Upgrading a datastore last written by a 3.x release in place. This upgrade is \
+			 experimental and was enabled by SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X"
+		);
+		Ok(())
 	}
 
 	/// Refuses a datastore that still records a `DEFINE MODEL` definition: this build

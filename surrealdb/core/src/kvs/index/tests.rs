@@ -23041,10 +23041,15 @@ async fn index_format_stamp_is_admitted_to_the_feature_level() -> Result<()> {
 	}
 	assert_eq!(overwrite_keeps(&ds, &session).await?, (INDEX_FORMAT_VERSION, false));
 
-	// A store an earlier release wrote, opened by this build and held at Legacy.
+	// A store an earlier release wrote, opened by this build with the opt-in to upgrade it, and
+	// held at Legacy.
 	let legacy = Datastore::builder()
 		.without_maintenance_tasks()
 		.without_startup_transactions()
+		.with_config(
+			surrealdb_cnf::ConfigMap::empty()
+				.with_key_value("experimental_upgrade_from_3x", "true"),
+		)
 		.with_legacy_feature_level()
 		.build_with_path("memory")
 		.await?;

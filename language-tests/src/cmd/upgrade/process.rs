@@ -108,6 +108,10 @@ impl SurrealProcess {
 			// Lets the current checkout mint presigned URLs. A release that
 			// predates presigning ignores the variable.
 			.env("SURREAL_BUCKET_PRESIGN_SECRET", "language-tests-presign-secret-0000")
+			// A 4.x checkout refuses to open a store a 3.x release wrote unless
+			// the operator opts in, and every hop onto it is such an upgrade. A
+			// release that predates the opt-in ignores the variable.
+			.env("SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X", "true")
 			.stdin(Stdio::null())
 			.stdout(Stdio::piped())
 			.stderr(Stdio::piped())

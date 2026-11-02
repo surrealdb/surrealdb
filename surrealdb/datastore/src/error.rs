@@ -155,6 +155,21 @@ pub enum DatastoreError {
 		actual: u16,
 	},
 
+	/// The datastore was last written by a 3.x release, and this build upgrades such a
+	/// datastore in place only when the `experimental_upgrade_from_3x` configuration key opts
+	/// in. The upgrade rewrites stored data, so a 3.x release cannot open the datastore after it.
+	#[error(
+		"The data stored on disk was last written by SurrealDB {stored}. Upgrading it in place to \
+		 SurrealDB {running} is experimental and is refused by default: the upgrade rewrites \
+		 stored data, and the datastore cannot be opened by a 3.x release afterwards. Keep \
+		 running a 3.x release, or take a backup and set \
+		 SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true to opt in to the experimental upgrade"
+	)]
+	UpgradeFrom3xNotEnabled {
+		stored: String,
+		running: String,
+	},
+
 	/// The database holds a `DEFINE MODEL` definition. This build does not run models, so it
 	/// refuses to open a datastore that still records one.
 	#[error(
@@ -432,6 +447,9 @@ impl LeafError for DatastoreError {
 			| DatastoreError::FeatureLevelMissing
 			| DatastoreError::FeatureLevelPinInvalid
 			| DatastoreError::StoreReadOnly {
+				..
+			}
+			| DatastoreError::UpgradeFrom3xNotEnabled {
 				..
 			} => TypesError::configuration(message, None),
 			DatastoreError::StalenessAboveMaximum {

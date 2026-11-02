@@ -34,6 +34,10 @@ pub struct SurrealKvConfig {
 	/// transaction size: a commit too large for the memtable is written directly to a level-0
 	/// table instead.
 	pub max_memtable_size: usize,
+	/// Whether a directory a 3.x release wrote, as RocksDB or as SurrealKV v0.x, is converted in
+	/// place when it is opened (default: false, which refuses to open it). The datastore reads the
+	/// same key to decide whether to upgrade the data such a directory holds.
+	pub experimental_upgrade_from_3x: bool,
 }
 
 const KIB: u64 = 1024;
@@ -102,6 +106,7 @@ impl Default for SurrealKvConfig {
 			vlog_threshold: (4 * KIB) as usize,
 			block_cache_capacity: default_block_cache_capacity(),
 			max_memtable_size: default_max_memtable_size(),
+			experimental_upgrade_from_3x: false,
 		}
 	}
 }
@@ -172,7 +177,8 @@ impl Config for SurrealKvConfig {
 			.parse_key("surrealkv_vlog_max_file_size", &mut self.vlog_max_file_size)
 			.parse_key("surrealkv_vlog_threshold", &mut self.vlog_threshold)
 			.parse_key("surrealkv_block_cache_capacity", &mut self.block_cache_capacity)
-			.parse_key("surrealkv_max_memtable_size", &mut self.max_memtable_size);
+			.parse_key("surrealkv_max_memtable_size", &mut self.max_memtable_size)
+			.parse_key_bool("experimental_upgrade_from_3x", &mut self.experimental_upgrade_from_3x);
 
 		if map.has_key("datastore_sync") {
 			map.parse_key("datastore_sync", &mut self.sync_mode);

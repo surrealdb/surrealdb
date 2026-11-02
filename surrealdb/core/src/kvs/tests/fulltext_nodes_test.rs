@@ -366,13 +366,17 @@ impl TransactionBuilderFactory for SharedBackend {
 }
 
 /// A node: a datastore of its own, with its own node id, caches and tasks.
-/// Where `legacy`, it keeps a store at the Legacy level there, and records no
-/// level of its own on a store it finds new.
+/// Where `legacy`, it keeps a store at the Legacy level there, records no level
+/// of its own on a store it finds new, and opts in to upgrading a store a 3.x
+/// release wrote.
 #[cfg(feature = "kv-mem")]
 pub(super) async fn node(backend: &SharedBackend, legacy: bool) -> Arc<Datastore> {
 	let builder = Datastore::builder().with_id(Uuid::new_v4()).without_maintenance_tasks();
 	let builder = if legacy {
-		builder.with_legacy_feature_level().without_startup_transactions()
+		builder.with_legacy_feature_level().without_startup_transactions().with_config(
+			surrealdb_cnf::ConfigMap::empty()
+				.with_key_value("experimental_upgrade_from_3x", "true"),
+		)
 	} else {
 		builder
 	};

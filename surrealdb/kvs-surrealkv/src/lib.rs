@@ -124,6 +124,35 @@ fn holds_rocksdb_files(path: &str) -> bool {
 	current && manifest
 }
 
+/// The storage engine of a 3.x release that wrote the directory at `path`, or `None` for a
+/// directory no 3.x release wrote.
+///
+/// A 3.x release wrote either RocksDB files or SurrealKV v0.x files, whose manifest is of format
+/// version 1. A conversion of either that stopped part way leaves its marker file, and is still
+/// such a directory. Opening one converts it in place, after which the release that wrote it
+/// cannot open it, so it is judged from the files alone, before anything opens them.
+#[cfg(not(target_family = "wasm"))]
+fn written_by_3x(path: &str) -> Option<&'static str> {
+	let dir = std::path::Path::new(path);
+	if holds_rocksdb_files(path) || dir.join("MIGRATING_ROCKSDB").exists() {
+		return Some("RocksDB");
+	}
+	let manifest = dir.join("manifest").join(format!("{:020}.manifest", 0));
+	// The format version is the manifest's first two bytes, so only those are read.
+	let legacy_manifest = std::fs::File::open(manifest)
+		.and_then(|mut file| {
+			use std::io::Read;
+			let mut version = [0u8; 2];
+			file.read_exact(&mut version)?;
+			Ok(u16::from_be_bytes(version))
+		})
+		.is_ok_and(|version| version == 1);
+	if legacy_manifest || dir.join("MIGRATING").exists() {
+		return Some("SurrealKV v0.x");
+	}
+	None
+}
+
 /// The error of a failed commit. Only the errors SurrealKV raises before it writes anything are
 /// definite; any other may come after the commit reached the WAL, or the memtable, so whether it
 /// applied is unknown: recovery may replay it.
@@ -304,6 +333,19 @@ impl Datastore {
 		// committing a new size of the file, which on ext4 and XFS is most of what it costs.
 		let opts =
 			Self::options(&config).with_path(path.to_string().into()).with_wal_preallocation(true);
+		// The build below converts a directory a 3.x release wrote in place, after which that
+		// release cannot open it, so it runs on one only when the operator opts in.
+		if !config.experimental_upgrade_from_3x
+			&& let Some(engine) = written_by_3x(path)
+		{
+			return Err(Error::Datastore(format!(
+				"The directory {path} holds a {engine} database written by SurrealDB 3.x. \
+				 Upgrading it in place to SurrealDB 4 is experimental and is refused by default: \
+				 the upgrade converts the files, and a 3.x release cannot open them afterwards. \
+				 Keep running a 3.x release, or take a backup and set \
+				 SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true to opt in to the experimental upgrade"
+			)));
+		}
 		// A RocksDB directory is converted in place by the build below
 		if holds_rocksdb_files(path) {
 			warn!(
@@ -1896,6 +1938,83 @@ mod commit_error_test {
 		assert_eq!(visited, vec![(2, b"b".to_vec())]);
 		rd.cancel().await.unwrap();
 		drop(ds);
+		let _ = std::fs::remove_dir_all(&dir);
+	}
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+#[allow(clippy::unwrap_used)]
+mod written_by_3x_test {
+	use super::*;
+
+	fn scratch(name: &str) -> std::path::PathBuf {
+		let dir = std::env::temp_dir().join(format!(
+			"surrealkv_{name}_{}_{}",
+			std::process::id(),
+			std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+		));
+		std::fs::create_dir_all(&dir).unwrap();
+		dir
+	}
+
+	/// Every file in `dir`, with its contents, so a test can tell the directory was left as it was.
+	fn snapshot(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+		let mut files = Vec::new();
+		let mut pending = vec![dir.to_path_buf()];
+		while let Some(next) = pending.pop() {
+			for entry in std::fs::read_dir(next).unwrap().flatten() {
+				let path = entry.path();
+				if path.is_dir() {
+					pending.push(path);
+				} else {
+					files.push((path.clone(), std::fs::read(&path).unwrap()));
+				}
+			}
+		}
+		files.sort();
+		files
+	}
+
+	/// A directory a 3.x release wrote, as RocksDB or as SurrealKV v0.x, is refused without the
+	/// opt-in, and nothing in it is converted, moved or created.
+	#[tokio::test]
+	async fn a_directory_written_by_3x_is_refused_and_left_as_it_was() {
+		let rocksdb = scratch("rocksdb_3x");
+		std::fs::write(rocksdb.join("CURRENT"), b"MANIFEST-000001\n").unwrap();
+		std::fs::write(rocksdb.join("MANIFEST-000001"), b"rocksdb").unwrap();
+		let v0 = scratch("surrealkv_v0_3x");
+		std::fs::create_dir_all(v0.join("manifest")).unwrap();
+		std::fs::write(v0.join("manifest").join(format!("{:020}.manifest", 0)), [0, 1, 0, 0])
+			.unwrap();
+
+		for (dir, engine) in [(&rocksdb, "RocksDB"), (&v0, "SurrealKV v0.x")] {
+			let before = snapshot(dir);
+			let path = dir.to_string_lossy().into_owned();
+			let Err(err) = Datastore::new(&path, SurrealKvConfig::default()).await else {
+				panic!("a {engine} directory written by 3.x was opened");
+			};
+			let message = err.to_string();
+			assert!(message.contains(engine), "{message}");
+			assert!(message.contains("SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true"), "{message}");
+			assert_eq!(snapshot(dir), before, "the refusal changed the {engine} directory");
+			let _ = std::fs::remove_dir_all(dir);
+		}
+	}
+
+	/// A directory this engine wrote, and an empty one, open without the opt-in.
+	#[tokio::test]
+	async fn a_directory_this_engine_wrote_is_not_refused() {
+		let dir = scratch("surrealkv_current");
+		let path = dir.to_string_lossy().into_owned();
+		let ds = Datastore::new(&path, SurrealKvConfig::default()).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		tx.set(Key::from(b"k".as_slice()), b"v".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+		Datastore::shutdown(&ds).await.unwrap();
+		drop(ds);
+		assert_eq!(written_by_3x(&path), None);
+		let ds = Datastore::new(&path, SurrealKvConfig::default()).await.unwrap();
+		Datastore::shutdown(&ds).await.unwrap();
 		let _ = std::fs::remove_dir_all(&dir);
 	}
 }

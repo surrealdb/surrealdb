@@ -444,6 +444,13 @@ fn every_datastore_variant() -> Vec<(&'static str, DatastoreError)> {
 			},
 		),
 		(
+			"UpgradeFrom3xNotEnabled",
+			DatastoreError::UpgradeFrom3xNotEnabled {
+				stored: "sample".to_string(),
+				running: "sample".to_string(),
+			},
+		),
+		(
 			"MigrationTimedOut",
 			DatastoreError::MigrationTimedOut {
 				migrations: "sample".to_string(),
