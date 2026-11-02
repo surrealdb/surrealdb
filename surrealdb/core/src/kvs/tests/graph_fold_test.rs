@@ -1313,3 +1313,185 @@ async fn a_stale_catalog_refresh_cannot_unset_graph_folded() {
 		run(&ds, &ses, "RETURN [[person:p1, person:p2, person:p3]];").await
 	);
 }
+
+/// Whether the graph fold job's lease has ever been written.
+async fn fold_lease_written(ds: &Datastore) -> bool {
+	use crate::catalog::TaskLease;
+	use crate::key::schema::TaskLeaseKey;
+	use crate::kvs::tasklease::TaskLeaseType;
+	let txn = ds.transaction(Read).await.unwrap();
+	let lease: Option<TaskLease> = txn
+		.get_key(
+			&TaskLeaseKey {
+				task_id: TaskLeaseType::GraphFold,
+			},
+			None,
+		)
+		.await
+		.unwrap();
+	txn.cancel().await.unwrap();
+	lease.is_some()
+}
+
+/// A hub with `edges` outgoing `likes` edges, on a seeded datastore.
+async fn hub(ds: &Datastore, ses: &Session, edges: usize) -> RecordId {
+	let mut sql = String::from("CREATE person:hub;");
+	for i in 0..edges {
+		sql.push_str(&format!("CREATE person:t{i}; RELATE person:hub->likes:h{i}->person:t{i};"));
+	}
+	run(ds, ses, &sql).await;
+	RecordId::new("person".into(), "hub".to_string())
+}
+
+/// A read over a hot scope writes nothing: the observation stays in memory
+/// until a flush queues it, as one key the fold-queue predicate matches
+/// within the queue's bounds. A flush with nothing observed since the last
+/// one queues nothing, and a host-driven pass folds the queued scope without
+/// taking the job's lease.
+#[tokio::test]
+async fn a_flushed_observation_is_folded_by_a_host_driven_pass() {
+	let ds = ds().await;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	seed(&ds, &ses).await;
+	let threshold = crate::idx::config::IdxConfig::default().graph_fold_threshold;
+	let hub = hub(&ds, &ses, threshold).await;
+
+	let before = run(&ds, &ses, "SELECT VALUE ->likes->person FROM person:hub;").await;
+	assert_eq!(fold_queue_len(&ds).await, 0, "a read queues nothing itself");
+	assert_eq!(ds.flush_graph_fold_observations().await.unwrap(), 1);
+	assert_eq!(ds.flush_graph_fold_observations().await.unwrap(), 0, "nothing new observed");
+
+	let (start, end) = Datastore::graph_fold_queue_bounds().unwrap();
+	let queued = {
+		use crate::key::schema::GraphFoldPrefix;
+		let txn = ds.transaction(Read).await.unwrap();
+		let keys = txn.keys(GraphFoldPrefix {}.range().unwrap(), 100, 0, None).await.unwrap();
+		txn.cancel().await.unwrap();
+		keys
+	};
+	assert_eq!(queued.len(), 1);
+	for key in &queued {
+		assert!(Datastore::is_graph_fold_queue_key(key), "{key:?}");
+		assert!(key.as_slice() >= start.as_slice() && key.as_slice() < end.as_slice());
+	}
+
+	let run_ = ds.run_graph_fold(8).await.unwrap();
+	assert_eq!((run_.scopes, run_.failed, run_.more), (1, 0, false), "{run_:?}");
+	assert!(chunk_count(&ds, &hub).await > 0, "the hot scope must have folded");
+	assert_eq!(fold_queue_len(&ds).await, 0);
+	assert!(!fold_lease_written(&ds).await, "a host-driven pass takes no lease");
+	assert_eq!(run(&ds, &ses, "SELECT VALUE ->likes->person FROM person:hub;").await, before);
+}
+
+/// With a zero threshold a hot read observes nothing, yet an edge delete on a
+/// table already folded queues its scope, and a host-driven pass drains it.
+#[tokio::test]
+async fn a_host_driven_pass_repays_fold_debt_under_a_zero_threshold() {
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.with_graph_fold_threshold(0)
+		.build_with_path("memory")
+		.await
+		.unwrap();
+	let ses = Session::owner().with_ns("test").with_db("test");
+	seed(&ds, &ses).await;
+	let threshold = crate::idx::config::IdxConfig::default().graph_fold_threshold;
+	let _ = hub(&ds, &ses, threshold).await;
+	run(&ds, &ses, "SELECT VALUE ->likes->person FROM person:hub;").await;
+	assert_eq!(ds.flush_graph_fold_observations().await.unwrap(), 0, "no fold initiation");
+
+	fold_vertex(&ds, &person(0)).await;
+	run(&ds, &ses, "DELETE likes:l01;").await;
+	assert_eq!(delta_count(&ds, &person(0)).await, 1, "the tombstone rides the delta layer");
+	assert!(fold_queue_len(&ds).await > 0, "the delete must queue its scopes");
+
+	let run_ = ds.run_graph_fold(8).await.unwrap();
+	assert!(run_.scopes > 0 && !run_.more && run_.failed == 0, "{run_:?}");
+	assert_eq!(fold_queue_len(&ds).await, 0, "the queue must drain");
+	assert_eq!(delta_count(&ds, &person(0)).await, 0, "the tombstone must be consumed");
+}
+
+/// A pass with nothing queued and nothing observed reads no batch, reports no
+/// work and writes nothing.
+#[tokio::test]
+async fn a_host_driven_pass_over_an_empty_queue_does_nothing() {
+	let ds = ds().await;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	seed(&ds, &ses).await;
+	let run_ = ds.run_graph_fold(8).await.unwrap();
+	assert_eq!((run_.batches, run_.scopes, run_.failed, run_.more), (0, 0, 0, false));
+	assert!(!fold_lease_written(&ds).await);
+	assert_eq!(fold_queue_len(&ds).await, 0);
+}
+
+/// A scope whose fold outlasts the passes one call gives it keeps its entry
+/// and reports more; calls made while more is reported finish the fold and
+/// consume the entry.
+#[tokio::test]
+async fn a_host_driven_pass_reports_more_until_a_long_fold_finishes() {
+	use surrealdb_cnf::ConfigMap;
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.with_config(ConfigMap::empty().with_key_value("graph_fold_batch", "2"))
+		.with_graph_fold_threshold(1)
+		.build_with_path("memory")
+		.await
+		.unwrap();
+	let ses = Session::owner().with_ns("test").with_db("test");
+	seed(&ds, &ses).await;
+	let edges = 4 * 2 * surrealdb_kvs::consts::GRAPH_FOLD_SLICE_PASSES_PER_SCOPE;
+	let hub = hub(&ds, &ses, edges).await;
+	let before = run(&ds, &ses, "SELECT VALUE ->likes->person FROM person:hub;").await;
+
+	let first = ds.run_graph_fold(1).await.unwrap();
+	assert!(first.more, "{first:?}");
+	assert!(fold_queue_len(&ds).await > 0, "an unfinished scope keeps its entry");
+	let mut calls = 1;
+	loop {
+		let run_ = ds.run_graph_fold(1).await.unwrap();
+		assert_eq!(run_.failed, 0);
+		calls += 1;
+		if !run_.more {
+			break;
+		}
+		assert!(calls < 100, "the fold did not finish");
+	}
+	assert!(calls > 2, "the fold outlasted more than one call's passes");
+	assert_eq!(fold_queue_len(&ds).await, 0);
+	assert!(chunk_count(&ds, &hub).await > 0);
+	assert_eq!(run(&ds, &ses, "SELECT VALUE ->likes->person FROM person:hub;").await, before);
+}
+
+/// The fold-queue predicate matches the queue's own keys and none of its
+/// neighbours'.
+#[test]
+fn the_fold_queue_predicate_matches_only_queue_keys() {
+	use std::borrow::Cow;
+
+	use uuid::Uuid;
+
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
+	use crate::key::schema::GraphFoldKey;
+
+	let hub = person(0);
+	let key = GraphFoldKey {
+		ns: NamespaceId(1),
+		db: DatabaseId(2),
+		tb: Cow::Borrowed(&hub.table),
+		id: Cow::Borrowed(&hub.key),
+		dir: Dir::Out,
+		nid: Uuid::now_v7(),
+		uid: Uuid::now_v7(),
+	}
+	.encode_key()
+	.unwrap();
+	assert!(Datastore::is_graph_fold_queue_key(&key));
+	let (start, end) = Datastore::graph_fold_queue_bounds().unwrap();
+	assert!(key.as_slice() >= start.as_slice() && key.as_slice() < end.as_slice());
+	assert!(start.starts_with(b"/!gf"), "{start:?}");
+	assert!(!Datastore::is_graph_fold_queue_key(&key[..key.len() - 1]), "a truncated entry");
+	let (tq, _) = Datastore::table_migration_request_bounds().unwrap();
+	assert!(!Datastore::is_graph_fold_queue_key(&tq));
+	assert!(!Datastore::is_graph_fold_queue_key(b"/!gx"));
+}

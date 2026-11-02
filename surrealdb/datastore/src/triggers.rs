@@ -475,7 +475,8 @@ pub struct CommitTriggers {
 	pub(crate) write_fence: WriteFence,
 	/// Adjacency scopes a read found carrying enough unfolded keys to be
 	/// worth packing. In memory because reads cannot write a queue entry;
-	/// the fold task drains this set into the durable queue on its pass.
+	/// a flush drains this set into the durable queue: the fold drain's own
+	/// at its start, or one a host runs on a datastore that does not drain.
 	graph_fold_observations: Mutex<HashSet<GraphFoldScope>>,
 	/// Work the next commit through this datastore runs once its pending-state guards
 	/// are covered and before its storage commit, as the tests of a commit that
@@ -625,7 +626,7 @@ impl CommitTriggers {
 		&self.table_removals
 	}
 
-	/// Drain the read-observed scopes for the fold task's pass.
+	/// Drain the read-observed scopes, for a flush into the durable queue.
 	pub fn drain_graph_fold_observations(&self) -> Vec<GraphFoldScope> {
 		self.graph_fold_observations.lock().drain().collect()
 	}

@@ -296,6 +296,18 @@ enum FoldOutcome {
 	LeaseLost,
 }
 
+/// What one drain of the graph fold queue did; see [`Datastore::graph_fold_drain`].
+struct FoldDrain {
+	/// The batches of queue entries read.
+	batches: usize,
+	/// The scopes whose fold failed.
+	failed: usize,
+	/// The scopes whose queue entries the drain consumed.
+	folded: usize,
+	/// The pass report.
+	pass: Pass,
+}
+
 /// Whether a reclaim pass emptied the prefix it was given.
 ///
 /// `Complete` licenses the caller to retire the queue entry. `Incomplete` means
@@ -1381,6 +1393,21 @@ pub struct IndexBuildsRun {
 	/// An owner that is running passes hands its build back sooner, and wakes
 	/// [`CommitTriggers::index_build`] when a statement hands one back.
 	pub retry_after: Option<Duration>,
+}
+
+/// What one bounded pass of the graph fold job did: see [`Datastore::run_graph_fold`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct GraphFoldRun {
+	/// The batches of queue entries the pass read.
+	pub batches: usize,
+	/// The scopes whose queued work the pass finished, their queue entries deleted.
+	pub scopes: usize,
+	/// The scopes whose fold failed: their entries stay queued, for a later pass to retry.
+	pub failed: usize,
+	/// Whether work is left that a pass run at once continues: the budget ran out with entries
+	/// left, a scope's fold outlasted its passes, or a batch's cleanup kept losing conflicts.
+	pub more: bool,
 }
 
 /// What one bounded pass of index compaction did: see [`Datastore::run_index_compaction`].
@@ -7981,12 +8008,37 @@ impl Datastore {
 		passes_per_scope: Option<usize>,
 	) -> Result<(usize, usize, Pass)> {
 		trace!(target: TARGET, "Attempting graph fold process");
-		Self::flush_graph_fold_observations(&dbs).await?;
 		let lh = dbs.lease_handler(TaskLeaseType::GraphFold, interval * 2, Some(&canceller))?;
-		let batch = dbs.config.idx.graph_fold_batch;
+		let drain =
+			Self::graph_fold_drain(dbs, Some(&lh), canceller, max_batches, passes_per_scope, None)
+				.await?;
+		Ok((drain.batches, drain.failed, drain.pass))
+	}
+
+	/// The drain behind [`Self::graph_fold_bounded`] and [`Self::run_graph_fold`]: this node's
+	/// read-path observations flushed into the queue, then the queue's batches folded under
+	/// `lh` when given one, or with no lease when the caller is the only one driving the queue.
+	///
+	/// With `max_passes`, the drain runs at most that many fold passes in all: a scope reached
+	/// once they are spent is left with its entries, as one whose fold outlasted its own passes
+	/// is, and the drain stops at that batch to report them as its backlog.
+	async fn graph_fold_drain(
+		dbs: Arc<Datastore>,
+		lh: Option<&LeaseHandler>,
+		canceller: CancellationToken,
+		max_batches: Option<usize>,
+		passes_per_scope: Option<usize>,
+		max_passes: Option<usize>,
+	) -> Result<FoldDrain> {
+		dbs.flush_graph_fold_observations().await?;
 		let mut count_iteration = 0;
 		let mut count_error = 0;
-		let mut pass = Pass::elsewhere();
+		let mut count_folded = 0;
+		let mut spent = 0;
+		let mut pass = match lh {
+			Some(_) => Pass::elsewhere(),
+			None => Pass::done(TaskLeaseState::NotLeased),
+		};
 		let queue = GraphFoldPrefix {}.range()?;
 		// The rotation continues from where the previous slice stopped, with
 		// what it had achieved so far; see `index_compaction_bounded`.
@@ -8013,11 +8065,13 @@ impl Datastore {
 				break 'fold;
 			}
 			// Without the lease, another node is draining the queue.
-			if !lh.has_lease().await? {
-				pass.lease = TaskLeaseState::Elsewhere;
-				break 'fold;
+			if let Some(lh) = lh {
+				if !lh.has_lease().await? {
+					pass.lease = TaskLeaseState::Elsewhere;
+					break 'fold;
+				}
+				pass.lease = TaskLeaseState::Held;
 			}
-			pass.lease = TaskLeaseState::Held;
 			Self::ensure_not_cancelled(&canceller)?;
 			trace!(target: TARGET, "Running graph fold process");
 			// One bounded, keys-only batch of queue entries per iteration,
@@ -8100,18 +8154,23 @@ impl Datastore {
 			let mut folded: HashSet<GraphFoldScope> = HashSet::with_capacity(scopes.len());
 			let mut unfinished = false;
 			for (scope, entries) in scopes {
+				let passes = match max_passes {
+					Some(max) => {
+						let left = max.saturating_sub(spent);
+						if left == 0 {
+							unfinished = true;
+							continue;
+						}
+						Some(passes_per_scope.map_or(left, |per_scope| per_scope.min(left)))
+					}
+					None => passes_per_scope,
+				};
 				#[cfg(test)]
 				if let Some(hook) = test::take_before_fold_scope(dbs.id) {
 					hook().await;
 				}
 				match Self::fold_queued_scope(
-					&dbs,
-					&lh,
-					&scope,
-					&entries,
-					batch,
-					passes_per_scope,
-					&canceller,
+					&dbs, lh, &scope, &entries, passes, &mut spent, &canceller,
 				)
 				.await
 				{
@@ -8216,6 +8275,7 @@ impl Datastore {
 					break;
 				}
 			}
+			count_folded += folded.len();
 			// A scope whose fold outlasted its passes is progress the rotation
 			// made, and the slice ends at its batch: the entries it kept are
 			// its backlog, and the next slice reaches them after the scopes
@@ -8231,16 +8291,41 @@ impl Datastore {
 			cursor.resume_at = resume_at;
 			cursor.progressed = progressed;
 		}
-		Ok((count_iteration, count_error, pass))
+		Ok(FoldDrain {
+			batches: count_iteration,
+			failed: count_error,
+			folded: count_folded,
+			pass,
+		})
 	}
 
 	/// Writes this node's read-path fold observations into the durable
-	/// queue: blind puts of per-observation keys, so nothing contends.
-	async fn flush_graph_fold_observations(dbs: &Arc<Datastore>) -> Result<()> {
-		let observations = dbs.triggers.drain_graph_fold_observations();
+	/// queue in one transaction, and answers how many scopes it queued.
+	///
+	/// A read that finds a (vertex, direction) scope carrying at least
+	/// `graph_fold_threshold` unfolded per-edge keys records the scope in this
+	/// datastore's memory and notifies
+	/// [`CommitTriggers::graph_fold`](surrealdb_datastore::triggers::CommitTriggers::graph_fold)
+	/// on [`Self::commit_triggers`]; reads write nothing. Every fold drain
+	/// calls this first, so a node that drains the queue queues its own
+	/// observations. A host whose reads are served by datastores that never
+	/// drain the queue, or that may be dropped before their next drain, calls
+	/// this on each of them: observations not yet flushed are lost with the
+	/// datastore, and a scope still worth folding is observed again by its
+	/// next read.
+	///
+	/// Each observed scope is a blind put of a key of its own, so the
+	/// transaction contends with nothing, and every key it writes is one
+	/// [`Self::is_graph_fold_queue_key`] matches. With no observation recorded
+	/// since the last flush it opens no transaction and answers zero. A scope
+	/// read hot again after its flush is recorded again, so a host bounds how
+	/// often it calls this, not how often reads observe.
+	pub async fn flush_graph_fold_observations(&self) -> Result<usize> {
+		let observations = self.triggers.drain_graph_fold_observations();
 		if observations.is_empty() {
-			return Ok(());
+			return Ok(0);
 		}
+		let dbs = self;
 		let txn = dbs.transaction(Write).await?;
 		for scope in &observations {
 			let key = GraphFoldKey {
@@ -8257,13 +8342,15 @@ impl Datastore {
 				return Err(e);
 			}
 		}
-		txn.commit().await
+		txn.commit().await?;
+		Ok(observations.len())
 	}
 
 	/// Drains one queued scope: bounded fold passes, each in its own
 	/// transaction, retrying a bounded number of times when a concurrent
 	/// edge write conflicts with a pass. Runs at most `passes` of them when a
-	/// bound is given, and reports whether the scope is drained, unfinished
+	/// bound is given, adding each committed pass to `spent`, and reports
+	/// whether the scope is drained, unfinished
 	/// — the passes ran out with keys left to examine — or refused, its
 	/// table's definition needing a newer release; see [`FoldOutcome`]. Each
 	/// pass continues where the last committed one stopped, within this call
@@ -8275,19 +8362,21 @@ impl Datastore {
 	/// from its start, so that no entry is consumed without the write it
 	/// names having been examined; see [`ScopeScan`].
 	///
-	/// The lease `lh` is renewed before the scope is examined and before each
-	/// pass; a scope reached after another node took it reports
+	/// The lease `lh`, when given, is renewed before the scope is examined and
+	/// before each pass; a scope reached after another node took it reports
 	/// [`FoldOutcome::LeaseLost`] with no further pass run.
 	async fn fold_queued_scope(
 		dbs: &Arc<Datastore>,
-		lh: &LeaseHandler,
+		lh: Option<&LeaseHandler>,
 		scope: &GraphFoldScope,
 		entries: &[&[u8]],
-		batch: usize,
 		passes: Option<usize>,
+		spent: &mut usize,
 		canceller: &CancellationToken,
 	) -> Result<FoldOutcome> {
-		if !lh.try_maintain_lease().await? {
+		if let Some(lh) = lh
+			&& !lh.try_maintain_lease().await?
+		{
 			return Ok(FoldOutcome::LeaseLost);
 		}
 		// A table, database or namespace removed since the entry was queued
@@ -8338,6 +8427,7 @@ impl Datastore {
 			}
 		}
 		let vertex = crate::val::RecordId::new(scope.tb.clone(), scope.id.clone());
+		let batch = dbs.config.idx.graph_fold_batch;
 		let mut retries = 0;
 		let mut done = 0;
 		// The key the next pass scans after: where the last committed pass
@@ -8360,7 +8450,9 @@ impl Datastore {
 		};
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
-			if !lh.try_maintain_lease().await? {
+			if let Some(lh) = lh
+				&& !lh.try_maintain_lease().await?
+			{
 				return Ok(FoldOutcome::LeaseLost);
 			}
 			let txn = Arc::new(dbs.transaction(Write).await?);
@@ -8390,6 +8482,7 @@ impl Datastore {
 			match txn.commit().await {
 				Ok(()) => {
 					retries = 0;
+					*spent += 1;
 					if !outcome.has_more {
 						dbs.fold_cursor.lock().scans.remove(scope);
 						return Ok(FoldOutcome::Folded);
@@ -9294,6 +9387,71 @@ impl Datastore {
 	/// started no build.
 	pub fn is_index_build_state_key(key: &[u8]) -> bool {
 		crate::key::schema::BuildStateKey::decode_key(key).is_ok()
+	}
+
+	/// Runs at most `budget` fold passes over the graph fold queue and reports what is left.
+	///
+	/// The queue holds one entry per (vertex, direction) scope whose per-edge adjacency keys are
+	/// worth packing into blocks: a read that found a scope over `graph_fold_threshold` unfolded
+	/// keys, once its observation is flushed ([`Self::flush_graph_fold_observations`], which the
+	/// pass runs first for this datastore's own), and an edge delete on a table already folded,
+	/// whose tombstone every read of the scope subtracts until a fold consumes it. A zero
+	/// threshold stops the first and never the second, so a host runs this pass whatever the
+	/// threshold.
+	///
+	/// A fold pass is one transaction over at most `graph_fold_batch` of a scope's keys that
+	/// commits its own progress, and a call runs at most `budget` of them, at most
+	/// [`GRAPH_FOLD_SLICE_PASSES_PER_SCOPE`] on any one scope, reading at most `budget` batches of
+	/// queue entries. A scope whose fold outlasts its passes, or is reached with the budget spent,
+	/// keeps its entries and the call ends at its batch; the next call continues where the last
+	/// committed pass stopped, after the scopes the rotation has yet to reach. A call is cancelled
+	/// by dropping its future: stopped anywhere — its future dropped, its process gone — it loses
+	/// at most the fold pass it was in. The entries of the scopes a batch folded are deleted in a
+	/// bounded write transaction of its own. [`GraphFoldRun::more`] is set when the budget ran out
+	/// with entries left, a scope's fold outlasted its passes, or a batch's cleanup kept losing
+	/// conflicts; a host calls again while it is set. A scope whose fold fails keeps its entries
+	/// and is counted in [`GraphFoldRun::failed`] without setting `more`: the next pass any wake
+	/// starts retries it, and a pass run at once would fail it again.
+	///
+	/// Nothing is spawned and no lease is taken: the caller is the only one driving the queue, as
+	/// a host that builds the datastore
+	/// [`without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks) and runs
+	/// these passes on one node is. It runs a pass when
+	/// [`CommitTriggers::graph_fold`](surrealdb_datastore::triggers::CommitTriggers::graph_fold) on
+	/// [`Self::commit_triggers`] is notified, when a commit wrote a key
+	/// [`Self::is_graph_fold_queue_key`] matches, and again while [`GraphFoldRun::more`] is set. A
+	/// pass with nothing queued and nothing observed reads one empty batch and writes nothing.
+	pub async fn run_graph_fold(self: &Arc<Self>, budget: usize) -> Result<GraphFoldRun> {
+		let budget = budget.max(1);
+		let drain = Self::graph_fold_drain(
+			Arc::clone(self),
+			None,
+			CancellationToken::new(),
+			Some(budget),
+			Some(GRAPH_FOLD_SLICE_PASSES_PER_SCOPE),
+			Some(budget),
+		)
+		.await?;
+		Ok(GraphFoldRun {
+			batches: drain.batches,
+			scopes: drain.folded,
+			failed: drain.failed,
+			more: drain.pass.progress == Progress::More,
+		})
+	}
+
+	/// Whether `key` is an entry of the graph fold queue. Every write that gives
+	/// [`Self::run_graph_fold`] work puts such a key: an observation's flush, and an edge delete
+	/// on a folded table. A pass deletes the entries it consumes.
+	pub fn is_graph_fold_queue_key(key: &[u8]) -> bool {
+		GraphFoldKey::decode_key(key).is_ok()
+	}
+
+	/// The key bounds `[start, end)` of the graph fold queue: every key
+	/// [`Self::is_graph_fold_queue_key`] matches lies within them.
+	pub fn graph_fold_queue_bounds() -> Result<(Vec<u8>, Vec<u8>)> {
+		let range = GraphFoldPrefix {}.range()?;
+		Ok((range.start().as_slice().to_vec(), range.end().as_slice().to_vec()))
 	}
 
 	/// Runs the async events this node has queued, without a lease.
