@@ -822,7 +822,7 @@ async fn send_request(
 	let url = base_url.join(RPC_PATH).expect("valid RPC path");
 
 	let req_value = req.into_value();
-	let body = surrealdb_rpc::wire::encode(req_value)
+	let body = surrealdb_rpc::wire::encode_body(req_value)
 		.map_err(|x| format!("Failed to serialize to CBOR: {x}"))
 		.map_err(|e| {
 			crate::Error::internal(format!(
@@ -833,7 +833,9 @@ async fn send_request(
 	// Include auth header so the server can authenticate the request and maintain
 	// session state. This is essential for token-based auth flows where the server
 	// extracts namespace/database from JWT claims during authenticate().
-	let http_req = client.post(url).headers(headers.clone()).auth(auth).body(body);
+	let mut headers = headers.clone();
+	headers.insert(CONTENT_TYPE, HeaderValue::from_static(body.content_type));
+	let http_req = client.post(url).headers(headers).auth(auth).body(body.bytes);
 	let response = http_req
 		.send()
 		.await
@@ -1376,6 +1378,35 @@ mod tests {
 
 	fn is_detach(request: &Received) -> bool {
 		request.body.windows(6).any(|w| w == b"detach")
+	}
+
+	/// A request holding a regex, which plain `cbor` has no form for, is sent
+	/// as a `cbor.2` body under that content type; any other stays plain `cbor`.
+	#[tokio::test]
+	async fn a_regex_parameter_is_sent_as_a_cbor_2_body() {
+		let regex = Value::Regex("^a/b[0-9]+$".parse().unwrap());
+		let (base_url, server) = stub_server(vec![ok(), ok()]);
+		let client = reqwest::Client::new();
+		for value in [regex.clone(), Value::from_t("plain")] {
+			let request = Command::Set {
+				key: "r".to_owned(),
+				value,
+			}
+			.into_router_request(Some(1), None)
+			.unwrap();
+			send_request(request, &base_url, &client, &default_headers(), &None).await.unwrap();
+		}
+		let received = server.join().unwrap();
+		fn content_types(r: &Received) -> Vec<&str> {
+			r.head.lines().filter(|l| l.starts_with("content-type: ")).collect()
+		}
+		assert_eq!(content_types(&received[0]), ["content-type: application/cbor; v=2"]);
+		assert_eq!(content_types(&received[1]), ["content-type: application/cbor"]);
+		let sent = surrealdb_types::cbor::decode_v2(&received[0].body, 64, None).unwrap();
+		let Value::Object(sent) = sent else {
+			panic!("a request is an object");
+		};
+		assert_eq!(sent["params"], Value::from_t(vec![Value::from_t("r"), regex]));
 	}
 
 	/// The server only lets a session's owner detach it, so the detach sent

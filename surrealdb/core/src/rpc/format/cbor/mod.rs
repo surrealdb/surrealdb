@@ -1,6 +1,6 @@
 pub use surrealdb_types::cbor::{
-	TAG_BIGDECIMAL, TAG_DATE, TAG_F16, TAG_F32, TAG_I8, TAG_I16, TAG_I32, TAG_INTERVAL, TAG_TIME,
-	TAG_TIMESTAMP, TAG_U8, TAG_U16, TAG_U32, TAG_U64, encode, encode_v2,
+	TAG_BIGDECIMAL, TAG_DATE, TAG_F16, TAG_F32, TAG_I8, TAG_I16, TAG_I32, TAG_INTERVAL, TAG_REGEX,
+	TAG_TIME, TAG_TIMESTAMP, TAG_U8, TAG_U16, TAG_U32, TAG_U64, encode, encode_v2,
 };
 use surrealdb_types::{RecordId, Value, cbor as convert};
 
@@ -571,6 +571,78 @@ mod tests {
 			decode_v2(&encode_cbor(&Cbor::Tag(TAG_BIGDECIMAL, Box::new(text("1.5.5")))), 64)
 				.is_err()
 		);
+	}
+
+	/// A regex is tag 193 over its pattern under `cbor.2`; `cbor` neither writes nor reads one.
+	#[test]
+	fn regex_round_trips_in_v2_and_is_refused_in_v1() {
+		use surrealdb_types::{Array, Regex, regex_engine};
+
+		// Patterns both regex engines compile, so the test holds with or without `regex-unicode`.
+		let patterns = ["^[a-z]+$", "a/b", r"a\/b", r"(?i)ab\d{2,}", "", r"\x{e9}+"];
+		for pattern in patterns {
+			let compiled = regex_engine::compile(pattern, None).unwrap();
+			let value = Value::Regex(Regex::from(compiled));
+			let bytes = encode_v2(value.clone()).unwrap();
+			assert_eq!(
+				ciborium::from_reader::<Cbor, _>(bytes.as_slice()).unwrap(),
+				Cbor::Tag(TAG_REGEX, Box::new(text(pattern)))
+			);
+			let Value::Regex(back) = decode_v2(&bytes, 64).unwrap() else {
+				panic!("{pattern} decodes as a regex");
+			};
+			assert_eq!(back.as_str(), pattern);
+			assert_eq!(
+				decode(&bytes, 64).expect_err("v1 must refuse tag 193").to_string(),
+				format!("CBOR tag {TAG_REGEX} is not accepted here: use cbor.2")
+			);
+			assert!(
+				encode(value).expect_err("v1 has no regex form").to_string().contains("tag 193")
+			);
+		}
+		// Nested, and as a client sends one in a request's parameters.
+		let regex = Value::Regex("x+".parse().unwrap());
+		let nested = Value::Array(Array::from(vec![regex.clone()]));
+		assert_eq!(decode_v2(&encode_v2(nested.clone()).unwrap(), 64).unwrap(), nested);
+		let request = encode_cbor(&Cbor::Map(vec![
+			(text("method"), text("query")),
+			(
+				text("params"),
+				Cbor::Array(vec![text("RETURN $r"), Cbor::Tag(TAG_REGEX, Box::new(text("x+")))]),
+			),
+		]));
+		let Value::Object(request) = decode_request_v2(&request, 64).unwrap() else {
+			panic!("a request decodes as an object");
+		};
+		assert_eq!(
+			request["params"],
+			Value::Array(Array::from(vec![Value::String("RETURN $r".into()), regex]))
+		);
+	}
+
+	#[test]
+	fn regex_tag_refuses_an_invalid_pattern_and_a_non_text_payload() {
+		for (item, expected) in [
+			(
+				Cbor::Tag(TAG_REGEX, Box::new(text("(unclosed"))),
+				"Expected a valid regex under tag 193",
+			),
+			(
+				Cbor::Tag(TAG_REGEX, Box::new(text("a{99999999}"))),
+				"Expected a valid regex under tag 193",
+			),
+			(
+				Cbor::Tag(TAG_REGEX, Box::new(Cbor::Integer(1.into()))),
+				"Expected a CBOR text under tag 193",
+			),
+			(
+				Cbor::Tag(TAG_REGEX, Box::new(Cbor::Bytes(b"abc".to_vec()))),
+				"Expected a CBOR text under tag 193",
+			),
+		] {
+			let err = decode_v2(&encode_cbor(&item), 64).expect_err("must be refused").to_string();
+			assert!(err.contains(expected), "expected {expected:?} in {err:?}");
+		}
 	}
 
 	#[test]

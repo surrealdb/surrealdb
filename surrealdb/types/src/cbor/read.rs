@@ -547,6 +547,8 @@ mod tests {
 				.map(|(i, v)| (format!("k{i}"), v))
 				.collect::<BTreeMap<_, _>>(),
 		)));
+		// Outside the nested containers, which `cbor` would then refuse whole.
+		values.push(Value::Regex("^a/b[0-9]+$".parse().unwrap()));
 		values
 	}
 

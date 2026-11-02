@@ -71,6 +71,10 @@ pub const TAG_TIMESTAMP: u64 = 190;
 pub const TAG_INTERVAL: u64 = 191;
 /// `cbor.2`: a `bigdecimal` as its text, the positional notation `BigDecimal` displays.
 pub const TAG_BIGDECIMAL: u64 = 192;
+/// `cbor.2`: a `regex` as the text of its pattern, in the syntax SurrealQL regexes use (the Rust
+/// `regex` crate's). IANA tag 35 names PCRE / ECMAScript syntax, which generic CBOR decoders
+/// compile with their own engine, so it is not used.
+pub const TAG_REGEX: u64 = 193;
 
 // Custom tags (55->60 is unassigned)
 const TAG_FILE: u64 = 55;
@@ -484,6 +488,14 @@ fn value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 						.map_err(|_| anyhow!("Expected interval microseconds that fit 64 bits"))?;
 					Ok(PublicValue::Interval(PublicInterval::new(months, days, micros)))
 				}
+				TAG_REGEX if ctx.v2 => {
+					let CborValue::Text(v) = *v else {
+						return Err(anyhow!("Expected a CBOR text under tag {TAG_REGEX}"));
+					};
+					crate::regex_engine::compile(&v, None)
+						.map(|r| PublicValue::Regex(r.into()))
+						.map_err(|e| anyhow!("Expected a valid regex under tag {TAG_REGEX}: {e}"))
+				}
 				TAG_I8 if ctx.v2 => {
 					if let CborValue::Integer(i) = *v {
 						Ok(PublicValue::Number(PublicNumber::I8(to_i8(i)?)))
@@ -569,7 +581,7 @@ fn unsupported_tag(tag: u64) -> anyhow::Error {
 			"CBOR tag 13 (a duration as text) is not accepted: send tag {TAG_CUSTOM_DURATION} [seconds, nanos]"
 		),
 		TAG_SHAPED_BLOCK => anyhow!("CBOR tag 57 (a shaped block) is not accepted here"),
-		TAG_I8..=TAG_F32 | TAG_BIGDECIMAL | TAG_DATE | TAG_TIME..=TAG_INTERVAL => {
+		TAG_I8..=TAG_F32 | TAG_BIGDECIMAL | TAG_REGEX | TAG_DATE | TAG_TIME..=TAG_INTERVAL => {
 			anyhow!("CBOR tag {tag} is not accepted here: use cbor.2")
 		}
 		_ => anyhow!("Encountered an unknown CBOR tag"),
@@ -932,9 +944,15 @@ fn from_value_inner(val: PublicValue, v2: bool) -> Result<CborValue> {
 					.collect::<Result<Vec<CborValue>>>()?,
 			)),
 		)),
-		PublicValue::Regex(_) => {
-			// Uncborrable value type
-			Err(anyhow!("Unsupported value type: Regex"))
+		// `cbor` has no form for a regex.
+		PublicValue::Regex(v) => {
+			if v2 {
+				Ok(CborValue::Tag(TAG_REGEX, Box::new(CborValue::Text(v.as_str().to_owned()))))
+			} else {
+				Err(anyhow!(
+					"Unsupported value type: Regex (cbor.2 carries one as tag {TAG_REGEX})"
+				))
+			}
 		}
 	}
 }
