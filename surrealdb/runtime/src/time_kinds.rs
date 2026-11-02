@@ -333,13 +333,15 @@ fn make_time_of(name: &str, hour: &Number, min: &Number, sec: &Number) -> Result
 	// The seconds given are below 60; rounding them may carry a whole 60, which carries on into
 	// the minutes and hours of the total. The total is at most 24:00:00.
 	let given_below_60 = sec.as_decimal_lossless().is_some_and(|d| d < Decimal::from(60));
-	let fields_ok = (0..=24).contains(&h) && (0..60).contains(&m) && given_below_60;
+	// The fields are range-checked before the total is summed, so the sum cannot overflow.
+	if !((0..=24).contains(&h) && (0..60).contains(&m) && given_below_60) {
+		bail!(invalid(name, "The time fields are out of range."));
+	}
 	let total = h as u64 * 3_600_000_000_000
 		+ m as u64 * 60_000_000_000
 		+ u64::from(s) * 1_000_000_000
 		+ u64::from(ns);
-	if !fields_ok || total > 24 * 3_600_000_000_000 || (h == 24 && total != 24 * 3_600_000_000_000)
-	{
+	if total > 24 * 3_600_000_000_000 || (h == 24 && total != 24 * 3_600_000_000_000) {
 		bail!(invalid(name, "The time fields are out of range."));
 	}
 	Ok(total)

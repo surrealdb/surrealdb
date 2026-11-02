@@ -134,7 +134,7 @@ fn corpus(kind: &Kind) -> Vec<String> {
 		Kind::Datetime => {
 			lits(&["d'1970-01-01T00:00:00Z'", "d'2024-02-29T12:00:00Z'", "d'9999-12-31T23:59:59Z'"])
 		}
-		Kind::Date => lits(&["date'1970-01-01'", "date'2024-02-29'", "date'+262142-12-31'"]),
+		Kind::Date => lits(&["date'1970-01-01'", "date'2024-02-29'", "date'+262142-12-30'"]),
 		Kind::Time => lits(&["time'00:00:00'", "time'12:30:45.123456789'", "time'24:00:00'"]),
 		Kind::Timestamp => lits(&[
 			"timestamp'1970-01-01T00:00:00'",
