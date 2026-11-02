@@ -24,6 +24,7 @@ pub fn into_types_error(error: Error) -> TypesError {
 	use Error::*;
 	let message = error.to_string();
 	let source = error.source().map(|s| TypesError::internal(s.to_string()));
+
 	let mapped = match error {
 		// Auth
 		ExpiredSession => TypesError::not_allowed(message, AuthError::SessionExpired),
@@ -211,6 +212,15 @@ pub fn into_types_error(error: Error) -> TypesError {
 				id: record.to_sql(),
 			},
 		),
+		IndexExists {
+			record,
+			..
+		} => TypesError::already_exists(
+			message,
+			AlreadyExistsError::Record {
+				id: record.to_sql(),
+			},
+		),
 		ClAlreadyExists {
 			..
 		} => TypesError::internal(message),
@@ -331,8 +341,300 @@ pub fn into_types_error(error: Error) -> TypesError {
 		ObsError(_) => TypesError::internal(message),
 		TimestampOverflow(..) => TypesError::internal(message),
 		ApiError(error) => error.into_types_error(),
-
-		_ => TypesError::internal(message),
+		// The old wildcard arm
+		Unreachable(_)
+		| Query {
+			..
+		}
+		| PatchTest {
+			..
+		}
+		| HttpDisabled
+		| InvalidFetch {
+			..
+		}
+		| InvalidLimit {
+			..
+		}
+		| InvalidStart {
+			..
+		}
+		| InvalidScript {
+			..
+		}
+		| InvalidModel {
+			..
+		}
+		| InvalidFunction {
+			..
+		}
+		| InvalidFunctionArguments {
+			..
+		}
+		| InvalidMethodArguments {
+			..
+		}
+		| InvalidAggregation {
+			..
+		}
+		| InvalidAggregationSelector {
+			..
+		}
+		| InvalidUrl(_)
+		| InvalidVectorDimension {
+			..
+		}
+		| InvalidVectorDistance {
+			..
+		}
+		| InvalidVectorValue(_)
+		| InvalidRegex(_)
+		| InvalidTimeout(_)
+		| InvalidControlFlow
+		| QueryBeyondMemoryThreshold
+		| NsNotAllowed {
+			..
+		}
+		| DbNotAllowed {
+			..
+		}
+		| EvNotFound {
+			..
+		}
+		| FcNotFound {
+			..
+		}
+		| MdNotFound {
+			..
+		}
+		| FdNotFound {
+			..
+		}
+		| MlNotFound {
+			..
+		}
+		| NdNotFound {
+			..
+		}
+		| PaNotFound {
+			..
+		}
+		| SeqNotFound {
+			..
+		}
+		| CgNotFound {
+			..
+		}
+		| ApNotFound {
+			..
+		}
+		| AzNotFound {
+			..
+		}
+		| AzInUse {
+			..
+		}
+		| BuNotFound {
+			..
+		}
+		| IxNotFound {
+			..
+		}
+		| UserRootNotFound {
+			..
+		}
+		| UserNsNotFound {
+			..
+		}
+		| UserDbNotFound {
+			..
+		}
+		| ComputationDepthExceeded
+		| InvalidStatement(_)
+		| InvalidStatementTarget {
+			..
+		}
+		| CreateStatement {
+			..
+		}
+		| UpsertStatement {
+			..
+		}
+		| UpdateStatement {
+			..
+		}
+		| RelateStatementIn {
+			..
+		}
+		| RelateStatementId {
+			..
+		}
+		| RelateStatementOut {
+			..
+		}
+		| DeleteStatement {
+			..
+		}
+		| InsertStatement {
+			..
+		}
+		| InsertStatementIn {
+			..
+		}
+		| InsertStatementId {
+			..
+		}
+		| InsertStatementOut {
+			..
+		}
+		| LiveStatement {
+			..
+		}
+		| KillStatement {
+			..
+		}
+		| SingleOnlyOutput
+		| ParamPermissions {
+			..
+		}
+		| FunctionPermissions {
+			..
+		}
+		| BucketPermissions {
+			..
+		}
+		| PermissionPredicateSideEffect
+		| PermissionClauseNotReadonly {
+			..
+		}
+		| TableCheck {
+			..
+		}
+		| TableIsView {
+			..
+		}
+		| FieldValue {
+			..
+		}
+		| SetCoerce {
+			..
+		}
+		| ReturnCoerce {
+			..
+		}
+		| FieldCoerce {
+			..
+		}
+		| FieldReadonly {
+			..
+		}
+		| FieldUndefined {
+			..
+		}
+		| IdInvalid {
+			..
+		}
+		| IdMismatch {
+			..
+		}
+		| InOverride {
+			..
+		}
+		| OutOverride {
+			..
+		}
+		| PlannerUnsupported(_)
+		| PlannerUnimplemented(_)
+		| ApMethodDuplicate {
+			..
+		}
+		| AccessRootNotFound {
+			..
+		}
+		| AccessGrantRootNotFound {
+			..
+		}
+		| AccessNsNotFound {
+			..
+		}
+		| AccessGrantNsNotFound {
+			..
+		}
+		| AccessDbNotFound {
+			..
+		}
+		| AccessGrantDbNotFound {
+			..
+		}
+		| AccessLevelMismatch
+		| AccessMethodMismatch
+		| AccessNotFound
+		| AccessInvalidDuration
+		| AccessInvalidExpiration
+		| AccessRecordTokenDurationRequired
+		| AccessBearerMissingKey
+		| AccessGrantBearerInvalid
+		| AccessGrantInvalidSubject
+		| AccessGrantRevoked
+		| TbInvalid {
+			..
+		}
+		| UnsupportedDestructure {
+			..
+		}
+		| UnsupportedVersionedQueries
+		| InvalidStorageVersion
+		| OutdatedStorageVersion {
+			..
+		}
+		| QueryTooLarge
+		| ArithmeticOverflow(_)
+		| ArithmeticNegativeOverflow(_)
+		| OrderingError(_)
+		| InvalidBound {
+			..
+		}
+		| IdiomRecursionLimitExceeded {
+			..
+		}
+		| UnsupportedRepeatRecurse
+		| RecursionInstructionPlanConflict
+		| InvalidRecursionTarget {
+			..
+		}
+		| DeleteRejectedByReference(_, _)
+		| ReferenceTypeConflict(_)
+		| ReferenceNestedField(_)
+		| RefsUpdateFailure(_, _)
+		| MismatchedFieldTypes {
+			..
+		}
+		| InvalidBytesize
+		| InvalidPath(_)
+		| FileAccessDenied(_)
+		| NoGlobalBucket
+		| BucketUnavailable(_)
+		| GlobalBucketEnforced
+		| InvalidBucketUrl(_)
+		| UnsupportedBackend
+		| ReadonlyBucket(_)
+		| ObjectStoreFailure(_, _)
+		| ComputedKeywordConflict(_)
+		| ComputedNestedFieldConflict(_, _)
+		| ComputedParentFieldConflict(_, _)
+		| ComputedNestedField(_)
+		| ComputedFieldCycle(_)
+		| IdFieldKeywordConflict(_)
+		| IdFieldUnsupportedKind(_)
+		| IdFieldGenerateUnsupported {
+			..
+		}
+		| EvNamespaceMismatch(_, _)
+		| EvDatabaseMismatch(_, _)
+		| EvReachMaxDepth(_, _)
+		| ComputedFieldCannotBeIndexed {
+			..
+		} => TypesError::internal(message),
 	};
 
 	if let Some(cause) = source {
