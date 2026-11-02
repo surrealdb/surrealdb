@@ -18,9 +18,9 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 		}
 		Data::Enum(data) => {
 			// As `derive(Hash)` does: the discriminant first, when there is more than one variant.
-			let discriminant = (data.variants.len() > 1).then(|| {
-				quote!(::core::hash::Hash::hash(&::core::mem::discriminant(self), state);)
-			});
+			let discriminant = (data.variants.len() > 1).then(
+				|| quote!(::core::hash::Hash::hash(&::core::mem::discriminant(self), state);),
+			);
 			let arms = data.variants.iter().map(|variant| {
 				let ident = &variant.ident;
 				let (pattern, hashes) = destructure(&variant.fields, quote!(Self::#ident));

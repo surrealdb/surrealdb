@@ -24,7 +24,6 @@ use surrealdb_sqlplan::dialect::DialectPolicy;
 use surrealdb_sqlplan::observability::global_metrics;
 use tokio::io::{ReadHalf, WriteHalf, split};
 use tokio::sync::OwnedSemaphorePermit;
-use crate::tls::{TlsAcceptor, TlsStream};
 use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
 
@@ -32,6 +31,7 @@ use crate::auth::*;
 use crate::codec::*;
 use crate::constants::*;
 use crate::msg::*;
+use crate::tls::{TlsAcceptor, TlsStream};
 use crate::typing::*;
 use crate::uservars::{UserState, UserValue, bind_placeholders};
 use crate::{AuthRequest, Authenticator, BoxedIo, LOG, Start};

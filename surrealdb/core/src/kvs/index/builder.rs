@@ -2947,8 +2947,7 @@ impl Building {
 					build_claimable(&current, Utc::now())
 				} else {
 					build_owner_expired(&current, Utc::now())
-				}
-				|| only.is_some_and(|only| current.generation != only)
+				} || only.is_some_and(|only| current.generation != only)
 			{
 				tx.cancel().await?;
 				return Ok(None);
@@ -5311,8 +5310,7 @@ impl Building {
 					let bytes: usize = batch.result.iter().map(|(k, v)| k.len() + v.len()).sum();
 					let avg = (bytes / batch.result.len()).max(1);
 					scan_batch_size = (INDEXING_BATCH_MAX_BYTES / avg)
-						.clamp(1, INDEXING_SCAN_BATCH_SIZE as usize)
-						as u32;
+						.clamp(1, INDEXING_SCAN_BATCH_SIZE as usize) as u32;
 					#[cfg(test)]
 					if let Some(n) = scan_batch_override {
 						scan_batch_size = n;

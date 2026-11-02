@@ -20,11 +20,11 @@ use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 pub use surrealdb_core::kvs::Dialect;
+use tls::TlsAcceptor;
 pub use tokio;
 use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(feature = "tls")]
 pub use tokio_rustls;
-use tls::TlsAcceptor;
 pub use tokio_util;
 use tokio_util::sync::CancellationToken;
 #[cfg(feature = "listener")]
@@ -42,7 +42,6 @@ use {
 #[macro_use]
 extern crate tracing;
 
-pub mod tls;
 mod advisory;
 pub mod conn;
 mod copy;
@@ -53,6 +52,7 @@ mod maintenance;
 pub mod msg;
 pub mod sasl;
 mod sqlprepare;
+pub mod tls;
 pub mod typing;
 mod vector;
 

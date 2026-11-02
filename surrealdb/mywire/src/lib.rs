@@ -17,10 +17,10 @@ use std::sync::{Arc, LazyLock};
 use common::time::Instant;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use tls::TlsAcceptor;
 use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(feature = "tls")]
 pub use tokio_rustls;
-use tls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 #[cfg(feature = "listener")]
 use {
@@ -34,7 +34,6 @@ use {
 	tokio_rustls::rustls::ServerConfig,
 };
 
-pub mod tls;
 pub mod auth;
 pub mod codec;
 pub mod conn;
@@ -44,6 +43,7 @@ pub mod msg;
 pub mod query;
 mod rsa_auth;
 mod show;
+pub mod tls;
 pub mod typing;
 mod uservars;
 

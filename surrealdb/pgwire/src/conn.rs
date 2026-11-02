@@ -40,7 +40,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[cfg(feature = "listener")]
 use tokio::net::TcpStream;
 use tokio::sync::OwnedSemaphorePermit;
-use crate::tls::{TlsAcceptor, TlsStream};
 use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
 
@@ -60,6 +59,7 @@ use super::typing::{
 	shape_result_with_descriptor,
 };
 use super::{AuthRequest, Authenticator, BoxedIo, CancelRegistry, LOG, Start, encode, sasl};
+use crate::tls::{TlsAcceptor, TlsStream};
 
 /// A client connection stream: plaintext, or upgraded to TLS after an accepted
 /// SSLRequest. `Either` forwards `AsyncRead`/`AsyncWrite` to whichever it is,

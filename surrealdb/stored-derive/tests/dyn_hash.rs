@@ -1,5 +1,5 @@
-//! `#[derive(DynHash)]` feeds a hasher what `#[derive(Hash)]` feeds it: the same calls with the same
-//! values in the same order, so a digest over a type is the same whichever derive it carries.
+//! `#[derive(DynHash)]` feeds a hasher what `#[derive(Hash)]` feeds it: the same calls with the
+//! same values in the same order, so a digest over a type is the same whichever derive it carries.
 
 use std::hash::{Hash, Hasher};
 
@@ -45,7 +45,7 @@ macro_rules! twins {
 twins!(EnumA, EnumB, {
 	Unit,
 	Tuple(u32, String),
-	Named { state: u64, name: Option<String>, inner: Box<Vec<u8>> },
+	Named { state: u64, name: Option<String>, inner: Box<[u8]> },
 });
 
 twins!(OneA, OneB, {
@@ -75,15 +75,29 @@ fn enums_hash_as_derived() {
 	assert_eq!(calls(&EnumA::Unit), calls(&EnumB::Unit));
 	assert_eq!(calls(&EnumA::Tuple(7, "x".into())), calls(&EnumB::Tuple(7, "x".into())));
 	assert_eq!(
-		calls(&EnumA::Named { state: 9, name: Some("n".into()), inner: Box::new(vec![1, 2]) }),
-		calls(&EnumB::Named { state: 9, name: Some("n".into()), inner: Box::new(vec![1, 2]) }),
+		calls(&EnumA::Named {
+			state: 9,
+			name: Some("n".into()),
+			inner: Box::new([1, 2])
+		}),
+		calls(&EnumB::Named {
+			state: 9,
+			name: Some("n".into()),
+			inner: Box::new([1, 2])
+		}),
 	);
 	assert_eq!(calls(&OneA::Only(3)), calls(&OneB::Only(3)));
 }
 
 #[test]
 fn structs_hash_as_derived() {
-	let a = StructA { a: 1, b: ("s".into(), -2) };
-	let b = StructB { a: 1, b: ("s".into(), -2) };
+	let a = StructA {
+		a: 1,
+		b: ("s".into(), -2),
+	};
+	let b = StructB {
+		a: 1,
+		b: ("s".into(), -2),
+	};
 	assert_eq!(calls(&a), calls(&b));
 }
