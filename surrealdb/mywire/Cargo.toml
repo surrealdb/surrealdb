@@ -14,7 +14,11 @@ categories.workspace = true
 default = ["listener"]
 # The TCP listener (`start`): needs a native runtime. Without it the crate serves any async byte stream
 # through `serve` and builds for `wasm32-unknown-unknown`.
-listener = ["dep:axum-server", "tokio/net"]
+listener = ["dep:axum-server", "tokio/net", "tls"]
+# TLS for the connections `serve` takes (`ServeOptions::tls`, `Start::Tls`). Without it the crate links no
+# TLS implementation and serves connections in clear, for a host that ends TLS before handing them over
+# (`Start::Secured`).
+tls = ["dep:tokio-rustls", "dep:ring", "dep:rustls-pki-types"]
 
 [dependencies]
 common = { workspace = true }
@@ -33,7 +37,7 @@ rand = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["sync", "io-util", "macros"] }
-tokio-rustls = { workspace = true }
+tokio-rustls = { workspace = true, optional = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
@@ -46,9 +50,9 @@ tokio = { workspace = true, features = ["rt"] }
 # TLS on `wasm32-unknown-unknown`: ring is the crypto provider, and it and the certificate time source
 # read the host's JavaScript clock and entropy.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
-rustls-pki-types = { workspace = true, features = ["web"] }
-tokio-rustls = { workspace = true, features = ["ring"] }
+ring = { workspace = true, features = ["wasm32_unknown_unknown_js"], optional = true }
+rustls-pki-types = { workspace = true, features = ["web"], optional = true }
+tokio-rustls = { workspace = true, features = ["ring"], optional = true }
 
 [dev-dependencies]
 # The integration tests drive the TCP listener, whatever features the build as a whole selects.

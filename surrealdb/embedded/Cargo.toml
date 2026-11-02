@@ -14,6 +14,16 @@ description = "Shared embedded SurrealDB engine for the JavaScript FFI shims"
 default = []
 kv-mem = ["surrealdb-core/kv-mem"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv"]
+# Tracing spans on the engine's functions (see `surrealdb-core`'s feature). A
+# host that installs no span subscriber has no use for them.
+observability = ["surrealdb-core/observability"]
+# The e-graph optimiser (see `surrealdb-core`'s feature). Without it a
+# statement is planned from the plan the binder and the loop passes leave,
+# which answers the same rows.
+egraph = ["surrealdb-core/egraph"]
+# The datastore's own maintenance tasks (see `surrealdb-core`'s feature). A
+# host that drives that work itself builds without them.
+maintenance-tasks = ["surrealdb-core/maintenance-tasks"]
 
 [lib]
 path = "src/lib.rs"
@@ -29,7 +39,6 @@ surrealdb-core = { workspace = true, features = [
     "crypto-password",
     "html-sanitize",
     "cjk-tokenizer",
-    "observability",
     "vector-index",
     "fulltext",
     "regex-unicode",
@@ -38,12 +47,10 @@ surrealdb-core = { workspace = true, features = [
     "scram",
     "text-diff",
     "url",
-    "maintenance-tasks",
     "api",
     "files",
     "search",
     "encoding",
-    "egraph",
     "http",
 ] }
 surrealdb-cnf = { workspace = true }

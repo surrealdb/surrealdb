@@ -43,7 +43,7 @@ pub enum DefineKind {
 	IfNotExists,
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Eq, PartialEq, surrealdb_stored_derive::DynHash)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),

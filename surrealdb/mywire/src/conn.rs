@@ -24,8 +24,7 @@ use surrealdb_sqlplan::dialect::DialectPolicy;
 use surrealdb_sqlplan::observability::global_metrics;
 use tokio::io::{ReadHalf, WriteHalf, split};
 use tokio::sync::OwnedSemaphorePermit;
-use tokio_rustls::TlsAcceptor;
-use tokio_rustls::server::TlsStream;
+use crate::tls::{TlsAcceptor, TlsStream};
 use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
 

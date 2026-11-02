@@ -1,5 +1,6 @@
 use std::fmt;
 use std::fmt::Debug;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use surrealdb_kvs::api::{
@@ -10,6 +11,7 @@ use surrealdb_kvs::snapshot::ViewCapabilities;
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use surrealdb_kvs::{Direction, Estimate, Key, KeyRange, Snapshot, SplitTarget};
 
+use crate::out_of_line::OutOfLine;
 use crate::record_writes::{Reached, RecordWrites, among, record_prefix};
 use crate::speculation::{Held, HeldCursor, Overlay};
 use crate::{IntoBytes, Result, Val};
@@ -485,11 +487,21 @@ impl Transactor {
 	}
 
 	/// Check if a key exists in the datastore.
+	#[inline(never)]
+	pub fn exists(
+		&self,
+		key: Key<'_>,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<bool>>> {
+		OutOfLine::new(self.exists_body(key, version))
+	}
+
+	/// [`Self::exists`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn exists(&self, key: Key<'_>, version: Option<u64>) -> Result<bool> {
+	async fn exists_body(&self, key: Key<'_>, version: Option<u64>) -> Result<bool> {
 		if self.absence.holds() {
 			self.absence
 				.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
@@ -506,11 +518,21 @@ impl Transactor {
 	}
 
 	/// Fetch a key from the datastore.
+	#[inline(never)]
+	pub fn get(
+		&self,
+		key: Key<'_>,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<Option<Val>>>> {
+		OutOfLine::new(self.get_body(key, version))
+	}
+
+	/// [`Self::get`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn get(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Val>> {
+	async fn get_body(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Val>> {
 		if self.absence.holds() {
 			self.absence
 				.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
@@ -528,11 +550,17 @@ impl Transactor {
 
 	/// Fetch a key from the datastore, registering the key for
 	/// commit-time conflict detection.
+	#[inline(never)]
+	pub fn getu(&self, key: Key<'_>) -> OutOfLine<impl Future<Output = Result<Option<Val>>>> {
+		OutOfLine::new(self.getu_body(key))
+	}
+
+	/// [`Self::getu`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn getu(&self, key: Key<'_>) -> Result<Option<Val>> {
+	async fn getu_body(&self, key: Key<'_>) -> Result<Option<Val>> {
 		if self.absence.holds() {
 			self.absence
 				.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
@@ -549,11 +577,21 @@ impl Transactor {
 	}
 
 	/// Fetch many keys from the datastore.
+	#[inline(never)]
+	pub fn getm(
+		&self,
+		keys: &[Key<'_>],
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<GetMultiResult>>> {
+		OutOfLine::new(self.getm_body(keys, version))
+	}
+
+	/// [`Self::getm`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn getm(&self, keys: &[Key<'_>], version: Option<u64>) -> Result<GetMultiResult> {
+	async fn getm_body(&self, keys: &[Key<'_>], version: Option<u64>) -> Result<GetMultiResult> {
 		if self.absence.holds() {
 			self.absence
 				.guard_keys(self.inner.as_ref(), self.record_writes.as_deref(), keys)
@@ -578,11 +616,21 @@ impl Transactor {
 	///
 	/// This function fetches all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
+	#[inline(never)]
+	pub fn getr(
+		&self,
+		rng: KeyRange<'_>,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<ScanResult>>> {
+		OutOfLine::new(self.getr_body(rng, version))
+	}
+
+	/// [`Self::getr`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn getr(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<ScanResult> {
+	async fn getr_body(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<ScanResult> {
 		if self.absence.holds() {
 			self.absence
 				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
@@ -595,14 +643,20 @@ impl Transactor {
 	}
 
 	/// Insert or update a key in the datastore.
+	#[inline(never)]
+	pub fn set<V>(&self, key: Key<'_>, val: V) -> OutOfLine<impl Future<Output = Result<()>>>
+	where
+		V: IntoBytes + Debug,
+	{
+		OutOfLine::new(self.set_body(key, val.into_vec()))
+	}
+
+	/// [`Self::set`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn set<V>(&self, key: Key<'_>, val: V) -> Result<()>
-	where
-		V: IntoBytes + Debug,
-	{
+	async fn set_body(&self, key: Key<'_>, val: Val) -> Result<()> {
 		let val = val.into_vec();
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
@@ -746,14 +800,20 @@ impl Transactor {
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
+	#[inline(never)]
+	pub fn put<V>(&self, key: Key<'_>, val: V) -> OutOfLine<impl Future<Output = Result<()>>>
+	where
+		V: IntoBytes + Debug,
+	{
+		OutOfLine::new(self.put_body(key, val.into_vec()))
+	}
+
+	/// [`Self::put`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn put<V>(&self, key: Key<'_>, val: V) -> Result<()>
-	where
-		V: IntoBytes + Debug,
-	{
+	async fn put_body(&self, key: Key<'_>, val: Val) -> Result<()> {
 		let val = val.into_vec();
 		if self.speculating() {
 			if self.absence.holds() {
@@ -856,14 +916,25 @@ impl Transactor {
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
+	#[inline(never)]
+	pub fn putc<V>(
+		&self,
+		key: Key<'_>,
+		val: V,
+		chk: Option<V>,
+	) -> OutOfLine<impl Future<Output = Result<()>>>
+	where
+		V: IntoBytes + Debug,
+	{
+		OutOfLine::new(self.putc_body(key, val.into_vec(), chk.map(|v| v.into_vec())))
+	}
+
+	/// [`Self::putc`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn putc<V>(&self, key: Key<'_>, val: V, chk: Option<V>) -> Result<()>
-	where
-		V: IntoBytes + Debug,
-	{
+	async fn putc_body(&self, key: Key<'_>, val: Val, chk: Option<Val>) -> Result<()> {
 		let val = val.into_vec();
 		let chk = chk.map(|v| v.into_vec());
 		if self.speculating() {
@@ -900,11 +971,17 @@ impl Transactor {
 	}
 
 	/// Delete a key from the datastore.
+	#[inline(never)]
+	pub fn del(&self, key: Key<'_>) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.del_body(key))
+	}
+
+	/// [`Self::del`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn del(&self, key: Key<'_>) -> Result<()> {
+	async fn del_body(&self, key: Key<'_>) -> Result<()> {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
@@ -932,11 +1009,21 @@ impl Transactor {
 
 	/// Delete a key from the datastore if the current value matches a
 	/// condition.
+	#[inline(never)]
+	pub fn delc(
+		&self,
+		key: Key<'_>,
+		chk: Option<&[u8]>,
+	) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.delc_body(key, chk))
+	}
+
+	/// [`Self::delc`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn delc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
+	async fn delc_body(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
 		if self.speculating() {
 			if self.absence.holds() {
 				self.absence
@@ -974,11 +1061,17 @@ impl Transactor {
 	///
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
+	#[inline(never)]
+	pub fn delr(&self, rng: KeyRange<'_>) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.delr_body(rng))
+	}
+
+	/// [`Self::delr`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn delr(&self, rng: KeyRange<'_>) -> Result<()> {
+	async fn delr_body(&self, rng: KeyRange<'_>) -> Result<()> {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.clear(&rng));
 		}
@@ -1123,11 +1216,23 @@ impl Transactor {
 	/// request to the underlying datastore. The returned [`KeysResult`] also
 	/// reports the total key bytes scanned, accumulated by the backend during
 	/// the same iteration that produced the keys.
+	#[inline(never)]
+	pub fn keys(
+		&self,
+		rng: KeyRange<'_>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<KeysResult>>> {
+		OutOfLine::new(self.keys_body(rng, limit, skip, version))
+	}
+
+	/// [`Self::keys`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn keys(
+	async fn keys_body(
 		&self,
 		rng: KeyRange<'_>,
 		limit: u32,
@@ -1189,11 +1294,23 @@ impl Transactor {
 	/// request to the underlying datastore. The returned [`ScanResult`] also
 	/// reports the total value bytes scanned, accumulated by the backend
 	/// during the same iteration that produced the values.
+	#[inline(never)]
+	pub fn scan(
+		&self,
+		rng: KeyRange<'_>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<ScanResult>>> {
+		OutOfLine::new(self.scan_body(rng, limit, skip, version))
+	}
+
+	/// [`Self::scan`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn scan(
+	async fn scan_body(
 		&self,
 		rng: KeyRange<'_>,
 		limit: u32,
@@ -1253,11 +1370,21 @@ impl Transactor {
 	///
 	/// This function fetches the total count, in batches, with multiple
 	/// requests to the underlying datastore.
+	#[inline(never)]
+	pub fn count(
+		&self,
+		rng: KeyRange<'_>,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<usize>>> {
+		OutOfLine::new(self.count_body(rng, version))
+	}
+
+	/// [`Self::count`]'s body, polled out of line.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
-	pub async fn count(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<usize> {
+	async fn count_body(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<usize> {
 		if self.absence.holds() {
 			self.absence
 				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)

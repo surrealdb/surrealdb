@@ -26,7 +26,7 @@ use crate::exec::function::FunctionRegistry;
 use crate::http::HttpClient;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::cache::ds::DatastoreCache;
-use crate::kvs::index::IndexBuilder;
+use crate::kvs::index::{BuildTasks, IndexBuilder};
 use crate::kvs::migration::{self, LEDGER, LedgerVerdict};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
@@ -67,8 +67,8 @@ pub struct Builder {
 	/// [`Builder::without_maintenance_tasks`].
 	maintenance: bool,
 	/// Whether a statement runs the index build it starts on a task of its own;
-	/// see [`Builder::without_index_build_tasks`].
-	index_build_tasks: bool,
+	/// see [`Builder::without_index_build_tasks`]. `None` leaves them to passes.
+	index_build_tasks: Option<BuildTasks>,
 	/// The batches a blocking statement runs of a deferred build itself; see
 	/// [`Builder::with_inline_index_build_batches`].
 	inline_index_build_batches: usize,
@@ -146,7 +146,17 @@ fn attach_edge(ds: &Datastore, verdict: LedgerVerdict) -> BoxFut<'_, Result<()>>
 
 impl Builder {
 	pub fn new() -> Self {
-		Self::with_functions(FunctionRegistry::with_builtins)
+		Self::with_functions(FunctionRegistry::with_builtins, Some(BuildTasks::spawned()))
+	}
+
+	/// A builder for a datastore whose host drives its background work: it
+	/// starts no maintenance task ([`Builder::without_maintenance_tasks`]) and
+	/// leaves the index builds statements start to passes the host runs
+	/// ([`Builder::without_index_build_tasks`]). It names neither the task
+	/// runner nor the build task, so a build that constructs only such
+	/// datastores links neither.
+	pub fn host_driven() -> Self {
+		Self::with_functions(FunctionRegistry::with_builtins, None).without_maintenance_tasks()
 	}
 
 	/// A builder for a datastore served through [`Datastore::execute_edge`]:
@@ -156,7 +166,8 @@ impl Builder {
 	/// it never runs migrations or raises the feature level.
 	pub fn for_edge() -> Self {
 		let mut builder =
-			Self::with_functions(FunctionRegistry::with_edge_builtins).without_maintenance_tasks();
+			Self::with_functions(FunctionRegistry::with_edge_builtins, Some(BuildTasks::spawned()))
+				.without_maintenance_tasks();
 		builder.attach = Some(attach_edge);
 		builder
 	}
@@ -169,12 +180,13 @@ impl Builder {
 	/// handed. A build that never constructs one links none of the rest of the
 	/// function library through it.
 	pub fn for_leaf() -> Self {
-		Self::with_functions(FunctionRegistry::with_aggregates)
-			.without_startup_transactions()
-			.without_index_build_tasks()
+		Self::with_functions(FunctionRegistry::with_aggregates, None).without_startup_transactions()
 	}
 
-	fn with_functions(functions: fn() -> FunctionRegistry) -> Self {
+	fn with_functions(
+		functions: fn() -> FunctionRegistry,
+		index_build_tasks: Option<BuildTasks>,
+	) -> Self {
 		Builder {
 			capabilities: Default::default(),
 			shutdown: CancellationToken::new(),
@@ -187,7 +199,7 @@ impl Builder {
 			engine_options: EngineOptions::default(),
 			// A build without `maintenance-tasks` leaves that work to its host.
 			maintenance: cfg!(feature = "maintenance-tasks"),
-			index_build_tasks: true,
+			index_build_tasks,
 			inline_index_build_batches: 0,
 			startup: Some(start),
 			transaction_timeout: None,
@@ -363,7 +375,7 @@ impl Builder {
 	/// Independent of [`Builder::without_maintenance_tasks`], which leaves
 	/// statements building on their own tasks.
 	pub fn without_index_build_tasks(mut self) -> Self {
-		self.index_build_tasks = false;
+		self.index_build_tasks = None;
 		self
 	}
 
@@ -790,7 +802,7 @@ impl Builder {
 			),
 			index_builder: IndexBuilder::new(
 				tf.clone(),
-				!self.index_build_tasks,
+				self.index_build_tasks,
 				self.inline_index_build_batches,
 			),
 			compaction_swept_at: parking_lot::Mutex::new(None),

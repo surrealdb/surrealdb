@@ -61,7 +61,7 @@ mod function;
 mod graph;
 mod groups;
 mod host;
-pub(crate) use host::out_of_line;
+pub(crate) use host::{out_of_line, out_of_line_boxed};
 mod info;
 mod inline;
 mod interp;

@@ -443,7 +443,12 @@ pub(crate) struct IndexBuilder {
 	/// Whether a statement leaves the build it starts to bounded passes
 	/// ([`Self::run_pass`]) instead of running it on a task of its own; see
 	/// [`Builder::without_index_build_tasks`](crate::kvs::Builder::without_index_build_tasks).
+	/// It is whether `spawn` is `None`.
 	defers: bool,
+	/// Runs an acquired build on a task of its own ([`BuildTasks`]), where
+	/// builds are not deferred. A deferring builder never spawns one, so a
+	/// build that constructs only deferring builders links none of it.
+	spawn: Option<BuildTasks>,
 	/// Where builds are deferred, the batches a blocking statement that awaits
 	/// its build after its commit runs of that build itself, before it leaves
 	/// the rest to passes; zero leaves all of it to them. See
@@ -659,8 +664,47 @@ pub(crate) struct IndexMutation<'a> {
 	pub(crate) count_cond_match: Option<(bool, bool)>,
 }
 
+/// Runs an acquired build on a task of its own.
+type SpawnBuild = for<'a> fn(
+	&'a IndexBuilder,
+	IndexBuilding,
+	AcquiredBuild,
+	Option<Sender<Result<()>>>,
+	bool,
+) -> crate::exec::BoxFut<'a, Result<()>>;
+
+/// How an [`IndexBuilder`] that does not defer builds runs one: on a task of
+/// its own. Only a datastore builder that spawns builds names it
+/// ([`BuildTasks::spawned`]), so a build that never constructs one links none
+/// of the build task.
+#[derive(Clone, Copy)]
+pub(crate) struct BuildTasks(SpawnBuild);
+
+impl BuildTasks {
+	/// Builds run on tasks of their own.
+	pub(crate) fn spawned() -> Self {
+		Self(spawn_build)
+	}
+}
+
+fn spawn_build<'a>(
+	builder: &'a IndexBuilder,
+	building: IndexBuilding,
+	acquired: AcquiredBuild,
+	sdr: Option<Sender<Result<()>>>,
+	waits_for_statement: bool,
+) -> crate::exec::BoxFut<'a, Result<()>> {
+	Box::pin(builder.spawn_acquired_building(building, acquired, sdr, waits_for_statement))
+}
+
 impl IndexBuilder {
-	pub(in crate::kvs) fn new(tf: TransactionFactory, defers: bool, inline_batches: usize) -> Self {
+	/// A builder that runs the builds statements start through `spawn`, or
+	/// leaves them to bounded passes where it is `None`.
+	pub(in crate::kvs) fn new(
+		tf: TransactionFactory,
+		spawn: Option<BuildTasks>,
+		inline_batches: usize,
+	) -> Self {
 		Self {
 			tf,
 			shutting_down: Default::default(),
@@ -673,9 +717,15 @@ impl IndexBuilder {
 			closing_poll: Default::default(),
 			#[cfg(test)]
 			closing_waits: Default::default(),
-			defers,
+			defers: spawn.is_none(),
+			spawn,
 			inline_batches,
 		}
+	}
+
+	/// How this builder spawns a build: `None` where it defers builds.
+	pub(crate) fn spawner(&self) -> Option<BuildTasks> {
+		self.spawn
 	}
 
 	/// How long admission waits between reads of a `Closing` build's state
@@ -918,7 +968,26 @@ impl IndexBuilder {
 	/// ([`Building::await_statement_closed`]). Every caller asks for that
 	/// except one whose build is awaited inside that transaction, which cannot
 	/// close before the build ends.
+	///
+	/// Only a builder that does not defer builds spawns one; every caller is
+	/// on a path a deferring builder leaves before it.
 	async fn start_acquired_building(
+		&self,
+		building: IndexBuilding,
+		acquired: AcquiredBuild,
+		sdr: Option<Sender<Result<()>>>,
+		waits_for_statement: bool,
+	) -> Result<()> {
+		let Some(BuildTasks(spawn)) = self.spawn else {
+			anyhow::bail!(Error::unreachable(
+				"a builder that defers index builds spawned a build task"
+			));
+		};
+		spawn(self, building, acquired, sdr, waits_for_statement).await
+	}
+
+	/// [`Self::start_acquired_building`] where builds run on tasks of their own.
+	async fn spawn_acquired_building(
 		&self,
 		building: IndexBuilding,
 		acquired: AcquiredBuild,
@@ -2878,7 +2947,8 @@ impl Building {
 					build_claimable(&current, Utc::now())
 				} else {
 					build_owner_expired(&current, Utc::now())
-				} || only.is_some_and(|only| current.generation != only)
+				}
+				|| only.is_some_and(|only| current.generation != only)
 			{
 				tx.cancel().await?;
 				return Ok(None);
@@ -5241,7 +5311,8 @@ impl Building {
 					let bytes: usize = batch.result.iter().map(|(k, v)| k.len() + v.len()).sum();
 					let avg = (bytes / batch.result.len()).max(1);
 					scan_batch_size = (INDEXING_BATCH_MAX_BYTES / avg)
-						.clamp(1, INDEXING_SCAN_BATCH_SIZE as usize) as u32;
+						.clamp(1, INDEXING_SCAN_BATCH_SIZE as usize)
+						as u32;
 					#[cfg(test)]
 					if let Some(n) = scan_batch_override {
 						scan_batch_size = n;

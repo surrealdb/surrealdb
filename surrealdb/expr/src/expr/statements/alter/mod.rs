@@ -98,7 +98,7 @@ impl<T: Revisioned + DeserializeRevisioned> DeserializeRevisioned for AlterKind<
 	}
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Eq, PartialEq, surrealdb_stored_derive::DynHash)]
 /// Execution‑time representation of all `ALTER` statements.
 ///
 /// Variants map to specific resources and delegate execution to their

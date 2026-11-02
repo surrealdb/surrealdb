@@ -663,7 +663,7 @@ impl FlushOnCommit {
 
 impl CommitAction for FlushOnCommit {
 	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-		crate::exec::vm::out_of_line(|| async move {
+		crate::exec::vm::out_of_line_boxed(|| async move {
 			flush_live_query_notifications(self.0);
 		})
 	}

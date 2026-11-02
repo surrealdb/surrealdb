@@ -503,7 +503,7 @@ pub(super) fn run_group<'a>(
 	state: &'a mut State,
 	frame: &'a ExecutionContext,
 ) -> GroupRun<'a> {
-	crate::exec::vm::host::out_of_line(|| async move {
+	crate::exec::vm::host::out_of_line_boxed(|| async move {
 		let (out, mut ran, output) =
 			run_group_out(program, group, state, frame, Out::Gather(Vec::new())).await;
 		let mut rows = match out {
@@ -540,7 +540,7 @@ pub(super) fn run_group_into<'a>(
 	frame: &'a ExecutionContext,
 	sink: &'a mut (dyn RowSink + Send),
 ) -> crate::exec::BoxFut<'a, FlowResult<()>> {
-	crate::exec::vm::host::out_of_line(|| async move {
+	crate::exec::vm::host::out_of_line_boxed(|| async move {
 		let (out, ran, output) = run_group_out(program, group, state, frame, Out::Sink(sink)).await;
 		let rest = std::mem::replace(&mut state.output, output);
 		ran?;
@@ -565,7 +565,7 @@ fn run_group_out<'a, 'o>(
 where
 	'o: 'a,
 {
-	crate::exec::vm::host::out_of_line(|| async move {
+	crate::exec::vm::host::out_of_line_boxed(|| async move {
 		if state.program.is_none() {
 			state.program = Some(Arc::clone(program));
 		}
@@ -1806,11 +1806,39 @@ pub(super) enum Out<'o, 'y> {
 /// takes small: the lowering recurses through itself, and a frame holding a
 /// copy of its own future per call site grows the stack by that much at
 /// every level.
+///
+/// The box is polled through [`Polled::poll`], which is never inlined, so the
+/// body of `F` is generated once, in that function, rather than inlined into
+/// the state machine of every caller that awaits it.
 #[inline(never)]
-pub(crate) fn out_of_line<F: std::future::Future>(
+pub(crate) fn out_of_line<F: std::future::Future>(make: impl FnOnce() -> F) -> Polled<F> {
+	Polled(Box::pin(make()))
+}
+
+/// `make`'s future, built in a frame of its own and boxed, for a caller that
+/// coerces the box to a boxed trait object: that box is polled through its
+/// vtable, so it needs no [`Polled`] wrapper.
+#[inline(never)]
+pub(crate) fn out_of_line_boxed<F: std::future::Future>(
 	make: impl FnOnce() -> F,
 ) -> std::pin::Pin<Box<F>> {
 	Box::pin(make())
+}
+
+/// A boxed future polled through a call that is never inlined ([`out_of_line`]).
+#[must_use = "futures do nothing unless you `.await` or poll them"]
+pub(crate) struct Polled<F>(std::pin::Pin<Box<F>>);
+
+impl<F: std::future::Future> std::future::Future for Polled<F> {
+	type Output = F::Output;
+
+	#[inline(never)]
+	fn poll(
+		mut self: std::pin::Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+	) -> std::task::Poll<F::Output> {
+		self.0.as_mut().poll(cx)
+	}
 }
 
 /// Run a pipeline over the rows of a source in storage: a table, a record id,
@@ -7174,7 +7202,7 @@ impl super::binding::StepSink for Below<'_> {
 		rows: Vec<Value>,
 		state: &'a mut State,
 	) -> futures::future::BoxFuture<'a, FlowResult<Ended>> {
-		crate::exec::vm::host::out_of_line(|| self.run(rows, state))
+		crate::exec::vm::host::out_of_line_boxed(|| self.run(rows, state))
 	}
 }
 
@@ -9160,7 +9188,7 @@ pub(super) fn gather_program(
 	program: Arc<Program>,
 	ctx: ExecutionContext,
 ) -> crate::exec::BoxFut<'static, FlowResult<Value>> {
-	crate::exec::vm::host::out_of_line(|| async move {
+	crate::exec::vm::host::out_of_line_boxed(|| async move {
 		let mut values = if program.write.is_none() && program.tail.is_none() {
 			let unitted = super::closure::with_units(&program, &ctx);
 			let ctx = unitted.as_ref().unwrap_or(&ctx);
@@ -9262,7 +9290,7 @@ struct RecurseBody<'a> {
 
 impl crate::exec::operators::recursion::DepthBody for RecurseBody<'_> {
 	fn eval<'a>(&'a self, value: &'a Value) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
-		crate::exec::vm::host::out_of_line(|| async move {
+		crate::exec::vm::host::out_of_line_boxed(|| async move {
 			// A depth is a unit, whatever its body runs.
 			super::fuel::tick(self.ctx, 1).await?;
 			match self.unit {
@@ -9359,7 +9387,7 @@ impl crate::exec::operators::recursion::RepeatBody for RepeatUnit<'_> {
 		value: &'a Value,
 		rec: crate::exec::eval_context::RecursionCtx,
 	) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
-		crate::exec::vm::host::out_of_line(|| async move {
+		crate::exec::vm::host::out_of_line_boxed(|| async move {
 			super::fuel::tick(self.ctx, 1).await?;
 			run_unit_in(self.program, self.units, self.ctx, Some(value), Vec::new(), Some(rec))
 				.await
@@ -9395,7 +9423,7 @@ impl crate::exec::operators::fetch::FetchIndex<super::program::FetchStepSpec> fo
 		ctx: &'a ExecutionContext,
 		step: &'a super::program::FetchStepSpec,
 	) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
-		crate::exec::vm::host::out_of_line(|| async move {
+		crate::exec::vm::host::out_of_line_boxed(|| async move {
 			if let super::program::FetchStepSpec::Index {
 				pipeline,
 			} = step

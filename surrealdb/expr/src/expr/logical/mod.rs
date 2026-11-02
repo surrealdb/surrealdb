@@ -511,7 +511,7 @@ impl ToSql for LogicalInfo {
 /// carrying that operator's fields, so a pass that handles one operator takes
 /// and returns the struct by name — its signature says which operator it works
 /// on — and adding a field to an operator touches only the code that reads it.
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, surrealdb_stored_derive::DynHash)]
 pub enum LogicalOp {
 	/// Rows read from storage; see [`LogicalSource`].
 	Source(LogicalSource),

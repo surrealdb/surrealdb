@@ -28,7 +28,7 @@ anyhow = { workspace = true }
 futures = { workspace = true }
 js-sys = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
-surrealdb-embedded = { workspace = true }
+surrealdb-embedded = { workspace = true, features = ["observability", "egraph", "maintenance-tasks"] }
 # Only for asking whether the browser keeps the origin's storage.
 surrealdb-kvs-surrealkv = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true }

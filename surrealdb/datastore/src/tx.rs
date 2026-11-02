@@ -8471,7 +8471,16 @@ impl Transaction {
 	// --------------------------------------------------
 
 	/// Fetch an encoded key, recording the read.
-	async fn get_encoded(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Val>> {
+	#[inline(never)]
+	fn get_encoded(
+		&self,
+		key: Key<'_>,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<Option<Val>>>> {
+		OutOfLine::new(self.get_encoded_body(key, version))
+	}
+
+	async fn get_encoded_body(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Val>> {
 		let key_bytes = key.len() as u64;
 		let val = self.tr.get(key, version).await?;
 		let (keys_found, value_bytes) = match &val {
@@ -8485,7 +8494,12 @@ impl Transaction {
 	/// Fetch an encoded key with a lock that registers it for commit-time conflict
 	/// detection, recording the read. A read-only transaction cannot hold the lock
 	/// and is refused.
-	async fn getu_encoded(&self, key: Key<'_>) -> Result<Option<Val>> {
+	#[inline(never)]
+	fn getu_encoded(&self, key: Key<'_>) -> OutOfLine<impl Future<Output = Result<Option<Val>>>> {
+		OutOfLine::new(self.getu_encoded_body(key))
+	}
+
+	async fn getu_encoded_body(&self, key: Key<'_>) -> Result<Option<Val>> {
 		if !self.tr.writeable() {
 			anyhow::bail!(KvsError::TransactionReadonly);
 		}
@@ -8500,7 +8514,16 @@ impl Transaction {
 	}
 
 	/// Whether an encoded key exists, recording the read.
-	async fn exists_encoded(&self, key: Key<'_>, version: Option<u64>) -> Result<bool> {
+	#[inline(never)]
+	fn exists_encoded(
+		&self,
+		key: Key<'_>,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<bool>>> {
+		OutOfLine::new(self.exists_encoded_body(key, version))
+	}
+
+	async fn exists_encoded_body(&self, key: Key<'_>, version: Option<u64>) -> Result<bool> {
 		let key_bytes = key.len() as u64;
 		let found = self.tr.exists(key, version).await?;
 		self.metrics.record_get(u64::from(found), key_bytes, 0);

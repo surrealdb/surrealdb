@@ -29,11 +29,8 @@ pub enum ExplainFormat {
 	Json,
 }
 
-#[derive(Debug, Eq, Hash)]
-#[expect(
-	clippy::derived_hash_with_manual_eq,
-	reason = "PartialEq compares the same fields in the same order as Hash hashes them"
-)]
+/// `PartialEq` compares the same fields in the same order as `Hash` hashes them.
+#[derive(Debug, Eq, surrealdb_stored_derive::DynHash)]
 pub enum Expr {
 	Literal(Literal),
 	Param(Param),

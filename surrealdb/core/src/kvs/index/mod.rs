@@ -53,7 +53,7 @@ use std::time::Duration;
 pub(crate) use after_commit::unstarted;
 pub(crate) use after_commit::{RemoveFailedDefinition, StagedRebuild};
 pub(crate) use builder::{
-	AbortLocalBuild, BuildCompletion, BuildPass, CleanUncommittedBuild, IndexBuilder,
+	AbortLocalBuild, BuildCompletion, BuildPass, BuildTasks, CleanUncommittedBuild, IndexBuilder,
 	IndexMutation, RebuildStaging, ResumeScope,
 };
 pub(crate) use state::filter_online_indexes;

@@ -22,7 +22,7 @@ futures = { workspace = true }
 napi = { workspace = true, features = ["async", "serde-json"] }
 napi-derive = { workspace = true }
 serde_json = { workspace = true }
-surrealdb-embedded = { workspace = true }
+surrealdb-embedded = { workspace = true, features = ["observability", "egraph", "maintenance-tasks"] }
 
 [build-dependencies]
 napi-build = { workspace = true }

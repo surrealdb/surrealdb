@@ -1873,7 +1873,7 @@ impl Datastore {
 			),
 			index_builder: IndexBuilder::new(
 				self.transaction_factory.clone(),
-				self.index_builder.defers_builds(),
+				self.index_builder.spawner(),
 				self.index_builder.inline_batches(),
 			),
 			compaction_swept_at: parking_lot::Mutex::new(None),
@@ -1981,7 +1981,7 @@ impl Datastore {
 			),
 			index_builder: IndexBuilder::new(
 				transaction_factory.clone(),
-				self.index_builder.defers_builds(),
+				self.index_builder.spawner(),
 				self.index_builder.inline_batches(),
 			),
 			compaction_swept_at: parking_lot::Mutex::new(None),
@@ -2036,7 +2036,7 @@ impl Datastore {
 		let mut fork = self.fork_for_test_with_node_id(id);
 		fork.index_builder = IndexBuilder::new(
 			transaction_factory.clone(),
-			self.index_builder.defers_builds(),
+			self.index_builder.spawner(),
 			self.index_builder.inline_batches(),
 		);
 		fork.sequences = Sequences::new(transaction_factory.clone(), id);

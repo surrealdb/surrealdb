@@ -9,7 +9,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::expr::method::is_builtin_method;
 use crate::expr::{CoverStmts, Expr, Idiom, Literal, Lookup};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, surrealdb_stored_derive::DynHash)]
 pub enum Part {
 	All,
 	Flatten,

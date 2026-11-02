@@ -40,8 +40,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[cfg(feature = "listener")]
 use tokio::net::TcpStream;
 use tokio::sync::OwnedSemaphorePermit;
-use tokio_rustls::TlsAcceptor;
-use tokio_rustls::server::TlsStream;
+use crate::tls::{TlsAcceptor, TlsStream};
 use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
 

@@ -229,7 +229,7 @@ impl ToSql for LogicalLiteral {
 /// idiom it was lowered from ([`ToSql`]), names its output through
 /// [`Self::output_path`], and declares the position it reads through
 /// [`Self::field_path`](super::schema).
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, surrealdb_stored_derive::DynHash)]
 pub enum LogicalExpr {
 	Literal(LogicalLiteral),
 	/// `[a, b]`. Flattened out of the literal because its elements are

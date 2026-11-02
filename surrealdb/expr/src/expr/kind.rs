@@ -94,7 +94,7 @@ impl From<crate::types::PublicGeometryKind> for GeometryKind {
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 2, serialize = false)]
-#[derive(Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Debug, Default, Eq, PartialEq, surrealdb_stored_derive::DynHash)]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	#[default]

@@ -55,6 +55,7 @@
 //! `surrealdb-expr` and nothing else.
 
 mod codegen;
+mod dyn_hash;
 mod model;
 
 use proc_macro::TokenStream;
@@ -66,6 +67,20 @@ pub fn derive_stored(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input as DeriveInput);
 	match model::parse(&input) {
 		Ok(model) => codegen::expand(&model).into(),
+		Err(error) => error.to_compile_error().into(),
+	}
+}
+
+/// Derives `Hash` as `derive(Hash)` does, feeding the hasher the same values in the same order,
+/// through one body that takes `&mut dyn Hasher`. `derive(Hash)` generates a type's hashing code
+/// once per hasher type; a large type hashed by several hashers carries that code once instead.
+/// Each call goes through the hasher's vtable, so it suits a type hashed for caching and
+/// planning, not one hashed per row.
+#[proc_macro_derive(DynHash)]
+pub fn derive_dyn_hash(input: TokenStream) -> TokenStream {
+	let input = parse_macro_input!(input as DeriveInput);
+	match dyn_hash::expand(&input) {
+		Ok(tokens) => tokens.into(),
 		Err(error) => error.to_compile_error().into(),
 	}
 }
