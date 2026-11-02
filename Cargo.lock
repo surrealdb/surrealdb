@@ -8633,8 +8633,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "1.1.1"
-source = "git+https://github.com/surrealdb/surrealkv?rev=3e5e51475#3e5e5147543db50ff4aa09e63fb09b93b07a5a3f"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb696686bd158ecdcccbcd6dcf7f2a5daf5d533c6d09603397946e2a15f8264e"
 dependencies = [
  "aes-gcm",
  "affinitypool",
@@ -8671,8 +8672,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv-compat-indxdb"
-version = "0.2.1"
-source = "git+https://github.com/surrealdb/surrealkv?rev=3e5e51475#3e5e5147543db50ff4aa09e63fb09b93b07a5a3f"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04704b05260d80649dc1bce9fd091763f350ed8d2895c52b0682bf6364d118c0"
 dependencies = [
  "js-sys",
  "thiserror 2.0.21",
@@ -8683,8 +8685,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv-compat-rocksdb"
-version = "0.2.1"
-source = "git+https://github.com/surrealdb/surrealkv?rev=3e5e51475#3e5e5147543db50ff4aa09e63fb09b93b07a5a3f"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dfec9149b38bdf635c03ea8f1cc3a7152619162fffe632723ea011d6a9b2813"
 dependencies = [
  "lz4_flex",
  "rustix",
@@ -8696,8 +8699,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv-compat-v1"
-version = "0.2.1"
-source = "git+https://github.com/surrealdb/surrealkv?rev=3e5e51475#3e5e5147543db50ff4aa09e63fb09b93b07a5a3f"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9fdbf48fbfd32103603501268231cc5883b6e8159d1482ae5d249dfc13aa8cf"
 dependencies = [
  "crc32fast",
  "lz4_flex",
@@ -8707,9 +8711,9 @@ dependencies = [
 
 [[package]]
 name = "surrealmx"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da8b7b71c794d7219a061d3811d2264ad12c82229d033d8b24660a621af0e55d"
+checksum = "a5ed0da12b19262916a8ddb7ac8a340772113ce91b8c845aa7bc994b69d39715"
 dependencies = [
  "artmap",
  "bincode",

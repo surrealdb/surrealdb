@@ -168,18 +168,6 @@ audit-as-crates-io = false
 [policy.surrealism-verify]
 audit-as-crates-io = false
 
-[policy.surrealkv]
-audit-as-crates-io = false
-
-[policy.surrealkv-compat-indxdb]
-audit-as-crates-io = false
-
-[policy.surrealkv-compat-rocksdb]
-audit-as-crates-io = false
-
-[policy.surrealkv-compat-v1]
-audit-as-crates-io = false
-
 [[exemptions.Inflector]]
 version = "0.11.4"
 criteria = "safe-to-deploy"
