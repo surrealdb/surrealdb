@@ -180,9 +180,10 @@ pub(super) fn plan_remove(remove: &RemoveStatement, checks: DdlChecks) -> Planne
 		),
 		RemoveStatement::Bucket(stmt) => (
 			DdlForm::RemoveBucket,
-			(EDIT, ResourceKind::Bucket, Base::Db),
+			(EDIT, ResourceKind::Bucket, stmt.base),
 			RemoveObject::Bucket {
 				name: s.name(DdlOperand::Name, &stmt.name)?,
+				base: stmt.base,
 			},
 			stmt.if_exists,
 			false,

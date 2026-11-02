@@ -107,6 +107,14 @@ pub enum Key {
 	Az(NamespaceId, DatabaseId, String),
 	/// A cache key for a bucket (on a database)
 	Bu(NamespaceId, DatabaseId, String),
+	/// A cache key for root buckets
+	RootBus,
+	/// A cache key for a bucket (on the root)
+	RootBu(String),
+	/// A cache key for namespace buckets
+	NsBus(NamespaceId),
+	/// A cache key for a bucket (on a namespace)
+	NsBu(NamespaceId, String),
 	/// A cache key for a function (on a database)
 	Fc(NamespaceId, DatabaseId, String),
 	/// A cache key for a module (on a database)
@@ -187,6 +195,10 @@ impl Key {
 			Key::Ap(a, b, c) => Lookup::Ap(*a, *b, c),
 			Key::Az(a, b, c) => Lookup::Az(*a, *b, c),
 			Key::Bu(a, b, c) => Lookup::Bu(*a, *b, c),
+			Key::RootBus => Lookup::RootBus,
+			Key::RootBu(a) => Lookup::RootBu(a),
+			Key::NsBus(a) => Lookup::NsBus(*a),
+			Key::NsBu(a, b) => Lookup::NsBu(*a, b),
 			Key::Fc(a, b, c) => Lookup::Fc(*a, *b, c),
 			Key::Md(a, b, c) => Lookup::Md(*a, *b, c),
 			Key::Ml(a, b, c, d) => Lookup::Ml(*a, *b, c, d),
@@ -266,6 +278,10 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Ap(a, b, c) => Key::Ap(a, b, c.to_string()),
 			Lookup::Az(a, b, c) => Key::Az(a, b, c.to_string()),
 			Lookup::Bu(a, b, c) => Key::Bu(a, b, c.to_string()),
+			Lookup::RootBus => Key::RootBus,
+			Lookup::RootBu(a) => Key::RootBu(a.to_string()),
+			Lookup::NsBus(a) => Key::NsBus(a),
+			Lookup::NsBu(a, b) => Key::NsBu(a, b.to_string()),
 			Lookup::Fc(a, b, c) => Key::Fc(a, b, c.to_string()),
 			Lookup::Md(a, b, c) => Key::Md(a, b, c.to_string()),
 			Lookup::Ml(a, b, c, d) => Key::Ml(a, b, c.to_string(), d.to_string()),

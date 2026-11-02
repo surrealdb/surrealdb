@@ -283,8 +283,9 @@ impl Datastore {
 		now: i64,
 	) -> Result<BucketAccess> {
 		let (ns_id, db_id) = ctx.expect_ns_db_ids(opt).await?;
-		let definition = txn.expect_db_bucket(ns_id, db_id, bucket).await?;
-		let store = ctx.get_bucket_store(ns_id, db_id, bucket).await?;
+		let level = crate::catalog::BucketLevel::Db(ns_id, db_id);
+		let definition = txn.expect_bucket(level, bucket).await?;
+		let store = ctx.get_bucket_store(level, bucket).await?;
 
 		// Normalise before anything reads the key, so the signature check and
 		// the store agree on which object this is.

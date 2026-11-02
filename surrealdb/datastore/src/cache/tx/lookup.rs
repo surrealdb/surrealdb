@@ -112,6 +112,14 @@ pub enum Lookup<'a> {
 	Az(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a bucket (on a database)
 	Bu(NamespaceId, DatabaseId, &'a str),
+	/// A cache key for root buckets
+	RootBus,
+	/// A cache key for a bucket (on the root)
+	RootBu(&'a str),
+	/// A cache key for namespace buckets
+	NsBus(NamespaceId),
+	/// A cache key for a bucket (on a namespace)
+	NsBu(NamespaceId, &'a str),
 	/// A cache key for a function (on a database)
 	Fc(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a module (on a database)
@@ -193,6 +201,10 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Ap(la, lb, lc), Key::Ap(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Az(la, lb, lc), Key::Az(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Bu(la, lb, lc), Key::Bu(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::RootBus, Key::RootBus) => true,
+			(Self::RootBu(la), Key::RootBu(ka)) => la == ka,
+			(Self::NsBus(la), Key::NsBus(ka)) => la == ka,
+			(Self::NsBu(la, lb), Key::NsBu(ka, kb)) => la == ka && lb == kb,
 			(Self::Fc(la, lb, lc), Key::Fc(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Md(la, lb, lc), Key::Md(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Ml(la, lb, lc, ld), Key::Ml(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
@@ -326,6 +338,10 @@ mod tests {
 	#[case(Lookup::Ap(NamespaceId(1), DatabaseId(1), "test"), Key::Ap(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Az(NamespaceId(1), DatabaseId(1), "test"), Key::Az(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Bu(NamespaceId(1), DatabaseId(1), "test"), Key::Bu(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::RootBus, Key::RootBus, true)]
+	#[case(Lookup::RootBu("test"), Key::RootBu("test".to_string()), true)]
+	#[case(Lookup::NsBus(NamespaceId(1)), Key::NsBus(NamespaceId(1)), true)]
+	#[case(Lookup::NsBu(NamespaceId(1), "test"), Key::NsBu(NamespaceId(1), "test".to_string()), true)]
 	#[case(Lookup::Fc(NamespaceId(1), DatabaseId(1), "test"), Key::Fc(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Ml(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ml(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
 	#[case(Lookup::Cg(NamespaceId(1), DatabaseId(1), "test"), Key::Cg(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]

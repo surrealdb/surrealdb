@@ -9,7 +9,7 @@ use super::store::{
 	ListEntry, ListOptions, ObjectKey, ObjectMeta, ObjectStore, PutCondition, put_bytes,
 };
 use crate::catalog::providers::BucketProvider;
-use crate::catalog::{BucketDefinition, DatabaseId, NamespaceId, Permission};
+use crate::catalog::{BucketDefinition, BucketLevel, DatabaseId, NamespaceId, Permission};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -32,8 +32,7 @@ pub(crate) struct BucketController<'a> {
 
 	bucket: Arc<BucketDefinition>,
 	store: Arc<dyn ObjectStore>,
-	ns: NamespaceId,
-	db: DatabaseId,
+	level: BucketLevel,
 }
 
 impl<'a> BucketController<'a> {
@@ -56,9 +55,9 @@ impl<'a> BucketController<'a> {
 		doc: Option<&'a CursorDoc>,
 		buc: &str,
 	) -> Result<Self> {
-		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let bucket = ctx.tx().expect_db_bucket(ns, db, buc).await?;
-		let store = ctx.get_bucket_store(ns, db, buc).await?;
+		let level = ctx.expect_bucket_level(opt).await?;
+		let bucket = ctx.tx().expect_bucket(level, buc).await?;
+		let store = ctx.get_bucket_store(level, buc).await?;
 
 		Ok(Self {
 			ctx,
@@ -67,8 +66,7 @@ impl<'a> BucketController<'a> {
 
 			bucket,
 			store,
-			ns,
-			db,
+			level,
 		})
 	}
 
@@ -91,8 +89,7 @@ impl<'a> BucketController<'a> {
 			doc: None,
 			bucket,
 			store,
-			ns,
-			db,
+			level: BucketLevel::Db(ns, db),
 		}
 	}
 
@@ -397,6 +394,12 @@ impl<'a> BucketController<'a> {
 			.and_then(|b| b.presign_secret())
 			.cloned()
 			.ok_or(Error::PresignNoSecret)?;
+		// A presigned URL names the namespace and database it was issued in.
+		let BucketLevel::Db(ns_id, db_id) = self.level else {
+			bail!(Error::Presign(
+				"Presigned URLs are only issued for buckets defined on a database".to_owned()
+			));
+		};
 		let (ns_name, db_name) = self.opt.ns_db()?;
 		let origin = self.ctx.get_buckets().and_then(|b| b.public_origin()).map(str::to_owned);
 
@@ -404,8 +407,8 @@ impl<'a> BucketController<'a> {
 			&secret,
 			origin.as_deref(),
 			BucketScope {
-				ns_id: self.ns,
-				db_id: self.db,
+				ns_id,
+				db_id,
 				ns_name,
 				db_name,
 				bucket: self.bucket.name.as_str(),
@@ -453,10 +456,12 @@ impl<'a> BucketController<'a> {
 		target: Option<&ObjectKey>,
 		presign: Option<&PresignRequest>,
 	) -> Result<()> {
-		if self.ctx.check_perms(self.opt, op.into())? {
-			// Guest and Record users are not allowed to list files in buckets
+		if self.ctx.check_bucket_perms(self.opt, op.into(), self.level)? {
+			// Guest and Record users are not allowed to list files in buckets,
+			// and reach no bucket above a database: its clause admits only the
+			// principals of the level it is defined at.
 			ensure!(
-				!op.is_list(),
+				!op.is_list() && matches!(self.level, BucketLevel::Db(..)),
 				Error::BucketPermissions {
 					name: self.bucket.name.to_string(),
 					op,

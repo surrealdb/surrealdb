@@ -56,6 +56,26 @@ where
 	Ok(Value::Object(out))
 }
 
+/// `buckets` defined at `base`, as `INFO` renders a list of them: their SurrealQL
+/// names the level when it is not a database.
+fn listed_buckets(
+	buckets: Vec<crate::catalog::BucketDefinition>,
+	structured: bool,
+	base: crate::expr::Base,
+) -> anyhow::Result<Value> {
+	if structured {
+		return Ok(Value::Array(buckets.into_iter().map(InfoStructure::structure).collect()));
+	}
+	let mut out = Object::default();
+	for bucket in &buckets {
+		out.insert(
+			bucket.name.to_string(),
+			Value::from(bucket.to_runtime_definition_on(base).to_sql()),
+		);
+	}
+	Ok(Value::Object(out))
+}
+
 /// Render the list of definitions in `values`.
 pub(super) async fn render(
 	kind: Definitions,
@@ -81,10 +101,25 @@ pub(super) async fn render(
 			})
 		}
 		Definitions::Bucket => {
-			listed(compiled::<catalog::BucketDefinition>(values)?, structured, |v| {
-				Ok(v.name.to_string())
-			})
+			let buckets = compiled::<catalog::BucketDefinition>(values)?;
+			let buckets = match scope {
+				Some((ns, db)) => {
+					buckets.into_iter().map(|bu| bu.with_stored_backend(ns, db)).collect()
+				}
+				None => buckets,
+			};
+			listed_buckets(buckets, structured, crate::expr::Base::Db)
 		}
+		Definitions::RootBucket => listed_buckets(
+			compiled::<catalog::BucketDefinition>(values)?,
+			structured,
+			crate::expr::Base::Root,
+		),
+		Definitions::NsBucket => listed_buckets(
+			compiled::<catalog::BucketDefinition>(values)?,
+			structured,
+			crate::expr::Base::Ns,
+		),
 		Definitions::Function => {
 			listed(compiled::<catalog::FunctionDefinition>(values)?, structured, |v| {
 				Ok(v.name.to_string())
@@ -216,6 +251,8 @@ pub(super) fn render_one(kind: Definitions, structured: bool, value: &Value) -> 
 		| Definitions::Api
 		| Definitions::Analyzer
 		| Definitions::Bucket
+		| Definitions::RootBucket
+		| Definitions::NsBucket
 		| Definitions::Function
 		| Definitions::Extension
 		| Definitions::Model

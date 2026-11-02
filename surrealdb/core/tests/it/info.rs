@@ -19,11 +19,11 @@ async fn info_for_root() {
 	let mut t = Test::new(sql).await.unwrap();
 	t.skip_ok(3).unwrap();
 	t.expect_regex(
-		r"\{ accesses: \{ access: .* \}, namespaces: \{ NS: .* \}, nodes: \{ .* \}, system: \{ .* \}, users: \{ user: .* \} \}",
+		r"\{ accesses: \{ access: .* \}, buckets: \{  \}, config: \{ .* \}, defaults: \{ .* \}, namespaces: \{ NS: .* \}, nodes: \{ .* \}, system: \{ .* \}, users: \{ user: .* \} \}",
 	)
 	.unwrap();
 	t.expect_regex(
-		r"\{ accesses: \[\{.*\}\], config: \{ .* \}, defaults: \{ .* \}, namespaces: \[\{ .* \}\], nodes: \[.*\], system: \{ .* \}, users: \[\{ .* \}\] \}",
+		r"\{ accesses: \[\{.*\}\], buckets: \[\], config: \{ .* \}, defaults: \{ .* \}, namespaces: \[\{ .* \}\], nodes: \[.*\], system: \{ .* \}, users: \[\{ .* \}\] \}",
 	)
 	.unwrap();
 }
@@ -73,7 +73,7 @@ async fn info_for_ns() {
 	let mut t = Test::new(sql).await.unwrap();
 	t.skip_ok(3).unwrap();
 	t.expect_regex(
-		r"\{ accesses: \{ access: .* \}, databases: \{ DB: .* \}, users: \{ user: .* \} \}",
+		r"\{ accesses: \{ access: .* \}, buckets: \{  \}, databases: \{ DB: .* \}, users: \{ user: .* \} \}",
 	)
 	.unwrap();
 }
@@ -222,7 +222,7 @@ async fn permissions_checks_info_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = r#"{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }"#.to_string();
+	let check = r#"{ accesses: {  }, buckets: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }"#.to_string();
 
 	let test_cases = [
 		// Root level
@@ -282,7 +282,7 @@ async fn permissions_checks_info_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = "{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}} COMPATIBILITY 4' }, users: {  } }";
+	let check = "{ accesses: {  }, buckets: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}} COMPATIBILITY 4' }, users: {  } }";
 
 	let test_cases = [
 		// Root level
@@ -598,7 +598,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: {  }, users: {  } }"#.to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, buckets: {  }, databases: {  }, users: {  } }"#.to_string();
 		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,
@@ -621,7 +621,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: {  }, users: {  } }"#
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, buckets: {  }, databases: {  }, users: {  } }"#
 				.to_string();
 		let out_str = out.unwrap().to_sql();
 		assert_eq!(
@@ -695,7 +695,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#
+			r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'access' }], buckets: [], databases: [], users: [] }"#
 				.to_string();
 		let out_str = out.unwrap().to_sql();
 		assert_eq!(
@@ -719,7 +719,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'PS512', key: '[REDACTED]' }, verify: { alg: 'PS512', key: 'public' } }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#
+			r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'PS512', key: '[REDACTED]' }, verify: { alg: 'PS512', key: 'public' } }, kind: 'JWT' }, name: 'access' }], buckets: [], databases: [], users: [] }"#
 				.to_string();
 		let out_str = out.unwrap().to_sql();
 		assert_eq!(

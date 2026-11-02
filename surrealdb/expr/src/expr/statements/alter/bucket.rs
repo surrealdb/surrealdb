@@ -3,11 +3,13 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
 use crate::expr::permission::Permission;
-use crate::expr::{CoverStmts, Expr, Literal};
+use crate::expr::{Base, CoverStmts, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AlterBucketStatement {
 	pub name: Expr,
+	/// The level the bucket lives at; `DATABASE` when the statement names none.
+	pub base: Base,
 	pub if_exists: bool,
 	pub backend: AlterKind<String>,
 	pub permissions: Option<Permission>,
@@ -24,6 +26,7 @@ impl Default for AlterBucketStatement {
 	fn default() -> Self {
 		Self {
 			name: Expr::Literal(Literal::None),
+			base: Base::Db,
 			if_exists: false,
 			backend: AlterKind::None,
 			permissions: None,
@@ -41,6 +44,9 @@ impl ToSql for AlterBucketStatement {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
 		write_sql!(f, fmt, " {}", CoverStmts(&self.name));
+		if self.base != Base::Db {
+			write_sql!(f, fmt, " ON {}", self.base);
+		}
 
 		match self.readonly {
 			AlterKind::Set(_) => write_sql!(f, fmt, " READONLY"),

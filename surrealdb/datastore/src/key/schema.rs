@@ -168,6 +168,9 @@ keyspace! {
 		/// Root-level configuration, keyed by kind.
 		root_config = ["!cg", @, ty: Str] => surrealdb_catalog::StoredConfigDefinition;
 
+		/// A root-level bucket definition.
+		root_bucket = ["!bu", @, bu: Str] => surrealdb_catalog::StoredBucketDefinition;
+
 		/// A lease over one of the singleton background tasks.
 		task_lease = ["!tl", @, task_id: TaskLeaseType] => surrealdb_catalog::TaskLease;
 
@@ -289,6 +292,9 @@ keyspace! {
 
 			/// A namespace-level access method definition.
 			ns_access_method = ["!ac", @, ac: Str] => surrealdb_catalog::StoredAccessDefinition;
+
+			/// A namespace-level bucket definition.
+			ns_bucket = ["!bu", @, bu: Str] => surrealdb_catalog::StoredBucketDefinition;
 
 			/// The database id allocator's reserved batch and its state.
 			db_id_batch = ["!dh", @, start: i64] => crate::sequences::BatchValue;

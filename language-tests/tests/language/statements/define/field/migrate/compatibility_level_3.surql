@@ -73,10 +73,10 @@ value = "3"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, databases: { test: 'DEFINE DATABASE test COMPATIBILITY 3' }, users: {  } }"
+value = "{ accesses: {  }, buckets: {  }, databases: { test: 'DEFINE DATABASE test COMPATIBILITY 3' }, users: {  } }"
 
 [[test.results]]
-value = "{ accesses: [], databases: [{ compatibility: 3, id: 0, name: 'test' }], users: [] }"
+value = "{ accesses: [], buckets: [], databases: [{ compatibility: 3, id: 0, name: 'test' }], users: [] }"
 */
 DEFINE TABLE p SCHEMAFULL;
 DEFINE FIELD a ON p TYPE string;

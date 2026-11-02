@@ -2055,12 +2055,14 @@ pub(crate) enum StoreInstr {
 		db: Reg,
 		module: Reg,
 	},
-	/// Register the storage backend of the bucket defined in `bucket`, of the
-	/// database in `ns`/`db`, with the process's buckets; raise when the
-	/// datastore runs without them.
+	/// Register the storage backend of the bucket defined in `bucket`, at the
+	/// level `ns`/`db` name (neither: the root; `ns` alone: that namespace),
+	/// with the process's buckets; raise when the datastore runs without them,
+	/// and when a principal below the root gives the bucket a `global://`
+	/// backend.
 	ConnectBucket {
-		ns: Reg,
-		db: Reg,
+		ns: Option<Reg>,
+		db: Option<Reg>,
 		bucket: Reg,
 	},
 	/// Refuse the value in `value` when it nests deeper than a value may be
@@ -2395,7 +2397,12 @@ pub(crate) enum Definitions {
 	Access,
 	Api,
 	Analyzer,
+	/// A database's buckets.
 	Bucket,
+	/// The root's buckets.
+	RootBucket,
+	/// A namespace's buckets.
+	NsBucket,
 	Function,
 	/// Extensions, keyed by the name SurrealQL calls them by (`ext::name`).
 	Extension,
@@ -2918,6 +2925,7 @@ impl FieldRefusal {
 				..
 			}
 			| E::ExtensionNeedsTrust
+			| E::BucketNeedsBackend
 			| E::TableTypeRelationOverRecord {
 				..
 			}
@@ -3376,6 +3384,9 @@ pub(crate) enum StatementError {
 	/// A `DEFINE EXTENSION` with neither `SIGNER` nor `UNSIGNED`, outside an
 	/// import; the argument is unused.
 	MdNeedsTrust,
+	/// A `DEFINE BUCKET` with no `BACKEND`, outside an import; the argument is
+	/// unused.
+	BuNeedsBackend,
 	/// A method an API defines in more than one `FOR` clause; the argument is
 	/// an object of the API's `value` (its path as given) and the `method`.
 	ApMethodDuplicate,

@@ -57,11 +57,12 @@ use crate::key::schema::{
 	LayoutKey, LayoutPrefix, MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey,
 	NamespacePrefix, NodeEventQueueKey, NodeKey, NodeLiveQueryKey, NodePrefix, NodeReleaseKey,
 	NodeReleasePrefix, NodeStatePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessPrefix,
-	NsGrantKey, NsPrefix, NsRoot, NsUserKey, NsUserPrefix, ParamKey, ParamPrefix,
-	RootAccessMethodKey, RootAccessMethodPrefix, RootAccessPrefix, RootConfigKey, RootConfigPrefix,
-	RootGrantKey, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionKey,
-	SubscriptionPrefix, TableConformanceKey, TableKey, TableMigrationsKey, TablePrefix,
-	TaskLeaseKey, TaskLeasePrefix, TblPrefix, TblRoot, ViewStateKey, ViewStatePrefix,
+	NsBucketKey, NsBucketPrefix, NsGrantKey, NsPrefix, NsRoot, NsUserKey, NsUserPrefix, ParamKey,
+	ParamPrefix, RootAccessMethodKey, RootAccessMethodPrefix, RootAccessPrefix, RootBucketKey,
+	RootBucketPrefix, RootConfigKey, RootConfigPrefix, RootGrantKey, RootUserKey, RootUserPrefix,
+	SequenceKey, SequencePrefix, SubscriptionKey, SubscriptionPrefix, TableConformanceKey,
+	TableKey, TableMigrationsKey, TablePrefix, TaskLeaseKey, TaskLeasePrefix, TblPrefix, TblRoot,
+	ViewStateKey, ViewStatePrefix,
 };
 use crate::key::{
 	AnyRange, KVKeyDecode, KVSubspace, KVValue, Key, RawRange, Resumable, TypedRange,
@@ -643,6 +644,15 @@ impl Audit {
 			|_| {},
 		)
 		.await?;
+		self.family(
+			txn,
+			RootBucketPrefix {}.range()?,
+			false,
+			&scope,
+			namer!(RootBucketKey, k => k.bu.into_owned()),
+			|_| {},
+		)
+		.await?;
 		// Every key under an access method is a grant: the band is walked whole, so a grant whose
 		// access method is missing or malformed is still judged.
 		self.family(
@@ -737,6 +747,18 @@ impl Audit {
 			false,
 			&scope,
 			namer!(NsAccessMethodKey, k => k.ac.into_owned()),
+			|_| {},
+		)
+		.await?;
+		self.family(
+			txn,
+			NsBucketPrefix {
+				ns,
+			}
+			.range()?,
+			false,
+			&scope,
+			namer!(NsBucketKey, k => k.bu.into_owned()),
 			|_| {},
 		)
 		.await?;

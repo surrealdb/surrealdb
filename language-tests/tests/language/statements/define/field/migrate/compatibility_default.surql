@@ -16,7 +16,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, databases: { later: 'DEFINE DATABASE later COMPATIBILITY 3', pinned: 'DEFINE DATABASE pinned COMPATIBILITY 4', test: 'DEFINE DATABASE test COMPATIBILITY 4' }, users: {  } }"
+value = "{ accesses: {  }, buckets: {  }, databases: { later: 'DEFINE DATABASE later COMPATIBILITY 3', pinned: 'DEFINE DATABASE pinned COMPATIBILITY 4', test: 'DEFINE DATABASE test COMPATIBILITY 4' }, users: {  } }"
 
 [[test.results]]
 value = "NONE"
@@ -28,7 +28,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, databases: { later: 'DEFINE DATABASE later COMPATIBILITY 3', latest: 'DEFINE DATABASE latest COMPATIBILITY 4', pinned: 'DEFINE DATABASE pinned COMPATIBILITY 4', test: 'DEFINE DATABASE test COMPATIBILITY 4' }, users: {  } }"
+value = "{ accesses: {  }, buckets: {  }, databases: { later: 'DEFINE DATABASE later COMPATIBILITY 3', latest: 'DEFINE DATABASE latest COMPATIBILITY 4', pinned: 'DEFINE DATABASE pinned COMPATIBILITY 4', test: 'DEFINE DATABASE test COMPATIBILITY 4' }, users: {  } }"
 */
 ALTER SYSTEM COMPATIBILITY 3;
 DEFINE DATABASE later;

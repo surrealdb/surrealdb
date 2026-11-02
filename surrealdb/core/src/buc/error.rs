@@ -112,6 +112,10 @@ pub(crate) enum Error {
 	#[error("Bucket is unavailable")]
 	GlobalBucketEnforced,
 
+	/// A `global://` backend was given by a principal below the root
+	#[error("Only a root user can give a bucket a `global://` backend")]
+	GlobalBackendNeedsRoot,
+
 	/// The `BACKEND` url or bucket name could not be parsed, or names an unusable location
 	#[error("Bucket url could not be processed: {0}")]
 	InvalidBucketUrl(String),
@@ -155,6 +159,9 @@ impl LeafError for Error {
 			Error::ContentTypeUnsupported(_) => TypesError::validation(message, None),
 			// An unusable credential, not bad input.
 			Error::PresignBadSignature => TypesError::not_allowed(message, None),
+			// The principal may define buckets, but not over the whole global
+			// bucket, which holds every namespace's objects.
+			Error::GlobalBackendNeedsRoot => TypesError::not_allowed(message, None),
 			// The node is missing a signing secret. Nothing the caller can fix, and
 			// nothing broken — it was started that way.
 			Error::PresignNoSecret => TypesError::configuration(message, None),

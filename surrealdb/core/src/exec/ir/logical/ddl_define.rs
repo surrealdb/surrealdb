@@ -866,9 +866,10 @@ pub(super) fn plan_define<'e>(
 			};
 			(
 				DdlForm::DefineBucket,
-				(EDIT, ResourceKind::Bucket, Base::Db),
+				(EDIT, ResourceKind::Bucket, stmt.base),
 				DefineObject::Bucket {
 					name,
+					base: stmt.base,
 					backend,
 					permissions,
 					readonly: stmt.readonly,

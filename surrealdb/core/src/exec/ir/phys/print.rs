@@ -1815,7 +1815,7 @@ text_enum!(RemoveObject {
 		User { name: u16, base: Base },
 		Model { name: Strand, version: Strand },
 		Api { name: u16 },
-		Bucket { name: u16 },
+		Bucket { name: u16, base: Base },
 		Sequence { name: u16 },
 		Module { name: ModuleName },
 		Config { kind: ConfigKind }

@@ -754,9 +754,10 @@ pub(super) fn plan_alter<'e>(
 			));
 			(
 				DdlForm::AlterBucket,
-				(EDIT, ResourceKind::Bucket, Base::Db),
+				(EDIT, ResourceKind::Bucket, stmt.base),
 				AlterObject::Bucket {
 					name,
+					base: stmt.base,
 					backend: stmt.backend.clone(),
 					permissions,
 					readonly: stmt.readonly.clone(),

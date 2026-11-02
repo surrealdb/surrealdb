@@ -2214,10 +2214,12 @@ d467312297aad75c language-tests/tests/language/primitive/duration/truthiness.sur
 664842bb559d2285 language-tests/tests/language/primitive/files/basic_functions.surql
 5a00db9834b4c25c language-tests/tests/language/primitive/files/basic_methods.surql
 c4dcd42342a3aac9 language-tests/tests/language/primitive/files/binary.surql
+d253f9bd895020df language-tests/tests/language/primitive/files/bucket_levels.surql
 2eb2b42d36238dcf language-tests/tests/language/primitive/files/content_type.surql
 66e91f98915baade language-tests/tests/language/primitive/files/copy_across_buckets.surql
 f86dc07ba5002815 language-tests/tests/language/primitive/files/edge_cases.surql
 7c366dbbfb6a37f9 language-tests/tests/language/primitive/files/errors.surql
+e657a74627ca192b language-tests/tests/language/primitive/files/global_backend.surql
 ae2680617f3535cd language-tests/tests/language/primitive/files/info.surql
 019493dfc64694a8 language-tests/tests/language/primitive/files/list.surql
 475dccc7dd83f0e7 language-tests/tests/language/primitive/files/list_edge_cases.surql

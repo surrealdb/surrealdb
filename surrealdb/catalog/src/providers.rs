@@ -992,32 +992,32 @@ pub trait ApiProvider: Sync {
 }
 
 pub trait BucketProvider: Sync {
-	/// Retrieve all bucket definitions for a specific database.
-	fn all_db_buckets(
+	/// Retrieve all bucket definitions at a level, as stored: a database bucket
+	/// stored with no backend is listed with none.
+	fn all_buckets(
 		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
+		level: catalog::BucketLevel,
 		version: Option<u64>,
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::BucketDefinition]>>>;
 
-	/// Retrieve a specific bucket definition.
-	fn get_db_bucket<'a>(
+	/// Retrieve a specific bucket definition at a level, with the backend it is
+	/// served from: a database bucket stored with none is given its path in the
+	/// global bucket.
+	fn get_bucket<'a>(
 		&'a self,
-		ns: NamespaceId,
-		db: DatabaseId,
+		level: catalog::BucketLevel,
 		bu: &'a str,
 		version: Option<u64>,
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::BucketDefinition>>>>;
 
 	/// Retrieve a specific bucket definition returning an error if it does not exist.
-	fn expect_db_bucket<'a>(
+	fn expect_bucket<'a>(
 		&'a self,
-		ns: NamespaceId,
-		db: DatabaseId,
+		level: catalog::BucketLevel,
 		bu: &'a str,
 	) -> BoxProviderFut<'a, Result<Arc<catalog::BucketDefinition>>> {
 		Box::pin(async move {
-			match self.get_db_bucket(ns, db, bu, None).await? {
+			match self.get_bucket(level, bu, None).await? {
 				Some(val) => Ok(val),
 				None => anyhow::bail!(Error::BuNotFound {
 					name: bu.to_owned(),

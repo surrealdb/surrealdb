@@ -385,6 +385,16 @@ impl<'a> Lower<'a> {
 		}
 	}
 
+	/// The `ON` base of a bucket statement, whose clause is optional: `DATABASE`
+	/// when absent.
+	fn bucket_base(code: u32) -> Base {
+		if code == NONE {
+			Base::Db
+		} else {
+			Self::base(code)
+		}
+	}
+
 	/// Lowers the expression at `id`.
 	///
 	/// Values, blocks and operators lower in a function of their own, so each

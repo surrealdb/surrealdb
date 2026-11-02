@@ -46,6 +46,7 @@ fn accept_payload(value: Value) -> Result<bytes::Bytes> {
 /// Helper struct for bucket operations without needing the full BucketController.
 struct StreamingBucketOps<'a> {
 	bucket: Arc<BucketDefinition>,
+	level: crate::catalog::BucketLevel,
 	store: Arc<dyn ObjectStore>,
 	frozen_ctx: &'a crate::ctx::FrozenContext,
 	exec_ctx: &'a ExecutionContext,
@@ -72,20 +73,21 @@ impl<'a> StreamingBucketOps<'a> {
 			EngineError::Internal("No options available for file operation".to_string())
 		})?;
 
-		// Get namespace and database IDs from the Options
-		let (ns_id, db_id) = frozen_ctx.expect_ns_db_ids(opt).await?;
+		// The level of the session's buckets: its database, its namespace or the root
+		let level = frozen_ctx.expect_bucket_level(opt).await?;
 
 		// Get bucket definition and store
 		let txn = ctx.txn();
 		let (bucket, store) = crate::exec::vm::descriptor::object(async {
-			let bucket = txn.expect_db_bucket(ns_id, db_id, bucket_name).await?;
-			let store = frozen_ctx.get_bucket_store(ns_id, db_id, bucket_name).await?;
+			let bucket = txn.expect_bucket(level, bucket_name).await?;
+			let store = frozen_ctx.get_bucket_store(level, bucket_name).await?;
 			anyhow::Ok((bucket, store))
 		})
 		.await?;
 
 		Ok(Self {
 			bucket,
+			level,
 			store,
 			frozen_ctx,
 			exec_ctx: ctx.exec_ctx,
@@ -249,11 +251,13 @@ impl<'a> StreamingBucketOps<'a> {
 		// Permissions are checked only when the execution context and options require it.
 		if !self.skip_fetch_perms
 			&& self.exec_ctx.should_check_perms(op.into())?
-			&& self.frozen_ctx.check_perms(self.opt, op.into())?
+			&& self.frozen_ctx.check_bucket_perms(self.opt, op.into(), self.level)?
 		{
-			// Guest and Record users are not allowed to list files in buckets
+			// Guest and Record users are not allowed to list files in buckets,
+			// and reach no bucket above a database: its clause admits only the
+			// principals of the level it is defined at.
 			ensure!(
-				!op.is_list(),
+				!op.is_list() && matches!(self.level, crate::catalog::BucketLevel::Db(..)),
 				BucError::BucketPermissions {
 					name: self.bucket.name.to_string(),
 					op,

@@ -688,6 +688,7 @@ impl Lower<'_> {
 				let mut s = DefineBucketStatement {
 					name: name()?,
 					kind,
+					base: Self::bucket_base(rec[define::ON]),
 					..Default::default()
 				};
 				for c in clauses {
@@ -1368,6 +1369,7 @@ impl Lower<'_> {
 			}),
 			x if x == K::Bucket as u8 => RemoveStatement::Bucket(RemoveBucketStatement {
 				name: name()?,
+				base: Self::bucket_base(rec[rm::ON]),
 				if_exists,
 			}),
 			_ => RemoveStatement::Config(RemoveConfigStatement {
@@ -1779,6 +1781,7 @@ impl Lower<'_> {
 			x if x == K::Bucket as u8 => {
 				let mut s = AlterBucketStatement {
 					name: name()?,
+					base: Self::bucket_base(rec[2]),
 					if_exists,
 					..Default::default()
 				};

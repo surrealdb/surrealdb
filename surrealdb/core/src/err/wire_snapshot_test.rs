@@ -601,6 +601,7 @@ fn every_buc_variant() -> Vec<(&'static str, BucError)> {
 		("NoGlobalBucket", BucError::NoGlobalBucket),
 		("BucketUnavailable", BucError::BucketUnavailable("sample".to_string())),
 		("GlobalBucketEnforced", BucError::GlobalBucketEnforced),
+		("GlobalBackendNeedsRoot", BucError::GlobalBackendNeedsRoot),
 		("InvalidBucketUrl", BucError::InvalidBucketUrl("sample".to_string())),
 		("UnsupportedBackend", BucError::UnsupportedBackend),
 		("ReadonlyBucket", BucError::ReadonlyBucket("sample".to_string())),
@@ -1460,6 +1461,7 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 			},
 		),
 		("ExtensionNeedsTrust", ExecError::ExtensionNeedsTrust),
+		("BucketNeedsBackend", ExecError::BucketNeedsBackend),
 		(
 			"IdComponentNameUnsupported",
 			ExecError::IdComponentNameUnsupported {

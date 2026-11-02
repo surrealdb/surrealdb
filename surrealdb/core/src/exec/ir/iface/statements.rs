@@ -569,6 +569,8 @@ pub(crate) enum DefineObject {
 	Api(Box<DefineApi>),
 	Bucket {
 		name: OperandSlot,
+		/// The level the bucket lives at.
+		base: Base,
 		backend: Option<OperandSlot>,
 		permissions: PermissionShape,
 		readonly: bool,
@@ -733,6 +735,8 @@ pub(crate) enum RemoveObject {
 	},
 	Bucket {
 		name: OperandSlot,
+		/// The level the bucket lives at.
+		base: Base,
 	},
 	Sequence {
 		name: OperandSlot,
@@ -810,6 +814,8 @@ pub(crate) enum AlterObject {
 	},
 	Bucket {
 		name: OperandSlot,
+		/// The level the bucket lives at.
+		base: Base,
 		backend: AlterKind<String>,
 		permissions: Option<PermissionShape>,
 		readonly: AlterKind<()>,

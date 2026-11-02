@@ -296,7 +296,7 @@ async fn export_metadata(
 
 	// Output BUCKETS
 	if cfg.buckets {
-		let buckets = tx.all_db_buckets(ns, db, None).await?;
+		let buckets = tx.all_buckets(crate::catalog::BucketLevel::Db(ns, db), None).await?;
 		export_section("BUCKETS", buckets.iter(), chn).await?;
 	}
 

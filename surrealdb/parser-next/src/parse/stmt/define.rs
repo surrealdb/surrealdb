@@ -289,6 +289,9 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			DefineKind::Bucket => {
 				rec[define::NAME] = self.expr(true)?;
+				if self.eat_kw(Kw::On) {
+					rec[define::ON] = self.base()?;
+				}
 				loop {
 					if self.tok.kw == Kw::Backend {
 						self.expr_clause(Cl::Backend)?;

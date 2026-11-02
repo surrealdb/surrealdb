@@ -1164,6 +1164,11 @@ async fn step_inner(
 						crate::exec::Error::ExtensionNeedsTrust,
 					)));
 				}
+				StatementError::BuNeedsBackend => {
+					return Err(ControlFlow::Err(anyhow::Error::new(
+						crate::exec::Error::BucketNeedsBackend,
+					)));
+				}
 				StatementError::ComputedFieldCannotBeIndexed => {
 					let detail = read(regs, *arg);
 					return Err(ControlFlow::Err(anyhow::Error::new(
@@ -1303,7 +1308,8 @@ async fn step_inner(
 						| StatementError::BuNotFound
 						| StatementError::MdNotFound
 						| StatementError::MlNotFound
-						| StatementError::MdNeedsTrust => unreachable!(),
+						| StatementError::MdNeedsTrust
+						| StatementError::BuNeedsBackend => unreachable!(),
 					};
 					return Err(ControlFlow::Err(anyhow::Error::new(err)));
 				}
@@ -1432,6 +1438,7 @@ async fn step_inner(
 					name,
 				},
 				StatementError::MdNeedsTrust
+				| StatementError::BuNeedsBackend
 				| StatementError::ComputedFieldCannotBeIndexed
 				| StatementError::ApMethodDuplicate
 				| StatementError::AzInUse
@@ -2956,18 +2963,69 @@ async fn step_inner(
 					crate::buc::Error::BucketUnavailable(bucket.name.as_str().to_owned()),
 				)));
 			};
-			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
-			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
+			let ns = match ns {
+				Some(ns) => Some(crate::catalog::NamespaceId(id_of(&read(regs, *ns))?)),
+				None => None,
+			};
+			let db = match db {
+				Some(db) => Some(crate::catalog::DatabaseId(id_of(&read(regs, *db))?)),
+				None => None,
+			};
+			let level = match (ns, db) {
+				(Some(ns), Some(db)) => crate::catalog::BucketLevel::Db(ns, db),
+				(Some(ns), None) => crate::catalog::BucketLevel::Ns(ns),
+				_ => crate::catalog::BucketLevel::Root,
+			};
+			let backend = match (&bucket.backend, level) {
+				(Some(backend), _) => {
+					// The global bucket holds every namespace's objects, so only a
+					// principal who may edit buckets at the root names a path in it.
+					if crate::buc::manager::is_global_backend(backend.as_str()) {
+						let opt = ctx.options().ok_or_else(|| {
+							ControlFlow::Err(anyhow!("a bucket definition outside a statement"))
+						})?;
+						ctx.ctx()
+							.is_allowed(
+								opt,
+								crate::iam::Action::Edit,
+								crate::iam::ResourceKind::Bucket,
+								crate::expr::Base::Root,
+							)
+							.map_err(|_| {
+								ControlFlow::Err(anyhow::Error::new(
+									crate::buc::Error::GlobalBackendNeedsRoot,
+								))
+							})?;
+					}
+					backend.as_str().to_owned()
+				}
+				// Only an import stores a bucket with no backend: a database
+				// bucket, served where the catalog reads it from.
+				(None, crate::catalog::BucketLevel::Db(ns, db)) => {
+					crate::catalog::BucketDefinition::legacy_global_backend(
+						ns,
+						db,
+						bucket.name.as_str(),
+					)
+				}
+				(None, _) => {
+					return Err(ControlFlow::Err(anyhow::Error::new(
+						crate::exec::Error::BucketNeedsBackend,
+					)));
+				}
+			};
 			buckets
-				.new_backend(
-					ns,
-					db,
-					bucket.name.as_str(),
-					bucket.readonly,
-					bucket.backend.as_ref().map(|b| b.as_str()),
-				)
+				.new_backend(level, bucket.name.as_str(), bucket.readonly, &backend)
 				.await
 				.map_err(ControlFlow::Err)?;
+			ctx.txn()
+				.on_commit(buckets.evict_on_commit(
+					level,
+					bucket.name.as_str(),
+					&backend,
+					bucket.readonly,
+				))
+				.await;
 		}
 		StoreInstr::CheckDepth {
 			value,

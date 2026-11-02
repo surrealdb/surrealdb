@@ -142,6 +142,7 @@ Presign	{ cause: NONE, code: -32000, kind: 'Validation', message: 'sample' }
 NoGlobalBucket	{ cause: NONE, code: -32000, kind: 'Internal', message: 'No global bucket has been configured' }
 BucketUnavailable	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket `sample` is unavailable' }
 GlobalBucketEnforced	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket is unavailable' }
+GlobalBackendNeedsRoot	{ cause: NONE, code: -32000, kind: 'NotAllowed', message: 'Only a root user can give a bucket a `global://` backend' }
 InvalidBucketUrl	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket url could not be processed: sample' }
 UnsupportedBackend	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket backend is not supported' }
 ReadonlyBucket	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Write operation is not supported, as bucket `sample` is in read-only mode' }
@@ -320,6 +321,7 @@ ComputedFieldReadByView	{ cause: NONE, code: -32600, details: { kind: 'InvalidRe
 ComputedFieldReadByViewUnresolved	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot change the value the computed field `city` of `sale` derives: the aggregated view `by_city` may depend on it, through a read of fields of the record by names that cannot be determined, and `sale` holds records the view has already grouped by the value derived before. Remove `by_city`, change the field, then define `by_city` again' }
 IdComponentUnsupportedKind	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'The record id component `value` of `reading` cannot have the type `float`: only string, int, datetime, uuid, duration, bool and record components keep their order in storage' }
 ExtensionNeedsTrust	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'DEFINE EXTENSION needs SIGNER {…} or UNSIGNED' }
+BucketNeedsBackend	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'DEFINE BUCKET needs a BACKEND, such as BACKEND "global://" for the global bucket' }
 IdComponentNameUnsupported	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot name the record id component `the city` of `reading`: a component name must be a plain identifier of ASCII letters, digits and underscores that does not start with a digit and is not NaN or Infinity' }
 IdComponentsOnRelation	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot name the parts of the record id of `edge`: it is a relation table' }
 IdComponentsOnView	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot name the parts of the record id of `v`: it is a view' }

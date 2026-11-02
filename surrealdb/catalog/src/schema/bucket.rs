@@ -64,7 +64,41 @@ pub struct StoredBucketDefinition {
 }
 impl_kv_value_catalog!(StoredBucketDefinition);
 
+/// The level a bucket definition lives at, and the ids that locate it there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BucketLevel {
+	Root,
+	Ns(crate::catalog::NamespaceId),
+	Db(crate::catalog::NamespaceId, crate::catalog::DatabaseId),
+}
+
 impl BucketDefinition {
+	/// Gives a database bucket stored with no backend the backend it is served
+	/// from: the global bucket, under `/{ns}/{db}/{bu}`. `DEFINE BUCKET` stores a
+	/// backend for every bucket it writes outside an import; a bucket stored with
+	/// none reads as this explicit `global://` path, so its objects stay where
+	/// they were written.
+	pub fn with_stored_backend(
+		mut self,
+		ns: crate::catalog::NamespaceId,
+		db: crate::catalog::DatabaseId,
+	) -> Self {
+		if self.backend.is_none() {
+			self.backend = Some(Strand::new(Self::legacy_global_backend(ns, db, &self.name)));
+		}
+		self
+	}
+
+	/// The backend of database bucket `bu` stored with none: its path in the
+	/// global bucket.
+	pub fn legacy_global_backend(
+		ns: crate::catalog::NamespaceId,
+		db: crate::catalog::DatabaseId,
+		bu: &str,
+	) -> String {
+		format!("global://{ns}/{db}/{bu}")
+	}
+
 	/// Redacts inline credentials embedded in the bucket backend URL so that
 	/// `INFO FOR DB` and `EXPORT` do not expose secret keys, tokens, or passwords.
 	pub fn redacted(mut self) -> Self {
@@ -76,11 +110,13 @@ impl BucketDefinition {
 		self
 	}
 
-	fn to_runtime_definition(&self) -> DefineBucketStatement {
+	/// The redacted `DEFINE BUCKET` statement that defines this bucket at `base`.
+	pub fn to_runtime_definition_on(&self, base: runtime::Base) -> DefineBucketStatement {
 		let redacted = self.clone().redacted();
 		DefineBucketStatement {
 			kind: DefineKind::Default,
 			name: runtime::Expr::Idiom(runtime::Idiom::field(redacted.name)),
+			base,
 			backend: redacted.backend.map(|v| runtime::Expr::Literal(runtime::Literal::String(v))),
 			permissions: redacted.permissions,
 			readonly: redacted.readonly,
@@ -204,7 +240,7 @@ impl InfoStructure for BucketDefinition {
 
 impl ToSql for BucketDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_runtime_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition_on(runtime::Base::Db).fmt_sql(f, fmt)
 	}
 }
 

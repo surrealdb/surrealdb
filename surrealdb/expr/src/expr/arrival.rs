@@ -912,6 +912,7 @@ impl Visitor for ArrivalVisitor {
 		} []
 		visit_alter_bucket(AlterBucketStatement) {
 			name: _,
+			base: _,
 			if_exists: _,
 			backend: _,
 			permissions: _,
@@ -1010,7 +1011,7 @@ impl Visitor for ArrivalVisitor {
 		visit_remove_user(RemoveUserStatement) { name: _, base: _, if_exists: _ } []
 		visit_remove_model(RemoveModelStatement) { name: _, version: _, if_exists: _ } []
 		visit_remove_api(RemoveApiStatement) { name: _, if_exists: _ } []
-		visit_remove_bucket(RemoveBucketStatement) { name: _, if_exists: _ } []
+		visit_remove_bucket(RemoveBucketStatement) { name: _, base: _, if_exists: _ } []
 		visit_remove_sequence(RemoveSequenceStatement) { name: _, if_exists: _ } []
 		visit_relate(RelateStatement) {
 			only: _,
@@ -1053,6 +1054,7 @@ impl Visitor for ArrivalVisitor {
 		visit_define_bucket(DefineBucketStatement) {
 			kind: _,
 			name: _,
+			base: _,
 			backend: _,
 			permissions: _,
 			readonly: _,

@@ -170,7 +170,8 @@ pub(crate) async fn fetch_archive(
 			bucket,
 			key,
 		} => {
-			let store = ctx.get_bucket_store(ns, db, bucket).await?;
+			let store =
+				ctx.get_bucket_store(crate::catalog::BucketLevel::Db(ns, db), bucket).await?;
 			let key = crate::buc::store::ObjectKey::new(key);
 			match store.get(&key).await.map_err(|e| anyhow::anyhow!("failed to get file: {e}"))? {
 				Some(archive) => Ok(archive),

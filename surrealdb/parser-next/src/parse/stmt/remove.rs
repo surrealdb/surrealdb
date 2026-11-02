@@ -126,9 +126,14 @@ impl<'a, 's> Parser<'a, 's> {
 			| DefineKind::Table
 			| DefineKind::Api
 			| DefineKind::Analyzer
-			| DefineKind::Bucket
 			| DefineKind::Sequence => {
 				rec[remove::NAME] = self.expr(true)?;
+			}
+			DefineKind::Bucket => {
+				rec[remove::NAME] = self.expr(true)?;
+				if self.eat_kw(Kw::On) {
+					rec[remove::ON] = self.base()?;
+				}
 			}
 		}
 		rec[remove::FLAGS] = flags;

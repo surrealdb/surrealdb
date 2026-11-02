@@ -180,6 +180,7 @@ impl<'a, 's> Parser<'a, 's> {
 		const ACCESS: u8 = DefineKind::Access as u8;
 		const CONFIG: u8 = DefineKind::Config as u8;
 		const MODULE: u8 = DefineKind::Module as u8;
+		const BUCKET: u8 = DefineKind::Bucket as u8;
 		match kind {
 			TABLE => rec[1] = self.expr(false)?,
 			EVENT | INDEX | FIELD => {
@@ -197,6 +198,12 @@ impl<'a, 's> Parser<'a, 's> {
 				rec[1] = self.expr(true)?;
 				self.expect_kw(Kw::On, "ON")?;
 				rec[2] = self.base()?;
+			}
+			BUCKET => {
+				rec[1] = self.expr(true)?;
+				if self.eat_kw(Kw::On) {
+					rec[2] = self.base()?;
+				}
 			}
 			CONFIG => {
 				let c = self.tok;
@@ -356,12 +363,8 @@ impl<'a, 's> Parser<'a, 's> {
 						"`FLEXIBLE`, `TYPE`, `READONLY`, `INLINE`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, or `REFERENCE`",
 					),
 					x if x == k(D::Bucket) => (
-						&[
-							(Kw::Readonly, Cl::Readonly),
-							(Kw::Backend, Cl::Backend),
-							(Kw::Comment, Cl::Comment),
-						],
-						"`READONLY`, `BACKEND`, or `COMMENT`",
+						&[(Kw::Readonly, Cl::Readonly), (Kw::Comment, Cl::Comment)],
+						"`READONLY` or `COMMENT`",
 					),
 					x if x == k(D::Analyzer) => (
 						&[

@@ -1048,6 +1048,31 @@ impl Context {
 		Ok(opt.auth.is_allowed(action, &res).map_err(crate::err::Error::from)?)
 	}
 
+	/// Whether a caller acting on a bucket at `level` is judged by the bucket
+	/// rather than exempt by its role: [`Self::check_perms`] for a database's
+	/// bucket, and for a bucket at the root or the session's namespace the role
+	/// the caller holds at that level or above it.
+	pub(crate) fn check_bucket_perms(
+		&self,
+		opt: &Options,
+		action: Action,
+		level: crate::catalog::BucketLevel,
+	) -> Result<bool> {
+		let ns = match level {
+			crate::catalog::BucketLevel::Db(..) => return self.check_perms(opt, action),
+			crate::catalog::BucketLevel::Ns(_) => Some(opt.ns()?),
+			crate::catalog::BucketLevel::Root => None,
+		};
+		Ok(opt.perms
+			&& crate::exec::permission::action_is_checked(
+				self.auth_enabled,
+				&opt.auth,
+				action,
+				ns,
+				None,
+			))
+	}
+
 	/// Table-level permission check, which the options' `perms` flag gates.
 	pub fn check_perms(&self, opt: &Options, action: Action) -> Result<bool> {
 		if !opt.perms {
@@ -1139,6 +1164,23 @@ impl Context {
 		let db_def =
 			crate::exec::vm::descriptor::object(txn.ensure_ns_db(Some(self), ns, db)).await?;
 		Ok((db_def.namespace_id, db_def.database_id))
+	}
+
+	/// The level of the buckets the current context reaches: the session's
+	/// database when one is selected, else its namespace, else the root. A
+	/// selected namespace or database that does not exist is an error.
+	pub(crate) async fn expect_bucket_level(
+		&self,
+		opt: &Options,
+	) -> Result<crate::catalog::BucketLevel> {
+		if opt.db.is_some() {
+			let (ns, db) = self.expect_ns_db_ids(opt).await?;
+			Ok(crate::catalog::BucketLevel::Db(ns, db))
+		} else if opt.ns.is_some() {
+			Ok(crate::catalog::BucketLevel::Ns(self.expect_ns_id(opt).await?))
+		} else {
+			Ok(crate::catalog::BucketLevel::Root)
+		}
 	}
 
 	/// Get the namespace and database ids for the current context.
@@ -1960,13 +2002,12 @@ impl Context {
 	/// Obtain the connection for a bucket
 	pub(crate) async fn get_bucket_store(
 		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
+		level: crate::catalog::BucketLevel,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Do we have a buckets context?
 		if let Some(buckets) = &self.shared.buckets {
-			buckets.get_bucket_store(&self.tx(), ns, db, bu).await
+			buckets.get_bucket_store(&self.tx(), level, bu).await
 		} else {
 			bail!(BucError::BucketUnavailable(bu.into()))
 		}

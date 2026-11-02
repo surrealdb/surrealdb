@@ -764,6 +764,15 @@ impl InfoLowerer<'_, '_> {
 			None,
 			version,
 		)?;
+		self.part(
+			out,
+			"buckets",
+			("RootBucketPrefix", "StoredBucketDefinition", Definitions::RootBucket),
+			&[],
+			structured,
+			None,
+			version,
+		)?;
 		// The root's defaults are its `default` config's, whichever form.
 		let ty = self.constant(Value::String("default".into()))?;
 		let key = self.object(&[("ty", ty)])?;
@@ -957,8 +966,9 @@ impl InfoLowerer<'_, '_> {
 		let version = self.version(version)?;
 		let out = self.new_object()?;
 		let scope = [("ns", Operand::Reg(ns))];
-		let parts: [(&str, Part); 3] = [
+		let parts: [(&str, Part); 4] = [
 			("accesses", ("NsAccessMethodPrefix", "StoredAccessDefinition", Definitions::Access)),
+			("buckets", ("NsBucketPrefix", "StoredBucketDefinition", Definitions::NsBucket)),
 			("databases", ("DatabasePrefix", "DatabaseDefinition", Definitions::Database)),
 			("users", ("NsUserPrefix", "UserDefinition", Definitions::User)),
 		];
@@ -1484,12 +1494,23 @@ mod tests {
 		let root = info(InfoSubject::Root, false, |_| Vec::new());
 		assert_eq!(
 			renders(&root),
-			vec![Definitions::Access, Definitions::Namespace, Definitions::Node, Definitions::User]
+			vec![
+				Definitions::Access,
+				Definitions::RootBucket,
+				Definitions::Namespace,
+				Definitions::Node,
+				Definitions::User
+			]
 		);
 		let ns = info(InfoSubject::Ns, false, |_| Vec::new());
 		assert_eq!(
 			renders(&ns),
-			vec![Definitions::Access, Definitions::Database, Definitions::User]
+			vec![
+				Definitions::Access,
+				Definitions::NsBucket,
+				Definitions::Database,
+				Definitions::User
+			]
 		);
 		let db = info(InfoSubject::Db, false, |_| Vec::new());
 		assert_eq!(renders(&db).len(), 12);
@@ -1510,11 +1531,12 @@ mod tests {
 	fn a_version_reads_every_versioned_part_at_its_stamp_and_the_nodes_unversioned() {
 		let root = info(InfoSubject::Root, false, |b| vec![b.literal(Value::from(1_i64))]);
 		assert!(stores(&root).iter().any(|store| matches!(store, StoreInstr::VersionStamp { .. })));
-		// The accesses, the namespaces and the users are read at the stamp, the nodes are not.
-		assert_eq!(scans(&root), 4);
+		// The accesses, the buckets, the namespaces and the users are read at the stamp, the nodes
+		// are not.
+		assert_eq!(scans(&root), 5);
 		let at =
 			stores(&root).iter().filter(|store| matches!(store, StoreInstr::ScanAt { .. })).count();
-		assert_eq!(at, 3);
+		assert_eq!(at, 4);
 		let plain = info(InfoSubject::Root, false, |_| Vec::new());
 		assert!(!stores(&plain).iter().any(|store| matches!(
 			store,

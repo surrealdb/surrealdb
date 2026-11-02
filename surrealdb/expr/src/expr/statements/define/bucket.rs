@@ -2,12 +2,14 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::expr::permission::Permission;
-use crate::expr::{CoverStmts, Expr, Literal};
+use crate::expr::{Base, CoverStmts, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineBucketStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
+	/// The level the bucket lives at; `DATABASE` when the statement names none.
+	pub base: Base,
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
@@ -19,6 +21,7 @@ impl Default for DefineBucketStatement {
 		Self {
 			kind: DefineKind::Default,
 			name: Expr::Literal(Literal::None),
+			base: Base::Db,
 			backend: None,
 			permissions: Permission::default(),
 			readonly: false,
@@ -36,6 +39,9 @@ impl ToSql for DefineBucketStatement {
 			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
 		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
+		if self.base != Base::Db {
+			write_sql!(f, sql_fmt, " ON {}", self.base);
+		}
 
 		if self.readonly {
 			write_sql!(f, sql_fmt, " READONLY");

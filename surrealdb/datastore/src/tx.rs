@@ -85,13 +85,13 @@ use crate::key::schema::{
 	IndexDefPrefix, IndexNameKey, IndexShapesKey, IndexShapesTrackedKey, LayoutKey, LayoutPrefix,
 	LiveEventsKey, MigrationKey, MigrationRunKey, MigrationRunPrefix, MlModelKey, MlModelPrefix,
 	ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NodeReleaseKey,
-	NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey,
-	NsUserPrefix, ObjectVersionKey, ParamKey, ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey,
-	RecordPrefix, RootAccessMethodKey, RootAccessMethodPrefix, RootAccessRoot, RootConfigKey,
-	RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix,
-	StoreDefaultsKey, SubscriptionPrefix, TableConformanceKey, TableKey, TableMigrationKey,
-	TableMigrationRequestKey, TableMigrationRequestTbPrefix, TableMigrationsKey, TablePrefix,
-	TermChangeBatchKey, VersionKey,
+	NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsBucketKey, NsBucketPrefix, NsGrantKey,
+	NsGrantPrefix, NsUserKey, NsUserPrefix, ObjectVersionKey, ParamKey, ParamPrefix, ReclaimKey,
+	ReclaimTbPrefix, RecordKey, RecordPrefix, RootAccessMethodKey, RootAccessMethodPrefix,
+	RootAccessRoot, RootBucketKey, RootBucketPrefix, RootConfigKey, RootGrantKey, RootGrantPrefix,
+	RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, StoreDefaultsKey, SubscriptionPrefix,
+	TableConformanceKey, TableKey, TableMigrationKey, TableMigrationRequestKey,
+	TableMigrationRequestTbPrefix, TableMigrationsKey, TablePrefix, TermChangeBatchKey, VersionKey,
 };
 use crate::key::table_migration::{TableMigrationRequest, TableMigrationState, VerifiedField};
 use crate::layouts::LayoutSet;
@@ -15898,74 +15898,109 @@ impl ApiProvider for Transaction {
 // --------------------------------------------------
 
 impl BucketProvider for Transaction {
-	/// Retrieve all bucket definitions for a specific database.
-	fn all_db_buckets(
+	/// Retrieve all bucket definitions at a level.
+	fn all_buckets(
 		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
+		level: catalog::BucketLevel,
 		version: Option<u64>,
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::BucketDefinition]>>> {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				let qey = cache::tx::Lookup::Bus(ns, db);
+				let qey = match level {
+					catalog::BucketLevel::Root => cache::tx::Lookup::RootBus,
+					catalog::BucketLevel::Ns(ns) => cache::tx::Lookup::NsBus(ns),
+					catalog::BucketLevel::Db(ns, db) => cache::tx::Lookup::Bus(ns, db),
+				};
 				if version.is_none()
 					&& let Some(val) = self.cache.get(&qey)
 				{
 					return val.try_into_bus();
 				}
-				let range = BucketPrefix {
-					ns,
-					db,
-				}
-				.range()?;
+				let range = match level {
+					catalog::BucketLevel::Root => RootBucketPrefix {}.range()?,
+					catalog::BucketLevel::Ns(ns) => NsBucketPrefix {
+						ns,
+					}
+					.range()?,
+					catalog::BucketLevel::Db(ns, db) => BucketPrefix {
+						ns,
+						db,
+					}
+					.range()?,
+				};
 				let val = self.tr.getr(range.into_key_range(), version).await?;
 				let stored: Arc<[catalog::StoredBucketDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-				let val = catalog::from_stored_all(&stored)?;
+				// Listed as stored: an export renders a database bucket stored with no
+				// backend without one, so an import serves it from the destination's
+				// global prefix, as it was served from the source's.
+				let val: Arc<[catalog::BucketDefinition]> = catalog::from_stored_all(&stored)?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Bus(Arc::clone(&val));
 					self.cache.insert(qey, entry);
 				}
 				Ok(val)
 			}
-			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_buckets")),
+			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_buckets")),
 		)
 	}
 
-	/// Retrieve a specific bucket definition from a database.
-	fn get_db_bucket<'a>(
+	/// Retrieve a specific bucket definition at a level.
+	fn get_bucket<'a>(
 		&'a self,
-		ns: NamespaceId,
-		db: DatabaseId,
+		level: catalog::BucketLevel,
 		bu: &'a str,
 		version: Option<u64>,
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::BucketDefinition>>>> {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				let qey = cache::tx::Lookup::Bu(ns, db, bu);
+				let qey = match level {
+					catalog::BucketLevel::Root => cache::tx::Lookup::RootBu(bu),
+					catalog::BucketLevel::Ns(ns) => cache::tx::Lookup::NsBu(ns, bu),
+					catalog::BucketLevel::Db(ns, db) => cache::tx::Lookup::Bu(ns, db, bu),
+				};
 				if version.is_none()
 					&& let Some(val) = self.cache.get(&qey)
 				{
 					return val.try_into_type().map(Some);
 				}
-				let key = BucketKey {
-					ns,
-					db,
-					bu: Cow::Borrowed(bu),
+				let val = match level {
+					catalog::BucketLevel::Root => {
+						self.get_key(&RootBucketKey::new(Cow::Borrowed(bu)), version).await?
+					}
+					catalog::BucketLevel::Ns(ns) => {
+						let key = NsBucketKey {
+							ns,
+							bu: Cow::Borrowed(bu),
+						};
+						self.get_key(&key, version).await?
+					}
+					catalog::BucketLevel::Db(ns, db) => {
+						let key = BucketKey {
+							ns,
+							db,
+							bu: Cow::Borrowed(bu),
+						};
+						self.get_key(&key, version).await?
+					}
 				};
-				let Some(val) = self.get_key(&key, version).await? else {
+				let Some(val) = val else {
 					return Ok(None);
 				};
-				let bucket_def = Arc::new(catalog::BucketDefinition::from_stored(&val)?);
+				let bucket_def = catalog::BucketDefinition::from_stored(&val)?;
+				let bucket_def = Arc::new(match level {
+					catalog::BucketLevel::Db(ns, db) => bucket_def.with_stored_backend(ns, db),
+					catalog::BucketLevel::Root | catalog::BucketLevel::Ns(_) => bucket_def,
+				});
 				if version.is_none() {
 					let entr = cache::tx::Entry::Any(bucket_def.clone());
 					self.cache.insert(qey, entr);
 				}
 				Ok(Some(bucket_def))
 			}
-			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_bucket")),
+			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_bucket")),
 		)
 	}
 }

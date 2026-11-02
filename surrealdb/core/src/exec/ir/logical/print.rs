@@ -2649,6 +2649,7 @@ text_enum!(DefineObject {
 		},
 		Bucket {
 			name: u16,
+			base: Base,
 			backend: Option<u16>,
 			permissions: PermissionShape,
 			readonly: bool,
@@ -2675,7 +2676,7 @@ text_enum!(RemoveObject {
 		User { name: u16, base: Base },
 		Model { name: Strand, version: Strand },
 		Api { name: u16 },
-		Bucket { name: u16 },
+		Bucket { name: u16, base: Base },
 		Sequence { name: u16 },
 		Module { name: ModuleName },
 		Config { kind: ConfigKind }
@@ -2721,6 +2722,7 @@ text_enum!(AlterObject {
 		},
 		Bucket {
 			name: u16,
+			base: Base,
 			backend: AlterKind<String>,
 			permissions: Option<PermissionShape>,
 			readonly: AlterKind<()>,

@@ -467,8 +467,8 @@ async fn permissions_checks_remove_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, buckets: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, buckets: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -548,9 +548,10 @@ async fn permissions_checks_remove_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, databases: {  }, users: {  } }".to_string();
+	let check_success =
+		"{ accesses: {  }, buckets: {  }, databases: {  }, users: {  } }".to_string();
 	let check_error =
-		"{ accesses: {  }, databases: { DB: 'DEFINE DATABASE DB COMPATIBILITY 4' }, users: {  } }"
+		"{ accesses: {  }, buckets: {  }, databases: { DB: 'DEFINE DATABASE DB COMPATIBILITY 4' }, users: {  } }"
 			.to_string();
 
 	let test_cases = [
@@ -682,8 +683,8 @@ async fn permissions_checks_remove_root_access() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
-	let check_error = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }"#.to_string();
+	let check_success = "{ accesses: {  }, buckets: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_error = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, buckets: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }"#.to_string();
 
 	let test_cases = [
 		// Root level
@@ -767,9 +768,9 @@ async fn permissions_checks_remove_ns_access() {
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
 	let check_success =
-		"{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}} COMPATIBILITY 4' }, users: {  } }"
+		"{ accesses: {  }, buckets: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}} COMPATIBILITY 4' }, users: {  } }"
 			.to_string();
-	let check_error = "{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}} COMPATIBILITY 4' }, users: {  } }".to_string();
+	let check_error = "{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, buckets: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}} COMPATIBILITY 4' }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -894,8 +895,8 @@ async fn permissions_checks_remove_root_user() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
-	let check_error = r#"{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }"#.to_string();
+	let check_success = "{ accesses: {  }, buckets: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_error = r#"{ accesses: {  }, buckets: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_requested: 0, memory_usage: 0, physical_cores: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }"#.to_string();
 
 	let test_cases = [
 		// Root level
@@ -985,9 +986,9 @@ async fn permissions_checks_remove_ns_user() {
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
 	let check_success =
-		"{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}} COMPATIBILITY 4' }, users: {  } }"
+		"{ accesses: {  }, buckets: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}} COMPATIBILITY 4' }, users: {  } }"
 			.to_string();
-	let check_error = "{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}} COMPATIBILITY 4' }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }".to_string();
+	let check_error = "{ accesses: {  }, buckets: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}} COMPATIBILITY 4' }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }".to_string();
 
 	let test_cases = [
 		// Root level

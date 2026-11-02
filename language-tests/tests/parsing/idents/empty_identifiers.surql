@@ -27,7 +27,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''{ accesses: {  }, databases: { "": 'DEFINE DATABASE `` COMPATIBILITY 3' }, users: {  } }'''
+value = '''{ accesses: {  }, buckets: {  }, databases: { "": 'DEFINE DATABASE `` COMPATIBILITY 3' }, users: {  } }'''
 
 [[test.results]]
 value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 3, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { "": 'DEFINE TABLE `` TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' }, users: {  } }'''

@@ -2024,10 +2024,11 @@ impl Ddl<'_, '_> {
 			DefineObject::Api(api) => self.define_api(attrs, api),
 			DefineObject::Bucket {
 				name,
+				base,
 				backend,
 				comment,
 				..
-			} => self.define_bucket(attrs, *name, *backend, *comment),
+			} => self.define_bucket(attrs, *name, *base, *backend, *comment),
 			DefineObject::Sequence {
 				name,
 				batch,
@@ -2513,23 +2514,111 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
+	/// The key route of a bucket at `base`, and the ids of the namespace and database its key
+	/// lies under: none at the root, the session's namespace at `NAMESPACE`, its namespace and
+	/// database at `DATABASE`. With `creating`, a namespace or database that does not exist is
+	/// created; without, it must exist.
+	fn bucket_scope(
+		&mut self,
+		base: Base,
+		creating: bool,
+	) -> Result<(&'static str, Option<Reg>, Option<Reg>), IrError> {
+		Ok(match base {
+			Base::Root => ("RootBucketKey", None, None),
+			Base::Ns if creating => ("NsBucketKey", Some(self.namespace_id_creating()?), None),
+			Base::Ns => ("NsBucketKey", Some(self.session_ns_id()?), None),
+			Base::Db => {
+				let (ns, db) = if creating {
+					self.ids_creating()?
+				} else {
+					self.session_ids()?
+				};
+				("BucketKey", Some(ns), Some(db))
+			}
+		})
+	}
+
+	/// The key of bucket `bu` under the namespace and database [`Self::bucket_scope`] gave.
+	fn bucket_key(
+		&mut self,
+		ns: Option<Reg>,
+		db: Option<Reg>,
+		bu: Operand,
+	) -> Result<Reg, IrError> {
+		let mut fields = Vec::with_capacity(3);
+		if let Some(ns) = ns {
+			fields.push(("ns", Operand::Reg(ns)));
+		}
+		if let Some(db) = db {
+			fields.push(("db", Operand::Reg(db)));
+		}
+		fields.push(("bu", bu));
+		self.object(&fields)
+	}
+
+	/// The id of the session's namespace, which must exist: one that does not raises
+	/// `NsNotFound` naming it.
+	fn session_ns_id(&mut self) -> Result<Reg, IrError> {
+		let ns_name = self.reg()?;
+		self.store(StoreInstr::SessionNs {
+			dst: ns_name,
+		});
+		let ns_key = self.object(&[("ns", Operand::Reg(ns_name))])?;
+		let namespace = self.reg()?;
+		self.store(StoreInstr::Get {
+			route: RouteId::named("NamespaceKey"),
+			key: ns_key,
+			ty: TypeId::named("NamespaceDefinition"),
+			dst: namespace,
+		});
+		let present = self.label()?;
+		self.emit(Instr::JumpIf {
+			cond: Operand::Reg(namespace),
+			truthy: true,
+			target: present,
+		});
+		self.store(StoreInstr::Raise {
+			error: StatementError::NsNotFound,
+			arg: ns_name,
+		});
+		self.bind(present)?;
+		let ns = self.reg()?;
+		self.get_field(namespace, "namespace_id", ns)?;
+		Ok(ns)
+	}
+
 	/// `DEFINE BUCKET`: a definition that exists is refused under the name it holds. The backend
-	/// is converted, and the bucket connected to it, before the comment is evaluated.
+	/// is converted, and the bucket connected to it, before the comment is evaluated. A statement
+	/// with no backend is refused outside an import; an import stores the bucket with none.
 	fn define_bucket(
 		&mut self,
 		attrs: &DefineAttrs,
 		name: OperandSlot,
+		base: Base,
 		backend: Option<OperandSlot>,
 		comment: OperandSlot,
 	) -> Result<(), IrError> {
 		self.guard()?;
+		if backend.is_none() {
+			let import = self.label()?;
+			self.store(StoreInstr::JumpIfImport {
+				target: import,
+			});
+			let arg = self.constant(Value::None)?;
+			let arg = self.load(arg)?;
+			self.store(StoreInstr::Raise {
+				error: StatementError::BuNeedsBackend,
+				arg,
+			});
+			self.bind(import)?;
+		}
 		let name = self.name(name, NameClause::Bucket)?;
-		let (ns, db) = self.ids_creating()?;
+		let (route, ns, db) = self.bucket_scope(base, true)?;
 		let bu = name.operand;
-		let key = self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("bu", bu)])?;
+		let key = self.bucket_key(ns, db, bu)?;
 		let existing = self.reg()?;
 		self.store(StoreInstr::Get {
-			route: RouteId::named("BucketKey"),
+			route: RouteId::named(route),
 			key,
 			ty: TypeId::named("StoredBucketDefinition"),
 			dst: existing,
@@ -2588,7 +2677,7 @@ impl Ddl<'_, '_> {
 		let comment = self.comment(comment)?;
 		self.set_comment(definition, &comment)?;
 		self.store(StoreInstr::Put {
-			route: RouteId::named("BucketKey"),
+			route: RouteId::named(route),
 			key,
 			ty: TypeId::named("StoredBucketDefinition"),
 			value: definition,
@@ -2718,12 +2807,8 @@ impl Ddl<'_, '_> {
 			),
 			RemoveObject::Bucket {
 				name,
-			} => self.remove_db_definition(
-				("BucketKey", "bu", "StoredBucketDefinition"),
-				DbName::Named(*name, NameClause::Bucket),
-				if_exists,
-				StatementError::BuNotFound,
-			),
+				base,
+			} => self.remove_bucket(*name, *base, if_exists),
 			RemoveObject::Module {
 				name,
 			} => self.remove_module(&name.get_storage_name(), if_exists),
@@ -2915,6 +3000,37 @@ impl Ddl<'_, '_> {
 		self.get_field(definition, "name", stored_name)?;
 		let stored_at =
 			self.object(&[("ns", ns_op), ("db", db_op), (field, Operand::Reg(stored_name))])?;
+		self.store(StoreInstr::Delete {
+			route: RouteId::named(route),
+			key: stored_at,
+		});
+		self.store(StoreInstr::ClearCache);
+		self.answer_none()
+	}
+
+	/// `REMOVE BUCKET`: the definition at `base`, deleted under the name it is stored by.
+	fn remove_bucket(
+		&mut self,
+		name: OperandSlot,
+		base: Base,
+		if_exists: bool,
+	) -> Result<(), IrError> {
+		self.guard()?;
+		let bu = self.name(name, NameClause::Bucket)?.operand;
+		let (route, ns, db) = self.bucket_scope(base, false)?;
+		let key = self.bucket_key(ns, db, bu)?;
+		let definition = self.reg()?;
+		self.store(StoreInstr::Get {
+			route: RouteId::named(route),
+			key,
+			ty: TypeId::named("StoredBucketDefinition"),
+			dst: definition,
+		});
+		let shown = self.load(bu)?;
+		self.must_exist(if_exists, definition, StatementError::BuNotFound, shown)?;
+		let stored_name = self.reg()?;
+		self.get_field(definition, "name", stored_name)?;
+		let stored_at = self.bucket_key(ns, db, Operand::Reg(stored_name))?;
 		self.store(StoreInstr::Delete {
 			route: RouteId::named(route),
 			key: stored_at,
@@ -3471,9 +3587,18 @@ impl Ddl<'_, '_> {
 			} => self.alter_param(attrs, name.as_str(), *value),
 			AlterObject::Bucket {
 				name,
+				base,
+				backend,
+				readonly,
 				revoke_signatures,
 				..
-			} => self.alter_bucket(attrs, *name, *revoke_signatures),
+			} => self.alter_bucket(
+				attrs,
+				*name,
+				*base,
+				matches!(backend, AlterKind::Set(_)) || !matches!(readonly, AlterKind::None),
+				*revoke_signatures,
+			),
 			AlterObject::Config {
 				inner,
 				..
@@ -3850,20 +3975,31 @@ impl Ddl<'_, '_> {
 		&mut self,
 		attrs: &AlterAttrs,
 		name: OperandSlot,
+		base: Base,
+		reconnects: bool,
 		revoke_signatures: bool,
 	) -> Result<(), IrError> {
 		let template = Self::alter_template(attrs)?;
 		self.guard()?;
-		let (ns, db) = self.session_ids()?;
+		let (route, ns, db) = self.bucket_scope(base, false)?;
 		let bu = self.name(name, NameClause::Bucket)?.operand;
-		let key = self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("bu", bu)])?;
+		let key = self.bucket_key(ns, db, bu)?;
 		let definition = self.stored_at(
-			("BucketKey", "StoredBucketDefinition"),
+			(route, "StoredBucketDefinition"),
 			key,
 			attrs.if_exists,
 			(StatementError::BuNotFound, bu),
 		)?;
 		self.replace_fields(definition, template)?;
+		// A new backend, or a new mode a provider may open its handle in, is
+		// connected before it is stored.
+		if reconnects {
+			self.store(StoreInstr::ConnectBucket {
+				ns,
+				db,
+				bucket: definition,
+			});
+		}
 		if revoke_signatures {
 			let nonce = self.reg()?;
 			self.store(StoreInstr::NewUuid {
@@ -3874,7 +4010,7 @@ impl Ddl<'_, '_> {
 			self.set_field(definition, "presign_nonce", Operand::Reg(nonce))?;
 		}
 		self.store(StoreInstr::Put {
-			route: RouteId::named("BucketKey"),
+			route: RouteId::named(route),
 			key,
 			ty: TypeId::named("StoredBucketDefinition"),
 			value: definition,

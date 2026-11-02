@@ -495,6 +495,12 @@ pub(crate) enum Error {
 	#[error("DEFINE EXTENSION needs SIGNER {{…}} or UNSIGNED")]
 	ExtensionNeedsTrust,
 
+	/// A `DEFINE BUCKET` outside an import that names no `BACKEND`. An import
+	/// stores such a database bucket with none, and it is served from the
+	/// global bucket under its namespace, database and name.
+	#[error("DEFINE BUCKET needs a BACKEND, such as BACKEND \"global://\" for the global bucket")]
+	BucketNeedsBackend,
+
 	/// A component of a named record id is given a name that is not a plain
 	/// identifier (`KeyStructure::is_plain_name`): the fields of a record are
 	/// keyed by their raw names, which escape any other name.
@@ -779,6 +785,7 @@ impl LeafError for Error {
 				..
 			}
 			| Error::ExtensionNeedsTrust
+			| Error::BucketNeedsBackend
 			| Error::IdComponentNameUnsupported {
 				..
 			}

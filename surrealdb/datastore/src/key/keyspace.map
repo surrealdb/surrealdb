@@ -27,6 +27,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /!ac                                                                                           RootAccessMethodPrefix ->  (range)
 /!cg{ty}                                                                                                RootConfigKey ->  surrealdb_catalog::StoredConfigDefinition
 /!cg                                                                                                 RootConfigPrefix ->  (range)
+/!bu{bu}                                                                                                RootBucketKey ->  surrealdb_catalog::StoredBucketDefinition
+/!bu                                                                                                 RootBucketPrefix ->  (range)
 /!tl{task_id}                                                                                            TaskLeaseKey ->  surrealdb_catalog::TaskLease
 /!tl                                                                                                  TaskLeasePrefix ->  (range)
 /!wb                                                                                                  WriteBarrierKey ->  u64
@@ -85,6 +87,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}!us                                                                                                NsUserPrefix ->  (range)
 /*{ns}!ac{ac}                                                                                       NsAccessMethodKey ->  surrealdb_catalog::StoredAccessDefinition
 /*{ns}!ac                                                                                        NsAccessMethodPrefix ->  (range)
+/*{ns}!bu{bu}                                                                                             NsBucketKey ->  surrealdb_catalog::StoredBucketDefinition
+/*{ns}!bu                                                                                              NsBucketPrefix ->  (range)
 /*{ns}!dh{start}                                                                                         DbIdBatchKey ->  crate::sequences::BatchValue
 /*{ns}!dh                                                                                             DbIdBatchPrefix ->  (range)
 /*{ns}!di{nid}                                                                                           DbIdStateKey ->  crate::sequences::SequenceState
