@@ -189,6 +189,22 @@ jobs:
           sparse-checkout-cone-mode: false
           path: .ci
 
+      # A publish binds the dockerhub-publish environment in mirror-docker,
+      # whose deployment branch policy admits main and releases/* only, so a
+      # publish dispatched from any other ref would promote and publish
+      # everything else and then fail there. It is refused here, before
+      # anything is published; a dry-run may run from any ref.
+      - name: Check the publish ref
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        run: |
+          # The environment's `releases/*` filter does not match a nested name
+          # such as releases/x/y, so neither does this check.
+          case "${GITHUB_REF}" in
+            refs/heads/releases/*/*) ;;
+            refs/heads/main | refs/heads/releases/*) exit 0 ;;
+          esac
+          echo "::error::Publish from main or a releases/<line> branch, not ${GITHUB_REF}. Dispatch with publish off for a dry-run."
+          exit 1
 
       - name: Determine configuration
         id: config
@@ -922,7 +938,11 @@ jobs:
   mirror-docker:
     name: Mirror ${{ matrix.name }}
     # Gated upstream by `approve` (single approval covers the whole publish
-    # chain), so no per-job environment here.
+    # chain). A publish binds `dockerhub-publish`, which has no reviewers: the
+    # DockerHub OIDC connection trusts only that environment's subject, so only
+    # a job bound to it (on main or releases/*) can obtain a DockerHub token. A
+    # dry-run binds nothing and does not log in.
+    environment: ${{ needs.prepare-vars.outputs.publish == 'true' && 'dockerhub-publish' || '' }}
     needs: [prepare-vars, approve, promote]
     # Runs on dry-runs too: the action's dry-run mode verifies the source
     # manifests exist in ECR and computes the public tags, but pushes nothing.

@@ -127,14 +127,20 @@ jobs:
           PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
+          # A publish binds the dockerhub-publish environment in mirror-docker,
+          # whose `releases/*` branch filter does not match a nested name such as
+          # releases/x/y, so neither does this check: such a ref is refused here,
+          # before anything is published.
           case "${GITHUB_REF}" in
             refs/heads/main) channel=nightly ;;
+            refs/heads/releases/*/*) channel= ;;
             refs/heads/releases/*) channel=versioned ;;
-            *)
-              echo "::error::Dispatch this workflow from main (nightly) or from the releases/* branch being released, not ${GITHUB_REF}."
-              exit 1
-              ;;
+            *) channel= ;;
           esac
+          if [[ -z "${channel}" ]]; then
+            echo "::error::Dispatch this workflow from main (nightly) or from the releases/<line> branch being released, not ${GITHUB_REF}."
+            exit 1
+          fi
           {
             echo "channel=${channel}"
             echo "nightly=$([[ "${channel}" == nightly ]] && echo true || echo false)"
@@ -1030,6 +1036,11 @@ jobs:
   mirror-docker:
     name: Mirror ${{ matrix.name }}
     needs: [prepare, approve, promote]
+    # A publish binds `dockerhub-publish`, which has no reviewers: the
+    # DockerHub OIDC connection trusts only that environment's subject, so only
+    # a job bound to it (on main or releases/*) can obtain a DockerHub token. A
+    # dry-run binds nothing and does not log in.
+    environment: ${{ needs.prepare.outputs.publish == 'true' && 'dockerhub-publish' || '' }}
     runs-on: ${{ vars.RUNNER_AMD }}
     # Each image's mirrors from every release take turns, release.yml's too.
     # This one re-reads the GitHub release promote marked latest before moving
