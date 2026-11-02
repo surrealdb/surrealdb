@@ -457,6 +457,9 @@ pub struct CommitTriggers {
 	/// or verification so the job starts on the commit instead of waiting
 	/// out its interval.
 	pub table_migration: Notify,
+	/// The reclaim of removed namespaces, databases and indexes, notified when a commit queues
+	/// a reclaim entry.
+	pub reclaim: Notify,
 	/// The tables a transaction open through the datastore is removing, whose rows the table
 	/// migration job leaves alone until that transaction ends; see [`TableRemovals`].
 	pub(crate) table_removals: TableRemovals,

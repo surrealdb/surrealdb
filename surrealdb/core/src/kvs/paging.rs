@@ -106,10 +106,14 @@ impl<R: AnyRange + Resumable + Clone> PagedDelete<'_, R> {
 	///
 	/// `budget` is decremented by what was deleted, so a caller sharing one
 	/// pass across several ranges can hand the remainder to the next.
+	///
+	/// `lease` is the task lease checked before every page; `None` runs every
+	/// page unleased, for a caller whose host runs one pass at a time and whose
+	/// companion's compare-and-set keeps concurrent deletes apart.
 	pub(crate) async fn run(
 		mut self,
 		ds: &Datastore,
-		lh: &LeaseHandler,
+		lease: Option<&LeaseHandler>,
 		canceller: &CancellationToken,
 		budget: &mut u64,
 	) -> Result<PagedOutcome> {
@@ -136,7 +140,9 @@ impl<R: AnyRange + Resumable + Clone> PagedDelete<'_, R> {
 			// A delete can span many passes, so handing the range to the next
 			// lease holder costs nothing: every page so far is committed and the
 			// next holder resumes from what survives.
-			if !lh.try_maintain_lease().await? {
+			if let Some(lh) = lease
+				&& !lh.try_maintain_lease().await?
+			{
 				return Ok(PagedOutcome::LeaseLost);
 			}
 			// At least one key however small the page: a zero limit scans
@@ -301,7 +307,7 @@ where
 			let share = (*budget / remaining.max(1)).max(1).min(*budget);
 			remaining = remaining.saturating_sub(1);
 			let mut left = share;
-			let outcome = delete(&target).run(ds, lh, canceller, &mut left).await?;
+			let outcome = delete(&target).run(ds, Some(lh), canceller, &mut left).await?;
 			// Charge what the target deleted, not what it was offered.
 			*budget = budget.saturating_sub(share.saturating_sub(left));
 			match outcome {

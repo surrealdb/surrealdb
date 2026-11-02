@@ -820,6 +820,8 @@ pub struct Transaction {
 	trigger_graph_fold: AtomicBool,
 	/// Whether a commit of this transaction queued table migration work.
 	trigger_table_migration: AtomicBool,
+	/// Whether a commit of this transaction queued a reclaim entry.
+	trigger_reclaim: AtomicBool,
 	/// The keys of the table migration requests this transaction wrote, which no other
 	/// transaction sees until it commits ([`Self::hold_table_for_removal`]).
 	migration_requests_made: parking_lot::Mutex<Vec<Vec<u8>>>,
@@ -2411,6 +2413,7 @@ impl Transaction {
 			trigger_index_compaction: AtomicBool::new(false),
 			trigger_graph_fold: AtomicBool::new(false),
 			trigger_table_migration: AtomicBool::new(false),
+			trigger_reclaim: AtomicBool::new(false),
 			migration_requests_made: parking_lot::Mutex::default(),
 			live_bucket: crate::triggers::NO_LIVE_BUCKET,
 			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
@@ -3496,6 +3499,10 @@ impl Transaction {
 			// Notify after commit so the queued table migration is visible to the job.
 			self.triggers.table_migration.notify_one();
 		}
+		if self.trigger_reclaim.load(Ordering::Relaxed) {
+			// Notify after commit so the queued reclaim entry is visible to the pass.
+			self.triggers.reclaim.notify_one();
+		}
 		self.emit_transaction_event(Outcome::Success);
 		Ok(())
 	}
@@ -4357,7 +4364,7 @@ impl Transaction {
 		}
 		// Enqueue background reclaim of the namespace data prefix.
 		let rc = ReclaimKey::namespace(ns_def.namespace_id, expunge, Uuid::now_v7());
-		self.set_key(&rc, &crate::key::reclaim::ReclaimState::enqueued()).await?;
+		self.enqueue_reclaim_key(&rc).await?;
 		// Invalidate cached namespace lookups so the removal is observed.
 		self.cache.remove(&cache::tx::Lookup::Nss);
 		self.cache.remove(&cache::tx::Lookup::NsByName(&ns_def.name));
@@ -4393,7 +4400,7 @@ impl Transaction {
 		// Enqueue background reclaim of the database data prefix.
 		let rc =
 			ReclaimKey::database(db_def.namespace_id, db_def.database_id, expunge, Uuid::now_v7());
-		self.set_key(&rc, &crate::key::reclaim::ReclaimState::enqueued()).await?;
+		self.enqueue_reclaim_key(&rc).await?;
 		// Invalidate cached database lookups so the removal is observed.
 		self.cache.remove(&cache::tx::Lookup::Dbs(db_def.namespace_id));
 		self.cache.remove(&cache::tx::Lookup::DbByName(ns, &db_def.name));
@@ -7877,7 +7884,7 @@ impl Transaction {
 		expunge: bool,
 	) -> Result<()> {
 		let rc = ReclaimKey::index(ns, db, tb, ix, expunge, Uuid::now_v7());
-		self.set_key(&rc, &crate::key::reclaim::ReclaimState::enqueued()).await?;
+		self.enqueue_reclaim_key(&rc).await?;
 		Ok(())
 	}
 
@@ -7931,7 +7938,7 @@ impl Transaction {
 				expunge: Expunge::Keep,
 				uid: Uuid::now_v7(),
 			};
-			self.set_key(&rc, &crate::key::reclaim::ReclaimState::enqueued()).await?;
+			self.enqueue_reclaim_key(&rc).await?;
 		}
 		Ok(())
 	}
@@ -10743,6 +10750,7 @@ impl Transaction {
 			trigger_index_compaction: AtomicBool::new(false),
 			trigger_graph_fold: AtomicBool::new(false),
 			trigger_table_migration: AtomicBool::new(false),
+			trigger_reclaim: AtomicBool::new(false),
 			migration_requests_made: parking_lot::Mutex::default(),
 			live_bucket: crate::triggers::NO_LIVE_BUCKET,
 			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
@@ -12880,6 +12888,20 @@ impl Transaction {
 	/// commit makes it visible.
 	pub fn trigger_table_migration(&self) {
 		self.trigger_table_migration.store(true, Ordering::Relaxed);
+	}
+
+	/// Mark that this transaction queued a reclaim entry, so the reclaim pass is woken once the
+	/// commit makes it visible.
+	pub fn trigger_reclaim(&self) {
+		self.trigger_reclaim.store(true, Ordering::Relaxed);
+	}
+
+	/// Queue `rc` for background reclaim, as enqueued and not yet observed, and wake the reclaim
+	/// pass once this transaction commits.
+	pub async fn enqueue_reclaim_key(&self, rc: &ReclaimKey<'_>) -> Result<()> {
+		self.set_key(rc, &crate::key::reclaim::ReclaimState::enqueued()).await?;
+		self.trigger_reclaim();
+		Ok(())
 	}
 
 	pub fn trigger_async_event(&self) {

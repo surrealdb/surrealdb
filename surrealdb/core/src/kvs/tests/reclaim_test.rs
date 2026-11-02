@@ -2690,3 +2690,362 @@ async fn a_cancelled_doc_id_reclaim_step_stops_without_deleting() {
 	assert!(step.is_err(), "a cancelled step must stop: {step:?}");
 	assert_eq!(count_range(&ds, di).await, left, "a cancelled step must delete nothing");
 }
+
+/// A memory datastore with no background job, whose reclaim grace is judged
+/// against `clock`: the shape of a host that drives the passes itself.
+async fn hosted_ds(clock: Arc<surrealdb_datastore::clock::ManualClock>) -> Arc<Datastore> {
+	Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.without_maintenance_tasks()
+		.with_wall_clock(clock as Arc<dyn surrealdb_datastore::clock::WallClock>)
+		.build_with_path("memory")
+		.await
+		.unwrap()
+}
+
+fn manual_clock() -> Arc<surrealdb_datastore::clock::ManualClock> {
+	Arc::new(surrealdb_datastore::clock::ManualClock::new(chrono::Utc::now()))
+}
+
+/// Whether the reclaim task's lease key is stored.
+async fn reclaim_lease_held(ds: &Datastore) -> bool {
+	let tx = ds.transaction(Read).await.unwrap();
+	let lease = tx
+		.get_key(
+			&crate::key::schema::TaskLeaseKey {
+				task_id: crate::kvs::tasklease::TaskLeaseType::ReclaimTombstones,
+			},
+			None,
+		)
+		.await
+		.unwrap();
+	let _ = tx.cancel().await;
+	lease.is_some()
+}
+
+/// A hosted pass deletes a removed database's data and retires its entry,
+/// without taking the reclaim lease.
+#[tokio::test]
+async fn a_hosted_reclaim_pass_drains_a_removed_database_unleased() {
+	let ds = hosted_ds(manual_clock()).await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	ds.execute("DEFINE NAMESPACE test; DEFINE DATABASE tenant;", &ses, None).await.unwrap();
+	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
+	let range = DbRoot {
+		ns: ns_id,
+		db: db_id,
+	}
+	.range()
+	.unwrap();
+	seed_range(&ds, &range, 100).await;
+
+	ds.execute("REMOVE DATABASE tenant;", &ses, None).await.unwrap();
+	assert_eq!(reclaim_queue_len(&ds).await, 1);
+
+	let run = ds.run_reclaim(RECLAIM_PASS_KEY_BUDGET, Duration::ZERO).await.unwrap();
+	assert!(run.keys >= 100, "the pass must delete the seeded keys: {run:?}");
+	assert!(!run.more && run.retry_after.is_none(), "nothing is left: {run:?}");
+	assert_eq!(count_range(&ds, range).await, 0);
+	assert_eq!(reclaim_queue_len(&ds).await, 0);
+	assert!(!reclaim_lease_held(&ds).await, "a hosted pass takes no lease");
+}
+
+/// A prefix larger than the pass budget is finished over several passes, each
+/// deleting at most its budget and resuming at the cursor the last committed.
+#[tokio::test]
+async fn a_hosted_reclaim_pass_finishes_a_large_prefix_over_several_passes() {
+	let page = RECLAIM_BATCH_SIZE as usize;
+	let ds = hosted_ds(manual_clock()).await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	ds.execute("DEFINE NAMESPACE test; DEFINE DATABASE tenant;", &ses, None).await.unwrap();
+	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
+	let range = DbRoot {
+		ns: ns_id,
+		db: db_id,
+	}
+	.range()
+	.unwrap();
+	let baseline = count_range(&ds, range.clone()).await;
+	seed_range(&ds, &range, page * 5 / 2 - baseline).await;
+	ds.execute("REMOVE DATABASE tenant;", &ses, None).await.unwrap();
+	let total = count_range(&ds, range.clone()).await;
+	assert!(total > page * 2 && total <= page * 3, "the prefix must take three pages: {total}");
+
+	let budget = page as u64;
+	let mut passes = 0;
+	let mut deleted = 0;
+	loop {
+		let run = ds.run_reclaim(budget, Duration::ZERO).await.unwrap();
+		passes += 1;
+		assert!(run.keys <= budget, "a pass must stay within its budget: {run:?}");
+		deleted += run.keys;
+		let left = count_range(&ds, range.clone()).await;
+		assert_eq!(left as u64, total as u64 - deleted, "every deleted key is committed");
+		if !run.more {
+			break;
+		}
+		assert_eq!(reclaim_queue_len(&ds).await, 1, "a partly reclaimed entry stays queued");
+		assert!(passes < 8, "the reclaim must finish");
+	}
+	assert_eq!(passes, 3, "two full passes and one that empties the prefix");
+	assert_eq!(count_range(&ds, range).await, 0);
+	assert_eq!(reclaim_queue_len(&ds).await, 0);
+}
+
+/// The grace is measured on the datastore's wall clock: an entry is stamped
+/// when first seen, reported as due when its grace lapses, and reclaimed by
+/// the first pass after that.
+#[tokio::test]
+async fn a_hosted_reclaim_pass_judges_the_grace_on_the_injected_clock() {
+	let clock = manual_clock();
+	let ds = hosted_ds(Arc::clone(&clock)).await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	ds.execute("DEFINE NAMESPACE test; DEFINE DATABASE tenant;", &ses, None).await.unwrap();
+	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
+	let range = DbRoot {
+		ns: ns_id,
+		db: db_id,
+	}
+	.range()
+	.unwrap();
+	seed_range(&ds, &range, 10).await;
+	ds.execute("REMOVE DATABASE tenant;", &ses, None).await.unwrap();
+
+	let grace = Duration::from_secs(10);
+	let first = ds.run_reclaim(RECLAIM_PASS_KEY_BUDGET, grace).await.unwrap();
+	assert_eq!(first.keys, 0, "an entry first seen now is inside its grace");
+	assert!(!first.more);
+	assert_eq!(first.retry_after, Some(grace), "the entry is due a whole grace from now");
+	assert_eq!(
+		reclaim_entry_observed_ms(&ds).await,
+		surrealdb_datastore::clock::WallClock::now(&*clock).timestamp_millis() as u64,
+		"the stamp is the injected clock's reading"
+	);
+
+	clock.advance(chrono::Duration::seconds(9));
+	let early = ds.run_reclaim(RECLAIM_PASS_KEY_BUDGET, grace).await.unwrap();
+	assert_eq!(early.keys, 0, "the grace has not lapsed on the injected clock");
+	assert_eq!(early.retry_after, Some(Duration::from_secs(1)));
+	assert!(count_range(&ds, range.clone()).await >= 10);
+
+	clock.advance(chrono::Duration::seconds(1));
+	let due = ds.run_reclaim(RECLAIM_PASS_KEY_BUDGET, grace).await.unwrap();
+	assert!(due.keys >= 10, "the lapsed entry is reclaimed: {due:?}");
+	assert!(!due.more && due.retry_after.is_none());
+	assert_eq!(count_range(&ds, range).await, 0);
+	assert_eq!(reclaim_queue_len(&ds).await, 0);
+}
+
+/// A hosted pass pages every prefix through transactions, even where the
+/// backend can destroy a range outside one.
+#[tokio::test]
+async fn a_hosted_reclaim_pass_never_destroys_out_of_transaction() {
+	let destroyed = DestroyedRanges::default();
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.without_maintenance_tasks()
+		.build_with_factory_path("memory", DestroyRangeComposer(destroyed.clone()))
+		.await
+		.unwrap();
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	ds.execute("DEFINE NAMESPACE test; DEFINE DATABASE tenant;", &ses, None).await.unwrap();
+	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
+	let range = DbRoot {
+		ns: ns_id,
+		db: db_id,
+	}
+	.range()
+	.unwrap();
+	seed_range(&ds, &range, 10).await;
+	ds.execute("REMOVE DATABASE tenant;", &ses, None).await.unwrap();
+
+	let run = ds.run_reclaim(RECLAIM_PASS_KEY_BUDGET, Duration::ZERO).await.unwrap();
+	assert!(run.keys >= 10);
+	assert_eq!(count_range(&ds, range).await, 0);
+	assert!(destroyed.ranges().is_empty(), "a hosted pass must not destroy out-of-transaction");
+}
+
+/// A hosted pass that finds nothing queued commits nothing, so it leaves no
+/// work behind for the host to be woken by.
+#[tokio::test]
+async fn an_idle_hosted_reclaim_pass_commits_nothing() {
+	let observer = Arc::new(WriteTxSizeObserver::default());
+	let ds = observed_ds(Arc::clone(&observer)).await;
+	observer.clear();
+	let run = ds.run_reclaim(RECLAIM_PASS_KEY_BUDGET, Duration::from_secs(10)).await.unwrap();
+	assert_eq!(run.keys, 0);
+	assert!(!run.more && run.retry_after.is_none());
+	assert!(observer.sizes().is_empty(), "an idle pass committed: {:?}", observer.sizes());
+}
+
+/// A removal's commit puts a key the reclaim predicate matches, within the
+/// queue's bounds, and notifies the reclaim trigger.
+#[tokio::test]
+async fn a_removal_notifies_the_reclaim_trigger_and_queues_a_matching_key() {
+	let ds = hosted_ds(manual_clock()).await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	ds.execute(
+		"DEFINE NAMESPACE test; DEFINE DATABASE tenant; DEFINE TABLE thing; \
+		 DEFINE INDEX idx ON thing FIELDS val;",
+		&ses,
+		None,
+	)
+	.await
+	.unwrap();
+	let (start, end) = Datastore::reclaim_queue_bounds().unwrap();
+	for removal in ["REMOVE INDEX idx ON thing;", "REMOVE DATABASE tenant;"] {
+		ds.execute(removal, &ses, None).await.unwrap();
+		tokio::time::timeout(Duration::from_secs(1), ds.commit_triggers().reclaim.notified())
+			.await
+			.unwrap_or_else(|_| panic!("`{removal}` did not notify the reclaim trigger"));
+		let queued = keys_in_range(&ds, ReclaimPrefix {}.range().unwrap()).await;
+		assert!(!queued.is_empty(), "`{removal}` queued nothing");
+		for key in queued {
+			assert!(Datastore::is_reclaim_key(&key));
+			assert!(key >= start && key < end);
+		}
+		ds.run_reclaim(RECLAIM_PASS_KEY_BUDGET, Duration::ZERO).await.unwrap();
+	}
+	assert!(!Datastore::is_reclaim_key(&end));
+	assert!(!Datastore::is_reclaim_key(b"/!tq"));
+}
+
+/// A hosted pass shares its budget among as many entries as it has pages of
+/// budget, so the pages it commits are bounded by the budget however many
+/// queued entries hold data.
+#[tokio::test]
+async fn a_hosted_reclaim_pass_commits_pages_bounded_by_its_budget() {
+	let page = RECLAIM_BATCH_SIZE as usize;
+	let observer = Arc::new(WriteTxSizeObserver::default());
+	let ds = observed_ds(Arc::clone(&observer)).await;
+	let entries = 20;
+	{
+		let tx = ds.transaction(Write).await.unwrap();
+		tx.admit_stored_format().await.unwrap();
+		tx.commit().await.unwrap();
+	}
+	for i in 0..entries {
+		let db = DatabaseId(i as u32 + 1);
+		let range = DbRoot {
+			ns: NamespaceId(1),
+			db,
+		}
+		.range()
+		.unwrap();
+		seed_range(&ds, &range, page).await;
+		let tx = ds.transaction(Write).await.unwrap();
+		tx.set_key(
+			&ReclaimKey::database(NamespaceId(1), db, false, Uuid::now_v7()),
+			&ReclaimState::enqueued(),
+		)
+		.await
+		.unwrap();
+		tx.commit().await.unwrap();
+	}
+
+	let pages = 2;
+	let budget = (pages * page) as u64;
+	observer.clear();
+	let run = ds.run_reclaim(budget, Duration::ZERO).await.unwrap();
+	assert_eq!(run.keys, budget, "the pass spends its whole budget: {run:?}");
+	assert!(run.more);
+	let sizes = observer.sizes();
+	assert!(
+		sizes.len() <= pages + 1,
+		"{pages} pages and one retirement at most, not a page per entry: {sizes:?}"
+	);
+	assert_eq!(reclaim_queue_len(&ds).await, entries - pages, "each served entry was emptied");
+}
+
+/// A `DEFINE INDEX` waiting on a doc-ID space a hosted pass left torn finishes
+/// the space itself and completes; the hosted pass and the statement's own
+/// steps share the entries through their compare-and-set, so a later pass
+/// finds nothing left.
+#[tokio::test]
+async fn defining_a_doc_id_index_finishes_a_space_a_hosted_pass_tore() {
+	let page = RECLAIM_BATCH_SIZE as usize;
+	let ds = hosted_ds(manual_clock()).await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	ds.execute(
+		"DEFINE NAMESPACE test;
+		 DEFINE DATABASE tenant;
+		 DEFINE TABLE thing SCHEMALESS;
+		 DEFINE INDEX idx ON thing FIELDS val;",
+		&ses,
+		None,
+	)
+	.await
+	.unwrap();
+
+	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
+	let tb = TableName::from("thing");
+	let di = DocLookupPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
+	let dd = DocKeyPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
+	seed_range(&ds, &di, page * 2).await;
+	seed_range(&ds, &dd, page * 2).await;
+
+	ds.execute("REMOVE INDEX idx ON thing;", &ses, None).await.unwrap();
+	let run = ds.run_reclaim(page as u64, Duration::ZERO).await.unwrap();
+	assert!(run.more, "one page of budget leaves the space torn: {run:?}");
+	let left = count_range(&ds, di.clone()).await + count_range(&ds, dd.clone()).await;
+	assert!(left > 0 && left < page * 4, "the pass must have torn the space: {left} left");
+
+	let mut response =
+		ds.execute("DEFINE INDEX idx ON thing FIELDS val;", &ses, None).await.unwrap();
+	response.remove(0).result.unwrap();
+	assert_eq!(count_range(&ds, di).await + count_range(&ds, dd).await, 0);
+	assert_eq!(count_doc_kinds(&reclaim_queue_kinds(&ds).await), 0);
+	let _ = index_id(&ds, ns_id, db_id, "thing", "idx").await;
+
+	let after = ds.run_reclaim(RECLAIM_PASS_KEY_BUDGET, Duration::ZERO).await.unwrap();
+	assert!(!after.more, "nothing is left for a pass: {after:?}");
+}
+
+/// A hosted pass spends its whole budget on one entry when it serves only
+/// that one, and reports work left whenever an entry it served still holds
+/// data, even with budget unspent.
+#[tokio::test]
+async fn a_hosted_reclaim_pass_reports_an_entry_it_left_holding_data() {
+	let page = RECLAIM_BATCH_SIZE as usize;
+	let ds = hosted_ds(manual_clock()).await;
+	{
+		let tx = ds.transaction(Write).await.unwrap();
+		tx.admit_stored_format().await.unwrap();
+		tx.commit().await.unwrap();
+	}
+	let queue = |db: u32, keys: usize| {
+		let ds = Arc::clone(&ds);
+		async move {
+			let range = DbRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(db),
+			}
+			.range()
+			.unwrap();
+			seed_range(&ds, &range, keys).await;
+			let tx = ds.transaction(Write).await.unwrap();
+			let rc = ReclaimKey::database(NamespaceId(1), DatabaseId(db), false, Uuid::now_v7());
+			tx.set_key(&rc, &ReclaimState::enqueued()).await.unwrap();
+			tx.commit().await.unwrap();
+			range
+		}
+	};
+
+	// One entry: the pass spends its whole budget on it.
+	let big = queue(1, page * 3).await;
+	let run = ds.run_reclaim((page * 4) as u64, Duration::ZERO).await.unwrap();
+	assert_eq!(run.keys, (page * 3) as u64, "{run:?}");
+	assert!(!run.more, "{run:?}");
+	assert_eq!(count_range(&ds, big).await, 0);
+
+	// A large entry and a small one: the large one's share runs out with data
+	// left while the small one leaves budget unspent.
+	let large = queue(2, page * 5).await;
+	let _small = queue(3, 10).await;
+	let run = ds.run_reclaim((page * 4) as u64, Duration::ZERO).await.unwrap();
+	assert!(run.keys < (page * 4) as u64, "budget is left unspent: {run:?}");
+	assert!(run.more, "an entry left holding data is work left: {run:?}");
+	while ds.run_reclaim((page * 4) as u64, Duration::ZERO).await.unwrap().more {}
+	assert_eq!(count_range(&ds, large).await, 0);
+	assert_eq!(reclaim_queue_len(&ds).await, 0);
+}

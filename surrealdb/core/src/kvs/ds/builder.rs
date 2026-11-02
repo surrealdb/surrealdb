@@ -90,6 +90,8 @@ pub struct Builder {
 	joined_event_workers: Option<usize>,
 	/// The entries a batch of async events fetches; see [`Builder::with_event_batch_size`].
 	event_batch_size: Option<u32>,
+	/// The clock the reclaim grace is judged against; see [`Builder::with_wall_clock`].
+	wall_clock: Option<Arc<dyn surrealdb_datastore::clock::WallClock>>,
 	/// The node whose async event queue the datastore's writes queue under; see
 	/// [`Builder::with_event_queue_node`].
 	event_queue_node: Option<Uuid>,
@@ -209,6 +211,7 @@ impl Builder {
 			morsel_places: None,
 			joined_event_workers: None,
 			event_batch_size: None,
+			wall_clock: None,
 			event_queue_node: None,
 			temp_store: None,
 			#[cfg(test)]
@@ -536,6 +539,16 @@ impl Builder {
 		self
 	}
 
+	/// Judge the reclaim grace ([`Datastore::run_reclaim`]) against `clock` instead of the system
+	/// clock, for a host that owns time. Without it the grace reads the system clock.
+	pub fn with_wall_clock(
+		mut self,
+		clock: Arc<dyn surrealdb_datastore::clock::WallClock>,
+	) -> Self {
+		self.wall_clock = Some(clock);
+		self
+	}
+
 	/// Queue the async events this datastore's writes raise under the queue of `node` instead of
 	/// this datastore's own node, and drain that queue where this datastore drains its own
 	/// ([`Datastore::process_async_events`], [`Datastore::async_event_queue_bounds`]).
@@ -782,6 +795,9 @@ impl Builder {
 			scheduler: None,
 			joined_event_workers: self.joined_event_workers,
 			event_batch_size: self.event_batch_size.unwrap_or(crate::kvs::NORMAL_BATCH_SIZE),
+			wall_clock: self
+				.wall_clock
+				.unwrap_or_else(|| Arc::new(surrealdb_datastore::clock::SystemWallClock)),
 			event_queue_node: self.event_queue_node,
 			morsel_places: self
 				.morsel_places

@@ -330,6 +330,67 @@ enum ReclaimOutcome {
 	LeaseLost,
 }
 
+/// How a reclaim runs: under the cluster's reclaim task lease, or as a pass a
+/// host drives itself.
+#[derive(Clone, Copy)]
+enum ReclaimMode<'a> {
+	/// Under `lease`, checked before every page, destroying a prefix in one
+	/// out-of-transaction call where the backend offers [`DestroyRange`].
+	Leased(&'a LeaseHandler),
+	/// With no lease, every prefix deleted in pages that are ordinary
+	/// transactions. The host runs one pass at a time, and each page's
+	/// compare-and-set on its queue entry keeps a concurrent statement
+	/// finishing the same reclaim from deleting twice.
+	Hosted,
+}
+
+impl<'a> ReclaimMode<'a> {
+	/// The lease checked before every page, if any.
+	fn lease(self) -> Option<&'a LeaseHandler> {
+		match self {
+			Self::Leased(lh) => Some(lh),
+			Self::Hosted => None,
+		}
+	}
+
+	/// Whether the lease is still held: always, for a hosted pass.
+	async fn held(self) -> Result<bool> {
+		match self {
+			Self::Leased(lh) => lh.try_maintain_lease().await,
+			Self::Hosted => Ok(true),
+		}
+	}
+}
+
+/// What one bounded reclaim pass did: see [`Datastore::run_reclaim`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReclaimRun {
+	/// The data keys the pass deleted.
+	pub keys: u64,
+	/// Whether work is left that a pass run at once continues: the pass spent its key budget,
+	/// left an entry it served holding data, or walked its share of the queue with entries still
+	/// to walk.
+	pub more: bool,
+	/// Where no such work is left but an entry is still inside its grace, how long until the
+	/// first of them ages past it, when a pass deletes it.
+	pub retry_after: Option<Duration>,
+}
+
+/// What [`Datastore::reclaim_pass`] did.
+struct ReclaimPass {
+	/// The queue batches the walk read.
+	iterations: usize,
+	/// The entries the pass could not decode, stamp, reclaim or retire.
+	errors: usize,
+	pass: Pass,
+	/// Whether an entry the pass served still holds data.
+	incomplete: bool,
+	/// The earliest instant, in milliseconds on the datastore's wall clock, at which an entry
+	/// the walk saw inside its grace ages past it.
+	next_due_ms: Option<u64>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ShutdownNodeDeleteOutcome {
 	Archived,
@@ -867,8 +928,10 @@ pub struct Datastore {
 	node_cleanup_cursor: parking_lot::Mutex<Option<NodeCleanupScan>>,
 	/// The scan of the reclaim queue a reclaim pass stopped in when it walked
 	/// its share of batches with entries still to walk; `None` between scans.
-	/// This node's alone: the pass runs under a lease, and a node the lease
-	/// moves to scans from the head. See [`ReclaimScan`].
+	/// This node's alone: a leased pass runs on the node holding the lease, and
+	/// a node the lease moves to scans from the head; a hosted pass
+	/// ([`Datastore::run_reclaim`]) runs on the one node its host drives. See
+	/// [`ReclaimScan`].
 	reclaim_cursor: parking_lot::Mutex<Option<ReclaimScan>>,
 	/// The changefeed-collection sweep in progress, or one not begun between
 	/// sweeps. This node's alone: the sweep runs under a lease, and a node the
@@ -980,6 +1043,8 @@ pub struct Datastore {
 	joined_event_workers: Option<usize>,
 	/// The entries a batch of async events fetches; see [`Builder::with_event_batch_size`].
 	event_batch_size: u32,
+	/// The clock the reclaim grace is judged against; see [`Builder::with_wall_clock`].
+	wall_clock: Arc<dyn surrealdb_datastore::clock::WallClock>,
 	/// The node whose async event queue this datastore's writes queue under, when it is not this
 	/// datastore's own; see [`Builder::with_event_queue_node`].
 	event_queue_node: Option<Uuid>,
@@ -1920,6 +1985,7 @@ impl Datastore {
 			morsel_places: self.morsel_places,
 			joined_event_workers: self.joined_event_workers,
 			event_batch_size: self.event_batch_size,
+			wall_clock: Arc::clone(&self.wall_clock),
 			event_queue_node: self.event_queue_node,
 			memory_governor: self.memory_governor,
 			temp_store: self.temp_store,
@@ -2028,6 +2094,7 @@ impl Datastore {
 			morsel_places: self.morsel_places.clone(),
 			joined_event_workers: self.joined_event_workers,
 			event_batch_size: self.event_batch_size,
+			wall_clock: Arc::clone(&self.wall_clock),
 			event_queue_node: self.event_queue_node,
 			memory_governor: self.memory_governor.clone(),
 			temp_store: self.temp_store.clone(),
@@ -2491,6 +2558,12 @@ impl Datastore {
 
 	pub(crate) fn clock_now(&self) -> Timestamp {
 		SystemClock::new().now()
+	}
+
+	/// The current time on the datastore's wall clock ([`Builder::with_wall_clock`]), in unix
+	/// milliseconds; zero for an instant before the epoch.
+	fn wall_clock_ms(&self) -> u64 {
+		u64::try_from(self.wall_clock.now().timestamp_millis()).unwrap_or(0)
 	}
 
 	/// When this datastore was opened, on the clock [`Self::clock_now`] reads.
@@ -7136,8 +7209,10 @@ impl Datastore {
 	/// commit is at least `grace` old — equivalent to it having fallen behind the
 	/// MVCC GC safepoint (`now - mvcc_gc_lifetime`) when `grace >= mvcc_gc_lifetime`,
 	/// by which point any transaction that could still read the data has expired.
-	/// A `grace` of zero reclaims immediately without stamping (used by tests and
-	/// the language-test harness teardown, where there are no concurrent readers).
+	/// A `grace` of zero reclaims immediately without stamping, which is sound where
+	/// nothing reads the prefix out-of-band: no concurrent reader, as for tests and
+	/// the language-test harness teardown, or no out-of-transaction destroy, as for a
+	/// host's own passes ([`Self::run_reclaim`]).
 	///
 	/// Returns `(iterations, errors)`.
 	#[cfg_attr(
@@ -7208,6 +7283,76 @@ impl Datastore {
 		Self::reclaim_tombstones_bounded(dbs, interval, grace, budget, canceller).await
 	}
 
+	/// One bounded pass of the reclaim queue on the calling task, for a host that drives the
+	/// datastore's background work itself
+	/// ([`without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks)): it
+	/// deletes the data of namespaces, databases and indexes a committed `REMOVE` left queued
+	/// ([`ReclaimKey`]), and of the shared doc-ID spaces removing a table's last doc-ID index
+	/// left queued.
+	///
+	/// At most `budget` data keys are deleted, capped at [`RECLAIM_PASS_KEY_BUDGET`], in pages of
+	/// at most [`RECLAIM_BATCH_SIZE`] keys, each served entry's share of the budget rounded down
+	/// to whole pages (at least one), so a pass commits at most `budget / RECLAIM_BATCH_SIZE`
+	/// (rounded up) data pages however many entries hold data, and one write transaction that
+	/// retires the entries it emptied; an entry found already empty costs a read and no commit.
+	/// Every page is an ordinary write transaction that deletes its keys and advances its entry's
+	/// resume cursor together, so a pass stopped anywhere loses no committed page and the next
+	/// pass resumes at the cursor. An entry is retired once its prefix is empty. The queue is
+	/// walked as [`Self::reclaim_tombstones`] walks it, at most [`RECLAIM_PASS_WALK_BATCHES`]
+	/// batches a pass, and the budget is spent on the longest-waiting entries first.
+	///
+	/// Nothing is spawned and no lease is taken: the pass runs unleased, so the host runs one
+	/// pass at a time, and each page's compare-and-set on its entry keeps a `DEFINE INDEX`
+	/// finishing the same doc-ID reclaim from deleting a page twice. No prefix is
+	/// destroyed outside a transaction, whatever the backend offers, so the data stays visible
+	/// to every snapshot that predates a page.
+	///
+	/// An entry is reclaimed only once it has been observed for `grace`, measured on the
+	/// datastore's wall clock ([`Builder::with_wall_clock`]) from the pass that first saw it,
+	/// which stamps it. A `grace` of zero reclaims every entry on the first pass that reaches it
+	/// and writes no stamp; it is sound on a backend whose reads hold their snapshot for as long
+	/// as they run, since every page is an ordinary transaction. A host whose readers need the
+	/// data kept for some time after the `REMOVE` commits passes that time.
+	///
+	/// A commit that queues an entry puts a key [`Self::is_reclaim_key`] matches and notifies
+	/// [`CommitTriggers::reclaim`](surrealdb_datastore::triggers::CommitTriggers::reclaim). A
+	/// pass's pages and first stamps put such keys too, without notifying; retiring an entry
+	/// deletes its key, and a pass that finds nothing to do commits nothing. A host runs a pass
+	/// on such a commit, again at once while [`ReclaimRun::more`] is set, and after
+	/// [`ReclaimRun::retry_after`].
+	pub async fn run_reclaim(&self, budget: u64, grace: Duration) -> Result<ReclaimRun> {
+		let budget = budget.min(RECLAIM_PASS_KEY_BUDGET);
+		let run = self
+			.reclaim_pass(ReclaimMode::Hosted, grace, budget, &CancellationToken::new())
+			.await?;
+		let more = run.pass.progress == Progress::More || run.incomplete;
+		let retry_after = match run.next_due_ms {
+			Some(due) if !more => {
+				Some(Duration::from_millis(due.saturating_sub(self.wall_clock_ms())))
+			}
+			_ => None,
+		};
+		Ok(ReclaimRun {
+			keys: run.pass.items,
+			more,
+			retry_after,
+		})
+	}
+
+	/// Whether `key` is an entry of the reclaim queue, which a commit that removes a namespace,
+	/// database or index, or a table's last doc-ID index, puts. A commit that put no such key
+	/// queued no reclaim.
+	pub fn is_reclaim_key(key: &[u8]) -> bool {
+		ReclaimKey::decode_key(key).is_ok()
+	}
+
+	/// The key bounds `[start, end)` of the reclaim queue: every key [`Self::is_reclaim_key`]
+	/// matches lies within them.
+	pub fn reclaim_queue_bounds() -> Result<(Vec<u8>, Vec<u8>)> {
+		let range = ReclaimPrefix {}.range()?;
+		Ok((range.start().as_slice().to_vec(), range.end().as_slice().to_vec()))
+	}
+
 	/// One reclaim pass, deleting at most `budget` data keys in total.
 	///
 	/// A scan walks the whole queue, in passes of at most
@@ -7245,14 +7390,36 @@ impl Datastore {
 		budget: u64,
 		canceller: CancellationToken,
 	) -> Result<(usize, usize, Pass)> {
+		// Coordinate across the cluster so only one node reclaims at a time.
+		let lh =
+			dbs.lease_handler(TaskLeaseType::ReclaimTombstones, interval * 2, Some(&canceller))?;
+		let run = dbs.reclaim_pass(ReclaimMode::Leased(&lh), grace, budget, &canceller).await?;
+		Ok((run.iterations, run.errors, run.pass))
+	}
+
+	/// One reclaim pass in `mode`, deleting at most `budget` data keys in total;
+	/// see [`Self::reclaim_tombstones_bounded`] for how the walk and the spend
+	/// are bounded. Entry ages are read from the datastore's wall clock
+	/// ([`Builder::with_wall_clock`]).
+	async fn reclaim_pass(
+		&self,
+		mode: ReclaimMode<'_>,
+		grace: Duration,
+		budget: u64,
+		canceller: &CancellationToken,
+	) -> Result<ReclaimPass> {
 		trace!(target: TARGET, "Attempting tombstone reclaim process");
+		let dbs = self;
 		// Data keys this pass may still delete, shared out across the entries it
 		// serves. Spent to zero ends the spend with every cursor committed.
 		let limit = budget;
 		let mut budget = budget;
-		// Coordinate across the cluster so only one node reclaims at a time.
-		let lh =
-			dbs.lease_handler(TaskLeaseType::ReclaimTombstones, interval * 2, Some(&canceller))?;
+		// The earliest instant an entry this pass saw inside its grace ages past
+		// it, so a host that drives the passes knows when to run the next.
+		let mut next_due_ms: Option<u64> = None;
+		// Whether an entry this pass served still holds data, which a pass run
+		// at once continues even where this one ends with budget unspent.
+		let mut incomplete = false;
 		let mut count_iteration = 0;
 		let mut count_error = 0;
 		// The queue range and a window within it, advanced past each batch the
@@ -7278,13 +7445,17 @@ impl Datastore {
 		'pass: {
 			// Walk the queue: stamp, age, and select. No deletes, so no budget.
 			loop {
-				Self::ensure_not_cancelled(&canceller)?;
+				Self::ensure_not_cancelled(canceller)?;
 				// If we don't hold the lease, another node is handling this task.
-				if !lh.has_lease().await? {
+				let held = match mode {
+					ReclaimMode::Leased(lh) => lh.has_lease().await?,
+					ReclaimMode::Hosted => true,
+				};
+				if !held {
 					lease_held = false;
 					break;
 				}
-				Self::ensure_not_cancelled(&canceller)?;
+				Self::ensure_not_cancelled(canceller)?;
 				// The window to read: after the batch the scan last read, or from
 				// the head of a scan begun now, which ends at the last entry there
 				// is. Nothing queued at all ends the walk.
@@ -7308,7 +7479,7 @@ impl Datastore {
 					let _ = txn.cancel().await;
 					res?
 				};
-				Self::ensure_not_cancelled(&canceller)?;
+				Self::ensure_not_cancelled(canceller)?;
 				let Some((last, _)) = items.last().cloned() else {
 					// The window has run off the end of the queue: everything queued
 					// has been walked.
@@ -7317,17 +7488,17 @@ impl Datastore {
 				count_iteration += 1;
 				// Current wall-clock time (unix millis), used to age each entry
 				// against `grace` and to stamp first observations.
-				let now_ms = web_time::SystemTime::now()
-					.duration_since(web_time::SystemTime::UNIX_EPOCH)
-					.map(|d| d.as_millis() as u64)
-					.unwrap_or(0);
+				let now_ms = dbs.wall_clock_ms();
 				let grace_ms = grace.as_millis() as u64;
+				let mut due = |at: u64| {
+					next_due_ms = Some(next_due_ms.map_or(at, |d| d.min(at)));
+				};
 				// Queue states to initialise or repair. The raw value read with each
 				// one is the compare-and-set guard, so a concurrent cursor advance or
 				// cancellation cannot be overwritten by this batch.
 				let mut to_stamp: Vec<(Vec<u8>, Vec<u8>, ReclaimState)> = Vec::new();
 				for (k, v) in items.iter() {
-					Self::ensure_not_cancelled(&canceller)?;
+					Self::ensure_not_cancelled(canceller)?;
 					if let Err(e) = ReclaimKey::decode_key(k) {
 						count_error += 1;
 						warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
@@ -7390,6 +7561,7 @@ impl Datastore {
 							// observation time (>= commit) and defer reclaim. Aging
 							// is measured from here, never from the pre-commit
 							// `uid`. Not a candidate this pass: its grace starts now.
+							due(now_ms.saturating_add(grace_ms));
 							to_stamp.push((
 								k.clone(),
 								v.clone(),
@@ -7405,6 +7577,7 @@ impl Datastore {
 						// transaction that could still read it is behind the MVCC
 						// GC safepoint.
 						if now_ms.saturating_sub(state.observed_ms) < grace_ms {
+							due(state.observed_ms.saturating_add(grace_ms));
 							continue;
 						}
 					}
@@ -7433,7 +7606,7 @@ impl Datastore {
 				// enqueues.
 				if !to_stamp.is_empty() {
 					let txn = dbs.transaction(Write).await?;
-					if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+					if let Err(e) = Self::ensure_not_cancelled(canceller) {
 						let _ = txn.cancel().await;
 						return Err(e);
 					}
@@ -7510,7 +7683,7 @@ impl Datastore {
 			// each takes its slice of what is left rather than all of it.
 			let mut remaining = selected.len() as u64;
 			for candidate in selected {
-				Self::ensure_not_cancelled(&canceller)?;
+				Self::ensure_not_cancelled(canceller)?;
 				// Stop at the entry the lease was lost on, and report the pass
 				// as run under another node's lease, as the walk does. The queue
 				// update below still commits what this pass emptied, and
@@ -7520,7 +7693,7 @@ impl Datastore {
 				// period, so a call that drops it consumes the read the page
 				// loop's own check depends on and leaves that check answering
 				// affirmatively without asking.
-				if !lh.try_maintain_lease().await? {
+				if !mode.held().await? {
 					lease_held = false;
 					break;
 				}
@@ -7554,21 +7727,35 @@ impl Datastore {
 				// amount. Capped, each served entry gets about a page and the pass
 				// stops when the budget runs out — which is what makes the
 				// oldest-first order above decide who is served.
-				let divisor = remaining.min(RECLAIM_PASS_ENTRY_QUOTA as u64);
-				let share = (budget / divisor.max(1)).max(1).min(budget);
+				// A hosted pass instead rounds each share down to whole pages, at
+				// least one, so the pages it commits add up to at most one per
+				// `RECLAIM_BATCH_SIZE` keys of budget however many entries hold
+				// data, where unrounded shares would end the pass with ever smaller
+				// pages.
+				let share = match mode {
+					ReclaimMode::Leased(_) => {
+						let divisor = remaining.min(RECLAIM_PASS_ENTRY_QUOTA as u64);
+						(budget / divisor.max(1)).max(1).min(budget)
+					}
+					ReclaimMode::Hosted => {
+						let page = RECLAIM_BATCH_SIZE as u64;
+						let even = budget / remaining.max(1);
+						(even - even % page).max(page).min(budget)
+					}
+				};
 				remaining = remaining.saturating_sub(1);
 				let mut left = share;
 				// Whether the lease passed to another node mid-entry. Recorded
 				// rather than broken on directly, so the budget below is charged
 				// for the pages this entry did commit before the pass ends.
 				let mut lease_lost = false;
-				match dbs.reclaim_decoded(&rc, &state, &lh, &canceller, &mut left).await {
+				match dbs.reclaim_decoded(&rc, &state, mode, canceller, &mut left).await {
 					// The prefix is empty, so the entry has nothing left to
 					// name and can be retired.
 					Ok(ReclaimOutcome::Complete) => done.push(key),
 					// Progress is durable but keys remain: leaving the entry
 					// queued is what lets a later pass resume it.
-					Ok(ReclaimOutcome::Incomplete) => {}
+					Ok(ReclaimOutcome::Incomplete) => incomplete = true,
 					// The entry is already gone, so it must not be added to
 					// `done`: that would delete whatever a concurrent writer
 					// put at the same key.
@@ -7615,7 +7802,7 @@ impl Datastore {
 			// by the entry quota.
 			if !done.is_empty() {
 				let txn = dbs.transaction(Write).await?;
-				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+				if let Err(e) = Self::ensure_not_cancelled(canceller) {
 					let _ = txn.cancel().await;
 					return Err(e);
 				}
@@ -7680,7 +7867,13 @@ impl Datastore {
 				TaskLeaseState::Elsewhere
 			},
 		};
-		Ok((count_iteration, count_error, pass))
+		Ok(ReclaimPass {
+			iterations: count_iteration,
+			errors: count_error,
+			pass,
+			next_due_ms,
+			incomplete,
+		})
 	}
 
 	/// Whether the table a queue entry names still has a consumer of the
@@ -7714,7 +7907,7 @@ impl Datastore {
 		&self,
 		rc: &ReclaimKey<'_>,
 		state: &ReclaimState,
-		lh: &LeaseHandler,
+		mode: ReclaimMode<'_>,
 		canceller: &CancellationToken,
 		budget: &mut u64,
 	) -> Result<ReclaimOutcome> {
@@ -7789,7 +7982,7 @@ impl Datastore {
 				DocPendingPrefix::new(rc.ns, rc.db, Cow::Borrowed(rc.tb.as_ref())).raw_range()?
 			}
 		};
-		self.reclaim_range(rc, state, prefix, lh, canceller, budget).await
+		self.reclaim_range(rc, state, prefix, mode, canceller, budget).await
 	}
 
 	/// Destroy every key beneath `prefix`, resuming from the queue entry's
@@ -7826,7 +8019,7 @@ impl Datastore {
 		rc: &ReclaimKey<'_>,
 		state: &ReclaimState,
 		prefix: RawRange,
-		lh: &LeaseHandler,
+		mode: ReclaimMode<'_>,
 		canceller: &CancellationToken,
 		budget: &mut u64,
 	) -> Result<ReclaimOutcome> {
@@ -7848,6 +8041,7 @@ impl Datastore {
 		// cancellation stop it; its cursor is also what tells the next
 		// `DEFINE INDEX` that the space was left torn.
 		if !rc.kind.is_doc_id()
+			&& matches!(mode, ReclaimMode::Leased(_))
 			&& let Some(ops) = self.destroy_range_ops()
 		{
 			trace!(
@@ -7890,7 +8084,7 @@ impl Datastore {
 			expunge: rc.expunge == Expunge::Expunge,
 			page: RECLAIM_BATCH_SIZE,
 		}
-		.run(self, lh, canceller, budget)
+		.run(self, mode.lease(), canceller, budget)
 		.await?;
 		Ok(match outcome {
 			PagedOutcome::Complete => ReclaimOutcome::Complete,

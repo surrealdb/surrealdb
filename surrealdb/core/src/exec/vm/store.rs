@@ -740,6 +740,10 @@ async fn step_inner(
 		} => {
 			let key = codec::key::encode_id(*route, &read(regs, *key)).map_err(ControlFlow::Err)?;
 			put_value(ctx, key, *ty, &read(regs, *value), LevelledMode::Set).await?;
+			// A queued reclaim entry wakes the reclaim pass once the statement's commit lands.
+			if route.name() == "ReclaimKey" {
+				ctx.txn().trigger_reclaim();
+			}
 		}
 		StoreInstr::Replace {
 			route,

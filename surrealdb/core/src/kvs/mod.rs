@@ -50,7 +50,7 @@ pub(crate) use consts::{
 };
 pub use ds::{
 	Builder, Datastore, GraphFoldRun, IndexBuildsRun, IndexCompactionRun, LiveQueryEngine,
-	StatementCacheStats, TransactionBuilderFactory, TransactionBuilderParts,
+	ReclaimRun, StatementCacheStats, TransactionBuilderFactory, TransactionBuilderParts,
 };
 pub(crate) use ds::{DocIdsReclaimPending, DocIdsReclaimStep};
 pub(crate) use err::Error;

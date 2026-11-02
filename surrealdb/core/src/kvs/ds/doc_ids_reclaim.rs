@@ -30,7 +30,7 @@ use surrealdb_kvs::TransactionType::{Read, Write};
 use surrealdb_strand::TableName;
 use tokio_util::sync::CancellationToken;
 
-use super::{Datastore, ReclaimOutcome};
+use super::{Datastore, ReclaimMode, ReclaimOutcome};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::reclaim::{ALL_DOC_ID_KINDS, ReclaimState};
 use crate::key::schema::{ReclaimKey, ReclaimTbPrefix};
@@ -177,7 +177,9 @@ impl Datastore {
 		for (key, state) in states {
 			Self::ensure_not_cancelled(canceller)?;
 			let rc = ReclaimKey::decode_key(&key)?;
-			let outcome = match self.reclaim_decoded(&rc, &state, &lh, canceller, &mut budget).await
+			let outcome = match self
+				.reclaim_decoded(&rc, &state, ReclaimMode::Leased(&lh), canceller, &mut budget)
+				.await
 			{
 				// A page lost its commit to a concurrent page of the entry.
 				Err(e) if is_retryable_transaction_conflict(&e) => {
