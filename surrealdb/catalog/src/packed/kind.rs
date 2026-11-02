@@ -245,6 +245,13 @@ pub(crate) fn ops(kind: PhysicalKind) -> &'static KindOps {
 			decode: decode_decimal_var::<Build>,
 			check: decode_decimal_var::<Check>,
 		},
+		PhysicalKind::BigDecimal => &KindOps {
+			escape: None,
+			write: write_bigdecimal,
+			read: read_bigdecimal,
+			decode: decode_bigdecimal::<Build>,
+			check: decode_bigdecimal::<Check>,
+		},
 		PhysicalKind::Value => &KindOps {
 			escape: None,
 			write: write_value,
@@ -293,6 +300,7 @@ pub(crate) fn read<'a>(
 		PhysicalKind::Bytes => read_var_bytes(column, index, slot),
 		PhysicalKind::RecordKey => read_record_key(column, index, slot),
 		PhysicalKind::DecimalVar => read_decimal_var(column, index, slot),
+		PhysicalKind::BigDecimal => read_bigdecimal(column, index, slot),
 		PhysicalKind::Value => read_value(column, index, slot),
 		PhysicalKind::Object => read_no_slot(column, index, slot),
 	}
@@ -628,6 +636,33 @@ fn decode_decimal_var<M: Mode>(
 ) -> Result<M::Out<Value>, PackedError> {
 	let v = stored::decimal_payload(var(index, slot)?).map_err(stored_error(index))?;
 	Ok(M::make(|| Value::Number(Number::Decimal(v))))
+}
+
+/// Reads a `BigDecimal` slot in place as the BIGDECIMAL its payload is. The payload is checked
+/// as a whole decode checks it, and no value is built.
+fn read_bigdecimal<'a>(
+	_column: &'a Column,
+	index: u32,
+	slot: Slot<'a>,
+) -> Result<FieldRef<'a>, PackedError> {
+	ValueRef::bigdecimal(var(index, slot)?).map(FieldRef::Stored).map_err(stored_error(index))
+}
+
+/// Decodes a `BigDecimal` slot. The check refuses every payload the decode refuses and builds no
+/// value.
+fn decode_bigdecimal<M: Mode>(
+	_column: &Column,
+	index: u32,
+	slot: Slot<'_>,
+	_depth: usize,
+) -> Result<M::Out<Value>, PackedError> {
+	let payload = var(index, slot)?;
+	ValueRef::bigdecimal(payload).map_err(stored_error(index))?;
+	M::try_make(|| {
+		stored::bigdecimal_payload(payload)
+			.map(|d| Value::Number(Number::BigDecimal(Box::new(d))))
+			.map_err(stored_error(index))
+	})
 }
 
 // Bytes, uuids and points
@@ -1134,7 +1169,8 @@ fn write_signed(_column: &Column, value: &Value, dest: Dest<'_>) -> Result<Writt
 		| Number::F16(_)
 		| Number::F32(_)
 		| Number::Float(_)
-		| Number::Decimal(_) => Ok(Written::Misfit),
+		| Number::Decimal(_)
+		| Number::BigDecimal(_) => Ok(Written::Misfit),
 	}
 }
 
@@ -1165,7 +1201,8 @@ fn write_unsigned(
 		| Number::F16(_)
 		| Number::F32(_)
 		| Number::Float(_)
-		| Number::Decimal(_) => Ok(Written::Misfit),
+		| Number::Decimal(_)
+		| Number::BigDecimal(_) => Ok(Written::Misfit),
 	}
 }
 
@@ -1186,7 +1223,8 @@ fn write_f16(_column: &Column, value: &Value, dest: Dest<'_>) -> Result<Written,
 		| Number::U64(_)
 		| Number::F32(_)
 		| Number::Float(_)
-		| Number::Decimal(_) => Ok(Written::Misfit),
+		| Number::Decimal(_)
+		| Number::BigDecimal(_) => Ok(Written::Misfit),
 	}
 }
 
@@ -1207,7 +1245,8 @@ fn write_f32(_column: &Column, value: &Value, dest: Dest<'_>) -> Result<Written,
 		| Number::U64(_)
 		| Number::F16(_)
 		| Number::Float(_)
-		| Number::Decimal(_) => Ok(Written::Misfit),
+		| Number::Decimal(_)
+		| Number::BigDecimal(_) => Ok(Written::Misfit),
 	}
 }
 
@@ -1241,6 +1280,19 @@ fn write_decimal_var(
 		return Ok(Written::Misfit);
 	};
 	stored::put_decimal_payload(d, out);
+	Ok(Written::Fits)
+}
+
+fn write_bigdecimal(
+	_column: &Column,
+	value: &Value,
+	dest: Dest<'_>,
+) -> Result<Written, stored::Error> {
+	let (out, _, _) = var_of(dest)?;
+	let Value::Number(Number::BigDecimal(d)) = value else {
+		return Ok(Written::Misfit);
+	};
+	stored::put_bigdecimal_payload(d, out);
 	Ok(Written::Fits)
 }
 

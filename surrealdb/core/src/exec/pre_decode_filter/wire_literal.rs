@@ -57,7 +57,8 @@ impl NumberSubVariant {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_) => NumberSubVariant::Sized,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => NumberSubVariant::Sized,
 		}
 	}
 
@@ -245,7 +246,8 @@ impl LiteralWire {
 				| Number::U32(_)
 				| Number::U64(_)
 				| Number::F16(_)
-				| Number::F32(_),
+				| Number::F32(_)
+				| Number::BigDecimal(_),
 			) => LiteralWire::Other,
 			Value::Number(Number::Int(i)) => {
 				let mut full = Vec::new();
@@ -311,6 +313,10 @@ impl LiteralWire {
 			| Value::RecordId(_)
 			| Value::File(_)
 			| Value::Range(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Closure(_) => LiteralWire::Other,
 		}
 	}
@@ -412,7 +418,8 @@ impl LiteralSet {
 					| Number::U32(_)
 					| Number::U64(_)
 					| Number::F16(_)
-					| Number::F32(_) => {
+					| Number::F32(_)
+					| Number::BigDecimal(_) => {
 						out.number_sub_variants |= 1u8 << (NumberSubVariant::Sized as u8);
 						out.fallback.insert(v.clone());
 					}

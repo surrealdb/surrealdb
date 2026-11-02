@@ -8,7 +8,6 @@
 //! read flattened, in order, as the index flattens them when it stores them.
 
 use anyhow::Result;
-use surrealdb_runtime::util::math::ToFloat;
 use surrealdb_runtime::util::math::vector::{
 	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
 	ManhattanDistance, MinkowskiDistance, PearsonSimilarity, check_same_dimension, lane_sum,
@@ -46,7 +45,7 @@ pub fn score(
 		let mut nested = false;
 		let numbers = raw.iter().map_while(|v| {
 			if let Value::Number(n) = v {
-				Some(*n)
+				Some(n.clone())
 			} else if let Value::Array(_) = v {
 				nested = true;
 				None
@@ -80,7 +79,7 @@ fn flatten_numbers(values: &[Value], out: &mut Vec<Number>, limit: usize) -> boo
 	values.iter().all(|v| {
 		if let Value::Number(n) = v {
 			if out.len() < limit {
-				out.push(*n);
+				out.push(n.clone());
 				true
 			} else {
 				false
@@ -142,6 +141,10 @@ mod tests {
 		values.iter().map(|&v| Number::Int(v)).collect()
 	}
 
+	#[allow(
+		clippy::needless_pass_by_value,
+		reason = "Number is not Copy; this takes its operand by value like the arithmetic it feeds"
+	)]
 	fn float(n: Number) -> f64 {
 		n.to_float()
 	}

@@ -212,6 +212,29 @@ fn test_parse_predicates() {
 }
 
 #[test]
+fn test_parse_field_select_of_a_parenthesised_expression() {
+	use surrealdb_pgsql::printer::ToPgSql;
+
+	let expr = parse_expr("(home).zip").expect("parse field select");
+	let Expr::FieldSelect {
+		expr: base,
+		field,
+		..
+	} = &expr
+	else {
+		panic!("expected field select, got {expr:?}");
+	};
+	assert_eq!(field, "zip");
+	assert!(matches!(**base, Expr::Grouping { .. }));
+	assert_eq!(expr.to_pgsql_string(), "(home).zip");
+
+	// Fields chain, and a subscript applies to the field selected.
+	let expr = parse_expr("(a).b.c[1]").expect("parse chained field select");
+	assert!(matches!(expr, Expr::Subscript { .. }), "{expr:?}");
+	assert_eq!(expr.to_pgsql_string(), "(a).b.c[1]");
+}
+
+#[test]
 fn test_parse_subscript_and_slice() {
 	let expr = parse_expr("arr[1]").expect("parse subscript");
 	assert!(matches!(expr, Expr::Subscript { .. }));

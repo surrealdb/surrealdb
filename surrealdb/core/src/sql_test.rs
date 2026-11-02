@@ -86,6 +86,10 @@ fn set_check_type() {
 #[case::array(Kind::Array(Box::new(Kind::String), None))]
 #[case::either(Kind::Either(vec![Kind::String, Kind::Int]))]
 #[case::file(Kind::File(vec!["bucket".to_string()]))]
+#[case::enum_named(Kind::Enum(crate::expr::EnumRef::Named("mood".to_string())))]
+#[case::enum_inline(Kind::Enum(crate::expr::EnumRef::Inline(vec!["a".to_string(), "it's".to_string(), "x y".to_string()])))]
+#[case::enum_option(Kind::Either(vec![Kind::None, Kind::Enum(crate::expr::EnumRef::Named("m".to_string()))]))]
+#[case::array_of_enum(Kind::Array(Box::new(Kind::Enum(crate::expr::EnumRef::Inline(vec!["a".to_string()]))), None))]
 fn kind_canonical_text_round_trips(#[case] kind: Kind) {
 	assert_eq!(kind, kind_for_definition(&kind.to_sql()).unwrap());
 	assert_eq!(kind, kind_for_definition(&kind.to_sql_pretty()).unwrap());
@@ -128,6 +132,15 @@ fn assert_name_round_trips(query: &str) {
 #[case::function_reserved("DEFINE FUNCTION fn::`select`() {}")]
 #[case::function_spaced("DEFINE FUNCTION fn::`my fn`() {}")]
 #[case::param_plain("DEFINE PARAM $limit VALUE 1")]
+#[case::enum_plain("DEFINE ENUM mood VALUES 'a', 'b'")]
+#[case::enum_escaped(
+	"DEFINE ENUM IF NOT EXISTS `my mood` VALUES 'it\\'s', 'b' COMMENT 'c' PERMISSIONS NONE"
+)]
+#[case::enum_alter_add(
+	"ALTER ENUM mood ADD VALUE IF NOT EXISTS 'c' BEFORE 'a' ADD VALUE 'd' AFTER 'b'"
+)]
+#[case::enum_alter_rename("ALTER ENUM IF EXISTS mood RENAME VALUE 'a' TO 'z'")]
+#[case::enum_remove("REMOVE ENUM IF EXISTS mood")]
 #[case::param_reserved("DEFINE PARAM $`select` VALUE 1")]
 #[case::param_spaced("DEFINE PARAM $`my param` VALUE 1")]
 #[case::param_digit_leading("DEFINE PARAM $`1st` VALUE 1")]

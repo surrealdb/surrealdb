@@ -6,10 +6,12 @@ use std::iter::once;
 use common::fmt::{EscapeObjectKey, Float, Fmt, QuoteStr, SqlDatetime, SqlDuration};
 use rust_decimal::Decimal;
 use surrealdb_strand::Strand;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{BigDecimal, SqlFormat, ToSql, write_sql};
 
 use crate::expr::{CoverStmts, Expr, RecordIdLit};
-use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Uuid};
+use crate::val::{
+	Bytes, Date, Datetime, Duration, File, Geometry, Interval, Regex, Time, Timestamp, Uuid,
+};
 
 // Note: Literal uses `Strand` (not `String`) for the inner value of
 // `Literal::String` so that converting between `Value` and `Expr` via
@@ -36,6 +38,8 @@ pub enum Literal {
 	Float(f64),
 	Integer(i64),
 	Decimal(Decimal),
+	/// An arbitrary-precision decimal number
+	BigDecimal(Box<BigDecimal>),
 	String(Strand),
 	Bytes(Bytes),
 	Regex(Regex),
@@ -57,6 +61,10 @@ pub enum Literal {
 	U64(u64),
 	F16(half::f16),
 	F32(f32),
+	Date(Date),
+	Time(Time),
+	Timestamp(Timestamp),
+	Interval(Interval),
 }
 
 impl Literal {
@@ -69,11 +77,16 @@ impl Literal {
 			| Literal::Float(_)
 			| Literal::Integer(_)
 			| Literal::Decimal(_)
+			| Literal::BigDecimal(_)
 			| Literal::String(_)
 			| Literal::Bytes(_)
 			| Literal::Regex(_)
 			| Literal::Duration(_)
 			| Literal::Datetime(_)
+			| Literal::Date(_)
+			| Literal::Time(_)
+			| Literal::Timestamp(_)
+			| Literal::Interval(_)
 			| Literal::Uuid(_)
 			| Literal::File(_)
 			| Literal::Geometry(_)
@@ -105,11 +118,16 @@ impl Literal {
 			| Literal::Float(_)
 			| Literal::Integer(_)
 			| Literal::Decimal(_)
+			| Literal::BigDecimal(_)
 			| Literal::String(_)
 			| Literal::Bytes(_)
 			| Literal::Regex(_)
 			| Literal::Duration(_)
 			| Literal::Datetime(_)
+			| Literal::Date(_)
+			| Literal::Time(_)
+			| Literal::Timestamp(_)
+			| Literal::Interval(_)
 			| Literal::Uuid(_)
 			| Literal::File(_)
 			| Literal::Geometry(_)
@@ -159,11 +177,16 @@ impl Literal {
 			Literal::Float(x) => Value::Number(crate::val::Number::Float(*x)),
 			Literal::Integer(x) => Value::Number(crate::val::Number::Int(*x)),
 			Literal::Decimal(x) => Value::Number(crate::val::Number::Decimal(*x)),
+			Literal::BigDecimal(x) => Value::Number(crate::val::Number::BigDecimal(x.clone())),
 			Literal::String(x) => Value::String(x.clone()),
 			Literal::Bytes(x) => Value::Bytes(x.clone()),
 			Literal::Regex(x) => Value::Regex(x.clone()),
 			Literal::Duration(x) => Value::Duration(*x),
 			Literal::Datetime(x) => Value::Datetime(*x),
+			Literal::Date(x) => Value::Date(*x),
+			Literal::Time(x) => Value::Time(*x),
+			Literal::Timestamp(x) => Value::Timestamp(*x),
+			Literal::Interval(x) => Value::Interval(*x),
 			Literal::Uuid(x) => Value::Uuid(*x),
 			Literal::Geometry(x) => Value::Geometry(x.clone()),
 			Literal::File(x) => Value::File(x.clone()),
@@ -233,6 +256,8 @@ impl PartialEq for Literal {
 			(Literal::Float(a), Literal::Float(b)) => a.to_bits() == b.to_bits(),
 			(Literal::Integer(a), Literal::Integer(b)) => a == b,
 			(Literal::Decimal(a), Literal::Decimal(b)) => a == b,
+			// Value equality ignores trailing zeros; a literal is the same only as written.
+			(Literal::BigDecimal(a), Literal::BigDecimal(b)) => a == b && a.scale() == b.scale(),
 			(Literal::String(a), Literal::String(b)) => a == b,
 			(Literal::Bytes(a), Literal::Bytes(b)) => a == b,
 			(Literal::Regex(a), Literal::Regex(b)) => a == b,
@@ -242,6 +267,10 @@ impl PartialEq for Literal {
 			(Literal::Object(a), Literal::Object(b)) => a == b,
 			(Literal::Duration(a), Literal::Duration(b)) => a == b,
 			(Literal::Datetime(a), Literal::Datetime(b)) => a == b,
+			(Literal::Date(a), Literal::Date(b)) => a == b,
+			(Literal::Time(a), Literal::Time(b)) => a == b,
+			(Literal::Timestamp(a), Literal::Timestamp(b)) => a == b,
+			(Literal::Interval(a), Literal::Interval(b)) => a.identical(b),
 			(Literal::Uuid(a), Literal::Uuid(b)) => a == b,
 			(Literal::Geometry(a), Literal::Geometry(b)) => a == b,
 			(Literal::File(a), Literal::File(b)) => a == b,
@@ -274,6 +303,7 @@ impl Hash for Literal {
 			Literal::UnboundedRange => {}
 			Literal::Bool(x) => x.hash(state),
 			Literal::Float(x) => x.to_bits().hash(state),
+			Literal::BigDecimal(x) => x.hash(state),
 			Literal::Integer(x) => x.hash(state),
 			Literal::Decimal(x) => x.hash(state),
 			Literal::String(x) => x.hash(state),
@@ -285,6 +315,10 @@ impl Hash for Literal {
 			Literal::Object(x) => x.hash(state),
 			Literal::Duration(x) => x.hash(state),
 			Literal::Datetime(x) => x.hash(state),
+			Literal::Date(x) => x.hash(state),
+			Literal::Time(x) => x.hash(state),
+			Literal::Timestamp(x) => x.hash(state),
+			Literal::Interval(x) => x.hash(state),
 			Literal::Uuid(x) => x.hash(state),
 			Literal::Geometry(x) => x.hash(state),
 			Literal::File(x) => x.hash(state),
@@ -347,6 +381,9 @@ impl ToSql for Literal {
 			Literal::F16(v) => surrealdb_types::number::fmt_f16_sql(*v, f),
 			Literal::F32(v) => surrealdb_types::number::fmt_f32_sql(*v, f),
 			Literal::Decimal(d) => d.fmt_sql(f, fmt),
+			Literal::BigDecimal(d) => {
+				surrealdb_types::Number::BigDecimal(d.clone()).fmt_sql(f, fmt)
+			}
 			Literal::String(strand) => write_sql!(f, fmt, "{}", QuoteStr(strand)),
 			Literal::Bytes(bytes) => write_sql!(f, fmt, "b\"{}\"", hex::encode_upper(&bytes.0)),
 			Literal::Regex(regex) => {
@@ -466,6 +503,10 @@ impl ToSql for Literal {
 			}
 			Literal::Duration(duration) => SqlDuration(duration.0).fmt_sql(f, fmt),
 			Literal::Datetime(datetime) => SqlDatetime(datetime.0).fmt_sql(f, fmt),
+			Literal::Date(v) => v.fmt_sql(f, fmt),
+			Literal::Time(v) => v.fmt_sql(f, fmt),
+			Literal::Timestamp(v) => v.fmt_sql(f, fmt),
+			Literal::Interval(v) => v.fmt_sql(f, fmt),
 			Literal::Uuid(uuid) => write_sql!(f, fmt, "u{}", QuoteStr(&uuid.to_string())),
 			Literal::Geometry(geometry) => SqlGeometry(geometry).fmt_sql(f, fmt),
 			Literal::File(file) => file.fmt_sql(f, fmt),
@@ -513,6 +554,7 @@ mod equality_tests {
 				| Literal::Float(_)
 				| Literal::Integer(_)
 				| Literal::Decimal(_)
+				| Literal::BigDecimal(_)
 				| Literal::String(_)
 				| Literal::Bytes(_)
 				| Literal::Regex(_)
@@ -522,6 +564,10 @@ mod equality_tests {
 				| Literal::Object(_)
 				| Literal::Duration(_)
 				| Literal::Datetime(_)
+				| Literal::Date(_)
+				| Literal::Time(_)
+				| Literal::Timestamp(_)
+				| Literal::Interval(_)
 				| Literal::Uuid(_)
 				| Literal::Geometry(_)
 				| Literal::File(_)

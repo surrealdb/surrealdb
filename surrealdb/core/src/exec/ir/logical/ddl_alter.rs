@@ -18,14 +18,14 @@ use crate::exec::ir::iface::region_kind::{RegionKind, StoredRole};
 use crate::exec::ir::iface::statements::{
 	AlterAccess, AlterApiClauseShape, AlterDefaultShape, AlterEvent, AlterField, AlterFunction,
 	AlterObject, AlterTable, AlterUser, ApiActionShape, ConfigShape, DdlChecks, DefaultConfigShape,
-	OnDeleteShape, ReferenceShape,
+	EnumEdit, OnDeleteShape, ReferenceShape,
 };
 use crate::exec::vm::codec::Codec;
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::AlterStatement;
-use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::api::AlterApiClause;
 use crate::expr::statements::alter::field::AlterDefault;
+use crate::expr::statements::alter::{AlterEnumAction, AlterKind, EnumPosition};
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::{Base, Expr};
 use crate::iam::{Action, ResourceKind};
@@ -649,6 +649,14 @@ pub(super) fn plan_alter<'e>(
 				AlterKind::Drop => fields.push("reference"),
 				AlterKind::None => {}
 			}
+			match &stmt.sql_type {
+				AlterKind::Set(sql_type) => {
+					altered.sql_type = Some(sql_type.clone());
+					fields.push("sql_type");
+				}
+				AlterKind::Drop => fields.push("sql_type"),
+				AlterKind::None => {}
+			}
 			template = Some(alter_template(
 				"StoredFieldDefinition",
 				stored_value(codec, &altered.to_stored(), "StoredFieldDefinition")?,
@@ -671,6 +679,7 @@ pub(super) fn plan_alter<'e>(
 					comment: stmt.comment.clone(),
 					reference,
 					migrate: stmt.migrate.clone().map(Box::new),
+					sql_type: stmt.sql_type.clone(),
 				})),
 				stmt.if_exists,
 			)
@@ -713,6 +722,42 @@ pub(super) fn plan_alter<'e>(
 				stmt.if_exists,
 			)
 		}
+		AlterStatement::Enum(stmt) => (
+			DdlForm::AlterEnum,
+			(EDIT, ResourceKind::Parameter, Base::Db),
+			AlterObject::Enum {
+				name: stmt.name.clone(),
+				edits: stmt
+					.actions
+					.iter()
+					.map(|action| match action {
+						AlterEnumAction::AddValue {
+							value,
+							position,
+							if_not_exists,
+						} => EnumEdit::Add {
+							value: value.clone(),
+							anchor: match position {
+								Some(
+									EnumPosition::Before(anchor) | EnumPosition::After(anchor),
+								) => Some(anchor.clone()),
+								None => None,
+							},
+							after: matches!(position, Some(EnumPosition::After(_))),
+							if_not_exists: *if_not_exists,
+						},
+						AlterEnumAction::RenameValue {
+							from,
+							to,
+						} => EnumEdit::Rename {
+							from: from.clone(),
+							to: to.clone(),
+						},
+					})
+					.collect(),
+			},
+			stmt.if_exists,
+		),
 		AlterStatement::Bucket(stmt) => {
 			let name = s.name(DdlOperand::Name, &stmt.name)?;
 			let permissions =

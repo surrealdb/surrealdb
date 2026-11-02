@@ -1,0 +1,29 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL ENUM columns enforce their members, and SET columns map to a set of an inline enum"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, size: 'large' }, { id: 2, size: 'small' }]"
+
+[[test.results]]
+error = "Couldn't coerce value for field `size` of `shirts:3`: Expected `none | null | enum<'small', 'medium', 'large'>` but found `'huge'`"
+
+[[test.results]]
+value = "[{ id: 2 }]"
+
+*/
+
+CREATE TABLE shirts (id INT PRIMARY KEY, size ENUM('small', 'medium', 'large'), tags SET('a', 'b', 'c'));
+
+INSERT INTO shirts (id, size) VALUES (1, 'large'), (2, 'small');
+
+INSERT INTO shirts (id, size) VALUES (3, 'huge');
+
+SELECT id FROM shirts WHERE size = 'small';

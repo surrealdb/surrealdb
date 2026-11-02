@@ -10,8 +10,8 @@ use surrealdb_types::ToSql;
 
 use super::Transaction;
 use crate::catalog::providers::{
-	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
-	TableProvider, UserProvider,
+	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, EnumProvider,
+	NamespaceProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{
 	DatabaseId, Error, NamespaceId, Record, TableDefinition, TableType, ViewDefinition,
@@ -269,6 +269,15 @@ async fn export_metadata(
 	if cfg.params {
 		let params = tx.all_db_params(ns, db, None).await?;
 		export_section("PARAMS", params.iter(), chn).await?;
+	}
+
+	// Output ENUMS
+	//
+	// Fields and functions name an enum in their types, so it is defined first; an export that
+	// holds neither has no use for one.
+	if cfg.tables.is_any() || cfg.functions {
+		let enums = tx.all_db_enums(ns, db, None).await?;
+		export_section("ENUMS", enums.iter(), chn).await?;
 	}
 
 	// Output FUNCTIONS
@@ -1008,6 +1017,10 @@ fn reference_fan_out(data: &val::Value, name: &Idiom) -> usize {
 			| val::Value::String(_)
 			| val::Value::Duration(_)
 			| val::Value::Datetime(_)
+			| val::Value::Date(_)
+			| val::Value::Time(_)
+			| val::Value::Timestamp(_)
+			| val::Value::Interval(_)
 			| val::Value::Uuid(_)
 			| val::Value::Object(_)
 			| val::Value::Geometry(_)

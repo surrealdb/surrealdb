@@ -6,13 +6,13 @@ use std::hash::BuildHasher;
 
 use geo_types::Point;
 use rust_decimal::Decimal;
-use surrealdb_types::ToSql;
+use surrealdb_types::{BigDecimal, ToSql};
 
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
-	RecordId, Regex, Set, SqlNone, Strand, TableName, Uuid, Value,
+	Array, Bytes, Closure, Date, Datetime, Duration, File, Geometry, Interval, Null, Number,
+	Object, Range, RecordId, Regex, Set, SqlNone, Strand, TableName, Time, Timestamp, Uuid, Value,
 };
 
 /// Identifies which element of a collection caused a coercion failure.
@@ -261,6 +261,7 @@ impl Coerce for f64 {
 			| Number::F16(_)
 			| Number::F32(_) => true,
 			Number::Decimal(d) => f64::try_from(*d).is_ok(),
+			Number::BigDecimal(b) => b.to_f64().is_finite(),
 		}
 	}
 
@@ -272,6 +273,21 @@ impl Coerce for f64 {
 				into: "float".into(),
 			},
 		)
+	}
+}
+
+impl Coerce for BigDecimal {
+	fn can_coerce(v: &Value) -> bool {
+		matches!(v, Value::Number(n) if n.as_bigdecimal_lossless().is_some())
+	}
+
+	fn coerce(val: Value) -> Result<Self, CoerceError> {
+		val.try_into_number()
+			.and_then(|n| n.as_bigdecimal_lossless().ok_or(Value::Number(n)))
+			.map_err(|from| CoerceError::InvalidKind {
+				from,
+				into: "bigdecimal".into(),
+			})
 	}
 }
 
@@ -293,6 +309,7 @@ impl Coerce for Decimal {
 			Number::Float(f) => Decimal::try_from(*f).is_ok(),
 			Number::F16(f) => Decimal::try_from(f.to_f64()).is_ok(),
 			Number::F32(f) => Decimal::try_from(*f as f64).is_ok(),
+			Number::BigDecimal(b) => Decimal::try_from(b.as_ref()).is_ok(),
 		}
 	}
 
@@ -567,7 +584,8 @@ impl_direct! {
 	Uuid => Uuid,
 	Closure => Box<Closure> = Closure,
 	Range => Box<Range> = Range,
-	Datetime => Datetime,
+	Time => Time,
+	Interval => Interval,
 	Duration => Duration,
 	Bytes => Bytes,
 	Object => Object,
@@ -576,6 +594,73 @@ impl_direct! {
 	String => Strand = String,
 	Regex => Regex,
 	Table => TableName,
+}
+
+// The temporal kinds coerce into each other only when no information is lost: a date widens to
+// a timestamp or datetime at midnight, a timestamp reads as UTC, and a datetime narrows to a date
+// only when it is exactly midnight UTC.
+impl Coerce for Datetime {
+	fn can_coerce(v: &Value) -> bool {
+		matches!(v, Value::Datetime(_) | Value::Date(_) | Value::Timestamp(_))
+	}
+
+	fn coerce(v: Value) -> Result<Self, CoerceError> {
+		if let Value::Datetime(x) = v {
+			Ok(x)
+		} else if let Value::Date(x) = v {
+			Ok(x.into())
+		} else if let Value::Timestamp(x) = v {
+			Ok(x.into())
+		} else {
+			Err(CoerceError::InvalidKind {
+				from: v,
+				into: "datetime".into(),
+			})
+		}
+	}
+}
+
+impl Coerce for Date {
+	fn can_coerce(v: &Value) -> bool {
+		matches!(v, Value::Date(_)) || v.is_datetime_and(|x| x.exact_date().is_some())
+	}
+
+	fn coerce(v: Value) -> Result<Self, CoerceError> {
+		if let Value::Date(x) = v {
+			return Ok(x);
+		}
+		if let Value::Datetime(x) = v {
+			return x.exact_date().ok_or(CoerceError::InvalidKind {
+				from: v,
+				into: "date (a datetime that is not midnight UTC needs the cast `<date>`)".into(),
+			});
+		}
+		Err(CoerceError::InvalidKind {
+			from: v,
+			into: "date".into(),
+		})
+	}
+}
+
+impl Coerce for Timestamp {
+	fn can_coerce(v: &Value) -> bool {
+		matches!(v, Value::Timestamp(_) | Value::Date(_) | Value::Datetime(_))
+	}
+
+	fn coerce(v: Value) -> Result<Self, CoerceError> {
+		if let Value::Timestamp(x) = v {
+			Ok(x)
+		} else if let Value::Date(x) = v {
+			Ok(x.at_midnight())
+		} else if let Value::Datetime(x) = v {
+			Ok(x.into())
+		} else {
+			Err(CoerceError::InvalidKind {
+				from: v,
+				into: "timestamp".into(),
+			})
+		}
+	}
 }
 
 /// A geometry, or a GeoJSON object describing one
@@ -667,6 +752,7 @@ impl Value {
 				Kind::Int
 				| Kind::Float
 				| Kind::Decimal
+				| Kind::BigDecimal
 				| Kind::I8
 				| Kind::U8
 				| Kind::I16
@@ -697,6 +783,19 @@ impl Value {
 			.or_else(|| members.iter().find(|k| self.converts_to(k) && takes(self, k)))
 	}
 
+	/// Whether this value is a string that `reference` admits: any string for a named enum, whose
+	/// labels live in the catalog and are judged where it is reachable, and a listed label for an
+	/// inline one.
+	pub fn is_enum_member(&self, reference: &crate::expr::EnumRef) -> bool {
+		match (self, reference) {
+			(Value::String(_), crate::expr::EnumRef::Named(_)) => true,
+			(Value::String(s), crate::expr::EnumRef::Inline(labels)) => {
+				labels.iter().any(|l| l == s.as_str())
+			}
+			_ => false,
+		}
+	}
+
 	pub fn can_coerce_to_kind(&self, kind: &Kind) -> bool {
 		match kind {
 			Kind::Any => true,
@@ -706,6 +805,7 @@ impl Value {
 			Kind::Int => self.can_coerce_to::<i64>(),
 			Kind::Float => self.can_coerce_to::<f64>(),
 			Kind::Decimal => self.can_coerce_to::<Decimal>(),
+			Kind::BigDecimal => self.can_coerce_to::<BigDecimal>(),
 			Kind::Number => self.can_coerce_to::<Number>(),
 			Kind::I8 => self.can_coerce_to::<i8>(),
 			Kind::U8 => self.can_coerce_to::<u8>(),
@@ -718,6 +818,10 @@ impl Value {
 			Kind::F32 => self.can_coerce_to::<f32>(),
 			Kind::String => self.can_coerce_to::<String>(),
 			Kind::Datetime => self.can_coerce_to::<Datetime>(),
+			Kind::Date => self.can_coerce_to::<Date>(),
+			Kind::Time => self.can_coerce_to::<Time>(),
+			Kind::Timestamp => self.can_coerce_to::<Timestamp>(),
+			Kind::Interval => self.can_coerce_to::<Interval>(),
 			Kind::Duration => self.can_coerce_to::<Duration>(),
 			Kind::Object => self.can_coerce_to::<crate::val::Object>(),
 			Kind::Bytes => self.can_coerce_to::<Bytes>(),
@@ -763,6 +867,7 @@ impl Value {
 					self.can_coerce_to_file_buckets(buckets)
 				}
 			}
+			Kind::Enum(reference) => self.is_enum_member(reference),
 		}
 	}
 
@@ -865,6 +970,9 @@ impl Value {
 			Kind::Int => self.coerce_to::<i64>().map(Value::from),
 			Kind::Float => self.coerce_to::<f64>().map(Value::from),
 			Kind::Decimal => self.coerce_to::<Decimal>().map(Value::from),
+			Kind::BigDecimal => self
+				.coerce_to::<BigDecimal>()
+				.map(|b| Value::Number(Number::BigDecimal(Box::new(b)))),
 			Kind::Number => self.coerce_to::<Number>().map(Value::from),
 			Kind::I8 => self.coerce_to::<i8>().map(|v| Value::Number(Number::I8(v))),
 			Kind::U8 => self.coerce_to::<u8>().map(|v| Value::Number(Number::U8(v))),
@@ -877,6 +985,10 @@ impl Value {
 			Kind::F32 => self.coerce_to::<f32>().map(|v| Value::Number(Number::F32(v))),
 			Kind::String => self.coerce_to::<String>().map(Value::from),
 			Kind::Datetime => self.coerce_to::<Datetime>().map(Value::from),
+			Kind::Date => self.coerce_to::<Date>().map(Value::from),
+			Kind::Time => self.coerce_to::<Time>().map(Value::from),
+			Kind::Timestamp => self.coerce_to::<Timestamp>().map(Value::from),
+			Kind::Interval => self.coerce_to::<Interval>().map(Value::from),
 			Kind::Duration => self.coerce_to::<Duration>().map(Value::from),
 			Kind::Object => self.coerce_to::<crate::val::Object>().map(Value::from),
 			Kind::Bytes => self.coerce_to::<Bytes>().map(Value::from),
@@ -933,6 +1045,16 @@ impl Value {
 					self.coerce_to::<File>().map(Value::from)
 				} else {
 					self.coerce_to_file_buckets(buckets).map(Value::from)
+				}
+			}
+			Kind::Enum(reference) => {
+				if self.is_enum_member(reference) {
+					Ok(self)
+				} else {
+					Err(CoerceError::InvalidKind {
+						from: self,
+						into: kind.to_sql(),
+					})
 				}
 			}
 		}

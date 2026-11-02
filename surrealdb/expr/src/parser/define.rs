@@ -32,10 +32,11 @@ use crate::expr::statements::alter::field::AlterDefault;
 use crate::expr::statements::alter::table::{TableMigrateAction, TableMigrateClause};
 use crate::expr::statements::alter::{
 	AlterAccessStatement, AlterAnalyzerStatement, AlterApiClause, AlterApiStatement,
-	AlterBucketStatement, AlterConfigStatement, AlterDatabaseStatement, AlterEventStatement,
-	AlterFieldStatement, AlterFunctionStatement, AlterIndexStatement, AlterKind,
-	AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement,
-	AlterStatement, AlterSystemStatement, AlterTableStatement, AlterUserStatement,
+	AlterBucketStatement, AlterConfigStatement, AlterDatabaseStatement, AlterEnumAction,
+	AlterEnumStatement, AlterEventStatement, AlterFieldStatement, AlterFunctionStatement,
+	AlterIndexStatement, AlterKind, AlterModuleStatement, AlterNamespaceStatement,
+	AlterParamStatement, AlterSequenceStatement, AlterStatement, AlterSystemStatement,
+	AlterTableStatement, AlterUserStatement, EnumPosition,
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::{ApiConfig, Middleware};
@@ -43,16 +44,17 @@ use crate::expr::statements::define::config::defaults::DefaultConfig;
 use crate::expr::statements::define::{
 	ApiAction, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
 	DefineBucketStatement, DefineConfigStatement, DefineDatabaseStatement, DefineDefault,
-	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineSequenceStatement,
-	DefineStatement, DefineTableStatement, MigrateClause, kind_contains_object,
+	DefineEnumStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+	DefineIndexStatement, DefineKind, DefineNamespaceStatement, DefineParamStatement,
+	DefineSequenceStatement, DefineStatement, DefineTableStatement, MigrateClause, SqlType,
+	SqlTypeDialect, kind_contains_object,
 };
 use crate::expr::statements::remove::{
 	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement,
-	RemoveConfigStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
-	RemoveFunctionStatement, RemoveIndexStatement, RemoveModuleStatement, RemoveNamespaceStatement,
-	RemoveParamStatement, RemoveSequenceStatement, RemoveStatement, RemoveTableStatement,
-	RemoveUserStatement,
+	RemoveConfigStatement, RemoveDatabaseStatement, RemoveEnumStatement, RemoveEventStatement,
+	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveModuleStatement,
+	RemoveNamespaceStatement, RemoveParamStatement, RemoveSequenceStatement, RemoveStatement,
+	RemoveTableStatement, RemoveUserStatement,
 };
 use crate::expr::statements::{DefineModuleStatement, DefineUserStatement};
 use crate::expr::table_type::TableType;
@@ -104,6 +106,7 @@ impl Lower<'_> {
 				Literal::Integer(i) => return Ok(surrealdb_types::Number::Int(i)),
 				Literal::Float(f) => return Ok(surrealdb_types::Number::Float(f)),
 				Literal::Decimal(d) => return Ok(surrealdb_types::Number::Decimal(d)),
+				Literal::BigDecimal(d) => return Ok(surrealdb_types::Number::BigDecimal(d)),
 				Literal::I8(i) => return Ok(surrealdb_types::Number::I8(i)),
 				Literal::U8(u) => return Ok(surrealdb_types::Number::U8(u)),
 				Literal::I16(i) => return Ok(surrealdb_types::Number::I16(i)),
@@ -126,6 +129,10 @@ impl Lower<'_> {
 				| Literal::Object(_)
 				| Literal::Duration(_)
 				| Literal::Datetime(_)
+				| Literal::Date(_)
+				| Literal::Time(_)
+				| Literal::Timestamp(_)
+				| Literal::Interval(_)
 				| Literal::Uuid(_)
 				| Literal::Geometry(_)
 				| Literal::File(_) => {}
@@ -215,6 +222,25 @@ impl Lower<'_> {
 			table: TableName::new(self.name(r[0])?),
 			field: crate::expr::Idiom::field(Strand::new(self.name(r[1])?)),
 			filter: self.opt(r[2])?,
+		})
+	}
+
+	/// The declared type of a [`Cl::SqlType`] clause: `a` the dialect code, `b` the text.
+	fn sql_type(&self, c: &Node) -> R<SqlType> {
+		let dialect = match c.a {
+			0 => SqlTypeDialect::PostgreSql,
+			1 => SqlTypeDialect::MySql,
+			2 => SqlTypeDialect::DynamoDb,
+			code => return Err(Reject::new(format!("Unknown SQL type dialect code {code}"))),
+		};
+		let text = self.string(c.b)?;
+		if text.is_empty() {
+			let n = self.n(c.b);
+			return Err(Reject::new("A SQL TYPE clause needs a type").at(n.start, n.end));
+		}
+		Ok(SqlType {
+			dialect,
+			text,
 		})
 	}
 
@@ -626,6 +652,8 @@ impl Lower<'_> {
 							));
 						}
 						s.migrate = Some(self.migrate(c)?);
+					} else if kind == Cl::SqlType {
+						s.sql_type = Some(self.sql_type(c)?);
 					} else {
 						s.graphql_deprecated = Some(self.string(c.a)?);
 					}
@@ -704,6 +732,26 @@ impl Lower<'_> {
 					}
 				}
 				DefineStatement::Bucket(s)
+			}
+			x if x == K::Enum as u8 => {
+				let mut s = DefineEnumStatement {
+					name: Strand::new(self.name(rec[define::NAME])?),
+					kind,
+					..Default::default()
+				};
+				for c in clauses {
+					let kind = cl(c);
+					if kind == Cl::EnumValues {
+						for &l in self.list(c.a) {
+							s.labels.push(self.string(l)?);
+						}
+					} else if kind == Cl::PermValue {
+						s.permissions = self.perm(c.a)?;
+					} else {
+						s.comment = self.expr(c.a)?;
+					}
+				}
+				DefineStatement::Enum(s)
 			}
 			x if x == K::Sequence as u8 => {
 				let mut s = DefineSequenceStatement {
@@ -1372,6 +1420,10 @@ impl Lower<'_> {
 				base: Self::bucket_base(rec[rm::ON]),
 				if_exists,
 			}),
+			x if x == K::Enum as u8 => RemoveStatement::Enum(RemoveEnumStatement {
+				name: Strand::new(self.name(rec[rm::NAME])?),
+				if_exists,
+			}),
 			_ => RemoveStatement::Config(RemoveConfigStatement {
 				kind: match rec[rm::ON] {
 					0 => surrealdb_iam::ConfigKind::GraphQL,
@@ -1680,6 +1732,7 @@ impl Lower<'_> {
 						(_, Some(Cl::Assert)) => s.assert = AlterKind::Drop,
 						(_, Some(Cl::Default)) => s.default = AlterDefault::Drop,
 						(_, Some(Cl::Comment)) => s.comment = AlterKind::Drop,
+						(_, Some(Cl::SqlType)) => s.sql_type = AlterKind::Drop,
 						(_, Some(_)) => s.reference = AlterKind::Drop,
 						(Cl::FieldType, _) => {
 							let (k, names) = self.field_type(c.a, is_id)?;
@@ -1719,6 +1772,7 @@ impl Lower<'_> {
 							));
 						}
 						(Cl::Migrate, _) => s.migrate = Some(self.migrate(c)?),
+						(Cl::SqlType, _) => s.sql_type = AlterKind::Set(self.sql_type(c)?),
 						(Cl::Materialize, _) if materialize.is_some() => {
 							return Err(Reject::new(
 								"a field alteration takes one MATERIALIZE clause",
@@ -1798,6 +1852,50 @@ impl Lower<'_> {
 					}
 				}
 				AlterStatement::Bucket(s)
+			}
+			x if x == K::Enum as u8 => {
+				let mut s = AlterEnumStatement {
+					name: Strand::new(self.name(rec[1])?),
+					if_exists,
+					..Default::default()
+				};
+				for c in clauses {
+					let kind = unsafe_cl(c.op);
+					if kind == Cl::EnumAdd {
+						let r = self.rec(c.b, 3);
+						let anchor = if r[0] == NONE {
+							None
+						} else {
+							Some(self.string(r[0])?)
+						};
+						s.actions.push(AlterEnumAction::AddValue {
+							value: self.string(c.a)?,
+							position: match (r[1], anchor) {
+								(1, Some(a)) => Some(EnumPosition::Before(a)),
+								(2, Some(a)) => Some(EnumPosition::After(a)),
+								_ => None,
+							},
+							if_not_exists: r[2] == 1,
+						});
+					} else if kind == Cl::EnumRename {
+						s.actions.push(AlterEnumAction::RenameValue {
+							from: self.string(c.a)?,
+							to: self.string(c.b)?,
+						});
+					} else {
+						return Err(Reject::new(
+							"an enum alteration takes ADD VALUE or RENAME VALUE clauses",
+						)
+						.at(c.start, c.end));
+					}
+				}
+				if s.actions.is_empty() {
+					return Err(Reject::new(
+						"an enum alteration needs an ADD VALUE or RENAME VALUE clause",
+					)
+					.at(n.start, n.end));
+				}
+				AlterStatement::Enum(s)
 			}
 			x if x == K::Analyzer as u8 => {
 				let mut s = AlterAnalyzerStatement {

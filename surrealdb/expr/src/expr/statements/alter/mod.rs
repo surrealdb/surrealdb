@@ -7,6 +7,7 @@ pub mod api;
 pub mod bucket;
 pub mod config;
 pub mod database;
+pub mod enumeration;
 pub mod event;
 pub mod field;
 pub mod function;
@@ -25,6 +26,7 @@ pub use api::{AlterApiClause, AlterApiStatement};
 pub use bucket::AlterBucketStatement;
 pub use config::AlterConfigStatement;
 pub use database::AlterDatabaseStatement;
+pub use enumeration::{AlterEnumAction, AlterEnumStatement, EnumPosition};
 pub use event::AlterEventStatement;
 pub use field::{AlterDefault, AlterFieldStatement};
 pub use function::AlterFunctionStatement;
@@ -121,6 +123,7 @@ pub enum AlterStatement {
 	User(AlterUserStatement),
 	Access(AlterAccessStatement),
 	Module(AlterModuleStatement),
+	Enum(AlterEnumStatement),
 }
 
 /// Written out and kept out of line so one copy serves every crate that clones an `AlterStatement`.
@@ -145,6 +148,7 @@ impl Clone for AlterStatement {
 			Self::User(v) => Self::User(v.clone()),
 			Self::Access(v) => Self::Access(v.clone()),
 			Self::Module(v) => Self::Module(v.clone()),
+			Self::Enum(v) => Self::Enum(v.clone()),
 		}
 	}
 }
@@ -169,6 +173,7 @@ impl ToSql for AlterStatement {
 			Self::User(v) => v.fmt_sql(f, fmt),
 			Self::Access(v) => v.fmt_sql(f, fmt),
 			Self::Module(v) => v.fmt_sql(f, fmt),
+			Self::Enum(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

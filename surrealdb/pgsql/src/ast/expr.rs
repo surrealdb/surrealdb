@@ -40,12 +40,34 @@ pub struct ColumnRef {
 	pub span: Span,
 }
 
+/// The field qualifiers an `interval` type may carry (gram.y: opt_interval), in lower case with
+/// single spaces. A qualified interval's [`TypeName`] names the type `interval` followed by one of
+/// these, such as `interval day to second`.
+pub const INTERVAL_FIELD_QUALIFIERS: [&str; 13] = [
+	"year",
+	"month",
+	"day",
+	"hour",
+	"minute",
+	"second",
+	"year to month",
+	"day to hour",
+	"day to minute",
+	"day to second",
+	"hour to minute",
+	"hour to second",
+	"minute to second",
+];
+
 /// A PostgreSQL type name specification (e.g. `INTEGER`, `VARCHAR(255)`, `TEXT[]`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeName {
-	/// Qualified name of the type (e.g. `int4`, `pg_catalog.int4`).
+	/// Qualified name of the type (e.g. `int4`, `pg_catalog.int4`). A multi-word type folds its
+	/// words into the last part: `double precision`, `timestamp with time zone`, and an interval
+	/// with a field qualifier, `interval day to second`.
 	pub name: QualifiedName,
-	/// Type modifiers (e.g. `(255)` in `VARCHAR(255)`).
+	/// Type modifiers (e.g. `(255)` in `VARCHAR(255)`). The precision of an interval's
+	/// `SECOND(p)` field is its modifier, as the `p` of `interval(p)` is.
 	pub modifiers: Vec<String>,
 	/// Number of array dimensions (e.g. 1 for `INT[]`, 2 for `INT[][]`).
 	pub array_bounds: Vec<Option<i64>>,
@@ -414,6 +436,16 @@ pub enum Expr {
 		span: Span,
 	},
 
+	/// A field of a composite value, `(expr).field`: the parenthesised expression is the base.
+	FieldSelect {
+		/// The composite value.
+		expr: Box<Expr>,
+		/// The name of the field.
+		field: String,
+		/// Source span.
+		span: Span,
+	},
+
 	/// `IS [NOT] BOUND (var)` graph expression.
 	IsBound {
 		/// Variable expression.
@@ -627,6 +659,10 @@ impl Expr {
 				..
 			} => *span,
 			Self::Grouping {
+				span,
+				..
+			}
+			| Self::FieldSelect {
 				span,
 				..
 			} => *span,
@@ -871,6 +907,11 @@ impl Expr {
 			Self::Grouping {
 				expr,
 				span,
+			}
+			| Self::FieldSelect {
+				expr,
+				span,
+				..
 			} => {
 				*span = zero;
 				expr.normalize_spans();

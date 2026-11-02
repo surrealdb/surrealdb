@@ -871,7 +871,7 @@ impl Groups {
 					let numbers: usize = logged.numbers[at].iter().map(Vec::len).sum();
 					w.usize(numbers);
 					for number in logged.numbers[at].iter().flatten() {
-						w.value(&Value::Number(*number)).ok()?;
+						w.value(&Value::Number(number.clone())).ok()?;
 					}
 				}
 				w.usize(logged.bytes);
@@ -950,6 +950,10 @@ impl Groups {
 						| Value::String(_)
 						| Value::Duration(_)
 						| Value::Datetime(_)
+						| Value::Date(_)
+						| Value::Time(_)
+						| Value::Timestamp(_)
+						| Value::Interval(_)
 						| Value::Uuid(_)
 						| Value::Array(_)
 						| Value::Set(_)

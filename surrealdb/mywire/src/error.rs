@@ -35,6 +35,8 @@ const ER_BAD_DB_ERROR: Number = (1049, b"42000");
 const ER_BAD_FIELD_ERROR: Number = (1054, b"42S22");
 const ER_BAD_NULL_ERROR: Number = (1048, b"23000");
 const ER_DATA_OUT_OF_RANGE: Number = (1690, b"22003");
+const ER_DATA_TOO_LONG: Number = (1406, b"22001");
+const ER_INVALID_JSON_TEXT: Number = (3140, b"22032");
 const ER_DB_CREATE_EXISTS: Number = (1007, b"HY000");
 const ER_DERIVED_MUST_HAVE_ALIAS: Number = (1248, b"42000");
 const ER_DIVISION_BY_ZERO: Number = (1365, b"22012");
@@ -118,7 +120,16 @@ fn plan_number(err: &PlanError) -> Number {
 		PlanError::UndefinedConstraint {
 			..
 		} => ER_CANT_DROP_FIELD_OR_KEY,
-		PlanError::UndefinedOperator(_)
+		PlanError::DuplicateColumn(_) => ER_DUP_FIELDNAME,
+		// Domains and composite types are PostgreSQL's; MySQL has no number for them.
+		PlanError::UndefinedType(_)
+		| PlanError::UndefinedDomainConstraint {
+			..
+		}
+		| PlanError::DuplicateDomainConstraint {
+			..
+		}
+		| PlanError::UndefinedOperator(_)
 		| PlanError::ParameterOutOfRange(_)
 		| PlanError::NoActiveTransaction
 		| PlanError::InFailedTransaction
@@ -225,6 +236,19 @@ fn message_number(message: &str) -> Option<Number> {
 		} else {
 			Some(ER_TRUNCATED_WRONG_VALUE_FOR_FIELD)
 		}
+	} else if message.starts_with("Data too long for column '")
+		|| message.starts_with("value too long for type ")
+	{
+		// A value that a declared SQL type's length refuses.
+		Some(ER_DATA_TOO_LONG)
+	} else if message.starts_with("numeric field overflow ") {
+		Some(ER_DATA_OUT_OF_RANGE)
+	} else if message.starts_with("JSON cannot hold a ") {
+		Some(ER_INVALID_JSON_TEXT)
+	} else if message.starts_with("bit string ")
+		|| message.starts_with("invalid binary digit in a bit string: ")
+	{
+		Some(ER_TRUNCATED_WRONG_VALUE_FOR_FIELD)
 	} else {
 		None
 	}
@@ -278,6 +302,7 @@ static PLANNER_SENTENCES: [(&str, PlanError); 3] = [
 static PLANNER_FORMS: &[(&str, &str, PlanError)] = &[
 	("schema or table \"", "\" does not exist", PlanError::UndefinedTable(String::new())),
 	("column \"", "\" does not exist", PlanError::UndefinedColumn(String::new())),
+	("column \"", "\" specified more than once", PlanError::DuplicateColumn(String::new())),
 	("column reference \"", "\" is ambiguous", PlanError::AmbiguousColumn(String::new())),
 	(
 		"missing FROM-clause entry for table \"",
@@ -352,10 +377,15 @@ fn planner_kind(reason: &str) -> Option<&'static PlanError> {
 		return Some(kind);
 	}
 	PLANNER_FORMS.iter().find_map(|(start, end, kind)| {
-		(reason.len() >= start.len() + end.len()
-			&& reason.starts_with(start)
-			&& reason.ends_with(end))
-		.then_some(kind)
+		let middle = reason.strip_prefix(start)?.strip_suffix(end)?;
+		// A domain's constraint is named in the same frame as a relation's; only the noun
+		// between the names tells them apart.
+		if matches!(kind, PlanError::UndefinedConstraint { .. })
+			&& !middle.contains("\" of relation \"")
+		{
+			return None;
+		}
+		Some(kind)
 	})
 }
 
@@ -663,6 +693,16 @@ mod tests {
 				constraint: name(),
 				table: name(),
 			},
+			PlanError::UndefinedType(name()),
+			PlanError::UndefinedDomainConstraint {
+				constraint: name(),
+				domain: name(),
+			},
+			PlanError::DuplicateDomainConstraint {
+				constraint: name(),
+				domain: name(),
+			},
+			PlanError::DuplicateColumn(name()),
 			PlanError::InvalidParameterValue("m".to_string()),
 			PlanError::DataException("expected 3 dimensions, not 2".to_string()),
 			PlanError::ProgramLimitExceeded("dimensions".to_string()),
@@ -714,7 +754,15 @@ mod tests {
 					PlanError::UndefinedConstraint {
 						..
 					} => ER_CANT_DROP_FIELD_OR_KEY,
-					PlanError::UndefinedOperator(_)
+					PlanError::DuplicateColumn(_) => ER_DUP_FIELDNAME,
+					PlanError::UndefinedType(_)
+					| PlanError::UndefinedDomainConstraint {
+						..
+					}
+					| PlanError::DuplicateDomainConstraint {
+						..
+					}
+					| PlanError::UndefinedOperator(_)
 					| PlanError::ParameterOutOfRange(_)
 					| PlanError::NoActiveTransaction
 					| PlanError::InFailedTransaction

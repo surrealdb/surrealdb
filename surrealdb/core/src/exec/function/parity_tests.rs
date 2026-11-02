@@ -127,6 +127,7 @@ fn sample_value(kind: &Kind) -> Option<Value> {
 		Kind::None
 		| Kind::Null
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::I8
 		| Kind::U8
 		| Kind::I16
@@ -136,6 +137,10 @@ fn sample_value(kind: &Kind) -> Option<Value> {
 		| Kind::U64
 		| Kind::F16
 		| Kind::F32
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Regex
 		| Kind::Table(_)
 		| Kind::Record(_)
@@ -146,7 +151,8 @@ fn sample_value(kind: &Kind) -> Option<Value> {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => return None,
+		| Kind::File(_)
+		| Kind::Enum(_) => return None,
 	})
 }
 
@@ -159,6 +165,7 @@ fn kind_matches(value: &Value, kind: &Kind) -> bool {
 		Kind::Int => matches!(value, Value::Number(Number::Int(_))),
 		Kind::Float => matches!(value, Value::Number(Number::Float(_))),
 		Kind::Decimal => matches!(value, Value::Number(Number::Decimal(_))),
+		Kind::BigDecimal => matches!(value, Value::Number(Number::BigDecimal(_))),
 		Kind::I8 => matches!(value, Value::Number(Number::I8(_))),
 		Kind::U8 => matches!(value, Value::Number(Number::U8(_))),
 		Kind::I16 => matches!(value, Value::Number(Number::I16(_))),
@@ -171,6 +178,10 @@ fn kind_matches(value: &Value, kind: &Kind) -> bool {
 		Kind::Number => matches!(value, Value::Number(_)),
 		Kind::String => matches!(value, Value::String(_)),
 		Kind::Datetime => matches!(value, Value::Datetime(_)),
+		Kind::Date => matches!(value, Value::Date(_)),
+		Kind::Time => matches!(value, Value::Time(_)),
+		Kind::Timestamp => matches!(value, Value::Timestamp(_)),
+		Kind::Interval => matches!(value, Value::Interval(_)),
 		Kind::Duration => matches!(value, Value::Duration(_)),
 		Kind::Uuid => matches!(value, Value::Uuid(_)),
 		Kind::Bytes => matches!(value, Value::Bytes(_)),
@@ -186,7 +197,8 @@ fn kind_matches(value: &Value, kind: &Kind) -> bool {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => true,
+		| Kind::File(_)
+		| Kind::Enum(_) => true,
 	}
 }
 

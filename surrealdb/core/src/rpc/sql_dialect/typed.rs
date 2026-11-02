@@ -784,6 +784,7 @@ fn number_text(number: surrealdb_types::Number) -> String {
 		Number::F32(v) => float(v),
 		Number::F16(v) => float(v.to_f32()),
 		Number::Decimal(v) => v.to_string(),
+		Number::BigDecimal(v) => v.to_string(),
 	}
 }
 

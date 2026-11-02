@@ -61,6 +61,14 @@
 //! 2F     U64        1..=8 bytes, as U16
 //! 30     F16        2 bytes, IEEE binary16 bits
 //! 31     F32        4 bytes, IEEE binary32 bits
+//! 32     DATE       1..=4 bytes, as I32: days from 1970-01-01
+//! 33     TIME       1..=8 bytes, as U64: nanoseconds from midnight, up to 24 hours
+//! 34     TIMESTAMP  as DATETIME: wall-clock nanoseconds from 1970-01-01T00:00:00 when they
+//!                   fit, else i64 seconds, u32 nanoseconds
+//! 35     INTERVAL   16 bytes: i32 months, i32 days, i64 microseconds, little-endian, as written
+//! 36     BIGDECIMAL 00 or 01 for the sign, then the scale as a canonical varint, then the magnitude
+//!                   of the coefficient, little-endian, the fewest bytes that hold it (none for
+//!                   zero); a negative zero and a magnitude ending in a zero byte are refused
 //! 80-FE  INT        the integer tag − 0x80, 0 to 126
 //! others reserved
 //!
@@ -127,11 +135,13 @@ mod tests;
 pub mod varint;
 
 pub use decode::{
-	decimal_payload, decode, decode_datetime_payload, decode_duration_payload, decode_key,
-	decode_key_nested, decode_nested, validate, validate_entries_nested, validate_key_nested,
-	validate_nested,
+	bigdecimal_payload, decimal_payload, decode, decode_datetime_payload, decode_duration_payload,
+	decode_key, decode_key_nested, decode_nested, validate, validate_entries_nested,
+	validate_key_nested, validate_nested,
 };
-pub use encode::{Encoder, Open, encode, put_decimal_payload, with_encoder};
+pub use encode::{
+	Encoder, Open, encode, put_bigdecimal_payload, put_decimal_payload, with_encoder,
+};
 pub use map::{Item, ListRef, MapRef};
 pub use read::{ArrayIter, ArrayRef, Kind, ObjectIter, ObjectRef, OrderedObjectRef, ValueRef};
 
@@ -194,6 +204,16 @@ pub mod tag {
 	pub const F16: u8 = 0x30;
 	/// An IEEE 754 single-precision float.
 	pub const F32: u8 = 0x31;
+	/// A calendar date.
+	pub const DATE: u8 = 0x32;
+	/// A time of day.
+	pub const TIME: u8 = 0x33;
+	/// A date and time of day without a time zone.
+	pub const TIMESTAMP: u8 = 0x34;
+	/// A calendar-aware interval.
+	pub const INTERVAL: u8 = 0x35;
+	/// An arbitrary-precision decimal: a sign, a scale and an integer coefficient.
+	pub const BIGDECIMAL: u8 = 0x36;
 	/// The tag of the integer 0; the integer `n` in `0..=SMALL_INT_MAX` is
 	/// `SMALL_INT + n`.
 	pub const SMALL_INT: u8 = 0x80;

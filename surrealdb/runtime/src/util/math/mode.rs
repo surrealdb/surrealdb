@@ -15,7 +15,7 @@ pub async fn mode(array: Vec<Number>) -> Number {
 	.await;
 	let mut best: Option<(Number, u32)> = None;
 	fuel::walk(frequencies, |(value, n)| {
-		if best.is_none_or(|(_, most)| n >= most) {
+		if best.clone().is_none_or(|(_, most)| n >= most) {
 			best = Some((value, n));
 		}
 		std::ops::ControlFlow::Continue(())

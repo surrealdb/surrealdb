@@ -328,6 +328,7 @@ impl Expr {
 				surrealdb_types::Number::Int(i) => Expr::Literal(Literal::Integer(i)),
 				surrealdb_types::Number::Float(f) => Expr::Literal(Literal::Float(f)),
 				surrealdb_types::Number::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
+				surrealdb_types::Number::BigDecimal(b) => Expr::Literal(Literal::BigDecimal(b)),
 				surrealdb_types::Number::I8(i) => Expr::Literal(Literal::I8(i)),
 				surrealdb_types::Number::U8(u) => Expr::Literal(Literal::U8(u)),
 				surrealdb_types::Number::I16(i) => Expr::Literal(Literal::I16(i)),
@@ -348,6 +349,10 @@ impl Expr {
 			surrealdb_types::Value::Datetime(d) => {
 				Expr::Literal(Literal::Datetime(crate::val::Datetime(d.into_inner())))
 			}
+			surrealdb_types::Value::Date(v) => Expr::Literal(Literal::Date(v.into())),
+			surrealdb_types::Value::Time(v) => Expr::Literal(Literal::Time(v.into())),
+			surrealdb_types::Value::Timestamp(v) => Expr::Literal(Literal::Timestamp(v.into())),
+			surrealdb_types::Value::Interval(v) => Expr::Literal(Literal::Interval(v.into())),
 			surrealdb_types::Value::Uuid(u) => {
 				Expr::Literal(Literal::Uuid(crate::val::Uuid(u.into_inner())))
 			}
@@ -546,6 +551,10 @@ impl Expr {
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
 				Literal::Datetime(d) => Idiom::field(d.to_string()),
+				Literal::Date(d) => Idiom::field(d.to_string()),
+				Literal::Time(d) => Idiom::field(d.to_string()),
+				Literal::Timestamp(d) => Idiom::field(d.to_string()),
+				Literal::Interval(d) => Idiom::field(d.to_string()),
 				Literal::None
 				| Literal::Null
 				| Literal::UnboundedRange
@@ -553,6 +562,7 @@ impl Expr {
 				| Literal::Float(_)
 				| Literal::Integer(_)
 				| Literal::Decimal(_)
+				| Literal::BigDecimal(_)
 				| Literal::I8(_)
 				| Literal::U8(_)
 				| Literal::I16(_)
@@ -707,6 +717,7 @@ impl Expr {
 				| Literal::Float(_)
 				| Literal::Integer(_)
 				| Literal::Decimal(_)
+				| Literal::BigDecimal(_)
 				| Literal::I8(_)
 				| Literal::U8(_)
 				| Literal::I16(_)
@@ -725,6 +736,10 @@ impl Expr {
 				| Literal::Object(_)
 				| Literal::Duration(_)
 				| Literal::Datetime(_)
+				| Literal::Date(_)
+				| Literal::Time(_)
+				| Literal::Timestamp(_)
+				| Literal::Interval(_)
 				| Literal::Uuid(_)
 				| Literal::Geometry(_)
 				| Literal::File(_)
@@ -791,6 +806,7 @@ impl Expr {
 			Expr::Literal(Literal::Integer(x)) => x.is_negative(),
 			Expr::Literal(Literal::Float(x)) => x.is_sign_negative(),
 			Expr::Literal(Literal::Decimal(x)) => x.is_sign_negative(),
+			Expr::Literal(Literal::BigDecimal(x)) => x.signum() < 0,
 			Expr::Literal(Literal::I8(x)) => x.is_negative(),
 			Expr::Literal(Literal::I16(x)) => x.is_negative(),
 			Expr::Literal(Literal::I32(x)) => x.is_negative(),
@@ -822,6 +838,10 @@ impl Expr {
 				| Literal::Object(_)
 				| Literal::Duration(_)
 				| Literal::Datetime(_)
+				| Literal::Date(_)
+				| Literal::Time(_)
+				| Literal::Timestamp(_)
+				| Literal::Interval(_)
 				| Literal::Uuid(_)
 				| Literal::Geometry(_)
 				| Literal::File(_)

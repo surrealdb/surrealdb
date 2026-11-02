@@ -339,7 +339,7 @@ fn websocket_negotiates_cbor2_and_preserves_sized_number_widths() {
 		// response.
 		for (i, (num, expected_kind)) in sample_sized_numbers().into_iter().enumerate() {
 			let mut vars = Object::default();
-			vars.insert("x".to_owned(), Value::Number(num));
+			vars.insert("x".to_owned(), Value::Number(num.clone()));
 			let res = client
 				.rpc(
 					&format!("q_{i}"),
@@ -354,7 +354,8 @@ fn websocket_negotiates_cbor2_and_preserves_sized_number_widths() {
 			assert_eq!(
 				result,
 				&Value::Array(
-					vec![Value::Number(num), Value::String(expected_kind.to_owned())].into()
+					vec![Value::Number(num.clone()), Value::String(expected_kind.to_owned())]
+						.into()
 				),
 				"failed round-trip for {num:?} ({expected_kind})"
 			);
@@ -508,7 +509,7 @@ fn http_negotiates_cbor2_and_enforces_content_type_rules() {
 
 		for (i, (num, expected_kind)) in sample_sized_numbers().into_iter().enumerate() {
 			let mut vars = Object::default();
-			vars.insert("x".to_owned(), Value::Number(num));
+			vars.insert("x".to_owned(), Value::Number(num.clone()));
 			let res = client
 				.rpc(
 					&format!("hq_{i}"),
@@ -524,7 +525,8 @@ fn http_negotiates_cbor2_and_enforces_content_type_rules() {
 			assert_eq!(
 				result,
 				&Value::Array(
-					vec![Value::Number(num), Value::String(expected_kind.to_owned())].into()
+					vec![Value::Number(num.clone()), Value::String(expected_kind.to_owned())]
+						.into()
 				),
 				"HTTP round-trip failed for {num:?} ({expected_kind})"
 			);

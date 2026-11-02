@@ -55,6 +55,9 @@ impl Part {
 			Literal::Integer(i) => Some(*i as usize),
 			Literal::Float(f) => Some(*f as usize),
 			Literal::Decimal(d) => Some(usize::try_from(*d).unwrap_or_default()),
+			Literal::BigDecimal(d) => {
+				Some(d.to_u64().and_then(|u| usize::try_from(u).ok()).unwrap_or_default())
+			}
 			Literal::I8(i) => Some(*i as usize),
 			Literal::U8(u) => Some(*u as usize),
 			Literal::I16(i) => Some(*i as usize),
@@ -77,6 +80,10 @@ impl Part {
 			| Literal::Object(_)
 			| Literal::Duration(_)
 			| Literal::Datetime(_)
+			| Literal::Date(_)
+			| Literal::Time(_)
+			| Literal::Timestamp(_)
+			| Literal::Interval(_)
 			| Literal::Uuid(_)
 			| Literal::Geometry(_)
 			| Literal::File(_) => None,

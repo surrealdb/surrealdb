@@ -410,6 +410,9 @@ impl<'a> Parser<'a> {
 		if let TokenKind::IntLiteral(n) = tok.kind {
 			self.bump();
 			Ok(Expr::Literal(Literal::Integer(n), tok.span))
+		} else if let TokenKind::UnsignedIntLiteral(n) = tok.kind {
+			self.bump();
+			Ok(Expr::Literal(Literal::Unsigned(n), tok.span))
 		} else if let TokenKind::WideIntLiteral {
 			value,
 			..
@@ -755,7 +758,30 @@ impl<'a> Parser<'a> {
 		self.expect(&TokenKind::LParen, "'(' after CAST")?;
 		let expr = self.parse_expr()?;
 		self.expect_keyword(Keyword::As, "AS in CAST")?;
-		let (target_type, _) = self.parse_ident()?;
+		let (mut target_type, _) = self.parse_ident()?;
+		// A precision and scale, as in `DECIMAL(65,30)`, are kept in the type text.
+		if self.eat(&TokenKind::LParen) {
+			let mut modifiers = Vec::new();
+			loop {
+				let tok = self.peek();
+				let TokenKind::IntLiteral(n) = &tok.kind else {
+					return Err(ParseError::new(
+						tok.span,
+						ErrorKind::UnexpectedToken {
+							expected: "a precision or scale in the CAST type",
+							found: tok.kind.to_string(),
+						},
+					));
+				};
+				modifiers.push(n.to_string());
+				self.bump();
+				if !self.eat(&TokenKind::Comma) {
+					break;
+				}
+			}
+			self.expect(&TokenKind::RParen, "')' closing the CAST type modifiers")?;
+			target_type = format!("{target_type}({})", modifiers.join(","));
+		}
 		let end = self.expect(&TokenKind::RParen, "')' closing CAST")?.span;
 		Ok(Expr::Cast {
 			expr: Box::new(expr),

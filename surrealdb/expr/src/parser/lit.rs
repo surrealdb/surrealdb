@@ -12,6 +12,7 @@ use std::str::FromStr;
 use common::decimal::DecimalExt;
 use surrealdb_parser_next::ast::{Ast, NodeId};
 use surrealdb_parser_next::decode;
+use surrealdb_parser_next::lex::{PREFIX_DATE, PREFIX_INTERVAL, PREFIX_TIME, PREFIX_TIMESTAMP};
 use surrealdb_strand::Strand;
 
 use super::{Lower, Options, R, Reject};
@@ -121,6 +122,41 @@ pub fn decimal(text: &str) -> R<Literal> {
 		normalized_exact_as(Literal::Decimal, &s)
 	};
 	d.map(Literal::Decimal).map_err(fail)
+}
+
+/// A bigdecimal literal span (`1.50bigdec`, `-2e40bigdec`). The scale is kept as written, so
+/// `1.50bigdec` formats as `1.50bigdec` and re-parses to the same value and scale. An exponent is
+/// folded into the digits. A literal whose value, written out in full, has more significant digits
+/// than a bigdecimal holds is an error, so every accepted literal formats as text that re-parses.
+pub fn bigdecimal(text: &str) -> R<Literal> {
+	bigdecimal_value(text).map(Literal::BigDecimal)
+}
+
+/// The value of a [`bigdecimal`] literal span.
+pub fn bigdecimal_value(text: &str) -> R<Box<surrealdb_types::BigDecimal>> {
+	use surrealdb_types::BigDecimal;
+	use surrealdb_types::bigdecimal::MAX_DIGITS;
+	let fail = |e: String| Reject::new(format!("Failed to parse bigdecimal: {e}"));
+	let s: String = text.trim_end_matches("bigdec").chars().filter(|c| *c != '_').collect();
+	let value = s.parse::<BigDecimal>().map_err(|e| fail(e.to_string()))?;
+	let shown = value.to_string();
+	let written = shown.trim_start_matches('-').replace('.', "");
+	if written.trim_start_matches('0').len() > MAX_DIGITS {
+		return Err(fail(format!(
+			"the value has more than {MAX_DIGITS} significant digits once its exponent is applied"
+		)));
+	}
+	Ok(Box::new(value))
+}
+
+/// The decimal literal of a [`surrealdb_parser_next::ast::Tag::Decimal`] node with `op`: a
+/// [`bigdecimal`] for [`surrealdb_parser_next::ast::DECIMAL_BIG`], otherwise a [`decimal`].
+pub fn decimal_of(op: u8, text: &str) -> R<Literal> {
+	if op == surrealdb_parser_next::ast::DECIMAL_BIG {
+		bigdecimal(text)
+	} else {
+		decimal(text)
+	}
 }
 
 /// Whether the regex literal at `start..end` of `src`, with its
@@ -423,6 +459,34 @@ fn datetime_prefix(s: &str) -> R<(Literal, usize)> {
 /// A uuid string body: 8-4-4-4-12 hexadecimal digits, anything after them
 /// ignored, as earlier releases read it. Error spans are byte offsets
 /// into `s`.
+/// A `date'…'` body.
+pub fn date(s: &str) -> R<Literal> {
+	crate::val::Date::from_str(s)
+		.map(Literal::Date)
+		.map_err(|e| body_err(e.to_string(), 0, s.len()))
+}
+
+/// A `time'…'` body.
+pub fn time(s: &str) -> R<Literal> {
+	crate::val::Time::from_str(s)
+		.map(Literal::Time)
+		.map_err(|e| body_err(e.to_string(), 0, s.len()))
+}
+
+/// A `timestamp'…'` body.
+pub fn timestamp(s: &str) -> R<Literal> {
+	crate::val::Timestamp::from_str(s)
+		.map(Literal::Timestamp)
+		.map_err(|e| body_err(e.to_string(), 0, s.len()))
+}
+
+/// An `interval'…'` body.
+pub fn interval(s: &str) -> R<Literal> {
+	crate::val::Interval::from_str(s)
+		.map(Literal::Interval)
+		.map_err(|e| body_err(e.to_string(), 0, s.len()))
+}
+
 pub fn uuid(s: &str) -> R<Literal> {
 	const END: &str = "Unexpected end of string, expected UUID token to finish";
 	let b = s.as_bytes();
@@ -557,11 +621,7 @@ pub fn in_token(mut r: Reject, token: &str, start: u32) -> Reject {
 /// in the token.
 fn escaped_offset(token: &str, offset: u32) -> u32 {
 	let b = token.as_bytes();
-	let mut i = if matches!(b.first(), Some(b'"' | b'\'')) {
-		1
-	} else {
-		2
-	};
+	let mut i = surrealdb_parser_next::lex::string_prefix_len(token) + 1;
 	let mut idx = 0u32;
 	let hex = |c: u8| (c as char).to_digit(16);
 	while idx < offset {
@@ -800,6 +860,10 @@ impl Lower<'_> {
 			b'd' => datetime(&body).map_err(at)?,
 			b'u' => uuid(&body).map_err(at)?,
 			b'b' => bytes(&body).map_err(at)?,
+			PREFIX_DATE => date(&body).map_err(at)?,
+			PREFIX_TIME => time(&body).map_err(at)?,
+			PREFIX_TIMESTAMP => timestamp(&body).map_err(at)?,
+			PREFIX_INTERVAL => interval(&body).map_err(at)?,
 			_ => {
 				// A record id parsed from the string's contents.
 				let mut ast = Ast::new();
@@ -824,7 +888,15 @@ impl Lower<'_> {
 /// The established error for the string token `text` at `start` with prefix
 /// `prefix` whose contents do not decode, if they do not.
 pub fn prefixed_error(text: &str, prefix: u8, start: u32) -> Option<Reject> {
-	if !matches!(prefix, b'd' | b'u' | b'b' | b'f' | b'r') {
+	if !matches!(
+		prefix,
+		b'd' | b'u'
+			| b'b' | b'f'
+			| b'r' | PREFIX_DATE
+			| PREFIX_TIME
+			| PREFIX_TIMESTAMP
+			| PREFIX_INTERVAL
+	) {
 		return None;
 	}
 	let body = string_body(text).ok()?;
@@ -833,6 +905,10 @@ pub fn prefixed_error(text: &str, prefix: u8, start: u32) -> Option<Reject> {
 		b'u' => uuid(&body).err(),
 		b'b' => bytes(&body).err(),
 		b'f' => file(&body).err(),
+		PREFIX_DATE => date(&body).err(),
+		PREFIX_TIME => time(&body).err(),
+		PREFIX_TIMESTAMP => timestamp(&body).err(),
+		PREFIX_INTERVAL => interval(&body).err(),
 		_ => {
 			let mut ast = Ast::new();
 			let mut scratch = surrealdb_parser_next::Scratch::default();

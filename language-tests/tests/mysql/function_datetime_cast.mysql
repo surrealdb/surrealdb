@@ -7,13 +7,13 @@ database = true
 reason = "A text cast to a datetime or a date is read as MySQL writes it, in a query and in the value of an INSERT, and a date has no time of day"
 
 [[test.results]]
-value = "[{ a: d'2024-03-15T10:20:30Z', b: d'2024-03-15T00:00:00Z', c: d'2024-03-15T00:00:00Z', d: NULL }]"
+value = "[{ a: timestamp'2024-03-15T10:20:30', b: date'2024-03-15', c: date'2024-03-15', d: NULL }]"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[{ at: d'2024-03-15T10:20:30Z', id: 1 }]"
+value = "[{ at: timestamp'2024-03-15T10:20:30', id: 1 }]"
 
 [[test.results]]
 value = "[{ same: true, y: 2024 }]"

@@ -4,6 +4,8 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
 	Integer(i64),
+	/// An integer above `i64::MAX` that fits 64 unsigned bits, held exactly.
+	Unsigned(u64),
 	Float(f64),
 	String(String),
 	IntroducedString {
@@ -25,7 +27,10 @@ impl Literal {
 	pub fn to_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			Self::Integer(n) => write!(f, "{n}"),
-			Self::Float(fl) => write!(f, "{fl}"),
+			Self::Unsigned(n) => write!(f, "{n}"),
+			// The debug form keeps a fraction or an exponent, so a whole-valued double does not
+			// print as an integer literal, which re-parses as an exact integer.
+			Self::Float(fl) => write!(f, "{fl:?}"),
 			Self::String(s) => {
 				write!(f, "'")?;
 				for ch in s.chars() {

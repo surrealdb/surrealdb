@@ -190,10 +190,14 @@ pub enum AggregationStat {
 		sum_of_squares: Number,
 		count: i64,
 	},
+	/// The `time::max` of a group of datetimes. `max` is `Datetime::MIN_UTC` for a group that has
+	/// seen no temporal value, whatever the kind its values will have.
 	TimeMax {
 		arg: usize,
 		max: Datetime,
 	},
+	/// The `time::min` of a group of datetimes. `min` is `Datetime::MAX_UTC` for a group that has
+	/// seen no temporal value, whatever the kind its values will have.
 	TimeMin {
 		arg: usize,
 		min: Datetime,
@@ -202,13 +206,27 @@ pub enum AggregationStat {
 		arg: usize,
 		values: Vec<Value>,
 	},
+	/// The `time::max` of a group of `date`, `time` or `timestamp` values: the largest, of the one
+	/// kind the group holds. Never empty: a group with no temporal value is a [`Self::TimeMax`] at
+	/// its starting value, which the first value of one of these kinds turns into this stat and
+	/// which the group returns to when its last value leaves.
+	TemporalMax {
+		arg: usize,
+		max: Value,
+	},
+	/// The `time::min` counterpart of [`Self::TemporalMax`].
+	TemporalMin {
+		arg: usize,
+		min: Value,
+	},
 }
 
 /// Reads exactly what the derived serializer writes: the revision, a `u32` variant, then the
 /// variant's fields in declaration order. A stat written at revision 1 has no `shift` on `StdDev`
 /// and `Variance`, and takes [`AggregationStat::default_shift`]. `Accumulate`'s values are read
 /// through [`bounded::read_vec`], so a claimed length costs nothing beyond the values the input
-/// holds.
+/// holds. `TemporalMax` and `TemporalMin` follow every variant an earlier build wrote, so no
+/// discriminant those builds wrote is read differently.
 impl DeserializeRevisioned for AggregationStat {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
 		fn arg<R: std::io::Read>(reader: &mut R) -> Result<usize, revision::Error> {
@@ -320,6 +338,20 @@ impl DeserializeRevisioned for AggregationStat {
 					values: bounded::read_vec::<Value, _>(reader)?,
 				}
 			}
+			11 => {
+				let arg = arg(reader)?;
+				Self::TemporalMax {
+					arg,
+					max: Value::deserialize_revisioned(reader)?,
+				}
+			}
+			12 => {
+				let arg = arg(reader)?;
+				Self::TemporalMin {
+					arg,
+					min: Value::deserialize_revisioned(reader)?,
+				}
+			}
 			x => {
 				return Err(revision::Error::Deserialize(format!(
 					"Invalid discriminant `{x}` for enum `AggregationStat` revision `{revision}`"
@@ -349,6 +381,10 @@ impl SkipCheckRevisioned for AggregationStat {
 /// `Decimal` and `Float` differences go through `Number::try_sub` (which widens
 /// an `Int` operand to `Decimal` or `Float` before subtracting), so a `Decimal`
 /// group keeps full precision.
+#[allow(
+	clippy::needless_pass_by_value,
+	reason = "Number is not Copy; these take owned operands like the arithmetic they feed"
+)]
 fn shifted_difference(a: Number, b: Number) -> Result<Number> {
 	let a = a.widened();
 	let b = b.widened();
@@ -379,6 +415,10 @@ fn shifted_difference(a: Number, b: Number) -> Result<Number> {
 ///
 /// Arithmetic goes through `Number`, so a group of `Decimal` inputs accumulates
 /// and finalises as `Decimal`.
+#[allow(
+	clippy::needless_pass_by_value,
+	reason = "Number is not Copy; these take owned operands like the arithmetic they feed"
+)]
 pub fn shifted_accumulate(
 	shift: &mut Number,
 	sum: &mut Number,
@@ -388,14 +428,14 @@ pub fn shifted_accumulate(
 ) -> Result<()> {
 	let x = x.widened();
 	let next_shift = if *count == 0 {
-		x
+		x.clone()
 	} else {
-		*shift
+		shift.clone()
 	};
-	let delta = shifted_difference(x, next_shift)?;
-	let sq = delta.try_mul(delta)?;
-	let next_sum = (*sum).try_add(delta)?;
-	let next_sum_of_squares = (*sum_of_squares).try_add(sq)?;
+	let delta = shifted_difference(x, next_shift.clone())?;
+	let sq = delta.clone().try_mul(delta.clone())?;
+	let next_sum = sum.clone().try_add(delta)?;
+	let next_sum_of_squares = sum_of_squares.clone().try_add(sq)?;
 	*shift = next_shift;
 	*sum = next_sum;
 	*sum_of_squares = next_sum_of_squares;
@@ -426,10 +466,10 @@ pub fn shifted_rebase(
 ) -> Result<(Number, Number)> {
 	let n = Number::from(count);
 	let d = shifted_difference(from_shift, to_shift)?;
-	let rebased_sum = sum.try_add(n.try_mul(d)?)?;
+	let rebased_sum = sum.clone().try_add(n.clone().try_mul(d.clone())?)?;
 	let rebased_sum_of_squares = sum_of_squares
-		.try_add(Number::from(2).try_mul(d)?.try_mul(sum)?)?
-		.try_add(n.try_mul(d.try_mul(d)?)?)?;
+		.try_add(Number::from(2).try_mul(d.clone())?.try_mul(sum)?)?
+		.try_add(n.try_mul(d.clone().try_mul(d)?)?)?;
 	Ok((rebased_sum, rebased_sum_of_squares))
 }
 
@@ -437,6 +477,10 @@ pub fn shifted_rebase(
 /// [`shifted_accumulate`].
 ///
 /// Emptying a group clears the shift so the next value picks a fresh one.
+#[allow(
+	clippy::needless_pass_by_value,
+	reason = "Number is not Copy; these take owned operands like the arithmetic they feed"
+)]
 pub fn shifted_remove(
 	shift: &mut Number,
 	sum: &mut Number,
@@ -445,10 +489,10 @@ pub fn shifted_remove(
 	x: Number,
 ) -> Result<()> {
 	let x = x.widened();
-	let delta = shifted_difference(x, *shift)?;
-	let sq = delta.try_mul(delta)?;
-	let next_sum = (*sum).try_sub(delta)?;
-	let next_sum_of_squares = (*sum_of_squares).try_sub(sq)?;
+	let delta = shifted_difference(x, shift.clone())?;
+	let sq = delta.clone().try_mul(delta.clone())?;
+	let next_sum = sum.clone().try_sub(delta)?;
+	let next_sum_of_squares = sum_of_squares.clone().try_sub(sq)?;
 	*sum = next_sum;
 	*sum_of_squares = next_sum_of_squares;
 	*count -= 1;
@@ -511,7 +555,7 @@ pub fn shifted_sample_variance(sum: Number, sum_of_squares: Number, count: i64) 
 		1 => 0.0.into(),
 		_ => {
 			// `count` is at least 2 here, so both divisions are defined.
-			let mean = sum / Number::from(count);
+			let mean = sum.clone() / Number::from(count);
 			(sum_of_squares - (sum * mean)) / Number::from(count - 1)
 		}
 	}
@@ -576,6 +620,12 @@ impl AggregationStat {
 				}
 				| AggregationStat::Accumulate {
 					..
+				}
+				| AggregationStat::TemporalMax {
+					..
+				}
+				| AggregationStat::TemporalMin {
+					..
 				} => None,
 			})
 			.or_else(|| {
@@ -614,6 +664,12 @@ impl AggregationStat {
 						..
 					}
 					| AggregationStat::Accumulate {
+						..
+					}
+					| AggregationStat::TemporalMax {
+						..
+					}
+					| AggregationStat::TemporalMin {
 						..
 					} => None,
 				})
@@ -742,7 +798,7 @@ pub fn remove_from_aggregation_stats(
 				let Value::Number(n) = &arguments[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				*sum = (*sum).try_sub(n.widened())?;
+				*sum = sum.clone().try_sub(n.widened())?;
 			}
 			AggregationStat::Mean {
 				arg,
@@ -752,36 +808,31 @@ pub fn remove_from_aggregation_stats(
 				let Value::Number(n) = &arguments[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				*sum = (*sum).sub_exact(n.widened())?;
+				*sum = sum.clone().sub_exact(n.widened())?;
 				*count -= 1;
 			}
 			AggregationStat::TimeMax {
 				arg,
-				max,
-			} => {
-				let Value::Datetime(n) = &arguments[*arg] else {
-					fail!("Old record wasn't a datetime but was created with a number");
-				};
-				if *n == *max {
-					recalculations.push(Recalculation {
-						function: "time::max".to_string(),
-						stat: idx,
-						arg: *arg,
-					});
-				}
+				..
 			}
-			AggregationStat::TimeMin {
+			| AggregationStat::TimeMin {
 				arg,
-				min,
+				..
+			}
+			| AggregationStat::TemporalMax {
+				arg,
+				..
+			}
+			| AggregationStat::TemporalMin {
+				arg,
+				..
 			} => {
-				let Value::Datetime(n) = &arguments[*arg] else {
-					fail!("Old record wasn't a datetime but was created with a number");
-				};
-				if *n == *min {
+				let arg = *arg;
+				if temporal_withdraws(stat, &arguments[arg])? {
 					recalculations.push(Recalculation {
-						function: "time::min".to_string(),
+						function: stat_function(stat).to_string(),
 						stat: idx,
-						arg: *arg,
+						arg,
 					});
 				}
 			}
@@ -907,7 +958,7 @@ pub fn update_aggregation_stats(
 					fail!("Old record wasn't a number but was created with a number");
 				};
 				let before = before.widened();
-				*sum = (*sum).sub_exact(before)?;
+				*sum = sum.clone().sub_exact(before.clone())?;
 				*sum = match sum.wide() {
 					Wide::Decimal(d)
 						if matches!(before.wide(), Wide::Int(_))
@@ -921,7 +972,9 @@ pub fn update_aggregation_stats(
 								.map_err(|_| ExprError::TryAdd(d.to_string(), after.to_sql()))?,
 						)
 					}
-					Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_) => sum.try_add(after)?,
+					Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_) => {
+						sum.clone().try_add(after)?
+					}
 				};
 			}
 			AggregationStat::Mean {
@@ -934,42 +987,31 @@ pub fn update_aggregation_stats(
 					fail!("Old record wasn't a number but was created with a number");
 				};
 				let before = before.widened();
-				*sum = (*sum).sub_exact(before)?;
-				*sum = sum.add_exact(after)?;
+				*sum = sum.clone().sub_exact(before)?;
+				*sum = sum.clone().add_exact(after)?;
 			}
 			AggregationStat::TimeMax {
 				arg,
-				max,
-			} => {
-				let after = datetime(&after_args[*arg], "time::max")?;
-				let Value::Datetime(before) = &before_args[*arg] else {
-					fail!("Old record wasn't a datetime but was created with a number");
-				};
-				if after >= *max {
-					*max = after;
-				} else if *before == *max {
-					recalculations.push(Recalculation {
-						function: "time::max".to_string(),
-						stat: idx,
-						arg: *arg,
-					});
-				}
+				..
 			}
-			AggregationStat::TimeMin {
+			| AggregationStat::TimeMin {
 				arg,
-				min,
+				..
+			}
+			| AggregationStat::TemporalMax {
+				arg,
+				..
+			}
+			| AggregationStat::TemporalMin {
+				arg,
+				..
 			} => {
-				let after = datetime(&after_args[*arg], "time::min")?;
-				let Value::Datetime(before) = &before_args[*arg] else {
-					fail!("Old record wasn't a datetime but was created with a number");
-				};
-				if after <= *min {
-					*min = after;
-				} else if *before == *min && after != *min {
+				let arg = *arg;
+				if temporal_moves(stat, &before_args[arg], &after_args[arg])? {
 					recalculations.push(Recalculation {
-						function: "time::min".to_string(),
+						function: stat_function(stat).to_string(),
 						stat: idx,
-						arg: *arg,
+						arg,
 					});
 				}
 			}
@@ -1031,54 +1073,46 @@ pub fn apply_recalculations(
 			fail!("An aggregate recalculation named a stat the group does not hold")
 		};
 		match stat {
-			AggregationStat::TimeMin {
-				min: stat,
-				..
-			} => match value {
-				Value::Datetime(d) => *stat = d,
-				// No record of the group holds a datetime any more: the stat
-				// is the one a group that has seen none starts from.
-				Value::None | Value::Null => *stat = Datetime::MAX_UTC,
-				Value::Bool(_)
-				| Value::Number(_)
-				| Value::String(_)
-				| Value::Duration(_)
-				| Value::Uuid(_)
-				| Value::Array(_)
-				| Value::Set(_)
-				| Value::Object(_)
-				| Value::Geometry(_)
-				| Value::Bytes(_)
-				| Value::Table(_)
-				| Value::RecordId(_)
-				| Value::File(_)
-				| Value::Regex(_)
-				| Value::Range(_)
-				| Value::Closure(_) => fail!("Got wrong recalculation value"),
-			},
 			AggregationStat::TimeMax {
-				max: stat,
 				..
-			} => match value {
-				Value::Datetime(d) => *stat = d,
-				Value::None | Value::Null => *stat = Datetime::MIN_UTC,
-				Value::Bool(_)
-				| Value::Number(_)
-				| Value::String(_)
-				| Value::Duration(_)
-				| Value::Uuid(_)
-				| Value::Array(_)
-				| Value::Set(_)
-				| Value::Object(_)
-				| Value::Geometry(_)
-				| Value::Bytes(_)
-				| Value::Table(_)
-				| Value::RecordId(_)
-				| Value::File(_)
-				| Value::Regex(_)
-				| Value::Range(_)
-				| Value::Closure(_) => fail!("Got wrong recalculation value"),
-			},
+			}
+			| AggregationStat::TimeMin {
+				..
+			}
+			| AggregationStat::TemporalMax {
+				..
+			}
+			| AggregationStat::TemporalMin {
+				..
+			} => {
+				let extreme = match value {
+					// No record of the group holds a temporal value any more: the
+					// stat is the one a group that has seen none starts from.
+					Value::None | Value::Null => None,
+					value @ (Value::Datetime(_)
+					| Value::Date(_)
+					| Value::Time(_)
+					| Value::Timestamp(_)) => Some(value),
+					Value::Bool(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Duration(_)
+					| Value::Interval(_)
+					| Value::Uuid(_)
+					| Value::Array(_)
+					| Value::Set(_)
+					| Value::Object(_)
+					| Value::Geometry(_)
+					| Value::Bytes(_)
+					| Value::Table(_)
+					| Value::RecordId(_)
+					| Value::File(_)
+					| Value::Regex(_)
+					| Value::Range(_)
+					| Value::Closure(_) => fail!("Got wrong recalculation value"),
+				};
+				set_temporal_extreme(stat, extreme);
+			}
 			AggregationStat::NumberMin {
 				min: stat,
 				..
@@ -1123,9 +1157,9 @@ pub fn apply_recalculations(
 /// Whether `value` is skipped by `stat`, which must be one of [`skipping_stat`]'s.
 ///
 /// The numeric stats skip every value that is not a number, as the `math::`
-/// aggregates do. The datetime stats skip only `NONE` and `NULL` and refuse any
-/// other kind, so a record that lacks the field contributes nothing to a group
-/// and takes nothing out.
+/// aggregates do. The temporal stats skip `NONE` and `NULL` here, so a record
+/// that lacks the field contributes nothing to a group and takes nothing out;
+/// [`temporal`] judges every other value they meet.
 fn skips(stat: &AggregationStat, value: &Value) -> bool {
 	match stat {
 		AggregationStat::NumberMax {
@@ -1156,6 +1190,12 @@ fn skips(stat: &AggregationStat, value: &Value) -> bool {
 			..
 		}
 		| AggregationStat::TimeMin {
+			..
+		}
+		| AggregationStat::TemporalMax {
+			..
+		}
+		| AggregationStat::TemporalMin {
 			..
 		}
 		| AggregationStat::Accumulate {
@@ -1194,8 +1234,16 @@ fn skipping_stat(stat: &AggregationStat) -> Option<(usize, &'static str)> {
 		AggregationStat::TimeMax {
 			arg,
 			..
+		}
+		| AggregationStat::TemporalMax {
+			arg,
+			..
 		} => Some((*arg, "time::max")),
 		AggregationStat::TimeMin {
+			arg,
+			..
+		}
+		| AggregationStat::TemporalMin {
 			arg,
 			..
 		} => Some((*arg, "time::min")),
@@ -1236,13 +1284,13 @@ fn fold_in(stat: &mut AggregationStat, value: &Value, function: &str) -> Result<
 		AggregationStat::Sum {
 			sum,
 			..
-		} => *sum = (*sum).try_add(number(value, function)?.widened())?,
+		} => *sum = sum.clone().try_add(number(value, function)?.widened())?,
 		AggregationStat::Mean {
 			sum,
 			count,
 			..
 		} => {
-			*sum = sum.add_exact(number(value, function)?.widened())?;
+			*sum = sum.clone().add_exact(number(value, function)?.widened())?;
 			*count += 1;
 		}
 		AggregationStat::StdDev {
@@ -1266,23 +1314,17 @@ fn fold_in(stat: &mut AggregationStat, value: &Value, function: &str) -> Result<
 			number(value, function)?.widened(),
 		)?,
 		AggregationStat::TimeMax {
-			max,
 			..
-		} => {
-			let d = datetime(value, function)?;
-			if *max < d {
-				*max = d;
-			}
 		}
-		AggregationStat::TimeMin {
-			min,
+		| AggregationStat::TimeMin {
 			..
-		} => {
-			let d = datetime(value, function)?;
-			if *min > d {
-				*min = d;
-			}
 		}
+		| AggregationStat::TemporalMax {
+			..
+		}
+		| AggregationStat::TemporalMin {
+			..
+		} => fold_temporal(stat, value, function)?,
 		AggregationStat::Count {
 			..
 		}
@@ -1304,6 +1346,16 @@ fn fold_out(
 	value: &Value,
 	recalculations: &mut Vec<Recalculation>,
 ) -> Result<()> {
+	if let Some((arg, _)) = temporal_stat(stat) {
+		if temporal_withdraws(stat, value)? {
+			recalculations.push(Recalculation {
+				function: stat_function(stat).to_string(),
+				stat: idx,
+				arg,
+			});
+		}
+		return Ok(());
+	}
 	let held_extreme = match (&*stat, value) {
 		(
 			AggregationStat::NumberMax {
@@ -1319,20 +1371,6 @@ fn fold_out(
 			},
 			Value::Number(n),
 		) => (n == held).then_some((*arg, stat_function(stat))),
-		(
-			AggregationStat::TimeMax {
-				arg,
-				max: held,
-			},
-			Value::Datetime(d),
-		)
-		| (
-			AggregationStat::TimeMin {
-				arg,
-				min: held,
-			},
-			Value::Datetime(d),
-		) => (d == held).then_some((*arg, stat_function(stat))),
 		(
 			AggregationStat::Sum {
 				..
@@ -1357,7 +1395,7 @@ fn fold_out(
 				..
 			},
 			Value::Number(n),
-		) => *sum = (*sum).try_sub(n.widened())?,
+		) => *sum = sum.clone().try_sub(n.widened())?,
 		(
 			AggregationStat::Mean {
 				sum,
@@ -1366,7 +1404,7 @@ fn fold_out(
 			},
 			Value::Number(n),
 		) => {
-			*sum = (*sum).sub_exact(n.widened())?;
+			*sum = sum.clone().sub_exact(n.widened())?;
 			*count -= 1;
 		}
 		(
@@ -1415,21 +1453,259 @@ fn number(value: &Value, function: &str) -> Result<Number> {
 			),
 		})
 	};
-	Ok(*n)
+	Ok(n.clone())
 }
 
-/// [`number`], for an aggregate over datetimes.
-fn datetime(value: &Value, function: &str) -> Result<Datetime> {
-	let Value::Datetime(d) = value else {
-		bail!(ExprError::InvalidFunctionArguments {
+/// The argument of a `time::max` or `time::min` stat, and whether it keeps the
+/// largest value; `None` for any other stat.
+fn temporal_stat(stat: &AggregationStat) -> Option<(usize, bool)> {
+	match stat {
+		AggregationStat::TimeMax {
+			arg,
+			..
+		}
+		| AggregationStat::TemporalMax {
+			arg,
+			..
+		} => Some((*arg, true)),
+		AggregationStat::TimeMin {
+			arg,
+			..
+		}
+		| AggregationStat::TemporalMin {
+			arg,
+			..
+		} => Some((*arg, false)),
+		AggregationStat::Count {
+			..
+		}
+		| AggregationStat::CountValue {
+			..
+		}
+		| AggregationStat::NumberMax {
+			..
+		}
+		| AggregationStat::NumberMin {
+			..
+		}
+		| AggregationStat::Sum {
+			..
+		}
+		| AggregationStat::Mean {
+			..
+		}
+		| AggregationStat::StdDev {
+			..
+		}
+		| AggregationStat::Variance {
+			..
+		}
+		| AggregationStat::Accumulate {
+			..
+		} => None,
+	}
+}
+
+/// The extreme a [`temporal_stat`] holds, or `None` for a group that has seen
+/// no temporal value: a datetime stat at its starting value.
+fn temporal_extreme(stat: &AggregationStat) -> Option<Value> {
+	match stat {
+		AggregationStat::TimeMax {
+			max,
+			..
+		} => (*max != Datetime::MIN_UTC).then_some(Value::Datetime(*max)),
+		AggregationStat::TimeMin {
+			min,
+			..
+		} => (*min != Datetime::MAX_UTC).then_some(Value::Datetime(*min)),
+		AggregationStat::TemporalMax {
+			max: held,
+			..
+		}
+		| AggregationStat::TemporalMin {
+			min: held,
+			..
+		} => Some(held.clone()),
+		AggregationStat::Count {
+			..
+		}
+		| AggregationStat::CountValue {
+			..
+		}
+		| AggregationStat::NumberMax {
+			..
+		}
+		| AggregationStat::NumberMin {
+			..
+		}
+		| AggregationStat::Sum {
+			..
+		}
+		| AggregationStat::Mean {
+			..
+		}
+		| AggregationStat::StdDev {
+			..
+		}
+		| AggregationStat::Variance {
+			..
+		}
+		| AggregationStat::Accumulate {
+			..
+		} => None,
+	}
+}
+
+/// Make a [`temporal_stat`] hold `extreme`, a temporal value or `None` for a
+/// group that has seen none. A datetime and no value are held by the datetime
+/// stats, a `date`, `time` or `timestamp` by the temporal ones, so a group
+/// written before the temporal stats existed reads the same.
+fn set_temporal_extreme(stat: &mut AggregationStat, extreme: Option<Value>) {
+	let Some((arg, largest)) = temporal_stat(stat) else {
+		return;
+	};
+	*stat = match (extreme, largest) {
+		(None, true) => AggregationStat::TimeMax {
+			arg,
+			max: Datetime::MIN_UTC,
+		},
+		(None, false) => AggregationStat::TimeMin {
+			arg,
+			min: Datetime::MAX_UTC,
+		},
+		(Some(Value::Datetime(max)), true) => AggregationStat::TimeMax {
+			arg,
+			max,
+		},
+		(Some(Value::Datetime(min)), false) => AggregationStat::TimeMin {
+			arg,
+			min,
+		},
+		(Some(max), true) => AggregationStat::TemporalMax {
+			arg,
+			max,
+		},
+		(Some(min), false) => AggregationStat::TemporalMin {
+			arg,
+			min,
+		},
+	};
+}
+
+/// The name of the temporal kind of `value`, or `None` for a value of no
+/// temporal kind.
+fn temporal_kind(value: &Value) -> Option<&'static str> {
+	match value {
+		Value::Datetime(_) => Some("datetime"),
+		Value::Date(_) => Some("date"),
+		Value::Time(_) => Some("time"),
+		Value::Timestamp(_) => Some("timestamp"),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Interval(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => None,
+	}
+}
+
+/// [`number`], for a temporal aggregate whose group holds `held`.
+///
+/// A value of no temporal kind is refused, naming the kind expected as the ad
+/// hoc aggregate does. A value of the kind `held` has, or of any temporal kind
+/// for a group that holds none, is answered; one of another temporal kind is
+/// `None`, skipped as the ad hoc aggregate skips every kind but the first it
+/// folds.
+fn temporal<'a>(
+	value: &'a Value,
+	held: Option<&Value>,
+	function: &str,
+) -> Result<Option<&'a Value>> {
+	let expected = held.and_then(temporal_kind);
+	match temporal_kind(value) {
+		Some(found) => Ok(expected.is_none_or(|expected| expected == found).then_some(value)),
+		None => bail!(ExprError::InvalidFunctionArguments {
 			name: function.to_string(),
 			message: format!(
-				"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
+				"Argument 1 was the wrong type. Expected `{}` but found `{}`",
+				expected.unwrap_or("datetime"),
 				value.to_sql()
 			),
-		})
+		}),
+	}
+}
+
+/// Whether `candidate` displaces `held`, a value of the same temporal kind, as
+/// the largest (`largest`) or the smallest value.
+fn displaces(candidate: &Value, held: &Value, largest: bool) -> bool {
+	if largest {
+		candidate > held
+	} else {
+		candidate < held
+	}
+}
+
+/// Fold one present value into a [`temporal_stat`], as [`temporal`] admits it.
+fn fold_temporal(stat: &mut AggregationStat, value: &Value, function: &str) -> Result<()> {
+	let Some((_, largest)) = temporal_stat(stat) else {
+		return Ok(());
 	};
-	Ok(*d)
+	let held = temporal_extreme(stat);
+	if let Some(value) = temporal(value, held.as_ref(), function)?
+		&& held.as_ref().is_none_or(|held| displaces(value, held, largest))
+	{
+		set_temporal_extreme(stat, Some(value.clone()));
+	}
+	Ok(())
+}
+
+/// Whether a present value leaving the group of a [`temporal_stat`] takes its
+/// extreme with it, so the extreme must be recomputed. A value of a kind the
+/// group skipped takes nothing; a group that holds no extreme cannot have held
+/// the value, and is recomputed.
+fn temporal_withdraws(stat: &AggregationStat, value: &Value) -> Result<bool> {
+	if temporal_kind(value).is_none() {
+		fail!("Old record wasn't the kind its aggregate was created with");
+	}
+	Ok(temporal_extreme(stat).is_none_or(|held| held == *value))
+}
+
+/// Move a [`temporal_stat`] from a record's present value `before` to its
+/// present value `after`, answering whether the extreme must be recomputed.
+///
+/// An `after` that reaches the extreme becomes it. One that retreats from it,
+/// or that the group skips for its kind, needs the group re-read only if
+/// `before` was the extreme: a record that was the group's only one of its
+/// kind may leave the group holding values of another, and the re-read judges
+/// the group as the ad hoc aggregate does.
+fn temporal_moves(stat: &mut AggregationStat, before: &Value, after: &Value) -> Result<bool> {
+	let Some((_, largest)) = temporal_stat(stat) else {
+		return Ok(false);
+	};
+	let function = stat_function(stat);
+	let Some(held) = temporal_extreme(stat) else {
+		return Ok(true);
+	};
+	match temporal(after, Some(&held), function)? {
+		Some(after) if !displaces(&held, after, largest) => {
+			set_temporal_extreme(stat, Some(after.clone()));
+			Ok(false)
+		}
+		_ => Ok(*before == held),
+	}
 }
 
 /// Add one record's contribution to a group's stats.
@@ -1469,7 +1745,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					})
 				};
 				if *max < *n {
-					*max = *n
+					*max = n.clone()
 				}
 			}
 			AggregationStat::NumberMin {
@@ -1486,7 +1762,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					})
 				};
 				if *min > *n {
-					*min = *n
+					*min = n.clone()
 				}
 			}
 			AggregationStat::Sum {
@@ -1502,7 +1778,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 						),
 					})
 				};
-				*sum = (*sum).try_add(n.widened())?;
+				*sum = sum.clone().try_add(n.widened())?;
 			}
 			AggregationStat::Mean {
 				arg,
@@ -1519,7 +1795,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					})
 				};
 
-				*sum = (*sum).add_exact(n.widened())?;
+				*sum = sum.clone().add_exact(n.widened())?;
 				*count += 1;
 			}
 			AggregationStat::StdDev {
@@ -1562,39 +1838,23 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 			}
 			AggregationStat::TimeMax {
 				arg,
-				max,
-			} => {
-				let Value::Datetime(ref d) = arguments[*arg] else {
-					bail!(ExprError::InvalidFunctionArguments {
-						name: "time::max".to_string(),
-						message: format!(
-							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
-							arguments[*arg].to_sql()
-						),
-					})
-				};
-
-				if *max < *d {
-					*max = *d;
-				}
+				..
 			}
-			AggregationStat::TimeMin {
+			| AggregationStat::TimeMin {
 				arg,
-				min,
+				..
+			}
+			| AggregationStat::TemporalMax {
+				arg,
+				..
+			}
+			| AggregationStat::TemporalMin {
+				arg,
+				..
 			} => {
-				let Value::Datetime(ref d) = arguments[*arg] else {
-					bail!(ExprError::InvalidFunctionArguments {
-						name: "time::min".to_string(),
-						message: format!(
-							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
-							arguments[*arg].to_sql()
-						),
-					})
-				};
-
-				if *min > *d {
-					*min = *d;
-				}
+				let arg = *arg;
+				let function = stat_function(stat);
+				fold_temporal(stat, &arguments[arg], function)?;
 			}
 			AggregationStat::Accumulate {
 				arg,
@@ -1624,15 +1884,15 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 			AggregationStat::NumberMax {
 				max,
 				..
-			} => (*max).into(),
+			} => max.clone().into(),
 			AggregationStat::NumberMin {
 				min,
 				..
-			} => (*min).into(),
+			} => min.clone().into(),
 			AggregationStat::Sum {
 				sum,
 				..
-			} => (*sum).into(),
+			} => sum.clone().into(),
 			AggregationStat::Mean {
 				sum,
 				count,
@@ -1650,8 +1910,18 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 						Wide::Decimal(d) if d.scale() == 0 => {
 							Number::Float(sum.to_float() / *count as f64).into()
 						}
-						Wide::Decimal(_) => {
-							sum.try_float_div((*count).into()).unwrap_or(f64::NAN.into()).into()
+						Wide::Decimal(_) => sum
+							.clone()
+							.try_float_div((*count).into())
+							.unwrap_or(f64::NAN.into())
+							.into(),
+						// A bigdecimal mean is exact to the digits of its division, as the
+						// scalar math::mean's is.
+						Wide::BigDecimal(d) => {
+							match d.div_default(&surrealdb_types::BigDecimal::from(*count)) {
+								Ok(mean) => Number::BigDecimal(Box::new(mean)).into(),
+								Err(_) => f64::NAN.into(),
+							}
 						}
 					}
 				}
@@ -1661,32 +1931,30 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 				sum_of_squares,
 				count,
 				..
-			} => shifted_sample_deviation(*sum, *sum_of_squares, *count).into(),
+			} => shifted_sample_deviation(sum.clone(), sum_of_squares.clone(), *count).into(),
 			AggregationStat::Variance {
 				sum,
 				sum_of_squares,
 				count,
 				..
 			} => {
-				let num = shifted_sample_variance(*sum, *sum_of_squares, *count);
+				let num = shifted_sample_variance(sum.clone(), sum_of_squares.clone(), *count);
 				num.into()
 			}
-			// A group that has seen no datetime holds the stat's starting value,
-			// and answers `NONE` as the ad hoc aggregate does.
+			// A group that has seen no temporal value holds the stat's starting
+			// value, and answers `NONE` as the ad hoc aggregate does.
 			AggregationStat::TimeMax {
-				max,
 				..
-			} => match *max == Datetime::MIN_UTC {
-				true => Value::None,
-				false => (*max).into(),
-			},
-			AggregationStat::TimeMin {
-				min,
+			}
+			| AggregationStat::TimeMin {
 				..
-			} => match *min == Datetime::MAX_UTC {
-				true => Value::None,
-				false => (*min).into(),
-			},
+			}
+			| AggregationStat::TemporalMax {
+				..
+			}
+			| AggregationStat::TemporalMin {
+				..
+			} => temporal_extreme(a).unwrap_or(Value::None),
 			AggregationStat::Accumulate {
 				values,
 				..
@@ -2549,6 +2817,9 @@ pub fn backfill_stats(
 			Wide::Decimal(d) => {
 				i64::try_from(d).map_err(|_| anyhow!("Count was not representable as an integer"))
 			}
+			Wide::BigDecimal(d) => {
+				d.to_i64().ok_or_else(|| anyhow!("Count was not representable as an integer"))
+			}
 		}
 	};
 	let number_count_of = |arg: usize| -> Result<i64> {
@@ -2561,24 +2832,31 @@ pub fn backfill_stats(
 			Wide::Decimal(d) => {
 				i64::try_from(d).map_err(|_| anyhow!("Count was not representable as an integer"))
 			}
+			Wide::BigDecimal(d) => {
+				d.to_i64().ok_or_else(|| anyhow!("Count was not representable as an integer"))
+			}
 		}
 	};
 	let number_of = |value: BackfillValue| -> Result<Number> {
 		let Value::Number(n) = at(value)? else {
 			fail!("initial select statement did not return the right value")
 		};
-		Ok(*n)
+		Ok(n.clone())
 	};
-	let datetime_of = |value: BackfillValue, empty: Datetime| -> Result<Datetime> {
-		match at(value)? {
-			Value::Datetime(d) => Ok(*d),
-			// No record of the group holds a datetime: the stat is the one a
-			// group that has seen none starts from.
-			Value::None | Value::Null => Ok(empty),
+	let temporal_of = |aggregation: &Aggregation| -> Result<AggregationStat> {
+		let extreme = match at(BackfillValue::Aggregate(aggregation.clone()))? {
+			// No record of the group holds a temporal value: the stat is the one
+			// a group that has seen none starts from.
+			Value::None | Value::Null => None,
+			value
+			@ (Value::Datetime(_) | Value::Date(_) | Value::Time(_) | Value::Timestamp(_)) => {
+				Some(value.clone())
+			}
 			Value::Bool(_)
 			| Value::Number(_)
 			| Value::String(_)
 			| Value::Duration(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Array(_)
 			| Value::Set(_)
@@ -2590,8 +2868,13 @@ pub fn backfill_stats(
 			| Value::File(_)
 			| Value::Regex(_)
 			| Value::Range(_)
-			| Value::Closure(_) => fail!("initial select statement did not return the right value"),
-		}
+			| Value::Closure(_) => {
+				fail!("initial select statement did not return the right value")
+			}
+		};
+		let mut stat = aggregation.to_stat();
+		set_temporal_extreme(&mut stat, extreme);
+		Ok(stat)
 	};
 	if !values.contains(&BackfillValue::Aggregate(Aggregation::Count)) {
 		fail!("a materialised view's aggregations did not include a count");
@@ -2618,6 +2901,9 @@ pub fn backfill_stats(
 					Wide::Float(_) => fail!("Count was not representable as an integer"),
 					Wide::Decimal(d) => i64::try_from(d)
 						.map_err(|_| anyhow!("Count was not representable as an integer"))?,
+					Wide::BigDecimal(d) => d
+						.to_i64()
+						.ok_or_else(|| anyhow!("Count was not representable as an integer"))?,
 				};
 				AggregationStat::CountValue {
 					arg,
@@ -2646,7 +2932,7 @@ pub fn backfill_stats(
 					Wide::Decimal(d) if d.scale() == 0 => {
 						i64::try_from(d).map(Number::Int).unwrap_or(Number::Decimal(d))
 					}
-					Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_) => {
+					Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_) => {
 						Number::Int(0).add_exact(sum_n.widened())?
 					}
 				};
@@ -2656,20 +2942,7 @@ pub fn backfill_stats(
 					count: number_count_of(arg)?,
 				}
 			}
-			Aggregation::DatetimeMax(arg) => AggregationStat::TimeMax {
-				arg,
-				max: datetime_of(
-					BackfillValue::Aggregate(Aggregation::DatetimeMax(arg)),
-					Datetime::MIN_UTC,
-				)?,
-			},
-			Aggregation::DatetimeMin(arg) => AggregationStat::TimeMin {
-				arg,
-				min: datetime_of(
-					BackfillValue::Aggregate(Aggregation::DatetimeMin(arg)),
-					Datetime::MAX_UTC,
-				)?,
-			},
+			Aggregation::DatetimeMax(_) | Aggregation::DatetimeMin(_) => temporal_of(a)?,
 			Aggregation::StdDev(arg) | Aggregation::Variance(arg) => {
 				let mean = number_of(BackfillValue::Aggregate(Aggregation::Mean(arg)))?;
 				let variance = number_of(BackfillValue::SampleVariance(arg))?;
@@ -2902,6 +3175,110 @@ mod backfill_tests {
 		let doc = create_field_document(&[], &stats);
 		assert_eq!(doc.get(&aggregate_field_name(0)), Some(&Value::None));
 		assert_eq!(doc.get(&aggregate_field_name(1)), Some(&Value::None));
+	}
+
+	/// `time::min` and `time::max` over a `date` keep date state, answer the kind
+	/// folded in, skip a second kind, and return to the datetime starting state
+	/// when the group empties.
+	#[test]
+	fn temporal_extremes_keep_the_kind_folded_in() {
+		let date = |days: i32| Value::Date(crate::val::Date(days));
+		let mut stats =
+			vec![Aggregation::DatetimeMin(0).to_stat(), Aggregation::DatetimeMax(0).to_stat()];
+		for days in [5, 2, 9] {
+			add_to_aggregation_stats(&[date(days)], &mut stats).unwrap();
+		}
+		assert_eq!(
+			stats,
+			vec![
+				AggregationStat::TemporalMin {
+					arg: 0,
+					min: date(2),
+				},
+				AggregationStat::TemporalMax {
+					arg: 0,
+					max: date(9),
+				},
+			]
+		);
+		let doc = create_field_document(&[], &stats);
+		assert_eq!(doc.get(&aggregate_field_name(0)), Some(&date(2)));
+		assert_eq!(doc.get(&aggregate_field_name(1)), Some(&date(9)));
+
+		// A second temporal kind is skipped, as the ad hoc aggregate skips every
+		// kind but the first it folds; a value of no temporal kind is refused.
+		let datetime = Value::Datetime(Datetime::MIN_UTC);
+		add_to_aggregation_stats(std::slice::from_ref(&datetime), &mut stats).unwrap();
+		assert_eq!(temporal_extreme(&stats[0]), Some(date(2)));
+		assert!(remove_from_aggregation_stats(&[datetime], &mut stats).unwrap().is_empty());
+		let refused =
+			add_to_aggregation_stats(&[Value::from(1i64)], &mut stats).unwrap_err().to_string();
+		assert!(refused.contains("Expected `date`"), "{refused}");
+
+		// An update past the extreme takes it; one retreating from it re-reads.
+		let recalculations = update_aggregation_stats(&[date(9)], &[date(1)], &mut stats).unwrap();
+		assert_eq!(
+			recalculations,
+			vec![Recalculation {
+				function: "time::max".to_string(),
+				stat: 1,
+				arg: 0,
+			}]
+		);
+		assert_eq!(temporal_extreme(&stats[0]), Some(date(1)));
+		apply_recalculations(&mut stats, &recalculations, vec![date(5)]).unwrap();
+		assert_eq!(temporal_extreme(&stats[1]), Some(date(5)));
+
+		// Removing the extreme re-reads; an emptied group starts over.
+		let recalculations = remove_from_aggregation_stats(&[date(1)], &mut stats).unwrap();
+		assert_eq!(recalculations.len(), 1);
+		apply_recalculations(&mut stats, &recalculations, vec![Value::None]).unwrap();
+		assert_eq!(stats[0], Aggregation::DatetimeMin(0).to_stat());
+
+		// An update to another kind of the record that was the extreme re-reads
+		// the group rather than refusing it.
+		let mut single = vec![Aggregation::DatetimeMax(0).to_stat()];
+		add_to_aggregation_stats(&[date(3)], &mut single).unwrap();
+		let time = Value::Time(crate::val::Time::from_nanos(7).unwrap());
+		let recalculations =
+			update_aggregation_stats(&[date(3)], std::slice::from_ref(&time), &mut single).unwrap();
+		assert_eq!(recalculations.len(), 1);
+		apply_recalculations(&mut single, &recalculations, vec![time.clone()]).unwrap();
+		assert_eq!(
+			single,
+			vec![AggregationStat::TemporalMax {
+				arg: 0,
+				max: time,
+			}]
+		);
+	}
+
+	/// A backfill over `timestamp` values holds them in temporal state.
+	#[test]
+	fn backfill_stats_holds_temporal_kinds() {
+		let stamp = |days: i32| Value::Timestamp(crate::val::Date(days).at_midnight());
+		let aggregations =
+			vec![Aggregation::DatetimeMin(0), Aggregation::DatetimeMax(0), Aggregation::Count];
+		let values = vec![
+			BackfillValue::Aggregate(Aggregation::DatetimeMin(0)),
+			BackfillValue::Aggregate(Aggregation::DatetimeMax(0)),
+			BackfillValue::Aggregate(Aggregation::Count),
+		];
+		let computed = vec![stamp(1), stamp(4), Value::from(2i64)];
+		let stats = backfill_stats(&aggregations, &values, &computed, false).unwrap().unwrap();
+		assert_eq!(
+			stats[..2],
+			[
+				AggregationStat::TemporalMin {
+					arg: 0,
+					min: stamp(1),
+				},
+				AggregationStat::TemporalMax {
+					arg: 0,
+					max: stamp(4),
+				},
+			]
+		);
 	}
 
 	/// `shifted_accumulate` and `shifted_rebase` widen integer differences to `f64`

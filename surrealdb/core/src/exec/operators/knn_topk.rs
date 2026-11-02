@@ -130,7 +130,7 @@ pub(crate) fn extract_vector(
 		values.iter().all(|v| {
 			if let Value::Number(n) = v {
 				if out.len() < limit {
-					out.push(*n);
+					out.push(n.clone());
 					true
 				} else {
 					false

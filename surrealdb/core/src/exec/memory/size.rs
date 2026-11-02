@@ -25,6 +25,10 @@ pub(crate) fn kept_bytes(value: &Value) -> usize {
 		| Value::Number(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_) => 0,
 		Value::String(_)
 		| Value::Array(_)
@@ -142,6 +146,10 @@ fn heap_bytes(value: &Value, depth: usize) -> usize {
 		| Value::Number(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_) => 0,
 	}
 }

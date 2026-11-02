@@ -4,13 +4,15 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use surrealdb_collections::{VecMap, VecSet};
 use surrealdb_strand::Strand;
+use surrealdb_types::BigDecimal;
 
 use super::read::{Container, Kind};
 use super::tag::*;
+use super::varint::{self, VarintError};
 use super::{DEPTH_LIMIT, Error, geometry, read_int, read_uint, split_clen, utf8};
 use crate::val::{
-	Array, Bytes, Datetime, Duration, File, Number, Object, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Regex, Set, TableName, Uuid, Value,
+	Array, Bytes, Date, Datetime, Duration, File, Interval, Number, Object, Range, RecordId,
+	RecordIdKey, RecordIdKeyRange, Regex, Set, TableName, Time, Timestamp, Uuid, Value,
 };
 
 /// What a walk of the stored grammar produces. [`Build`] constructs each value it reads; [`Check`]
@@ -236,6 +238,59 @@ pub(super) fn decimal(p: &[u8]) -> Result<Decimal, Error> {
 	Ok(d)
 }
 
+/// Reads a BIGDECIMAL payload (the sign byte, the scale and the magnitude, without the tag) that
+/// is exactly `p`. Only the payload [`put_bigdecimal_payload`](super::put_bigdecimal_payload)
+/// writes is accepted, so every value has one payload.
+pub fn bigdecimal_payload(p: &[u8]) -> Result<BigDecimal, Error> {
+	bigdecimal(p)
+}
+
+/// The sign, scale and little-endian magnitude of the BIGDECIMAL payload `p`, refused unless it
+/// is the one payload of a value: a sign byte of 0 or 1, the scale as a canonical varint of at
+/// most [`MAX_SCALE`](surrealdb_types::bigdecimal::MAX_SCALE), and a magnitude of at most
+/// [`MAX_COEFFICIENT_BYTES`](surrealdb_types::bigdecimal::MAX_COEFFICIENT_BYTES) bytes that
+/// does not end in a zero byte, with no negative zero. Reads the parts in place and builds no
+/// value, so a reader that validates a payload without decoding it allocates nothing.
+pub(super) fn bigdecimal_parts(p: &[u8]) -> Result<(bool, i64, &[u8]), Error> {
+	let (&sign, rest) = p.split_first().ok_or(Error::Truncated)?;
+	let negative = match sign {
+		0x00 => false,
+		0x01 => true,
+		_ => return Err(Error::Malformed("a bigdecimal sign that is neither 0 nor 1")),
+	};
+	let (scale, used) = varint::read_u64(rest).map_err(|e| match e {
+		VarintError::Truncated => Error::Truncated,
+		VarintError::Overlong | VarintError::Overflow => {
+			Error::Malformed("a bigdecimal scale that is not a canonical varint")
+		}
+	})?;
+	let scale = i64::try_from(scale)
+		.ok()
+		.filter(|scale| *scale <= surrealdb_types::bigdecimal::MAX_SCALE)
+		.ok_or(Error::Malformed("a bigdecimal out of range"))?;
+	let magnitude = rest.get(used..).ok_or(Error::Truncated)?;
+	if magnitude.last() == Some(&0) {
+		return Err(Error::Malformed("a bigdecimal magnitude with a zero high byte"));
+	}
+	if negative && magnitude.is_empty() {
+		return Err(Error::Malformed("a negative zero bigdecimal"));
+	}
+	if magnitude.len() > surrealdb_types::bigdecimal::MAX_COEFFICIENT_BYTES {
+		return Err(Error::Malformed("a bigdecimal out of range"));
+	}
+	Ok((negative, scale, magnitude))
+}
+
+/// Reads the BIGDECIMAL payload `p`: the sign byte, the scale as a canonical varint, then the
+/// magnitude of the coefficient. The magnitude may not end in a zero byte and a negative zero is
+/// refused, so every value has one payload.
+#[inline]
+pub(super) fn bigdecimal(p: &[u8]) -> Result<BigDecimal, Error> {
+	let (negative, scale, magnitude) = bigdecimal_parts(p)?;
+	BigDecimal::from_le_parts(negative, magnitude, scale)
+		.map_err(|_| Error::Malformed("a bigdecimal out of range"))
+}
+
 #[inline]
 pub(super) fn duration(p: &[u8]) -> Result<std::time::Duration, Error> {
 	match p.len() {
@@ -251,6 +306,47 @@ pub(super) fn duration(p: &[u8]) -> Result<std::time::Duration, Error> {
 		}
 		_ => Err(Error::Malformed("a duration of the wrong width")),
 	}
+}
+
+#[inline]
+pub(super) fn date(p: &[u8]) -> Result<Date, Error> {
+	if p.is_empty() || p.len() > 4 {
+		return Err(Error::Malformed("a date of the wrong width"));
+	}
+	Date::from_days(read_int(p)? as i32).ok_or(Error::Malformed("a date out of range"))
+}
+
+#[inline]
+pub(super) fn time(p: &[u8]) -> Result<Time, Error> {
+	if p.is_empty() || p.len() > 8 {
+		return Err(Error::Malformed("a time of the wrong width"));
+	}
+	Time::from_nanos(read_uint(p)?).ok_or(Error::Malformed("a time past 24:00:00"))
+}
+
+#[inline]
+pub(super) fn timestamp(p: &[u8]) -> Result<Timestamp, Error> {
+	let (secs, nanos) = match p.len() {
+		8 => {
+			let ns = i64::from_le_bytes(fixed(p)?);
+			(ns.div_euclid(1_000_000_000), ns.rem_euclid(1_000_000_000) as u32)
+		}
+		12 => {
+			let (secs, nanos) = p.split_at_checked(8).ok_or(Error::Truncated)?;
+			(i64::from_le_bytes(fixed(secs)?), u32::from_le_bytes(fixed(nanos)?))
+		}
+		_ => return Err(Error::Malformed("a timestamp of the wrong width")),
+	};
+	Timestamp::from_parts(secs, nanos).ok_or(Error::Malformed("a timestamp out of range"))
+}
+
+#[inline]
+pub(super) fn interval(p: &[u8]) -> Result<Interval, Error> {
+	let b: [u8; 16] = fixed(p)?;
+	let months = i32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+	let days = i32::from_le_bytes([b[4], b[5], b[6], b[7]]);
+	let micros = i64::from_le_bytes([b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]]);
+	Ok(Interval::new(months, days, micros))
 }
 
 #[inline]
@@ -305,6 +401,10 @@ pub(super) fn parts<M: Mode>(t: u8, p: &[u8], depth: usize) -> Result<M::Out<Val
 		DECIMAL => {
 			let d = decimal(p)?;
 			M::make(|| Value::Number(Number::Decimal(d)))
+		}
+		BIGDECIMAL => {
+			let d = bigdecimal(p)?;
+			M::make(|| Value::Number(Number::BigDecimal(Box::new(d))))
 		}
 		I8 => {
 			let [b] = fixed(p)?;
@@ -365,6 +465,22 @@ pub(super) fn parts<M: Mode>(t: u8, p: &[u8], depth: usize) -> Result<M::Out<Val
 		DATETIME => {
 			let d = datetime(p)?;
 			M::make(|| Value::Datetime(Datetime(d)))
+		}
+		DATE => {
+			let d = date(p)?;
+			M::make(|| Value::Date(d))
+		}
+		TIME => {
+			let t = time(p)?;
+			M::make(|| Value::Time(t))
+		}
+		TIMESTAMP => {
+			let t = timestamp(p)?;
+			M::make(|| Value::Timestamp(t))
+		}
+		INTERVAL => {
+			let i = interval(p)?;
+			M::make(|| Value::Interval(i))
 		}
 		UUID => {
 			let u: [u8; 16] = fixed(p)?;
@@ -440,10 +556,12 @@ pub(super) fn parts<M: Mode>(t: u8, p: &[u8], depth: usize) -> Result<M::Out<Val
 pub(crate) mod strict {
 	use chrono::{DateTime, Utc};
 	use rust_decimal::Decimal;
+	use surrealdb_types::BigDecimal;
 
 	use super::{empty, fixed};
 	use crate::val::stored::tag::*;
 	use crate::val::stored::{Error, read_int, read_uint, utf8};
+	use crate::val::{Date, Interval, Time, Timestamp};
 
 	/// NONE, whose payload is empty.
 	#[inline(always)]
@@ -492,6 +610,15 @@ pub(crate) mod strict {
 		}
 	}
 
+	/// A BIGDECIMAL.
+	#[inline]
+	pub(crate) fn bigdecimal(t: u8, p: &[u8]) -> Result<Option<BigDecimal>, Error> {
+		match t {
+			BIGDECIMAL => super::bigdecimal(p).map(Some),
+			_ => Ok(None),
+		}
+	}
+
 	/// A STRING of valid UTF-8.
 	#[inline(always)]
 	pub(crate) fn string(t: u8, p: &[u8]) -> Result<Option<&str>, Error> {
@@ -524,6 +651,42 @@ pub(crate) mod strict {
 	pub(crate) fn datetime(t: u8, p: &[u8]) -> Result<Option<DateTime<Utc>>, Error> {
 		match t {
 			DATETIME => super::datetime(p).map(Some),
+			_ => Ok(None),
+		}
+	}
+
+	/// A DATE of 1 to 4 bytes.
+	#[inline]
+	pub(crate) fn date(t: u8, p: &[u8]) -> Result<Option<Date>, Error> {
+		match t {
+			DATE => super::date(p).map(Some),
+			_ => Ok(None),
+		}
+	}
+
+	/// A TIME of 1 to 8 bytes.
+	#[inline]
+	pub(crate) fn time(t: u8, p: &[u8]) -> Result<Option<Time>, Error> {
+		match t {
+			TIME => super::time(p).map(Some),
+			_ => Ok(None),
+		}
+	}
+
+	/// A TIMESTAMP in either of its two widths.
+	#[inline]
+	pub(crate) fn timestamp(t: u8, p: &[u8]) -> Result<Option<Timestamp>, Error> {
+		match t {
+			TIMESTAMP => super::timestamp(p).map(Some),
+			_ => Ok(None),
+		}
+	}
+
+	/// An INTERVAL of 16 bytes.
+	#[inline]
+	pub(crate) fn interval(t: u8, p: &[u8]) -> Result<Option<Interval>, Error> {
+		match t {
+			INTERVAL => super::interval(p).map(Some),
 			_ => Ok(None),
 		}
 	}

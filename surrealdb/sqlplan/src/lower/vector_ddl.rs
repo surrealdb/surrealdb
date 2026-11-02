@@ -70,6 +70,19 @@ pub(crate) fn kind(type_name: &TypeName) -> Kind {
 	}
 }
 
+/// The kind of a MySQL `VECTOR(n)` column type, which is the kind of the PostgreSQL `vector(n)`
+/// with the same dimensions. `type_str` is the lower-case type text, such as `vector(768)`. A count
+/// that is not valid gives the kind with no dimensions, as [`kind`] does.
+pub(crate) fn mysql_kind(type_str: &str) -> Kind {
+	let count = type_str
+		.split_once('(')
+		.and_then(|(_, args)| args.split(')').next())
+		.and_then(|count| count.trim().parse::<i64>().ok())
+		.and_then(|count| check_dimensions(count).ok())
+		.and_then(|count| u64::try_from(count).ok());
+	Kind::Array(Box::new(Kind::Float), count)
+}
+
 /// Refuse a column type that is a `vector` of no or of invalid dimensions.
 ///
 /// A column that holds a vector has its dimensions, which is what tells it from an array of

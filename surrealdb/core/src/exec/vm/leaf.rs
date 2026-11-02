@@ -593,6 +593,21 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::CheckIndexColumns {
 			..
 		}
+		| StoreInstr::AlterEnum {
+			..
+		}
+		| StoreInstr::RewriteEnumLabels {
+			..
+		}
+		| StoreInstr::CheckEnumUnreferenced {
+			..
+		}
+		| StoreInstr::RaiseUserType {
+			..
+		}
+		| StoreInstr::CheckUserTypeRemovable {
+			..
+		}
 		| StoreInstr::CheckTableAlter {
 			..
 		}

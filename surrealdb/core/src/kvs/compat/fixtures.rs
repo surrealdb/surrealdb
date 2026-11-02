@@ -897,6 +897,7 @@ pub fn field_basic() -> StoredFieldDefinition {
 		auth_limit: AuthLimit::new_no_limit(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		sql_type: None,
 	}
 }
 
@@ -921,6 +922,7 @@ pub fn field_with_type() -> StoredFieldDefinition {
 		auth_limit: AuthLimit::new_no_limit(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		sql_type: None,
 	}
 }
 
@@ -945,6 +947,7 @@ pub fn field_readonly() -> StoredFieldDefinition {
 		auth_limit: AuthLimit::new_no_limit(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		sql_type: None,
 	}
 }
 
@@ -974,6 +977,7 @@ pub fn field_flexible_with_reference() -> StoredFieldDefinition {
 		auth_limit: AuthLimit::new_no_limit(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		sql_type: None,
 	}
 }
 
@@ -1003,6 +1007,7 @@ pub fn field_with_default_set() -> StoredFieldDefinition {
 		auth_limit: AuthLimit::new_no_limit(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		sql_type: None,
 	}
 }
 
@@ -1034,6 +1039,7 @@ pub fn field_with_materialize() -> StoredFieldDefinition {
 		auth_limit: AuthLimit::new_no_limit(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		sql_type: None,
 	}
 }
 
@@ -1066,6 +1072,7 @@ pub fn field_record_type() -> StoredFieldDefinition {
 		),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		sql_type: None,
 	}
 }
 

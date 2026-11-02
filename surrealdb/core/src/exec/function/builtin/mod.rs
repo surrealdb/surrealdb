@@ -23,11 +23,13 @@ mod duration;
 #[cfg(feature = "encoding")]
 mod encoding;
 mod eval;
-pub(crate) use eval::evaluate_streaming;
+pub(crate) use eval::{evaluate_streaming, run_statements};
+mod enumeration;
 #[cfg(feature = "files")]
 mod file;
 mod geo;
 mod http;
+mod interval;
 mod math;
 mod meta;
 mod not;
@@ -59,9 +61,11 @@ static EDGE_SCALARS: &[&[&dyn ScalarFunction]] = &[
 	count::SCALARS,
 	crypto::SCALARS,
 	duration::SCALARS,
+	enumeration::SCALARS,
 	#[cfg(feature = "encoding")]
 	encoding::SCALARS,
 	geo::SCALARS,
+	interval::SCALARS,
 	math::SCALARS,
 	meta::SCALARS,
 	not::SCALARS,

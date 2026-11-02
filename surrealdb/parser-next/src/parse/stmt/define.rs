@@ -83,6 +83,33 @@ impl<'a, 's> Parser<'a, 's> {
 		self.push_clause(Cl::Migrate, name, idx, t.start, first)
 	}
 
+	/// Whether `t` is the bare identifier `word`, in any case. The words of
+	/// `SQL TYPE` are not keywords, so each is matched by its text, as `DISKANN`
+	/// is, and stays an identifier everywhere else.
+	pub(crate) fn is_word(&self, t: Tok, word: &str) -> bool {
+		t.kind == T::Ident && t.kw == Kw::None && self.text_of(t).eq_ignore_ascii_case(word)
+	}
+
+	/// `SQL TYPE dialect 'text'`, as a [`Cl::SqlType`] clause: the dialect is one
+	/// of `POSTGRESQL`, `MYSQL` or `DYNAMODB`, and the text is a string literal.
+	pub(crate) fn sql_type_clause(&mut self) -> R<()> {
+		let t = self.bump();
+		self.expect_kw(Kw::Type, "TYPE")?;
+		let dialect = if self.is_word(self.tok, "POSTGRESQL") {
+			0
+		} else if self.is_word(self.tok, "MYSQL") {
+			1
+		} else if self.is_word(self.tok, "DYNAMODB") {
+			2
+		} else {
+			return Err(self.unexpected("`POSTGRESQL`, `MYSQL`, or `DYNAMODB`"));
+		};
+		self.bump();
+		let first = self.ast.nodes.len();
+		let text = self.string_lit()?;
+		self.push_clause(Cl::SqlType, dialect, text, t.start, first)
+	}
+
 	/// `MATERIALIZE INTO table.field [WHERE cond]` after `REFERENCE`, as a
 	/// [`Cl::Materialize`] clause.
 	pub(crate) fn materialize_clause(&mut self) -> R<()> {
@@ -139,6 +166,8 @@ impl<'a, 's> Parser<'a, 's> {
 			DefineKind::Sequence
 		} else if t.kw == Kw::Extension || t.kw == Kw::Module {
 			DefineKind::Module
+		} else if self.ident_is(t, "ENUM", true) {
+			DefineKind::Enum
 		} else {
 			return Err(self.unexpected("a define statement keyword"));
 		};
@@ -319,6 +348,31 @@ impl<'a, 's> Parser<'a, 's> {
 				}
 			}
 			DefineKind::Module => deprecated |= self.define_module(&mut rec)?,
+			DefineKind::Enum => {
+				rec[define::NAME] = self.name()?;
+				let v = self.tok;
+				let first = self.ast.nodes.len();
+				self.expect_kw(Kw::Values, "VALUES")?;
+				let labels = self.vals.len() as u32;
+				loop {
+					let s = self.string_lit()?;
+					self.vals.push(s);
+					if !self.eat(T::Comma) {
+						break;
+					}
+				}
+				let list = self.list_from(labels).0;
+				self.push_clause(Cl::EnumValues, list, 0, v.start, first)?;
+				loop {
+					if self.tok.kw == Kw::Comment {
+						self.expr_clause(Cl::Comment)?;
+					} else if self.tok.kw == Kw::Permissions {
+						self.perm_value_clause()?;
+					} else {
+						break;
+					}
+				}
+			}
 		}
 		rec[define::CLAUSES] = self.list_from(mark).0;
 		let idx = self.record(&rec);
@@ -1217,6 +1271,8 @@ impl<'a, 's> Parser<'a, 's> {
 				self.string_clause(Cl::GraphqlDeprecated)?;
 			} else if self.tok.kw == Kw::Migrate {
 				self.migrate_clause(false)?;
+			} else if self.is_word(self.tok, "SQL") {
+				self.sql_type_clause()?;
 			} else {
 				return Ok(());
 			}

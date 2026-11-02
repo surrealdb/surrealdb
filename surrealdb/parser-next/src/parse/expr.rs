@@ -2050,6 +2050,7 @@ impl<'a, 's> Parser<'a, 's> {
 						| NumKind::I64
 						| NumKind::U64
 						| NumKind::Decimal
+						| NumKind::BigDecimal
 						| NumKind::Duration => LexError::IntOverflow,
 					};
 					return Err(self.number_error(start, err, mode, origin));
@@ -2085,6 +2086,9 @@ impl<'a, 's> Parser<'a, 's> {
 				})
 			}
 			NumKind::Decimal => Ok(self.leaf_span(Tag::Decimal, 0, 0, 0, start, end)),
+			NumKind::BigDecimal => {
+				Ok(self.leaf_span(Tag::Decimal, ast::DECIMAL_BIG, 0, 0, start, end))
+			}
 			NumKind::Duration => {
 				if crate::lex::decode_duration(body).is_none() {
 					return Err(self.number_error(start, LexError::InvalidDuration, mode, origin));

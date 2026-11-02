@@ -14,6 +14,7 @@ pub enum Kind {
 	Int,
 	Float,
 	Decimal,
+	BigDecimal,
 	I8,
 	U8,
 	I16,
@@ -26,6 +27,10 @@ pub enum Kind {
 	String,
 	Duration,
 	Datetime,
+	Date,
+	Time,
+	Timestamp,
+	Interval,
 	Uuid,
 	Bytes,
 	Table,
@@ -51,6 +56,7 @@ impl Kind {
 			INT | 0x80..=0xFE => Self::Int,
 			FLOAT => Self::Float,
 			DECIMAL => Self::Decimal,
+			BIGDECIMAL => Self::BigDecimal,
 			I8 => Self::I8,
 			U8 => Self::U8,
 			I16 => Self::I16,
@@ -63,6 +69,10 @@ impl Kind {
 			STRING => Self::String,
 			DURATION => Self::Duration,
 			DATETIME => Self::Datetime,
+			DATE => Self::Date,
+			TIME => Self::Time,
+			TIMESTAMP => Self::Timestamp,
+			INTERVAL => Self::Interval,
 			UUID => Self::Uuid,
 			BYTES => Self::Bytes,
 			TABLE => Self::Table,
@@ -142,6 +152,18 @@ impl<'a> ValueRef<'a> {
 			tag,
 			payload,
 			depth,
+		})
+	}
+
+	/// The BIGDECIMAL whose payload, without its tag, is exactly `payload`, at depth 0: the value
+	/// a packed row's `BigDecimal` column holds. Refuses every payload a whole decode of the
+	/// BIGDECIMAL refuses, and reads the payload in place without building the value.
+	pub fn bigdecimal(payload: &'a [u8]) -> Result<Self, Error> {
+		decode::bigdecimal_parts(payload)?;
+		Ok(Self {
+			tag: BIGDECIMAL,
+			payload,
+			depth: 0,
 		})
 	}
 
@@ -255,6 +277,15 @@ impl<'a> ValueRef<'a> {
 		}
 	}
 
+	/// The arbitrary-precision decimal, if this is one.
+	#[inline]
+	pub fn as_bigdecimal(&self) -> Result<Option<surrealdb_types::BigDecimal>, Error> {
+		match self.tag {
+			BIGDECIMAL => decode::bigdecimal(self.payload).map(Some),
+			_ => Ok(None),
+		}
+	}
+
 	/// The string, if this is one.
 	#[inline(always)]
 	pub fn as_str(&self) -> Result<Option<&'a str>, Error> {
@@ -285,6 +316,38 @@ impl<'a> ValueRef<'a> {
 	pub fn as_datetime(&self) -> Result<Option<chrono::DateTime<chrono::Utc>>, Error> {
 		match self.tag {
 			DATETIME => decode::datetime(self.payload).map(Some),
+			_ => Ok(None),
+		}
+	}
+
+	#[inline]
+	pub fn as_date(&self) -> Result<Option<crate::val::Date>, Error> {
+		match self.tag {
+			DATE => decode::date(self.payload).map(Some),
+			_ => Ok(None),
+		}
+	}
+
+	#[inline]
+	pub fn as_time(&self) -> Result<Option<crate::val::Time>, Error> {
+		match self.tag {
+			TIME => decode::time(self.payload).map(Some),
+			_ => Ok(None),
+		}
+	}
+
+	#[inline]
+	pub fn as_timestamp(&self) -> Result<Option<crate::val::Timestamp>, Error> {
+		match self.tag {
+			TIMESTAMP => decode::timestamp(self.payload).map(Some),
+			_ => Ok(None),
+		}
+	}
+
+	#[inline]
+	pub fn as_interval(&self) -> Result<Option<crate::val::Interval>, Error> {
+		match self.tag {
+			INTERVAL => decode::interval(self.payload).map(Some),
 			_ => Ok(None),
 		}
 	}

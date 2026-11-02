@@ -32,6 +32,7 @@ fn proven_kind(value: &Value) -> Kind {
 		Value::Number(Number::Int(_)) => Kind::Int,
 		Value::Number(Number::Float(_)) => Kind::Float,
 		Value::Number(Number::Decimal(_)) => Kind::Decimal,
+		Value::Number(Number::BigDecimal(_)) => Kind::BigDecimal,
 		Value::Number(Number::I8(_)) => Kind::I8,
 		Value::Number(Number::U8(_)) => Kind::U8,
 		Value::Number(Number::I16(_)) => Kind::I16,
@@ -49,6 +50,10 @@ fn proven_kind(value: &Value) -> Kind {
 		Value::Set(set) => Kind::Set(Box::new(join(set.iter().map(proven_kind).collect())), None),
 		Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Geometry(_)
 		| Value::Bytes(_)
@@ -73,6 +78,7 @@ fn conforms(value: &Value, kind: &Kind) -> bool {
 		(Kind::Int, Value::Number(Number::Int(_)))
 		| (Kind::Float, Value::Number(Number::Float(_)))
 		| (Kind::Decimal, Value::Number(Number::Decimal(_)))
+		| (Kind::BigDecimal, Value::Number(Number::BigDecimal(_)))
 		| (Kind::I8, Value::Number(Number::I8(_)))
 		| (Kind::U8, Value::Number(Number::U8(_)))
 		| (Kind::I16, Value::Number(Number::I16(_)))

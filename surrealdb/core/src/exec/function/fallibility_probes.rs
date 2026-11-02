@@ -96,6 +96,10 @@ fn corpus(kind: &Kind) -> Vec<String> {
 		Kind::Int => lits(&["0", "1", "-1", "9223372036854775807", "-9223372036854775808"]),
 		Kind::Float => lits(&["0.0f", "-0.0f", "1.5f", "NaN", "Infinity", "-Infinity"]),
 		Kind::Decimal => lits(&["0dec", "1.5dec", "-1.5dec", "79228162514264337593543950335dec"]),
+		// The last is beyond a `decimal`, which the functions that compute through one refuse.
+		Kind::BigDecimal => {
+			lits(&["0bigdec", "1.50bigdec", "-1.5bigdec", "79228162514264337593543950336bigdec"])
+		}
 		Kind::I8 => lits(&["0i8", "1i8", "-1i8", "127i8", "-128i8"]),
 		Kind::U8 => lits(&["0u8", "1u8", "255u8"]),
 		Kind::I16 => lits(&["0i16", "1i16", "-1i16", "32767i16", "-32768i16"]),
@@ -109,6 +113,7 @@ fn corpus(kind: &Kind) -> Vec<String> {
 			let mut all = corpus(&Kind::Int);
 			all.extend(corpus(&Kind::Float));
 			all.extend(corpus(&Kind::Decimal));
+			all.extend(corpus(&Kind::BigDecimal));
 			all.extend(corpus(&Kind::I8));
 			all.extend(corpus(&Kind::U8));
 			all.extend(corpus(&Kind::I16));
@@ -129,6 +134,19 @@ fn corpus(kind: &Kind) -> Vec<String> {
 		Kind::Datetime => {
 			lits(&["d'1970-01-01T00:00:00Z'", "d'2024-02-29T12:00:00Z'", "d'9999-12-31T23:59:59Z'"])
 		}
+		Kind::Date => lits(&["date'1970-01-01'", "date'2024-02-29'", "date'+262142-12-31'"]),
+		Kind::Time => lits(&["time'00:00:00'", "time'12:30:45.123456789'", "time'24:00:00'"]),
+		Kind::Timestamp => lits(&[
+			"timestamp'1970-01-01T00:00:00'",
+			"timestamp'2024-02-29T12:00:00.5'",
+			"timestamp'9999-12-31T23:59:59'",
+		]),
+		Kind::Interval => lits(&[
+			"interval'00:00:00'",
+			"interval'1 mon 2 days 03:04:05.5'",
+			"interval'-2147483648 mons -2147483648 days'",
+			"interval'2147483647 mons 2147483647 days'",
+		]),
 		Kind::Uuid => lits(&["u'00000000-0000-0000-0000-000000000000'"]),
 		Kind::Object => lits(&["{}", "{ a: 1, b: 'x' }", "{ a: { b: { c: [1, 2] } } }"]),
 		Kind::Record(_) => lits(&["probe:1", "probe:['a', 1]"]),
@@ -160,7 +178,7 @@ fn corpus(kind: &Kind) -> Vec<String> {
 			}
 			all
 		}
-		Kind::Literal(_) | Kind::File(_) => Vec::new(),
+		Kind::Literal(_) | Kind::File(_) | Kind::Enum(_) => Vec::new(),
 	}
 }
 

@@ -10,11 +10,12 @@ use rust_decimal::Decimal;
 
 use super::RecordIdParser;
 use crate::{
-	Array as PublicArray, Datetime as PublicDatetime, Duration as PublicDuration,
-	File as PublicFile, Geometry as PublicGeometry, Number as PublicNumber, Object as PublicObject,
+	Array as PublicArray, Date as PublicDate, Datetime as PublicDatetime,
+	Duration as PublicDuration, File as PublicFile, Geometry as PublicGeometry,
+	Interval as PublicInterval, Number as PublicNumber, Object as PublicObject,
 	Range as PublicRange, RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
 	RecordIdKeyRange as PublicRecordIdKeyRange, Set as PublicSet, Table as PublicTable,
-	Uuid as PublicUuid, Value as PublicValue,
+	Time as PublicTime, Timestamp as PublicTimestamp, Uuid as PublicUuid, Value as PublicValue,
 };
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
@@ -59,6 +60,17 @@ pub const TAG_U64: u64 = 186;
 pub const TAG_F16: u64 = 187;
 /// `cbor.2`: an `f32` number.
 pub const TAG_F32: u64 = 188;
+
+/// `cbor.2`: a `date` as an integer count of days since the epoch (RFC 8943).
+pub const TAG_DATE: u64 = 100;
+/// `cbor.2`: a `time` as unsigned nanoseconds since midnight.
+pub const TAG_TIME: u64 = 189;
+/// `cbor.2`: a `timestamp` as `[seconds, nanoseconds]` since the epoch, without a zone.
+pub const TAG_TIMESTAMP: u64 = 190;
+/// `cbor.2`: an `interval` as `[months, days, microseconds]`.
+pub const TAG_INTERVAL: u64 = 191;
+/// `cbor.2`: a `bigdecimal` as its text, the positional notation `BigDecimal` displays.
+pub const TAG_BIGDECIMAL: u64 = 192;
 
 // Custom tags (55->60 is unassigned)
 const TAG_FILE: u64 = 55;
@@ -413,6 +425,65 @@ fn value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 						Err(anyhow!("Expected a CBOR array with Set values"))
 					}
 				}
+				TAG_DATE if ctx.v2 => {
+					let CborValue::Integer(i) = *v else {
+						return Err(anyhow!("Expected a CBOR integer under tag {TAG_DATE}"));
+					};
+					let days = i32::try_from(i)
+						.map_err(|_| anyhow!("Expected a CBOR integer that fits a date"))?;
+					PublicDate::from_days(days)
+						.map(PublicValue::Date)
+						.ok_or_else(|| anyhow!("Expected a valid Date value"))
+				}
+				TAG_TIME if ctx.v2 => {
+					let CborValue::Integer(i) = *v else {
+						return Err(anyhow!("Expected a CBOR integer under tag {TAG_TIME}"));
+					};
+					let nanos = u64::try_from(i).map_err(|_| {
+						anyhow!("Expected a CBOR unsigned integer that fits a time")
+					})?;
+					PublicTime::from_nanos(nanos)
+						.map(PublicValue::Time)
+						.ok_or_else(|| anyhow!("Expected a valid Time value"))
+				}
+				TAG_TIMESTAMP if ctx.v2 => {
+					let (seconds, nanos) = to_seconds_nanos(*v, TAG_TIMESTAMP)?;
+					PublicTimestamp::from_parts(seconds, nanos)
+						.map(PublicValue::Timestamp)
+						.ok_or_else(|| anyhow!("Expected a valid Timestamp value"))
+				}
+				TAG_BIGDECIMAL if ctx.v2 => {
+					let CborValue::Text(v) = *v else {
+						return Err(anyhow!("Expected a CBOR text under tag {TAG_BIGDECIMAL}"));
+					};
+					v.parse::<crate::BigDecimal>()
+						.map(|d| PublicValue::Number(PublicNumber::BigDecimal(Box::new(d))))
+						.map_err(|e| {
+							anyhow!("Expected a valid bigdecimal under tag {TAG_BIGDECIMAL}: {e}")
+						})
+				}
+				TAG_INTERVAL if ctx.v2 => {
+					let CborValue::Array(v) = *v else {
+						return Err(anyhow!("Expected a CBOR array under tag {TAG_INTERVAL}"));
+					};
+					let [
+						CborValue::Integer(months),
+						CborValue::Integer(days),
+						CborValue::Integer(micros),
+					] = v.as_slice()
+					else {
+						return Err(anyhow!(
+							"Expected a CBOR array of 3 integers under tag {TAG_INTERVAL}"
+						));
+					};
+					let months = i32::try_from(*months)
+						.map_err(|_| anyhow!("Expected interval months that fit 32 bits"))?;
+					let days = i32::try_from(*days)
+						.map_err(|_| anyhow!("Expected interval days that fit 32 bits"))?;
+					let micros = i64::try_from(*micros)
+						.map_err(|_| anyhow!("Expected interval microseconds that fit 64 bits"))?;
+					Ok(PublicValue::Interval(PublicInterval::new(months, days, micros)))
+				}
 				TAG_I8 if ctx.v2 => {
 					if let CborValue::Integer(i) = *v {
 						Ok(PublicValue::Number(PublicNumber::I8(to_i8(i)?)))
@@ -498,7 +569,9 @@ fn unsupported_tag(tag: u64) -> anyhow::Error {
 			"CBOR tag 13 (a duration as text) is not accepted: send tag {TAG_CUSTOM_DURATION} [seconds, nanos]"
 		),
 		TAG_SHAPED_BLOCK => anyhow!("CBOR tag 57 (a shaped block) is not accepted here"),
-		TAG_I8..=TAG_F32 => anyhow!("CBOR tag {tag} is not accepted here: use cbor.2"),
+		TAG_I8..=TAG_F32 | TAG_BIGDECIMAL | TAG_DATE | TAG_TIME..=TAG_INTERVAL => {
+			anyhow!("CBOR tag {tag} is not accepted here: use cbor.2")
+		}
 		_ => anyhow!("Encountered an unknown CBOR tag"),
 	}
 }
@@ -631,6 +704,44 @@ fn block(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 	Ok(PublicValue::Array(rows.into()))
 }
 
+/// The custom duration tag over `[seconds, nanos]`, with the trailing zero parts left out.
+fn duration_tag(seconds: u64, nanos: u32) -> CborValue {
+	let tag_value = match (seconds, nanos) {
+		(0, 0) => Box::new(CborValue::Array(vec![])),
+		(_, 0) => Box::new(CborValue::Array(vec![CborValue::Integer(seconds.into())])),
+		_ => Box::new(CborValue::Array(vec![
+			CborValue::Integer(seconds.into()),
+			CborValue::Integer(nanos.into()),
+		])),
+	};
+	CborValue::Tag(TAG_CUSTOM_DURATION, tag_value)
+}
+
+/// The custom datetime tag over `[seconds, nanos]`.
+fn datetime_tag(seconds: i64, nanos: u32) -> Result<CborValue> {
+	Ok(CborValue::Tag(
+		TAG_CUSTOM_DATETIME,
+		Box::new(CborValue::Array(vec![
+			CborValue::Integer(seconds.into()),
+			CborValue::Integer(nanos.into()),
+		])),
+	))
+}
+
+/// Reads a `[seconds, nanos]` pair under `tag`.
+fn to_seconds_nanos(v: CborValue, tag: u64) -> Result<(i64, u32)> {
+	let CborValue::Array(v) = v else {
+		return Err(anyhow!("Expected a CBOR array under tag {tag}"));
+	};
+	let [CborValue::Integer(seconds), CborValue::Integer(nanos)] = v.as_slice() else {
+		return Err(anyhow!("Expected a CBOR array of 2 integers under tag {tag}"));
+	};
+	let seconds =
+		i64::try_from(*seconds).map_err(|_| anyhow!("Expected a CBOR integer data type"))?;
+	let nanos = u32::try_from(*nanos).map_err(|_| anyhow!("Expected a CBOR integer data type"))?;
+	Ok((seconds, nanos))
+}
+
 /// `val` as a `cbor` item.
 pub fn from_value(val: PublicValue) -> Result<CborValue> {
 	from_value_inner(val, false)
@@ -652,6 +763,17 @@ fn from_value_inner(val: PublicValue, v2: bool) -> Result<CborValue> {
 			PublicNumber::Decimal(v) => {
 				Ok(CborValue::Tag(TAG_STRING_DECIMAL, Box::new(CborValue::Text(v.to_string()))))
 			}
+			// A bigdecimal that fits a decimal is written as one. Any other value is written as
+			// tag 192 under cbor.2, and as plain text without it.
+			PublicNumber::BigDecimal(v) => match rust_decimal::Decimal::try_from(v.as_ref()) {
+				Ok(d) => {
+					Ok(CborValue::Tag(TAG_STRING_DECIMAL, Box::new(CborValue::Text(d.to_string()))))
+				}
+				Err(_) if v2 => {
+					Ok(CborValue::Tag(TAG_BIGDECIMAL, Box::new(CborValue::Text(v.to_string()))))
+				}
+				Err(_) => Ok(CborValue::Text(v.to_string())),
+			},
 			PublicNumber::I8(v) => {
 				if v2 {
 					Ok(CborValue::Tag(TAG_I8, Box::new(CborValue::Integer(i64::from(v).into()))))
@@ -719,32 +841,51 @@ fn from_value_inner(val: PublicValue, v2: bool) -> Result<CborValue> {
 			}
 		},
 		PublicValue::String(v) => Ok(CborValue::Text(v)),
-		PublicValue::Duration(v) => {
-			let seconds = v.secs();
-			let nanos = v.subsec_nanos();
-
-			let tag_value = match (seconds, nanos) {
-				(0, 0) => Box::new(CborValue::Array(vec![])),
-				(_, 0) => Box::new(CborValue::Array(vec![CborValue::Integer(seconds.into())])),
-				_ => Box::new(CborValue::Array(vec![
-					CborValue::Integer(seconds.into()),
-					CborValue::Integer(nanos.into()),
-				])),
-			};
-
-			Ok(CborValue::Tag(TAG_CUSTOM_DURATION, tag_value))
+		PublicValue::Duration(v) => Ok(duration_tag(v.secs(), v.subsec_nanos())),
+		PublicValue::Datetime(v) => datetime_tag(v.timestamp(), v.timestamp_subsec_nanos()),
+		PublicValue::Date(v) => {
+			if v2 {
+				Ok(CborValue::Tag(TAG_DATE, Box::new(CborValue::Integer(v.days().into()))))
+			} else {
+				datetime_tag(
+					v.into_inner().and_time(chrono::NaiveTime::MIN).and_utc().timestamp(),
+					0,
+				)
+			}
 		}
-		PublicValue::Datetime(v) => {
-			let seconds = v.timestamp();
-			let nanos = v.timestamp_subsec_nanos();
-
-			Ok(CborValue::Tag(
-				TAG_CUSTOM_DATETIME,
-				Box::new(CborValue::Array(vec![
-					CborValue::Integer(seconds.into()),
-					CborValue::Integer(nanos.into()),
-				])),
-			))
+		PublicValue::Time(v) => {
+			if v2 {
+				Ok(CborValue::Tag(TAG_TIME, Box::new(CborValue::Integer(v.nanos().into()))))
+			} else {
+				Ok(duration_tag(v.nanos() / 1_000_000_000, (v.nanos() % 1_000_000_000) as u32))
+			}
+		}
+		PublicValue::Timestamp(v) => {
+			if v2 {
+				Ok(CborValue::Tag(
+					TAG_TIMESTAMP,
+					Box::new(CborValue::Array(vec![
+						CborValue::Integer(v.seconds().into()),
+						CborValue::Integer(v.nanos().into()),
+					])),
+				))
+			} else {
+				datetime_tag(v.seconds(), v.nanos())
+			}
+		}
+		PublicValue::Interval(v) => {
+			if v2 {
+				Ok(CborValue::Tag(
+					TAG_INTERVAL,
+					Box::new(CborValue::Array(vec![
+						CborValue::Integer(v.months().into()),
+						CborValue::Integer(v.days().into()),
+						CborValue::Integer(v.micros().into()),
+					])),
+				))
+			} else {
+				Ok(CborValue::Text(v.to_string()))
+			}
 		}
 		PublicValue::Uuid(v) => {
 			Ok(CborValue::Tag(TAG_SPEC_UUID, Box::new(CborValue::Bytes(v.into_bytes().into()))))

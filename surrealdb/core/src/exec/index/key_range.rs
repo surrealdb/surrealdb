@@ -814,7 +814,7 @@ fn literal_bound(
 /// A number literal as a bound on an int component: see
 /// [`Classifier::bound`].
 fn int_bound(value: &Value, using: Use, inclusive: bool) -> Option<(Value, bool)> {
-	let Value::Number(number) = *value else {
+	let Value::Number(number) = value.clone() else {
 		return None;
 	};
 	if let Some(int) = number.as_int_lossless() {
@@ -834,6 +834,8 @@ fn int_bound(value: &Value, using: Use, inclusive: bool) -> Option<(Value, bool)
 		}
 		(Use::Low(_), Number::Decimal(d)) => Number::Decimal(d.ceil()),
 		(Use::High(_), Number::Decimal(d)) => Number::Decimal(d.floor()),
+		(Use::Low(_), Number::BigDecimal(d)) => Number::BigDecimal(Box::new(d.ceil().ok()?)),
+		(Use::High(_), Number::BigDecimal(d)) => Number::BigDecimal(Box::new(d.floor().ok()?)),
 		// An integer within `i64` was returned above; a `u64` above `i64::MAX` has no `i64` bound.
 		(
 			_,

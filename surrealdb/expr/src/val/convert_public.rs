@@ -36,6 +36,10 @@ pub fn convert_public_value_to_internal(value: surrealdb_types::Value) -> crate:
 		surrealdb_types::Value::Datetime(dt) => {
 			crate::val::Value::Datetime(crate::val::Datetime(dt.into_inner()))
 		}
+		surrealdb_types::Value::Date(v) => crate::val::Value::Date(v.into()),
+		surrealdb_types::Value::Time(v) => crate::val::Value::Time(v.into()),
+		surrealdb_types::Value::Timestamp(v) => crate::val::Value::Timestamp(v.into()),
+		surrealdb_types::Value::Interval(v) => crate::val::Value::Interval(v.into()),
 		surrealdb_types::Value::Uuid(u) => {
 			crate::val::Value::Uuid(crate::val::Uuid(u.into_inner()))
 		}

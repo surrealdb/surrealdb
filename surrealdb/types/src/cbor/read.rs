@@ -17,9 +17,12 @@ use anyhow::{Result, anyhow};
 
 use super::RecordIdParser;
 use super::convert::{
-	TAG_F32, TAG_I8, TAG_I16, TAG_I32, TAG_U8, TAG_U16, TAG_U32, TAG_U64, convert,
+	TAG_BIGDECIMAL, TAG_F32, TAG_I8, TAG_I16, TAG_I32, TAG_U8, TAG_U16, TAG_U32, TAG_U64, convert,
 };
-use crate::{Array, Datetime, Duration, Number, Object, RecordId, RecordIdKey, Table, Uuid, Value};
+use crate::{
+	Array, BigDecimal, Datetime, Duration, Number, Object, RecordId, RecordIdKey, Table, Uuid,
+	Value,
+};
 
 const TAG_NONE: u64 = 6;
 const TAG_TABLE: u64 = 7;
@@ -342,6 +345,12 @@ impl<'a> Reader<'a> {
 				let text = self.text(head.arg)?;
 				let decimal = super::convert::decimal_normalized(&text).ok()?;
 				Some(Value::Number(Number::Decimal(decimal)))
+			}
+			TAG_BIGDECIMAL if self.v2 => {
+				let head = self.head().filter(|h| h.major == 3)?;
+				let text = self.text(head.arg)?;
+				let decimal = text.parse::<BigDecimal>().ok()?;
+				Some(Value::Number(Number::BigDecimal(Box::new(decimal))))
 			}
 			TAG_I8 | TAG_U8 | TAG_I16 | TAG_U16 | TAG_I32 | TAG_U32 | TAG_U64 if self.v2 => {
 				let head = self.head()?;

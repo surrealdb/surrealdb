@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::catalog::BinderCatalog;
+use crate::catalog::{BinderCatalog, EnumColumn};
 use crate::dialect::DialectPolicy;
 use crate::error::PlanError;
 use crate::ir::{
@@ -70,12 +70,28 @@ impl RelationEntry {
 		let id_table = (self.is_base_table && column == "id").then(|| self.table_name.clone());
 		let derived =
 			self.source_query.as_ref().map(|query| projected_column(query, &column, catalog));
+		let enum_column = if self.is_base_table && column != "*" && column != "id" {
+			catalog.column_enum(self.schema.as_deref(), &self.table_name, &column)
+		} else {
+			derived.as_ref().and_then(|(_, _, held)| held.clone())
+		}
+		.map(Box::new);
+		let composite = if self.is_base_table && column != "*" && column != "id" {
+			catalog.column_composite(self.schema.as_deref(), &self.table_name, &column)
+		} else {
+			None
+		};
+		let declared_sql = if self.is_base_table && column != "*" && column != "id" {
+			catalog.column_sql_type(self.schema.as_deref(), &self.table_name, &column).map(Box::new)
+		} else {
+			None
+		};
 		let link_table = if self.is_base_table && column != "*" {
 			catalog
 				.link_table(self.schema.as_deref(), &self.table_name, &column)
 				.filter(|_| column != "id")
 		} else {
-			derived.as_ref().and_then(|(_, link)| link.clone())
+			derived.as_ref().and_then(|(_, link, _)| link.clone())
 		};
 		let key_read = if id_table.is_some() {
 			crate::ir::KeyRead::of(catalog.write_type(
@@ -101,12 +117,15 @@ impl RelationEntry {
 				// alias the query gives it.
 				catalog.column_type(self.schema.as_deref(), &self.table_name, &column)
 			} else {
-				derived.map(|(ty, _)| ty).unwrap_or(crate::SqlType::Unknown)
+				derived.map(|(ty, _, _)| ty).unwrap_or(crate::SqlType::Unknown)
 			},
 			column,
 			correlation_depth: 0,
 			id_table,
 			link_table,
+			enum_column,
+			composite,
+			declared_sql,
 			aggregate_output: false,
 			key_read,
 			also_in: Vec::new(),
@@ -120,7 +139,7 @@ fn projected_column(
 	query: &BoundSelect,
 	column: &str,
 	catalog: &dyn BinderCatalog,
-) -> (crate::SqlType, Option<String>) {
+) -> (crate::SqlType, Option<String>, Option<EnumColumn>) {
 	for target in &query.targets {
 		let name = target.alias.as_deref().or(match &target.expr {
 			BoundExpr::Column(col) => Some(col.column.as_str()),
@@ -171,7 +190,11 @@ fn projected_column(
 		});
 		if name == Some(column) && !target.is_unlisted_wildcard() {
 			return match &target.expr {
-				BoundExpr::Column(col) => (col.declared_type, col.link_table.clone()),
+				BoundExpr::Column(col) => (
+					col.declared_type,
+					col.link_table.clone(),
+					col.enum_column.clone().map(|held| *held),
+				),
 				BoundExpr::Literal(_)
 				| BoundExpr::Access {
 					..
@@ -215,7 +238,7 @@ fn projected_column(
 				| BoundExpr::UserVar(_)
 				| BoundExpr::SystemVar {
 					..
-				} => (query.infer_expr_type(&target.expr, catalog), None),
+				} => (query.infer_expr_type(&target.expr, catalog), None, None),
 			};
 		}
 	}
@@ -229,7 +252,10 @@ fn projected_column(
 				let link = (column != "id")
 					.then(|| catalog.link_table(schema.as_deref(), name, column))
 					.flatten();
-				return (catalog.column_type(schema.as_deref(), name, column), link);
+				let held = (column != "id")
+					.then(|| catalog.column_enum(schema.as_deref(), name, column))
+					.flatten();
+				return (catalog.column_type(schema.as_deref(), name, column), link, held);
 			}
 			Some(BoundTableSource::Subquery {
 				query,
@@ -238,7 +264,7 @@ fn projected_column(
 			_ => {}
 		}
 	}
-	(crate::SqlType::Unknown, None)
+	(crate::SqlType::Unknown, None, None)
 }
 
 /// The lexical scope of a query or subquery, maintaining available relations and target bindings.
@@ -551,7 +577,9 @@ impl QueryScope {
 		}
 
 		if let Some(described) = holders.iter().position(|col| {
-			col.link_table.is_some() || col.declared_type != crate::SqlType::Unknown
+			col.link_table.is_some()
+				|| col.enum_column.is_some()
+				|| col.declared_type != crate::SqlType::Unknown
 		}) {
 			holders.swap(0, described);
 			// Each holder is a distinct relation, and `relation_index` is its position in the FROM
@@ -729,6 +757,9 @@ impl QueryScope {
 				correlation_depth: 0,
 				id_table: None,
 				link_table: None,
+				enum_column: None,
+				composite: None,
+				declared_sql: None,
 				declared_type: crate::SqlType::Unknown,
 				aggregate_output: false,
 				key_read: crate::ir::KeyRead::None,
@@ -746,6 +777,9 @@ impl QueryScope {
 				correlation_depth: 0,
 				id_table: None,
 				link_table: None,
+				enum_column: None,
+				composite: None,
+				declared_sql: None,
 				declared_type: crate::SqlType::Unknown,
 				aggregate_output: false,
 				key_read: crate::ir::KeyRead::None,
@@ -769,6 +803,9 @@ impl QueryScope {
 					correlation_depth: 0,
 					id_table: None,
 					link_table: None,
+					enum_column: None,
+					composite: None,
+					declared_sql: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
 					key_read: crate::ir::KeyRead::None,
@@ -821,6 +858,9 @@ impl QueryScope {
 					correlation_depth: 0,
 					id_table: None,
 					link_table: None,
+					enum_column: None,
+					composite: None,
+					declared_sql: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
 					key_read: crate::ir::KeyRead::None,
@@ -874,6 +914,9 @@ impl QueryScope {
 					correlation_depth: 0,
 					id_table: None,
 					link_table: None,
+					enum_column: None,
+					composite: None,
+					declared_sql: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
 					key_read: crate::ir::KeyRead::None,

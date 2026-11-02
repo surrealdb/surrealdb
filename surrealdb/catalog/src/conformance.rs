@@ -392,6 +392,7 @@ pub(crate) mod tests {
 			graphql_alias: None,
 			graphql_deprecated: None,
 			inline: false,
+			sql_type: None,
 		}
 	}
 

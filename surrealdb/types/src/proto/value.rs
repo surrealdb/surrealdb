@@ -21,6 +21,9 @@ impl TryFrom<Value> for proto::Value {
 	/// beats wrapping it into a negative duration.
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		Ok(match value {
+			Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Interval(_) => {
+				return proto::Value::try_from(value.degrade_temporal());
+			}
 			Value::None => proto::Value::none(),
 			Value::Null => proto::Value::null(),
 			Value::Bool(b) => proto::Value::bool(b),
@@ -28,6 +31,12 @@ impl TryFrom<Value> for proto::Value {
 				Wide::Int(i) => proto::Value::int64(i),
 				Wide::Float(f) => proto::Value::float64(f),
 				Wide::Decimal(d) => proto::Value::decimal(d.into()),
+				// Same degrade as the flatbuffers encoding: exact decimals travel as decimals,
+				// any other bigdecimal as its text.
+				Wide::BigDecimal(b) => match rust_decimal::Decimal::try_from(b) {
+					Ok(d) => proto::Value::decimal(d.into()),
+					Err(_) => proto::Value::string(b.to_string()),
+				},
 			},
 			Value::String(s) => proto::Value::string(s),
 			Value::Bytes(b) => proto::Value::bytes(b.0),

@@ -44,6 +44,8 @@ use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{DefineDefault, FieldDefinition, IndexDefinition, TableDefinition, TableType};
 use crate::expr::computed_deps::extract_computed_deps;
 use crate::expr::reference::ReferenceDeleteStrategy;
+use crate::expr::statements::define::SqlTypeDialect;
+use crate::expr::statements::define::declared_type::DeclaredSqlType;
 use crate::expr::{Expr, Function, Kind, Literal, Part};
 use crate::kvs::Transaction;
 use crate::val::TableName;
@@ -56,6 +58,8 @@ pub(super) struct RecordingCatalog {
 	database: Option<String>,
 	listing: AtomicBool,
 	deferred: AtomicBool,
+	enums: AtomicBool,
+	domain_columns: AtomicBool,
 }
 
 impl RecordingCatalog {
@@ -65,6 +69,8 @@ impl RecordingCatalog {
 			database: database.map(str::to_owned),
 			listing: AtomicBool::new(false),
 			deferred: AtomicBool::new(false),
+			enums: AtomicBool::new(false),
+			domain_columns: AtomicBool::new(false),
 		}
 	}
 
@@ -75,6 +81,18 @@ impl RecordingCatalog {
 	/// Whether the lowering asked for a system view whose rows list the user's tables.
 	pub(super) fn asked_table_listing(&self) -> bool {
 		self.listing.load(Ordering::Relaxed)
+	}
+
+	/// Whether the lowering asked for a user-defined enum, domain or composite type, which only the
+	/// schema holds.
+	pub(super) fn asked_user_types(&self) -> bool {
+		self.enums.load(Ordering::Relaxed)
+	}
+
+	/// Whether the lowering asked for the columns declared with a domain (`ALTER DOMAIN`), which
+	/// are read from every table of the database.
+	pub(super) fn asked_domain_columns(&self) -> bool {
+		self.domain_columns.load(Ordering::Relaxed)
 	}
 
 	/// Whether the lowering left a refusal to the schema ([`BinderCatalog::defers_schema_checks`]),
@@ -104,6 +122,9 @@ impl BinderCatalog for RecordingCatalog {
 
 	fn get_table(&self, schema: Option<&str>, name: &str) -> Option<TableSchema> {
 		let system = EmptyCatalog.get_table(schema, name);
+		if matches!(name, "pg_type" | "pg_enum") {
+			self.enums.store(true, Ordering::Relaxed);
+		}
 		if system.is_none() {
 			self.note(name);
 		} else if surrealdb_sqlplan::catalog::system::lists_user_tables(schema, name) {
@@ -112,7 +133,53 @@ impl BinderCatalog for RecordingCatalog {
 		system
 	}
 
+	fn enum_type(&self, _name: &str) -> Option<surrealdb_sqlplan::EnumType> {
+		self.enums.store(true, Ordering::Relaxed);
+		None
+	}
+
+	fn enum_types(&self) -> Vec<surrealdb_sqlplan::EnumType> {
+		self.enums.store(true, Ordering::Relaxed);
+		Vec::new()
+	}
+
+	fn domain_type(&self, _name: &str) -> Option<surrealdb_sqlplan::DomainType> {
+		self.enums.store(true, Ordering::Relaxed);
+		None
+	}
+
+	fn composite_type(&self, _name: &str) -> Option<surrealdb_sqlplan::CompositeType> {
+		self.enums.store(true, Ordering::Relaxed);
+		None
+	}
+
+	fn domain_types(&self) -> Vec<surrealdb_sqlplan::DomainType> {
+		self.enums.store(true, Ordering::Relaxed);
+		Vec::new()
+	}
+
+	fn composite_types(&self) -> Vec<surrealdb_sqlplan::CompositeType> {
+		self.enums.store(true, Ordering::Relaxed);
+		Vec::new()
+	}
+
+	fn domain_columns(&self, _name: &str) -> Vec<surrealdb_sqlplan::DomainColumn> {
+		self.enums.store(true, Ordering::Relaxed);
+		self.domain_columns.store(true, Ordering::Relaxed);
+		Vec::new()
+	}
+
 	fn link_table(&self, _schema: Option<&str>, table: &str, _column: &str) -> Option<String> {
+		self.note(table);
+		None
+	}
+
+	fn column_enum(
+		&self,
+		_schema: Option<&str>,
+		table: &str,
+		_column: &str,
+	) -> Option<surrealdb_sqlplan::EnumColumn> {
 		self.note(table);
 		None
 	}
@@ -164,6 +231,147 @@ impl BinderCatalog for RecordingCatalog {
 	}
 }
 
+/// The user-defined types of the database `ns`/`db`: the enum types with the sort key of each
+/// label, the domains and the composite types. With `with_columns`, also the columns declared with
+/// each domain, as `(domain, column)`, which reads the fields of every table. A database that does
+/// not exist has none.
+pub(super) async fn user_types(
+	txn: &Transaction,
+	ns: &str,
+	db: &str,
+	with_columns: bool,
+) -> Result<(surrealdb_sqlplan::UserTypes, Vec<(String, surrealdb_sqlplan::DomainColumn)>)> {
+	use crate::catalog::providers::{EnumProvider, UserTypeProvider};
+	let Some(database) = txn.get_db_by_name(ns, db, None).await? else {
+		return Ok(Default::default());
+	};
+	let (ns_id, db_id) = (database.namespace_id, database.database_id);
+	let enums = txn.all_db_enums(ns_id, db_id, None).await?;
+	let definitions = txn.all_db_user_types(ns_id, db_id, None).await?;
+	let (domains, composites) = sql_user_types(&definitions);
+	let types = surrealdb_sqlplan::UserTypes {
+		enums: enums
+			.iter()
+			.map(|definition| surrealdb_sqlplan::EnumType {
+				name: definition.name.to_string(),
+				id: definition.id.0,
+				labels: definition
+					.labels
+					.iter()
+					.map(|l| surrealdb_sqlplan::EnumTypeLabel {
+						label: l.label.clone(),
+						order: l.order,
+						ident: l.ident,
+					})
+					.collect(),
+			})
+			.collect(),
+		domains,
+		composites,
+	};
+	let mut columns = Vec::new();
+	if with_columns && !types.domains.is_empty() {
+		for table in txn.all_tb(ns_id, db_id, None).await?.iter() {
+			for field in txn.all_tb_fields(ns_id, db_id, &table.name, None).await?.iter() {
+				let Some(column) = field.name.field_name() else {
+					continue;
+				};
+				let Some((domain, true)) = declared_user_type(field, &definitions) else {
+					continue;
+				};
+				columns.push((
+					domain.to_owned(),
+					surrealdb_sqlplan::DomainColumn {
+						table: table.name.as_str().to_owned(),
+						column: column.to_owned(),
+						not_null: field.assert.as_ref().is_some_and(leads_with_not_null),
+						default: match &field.default {
+							DefineDefault::Set(default) => Some(default.clone()),
+							DefineDefault::None | DefineDefault::Always(_) => None,
+						},
+					},
+				));
+			}
+		}
+	}
+	Ok((types, columns))
+}
+
+/// The domains and composite types of `definitions`, as the lowering describes them.
+fn sql_user_types(
+	definitions: &[crate::catalog::UserTypeDefinition],
+) -> (Vec<surrealdb_sqlplan::DomainType>, Vec<surrealdb_sqlplan::CompositeType>) {
+	use crate::expr::statements::define::UserTypeBody;
+	let mut domains = Vec::new();
+	let mut composites = Vec::new();
+	for definition in definitions {
+		match &definition.body {
+			UserTypeBody::Domain(domain) => domains.push(surrealdb_sqlplan::DomainType {
+				name: definition.name.to_string(),
+				id: definition.id.0,
+				base: domain.base.clone(),
+				base_type: domain.base_type.clone(),
+				not_null: domain.not_null,
+				default: domain.default.clone(),
+				checks: domain
+					.checks
+					.iter()
+					.map(|check| surrealdb_sqlplan::DomainCheck {
+						name: check.name.clone(),
+						check: check.check.clone(),
+					})
+					.collect(),
+			}),
+			UserTypeBody::Composite(composite) => {
+				composites.push(surrealdb_sqlplan::CompositeType {
+					name: definition.name.to_string(),
+					id: definition.id.0,
+					fields: composite
+						.fields
+						.iter()
+						.map(|field| (field.name.clone(), field.kind.clone()))
+						.collect(),
+				})
+			}
+		}
+	}
+	(domains, composites)
+}
+
+/// The user type of `definitions` the PostgreSQL declared type of `field` names, with whether it
+/// is a domain (`true`) or a composite type (`false`).
+fn declared_user_type<'a>(
+	field: &FieldDefinition,
+	definitions: &'a [crate::catalog::UserTypeDefinition],
+) -> Option<(&'a str, bool)> {
+	use crate::expr::statements::define::UserTypeBody;
+	let sql_type = field.sql_type.as_ref()?;
+	let definition = definitions.iter().find(|definition| {
+		crate::exec::vm::schema_host::declares_user_type(sql_type, definition.name.as_str())
+	})?;
+	Some((definition.name.as_str(), matches!(definition.body, UserTypeBody::Domain(_))))
+}
+
+/// Whether the assertion of a field leads with the column's own `NOT NULL`: the assertion
+/// `$value != NONE`, alone or as the first operand of the `AND` that joins a domain's checks to it.
+fn leads_with_not_null(assert: &Expr) -> bool {
+	use crate::expr::operator::BinaryOperator;
+	let Expr::Binary {
+		left,
+		op,
+		right,
+	} = assert
+	else {
+		return false;
+	};
+	if *op == BinaryOperator::And {
+		return leads_with_not_null(left);
+	}
+	*op == BinaryOperator::NotEqual
+		&& matches!(&**left, Expr::Param(param) if param.as_str() == "value")
+		&& matches!(&**right, Expr::Literal(Literal::None))
+}
+
 /// The table a field of this type links to; see [`surrealdb_sqlplan::link_target`].
 fn link_target(kind: &Kind) -> Option<&str> {
 	surrealdb_sqlplan::link_target(kind)
@@ -177,6 +385,11 @@ pub(super) struct Declared {
 	/// How the columns are declared, as `(table, column, shape)`, read only when a statement asks
 	/// for them (`ALTER TABLE ... ADD FOREIGN KEY`).
 	pub(super) shapes: Vec<(String, String, ColumnShape)>,
+	/// The columns that hold the labels of an enum, as `(table, column, held)`.
+	pub(super) enums: Vec<(String, String, surrealdb_sqlplan::EnumColumn)>,
+	/// The columns whose declared SQL type is a JSON type, as `(table, column)`: text written to
+	/// one is JSON text.
+	pub(super) json: Vec<(String, String)>,
 }
 
 /// The link columns of `tables`, and their shapes when `shapes` asks, read through `txn` from
@@ -210,6 +423,12 @@ pub(super) async fn link_columns(
 					surrealdb_sqlplan::kind_admits_none(kind),
 				));
 			}
+			if let Some(held) = surrealdb_sqlplan::EnumColumn::of_kind(kind) {
+				declared.enums.push((table.clone(), column.to_owned(), held));
+			}
+			if declared_json_type(field).is_some() {
+				declared.json.push((table.clone(), column.to_owned()));
+			}
 			if shapes {
 				let shape = ColumnShape::new(
 					Some(kind.clone()),
@@ -226,7 +445,11 @@ pub(super) async fn link_columns(
 /// A catalog naming what `declared` holds, as [`link_columns`] returns it, in the database
 /// `database`, or `None` when it holds nothing.
 pub(super) fn link_catalog(declared: &Declared, database: Option<&str>) -> Option<MemoryCatalog> {
-	if declared.links.is_empty() && declared.shapes.is_empty() {
+	if declared.links.is_empty()
+		&& declared.shapes.is_empty()
+		&& declared.enums.is_empty()
+		&& declared.json.is_empty()
+	{
 		return None;
 	}
 	let catalog = declared.links.iter().fold(
@@ -240,8 +463,14 @@ pub(super) fn link_catalog(declared: &Declared, database: Option<&str>) -> Optio
 			}
 		},
 	);
-	let mut catalog = declared.shapes.iter().fold(catalog, |catalog, (table, column, shape)| {
+	let catalog = declared.enums.iter().fold(catalog, |catalog, (table, column, held)| {
+		catalog.with_enum_column(table, column, held.clone())
+	});
+	let catalog = declared.shapes.iter().fold(catalog, |catalog, (table, column, shape)| {
 		catalog.with_column_shape(table, column, shape.clone())
+	});
+	let mut catalog = declared.json.iter().fold(catalog, |catalog, (table, column)| {
+		catalog.with_column_type(table, column, SqlType::Json)
 	});
 	if let Some(database) = database {
 		catalog.set_database(Some(database.to_owned()));
@@ -250,9 +479,10 @@ pub(super) fn link_catalog(declared: &Declared, database: Option<&str>) -> Optio
 }
 
 /// The SQL type of a field of `kind`, where it has one wire representation. Optionality does not
-/// change the type, and an array of such a scalar is an array of its type. Mixed unions, record
-/// links, sets, nested arrays and arrays of anything else are [`SqlType::Unknown`], typed from the
-/// values they hold.
+/// change the type, and an array of such a scalar is an array of its type. An array of such an
+/// array is a two-dimensional array of its type. Mixed unions, record links, sets, arrays nested
+/// deeper than two and arrays of anything else are [`SqlType::Unknown`], typed from the values
+/// they hold.
 ///
 /// [`SqlType::Unknown`]: surrealdb_sqlplan::SqlType::Unknown
 fn scalar_type(kind: &Kind) -> SqlType {
@@ -260,7 +490,11 @@ fn scalar_type(kind: &Kind) -> SqlType {
 		Kind::Bool => SqlType::Bool,
 		Kind::Bytes => SqlType::Bytea,
 		Kind::Datetime => SqlType::TimestampTz,
-		Kind::Decimal => SqlType::Numeric,
+		Kind::Date => SqlType::Date,
+		Kind::Time => SqlType::Time,
+		Kind::Timestamp => SqlType::Timestamp,
+		Kind::Interval => SqlType::Interval,
+		Kind::Decimal | Kind::BigDecimal => SqlType::Numeric,
 		Kind::Duration => SqlType::Interval,
 		Kind::Float => SqlType::Float8,
 		Kind::F16 => SqlType::Float4,
@@ -272,10 +506,11 @@ fn scalar_type(kind: &Kind) -> SqlType {
 		Kind::U8 => SqlType::Int2,
 		Kind::U16 => SqlType::Int4,
 		Kind::U32 => SqlType::Int8,
-		Kind::U64 => SqlType::Numeric,
+		Kind::U64 => SqlType::UInt8,
 		Kind::String => SqlType::Text,
 		Kind::Uuid => SqlType::Uuid,
 		Kind::Object => SqlType::Json,
+		Kind::Enum(_) => SqlType::Unknown,
 		Kind::Array(..) if vector_dimension(kind).is_some() => SqlType::Vector,
 		Kind::Array(elem, _) => SqlType::array_of(scalar_type(elem)).unwrap_or(SqlType::Unknown),
 		Kind::Either(kinds) => {
@@ -313,7 +548,12 @@ fn admits_absence(kind: &Kind) -> bool {
 		Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::F16
@@ -339,7 +579,8 @@ fn admits_absence(kind: &Kind) -> bool {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => false,
+		| Kind::File(_)
+		| Kind::Enum(_) => false,
 	}
 }
 
@@ -371,7 +612,12 @@ fn vector_dimension(kind: &Kind) -> Option<usize> {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::F16
@@ -397,7 +643,8 @@ fn vector_dimension(kind: &Kind) -> Option<usize> {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => None,
+		| Kind::File(_)
+		| Kind::Enum(_) => None,
 	}
 }
 
@@ -408,6 +655,39 @@ fn column_type_name(kind: Option<&Kind>) -> (Option<String>, bool) {
 		return (None, true);
 	};
 	(scalar_type(kind).name(), admits_absence(kind))
+}
+
+/// The wire type a field's declared SQL type names where its kind alone does not say it
+/// ([`SqlType::of_declared`]). `None` for a field with no declared type, or one whose type follows
+/// from its kind.
+fn declared_wire_type(field: &FieldDefinition) -> Option<SqlType> {
+	let declared = DeclaredSqlType::from_sql_type(field.sql_type.as_ref()?).ok()?;
+	SqlType::of_declared(&declared)
+}
+
+/// The name of a PostgreSQL `json` or `jsonb` column's declared type, which the column reports
+/// when its kind has no wire type of its own.
+fn declared_json_name(field: &FieldDefinition) -> Option<String> {
+	let declared = declared_json_type(field)?;
+	if declared.dialect() != SqlTypeDialect::PostgreSql {
+		return None;
+	}
+	Some(declared.base().to_string())
+}
+
+/// The declared SQL type of a field declared as a JSON type of either dialect: PostgreSQL `json`
+/// or `jsonb`, or MySQL `JSON`.
+fn declared_json_type(field: &FieldDefinition) -> Option<DeclaredSqlType> {
+	let declared = DeclaredSqlType::from_sql_type(field.sql_type.as_ref()?).ok()?;
+	declared.json_flavour()?;
+	Some(declared)
+}
+
+/// The SQL type a field is declared with (`SQL TYPE`), which the system views report for its
+/// column. A declaration that no longer reads as a type of its dialect reports nothing, and the
+/// column is reported by its kind.
+fn declared_sql_type(field: &FieldDefinition) -> Option<DeclaredSqlType> {
+	DeclaredSqlType::from_sql_type(field.sql_type.as_ref()?).ok()
 }
 
 /// The sequence that numbers a column whose `DEFAULT` draws its next value from one
@@ -437,7 +717,11 @@ type KeyTypes = std::collections::HashMap<String, Option<String>>;
 /// record id component are not columns. `id` is always the first column and never nullable; the
 /// other columns follow in the order the definitions are given. A column that links to one table
 /// has the type of that table's key (`keys`).
-fn table_columns(fields: &[FieldDefinition], keys: &KeyTypes) -> Vec<ColumnInfo> {
+fn table_columns(
+	fields: &[FieldDefinition],
+	keys: &KeyTypes,
+	user_types: &[crate::catalog::UserTypeDefinition],
+) -> Vec<ColumnInfo> {
 	let mut columns = Vec::with_capacity(fields.len() + 1);
 	let id = fields.iter().find(|field| field.name.field_name() == Some("id"));
 	let (data_type, _) = column_type_name(id.and_then(|field| field.field_kind.as_ref()));
@@ -447,6 +731,10 @@ fn table_columns(fields: &[FieldDefinition], keys: &KeyTypes) -> Vec<ColumnInfo>
 		data_type,
 		is_nullable: false,
 		sequence: id.and_then(default_sequence),
+		enum_held: None,
+		domain: None,
+		composite: None,
+		declared: id.and_then(declared_sql_type),
 	});
 	for field in fields {
 		let Some(name) = field.name.field_name() else {
@@ -456,6 +744,19 @@ fn table_columns(fields: &[FieldDefinition], keys: &KeyTypes) -> Vec<ColumnInfo>
 			continue;
 		}
 		let (mut data_type, mut is_nullable) = column_type_name(field.field_kind.as_ref());
+		// A PostgreSQL column whose declared type names its own wire type reports that type.
+		if let Some(declared) = declared_wire_type(field)
+			&& field.sql_type.as_ref().is_some_and(|ty| ty.dialect == SqlTypeDialect::PostgreSql)
+		{
+			data_type = declared.name();
+		}
+		// A PostgreSQL JSON column is `any`, which has no wire type of its own, so it keeps the
+		// JSON type its declared SQL type names.
+		if data_type.is_none()
+			&& let Some(json) = declared_json_name(field)
+		{
+			data_type = Some(json);
+		}
 		// A `NOT NULL` assertion makes the column required whatever its type admits.
 		if surrealdb_sqlplan::ColumnShape::new(None, field.assert.as_ref(), false).assert
 			== surrealdb_sqlplan::ColumnAssert::NotNull
@@ -474,7 +775,20 @@ fn table_columns(fields: &[FieldDefinition], keys: &KeyTypes) -> Vec<ColumnInfo>
 			data_type,
 			is_nullable,
 			sequence: default_sequence(field),
+			enum_held: field.field_kind.as_ref().and_then(surrealdb_sqlplan::EnumColumn::of_kind),
+			domain: None,
+			composite: None,
+			declared: declared_sql_type(field),
 		});
+		if let (Some((name, is_domain)), Some(column)) =
+			(declared_user_type(field, user_types), columns.last_mut())
+		{
+			if is_domain {
+				column.domain = Some(name.to_owned());
+			} else {
+				column.composite = Some(name.to_owned());
+			}
+		}
 	}
 	columns
 }
@@ -555,9 +869,11 @@ pub(super) async fn database_tables(
 	let Some(database) = txn.get_db_by_name(ns, db, None).await? else {
 		return Ok(Vec::new());
 	};
+	use crate::catalog::providers::UserTypeProvider;
 	let tables = txn.all_tb(database.namespace_id, database.database_id, None).await?;
 	let ns_id = database.namespace_id;
 	let db_id = database.database_id;
+	let user_types = txn.all_db_user_types(ns_id, db_id, None).await?;
 	let definitions = futures::future::try_join_all(tables.iter().map(|table| async move {
 		let (fields, indexes) = futures::future::try_join(
 			txn.all_tb_fields(ns_id, db_id, &table.name, None),
@@ -585,7 +901,7 @@ pub(super) async fn database_tables(
 	Ok(definitions
 		.iter()
 		.map(|(name, fields, indexes, view_over)| {
-			TableSchema::new(*name, table_columns(fields, &keys))
+			TableSchema::new(*name, table_columns(fields, &keys, &user_types))
 				.with_schema("public")
 				.with_indexes(table_indexes(indexes))
 				.with_foreign_keys(table_foreign_keys(fields))
@@ -613,6 +929,11 @@ pub(super) fn pgsql_keeps_columns(stmts: &[surrealdb_pgsql::ast::stmt::Statement
 				| Statement::Truncate(_)
 				| Statement::CreateIndex(_)
 				| Statement::CreateExtension(_)
+				| Statement::CreateType(_)
+				| Statement::AlterType(_)
+				| Statement::CreateDomain(_)
+				| Statement::AlterDomain(_)
+				| Statement::CreateCompositeType(_)
 				| Statement::Transaction(_)
 				| Statement::Set(_)
 				| Statement::Show(_)
@@ -679,21 +1000,34 @@ pub(super) enum Purpose {
 	Describing,
 }
 
+/// Which columns of a table are told their scalar type.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ColumnTypes {
+	/// None.
+	None,
+	/// The columns of a date, time, timestamp or interval type, which a comparison or an
+	/// arithmetic operation over them converts its other operand to.
+	Temporal,
+	/// Every column of a scalar type.
+	All,
+}
+
 impl Purpose {
-	/// Whether the scalar types of columns are read.
-	pub(super) fn types_columns(self) -> bool {
+	/// The columns whose scalar types are read.
+	pub(super) fn column_types(self) -> ColumnTypes {
 		match self {
-			Self::Lowering => false,
-			Self::Describing => true,
+			Self::Lowering => ColumnTypes::Temporal,
+			Self::Describing => ColumnTypes::All,
 		}
 	}
 }
 
 /// The tables `tables` of the database `ns`/`db`, as read through `txn`.
 ///
-/// A column that holds links is named. With `types` a column of a scalar type is typed, and with
-/// `columns` a table that is `SCHEMAFULL` and not a view is described as having the columns it
-/// defines and no others: see [`declared_columns`]. A database that does not exist has no tables.
+/// A column that holds links is named. With `types` the columns it selects of a scalar type are
+/// typed, and with `columns` a table that is `SCHEMAFULL` and not a view is described as having the
+/// columns it defines and no others: see [`declared_columns`]. A database that does not exist has
+/// no tables.
 ///
 /// `columns` is set only for a reader that may be told the columns, which is what viewing the
 /// definitions of the tables allows. Without it only the links are read: they decide how an
@@ -715,7 +1049,7 @@ pub(super) async fn describe_tables(
 	db: &str,
 	tables: &[String],
 	columns: bool,
-	types: bool,
+	types: ColumnTypes,
 ) -> Result<Described> {
 	let mut catalog = MemoryCatalog::new();
 	catalog.set_database(Some(db.to_owned()));
@@ -726,6 +1060,9 @@ pub(super) async fn describe_tables(
 	let Some(database) = txn.get_db_by_name(ns, db, None).await? else {
 		return Ok(described);
 	};
+	// The user types, read once a declared table needs them.
+	let mut user_types = None;
+	let mut composite_columns = false;
 	let mut targets: BTreeSet<String> = BTreeSet::new();
 	for table in tables {
 		let name = TableName::from(table.as_str());
@@ -747,7 +1084,12 @@ pub(super) async fn describe_tables(
 				}
 				described.shapes_lowering = true;
 			}
-			if !types {
+			if let Some(held) = surrealdb_sqlplan::EnumColumn::of_kind(kind) {
+				described.catalog =
+					std::mem::take(&mut described.catalog).with_enum_column(table, column, held);
+				described.shapes_lowering = true;
+			}
+			if types != ColumnTypes::All {
 				add_write_type(&mut described, table, column, kind);
 			}
 			if let Some(dimensions) = vector_dimension(kind) {
@@ -755,15 +1097,38 @@ pub(super) async fn describe_tables(
 				described.shapes_lowering = true;
 				has_vectors = true;
 			}
-			if types {
+			// A column declared with a SQL type is reported as that type to a client told the
+			// types of the columns it reads.
+			if types == ColumnTypes::All
+				&& let Some(declared) = declared_sql_type(field)
+			{
+				described.catalog.add_sql_type(table, column, declared);
+			}
+			// Text written to a JSON column is JSON text, which the lowering parses.
+			if declared_json_type(field).is_some() {
+				described.catalog.add_column_type(table, column, SqlType::Json);
+				described.shapes_lowering = true;
+				continue;
+			}
+			// A declared SQL type that names its own wire type decides how the lowering reads the
+			// column (a range column answers `@>` and `<@` with an element) as well as how the
+			// column is described.
+			let declared = declared_wire_type(field);
+			if types != ColumnTypes::None
+				&& let Some(ty) = declared
+			{
+				described.catalog.add_column_type(table, column, ty);
+				described.shapes_lowering = true;
+			} else if types != ColumnTypes::None {
 				let mut ty = scalar_type(kind);
 				// A link column is typed as the key of the table it links to.
-				if ty == SqlType::Unknown
+				if types == ColumnTypes::All
+					&& ty == SqlType::Unknown
 					&& let Some(target) = link_target(kind)
 				{
 					ty = key_type(txn, &database, target).await?;
 				}
-				if ty != SqlType::Unknown {
+				if ty != SqlType::Unknown && (types == ColumnTypes::All || ty.is_temporal()) {
 					described.catalog.add_column_type(table, column, ty);
 				}
 			}
@@ -805,14 +1170,40 @@ pub(super) async fn describe_tables(
 			&& definition.schemafull
 			&& definition.view.is_none()
 		{
-			let declared = declared_columns(&definition, &fields);
+			let user_types = match &user_types {
+				Some(user_types) => user_types,
+				None => {
+					use crate::catalog::providers::UserTypeProvider;
+					let read = txn
+						.all_db_user_types(database.namespace_id, database.database_id, None)
+						.await?;
+					user_types.insert(read)
+				}
+			};
+			let mut declared = declared_columns(&definition, &fields);
+			for field in fields.iter().filter(|field| !field.is_key_part()) {
+				let (Some(column), Some((name, false))) =
+					(field.name.field_name(), declared_user_type(field, user_types))
+				else {
+					continue;
+				};
+				if let Some(info) = declared.iter_mut().find(|info| info.name == column) {
+					info.composite = Some(name.to_owned());
+					composite_columns = true;
+				}
+			}
 			described.catalog.add_table(TableSchema::new(table, declared).as_closed());
 			described.catalog.add_null_columns(table, null_columns(&fields));
 			described.catalog.add_default_columns(table, default_columns(&fields));
 			described.shapes_lowering = true;
 		}
 	}
-	if !types {
+	// The composite type of a column describes how a result reads it.
+	if composite_columns && let Some(user_types) = &user_types {
+		let (_, composites) = sql_user_types(user_types);
+		described.catalog = std::mem::take(&mut described.catalog).with_composites(composites);
+	}
+	if types != ColumnTypes::All {
 		// Text written to a link column names a record of the table it links to by that table's
 		// key, so the type of the key of every target is read too.
 		for target in targets.iter().filter(|target| !tables.contains(target)) {
@@ -1017,7 +1408,12 @@ mod tests {
 			scalar_type(&Kind::Either(vec![Kind::None, array(Kind::String)])),
 			SqlType::Array(&SqlType::Text)
 		);
-		assert_eq!(scalar_type(&array(array(Kind::String))), SqlType::Unknown);
+		assert_eq!(
+			scalar_type(&array(array(Kind::String))),
+			SqlType::Array(&SqlType::Array(&SqlType::Text))
+		);
+		assert_eq!(scalar_type(&array(array(array(Kind::String)))), SqlType::Unknown);
+		assert_eq!(scalar_type(&array(array(Kind::Any))), SqlType::Unknown);
 		assert_eq!(scalar_type(&array(Kind::Any)), SqlType::Unknown);
 		assert_eq!(scalar_type(&array(record("dept"))), SqlType::Unknown);
 		assert_eq!(scalar_type(&Kind::Set(Box::new(Kind::String), None)), SqlType::Unknown);
@@ -1057,6 +1453,7 @@ mod tests {
 		assert_eq!(column(&Kind::Bytes), named("bytea", false));
 		assert_eq!(column(&Kind::Object), named("jsonb", false));
 		assert_eq!(column(&array(Kind::String)), named("text[]", false));
+		assert_eq!(column(&array(array(Kind::Int))), named("bigint[]", false));
 		assert_eq!(
 			column(&Kind::Either(vec![Kind::None, array(Kind::Int)])),
 			named("bigint[]", true)
@@ -1095,16 +1492,20 @@ mod tests {
 			data_type: ty.map(str::to_owned),
 			is_nullable: nullable,
 			sequence: None,
+			enum_held: None,
+			domain: None,
+			composite: None,
+			declared: None,
 		};
 		assert_eq!(
-			table_columns(&fields, &KeyTypes::new()),
+			table_columns(&fields, &KeyTypes::new(), &[]),
 			vec![
 				column("id", 0, Some("bigint"), false),
 				column("name", 1, Some("text"), false),
 				column("tags", 2, Some("text[]"), true),
 			]
 		);
-		assert_eq!(table_columns(&[], &KeyTypes::new()), vec![column("id", 0, None, false)]);
+		assert_eq!(table_columns(&[], &KeyTypes::new(), &[]), vec![column("id", 0, None, false)]);
 	}
 
 	#[test]
@@ -1116,7 +1517,7 @@ mod tests {
 			typed("anyone", Some(Kind::Record(Vec::new()))),
 		];
 		let keys: KeyTypes = [("user".to_owned(), Some("bigint".to_owned()))].into();
-		let columns = table_columns(&fields, &keys);
+		let columns = table_columns(&fields, &keys, &[]);
 		let typed = |name: &str| {
 			let column = columns.iter().find(|c| c.name == name).unwrap();
 			(column.data_type.clone(), column.is_nullable)
@@ -1301,7 +1702,7 @@ mod tests {
 			},
 			typed("other", Some(Kind::String)),
 		];
-		let sequences: Vec<_> = table_columns(&fields, &KeyTypes::new())
+		let sequences: Vec<_> = table_columns(&fields, &KeyTypes::new(), &[])
 			.into_iter()
 			.map(|c| (c.name, c.sequence))
 			.collect();

@@ -15,6 +15,9 @@ impl ToFlatbuffers for Kind {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
+			Self::Date | Self::Timestamp => return Self::Datetime.to_fb(builder),
+			Self::Time => return Self::Duration.to_fb(builder),
+			Self::Interval | Self::Enum(_) => return Self::String.to_fb(builder),
 			Self::Any => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::Any,
 				kind: Some(
@@ -53,7 +56,8 @@ impl ToFlatbuffers for Kind {
 						.as_union_value(),
 				),
 			},
-			Self::Decimal => proto_fb::KindArgs {
+			// `bigdecimal` degrades to `decimal`, the nearest kind the wire carries.
+			Self::Decimal | Self::BigDecimal => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::Decimal,
 				kind: Some(
 					proto_fb::DecimalKind::create(builder, &proto_fb::DecimalKindArgs {})

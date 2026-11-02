@@ -31,6 +31,10 @@ pub(crate) trait Mode {
 
 	/// Wraps the value `f` constructs. `f` is not called in [`Check`].
 	fn make<T>(f: impl FnOnce() -> T) -> Self::Out<T>;
+	/// Wraps the value `f` constructs, or its error. `f` is not called in [`Check`], so a caller
+	/// whose check already refuses every input `f` would refuse passes it only a constructor
+	/// that the check has vouched for.
+	fn try_make<T, E>(f: impl FnOnce() -> Result<T, E>) -> Result<Self::Out<T>, E>;
 	/// Applies `f` to a walked value. `f` is not called in [`Check`].
 	fn map<T, U>(v: Self::Out<T>, f: impl FnOnce(T) -> U) -> Self::Out<U>;
 	/// Pairs two walked values.
@@ -76,6 +80,11 @@ impl Mode for Build {
 
 	#[inline(always)]
 	fn make<T>(f: impl FnOnce() -> T) -> T {
+		f()
+	}
+
+	#[inline(always)]
+	fn try_make<T, E>(f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
 		f()
 	}
 
@@ -170,6 +179,11 @@ impl Mode for Check {
 
 	#[inline(always)]
 	fn make<T>(_: impl FnOnce() -> T) {}
+
+	#[inline(always)]
+	fn try_make<T, E>(_: impl FnOnce() -> Result<T, E>) -> Result<(), E> {
+		Ok(())
+	}
 
 	#[inline(always)]
 	fn map<T, U>(_: (), _: impl FnOnce(T) -> U) {}

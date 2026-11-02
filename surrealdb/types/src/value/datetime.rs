@@ -30,6 +30,12 @@ impl Datetime {
 	/// The maximum UTC datetime
 	pub const MAX_UTC: Self = Datetime(DateTime::<Utc>::MAX_UTC);
 
+	/// Whether this datetime is the greatest (`infinity`) or least (`-infinity`) value of the
+	/// kind. PostgreSQL's `timestamptz` spells them so.
+	pub fn is_infinite(&self) -> bool {
+		*self == Self::MAX_UTC || *self == Self::MIN_UTC
+	}
+
 	/// Returns the current UTC datetime
 	pub fn now() -> Self {
 		Self(Utc::now())
@@ -53,6 +59,17 @@ impl Datetime {
 impl FromStr for Datetime {
 	type Err = anyhow::Error;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let v = s.trim();
+		if let Some(positive) = super::temporal::parse_infinity(v) {
+			return Ok(if positive {
+				Self::MAX_UTC
+			} else {
+				Self::MIN_UTC
+			});
+		}
+		if v.eq_ignore_ascii_case("epoch") {
+			return Ok(Self(DateTime::UNIX_EPOCH));
+		}
 		parse_common::datetime(s).map(Self).map_err(|e| anyhow::Error::msg(e.message))
 	}
 }

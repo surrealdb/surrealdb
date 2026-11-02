@@ -10,22 +10,22 @@ reason = "A function that has a lowering of its own answers as it does in a read
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: 1, n: 1i32, s: '7', ts: d'2019-05-01T00:00:00Z' }, { id: 2, n: 2i32, s: '42', ts: d'2021-05-01T00:00:00Z' }, { id: 3, n: 3i32, s: 'abc', ts: d'2018-01-01T00:00:00Z' }]"
+value = "[{ id: 1, n: 1i32, s: '7', ts: timestamp'2019-05-01T00:00:00' }, { id: 2, n: 2i32, s: '42', ts: timestamp'2021-05-01T00:00:00' }, { id: 3, n: 3i32, s: 'abc', ts: timestamp'2018-01-01T00:00:00' }]"
 
 [[test.results]]
-value = "[{ id: 1, n: 1i32, s: '00007', ts: d'2019-05-01T00:00:00Z' }, { id: 2, n: 2i32, s: '00042', ts: d'2021-05-01T00:00:00Z' }]"
+value = "[{ id: 1, n: 1i32, s: '00007', ts: timestamp'2019-05-01T00:00:00' }, { id: 2, n: 2i32, s: '00042', ts: timestamp'2021-05-01T00:00:00' }]"
 
 [[test.results]]
-value = "[{ id: 1, n: 1i32, s: '00007', ts: d'2019-05-01T00:00:00Z' }, { id: 3, n: 3i32, s: 'abc', ts: d'2018-01-01T00:00:00Z' }]"
+value = "[{ id: 1, n: 1i32, s: '00007', ts: timestamp'2019-05-01T00:00:00' }, { id: 3, n: 3i32, s: 'abc', ts: timestamp'2018-01-01T00:00:00' }]"
 
 [[test.results]]
 value = "[{ id: 2, s: '00042' }]"
 
 [[test.results]]
-value = "[{ id: 2, n: 1i32, s: '00042', ts: d'2021-05-02T00:00:00Z' }]"
+value = "[{ id: 2, n: 1i32, s: '00042', ts: timestamp'2021-05-02T00:00:00' }]"
 
 [[test.results]]
-value = "[{ id: 2, n: 1i32, s: '00042', ts: d'2021-06-02T00:00:00Z' }]"
+value = "[{ id: 2, n: 1i32, s: '00042', ts: timestamp'2021-06-02T00:00:00' }]"
 
 [[test.results]]
 value = "[{ id: 9, n: 1i32, s: 'bcd' }]"
@@ -34,7 +34,7 @@ value = "[{ id: 9, n: 1i32, s: 'bcd' }]"
 value = "[{ id: 9, n: 1i32, s: '**x' }]"
 
 [[test.results]]
-value = "[{ id: 2, n: 1i32, s: '00042', ts: d'2021-06-02T00:00:00Z' }, { id: 9, n: 1i32, s: '**x', ts: NONE }]"
+value = "[{ id: 2, n: 1i32, s: '00042', ts: timestamp'2021-06-02T00:00:00' }, { id: 9, n: 1i32, s: '**x', ts: NONE }]"
 */
 
 CREATE TABLE wr (id INT PRIMARY KEY, s VARCHAR(20), ts DATETIME, n INT);

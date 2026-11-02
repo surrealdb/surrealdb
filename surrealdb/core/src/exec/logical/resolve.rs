@@ -1419,6 +1419,13 @@ impl Resolver<'_> {
 				self.resolve_scalars(&mut leaf, &scope)?;
 				match (facts, table) {
 					(Some(facts), Some(table)) => {
+						super::enum_order::rewrite_stages(&mut stages, &|name| {
+							facts
+								.fields
+								.iter()
+								.find(|f| f.name == name)
+								.and_then(|f| f.kind.as_ref())
+						});
 						self.table_stack(leaf, &table, &facts, &stages, &scope)?
 					}
 					(None, _) | (Some(_), None) => leaf,
@@ -1436,12 +1443,51 @@ impl Resolver<'_> {
 			}),
 			LogicalOp::UnionAll(LogicalUnionAll {
 				inputs,
-			}) => LogicalOp::UnionAll(LogicalUnionAll {
-				inputs: inputs
-					.into_iter()
-					.map(|input| self.resolve_union_input(input, &scope, already_bound, &stages))
-					.collect::<Result<_, Error>>()?,
-			}),
+			}) => {
+				// The stages over a union read the rows of every input, so a field is an enum
+				// there only when each input is a table that declares it as the same one.
+				if !already_bound {
+					let sources: Vec<Option<Arc<TableFacts>>> = inputs
+						.iter()
+						.map(|input| {
+							if let LogicalOp::Source(LogicalSource {
+								source: SourceRef::Table(table),
+								..
+							}) = input
+							{
+								self.facts(table, &scope)
+							} else {
+								None
+							}
+						})
+						.collect();
+					if !sources.is_empty() && sources.iter().all(Option::is_some) {
+						let tables: Vec<&Arc<TableFacts>> = sources.iter().flatten().collect();
+						fn declared<'f>(facts: &'f TableFacts, name: &str) -> Option<&'f Kind> {
+							facts
+								.fields
+								.iter()
+								.find(|f| f.name == name)
+								.and_then(|f| f.kind.as_ref())
+						}
+						super::enum_order::rewrite_stages(&mut stages, &|name| {
+							let first = declared(tables[0], name)?;
+							tables[1..]
+								.iter()
+								.all(|facts| declared(facts, name) == Some(first))
+								.then_some(first)
+						});
+					}
+				}
+				LogicalOp::UnionAll(LogicalUnionAll {
+					inputs: inputs
+						.into_iter()
+						.map(|input| {
+							self.resolve_union_input(input, &scope, already_bound, &stages)
+						})
+						.collect::<Result<_, Error>>()?,
+				})
+			}
 			mut leaf @ (LogicalOp::Values(_) | LogicalOp::Match(_)) => {
 				self.resolve_scalars(&mut leaf, &scope)?;
 				leaf
@@ -2971,7 +3017,12 @@ fn may_hold_array(kind: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -2995,7 +3046,8 @@ fn may_hold_array(kind: &Kind) -> bool {
 		| Kind::Set(..)
 		| Kind::Function(..)
 		| Kind::Range
-		| Kind::File(_) => false,
+		| Kind::File(_)
+		| Kind::Enum(_) => false,
 	}
 }
 
@@ -3019,7 +3071,12 @@ fn may_hold_object(kind: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -3043,7 +3100,8 @@ fn may_hold_object(kind: &Kind) -> bool {
 		| Kind::Array(..)
 		| Kind::Function(..)
 		| Kind::Range
-		| Kind::File(_) => false,
+		| Kind::File(_)
+		| Kind::Enum(_) => false,
 	}
 }
 

@@ -48,19 +48,21 @@ use crate::expr::statements::access::{
 };
 use crate::expr::statements::alter::{
 	AlterAccessStatement, AlterAnalyzerStatement, AlterApiStatement, AlterBucketStatement,
-	AlterConfigStatement, AlterDatabaseStatement, AlterEventStatement, AlterFieldStatement,
-	AlterFunctionStatement, AlterIndexStatement, AlterKind, AlterModuleStatement,
-	AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement, AlterSystemStatement,
-	AlterTableStatement, AlterUserStatement,
+	AlterConfigStatement, AlterDatabaseStatement, AlterEnumStatement, AlterEventStatement,
+	AlterFieldStatement, AlterFunctionStatement, AlterIndexStatement, AlterKind,
+	AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement,
+	AlterSystemStatement, AlterTableStatement, AlterUserStatement,
 };
 use crate::expr::statements::define::config::api::ApiConfig;
 use crate::expr::statements::define::config::defaults::DefaultConfig;
 use crate::expr::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineSequenceStatement,
+	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineEnumStatement,
+	DefineSequenceStatement, DefineUserTypeStatement,
 };
 use crate::expr::statements::rebuild::RebuildIndexStatement;
 use crate::expr::statements::remove::{
-	RemoveApiStatement, RemoveBucketStatement, RemoveSequenceStatement,
+	RemoveApiStatement, RemoveBucketStatement, RemoveEnumStatement, RemoveSequenceStatement,
+	RemoveUserTypeStatement,
 };
 use crate::expr::statements::{
 	AlterStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
@@ -178,6 +180,10 @@ fn walk_value(value: &Value) -> Release {
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Geometry(_)
 			| Value::Bytes(_)
@@ -576,6 +582,7 @@ fn literal_release(literal: &Literal) -> Release {
 		| Literal::Float(..)
 		| Literal::Integer(..)
 		| Literal::Decimal(..)
+		| Literal::BigDecimal(..)
 		| Literal::I8(..)
 		| Literal::U8(..)
 		| Literal::I16(..)
@@ -594,6 +601,10 @@ fn literal_release(literal: &Literal) -> Release {
 		| Literal::Object(..)
 		| Literal::Duration(..)
 		| Literal::Datetime(..)
+		| Literal::Date(..)
+		| Literal::Time(..)
+		| Literal::Timestamp(..)
+		| Literal::Interval(..)
 		| Literal::Uuid(..)
 		| Literal::Geometry(..)
 		| Literal::File(..) => FIRST,
@@ -641,7 +652,12 @@ fn kind_release(kind: &Kind) -> Release {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -668,7 +684,8 @@ fn kind_release(kind: &Kind) -> Release {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(..)
-		| Kind::File(..) => FIRST,
+		| Kind::File(..)
+		| Kind::Enum(..) => FIRST,
 	}
 }
 
@@ -702,6 +719,8 @@ fn define_release(statement: &DefineStatement) -> Release {
 		| DefineStatement::Config(..)
 		| DefineStatement::Api(..)
 		| DefineStatement::Bucket(..)
+		| DefineStatement::Enum(..)
+		| DefineStatement::UserType(..)
 		| DefineStatement::Sequence(..)
 		| DefineStatement::Module(..) => FIRST,
 	}
@@ -720,6 +739,7 @@ fn alter_release(statement: &AlterStatement) -> Release {
 		| AlterStatement::Field(..)
 		| AlterStatement::Param(..)
 		| AlterStatement::Bucket(..)
+		| AlterStatement::Enum(..)
 		| AlterStatement::Config(..)
 		| AlterStatement::Analyzer(..)
 		| AlterStatement::Function(..)
@@ -745,6 +765,8 @@ fn remove_release(statement: &RemoveStatement) -> Release {
 		| RemoveStatement::Model(..)
 		| RemoveStatement::Api(..)
 		| RemoveStatement::Bucket(..)
+		| RemoveStatement::Enum(..)
+		| RemoveStatement::UserType(..)
 		| RemoveStatement::Sequence(..)
 		| RemoveStatement::Module(..)
 		| RemoveStatement::Config(..) => FIRST,
@@ -954,6 +976,7 @@ impl Visitor for ArrivalVisitor {
 			reference: _,
 			migrate: _,
 			key_names: _,
+			sql_type: _,
 		} []
 		visit_upsert(UpsertStatement) {
 			only: _,
@@ -1012,6 +1035,17 @@ impl Visitor for ArrivalVisitor {
 		visit_remove_model(RemoveModelStatement) { name: _, version: _, if_exists: _ } []
 		visit_remove_api(RemoveApiStatement) { name: _, if_exists: _ } []
 		visit_remove_bucket(RemoveBucketStatement) { name: _, base: _, if_exists: _ } []
+		visit_remove_enum(RemoveEnumStatement) { name: _, if_exists: _ } []
+		visit_remove_user_type(RemoveUserTypeStatement) { name: _, type_kind: _, if_exists: _ } []
+		visit_define_user_type(DefineUserTypeStatement) { kind: _, name: _, body: _ } []
+		visit_alter_enum(AlterEnumStatement) { name: _, if_exists: _, actions: _ } []
+		visit_define_enum(DefineEnumStatement) {
+			kind: _,
+			name: _,
+			labels: _,
+			comment: _,
+			permissions: _,
+		} []
 		visit_remove_sequence(RemoveSequenceStatement) { name: _, if_exists: _ } []
 		visit_relate(RelateStatement) {
 			only: _,
@@ -1143,6 +1177,7 @@ impl Visitor for ArrivalVisitor {
 			graphql_deprecated: _,
 			migrate: _,
 			key_names: _,
+			sql_type: _,
 		} []
 		visit_reference(Reference) { on_delete: _, materialize: _ } []
 		visit_define_event(DefineEventStatement) {

@@ -1397,7 +1397,8 @@ pub enum FieldRef<'a> {
 	/// A record id: its table and its key in the stored key grammar, which the reader that walks
 	/// the key validates.
 	RecordId(&'a TableName, &'a [u8]),
-	/// A `Value` column's value, a remainder, or a value read from an open ancestor's remainder.
+	/// A `Value` column's value, a `BigDecimal` column's value read as its BIGDECIMAL, a
+	/// remainder, or a value read from an open ancestor's remainder.
 	/// Never NULL and never NONE: a NULL from the column's bits, a `Value` slice or a remainder
 	/// entry is [`Null`](Self::Null), and an absent one is [`Absent`](Self::Absent). The bytes are
 	/// validated by the reader that walks them.

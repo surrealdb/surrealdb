@@ -430,12 +430,12 @@ impl SumState {
 	}
 
 	fn add(&mut self, value: &Value) -> FlowResult<()> {
-		let &Value::Number(n) = value else {
+		let Value::Number(n) = value else {
 			return Ok(());
 		};
 		let n = n.widened();
 		self.count += 1;
-		if !exact(n) {
+		if !exact(&n) {
 			self.inexact += 1;
 		}
 		if !self.stale {
@@ -449,12 +449,12 @@ impl SumState {
 	}
 
 	fn retract(&mut self, value: &Value) -> FlowResult<()> {
-		let &Value::Number(n) = value else {
+		let Value::Number(n) = value else {
 			return Ok(());
 		};
 		let n = n.widened();
 		self.count -= 1;
-		let exact = exact(n);
+		let exact = exact(&n);
 		if !exact {
 			self.inexact -= 1;
 		}
@@ -474,8 +474,8 @@ impl SumState {
 }
 
 /// Whether subtracting `n` takes back adding it exactly.
-fn exact(n: Number) -> bool {
-	matches!(n.wide(), Wide::Int(_) | Wide::Decimal(_))
+fn exact(n: &Number) -> bool {
+	matches!(n.wide(), Wide::Int(_) | Wide::Decimal(_) | Wide::BigDecimal(_))
 }
 
 /// A frame-reading call's state over the rows its head has added and its
@@ -656,7 +656,9 @@ impl Fold {
 	/// What the fold holds beyond the window's rows.
 	fn bytes(&self) -> usize {
 		match self {
-			Self::Sum(state) => state.sum.map_or(0, |sum| value_bytes(&Value::Number(sum))),
+			Self::Sum(state) => {
+				state.sum.as_ref().map_or(0, |sum| value_bytes(&Value::Number(sum.clone())))
+			}
 			Self::Extreme(v) | Self::First(v) | Self::Last(v) | Self::Nth(v) => {
 				v.as_ref().map_or(0, value_bytes)
 			}
@@ -1268,8 +1270,8 @@ impl WindowRun {
 				}
 				match (&state.sum, spec.function) {
 					(None, _) => Value::Null,
-					(Some(sum), WindowFunction::Avg) => mean(*sum, state.count),
-					(Some(sum), _) => Value::Number(*sum),
+					(Some(sum), WindowFunction::Avg) => mean(sum, state.count),
+					(Some(sum), _) => Value::Number(sum.clone()),
 				}
 			}
 			Fold::Extreme(v) | Fold::First(v) | Fold::Last(v) => v.clone().unwrap_or(Value::Null),
@@ -1444,7 +1446,7 @@ fn bucket(index: u64, size: u64, buckets: u64) -> u64 {
 
 /// The mean of `count` values whose sum is `sum`: a float, whatever the values' kind, as the
 /// `math::mean` aggregate answers, so integers do not divide as integers.
-fn mean(sum: Number, count: u64) -> Value {
+fn mean(sum: &Number, count: u64) -> Value {
 	Value::Number(Number::Float(sum.to_float() / count as f64))
 }
 

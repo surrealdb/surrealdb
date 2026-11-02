@@ -10,14 +10,16 @@ use crate::ast::graph::{
 };
 use crate::ast::json::{JsonTable, JsonTableColumn};
 use crate::ast::stmt::{
-	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CommonTableExpr, CopyDirection,
-	CopyFormat, CopyStmt, CopyTarget, CreateExtensionStmt, CreateIndexStmt, CreateSchemaStmt,
-	CreateTableStmt, CreateViewStmt, DeallocateStmt, DeleteStmt, DistinctClause, DropObjectType,
-	DropStmt, ExecuteStmt, ExplainStmt, IndexElem, InsertStmt, IsolationLevel, JoinCondition,
-	JoinType, LockingClause, LockingStrength, LockingWaitPolicy, OnConflictAction,
-	OnConflictClause, PrepareStmt, ReferentialAction, ResTarget, ResetStmt, SelectStmt, SetClause,
-	SetOpKind, SetOperation, SetStmt, ShowStmt, Statement, TableAlias, TableConstraint, TableRef,
-	TransactionStmt, TruncateStmt, UpdateStmt, WindowDef, WithClause,
+	AlterDomainAction, AlterDomainStmt, AlterTableAction, AlterTableStmt, AlterTypeAction,
+	AlterTypeStmt, ColumnConstraint, ColumnDef, CommonTableExpr, CopyDirection, CopyFormat,
+	CopyStmt, CopyTarget, CreateCompositeTypeStmt, CreateDomainStmt, CreateExtensionStmt,
+	CreateIndexStmt, CreateSchemaStmt, CreateTableStmt, CreateTypeStmt, CreateViewStmt,
+	DeallocateStmt, DeleteStmt, DistinctClause, DomainConstraint, DomainConstraintKind,
+	DropObjectType, DropStmt, EnumValuePlacement, ExecuteStmt, ExplainStmt, IndexElem, InsertStmt,
+	IsolationLevel, JoinCondition, JoinType, LockingClause, LockingStrength, LockingWaitPolicy,
+	OnConflictAction, OnConflictClause, PrepareStmt, ReferentialAction, ResTarget, ResetStmt,
+	SelectStmt, SetClause, SetOpKind, SetOperation, SetStmt, ShowStmt, Statement, TableAlias,
+	TableConstraint, TableRef, TransactionStmt, TruncateStmt, UpdateStmt, WindowDef, WithClause,
 };
 use crate::printer::ToPgSql;
 use crate::printer::expr::{print_ident, print_string_literal};
@@ -765,7 +767,107 @@ impl ToPgSql for DropObjectType {
 			Self::View => f.write_str("VIEW"),
 			Self::Schema => f.write_str("SCHEMA"),
 			Self::Type => f.write_str("TYPE"),
+			Self::Domain => f.write_str("DOMAIN"),
 		}
+	}
+}
+
+impl ToPgSql for CreateDomainStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("CREATE DOMAIN ")?;
+		self.name.to_pgsql(f)?;
+		f.write_str(" AS ")?;
+		self.data_type.to_pgsql(f)?;
+		for constraint in &self.constraints {
+			f.write_str(" ")?;
+			print_domain_constraint(f, constraint)?;
+		}
+		Ok(())
+	}
+}
+
+/// Print a domain constraint with its optional `CONSTRAINT name` prefix.
+fn print_domain_constraint(f: &mut fmt::Formatter<'_>, c: &DomainConstraint) -> fmt::Result {
+	if let Some(name) = &c.name {
+		f.write_str("CONSTRAINT ")?;
+		print_ident(f, name)?;
+		f.write_str(" ")?;
+	}
+	match &c.kind {
+		DomainConstraintKind::NotNull => f.write_str("NOT NULL"),
+		DomainConstraintKind::Null => f.write_str("NULL"),
+		DomainConstraintKind::Check(expr) => {
+			f.write_str("CHECK (")?;
+			expr.to_pgsql(f)?;
+			f.write_str(")")
+		}
+		DomainConstraintKind::Default(expr) => {
+			f.write_str("DEFAULT ")?;
+			expr.to_pgsql(f)
+		}
+	}
+}
+
+impl ToPgSql for AlterDomainStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("ALTER DOMAIN ")?;
+		self.name.to_pgsql(f)?;
+		match &self.action {
+			AlterDomainAction::SetDefault(expr) => {
+				f.write_str(" SET DEFAULT ")?;
+				expr.to_pgsql(f)
+			}
+			AlterDomainAction::DropDefault => f.write_str(" DROP DEFAULT"),
+			AlterDomainAction::SetNotNull => f.write_str(" SET NOT NULL"),
+			AlterDomainAction::DropNotNull => f.write_str(" DROP NOT NULL"),
+			AlterDomainAction::AddConstraint {
+				name,
+				check,
+			} => {
+				f.write_str(" ADD ")?;
+				if let Some(name) = name {
+					f.write_str("CONSTRAINT ")?;
+					print_ident(f, name)?;
+					f.write_str(" ")?;
+				}
+				f.write_str("CHECK (")?;
+				check.to_pgsql(f)?;
+				f.write_str(")")
+			}
+			AlterDomainAction::DropConstraint {
+				name,
+				if_exists,
+			} => {
+				f.write_str(" DROP CONSTRAINT ")?;
+				if *if_exists {
+					f.write_str("IF EXISTS ")?;
+				}
+				print_ident(f, name)
+			}
+			AlterDomainAction::ValidateConstraint {
+				name,
+			} => {
+				f.write_str(" VALIDATE CONSTRAINT ")?;
+				print_ident(f, name)
+			}
+		}
+	}
+}
+
+impl ToPgSql for CreateCompositeTypeStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("CREATE TYPE ")?;
+		self.name.to_pgsql(f)?;
+		f.write_str(" AS (")?;
+		for (i, attr) in self.attributes.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			print_ident(f, &attr.name)?;
+			f.write_str(" ")?;
+			attr.data_type.to_pgsql(f)?;
+		}
+		f.write_str(")")
 	}
 }
 
@@ -1012,6 +1114,62 @@ impl ToPgSql for CreateSchemaStmt {
 	}
 }
 
+impl ToPgSql for CreateTypeStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("CREATE TYPE ")?;
+		self.name.to_pgsql(f)?;
+		f.write_str(" AS ENUM (")?;
+		for (i, label) in self.labels.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			print_string_literal(f, label)?;
+		}
+		f.write_str(")")
+	}
+}
+
+impl ToPgSql for AlterTypeStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("ALTER TYPE ")?;
+		self.name.to_pgsql(f)?;
+		match &self.action {
+			AlterTypeAction::AddValue {
+				if_not_exists,
+				value,
+				placement,
+			} => {
+				f.write_str(" ADD VALUE ")?;
+				if *if_not_exists {
+					f.write_str("IF NOT EXISTS ")?;
+				}
+				print_string_literal(f, value)?;
+				match placement {
+					Some(EnumValuePlacement::Before(anchor)) => {
+						f.write_str(" BEFORE ")?;
+						print_string_literal(f, anchor)?;
+					}
+					Some(EnumValuePlacement::After(anchor)) => {
+						f.write_str(" AFTER ")?;
+						print_string_literal(f, anchor)?;
+					}
+					None => {}
+				}
+				Ok(())
+			}
+			AlterTypeAction::RenameValue {
+				from,
+				to,
+			} => {
+				f.write_str(" RENAME VALUE ")?;
+				print_string_literal(f, from)?;
+				f.write_str(" TO ")?;
+				print_string_literal(f, to)
+			}
+		}
+	}
+}
+
 impl ToPgSql for CreateExtensionStmt {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.write_str("CREATE EXTENSION ")?;
@@ -1218,6 +1376,11 @@ impl ToPgSql for Statement {
 			Self::CreateView(s) => s.to_pgsql(f),
 			Self::AlterTable(s) => s.to_pgsql(f),
 			Self::CreateSchema(s) => s.to_pgsql(f),
+			Self::CreateType(s) => s.to_pgsql(f),
+			Self::AlterType(s) => s.to_pgsql(f),
+			Self::CreateDomain(s) => s.to_pgsql(f),
+			Self::AlterDomain(s) => s.to_pgsql(f),
+			Self::CreateCompositeType(s) => s.to_pgsql(f),
 			Self::CreateExtension(s) => s.to_pgsql(f),
 			Self::Drop(s) => s.to_pgsql(f),
 			Self::Transaction(tx) => tx.to_pgsql(f),

@@ -218,13 +218,21 @@ pub(super) async fn step(
 			kind,
 			name,
 		} => {
-			let coerced =
-				read(regs, *value).coerce_to_kind(&program.kinds[*kind as usize]).map_err(|e| {
-					ControlFlow::Err(anyhow::Error::new(crate::exec::Error::SetCoerce {
-						name: program.fields[*name as usize].as_str().to_owned(),
-						error: Box::new(e),
-					}))
-				})?;
+			let kind = &program.kinds[*kind as usize];
+			let set_coerce = |e| {
+				ControlFlow::Err(anyhow::Error::new(crate::exec::Error::SetCoerce {
+					name: program.fields[*name as usize].as_str().to_owned(),
+					error: Box::new(e),
+				}))
+			};
+			let coerced = read(regs, *value).coerce_to_kind(kind).map_err(set_coerce)?;
+			super::schema_host::check_enums_held(
+				state.frame.as_ref().unwrap_or(ctx),
+				kind,
+				&coerced,
+			)
+			.await
+			.map_err(set_coerce)?;
 			write(regs, *value, coerced);
 		}
 		BlockInstr::CheckDepth {
@@ -287,6 +295,10 @@ pub(super) async fn step(
 				| Value::String(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Set(_)
 				| Value::Object(_)

@@ -4,11 +4,11 @@ reason = "A tuple that starts without a name is an ordinary tuple, so a later na
 
 [test.results]
 parsing-error = """
-Unexpected token `an identifier`, expected a kind name
-  --> [15:42]
+Unexpected token `:`, expected a kind name
+  --> [15:46]
    |
 15 | DEFINE FIELD id ON reading TYPE [string, time: datetime];
-   |                                          ^^^^
+   |                                              ^
 """
 
 */

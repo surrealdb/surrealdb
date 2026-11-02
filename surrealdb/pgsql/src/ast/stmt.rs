@@ -472,6 +472,8 @@ pub enum DropObjectType {
 	Schema,
 	/// Type object.
 	Type,
+	/// Domain object.
+	Domain,
 }
 
 /// A PostgreSQL `DROP` statement AST node.
@@ -713,6 +715,161 @@ pub struct AlterTableStmt {
 	pub span: Span,
 }
 
+/// A PostgreSQL `CREATE TYPE name AS ENUM ('a', 'b', ...)` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateTypeStmt {
+	/// Type name.
+	pub name: QualifiedName,
+	/// The labels in declaration order.
+	pub labels: Vec<String>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// Where `ALTER TYPE ... ADD VALUE` places a new label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnumValuePlacement {
+	/// `BEFORE 'label'`.
+	Before(String),
+	/// `AFTER 'label'`.
+	After(String),
+}
+
+/// The change an `ALTER TYPE` makes to an enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AlterTypeAction {
+	/// `ADD VALUE [IF NOT EXISTS] 'label' [BEFORE 'x' | AFTER 'x']`.
+	AddValue {
+		/// `IF NOT EXISTS`.
+		if_not_exists: bool,
+		/// The new label.
+		value: String,
+		/// Where the label goes; last when absent.
+		placement: Option<EnumValuePlacement>,
+	},
+	/// `RENAME VALUE 'a' TO 'b'`.
+	RenameValue {
+		/// The label renamed.
+		from: String,
+		/// Its new name.
+		to: String,
+	},
+}
+
+/// A PostgreSQL `ALTER TYPE` statement over an enum.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlterTypeStmt {
+	/// Type name.
+	pub name: QualifiedName,
+	/// The change.
+	pub action: AlterTypeAction,
+	/// Source span.
+	pub span: Span,
+}
+
+/// A constraint of a `CREATE DOMAIN` statement or an `ALTER DOMAIN ... ADD` action.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DomainConstraint {
+	/// The name given by `CONSTRAINT name`.
+	pub name: Option<String>,
+	/// The constraint itself.
+	pub kind: DomainConstraintKind,
+	/// Source span.
+	pub span: Span,
+}
+
+/// The kind of a domain constraint.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DomainConstraintKind {
+	/// `NOT NULL`.
+	NotNull,
+	/// `NULL`, which allows the null value and is the default.
+	Null,
+	/// `CHECK (expr)`, where `VALUE` names the value being checked.
+	Check(Expr),
+	/// `DEFAULT expr`, the value a column of the domain takes when none is given.
+	Default(Expr),
+}
+
+/// A PostgreSQL `CREATE DOMAIN name [AS] type [constraint ...]` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateDomainStmt {
+	/// Domain name.
+	pub name: QualifiedName,
+	/// The base type the domain restricts.
+	pub data_type: TypeName,
+	/// The `DEFAULT`, `NOT NULL`, `NULL` and `CHECK` elements in declaration order.
+	pub constraints: Vec<DomainConstraint>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// An attribute of a composite type: `name type`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompositeAttribute {
+	/// Attribute name.
+	pub name: String,
+	/// Attribute type.
+	pub data_type: TypeName,
+	/// Source span.
+	pub span: Span,
+}
+
+/// A PostgreSQL `CREATE TYPE name AS (attribute type, ...)` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateCompositeTypeStmt {
+	/// Type name.
+	pub name: QualifiedName,
+	/// The attributes in declaration order; empty for `AS ()`.
+	pub attributes: Vec<CompositeAttribute>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// The change an `ALTER DOMAIN` statement makes to a domain.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AlterDomainAction {
+	/// `SET DEFAULT expr`.
+	SetDefault(Expr),
+	/// `DROP DEFAULT`.
+	DropDefault,
+	/// `SET NOT NULL`.
+	SetNotNull,
+	/// `DROP NOT NULL`.
+	DropNotNull,
+	/// `ADD [CONSTRAINT name] CHECK (expr)`.
+	AddConstraint {
+		/// The constraint name, when given.
+		name: Option<String>,
+		/// The checked expression.
+		check: Expr,
+	},
+	/// `DROP CONSTRAINT [IF EXISTS] name`. `CASCADE` and `RESTRICT` are accepted and not kept,
+	/// because a domain constraint has no dependent objects.
+	DropConstraint {
+		/// The constraint dropped.
+		name: String,
+		/// `IF EXISTS`.
+		if_exists: bool,
+	},
+	/// `VALIDATE CONSTRAINT name`.
+	ValidateConstraint {
+		/// The constraint validated.
+		name: String,
+	},
+}
+
+/// A PostgreSQL `ALTER DOMAIN name <action>` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlterDomainStmt {
+	/// Domain name.
+	pub name: QualifiedName,
+	/// The change.
+	pub action: AlterDomainAction,
+	/// Source span.
+	pub span: Span,
+}
+
 /// A PostgreSQL `CREATE SCHEMA` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateSchemaStmt {
@@ -862,6 +1019,16 @@ pub enum Statement {
 	AlterTable(Box<AlterTableStmt>),
 	/// `CREATE SCHEMA` DDL.
 	CreateSchema(CreateSchemaStmt),
+	/// `CREATE TYPE ... AS ENUM` DDL.
+	CreateType(Box<CreateTypeStmt>),
+	/// `ALTER TYPE` DDL over an enum.
+	AlterType(Box<AlterTypeStmt>),
+	/// `CREATE DOMAIN` DDL.
+	CreateDomain(Box<CreateDomainStmt>),
+	/// `ALTER DOMAIN` DDL.
+	AlterDomain(Box<AlterDomainStmt>),
+	/// `CREATE TYPE ... AS (attributes)` DDL over a composite type.
+	CreateCompositeType(Box<CreateCompositeTypeStmt>),
 	/// `CREATE EXTENSION` DDL.
 	CreateExtension(CreateExtensionStmt),
 	/// `DROP` DDL.
@@ -965,6 +1132,11 @@ impl Statement {
 			Self::AlterTable(s) => s.span,
 			Self::CreateSchema(s) => s.span,
 			Self::CreateExtension(s) => s.span,
+			Self::CreateType(s) => s.span,
+			Self::AlterType(s) => s.span,
+			Self::CreateDomain(s) => s.span,
+			Self::AlterDomain(s) => s.span,
+			Self::CreateCompositeType(s) => s.span,
 			Self::Drop(s) => s.span,
 			Self::Transaction(tx) => match tx {
 				TransactionStmt::Begin {
@@ -1197,6 +1369,50 @@ impl Statement {
 			}
 			Self::CreateSchema(s) => s.span = zero,
 			Self::CreateExtension(s) => s.span = zero,
+			Self::CreateType(s) => s.span = zero,
+			Self::AlterType(s) => s.span = zero,
+			Self::CreateDomain(s) => {
+				s.span = zero;
+				s.name.span = zero;
+				s.data_type.span = zero;
+				for constraint in &mut s.constraints {
+					constraint.span = zero;
+					match &mut constraint.kind {
+						DomainConstraintKind::Check(expr) | DomainConstraintKind::Default(expr) => {
+							expr.normalize_spans()
+						}
+						DomainConstraintKind::NotNull | DomainConstraintKind::Null => {}
+					}
+				}
+			}
+			Self::AlterDomain(s) => {
+				s.span = zero;
+				s.name.span = zero;
+				match &mut s.action {
+					AlterDomainAction::SetDefault(expr)
+					| AlterDomainAction::AddConstraint {
+						check: expr,
+						..
+					} => expr.normalize_spans(),
+					AlterDomainAction::DropDefault
+					| AlterDomainAction::SetNotNull
+					| AlterDomainAction::DropNotNull
+					| AlterDomainAction::DropConstraint {
+						..
+					}
+					| AlterDomainAction::ValidateConstraint {
+						..
+					} => {}
+				}
+			}
+			Self::CreateCompositeType(s) => {
+				s.span = zero;
+				s.name.span = zero;
+				for attr in &mut s.attributes {
+					attr.span = zero;
+					attr.data_type.span = zero;
+				}
+			}
 			Self::Drop(s) => {
 				s.span = zero;
 				for n in &mut s.names {

@@ -7,25 +7,25 @@ database = true
 reason = "A text cast to a timestamp or a date is read as the servers write it, with a space or a T before the time, with or without a zone, and a date has no time of day"
 
 [[test.results]]
-value = "[{ a: d'2024-03-15T10:20:30Z', b: d'2024-03-15T10:20:30Z', c: d'2024-03-15T10:20:00Z', d: d'2024-03-15T10:20:30.500Z' }]"
+value = "[{ a: timestamp'2024-03-15T10:20:30', b: timestamp'2024-03-15T10:20:30', c: timestamp'2024-03-15T10:20:00', d: timestamp'2024-03-15T10:20:30.500' }]"
 
 [[test.results]]
-value = "[{ a: d'2024-03-15T00:00:00Z', b: d'2024-03-15T00:00:00Z', c: d'2024-03-15T08:20:30Z', d: d'2024-03-15T15:50:30Z', e: NULL }]"
+value = "[{ a: date'2024-03-15', b: date'2024-03-15', c: d'2024-03-15T08:20:30Z', d: d'2024-03-15T15:50:30Z', e: NULL }]"
 
 [[test.results]]
-value = "[{ a: d'2024-03-15T10:20:30Z', b: d'2024-03-15T00:00:00Z' }]"
+value = "[{ a: timestamp'2024-03-15T10:20:30', b: date'2024-03-15' }]"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[{ at: d'2024-03-15T10:20:30Z', id: 1 }]"
+value = "[{ at: timestamp'2024-03-15T10:20:30', id: 1 }]"
 
 [[test.results]]
 value = "[{ same: true }]"
 
 [[test.results]]
-error = "Could not cast into `datetime` using input `'garbage'`"
+error = "Could not cast into `timestamp` using input `'garbage'`"
 
 */
 

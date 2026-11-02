@@ -17,7 +17,8 @@ use crate::expr::arrival::{object_arrival, record_id_arrival, value_arrival};
 use crate::val::stored::decode::strict;
 use crate::val::stored::{Encoder, Error, Item, decode};
 use crate::val::{
-	BoundedDuration, Bytes, Datetime, Duration, Number, RecordId, Strand, TableName, Uuid, Value,
+	BoundedDuration, Bytes, Date, Datetime, Duration, Interval, Number, RecordId, Strand,
+	TableName, Time, Timestamp, Uuid, Value,
 };
 
 /// The tag and payload of an item.
@@ -485,6 +486,46 @@ impl StoredField for Datetime {
 	}
 }
 
+macro_rules! stored_temporal {
+	($ty:ty, $variant:ident, $encode:ident, $strict:ident, $name:literal, $expected:literal) => {
+		impl StoredField for $ty {
+			fn encode_item(
+				&self,
+				enc: &mut Encoder,
+				_prior: Option<Item<'_>>,
+			) -> Result<(), SchemaError> {
+				enc.$encode(self);
+				Ok(())
+			}
+
+			fn decode_item(item: Item<'_>, _depth: u32) -> Result<Self, SchemaError> {
+				scalar(item, strict::$strict)
+			}
+
+			fn into_vm_value(self) -> Result<Value, SchemaError> {
+				Ok(Value::$variant(self))
+			}
+
+			fn from_vm_value(value: Value) -> Result<Self, SchemaError> {
+				if let Value::$variant(v) = value {
+					Ok(v)
+				} else {
+					Err(SchemaError::vm($name, $expected))
+				}
+			}
+
+			fn write_type_name(out: &mut String) {
+				out.push_str($name);
+			}
+		}
+	};
+}
+
+stored_temporal!(Date, Date, date, date, "date", "expected a date");
+stored_temporal!(Time, Time, time, time, "time", "expected a time");
+stored_temporal!(Timestamp, Timestamp, timestamp, timestamp, "timestamp", "expected a timestamp");
+stored_temporal!(Interval, Interval, interval, interval, "interval", "expected an interval");
+
 impl StoredField for std::time::Duration {
 	fn encode_item(&self, enc: &mut Encoder, _prior: Option<Item<'_>>) -> Result<(), SchemaError> {
 		enc.duration(*self);
@@ -556,10 +597,10 @@ impl StoredField for BoundedDuration {
 	}
 }
 
-/// Any number representation: INT, FLOAT, DECIMAL, or a sized number.
+/// Any number representation: INT, FLOAT, DECIMAL, BIGDECIMAL, or a sized number.
 impl StoredField for Number {
 	fn encode_item(&self, enc: &mut Encoder, _prior: Option<Item<'_>>) -> Result<(), SchemaError> {
-		enc.number(self);
+		enc.number(self)?;
 		Ok(())
 	}
 
@@ -573,6 +614,9 @@ impl StoredField for Number {
 		}
 		if let Some(v) = strict::decimal(tag, payload)? {
 			return Ok(Number::Decimal(v));
+		}
+		if let Some(v) = strict::bigdecimal(tag, payload)? {
+			return Ok(Number::BigDecimal(Box::new(v)));
 		}
 		if let Some(v) = strict::i8(tag, payload)? {
 			return Ok(Number::I8(v));

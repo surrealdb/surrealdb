@@ -17,8 +17,8 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
 use crate::val::table_name_public::{IntoPublicTable, IntoTableName};
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Range, RecordId, Regex, Set,
-	TableName, Uuid,
+	Array, Bytes, Closure, Date, Datetime, Duration, File, Geometry, Interval, Number, Range,
+	RecordId, Regex, Set, TableName, Time, Timestamp, Uuid,
 };
 
 #[revisioned(revision = 1)]
@@ -177,6 +177,70 @@ pub enum Kind {
 	F16,
 	#[revision(start = 2)]
 	F32,
+	#[revision(start = 2)]
+	Date,
+	#[revision(start = 2)]
+	Time,
+	#[revision(start = 2)]
+	Timestamp,
+	#[revision(start = 2)]
+	Interval,
+	/// An enum type: a string constrained to an ordered, named set of labels.
+	#[revision(start = 2)]
+	Enum(EnumRef),
+	/// An arbitrary-precision decimal number
+	BigDecimal,
+}
+
+/// What an enum kind names: a catalog enum by name, or its labels inline.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum EnumRef {
+	/// An enum declared by `DEFINE ENUM`.
+	Named(String),
+	/// A column-scoped enum, its labels in declaration order.
+	Inline(Vec<String>),
+}
+
+impl EnumRef {
+	/// The labels of an inline enum, in declaration order.
+	pub fn inline_labels(&self) -> Option<&[String]> {
+		match self {
+			EnumRef::Named(_) => None,
+			EnumRef::Inline(labels) => Some(labels),
+		}
+	}
+}
+
+impl ToSql for EnumRef {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("enum<");
+		match self {
+			EnumRef::Named(name) => write_sql!(f, fmt, "{}", EscapeKwFreeIdent(name)),
+			EnumRef::Inline(labels) => {
+				write_sql!(f, fmt, "{}", Fmt::comma_separated(labels.iter().map(|l| QuoteStr(l))))
+			}
+		}
+		f.push('>');
+	}
+}
+
+impl From<crate::types::PublicEnumRef> for EnumRef {
+	fn from(r: crate::types::PublicEnumRef) -> Self {
+		match r {
+			crate::types::PublicEnumRef::Named(n) => EnumRef::Named(n),
+			crate::types::PublicEnumRef::Inline(l) => EnumRef::Inline(l),
+		}
+	}
+}
+
+impl From<EnumRef> for crate::types::PublicEnumRef {
+	fn from(r: EnumRef) -> Self {
+		match r {
+			EnumRef::Named(n) => crate::types::PublicEnumRef::Named(n),
+			EnumRef::Inline(l) => crate::types::PublicEnumRef::Inline(l),
+		}
+	}
 }
 
 impl ::revision::SerializeRevisioned for Kind {
@@ -358,6 +422,36 @@ impl ::revision::SerializeRevisioned for Kind {
 				33u32.serialize_revisioned(writer)?;
 				Ok(())
 			}
+			Kind::Date => {
+				2u16.serialize_revisioned(writer)?;
+				34u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Time => {
+				2u16.serialize_revisioned(writer)?;
+				35u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Timestamp => {
+				2u16.serialize_revisioned(writer)?;
+				36u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Interval => {
+				2u16.serialize_revisioned(writer)?;
+				37u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::BigDecimal => {
+				2u16.serialize_revisioned(writer)?;
+				39u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Enum(v) => {
+				2u16.serialize_revisioned(writer)?;
+				38u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
 		}
 	}
 }
@@ -382,6 +476,7 @@ fn clone_kind(kind: &Kind) -> Kind {
 		Kind::Bytes => Kind::Bytes,
 		Kind::Datetime => Kind::Datetime,
 		Kind::Decimal => Kind::Decimal,
+		Kind::BigDecimal => Kind::BigDecimal,
 		Kind::Duration => Kind::Duration,
 		Kind::Float => Kind::Float,
 		Kind::Int => Kind::Int,
@@ -409,6 +504,11 @@ fn clone_kind(kind: &Kind) -> Kind {
 		Kind::U64 => Kind::U64,
 		Kind::F16 => Kind::F16,
 		Kind::F32 => Kind::F32,
+		Kind::Date => Kind::Date,
+		Kind::Time => Kind::Time,
+		Kind::Timestamp => Kind::Timestamp,
+		Kind::Interval => Kind::Interval,
+		Kind::Enum(reference) => Kind::Enum(reference.clone()),
 	}
 }
 
@@ -435,6 +535,10 @@ mod coerce_domain {
 	pub const RANGE: u32 = 1 << 16;
 	pub const CLOSURE: u32 = 1 << 17;
 	pub const FILE: u32 = 1 << 18;
+	pub const DATE: u32 = 1 << 19;
+	pub const TIME: u32 = 1 << 20;
+	pub const TIMESTAMP: u32 = 1 << 21;
+	pub const INTERVAL: u32 = 1 << 22;
 	pub const ALL: u32 = u32::MAX;
 }
 
@@ -476,6 +580,7 @@ impl Kind {
 				Kind::Int
 				| Kind::Float
 				| Kind::Decimal
+				| Kind::BigDecimal
 				| Kind::I8
 				| Kind::U8
 				| Kind::I16
@@ -499,6 +604,11 @@ impl Kind {
 			}
 			(Kind::File(old), Kind::File(new)) => {
 				new.is_empty() || (!old.is_empty() && old.iter().all(|b| new.contains(b)))
+			}
+			// An enum is a string, and an inline enum widens to one whose labels include its own.
+			(Kind::Enum(_), Kind::String) => true,
+			(Kind::Enum(EnumRef::Inline(old)), Kind::Enum(EnumRef::Inline(new))) => {
+				old.iter().all(|l| new.contains(l))
 			}
 			_ => false,
 		}
@@ -532,6 +642,7 @@ impl Kind {
 			Kind::Int
 			| Kind::Float
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Number
 			| Kind::I8
 			| Kind::U8
@@ -546,6 +657,10 @@ impl Kind {
 			// A string coerces to a table name.
 			Kind::Table(_) => d::STRING | d::TABLE,
 			Kind::Datetime => d::DATETIME,
+			Kind::Date => d::DATE,
+			Kind::Time => d::TIME,
+			Kind::Timestamp => d::TIMESTAMP,
+			Kind::Interval => d::INTERVAL,
 			Kind::Duration => d::DURATION,
 			Kind::Uuid => d::UUID,
 			Kind::Bytes => d::BYTES,
@@ -560,7 +675,86 @@ impl Kind {
 			Kind::Range => d::RANGE,
 			Kind::Function(..) => d::CLOSURE,
 			Kind::File(_) => d::FILE,
+			// A string coerces into an enum; membership is judged where the labels are known.
+			Kind::Enum(_) => d::STRING,
 			Kind::Either(kinds) => kinds.iter().fold(0, |acc, k| acc | k.coerce_domain()),
+		}
+	}
+
+	/// Whether this kind is, or contains, a named enum.
+	pub fn has_named_enum(&self) -> bool {
+		let mut found = false;
+		self.each_named_enum(&mut |_| found = true);
+		found
+	}
+
+	/// Whether this kind is, or contains, the named enum `name`.
+	pub fn references_enum(&self, name: &str) -> bool {
+		let mut found = false;
+		self.each_named_enum(&mut |n| found |= n == name);
+		found
+	}
+
+	/// Calls `f` with the name of each named enum this kind is, or contains.
+	pub fn each_named_enum(&self, f: &mut dyn FnMut(&str)) {
+		match self {
+			Kind::Enum(EnumRef::Named(name)) => f(name),
+			Kind::Either(kinds) | Kind::Literal(KindLiteral::Array(kinds)) => {
+				kinds.iter().for_each(|k| k.each_named_enum(f))
+			}
+			Kind::Array(inner, _) | Kind::Set(inner, _) => inner.each_named_enum(f),
+			Kind::Literal(KindLiteral::Object(fields)) => {
+				fields.values().for_each(|k| k.each_named_enum(f))
+			}
+			Kind::Function(args, ret) => {
+				args.iter().flatten().for_each(|k| k.each_named_enum(f));
+				if let Some(ret) = ret {
+					ret.each_named_enum(f);
+				}
+			}
+			Kind::Any
+			| Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
+			| Kind::Decimal
+			| Kind::BigDecimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32
+			| Kind::Number
+			| Kind::Object
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Record(_)
+			| Kind::Geometry(_)
+			| Kind::Range
+			| Kind::File(_)
+			| Kind::Enum(EnumRef::Inline(_))
+			| Kind::Literal(
+				KindLiteral::String(_)
+				| KindLiteral::Integer(_)
+				| KindLiteral::Float(_)
+				| KindLiteral::Decimal(_)
+				| KindLiteral::Duration(_)
+				| KindLiteral::Bool(_),
+			) => {}
 		}
 	}
 
@@ -583,10 +777,11 @@ impl Kind {
 	];
 
 	/// All numeric kinds (`int`, `float`, `decimal`, `number`, and all [`Self::SIZED`] kinds).
-	pub const NUMERIC: [Kind; 13] = [
+	pub const NUMERIC: [Kind; 14] = [
 		Kind::Int,
 		Kind::Float,
 		Kind::Decimal,
+		Kind::BigDecimal,
 		Kind::Number,
 		Kind::I8,
 		Kind::U8,
@@ -614,7 +809,7 @@ impl Kind {
 	/// Returns `true` if this kind admits only numbers (`int`, `float`, `decimal`, `number`, or a
 	/// sized numeric kind).
 	pub const fn is_numeric(&self) -> bool {
-		matches!(self, Kind::Int | Kind::Float | Kind::Decimal | Kind::Number)
+		matches!(self, Kind::Int | Kind::Float | Kind::Decimal | Kind::BigDecimal | Kind::Number)
 			|| self.is_sized_number()
 	}
 
@@ -660,7 +855,12 @@ impl Kind {
 			| Kind::Bool
 			| Kind::Bytes
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Duration
 			| Kind::Float
 			| Kind::Int
@@ -674,6 +874,7 @@ impl Kind {
 			| Kind::Function(_, _)
 			| Kind::Range
 			| Kind::File(_)
+			| Kind::Enum(_)
 			| Kind::I8
 			| Kind::U8
 			| Kind::I16
@@ -737,7 +938,12 @@ impl Kind {
 			| Kind::Bool
 			| Kind::Bytes
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Duration
 			| Kind::Float
 			| Kind::Int
@@ -751,6 +957,7 @@ impl Kind {
 			| Kind::Function(_, _)
 			| Kind::Range
 			| Kind::File(_)
+			| Kind::Enum(_)
 			| Kind::I8
 			| Kind::U8
 			| Kind::I16
@@ -781,7 +988,12 @@ impl Kind {
 			| Kind::Bool
 			| Kind::Bytes
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Duration
 			| Kind::Float
 			| Kind::Int
@@ -799,6 +1011,7 @@ impl Kind {
 			| Kind::Range
 			| Kind::Literal(_)
 			| Kind::File(_)
+			| Kind::Enum(_)
 			| Kind::I8
 			| Kind::U8
 			| Kind::I16
@@ -822,7 +1035,12 @@ impl Kind {
 			| Kind::Bool
 			| Kind::Bytes
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Duration
 			| Kind::Float
 			| Kind::Int
@@ -839,6 +1057,7 @@ impl Kind {
 			| Kind::Function(_, _)
 			| Kind::Range
 			| Kind::File(_)
+			| Kind::Enum(_)
 			| Kind::I8
 			| Kind::U8
 			| Kind::I16
@@ -867,7 +1086,12 @@ impl Kind {
 			| Kind::Bool
 			| Kind::Bytes
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Duration
 			| Kind::Float
 			| Kind::Int
@@ -881,6 +1105,7 @@ impl Kind {
 			| Kind::Function(_, _)
 			| Kind::Range
 			| Kind::File(_)
+			| Kind::Enum(_)
 			| Kind::I8
 			| Kind::U8
 			| Kind::I16
@@ -913,7 +1138,12 @@ impl Kind {
 			| Kind::Bool
 			| Kind::Bytes
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Duration
 			| Kind::Float
 			| Kind::Int
@@ -929,6 +1159,7 @@ impl Kind {
 			| Kind::Range
 			| Kind::Literal(_)
 			| Kind::File(_)
+			| Kind::Enum(_)
 			| Kind::I8
 			| Kind::U8
 			| Kind::I16
@@ -987,7 +1218,12 @@ impl Kind {
 				| Kind::Bool
 				| Kind::Bytes
 				| Kind::Datetime
+				| Kind::Date
+				| Kind::Time
+				| Kind::Timestamp
+				| Kind::Interval
 				| Kind::Decimal
+				| Kind::BigDecimal
 				| Kind::Duration
 				| Kind::Float
 				| Kind::Int
@@ -1002,6 +1238,7 @@ impl Kind {
 				| Kind::Range
 				| Kind::Literal(_)
 				| Kind::File(_)
+				| Kind::Enum(_)
 				| Kind::I8
 				| Kind::U8
 				| Kind::I16
@@ -1032,7 +1269,12 @@ impl Kind {
 			| Kind::Bool
 			| Kind::Bytes
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Duration
 			| Kind::Float
 			| Kind::Int
@@ -1049,6 +1291,7 @@ impl Kind {
 			| Kind::Function(_, _)
 			| Kind::Range
 			| Kind::File(_)
+			| Kind::Enum(_)
 			| Kind::I8
 			| Kind::U8
 			| Kind::I16
@@ -1199,6 +1442,10 @@ impl_basic_has_kind! {
 	Bytes => Bytes,
 	Number => Number,
 	Datetime => Datetime,
+	Date => Date,
+	Time => Time,
+	Timestamp => Timestamp,
+	Interval => Interval,
 	Duration => Duration,
 	Uuid => Uuid,
 	Range => Range,
@@ -1252,7 +1499,12 @@ impl ToSql for Kind {
 			Kind::Bool => f.push_str("bool"),
 			Kind::Bytes => f.push_str("bytes"),
 			Kind::Datetime => f.push_str("datetime"),
+			Kind::Date => f.push_str("date"),
+			Kind::Time => f.push_str("time"),
+			Kind::Timestamp => f.push_str("timestamp"),
+			Kind::Interval => f.push_str("interval"),
 			Kind::Decimal => f.push_str("decimal"),
+			Kind::BigDecimal => f.push_str("bigdecimal"),
 			Kind::Duration => f.push_str("duration"),
 			Kind::Float => f.push_str("float"),
 			Kind::Int => f.push_str("int"),
@@ -1310,6 +1562,7 @@ impl ToSql for Kind {
 			Kind::Either(k) => write_sql!(f, fmt, "{}", Fmt::verbar_separated(k)),
 			Kind::Range => f.push_str("range"),
 			Kind::Literal(l) => l.fmt_sql(f, fmt),
+			Kind::Enum(reference) => reference.fmt_sql(f, fmt),
 			Kind::File(k) => {
 				if k.is_empty() {
 					f.push_str("file");
@@ -1356,7 +1609,12 @@ impl From<crate::types::PublicKind> for Kind {
 			crate::types::PublicKind::Bool => Kind::Bool,
 			crate::types::PublicKind::Bytes => Kind::Bytes,
 			crate::types::PublicKind::Datetime => Kind::Datetime,
+			crate::types::PublicKind::Date => Kind::Date,
+			crate::types::PublicKind::Time => Kind::Time,
+			crate::types::PublicKind::Timestamp => Kind::Timestamp,
+			crate::types::PublicKind::Interval => Kind::Interval,
 			crate::types::PublicKind::Decimal => Kind::Decimal,
+			crate::types::PublicKind::BigDecimal => Kind::BigDecimal,
 			crate::types::PublicKind::Duration => Kind::Duration,
 			crate::types::PublicKind::Float => Kind::Float,
 			crate::types::PublicKind::Int => Kind::Int,
@@ -1389,6 +1647,7 @@ impl From<crate::types::PublicKind> for Kind {
 				ret.map(|r| Box::new(Kind::from(*r))),
 			),
 			crate::types::PublicKind::File(bucket) => Kind::File(bucket),
+			crate::types::PublicKind::Enum(reference) => Kind::Enum(reference.into()),
 			crate::types::PublicKind::Literal(lit) => Kind::Literal(lit.into()),
 			crate::types::PublicKind::I8 => Kind::I8,
 			crate::types::PublicKind::U8 => Kind::U8,
@@ -1412,7 +1671,12 @@ impl From<Kind> for crate::types::PublicKind {
 			Kind::Bool => crate::types::PublicKind::Bool,
 			Kind::Bytes => crate::types::PublicKind::Bytes,
 			Kind::Datetime => crate::types::PublicKind::Datetime,
+			Kind::Date => crate::types::PublicKind::Date,
+			Kind::Time => crate::types::PublicKind::Time,
+			Kind::Timestamp => crate::types::PublicKind::Timestamp,
+			Kind::Interval => crate::types::PublicKind::Interval,
 			Kind::Decimal => crate::types::PublicKind::Decimal,
+			Kind::BigDecimal => crate::types::PublicKind::BigDecimal,
 			Kind::Duration => crate::types::PublicKind::Duration,
 			Kind::Float => crate::types::PublicKind::Float,
 			Kind::Int => crate::types::PublicKind::Int,
@@ -1443,6 +1707,7 @@ impl From<Kind> for crate::types::PublicKind {
 				ret.map(|r| Box::new((*r).into())),
 			),
 			Kind::File(bucket) => crate::types::PublicKind::File(bucket),
+			Kind::Enum(reference) => crate::types::PublicKind::Enum(reference.into()),
 			Kind::Literal(lit) => crate::types::PublicKind::Literal(lit.into()),
 			Kind::I8 => crate::types::PublicKind::I8,
 			Kind::U8 => crate::types::PublicKind::U8,
@@ -2281,6 +2546,10 @@ mod kind_revision_tests {
 			Kind::U64,
 			Kind::F16,
 			Kind::F32,
+			Kind::Date,
+			Kind::Time,
+			Kind::Timestamp,
+			Kind::Interval,
 		];
 		for k in &kinds {
 			let mut buf = Vec::new();
@@ -2288,6 +2557,16 @@ mod kind_revision_tests {
 			let mut slice = buf.as_slice();
 			let decoded = Kind::deserialize_revisioned(&mut slice).unwrap();
 			assert_eq!(k, &decoded);
+		}
+		for (k, tag) in
+			[(Kind::Date, 34u32), (Kind::Time, 35), (Kind::Timestamp, 36), (Kind::Interval, 37)]
+		{
+			let mut buf = Vec::new();
+			k.serialize_revisioned(&mut buf).unwrap();
+			let mut expected = Vec::new();
+			2u16.serialize_revisioned(&mut expected).unwrap();
+			tag.serialize_revisioned(&mut expected).unwrap();
+			assert_eq!(buf, expected);
 		}
 	}
 }

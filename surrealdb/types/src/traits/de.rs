@@ -51,6 +51,12 @@ where
 		Number::F16(v) => visitor.visit_f32(f32::from(*v)),
 		Number::F32(v) => visitor.visit_f32(*v),
 		Number::Float(v) => visitor.visit_f64(*v),
+		// A bigdecimal that fits a decimal is offered as that decimal. Any other value is offered
+		// as its text, since no visitor method takes an arbitrary-precision number.
+		Number::BigDecimal(v) => match rust_decimal::Decimal::try_from(v.as_ref()) {
+			Ok(decimal) => deserialize_number(&Number::Decimal(decimal), visitor, fraction),
+			Err(_) => visitor.visit_string(v.to_string()),
+		},
 		Number::Decimal(decimal) => {
 			// A whole Decimal is offered as the narrowest of `u64`, `i64`, `u128` and
 			// `i128` that holds it, so integer visitors of any width accept it. A
@@ -205,6 +211,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 			Value::Object(v) => v.deserialize_any(visitor),
 			Value::None => visitor.visit_none(),
 			Value::Bytes(bytes) => visitor.visit_bytes(&bytes),
+			Value::Date(v) => visitor.visit_string(v.to_string()),
+			Value::Time(v) => visitor.visit_string(v.to_string()),
+			Value::Timestamp(v) => visitor.visit_string(v.to_string()),
+			Value::Interval(v) => visitor.visit_string(v.to_string()),
 			Value::Datetime(datetime) => {
 				let value = datetime
 					.into_inner()
@@ -295,6 +305,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 			| Value::Bytes(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Geometry(_)
 			| Value::Table(_)
@@ -374,6 +388,7 @@ impl<'de> serde::Deserializer<'de> for Value {
 		match self {
 			Value::String(v) => visitor.visit_string(v),
 			Value::Number(Number::Decimal(d)) => visitor.visit_string(d.to_string()),
+			Value::Number(Number::BigDecimal(d)) => visitor.visit_string(d.to_string()),
 			other @ Value::None
 			| other @ Value::Null
 			| other @ Value::Bool(_)
@@ -381,6 +396,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 			| other @ Value::Bytes(_)
 			| other @ Value::Duration(_)
 			| other @ Value::Datetime(_)
+			| other @ Value::Date(_)
+			| other @ Value::Time(_)
+			| other @ Value::Timestamp(_)
+			| other @ Value::Interval(_)
 			| other @ Value::Uuid(_)
 			| other @ Value::Geometry(_)
 			| other @ Value::Table(_)
@@ -504,6 +523,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 			| Value::Bytes(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Geometry(_)
 			| Value::Table(_)
@@ -804,6 +827,10 @@ impl Value {
 			Value::Bytes(_) => Unexpected::Seq,
 			Value::Duration(_) => Unexpected::Other("duration"),
 			Value::Datetime(_) => Unexpected::Other("datetime"),
+			Value::Date(_) => Unexpected::Other("date"),
+			Value::Time(_) => Unexpected::Other("time"),
+			Value::Timestamp(_) => Unexpected::Other("timestamp"),
+			Value::Interval(_) => Unexpected::Other("interval"),
 			Value::Uuid(_) => Unexpected::Other("uuid"),
 			Value::Geometry(_) => Unexpected::Other("geometry"),
 			Value::Table(_) => Unexpected::Other("table"),

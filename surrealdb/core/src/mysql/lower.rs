@@ -58,6 +58,14 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 			| surrealdb_sqlplan::PlanError::UndefinedConstraint {
 				..
 			}
+			| surrealdb_sqlplan::PlanError::UndefinedType(_)
+			| surrealdb_sqlplan::PlanError::UndefinedDomainConstraint {
+				..
+			}
+			| surrealdb_sqlplan::PlanError::DuplicateDomainConstraint {
+				..
+			}
+			| surrealdb_sqlplan::PlanError::DuplicateColumn(_)
 			| surrealdb_sqlplan::PlanError::InvalidParameterValue(_)
 			| surrealdb_sqlplan::PlanError::DataException(_)
 			| surrealdb_sqlplan::PlanError::ProgramLimitExceeded(_)

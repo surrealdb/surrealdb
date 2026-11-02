@@ -434,6 +434,9 @@ pub struct ColumnDefinition41 {
 	pub column_type: u8,
 	pub flags: u16,
 	pub decimals: u8,
+	/// The SRID a geometry cell of the column is sent with. The column definition packet does not
+	/// carry it; a spatial cell does, in front of its WKB.
+	pub srid: u32,
 }
 
 impl ColumnDefinition41 {
@@ -450,6 +453,7 @@ impl ColumnDefinition41 {
 			column_type,
 			flags: 0,
 			decimals: 0,
+			srid: 0,
 		}
 	}
 
@@ -466,6 +470,7 @@ impl ColumnDefinition41 {
 			column_type: MYSQL_TYPE_VAR_STRING,
 			flags: 0,
 			decimals: 0,
+			srid: 0,
 		}
 	}
 
@@ -527,6 +532,7 @@ impl ColumnDefinition41 {
 			column_type,
 			flags,
 			decimals,
+			srid: 0,
 		})
 	}
 }

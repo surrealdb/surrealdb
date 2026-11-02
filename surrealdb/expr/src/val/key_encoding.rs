@@ -791,6 +791,7 @@ mod key_order {
 				let point = digits.len() as i64;
 				Some(Exact::new(false, &digits, point))
 			}
+			Number::BigDecimal(_) => None,
 			Number::Decimal(d) => {
 				let mantissa = d.mantissa();
 				let digits = mantissa.unsigned_abs().to_string();
@@ -967,7 +968,7 @@ mod key_order {
 
 	/// The element encoding of a number without its kind tag, as it is stored.
 	fn stored_prefix(n: &Number) -> Vec<u8> {
-		let mut bytes = encode_component(&Value::Number(*n));
+		let mut bytes = encode_component(&Value::Number(n.clone()));
 		bytes.truncate(bytes.len() - NUMBER_KIND_TAG_LEN);
 		bytes
 	}
@@ -1009,7 +1010,7 @@ mod key_order {
 			.map(|n| NumberCase {
 				exact: exact_of(&n).expect("a finite number"),
 				prefix: value_prefix(&n),
-				element: encode_component(&Value::Number(n)),
+				element: encode_component(&Value::Number(n.clone())),
 				stored_prefix: stored_prefix(&n),
 				n,
 			})
@@ -1027,7 +1028,7 @@ mod key_order {
 		for a in &corpus {
 			for b in &corpus {
 				if a.prefix.cmp(&b.prefix) != a.exact.cmp(&b.exact) {
-					misses.push((a.n, b.n));
+					misses.push((a.n.clone(), b.n.clone()));
 				}
 			}
 		}
@@ -1088,9 +1089,10 @@ mod key_order {
 		}
 		for other in [Number::Float(5.0), decimal(5, 0), decimal(500, 2)] {
 			assert_eq!(five, other, "equal as numbers");
-			for key in
-				[key_of(&[Value::Number(other)]), key_of(&[Value::Number(other), string("x")])]
-			{
+			for key in [
+				key_of(&[Value::Number(other.clone())]),
+				key_of(&[Value::Number(other.clone()), string("x")]),
+			] {
 				assert!(!contains_prefix_range(&bound, &key), "{other:?}");
 			}
 		}
@@ -1538,6 +1540,13 @@ mod key_order {
 			record("t", RecordIdKey::Number(1)),
 			Value::File(File::new("bucket".to_owned(), "key".to_owned())),
 			Value::Range(Box::new(Range::unbounded())),
+			Value::Date(crate::val::Date(0)),
+			Value::Time(crate::val::Time(0)),
+			Value::Timestamp(crate::val::Timestamp {
+				secs: 0,
+				nanos: 0,
+			}),
+			Value::Interval(crate::val::Interval::new(0, 0, 0)),
 		];
 		let encoded: Vec<Vec<u8>> = samples.iter().map(encode_component).collect();
 		for (i, (a, ea)) in samples.iter().zip(&encoded).enumerate() {
@@ -1583,7 +1592,7 @@ mod key_order {
 		for (n, tag) in
 			[(Number::Int(7), &tags[0]), (Number::Float(7.5), &tags[1]), (decimal(75, 1), &tags[2])]
 		{
-			let element = encode_component(&Value::Number(n));
+			let element = encode_component(&Value::Number(n.clone()));
 			let prefix = value_prefix(&n);
 			assert_eq!(element, concat(&prefix, tag), "{n:?}");
 		}

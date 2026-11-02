@@ -1086,9 +1086,19 @@ fn stand_in_literal_for_kind(kind: &crate::expr::Kind) -> Option<LogicalLiteral>
 		| Kind::Any => Some(LogicalLiteral::Integer(0)),
 		Kind::F16 | Kind::F32 | Kind::Float => Some(LogicalLiteral::Float(0.0)),
 		Kind::Decimal => Some(LogicalLiteral::Decimal(rust_decimal::Decimal::ZERO)),
+		Kind::BigDecimal => {
+			Some(LogicalLiteral::BigDecimal(Box::new(surrealdb_types::BigDecimal::from(0_i64))))
+		}
 		Kind::String => Some(LogicalLiteral::String(Strand::default())),
 		Kind::Bytes => Some(LogicalLiteral::Bytes(crate::val::Bytes::default())),
 		Kind::Datetime => Some(LogicalLiteral::Datetime(crate::val::Datetime::MIN_UTC)),
+		Kind::Date => Some(LogicalLiteral::Date(crate::val::Date(0))),
+		Kind::Time => Some(LogicalLiteral::Time(crate::val::Time(0))),
+		Kind::Timestamp => Some(LogicalLiteral::Timestamp(crate::val::Timestamp {
+			secs: 0,
+			nanos: 0,
+		})),
+		Kind::Interval => Some(LogicalLiteral::Interval(crate::val::Interval::new(0, 0, 0))),
 		Kind::Duration => Some(LogicalLiteral::Duration(crate::val::Duration::default())),
 		Kind::Uuid => Some(LogicalLiteral::Uuid(crate::val::Uuid::default())),
 		Kind::Either(kinds) => kinds.iter().find_map(stand_in_literal_for_kind),
@@ -1100,7 +1110,8 @@ fn stand_in_literal_for_kind(kind: &crate::expr::Kind) -> Option<LogicalLiteral>
 		| Kind::Geometry(_)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => Some(LogicalLiteral::Integer(0)),
+		| Kind::File(_)
+		| Kind::Enum(_) => Some(LogicalLiteral::Integer(0)),
 	}
 }
 

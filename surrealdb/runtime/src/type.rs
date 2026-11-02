@@ -3,8 +3,8 @@ use geo_types::Point;
 use rust_decimal::Decimal;
 use surrealdb_expr::expr::Error as ExprError;
 use surrealdb_expr::val::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Set, TableName, Uuid, Value,
+	Array, Bytes, Date, Datetime, Duration, File, Geometry, Interval, Number, Range, RecordId,
+	RecordIdKey, RecordIdKeyRange, Set, TableName, Time, Timestamp, Uuid, Value,
 };
 
 use super::args::Optional;
@@ -32,6 +32,22 @@ pub fn file((bucket, key): (String, String)) -> Result<Value> {
 
 pub fn bytes((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Bytes>()?.into())
+}
+
+pub fn date((val,): (Value,)) -> Result<Value> {
+	Ok(val.cast_to::<Date>()?.into())
+}
+
+pub fn time((val,): (Value,)) -> Result<Value> {
+	Ok(val.cast_to::<Time>()?.into())
+}
+
+pub fn timestamp((val,): (Value,)) -> Result<Value> {
+	Ok(val.cast_to::<Timestamp>()?.into())
+}
+
+pub fn interval((val,): (Value,)) -> Result<Value> {
+	Ok(val.cast_to::<Interval>()?.into())
 }
 
 pub fn datetime((val,): (Value,)) -> Result<Value> {
@@ -141,6 +157,10 @@ pub fn table((val,): (Value,)) -> Result<Value> {
 		| Value::Number(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Array(_)
 		| Value::Set(_)
@@ -211,6 +231,8 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 					Number::F32(x) => x.to_string().into(),
 					// Safety: decimal -> string conversion cannot contain a null byte.
 					Number::Decimal(x) => x.to_string().into(),
+					// Safety: bigdecimal -> string conversion cannot contain a null byte.
+					Number::BigDecimal(x) => x.to_string().into(),
 				},
 				Value::Range(v) => {
 					let res =
@@ -228,6 +250,10 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 				| Value::String(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Set(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -288,6 +314,22 @@ pub mod is {
 
 	pub fn collection((arg,): (Value,)) -> Result<Value> {
 		Ok(matches!(arg, Value::Geometry(Geometry::Collection(_))).into())
+	}
+
+	pub fn date((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.is_date().into())
+	}
+
+	pub fn time((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.is_time().into())
+	}
+
+	pub fn timestamp((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.is_timestamp().into())
+	}
+
+	pub fn interval((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.is_interval().into())
 	}
 
 	pub fn datetime((arg,): (Value,)) -> Result<Value> {

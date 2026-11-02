@@ -7551,3 +7551,174 @@ async fn test_pgwire_wildcard_columns_take_their_declared_types() {
 
 	shutdown.cancel();
 }
+
+/// The names, type OIDs and type modifiers of the first RowDescription in `msgs`.
+fn row_description_typmods(msgs: &[(u8, Vec<u8>)]) -> Vec<(String, i32, i32)> {
+	let (_, payload) = msgs.iter().find(|(t, _)| *t == b'T').expect("RowDescription");
+	let mut cur = payload.as_slice();
+	let n = cur.get_i16();
+	let mut fields = Vec::new();
+	for _ in 0..n {
+		let name_end = cur.iter().position(|b| *b == 0).expect("field name");
+		let name = String::from_utf8_lossy(&cur[..name_end]).to_string();
+		cur.advance(name_end + 1);
+		cur.advance(4 + 2);
+		let oid = cur.get_i32();
+		cur.advance(2);
+		let typmod = cur.get_i32();
+		cur.advance(2);
+		fields.push((name, oid, typmod));
+	}
+	fields
+}
+
+#[tokio::test]
+async fn test_pgwire_declared_sql_types_are_reported_with_their_modifiers() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	for sql in [
+		"CREATE TABLE decl (id integer PRIMARY KEY, v varchar(20), c char(5), n numeric(10,2), ts \
+		 timestamp(3))",
+		"INSERT INTO decl (id, v, c, n, ts) VALUES (1, 'ab', 'xy', 1.5, \
+		 '2026-10-30 12:00:00.123'::timestamp)",
+	] {
+		let msgs = exchange(&mut stream, &[simple_query_packet(sql)]).await;
+		assert!(error_code(&msgs).is_none(), "{sql}: {:?}", error_code(&msgs));
+	}
+	let numeric = (10 << 16 | 2) + 4;
+	let expected = vec![
+		("v".to_owned(), 1043, 24),
+		("c".to_owned(), 1042, 9),
+		("n".to_owned(), 1700, numeric),
+		("ts".to_owned(), 1114, 3),
+	];
+
+	// A listed column is described by its declared type and modifier, and a character(n) value
+	// is padded to n.
+	let msgs = exchange(&mut stream, &[simple_query_packet("SELECT v, c, n, ts FROM decl")]).await;
+	assert!(error_code(&msgs).is_none(), "{:?}", error_code(&msgs));
+	assert_eq!(row_description_typmods(&msgs), expected);
+	let rows = data_rows(&msgs);
+	assert_eq!(rows[0][0].as_deref(), Some("ab"));
+	assert_eq!(rows[0][1].as_deref(), Some("xy   "));
+
+	// So is a column of a `*`.
+	let msgs = exchange(&mut stream, &[simple_query_packet("SELECT * FROM decl")]).await;
+	assert!(error_code(&msgs).is_none(), "{:?}", error_code(&msgs));
+	let described: Vec<_> =
+		row_description_typmods(&msgs).into_iter().filter(|(name, _, _)| name != "id").collect();
+	let mut sorted = expected.clone();
+	sorted.sort();
+	let mut described_sorted = described.clone();
+	described_sorted.sort();
+	assert_eq!(described_sorted, sorted);
+
+	// The extended protocol describes the same, and the binary form of a character(n) is padded.
+	let msgs = extended(&mut stream, "SELECT c, v FROM decl WHERE id = 1", &[], &[1, 1], &[]).await;
+	assert!(error_code(&msgs).is_none(), "{:?}", error_code(&msgs));
+	assert_eq!(
+		row_description_typmods(&msgs),
+		vec![("c".to_owned(), 1042, 9), ("v".to_owned(), 1043, 24)]
+	);
+	assert_eq!(data_rows(&msgs)[0][0].as_deref(), Some("xy   "));
+
+	// The catalog reports the modifier through atttypmod and format_type; a field's attnum follows
+	// the order of the field names.
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet(
+			"SELECT a.attname, a.atttypmod, format_type(a.atttypid, a.atttypmod) FROM \
+			 pg_attribute a JOIN pg_class c ON c.oid = a.attrelid WHERE c.relname = 'decl' AND \
+			 a.attnum > 0 ORDER BY a.attnum",
+		)],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "{:?}", error_code(&msgs));
+	let row = |name: &str, typmod: i32, format: &str| {
+		vec![Some(name.to_owned()), Some(typmod.to_string()), Some(format.to_owned())]
+	};
+	assert_eq!(
+		data_rows(&msgs),
+		vec![
+			row("id", -1, "integer"),
+			row("c", 9, "character(5)"),
+			row("n", numeric, "numeric(10,2)"),
+			row("ts", 3, "timestamp(3) without time zone"),
+			row("v", 24, "character varying(20)"),
+		]
+	);
+
+	// information_schema.columns lists the lengths, precision, scale and datetime precision.
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet(
+			"SELECT column_name, data_type, character_maximum_length, numeric_precision, \
+			 numeric_scale, datetime_precision, udt_name FROM information_schema.columns WHERE \
+			 table_name = 'decl' AND column_name <> 'id' ORDER BY ordinal_position",
+		)],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "{:?}", error_code(&msgs));
+	let cells = |values: [Option<&str>; 7]| values.map(|v| v.map(str::to_owned)).to_vec();
+	assert_eq!(
+		data_rows(&msgs),
+		vec![
+			cells([Some("c"), Some("character"), Some("5"), None, None, None, Some("bpchar")]),
+			cells([Some("n"), Some("numeric"), None, Some("10"), Some("2"), None, Some("numeric")]),
+			cells([
+				Some("ts"),
+				Some("timestamp without time zone"),
+				None,
+				None,
+				None,
+				Some("3"),
+				Some("timestamp"),
+			]),
+			cells([
+				Some("v"),
+				Some("character varying"),
+				Some("20"),
+				None,
+				None,
+				None,
+				Some("varchar")
+			]),
+		]
+	);
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_a_mysql_declared_column_is_reported_as_the_nearest_postgres_type() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	seed_surrealql(
+		addr,
+		"DEFINE TABLE mydecl SCHEMAFULL; DEFINE FIELD dt ON mydecl TYPE datetime SQL TYPE MYSQL \
+		 'datetime(3)'; DEFINE FIELD d ON mydecl TYPE decimal SQL TYPE MYSQL 'decimal(10,2)'; \
+		 DEFINE FIELD y ON mydecl TYPE int SQL TYPE MYSQL 'year'; CREATE mydecl:1 SET dt = \
+		 d'2026-10-30T12:00:00.123Z', d = 1.25dec, y = 2026;",
+	)
+	.await;
+	let msgs = exchange(&mut stream, &[simple_query_packet("SELECT dt, d, y FROM mydecl")]).await;
+	assert!(error_code(&msgs).is_none(), "{:?}", error_code(&msgs));
+	assert_eq!(
+		row_description_typmods(&msgs),
+		vec![
+			("dt".to_owned(), 1114, 3),
+			("d".to_owned(), 1700, (10 << 16 | 2) + 4),
+			("y".to_owned(), 21, -1),
+		]
+	);
+	assert_eq!(
+		data_rows(&msgs),
+		vec![vec![
+			Some("2026-10-30 12:00:00.123".to_owned()),
+			Some("1.25".to_owned()),
+			Some("2026".to_owned())
+		]]
+	);
+	shutdown.cancel();
+}

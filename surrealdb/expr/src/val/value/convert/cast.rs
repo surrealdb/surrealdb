@@ -8,7 +8,7 @@ use common::decimal::DecimalExt;
 use geo_types::Point;
 use rust_decimal::Decimal;
 use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
-use surrealdb_types::ToSql;
+use surrealdb_types::{BigDecimal, ToSql};
 
 use super::coerce::ElementPosition;
 use crate::expr::Kind;
@@ -16,8 +16,8 @@ use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::syn;
 use crate::val::range::IntegerRangeExt;
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
-	RecordId, Regex, Set, SqlNone, TableName, Uuid, Value,
+	Array, Bytes, Closure, Date, Datetime, Duration, File, Geometry, Interval, Null, Number,
+	Object, Range, RecordId, Regex, Set, SqlNone, TableName, Time, Timestamp, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -204,7 +204,7 @@ impl Cast for i64 {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		if let Value::Number(n) = v {
+		if let Value::Number(ref n) = v {
 			// An int, or a float/decimal that is a whole number within the
 			// `i64` range. Anything else is refused, never rounded or clamped
 			// to the nearest bound.
@@ -233,7 +233,7 @@ impl Cast for f64 {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		if let Value::Number(n) = v {
+		if let Value::Number(ref n) = v {
 			return n.as_float_lossless().ok_or_else(|| CastError::InvalidKind {
 				from: v,
 				into: "float".into(),
@@ -253,6 +253,31 @@ impl Cast for f64 {
 	}
 }
 
+impl Cast for BigDecimal {
+	fn can_cast(v: &Value) -> bool {
+		v.is_number_and(|n| n.as_bigdecimal_cast().is_some())
+			|| v.is_strand_and(|v| v.parse::<BigDecimal>().is_ok())
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		if let Value::Number(ref n) = v {
+			return n.as_bigdecimal_cast().ok_or_else(|| CastError::InvalidKind {
+				from: v,
+				into: "bigdecimal".into(),
+			});
+		}
+		if let Value::String(ref s) = v
+			&& let Ok(b) = s.parse::<BigDecimal>()
+		{
+			return Ok(b);
+		}
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "bigdecimal".into(),
+		})
+	}
+}
+
 impl Cast for Decimal {
 	fn can_cast(v: &Value) -> bool {
 		v.is_number_and(|n| n.as_decimal_lossless().is_some())
@@ -260,7 +285,7 @@ impl Cast for Decimal {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		if let Value::Number(n) = v {
+		if let Value::Number(ref n) = v {
 			return n.as_decimal_lossless().ok_or_else(|| CastError::InvalidKind {
 				from: v,
 				into: "decimal".into(),
@@ -312,7 +337,7 @@ macro_rules! impl_int_cast {
 				}
 
 				fn cast(v: Value) -> Result<Self, CastError> {
-					if let Value::Number(n) = v {
+					if let Value::Number(ref n) = v {
 						return n.as_int_lossless().and_then(|x| $ty::try_from(x).ok()).ok_or_else(|| CastError::InvalidKind {
 							from: v,
 							into: stringify!($ty).into(),
@@ -341,7 +366,7 @@ impl Cast for u64 {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		if let Value::Number(n) = v {
+		if let Value::Number(ref n) = v {
 			return n.as_u64_lossless().ok_or_else(|| CastError::InvalidKind {
 				from: v,
 				into: "u64".into(),
@@ -368,7 +393,7 @@ impl Cast for half::f16 {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		if let Value::Number(n) = v {
+		if let Value::Number(ref n) = v {
 			return n.as_f16().ok_or_else(|| CastError::InvalidKind {
 				from: v,
 				into: "f16".into(),
@@ -395,7 +420,7 @@ impl Cast for f32 {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		if let Value::Number(n) = v {
+		if let Value::Number(ref n) = v {
 			return n.as_f32().ok_or_else(|| CastError::InvalidKind {
 				from: v,
 				into: "f32".into(),
@@ -439,7 +464,12 @@ impl Cast for String {
 			Value::String(x) => Ok(x.into_string()),
 			Value::Uuid(x) => Ok(x.to_string()),
 			Value::Datetime(x) => Ok(x.to_string()),
+			Value::Date(x) => Ok(x.to_string()),
+			Value::Time(x) => Ok(x.to_string()),
+			Value::Timestamp(x) => Ok(x.to_string()),
+			Value::Interval(x) => Ok(x.to_string()),
 			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
+			Value::Number(Number::BigDecimal(x)) => Ok(x.to_string()),
 			Value::Bool(_)
 			| Value::Number(
 				Number::Int(_)
@@ -490,39 +520,151 @@ impl Cast for Uuid {
 	}
 }
 
+/// The date, time and timestamp casts accept a full datetime string, which is cast from the
+/// datetime it reads as.
+macro_rules! impl_temporal_cast {
+	($ty:ident, $name:literal, $text:expr, $from:expr) => {
+		impl Cast for $ty {
+			fn can_cast(v: &Value) -> bool {
+				Self::convert(v).is_some()
+			}
+
+			fn cast(v: Value) -> Result<Self, CastError> {
+				match Self::convert(&v) {
+					Some(x) => Ok(x),
+					None => Err(CastError::InvalidKind {
+						from: v,
+						into: $name.into(),
+					}),
+				}
+			}
+		}
+
+		impl $ty {
+			fn convert(v: &Value) -> Option<Self> {
+				let from: fn(&Value) -> Option<$ty> = $from;
+				if let Some(x) = from(v) {
+					return Some(x);
+				}
+				if let Value::String(s) = v {
+					let text: fn(&str) -> Option<$ty> = $text;
+					if let Some(x) = text(s) {
+						return Some(x);
+					}
+				}
+				None
+			}
+		}
+	};
+}
+
 impl Cast for Datetime {
 	fn can_cast(v: &Value) -> bool {
-		v.is_datetime() || v.is_strand_and(|s| Datetime::from_str(s).is_ok())
+		Self::convert(v).is_some()
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		// Datetimes are allowed
-		if let Value::Datetime(v) = v {
-			return Ok(v);
+		match Self::convert(&v) {
+			Some(x) => Ok(x),
+			None => Err(CastError::InvalidKind {
+				from: v,
+				into: "datetime".into(),
+			}),
 		}
-		// Attempt to parse a string
-		if let Value::String(ref s) = v
-			&& let Ok(d) = Datetime::from_str(s)
-		{
-			return Ok(d);
-		}
-		// Anything else raises an error
-		Err(CastError::InvalidKind {
-			from: v,
-			into: "datetime".into(),
-		})
 	}
 }
 
+impl Datetime {
+	fn convert(v: &Value) -> Option<Self> {
+		if let Value::Datetime(x) = v {
+			Some(*x)
+		} else if let Value::Date(x) = v {
+			Some((*x).into())
+		} else if let Value::Timestamp(x) = v {
+			Some((*x).into())
+		} else if let Value::String(s) = v {
+			Datetime::from_str(s).ok()
+		} else {
+			None
+		}
+	}
+}
+
+impl_temporal_cast!(
+	Date,
+	"date",
+	|s| Date::from_str(s).ok().or_else(|| Datetime::from_str(s).ok().map(|d| d.date())),
+	|v| {
+		if let Value::Date(x) = v {
+			Some(*x)
+		} else if let Value::Datetime(x) = v {
+			Some(x.date())
+		} else if let Value::Timestamp(x) = v {
+			Some(x.date())
+		} else {
+			None
+		}
+	}
+);
+
+impl_temporal_cast!(
+	Time,
+	"time",
+	|s| Time::from_str(s).ok().or_else(|| Datetime::from_str(s).ok().map(|d| d.time())),
+	|v| {
+		if let Value::Time(x) = v {
+			Some(*x)
+		} else if let Value::Datetime(x) = v {
+			Some(x.time())
+		} else if let Value::Timestamp(x) = v {
+			Some(x.time())
+		} else {
+			None
+		}
+	}
+);
+
+impl_temporal_cast!(
+	Timestamp,
+	"timestamp",
+	|s| Timestamp::from_str(s).ok().or_else(|| Datetime::from_str(s).ok().map(Timestamp::from)),
+	|v| {
+		if let Value::Timestamp(x) = v {
+			Some(*x)
+		} else if let Value::Datetime(x) = v {
+			Some((*x).into())
+		} else if let Value::Date(x) = v {
+			Some(x.at_midnight())
+		} else {
+			None
+		}
+	}
+);
+
+impl_temporal_cast!(Interval, "interval", |s| Interval::from_str(s).ok(), |v| {
+	if let Value::Interval(x) = v {
+		Some(*x)
+	} else if let Value::Time(x) = v {
+		// The time part as microseconds, truncating to the interval's resolution.
+		i64::try_from(x.nanos() / 1_000).ok().map(|m| Interval::new(0, 0, m))
+	} else if let Value::Duration(x) = v {
+		if x.0.subsec_nanos() % 1_000 != 0 {
+			return None;
+		}
+		i64::try_from(x.0.as_micros()).ok().map(|m| Interval::new(0, 0, m))
+	} else {
+		None
+	}
+});
+
 impl Cast for Duration {
 	fn can_cast(v: &Value) -> bool {
-		v.is_duration() || v.is_strand_and(|s| Duration::from_str(s).is_ok())
+		Self::convert(v).is_some() || v.is_strand_and(|s| Duration::from_str(s).is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		// Durations are allowed
-		if let Value::Duration(v) = v {
-			return Ok(v);
+		if let Some(d) = Self::convert(&v) {
+			return Ok(d);
 		}
 		// Attempt to parse a string
 		if let Value::String(ref s) = v
@@ -535,6 +677,26 @@ impl Cast for Duration {
 			from: v,
 			into: "duration".into(),
 		})
+	}
+}
+
+impl Duration {
+	fn convert(v: &Value) -> Option<Self> {
+		if let Value::Duration(x) = v {
+			Some(*x)
+		} else if let Value::Time(x) = v {
+			// Nanoseconds since midnight.
+			Some(Duration::from_nanos(x.nanos()))
+		} else if let Value::Interval(x) = v {
+			// A month is 30 days, as PostgreSQL's epoch convention, and a negative total is
+			// refused.
+			let micros = u128::try_from(x.normalised_micros()).ok()?;
+			let secs = u64::try_from(micros / 1_000_000).ok()?;
+			let nanos = (micros % 1_000_000) as u32 * 1_000;
+			Some(Duration::new(secs, nanos))
+		} else {
+			None
+		}
 	}
 }
 
@@ -890,6 +1052,7 @@ impl Value {
 			Kind::Int => self.can_cast_to::<i64>(),
 			Kind::Float => self.can_cast_to::<f64>(),
 			Kind::Decimal => self.can_cast_to::<Decimal>(),
+			Kind::BigDecimal => self.can_cast_to::<BigDecimal>(),
 			Kind::Number => self.can_cast_to::<Number>(),
 			Kind::I8 => self.can_cast_to::<i8>(),
 			Kind::U8 => self.can_cast_to::<u8>(),
@@ -902,6 +1065,10 @@ impl Value {
 			Kind::F32 => self.can_cast_to::<f32>(),
 			Kind::String => self.can_cast_to::<String>(),
 			Kind::Datetime => self.can_cast_to::<Datetime>(),
+			Kind::Date => self.can_cast_to::<Date>(),
+			Kind::Time => self.can_cast_to::<Time>(),
+			Kind::Timestamp => self.can_cast_to::<Timestamp>(),
+			Kind::Interval => self.can_cast_to::<Interval>(),
 			Kind::Duration => self.can_cast_to::<Duration>(),
 			Kind::Object => self.can_cast_to::<crate::val::Object>(),
 			Kind::Bytes => self.can_cast_to::<Bytes>(),
@@ -947,6 +1114,7 @@ impl Value {
 					self.can_cast_to_file_buckets(buckets)
 				}
 			}
+			Kind::Enum(reference) => self.is_enum_member(reference),
 		}
 	}
 
@@ -1011,6 +1179,9 @@ impl Value {
 			Kind::Int => self.cast_to::<i64>().map(Value::from),
 			Kind::Float => self.cast_to::<f64>().map(Value::from),
 			Kind::Decimal => self.cast_to::<Decimal>().map(Value::from),
+			Kind::BigDecimal => {
+				self.cast_to::<BigDecimal>().map(|b| Value::Number(Number::BigDecimal(Box::new(b))))
+			}
 			Kind::Number => self.cast_to::<Number>().map(Value::from),
 			Kind::I8 => self.cast_to::<i8>().map(|v| Value::Number(Number::I8(v))),
 			Kind::U8 => self.cast_to::<u8>().map(|v| Value::Number(Number::U8(v))),
@@ -1023,6 +1194,10 @@ impl Value {
 			Kind::F32 => self.cast_to::<f32>().map(|v| Value::Number(Number::F32(v))),
 			Kind::String => self.cast_to::<String>().map(Value::from),
 			Kind::Datetime => self.cast_to::<Datetime>().map(Value::from),
+			Kind::Date => self.cast_to::<Date>().map(Value::from),
+			Kind::Time => self.cast_to::<Time>().map(Value::from),
+			Kind::Timestamp => self.cast_to::<Timestamp>().map(Value::from),
+			Kind::Interval => self.cast_to::<Interval>().map(Value::from),
 			Kind::Duration => self.cast_to::<Duration>().map(Value::from),
 			Kind::Object => self.cast_to::<crate::val::Object>().map(Value::from),
 			Kind::Bytes => self.cast_to::<Bytes>().map(Value::from),
@@ -1070,6 +1245,16 @@ impl Value {
 					self.cast_to::<File>().map(Value::from)
 				} else {
 					self.cast_to_file_buckets(buckets).map(Value::from)
+				}
+			}
+			Kind::Enum(reference) => {
+				if self.is_enum_member(reference) {
+					Ok(self)
+				} else {
+					Err(CastError::InvalidKind {
+						from: self,
+						into: kind.to_sql(),
+					})
 				}
 			}
 		}

@@ -188,7 +188,11 @@ fn int_literal(ir: &crate::exec::ir::core::ir::Ir, value: ValueId) -> Option<i64
 			Value::Number(Number::U32(n)) => Some(*n as i64),
 			Value::Number(Number::U64(n)) => i64::try_from(*n).ok(),
 			Value::Number(
-				Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_),
+				Number::Float(_)
+				| Number::Decimal(_)
+				| Number::F16(_)
+				| Number::F32(_)
+				| Number::BigDecimal(_),
 			) => None,
 			Value::None
 			| Value::Null
@@ -196,6 +200,10 @@ fn int_literal(ir: &crate::exec::ir::core::ir::Ir, value: ValueId) -> Option<i64
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Array(_)
 			| Value::Set(_)
@@ -252,7 +260,12 @@ fn kind_admits_int(kind: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::F16
@@ -269,7 +282,8 @@ fn kind_admits_int(kind: &Kind) -> bool {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => false,
+		| Kind::File(_)
+		| Kind::Enum(_) => false,
 	}
 }
 

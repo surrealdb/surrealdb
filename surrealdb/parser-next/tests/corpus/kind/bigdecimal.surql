@@ -1,0 +1,12 @@
+bigdecimal;
+BIGDECIMAL;
+option<bigdecimal>;
+array<bigdecimal, 3>;
+set<bigdecimal>;
+bigdecimal | decimal;
+{ a: bigdecimal, b: option<bigdecimal> };
+<bigdecimal> $x;
+<bigdecimal> 1.5dec;
+DEFINE FIELD a ON t TYPE bigdecimal;
+DEFINE FIELD a ON t TYPE option<bigdecimal> DEFAULT 0bigdec;
+DEFINE FUNCTION fn::f($a: bigdecimal) -> bigdecimal { RETURN $a; };

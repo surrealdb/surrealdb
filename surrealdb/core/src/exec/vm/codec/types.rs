@@ -153,6 +153,14 @@ fn record_types() -> Vec<TypeDesc> {
 						Field::new("values", Ty::Vec(Box::new(Ty::Native(Native::Value)))),
 					]),
 				),
+				Variant::new(
+					"TemporalMax",
+					Shape::Struct(vec![arg(), Field::new("max", Ty::Native(Native::Value))]),
+				),
+				Variant::new(
+					"TemporalMin",
+					Shape::Struct(vec![arg(), Field::new("min", Ty::Native(Native::Value))]),
+				),
 			],
 		),
 	]

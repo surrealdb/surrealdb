@@ -128,6 +128,14 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}!ml                                                                                          MlModelPrefix ->  (range)
 /*{ns}*{db}!pa{pa}                                                                                           ParamKey ->  surrealdb_catalog::StoredParamDefinition
 /*{ns}*{db}!pa                                                                                            ParamPrefix ->  (range)
+/*{ns}*{db}!en{en}                                                                                         EnumDefKey ->  surrealdb_catalog::StoredEnumDefinition
+/*{ns}*{db}!en                                                                                          EnumDefPrefix ->  (range)
+/*{ns}*{db}!ty{ty}                                                                                        UserTypeKey ->  surrealdb_catalog::StoredUserTypeDefinition
+/*{ns}*{db}!ty                                                                                         UserTypePrefix ->  (range)
+/*{ns}*{db}!eb{start}                                                                                    EnIdBatchKey ->  crate::sequences::BatchValue
+/*{ns}*{db}!eb                                                                                        EnIdBatchPrefix ->  (range)
+/*{ns}*{db}!es{nid}                                                                                      EnIdStateKey ->  crate::sequences::SequenceState
+/*{ns}*{db}!es                                                                                        EnIdStatePrefix ->  (range)
 /*{ns}*{db}!th{start}                                                                                    TbIdBatchKey ->  crate::sequences::BatchValue
 /*{ns}*{db}!th                                                                                        TbIdBatchPrefix ->  (range)
 /*{ns}*{db}!ti{nid}                                                                                      TbIdStateKey ->  crate::sequences::SequenceState

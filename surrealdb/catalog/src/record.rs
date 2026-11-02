@@ -1743,6 +1743,14 @@ mod tests {
 				arg: 10,
 				values: vec![Value::from(1i64), Value::String(Strand::new("x")), Value::None],
 			},
+			AggregationStat::TemporalMax {
+				arg: 11,
+				max: Value::Date(crate::val::Date(19_000)),
+			},
+			AggregationStat::TemporalMin {
+				arg: 12,
+				min: Value::Timestamp(crate::val::Date(-3).at_midnight()),
+			},
 		]
 	}
 

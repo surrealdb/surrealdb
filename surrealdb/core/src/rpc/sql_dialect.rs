@@ -15,6 +15,22 @@ use crate::dbs::Session;
 use crate::kvs::{Datastore, Dialect};
 use crate::types::{PublicArray, PublicValue};
 
+// An enum's array type takes the OID `ENUM_ARRAY_OID_OFFSET` past the enum's own, so the catalog
+// draws no enum id at or past that distance.
+#[cfg(feature = "postgres")]
+const _: () =
+	assert!(crate::catalog::EnumId::LIMIT == surrealdb_sqlplan::descriptor::ENUM_ARRAY_OID_OFFSET);
+// Each enum's labels take a block of `ENUM_LABEL_OID_STRIDE` `pg_enum` OIDs, so the catalog draws
+// no label identity at or past it, and the last block ends below the 32-bit limit.
+#[cfg(feature = "postgres")]
+const _: () = assert!(
+	crate::catalog::ENUM_LABEL_IDENT_LIMIT == surrealdb_sqlplan::descriptor::ENUM_LABEL_OID_STRIDE
+		&& (surrealdb_sqlplan::descriptor::ENUM_LABEL_OID_BASE as u64)
+			+ (crate::catalog::EnumId::LIMIT as u64)
+				* (surrealdb_sqlplan::descriptor::ENUM_LABEL_OID_STRIDE as u64)
+			<= u32::MAX as u64
+);
+
 /// The session variable that names the dialect transaction the session holds open.
 pub(super) const TXN_VAR: &str = "sql_txn";
 /// The session variable that is `true` once a statement has failed in the open transaction.

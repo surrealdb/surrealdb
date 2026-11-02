@@ -261,7 +261,12 @@ impl<'k> Flat<'k> {
 				other @ Kind::Bool
 				| other @ Kind::Bytes
 				| other @ Kind::Datetime
+				| other @ Kind::Date
+				| other @ Kind::Time
+				| other @ Kind::Timestamp
+				| other @ Kind::Interval
 				| other @ Kind::Decimal
+				| other @ Kind::BigDecimal
 				| other @ Kind::Duration
 				| other @ Kind::Float
 				| other @ Kind::Int
@@ -287,7 +292,8 @@ impl<'k> Flat<'k> {
 				| other @ Kind::Function(..)
 				| other @ Kind::Range
 				| other @ Kind::Literal(_)
-				| other @ Kind::File(_) => flat.members.push(other),
+				| other @ Kind::File(_)
+				| other @ Kind::Enum(_) => flat.members.push(other),
 			}
 		}
 		flat
@@ -452,6 +458,7 @@ fn leaf_column(path: &[&str], flat: &Flat<'_>, presence: Shape) -> Draft {
 		[Kind::Float] => Some(PhysicalKind::F64),
 		[Kind::Bool] => Some(PhysicalKind::Bool),
 		[Kind::Decimal] => Some(PhysicalKind::DecimalVar),
+		[Kind::BigDecimal] => Some(PhysicalKind::BigDecimal),
 		[Kind::Datetime] => Some(PhysicalKind::Datetime),
 		[Kind::Duration] => Some(PhysicalKind::Duration),
 		[Kind::Uuid] => Some(PhysicalKind::Uuid),

@@ -37,23 +37,60 @@ impl Rejected {
 	pub(super) fn number(&mut self, _func: &str, value: &Value) -> Option<Number> {
 		if let Value::Number(n) = value {
 			self.folded = true;
-			Some(*n)
+			Some(n.clone())
 		} else {
 			None
 		}
 	}
 
-	/// Take a datetime input, recording a rejection for a value that is neither
-	/// a datetime nor absent.
-	pub(super) fn datetime(&mut self, func: &str, value: &Value) -> Option<crate::val::Datetime> {
-		if let Value::Datetime(d) = value {
-			self.folded = true;
-			Some(*d)
-		} else if matches!(value, Value::None | Value::Null) {
-			None
-		} else {
-			self.reject(func, "datetime", value);
-			None
+	/// Take a date, time, timestamp or datetime input. An aggregate folds one of those kinds:
+	/// `held` is the value the group holds so far, and an input of another kind than it is
+	/// recorded as a rejection, as is a value that is none of the four.
+	pub(super) fn temporal(
+		&mut self,
+		func: &str,
+		value: &Value,
+		held: Option<&Value>,
+	) -> Option<Value> {
+		let name = |v: &Value| match v {
+			Value::Datetime(_) => Some("datetime"),
+			Value::Date(_) => Some("date"),
+			Value::Time(_) => Some("time"),
+			Value::Timestamp(_) => Some("timestamp"),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_)
+			| Value::Interval(_) => None,
+		};
+		match (name(value), held.and_then(name)) {
+			(Some(found), Some(expected)) if found != expected => {
+				self.reject(func, expected, value);
+				None
+			}
+			(Some(_), _) => {
+				self.folded = true;
+				Some(value.clone())
+			}
+			(None, _) if matches!(value, Value::None | Value::Null) => None,
+			(None, _) => {
+				self.reject(func, "datetime", value);
+				None
+			}
 		}
 	}
 

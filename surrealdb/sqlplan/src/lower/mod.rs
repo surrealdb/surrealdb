@@ -2,14 +2,18 @@
 
 pub mod ddl;
 pub mod ddl_truncate;
+pub(crate) mod enum_rank;
 pub mod expr;
+pub(crate) mod family_cast;
 mod foreign_key;
 mod functions;
 pub(crate) mod id_key;
 pub(crate) mod link;
+pub mod network_rank;
 pub mod plan;
 mod quote_ident;
 mod sql_like;
+mod temporal;
 mod vector_ddl;
 mod vector_expr;
 mod vector_knn;

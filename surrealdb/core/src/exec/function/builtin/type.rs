@@ -19,6 +19,10 @@ define_pure_function!(TypeArray, "type::array", effects: EffectSet::PURE, fallib
 define_pure_function!(TypeBool, "type::bool", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Bool, crate::fnc::r#type::bool);
 define_pure_function!(TypeBytes, "type::bytes", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Any, crate::fnc::r#type::bytes);
 define_pure_function!(TypeDatetime, "type::datetime", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Datetime, crate::fnc::r#type::datetime);
+define_pure_function!(TypeDate, "type::date", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Date, crate::fnc::r#type::date);
+define_pure_function!(TypeTime, "type::time", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Time, crate::fnc::r#type::time);
+define_pure_function!(TypeTimestamp, "type::timestamp", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Timestamp, crate::fnc::r#type::timestamp);
+define_pure_function!(TypeInterval, "type::interval", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Interval, crate::fnc::r#type::interval);
 define_pure_function!(TypeDecimal, "type::decimal", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Decimal, crate::fnc::r#type::decimal);
 define_pure_function!(TypeDuration, "type::duration", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Duration, crate::fnc::r#type::duration);
 define_pure_function!(TypeF16, "type::f16", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> F16, crate::fnc::r#type::f16);
@@ -51,6 +55,10 @@ define_pure_function!(TypeIsBool, "type::is_bool", effects: EffectSet::PURE, fal
 define_pure_function!(TypeIsBytes, "type::is_bytes", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::bytes);
 define_pure_function!(TypeIsCollection, "type::is_collection", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::collection);
 define_pure_function!(TypeIsDatetime, "type::is_datetime", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::datetime);
+define_pure_function!(TypeIsDate, "type::is_date", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::date);
+define_pure_function!(TypeIsTime, "type::is_time", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::time);
+define_pure_function!(TypeIsTimestamp, "type::is_timestamp", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::timestamp);
+define_pure_function!(TypeIsInterval, "type::is_interval", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::interval);
 define_pure_function!(TypeIsDecimal, "type::is_decimal", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::decimal);
 define_pure_function!(TypeIsDuration, "type::is_duration", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::duration);
 define_pure_function!(TypeIsF16, "type::is_f16", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::f16);
@@ -245,7 +253,11 @@ pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
 	&TypeArray,
 	&TypeBool,
 	&TypeBytes,
+	&TypeDate,
 	&TypeDatetime,
+	&TypeInterval,
+	&TypeTime,
+	&TypeTimestamp,
 	&TypeDecimal,
 	&TypeDuration,
 	&TypeF16,
@@ -261,7 +273,11 @@ pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
 	&TypeIsBool,
 	&TypeIsBytes,
 	&TypeIsCollection,
+	&TypeIsDate,
 	&TypeIsDatetime,
+	&TypeIsInterval,
+	&TypeIsTime,
+	&TypeIsTimestamp,
 	&TypeIsDecimal,
 	&TypeIsDuration,
 	&TypeIsF16,

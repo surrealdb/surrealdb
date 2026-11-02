@@ -104,6 +104,24 @@ pub enum PlanError {
 		table: String,
 	},
 
+	#[error("type \"{0}\" does not exist")]
+	UndefinedType(String),
+
+	#[error("constraint \"{constraint}\" of domain \"{domain}\" does not exist")]
+	UndefinedDomainConstraint {
+		constraint: String,
+		domain: String,
+	},
+
+	#[error("constraint \"{constraint}\" for domain \"{domain}\" already exists")]
+	DuplicateDomainConstraint {
+		constraint: String,
+		domain: String,
+	},
+
+	#[error("column \"{0}\" specified more than once")]
+	DuplicateColumn(String),
+
 	#[error("invalid parameter value: {0}")]
 	InvalidParameterValue(String),
 
@@ -170,9 +188,17 @@ impl PlanError {
 			Self::SavepointDoesNotExist(_) => "3B001", // invalid_savepoint_specification
 			Self::ActiveTransactionAlreadyInProgress => "25001", // active_sql_transaction
 			Self::UndefinedObject(_)
+			| Self::UndefinedType(_)
+			| Self::UndefinedDomainConstraint {
+				..
+			}
 			| Self::UndefinedConstraint {
 				..
 			} => "42704", // undefined_object
+			Self::DuplicateDomainConstraint {
+				..
+			} => "42710", // duplicate_object
+			Self::DuplicateColumn(_) => "42701",  // duplicate_column
 			Self::InvalidParameterValue(_) => "22023", // invalid_parameter_value
 			Self::DataException(_) => "22000",    // data_exception
 			Self::ProgramLimitExceeded(_) => "54000", // program_limit_exceeded
@@ -221,7 +247,15 @@ impl PlanError {
 				..
 			} => 1091, // ER_CANT_DROP_FIELD_OR_KEY
 			Self::InvalidParameterValue(_) => 1210, // ER_WRONG_ARGUMENTS
-			Self::DataException(_)
+			Self::DuplicateColumn(_) => 1060,       // ER_DUP_FIELDNAME
+			Self::UndefinedType(_)
+			| Self::UndefinedDomainConstraint {
+				..
+			}
+			| Self::DuplicateDomainConstraint {
+				..
+			}
+			| Self::DataException(_)
 			| Self::ProgramLimitExceeded(_)
 			| Self::UndefinedOperatorClass {
 				..

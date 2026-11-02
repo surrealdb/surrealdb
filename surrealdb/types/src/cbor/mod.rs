@@ -8,8 +8,9 @@ mod convert;
 mod read;
 
 pub use convert::{
-	Ctx, RequestBlocks, TAG_F16, TAG_F32, TAG_I8, TAG_I16, TAG_I32, TAG_U8, TAG_U16, TAG_U32,
-	TAG_U64, from_value, from_value_v2, to_request_value, to_value, to_value_v2,
+	Ctx, RequestBlocks, TAG_BIGDECIMAL, TAG_DATE, TAG_F16, TAG_F32, TAG_I8, TAG_I16, TAG_I32,
+	TAG_INTERVAL, TAG_TIME, TAG_TIMESTAMP, TAG_U8, TAG_U16, TAG_U32, TAG_U64, from_value,
+	from_value_v2, to_request_value, to_value, to_value_v2,
 };
 pub use read::{MapEntries, map_entries};
 

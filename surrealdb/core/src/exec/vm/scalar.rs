@@ -104,6 +104,10 @@ impl<'a> Held<'a> {
 				| Value::Number(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)),
 			) => Held::Owned(value.clone()),
 			Held::Owned(
@@ -166,13 +170,17 @@ impl<'a> Scalar<'a> {
 			Value::None => Scalar::None,
 			Value::Null => Scalar::Null,
 			Value::Bool(v) => Scalar::Bool(*v),
-			Value::Number(v) => Scalar::Number(*v),
+			Value::Number(v) => Scalar::Number(v.clone()),
 			Value::String(v) => Scalar::Str(v.as_str()),
 			Value::Duration(v) => Scalar::Duration(*v),
 			Value::Datetime(v) => Scalar::Datetime(*v),
 			Value::Uuid(v) => Scalar::Uuid(*v),
 			Value::Bytes(v) => Scalar::Bytes(v.0.as_ref()),
 			other @ (Value::Array(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Set(_)
 			| Value::Object(_)
 			| Value::Geometry(_)
@@ -192,7 +200,7 @@ impl<'a> Scalar<'a> {
 			Scalar::None => Value::None,
 			Scalar::Null => Value::Null,
 			Scalar::Bool(v) => Value::Bool(*v),
-			Scalar::Number(v) => Value::Number(*v),
+			Scalar::Number(v) => Value::Number(v.clone()),
 			Scalar::Str(v) => Value::String((*v).into()),
 			Scalar::Duration(v) => Value::Duration(*v),
 			Scalar::Datetime(v) => Value::Datetime(*v),
@@ -243,7 +251,7 @@ impl<'a> Scalar<'a> {
 			Scalar::None => Scalar::None,
 			Scalar::Null => Scalar::Null,
 			Scalar::Bool(v) => Scalar::Bool(*v),
-			Scalar::Number(v) => Scalar::Number(*v),
+			Scalar::Number(v) => Scalar::Number(v.clone()),
 			Scalar::Str(v) => Scalar::Str(v),
 			Scalar::Duration(v) => Scalar::Duration(*v),
 			Scalar::Datetime(v) => Scalar::Datetime(*v),
@@ -270,7 +278,7 @@ impl<'a> Scalar<'a> {
 			Scalar::None => Scalar::None,
 			Scalar::Null => Scalar::Null,
 			Scalar::Bool(v) => Scalar::Bool(*v),
-			Scalar::Number(v) => Scalar::Number(*v),
+			Scalar::Number(v) => Scalar::Number(v.clone()),
 			Scalar::Str(v) => Scalar::Str(v),
 			Scalar::Duration(v) => Scalar::Duration(*v),
 			Scalar::Datetime(v) => Scalar::Datetime(*v),
@@ -404,6 +412,10 @@ fn value_rank(value: &Value) -> u8 {
 		Value::Regex(_) => 16,
 		Value::Range(_) => 17,
 		Value::Closure(_) => 18,
+		Value::Date(_) => 19,
+		Value::Time(_) => 20,
+		Value::Timestamp(_) => 21,
+		Value::Interval(_) => 22,
 	}
 }
 

@@ -1,7 +1,12 @@
 //! Packet encoder and decoder for the MySQL wire protocol.
 
+pub mod bit;
+pub mod year;
+
 use anyhow::Result;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+pub mod geometry;
 
 pub const MAX_PACKET_SIZE: usize = 16_777_215; // 2^24 - 1
 

@@ -343,7 +343,13 @@ pub async fn generate_schema(
 			)
 		};
 		($schema:ident, $name:expr_2021, $kind:expr_2021, $desc:literal) => {
-			scalar_debug_validated!($schema, $name, $kind, std::option::Option::Some($desc), None)
+			scalar_debug_validated!(
+				$schema,
+				$name,
+				$kind,
+				std::option::Option::Some($desc),
+				std::option::Option::<&str>::None
+			)
 		};
 		($schema:ident, $name:expr_2021, $kind:expr_2021, $desc:literal, $url:literal) => {
 			scalar_debug_validated!(
@@ -386,6 +392,25 @@ pub async fn generate_schema(
 	scalar_debug_validated!(schema, "null", Kind::Null);
 	scalar_debug_validated!(schema, "datetime", Kind::Datetime);
 	scalar_debug_validated!(schema, "duration", Kind::Duration);
+	scalar_debug_validated!(schema, "date", Kind::Date, "ISO 8601 calendar date, YYYY-MM-DD");
+	scalar_debug_validated!(
+		schema,
+		"time",
+		Kind::Time,
+		"Time of day without a zone, HH:MM:SS[.fffffffff], from 00:00:00 to 24:00:00"
+	);
+	scalar_debug_validated!(
+		schema,
+		"timestamp",
+		Kind::Timestamp,
+		"Date and time without a zone, YYYY-MM-DDTHH:MM:SS[.fffffffff]"
+	);
+	scalar_debug_validated!(
+		schema,
+		"interval",
+		Kind::Interval,
+		"Calendar interval of months, days and microseconds, in ISO 8601 or PostgreSQL text"
+	);
 	scalar_debug_validated!(schema, "bytes", Kind::Bytes);
 	scalar_debug_validated!(schema, "object", Kind::Object);
 	scalar_debug_validated!(schema, "any", Kind::Any);
@@ -454,11 +479,17 @@ pub(crate) fn sql_value_to_graphql_value(v: SurValue) -> Result<GraphqlValue, Gr
 				Some(n) => GraphqlValue::Number(n),
 				None => GraphqlValue::Null,
 			},
-			num @ SurNumber::Decimal(_) => GraphqlValue::String(num.to_string()),
+			num @ (SurNumber::Decimal(_) | SurNumber::BigDecimal(_)) => {
+				GraphqlValue::String(num.to_string())
+			}
 		},
 		SurValue::String(s) => GraphqlValue::String(s.into_string()),
 		SurValue::Duration(d) => GraphqlValue::String(d.to_string()),
 		SurValue::Datetime(d) => GraphqlValue::String(d.to_rfc3339()),
+		SurValue::Date(d) => GraphqlValue::String(d.to_string()),
+		SurValue::Time(d) => GraphqlValue::String(d.to_string()),
+		SurValue::Timestamp(d) => GraphqlValue::String(d.to_string()),
+		SurValue::Interval(d) => GraphqlValue::String(d.to_string()),
 		SurValue::Uuid(uuid) => GraphqlValue::String(uuid.to_string()),
 		SurValue::Array(a) => {
 			let items: Result<Vec<GraphqlValue>, GraphqlError> =
@@ -670,7 +701,12 @@ fn kind_to_type_inner(
 		Kind::Bool => TypeRef::named(TypeRef::BOOLEAN),
 		Kind::Bytes => TypeRef::named("bytes"),
 		Kind::Datetime => TypeRef::named("datetime"),
-		Kind::Decimal => TypeRef::named("decimal"),
+		Kind::Date => TypeRef::named("date"),
+		Kind::Time => TypeRef::named("time"),
+		Kind::Timestamp => TypeRef::named("timestamp"),
+		Kind::Interval => TypeRef::named("interval"),
+		Kind::Enum(_) => TypeRef::named(TypeRef::STRING),
+		Kind::Decimal | Kind::BigDecimal => TypeRef::named("decimal"),
 		Kind::Duration => TypeRef::named("duration"),
 		Kind::Float | Kind::F16 | Kind::F32 => TypeRef::named(TypeRef::FLOAT),
 		Kind::Int | Kind::I8 | Kind::I16 | Kind::I32 | Kind::U8 | Kind::U16 => {
@@ -1025,6 +1061,7 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GraphqlError> {
 		Literal::Float(f) => Ok(SurValue::Number(SurNumber::Float(f))),
 		Literal::Integer(i) => Ok(SurValue::Number(SurNumber::Int(i))),
 		Literal::Decimal(d) => Ok(SurValue::Number(SurNumber::Decimal(d))),
+		Literal::BigDecimal(d) => Ok(SurValue::Number(SurNumber::BigDecimal(d))),
 		Literal::I8(v) => Ok(SurValue::Number(SurNumber::I8(v))),
 		Literal::I16(v) => Ok(SurValue::Number(SurNumber::I16(v))),
 		Literal::I32(v) => Ok(SurValue::Number(SurNumber::I32(v))),
@@ -1066,6 +1103,10 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GraphqlError> {
 		}
 		Literal::Duration(d) => Ok(SurValue::Duration(d)),
 		Literal::Datetime(dt) => Ok(SurValue::Datetime(dt)),
+		Literal::Date(v) => Ok(SurValue::Date(v)),
+		Literal::Time(v) => Ok(SurValue::Time(v)),
+		Literal::Timestamp(v) => Ok(SurValue::Timestamp(v)),
+		Literal::Interval(v) => Ok(SurValue::Interval(v)),
 		Literal::Uuid(u) => Ok(SurValue::Uuid(u)),
 		Literal::Geometry(g) => Ok(SurValue::Geometry(g)),
 		Literal::File(f) => Ok(SurValue::File(f)),
@@ -1197,6 +1238,42 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 				Err(type_error(kind, val))
 			}
 		}
+		Kind::Date => {
+			if let GraphqlValue::String(s) = val
+				&& let Ok(v) = s.parse::<surrealdb_types::Date>()
+			{
+				Ok(SurValue::Date(v.into()))
+			} else {
+				Err(type_error(kind, val))
+			}
+		}
+		Kind::Time => {
+			if let GraphqlValue::String(s) = val
+				&& let Ok(v) = s.parse::<surrealdb_types::Time>()
+			{
+				Ok(SurValue::Time(v.into()))
+			} else {
+				Err(type_error(kind, val))
+			}
+		}
+		Kind::Timestamp => {
+			if let GraphqlValue::String(s) = val
+				&& let Ok(v) = s.parse::<surrealdb_types::Timestamp>()
+			{
+				Ok(SurValue::Timestamp(v.into()))
+			} else {
+				Err(type_error(kind, val))
+			}
+		}
+		Kind::Interval => {
+			if let GraphqlValue::String(s) = val
+				&& let Ok(v) = s.parse::<surrealdb_types::Interval>()
+			{
+				Ok(SurValue::Interval(v.into()))
+			} else {
+				Err(type_error(kind, val))
+			}
+		}
 		Kind::Datetime => {
 			if let GraphqlValue::String(s) = val {
 				match syn::datetime(s) {
@@ -1205,6 +1282,23 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 				}
 			} else {
 				Err(type_error(kind, val))
+			}
+		}
+		Kind::BigDecimal => {
+			// A bigdecimal is carried as its exact decimal text, as a decimal is.
+			let text = match val {
+				GraphqlValue::Number(n) => n.to_string(),
+				GraphqlValue::String(s) => s.clone(),
+				GraphqlValue::Null
+				| GraphqlValue::Boolean(_)
+				| GraphqlValue::Binary(_)
+				| GraphqlValue::Enum(_)
+				| GraphqlValue::List(_)
+				| GraphqlValue::Object(_) => return Err(type_error(kind, val)),
+			};
+			match text.parse::<surrealdb_types::BigDecimal>() {
+				Ok(d) => Ok(SurValue::Number(SurNumber::BigDecimal(Box::new(d)))),
+				Err(_) => Err(type_error(kind, val)),
 			}
 		}
 		Kind::Decimal => {
@@ -1644,6 +1738,7 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 		}
 		Kind::Regex => Err(resolver_error("Regexes are not yet supported")),
 		Kind::File(_) => Err(resolver_error("Files are not yet supported")),
+		Kind::Enum(_) => graphql_to_sql_kind_with_scope(val, Kind::String, enum_scope),
 	}
 }
 

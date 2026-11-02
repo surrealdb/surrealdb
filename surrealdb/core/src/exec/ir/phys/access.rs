@@ -2048,6 +2048,10 @@ fn read_version(
 			| Value::Number(_)
 			| Value::String(_)
 			| Value::Duration(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Array(_)
 			| Value::Set(_)
@@ -2142,7 +2146,7 @@ fn knn_vectors_of(
 					.iter()
 					.map(|value| {
 						if let Value::Number(number) = value {
-							Some(*number)
+							Some(number.clone())
 						} else {
 							None
 						}

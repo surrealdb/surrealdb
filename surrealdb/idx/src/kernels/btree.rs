@@ -473,9 +473,9 @@ impl<'a> IndexKeyspace<'a> {
 	}
 }
 
-/// Whether `value` holds a decimal that [`normalise_decimals`] respells: one
-/// with trailing zeros after its point, anywhere in the value, including inside
-/// the id of a record id and the bounds of a range.
+/// Whether `value` holds a decimal or a bigdecimal that [`normalise_decimals`]
+/// respells: one with trailing zeros after its point, anywhere in the value,
+/// including inside the id of a record id and the bounds of a range.
 fn holds_untidy_decimal(value: &Value) -> bool {
 	fn bound(bound: &Bound<Value>) -> bool {
 		matches!(bound, Bound::Included(v) | Bound::Excluded(v) if holds_untidy_decimal(v))
@@ -493,6 +493,7 @@ fn holds_untidy_decimal(value: &Value) -> bool {
 	}
 	match value {
 		Value::Number(Number::Decimal(d)) => d.scale() > 0 && d.mantissa() % 10 == 0,
+		Value::Number(Number::BigDecimal(d)) => !d.is_normalized(),
 		Value::Array(a) => a.iter().any(holds_untidy_decimal),
 		Value::Set(s) => s.iter().any(holds_untidy_decimal),
 		Value::Object(o) => o.values().any(holds_untidy_decimal),
@@ -505,6 +506,10 @@ fn holds_untidy_decimal(value: &Value) -> bool {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Geometry(_)
 		| Value::Bytes(_)
@@ -515,7 +520,8 @@ fn holds_untidy_decimal(value: &Value) -> bool {
 	}
 }
 
-/// Respell every decimal in `value` without trailing zeros, through arrays,
+/// Respell every decimal and bigdecimal in `value` without trailing zeros after
+/// its point, so `2.50dec` and `2.50bigdec` share the key of `2.5dec`, through arrays,
 /// sets, objects, the ids of record ids and the bounds of ranges. Values that
 /// compare equal before compare equal after, and the order of a set or object
 /// is unchanged.
@@ -547,6 +553,7 @@ fn normalise_decimals(value: &mut Value) {
 	}
 	match value {
 		Value::Number(Number::Decimal(d)) => *d = d.normalize(),
+		Value::Number(Number::BigDecimal(d)) => **d = d.normalized(),
 		Value::Array(Array(a)) => a.iter_mut().for_each(normalise_decimals),
 		Value::Set(set) if set.iter().any(holds_untidy_decimal) => {
 			*set = std::mem::take(set)
@@ -574,6 +581,10 @@ fn normalise_decimals(value: &mut Value) {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Set(_)
 		| Value::Geometry(_)

@@ -57,9 +57,12 @@ fn supported(value: &Value) -> bool {
 		| Value::Duration(_)
 		| Value::Datetime(_)
 		| Value::Uuid(_) => true,
+		// SQON's grammar has no `date`, `time`, `timestamp` or `interval` literal.
+		Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Interval(_) => false,
 		Value::Number(Number::Float(f)) => !f.is_nan(),
 		Value::Number(Number::Int(_) | Number::Decimal(_)) => true,
-		// SQON's grammar has no sized number kinds: `1u32` and `1f16` do not lex.
+		// SQON's grammar has no sized number kinds or arbitrary-precision literal: `1u32`,
+		// `1f16` and a BigDecimal literal do not lex.
 		Value::Number(
 			Number::I8(_)
 			| Number::U8(_)
@@ -69,10 +72,18 @@ fn supported(value: &Value) -> bool {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_),
+			| Number::F32(_)
+			| Number::BigDecimal(_),
 		) => false,
 		Value::Geometry(_) | Value::Regex(_) | Value::Table(_) => false,
-		Value::File(f) => file_str_supported(&f.bucket, &[]) && file_str_supported(&f.key, &['/']),
+		// A file prints as `f"bucket:/key"` only with a bucket and a key after its `/`; any other
+		// prints as a `type::file` call, which SQON does not read.
+		Value::File(f) => {
+			!f.bucket.is_empty()
+				&& !f.key.trim_start_matches('/').is_empty()
+				&& file_str_supported(&f.bucket, &[])
+				&& file_str_supported(&f.key, &['/'])
+		}
 		Value::Array(a) => a.iter().all(supported),
 		Value::Object(o) => o.values().all(supported),
 		Value::Set(s) => {
@@ -128,6 +139,10 @@ fn depth(value: &Value) -> usize {
 		| Value::Bytes(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Geometry(_)
 		| Value::Table(_)

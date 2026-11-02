@@ -5,36 +5,36 @@ use crate::exec::function::ScalarFunction;
 
 // Single argument math functions
 define_pure_function!(MathAbs, "math::abs", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::abs);
-define_pure_function!(MathAcos, "math::acos", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::acos);
-define_pure_function!(MathAcot, "math::acot", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::acot);
-define_pure_function!(MathAsin, "math::asin", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::asin);
-define_pure_function!(MathAtan, "math::atan", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::atan);
+define_pure_function!(MathAcos, "math::acos", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::acos);
+define_pure_function!(MathAcot, "math::acot", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::acot);
+define_pure_function!(MathAsin, "math::asin", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::asin);
+define_pure_function!(MathAtan, "math::atan", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::atan);
 define_pure_function!(MathCeil, "math::ceil", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::ceil);
-define_pure_function!(MathCos, "math::cos", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::cos);
-define_pure_function!(MathCot, "math::cot", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::cot);
-define_pure_function!(MathDeg2rad, "math::deg2rad", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::deg2rad);
+define_pure_function!(MathCos, "math::cos", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::cos);
+define_pure_function!(MathCot, "math::cot", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::cot);
+define_pure_function!(MathDeg2rad, "math::deg2rad", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::deg2rad);
 define_pure_function!(MathFloor, "math::floor", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::floor);
-define_pure_function!(MathLn, "math::ln", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::ln);
-define_pure_function!(MathLog10, "math::log10", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::log10);
-define_pure_function!(MathLog2, "math::log2", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::log2);
-define_pure_function!(MathRad2deg, "math::rad2deg", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::rad2deg);
+define_pure_function!(MathLn, "math::ln", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::ln);
+define_pure_function!(MathLog10, "math::log10", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::log10);
+define_pure_function!(MathLog2, "math::log2", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::log2);
+define_pure_function!(MathRad2deg, "math::rad2deg", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::rad2deg);
 define_pure_function!(MathRound, "math::round", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::round);
 define_pure_function!(MathSign, "math::sign", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::sign);
-define_pure_function!(MathSin, "math::sin", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::sin);
-define_pure_function!(MathSqrt, "math::sqrt", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::sqrt);
-define_pure_function!(MathTan, "math::tan", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number) -> Number, crate::fnc::math::tan);
+define_pure_function!(MathSin, "math::sin", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::sin);
+define_pure_function!(MathSqrt, "math::sqrt", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::sqrt);
+define_pure_function!(MathTan, "math::tan", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number) -> Number, crate::fnc::math::tan);
 
 // Two argument math functions
 define_pure_function!(MathBottom, "math::bottom", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, metered: crate::fnc::math::bottom_walk, (array: Any, count: Int) -> Any, crate::fnc::math::bottom);
 define_pure_function!(MathFixed, "math::fixed", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number, precision: Int) -> Number, crate::fnc::math::fixed);
-define_pure_function!(MathLog, "math::log", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Number, base: Number) -> Number, crate::fnc::math::log);
+define_pure_function!(MathLog, "math::log", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number, base: Number) -> Number, crate::fnc::math::log);
 define_pure_function!(MathPow, "math::pow", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (base: Number, exponent: Number) -> Number, crate::fnc::math::pow);
 define_pure_function!(MathTop, "math::top", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, metered: crate::fnc::math::top_walk, (array: Any, count: Int) -> Any, crate::fnc::math::top);
 
 // Three argument math functions
 define_pure_function!(MathClamp, "math::clamp", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Number, min: Number, max: Number) -> Number, crate::fnc::math::clamp);
-define_pure_function!(MathLerp, "math::lerp", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (a: Number, b: Number, t: Number) -> Number, crate::fnc::math::lerp);
-define_pure_function!(MathLerpangle, "math::lerpangle", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (a: Number, b: Number, t: Number) -> Number, crate::fnc::math::lerpangle);
+define_pure_function!(MathLerp, "math::lerp", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Number, b: Number, t: Number) -> Number, crate::fnc::math::lerp);
+define_pure_function!(MathLerpangle, "math::lerpangle", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Number, b: Number, t: Number) -> Number, crate::fnc::math::lerpangle);
 
 // Array aggregate math functions (operate on array of numbers)
 define_pure_function!(MathInterquartile, "math::interquartile", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, metered: crate::fnc::math::interquartile_walk, (array: Any) -> Number, crate::fnc::math::interquartile);

@@ -433,6 +433,65 @@ fn test_parse_empty_select_list_and_keyword_aliases() {
 }
 
 #[test]
+fn create_type_as_enum_parses_its_labels() {
+	use surrealdb_pgsql::ast::stmt::Statement;
+	let Statement::CreateType(create) =
+		parse_statement("CREATE TYPE mood AS ENUM ('sad', 'it''s ok', 'happy')").expect("parse")
+	else {
+		panic!("expected CreateType");
+	};
+	assert_eq!(create.name.parts, ["mood"]);
+	assert_eq!(create.labels, ["sad", "it's ok", "happy"]);
+}
+
+#[test]
+fn alter_type_parses_add_value_and_rename_value() {
+	use surrealdb_pgsql::ast::stmt::{AlterTypeAction, EnumValuePlacement, Statement};
+	let Statement::AlterType(alter) =
+		parse_statement("ALTER TYPE mood ADD VALUE IF NOT EXISTS 'meh' BEFORE 'ok'")
+			.expect("parse")
+	else {
+		panic!("expected AlterType");
+	};
+	assert_eq!(
+		alter.action,
+		AlterTypeAction::AddValue {
+			if_not_exists: true,
+			value: "meh".to_owned(),
+			placement: Some(EnumValuePlacement::Before("ok".to_owned())),
+		}
+	);
+	let Statement::AlterType(alter) =
+		parse_statement("ALTER TYPE mood RENAME VALUE 'ok' TO 'fine'").expect("parse")
+	else {
+		panic!("expected AlterType");
+	};
+	assert_eq!(
+		alter.action,
+		AlterTypeAction::RenameValue {
+			from: "ok".to_owned(),
+			to: "fine".to_owned()
+		}
+	);
+	assert!(parse_statement("ALTER TYPE mood DROP VALUE 'ok'").is_err());
+}
+
+#[test]
+fn enum_type_statements_round_trip() {
+	for sql in [
+		"CREATE TYPE mood AS ENUM ('sad', 'ok')",
+		"CREATE TYPE public.mood AS ENUM ('it''s')",
+		"ALTER TYPE mood ADD VALUE 'x'",
+		"ALTER TYPE mood ADD VALUE IF NOT EXISTS 'x' AFTER 'ok'",
+		"ALTER TYPE mood RENAME VALUE 'a' TO 'b'",
+		"DROP TYPE IF EXISTS mood",
+	] {
+		let stmt = parse_statement(sql).expect("parse");
+		assert_eq!(stmt.to_pgsql_string(), sql);
+	}
+}
+
+#[test]
 fn test_parse_schema_qualified_operator() {
 	for sql in [
 		"SELECT a FROM t WHERE a OPERATOR(pg_catalog.~) '^(x)$'",
@@ -454,6 +513,150 @@ fn test_parse_schema_qualified_operator() {
 }
 
 #[test]
+fn create_domain_parses_base_type_and_constraints_in_order() {
+	use surrealdb_pgsql::ast::stmt::{DomainConstraintKind, Statement};
+	let Statement::CreateDomain(create) = parse_statement(
+		"CREATE DOMAIN posint AS integer DEFAULT 1 CONSTRAINT positive CHECK (VALUE > 0) NOT NULL",
+	)
+	.expect("parse") else {
+		panic!("expected CreateDomain");
+	};
+	assert_eq!(create.name.parts, ["posint"]);
+	assert_eq!(create.data_type.name.parts, ["integer"]);
+	assert_eq!(create.constraints.len(), 3);
+	assert!(matches!(create.constraints[0].kind, DomainConstraintKind::Default(_)));
+	assert_eq!(create.constraints[0].name, None);
+	assert_eq!(create.constraints[1].name.as_deref(), Some("positive"));
+	assert!(matches!(create.constraints[1].kind, DomainConstraintKind::Check(_)));
+	assert!(matches!(create.constraints[2].kind, DomainConstraintKind::NotNull));
+	// `AS` is optional, and NULL names the nullable domain.
+	let Statement::CreateDomain(create) =
+		parse_statement("CREATE DOMAIN name_text text NULL").expect("parse")
+	else {
+		panic!("expected CreateDomain");
+	};
+	assert_eq!(create.constraints.len(), 1);
+	assert!(matches!(create.constraints[0].kind, DomainConstraintKind::Null));
+}
+
+#[test]
+fn alter_domain_parses_each_action() {
+	use surrealdb_pgsql::ast::stmt::{AlterDomainAction, Statement};
+	type ActionCheck = fn(&AlterDomainAction) -> bool;
+	let cases: [(&str, ActionCheck); 7] = [
+		("ALTER DOMAIN posint SET DEFAULT 2", |a| matches!(a, AlterDomainAction::SetDefault(_))),
+		("ALTER DOMAIN posint DROP DEFAULT", |a| matches!(a, AlterDomainAction::DropDefault)),
+		("ALTER DOMAIN posint SET NOT NULL", |a| matches!(a, AlterDomainAction::SetNotNull)),
+		("ALTER DOMAIN posint DROP NOT NULL", |a| matches!(a, AlterDomainAction::DropNotNull)),
+		("ALTER DOMAIN posint ADD CONSTRAINT c CHECK (VALUE < 10)", |a| {
+			matches!(
+				a,
+				AlterDomainAction::AddConstraint {
+					name: Some(_),
+					..
+				}
+			)
+		}),
+		("ALTER DOMAIN posint DROP CONSTRAINT IF EXISTS c CASCADE", |a| {
+			matches!(
+				a,
+				AlterDomainAction::DropConstraint {
+					if_exists: true,
+					..
+				}
+			)
+		}),
+		("ALTER DOMAIN posint VALIDATE CONSTRAINT c", |a| {
+			matches!(a, AlterDomainAction::ValidateConstraint { .. })
+		}),
+	];
+	for (sql, check) in cases {
+		let Statement::AlterDomain(alter) = parse_statement(sql).expect(sql) else {
+			panic!("expected AlterDomain for {sql}");
+		};
+		assert!(check(&alter.action), "wrong action for {sql}: {:?}", alter.action);
+	}
+	assert!(parse_statement("ALTER DOMAIN posint RENAME TO other").is_err());
+	assert!(parse_statement("ALTER DOMAIN posint OWNER TO me").is_err());
+}
+
+#[test]
+fn create_composite_type_parses_attributes() {
+	use surrealdb_pgsql::ast::stmt::Statement;
+	let Statement::CreateCompositeType(create) =
+		parse_statement("CREATE TYPE address AS (street text, zip integer)").expect("parse")
+	else {
+		panic!("expected CreateCompositeType");
+	};
+	assert_eq!(create.name.parts, ["address"]);
+	let names: Vec<&str> = create.attributes.iter().map(|a| a.name.as_str()).collect();
+	assert_eq!(names, ["street", "zip"]);
+	assert_eq!(create.attributes[1].data_type.name.parts, ["integer"]);
+	let Statement::CreateCompositeType(empty) =
+		parse_statement("CREATE TYPE nothing AS ()").expect("parse")
+	else {
+		panic!("expected CreateCompositeType");
+	};
+	assert!(empty.attributes.is_empty());
+}
+
+#[test]
+fn drop_domain_and_composite_type_parse() {
+	use surrealdb_pgsql::ast::stmt::Statement;
+	let Statement::Drop(drop) =
+		parse_statement("DROP DOMAIN IF EXISTS posint, other CASCADE").expect("parse")
+	else {
+		panic!("expected Drop");
+	};
+	assert_eq!(drop.object_type, DropObjectType::Domain);
+	assert!(drop.if_exists);
+	assert_eq!(drop.names.len(), 2);
+	let Statement::Drop(drop) = parse_statement("DROP TYPE address").expect("parse") else {
+		panic!("expected Drop");
+	};
+	assert_eq!(drop.object_type, DropObjectType::Type);
+}
+
+#[test]
+fn domain_and_composite_statements_reject_unsupported_forms() {
+	for sql in [
+		// Two defaults; the second is an error in the analysis, refused here.
+		"CREATE DOMAIN d AS int DEFAULT 1 DEFAULT 2",
+		// A named DEFAULT is not a domain constraint.
+		"CREATE DOMAIN d AS int CONSTRAINT c DEFAULT 1",
+		// COLLATE is not supported, so the statement does not end where it should.
+		"CREATE DOMAIN d AS text COLLATE \"C\"",
+		"CREATE DOMAIN d AS int CHECK VALUE > 0",
+		"CREATE DOMAIN d AS int CONSTRAINT c",
+		"CREATE TYPE t AS (a int CHECK (a > 0))",
+		"CREATE TYPE t AS (a int NOT NULL)",
+	] {
+		assert!(parse_statement(sql).is_err(), "expected a refusal for {sql}");
+	}
+}
+
+#[test]
+fn domain_and_composite_statements_round_trip() {
+	for sql in [
+		"CREATE DOMAIN posint AS integer DEFAULT 1 CONSTRAINT positive CHECK (value > 0) NOT NULL",
+		"CREATE DOMAIN public.name_text AS text NULL",
+		"ALTER DOMAIN posint SET DEFAULT 2",
+		"ALTER DOMAIN posint DROP DEFAULT",
+		"ALTER DOMAIN posint SET NOT NULL",
+		"ALTER DOMAIN posint DROP NOT NULL",
+		"ALTER DOMAIN posint ADD CONSTRAINT c CHECK (value < 10)",
+		"ALTER DOMAIN posint DROP CONSTRAINT IF EXISTS c",
+		"ALTER DOMAIN posint VALIDATE CONSTRAINT c",
+		"CREATE TYPE address AS (street text, zip integer)",
+		"CREATE TYPE nothing AS ()",
+		"DROP DOMAIN IF EXISTS posint",
+	] {
+		let stmt = parse_statement(sql).expect("parse");
+		assert_eq!(stmt.to_pgsql_string(), sql);
+	}
+}
+
+#[test]
 fn test_parse_create_table_with_storage_parameters() {
 	let stmt = parse_statement("CREATE TABLE t (a int not null, b char(84)) WITH (fillfactor=100)")
 		.expect("storage parameters after the column list");
@@ -463,4 +666,87 @@ fn test_parse_create_table_with_storage_parameters() {
 	assert_eq!(create.columns.len(), 2);
 	assert!(parse_statement("CREATE TABLE t (a int) WITH (fillfactor)").is_ok());
 	assert!(parse_statement("CREATE TABLE t (a int) WITH fillfactor").is_err());
+}
+
+/// The name and modifiers of the type of the only column of `CREATE TABLE t (a <type>)`.
+fn column_type(type_text: &str) -> (Vec<String>, Vec<String>) {
+	let sql = format!("CREATE TABLE t (a {type_text})");
+	let stmt = parse_statement(&sql).unwrap_or_else(|e| panic!("failed to parse {sql}: {e}"));
+	let Statement::CreateTable(create) = stmt else {
+		panic!("expected CREATE TABLE for {sql}");
+	};
+	let column = &create.columns[0];
+	(column.data_type.name.parts.clone(), column.data_type.modifiers.clone())
+}
+
+#[test]
+fn test_an_interval_field_qualifier_is_part_of_the_type_name() {
+	// gram.y: opt_interval, interval_second.
+	for (written, name, modifiers) in [
+		("INTERVAL", "interval", &[][..]),
+		("INTERVAL(3)", "interval", &["3"][..]),
+		("INTERVAL YEAR", "interval year", &[]),
+		("INTERVAL MONTH", "interval month", &[]),
+		("INTERVAL DAY", "interval day", &[]),
+		("INTERVAL HOUR", "interval hour", &[]),
+		("INTERVAL MINUTE", "interval minute", &[]),
+		("INTERVAL SECOND", "interval second", &[]),
+		("INTERVAL SECOND(3)", "interval second", &["3"]),
+		("interval year to month", "interval year to month", &[]),
+		("INTERVAL DAY TO HOUR", "interval day to hour", &[]),
+		("INTERVAL DAY TO MINUTE", "interval day to minute", &[]),
+		("INTERVAL DAY TO SECOND", "interval day to second", &[]),
+		("INTERVAL DAY TO SECOND(3)", "interval day to second", &["3"]),
+		("INTERVAL HOUR TO MINUTE", "interval hour to minute", &[]),
+		("INTERVAL HOUR TO SECOND(0)", "interval hour to second", &["0"]),
+		("INTERVAL MINUTE TO SECOND", "interval minute to second", &[]),
+		("INTERVAL DAY TO SECOND[]", "interval day to second", &[]),
+	] {
+		let (parts, mods) = column_type(written);
+		assert_eq!(parts, vec![name.to_string()], "{written}");
+		assert_eq!(mods, modifiers.iter().map(|m| m.to_string()).collect::<Vec<_>>(), "{written}");
+	}
+	// The qualifier is read in a cast too.
+	let printed =
+		parse_statement("SELECT CAST('1 day' AS INTERVAL HOUR), x::interval minute to second(2)")
+			.unwrap()
+			.to_string();
+	assert!(printed.contains("interval hour"), "{printed}");
+	assert!(printed.contains("interval minute to second(2)"), "{printed}");
+}
+
+#[test]
+fn test_an_interval_field_qualifier_outside_the_grammar_is_refused() {
+	for written in [
+		"INTERVAL MONTH TO YEAR",
+		"INTERVAL YEAR TO DAY",
+		"INTERVAL DAY TO YEAR",
+		"INTERVAL HOUR TO DAY",
+		"INTERVAL MINUTE TO HOUR",
+		"INTERVAL SECOND TO MINUTE",
+		"INTERVAL MONTH TO SECOND",
+		"INTERVAL DAY TO",
+		"INTERVAL DAY(3)",
+		"INTERVAL DAY TO MINUTE(3)",
+		"INTERVAL SECOND()",
+		"INTERVAL SECOND(x)",
+		"INTERVAL SECOND(3",
+		"INTERVAL(3) DAY",
+		"pg_catalog.interval DAY",
+	] {
+		let sql = format!("CREATE TABLE t (a {written})");
+		assert!(parse_statement(&sql).is_err(), "{sql} should be refused");
+	}
+}
+
+#[test]
+fn test_an_interval_field_qualifier_prints_back() {
+	for sql in [
+		"CREATE TABLE t (a INTERVAL DAY TO SECOND(3), b INTERVAL YEAR TO MONTH, c INTERVAL HOUR, d INTERVAL SECOND(2)[])",
+		"SELECT x::interval day to minute",
+	] {
+		let printed = parse_statement(sql).unwrap().to_string();
+		assert!(!printed.contains('"'), "{printed}");
+		assert_eq!(parse_statement(&printed).unwrap().to_string(), printed);
+	}
 }

@@ -1,5 +1,7 @@
 /// Array value types for SurrealDB
 pub mod array;
+/// Arbitrary-precision decimal value types for SurrealDB
+pub mod bigdecimal;
 /// Binary data value types for SurrealDB
 pub mod bytes;
 /// Datetime value types for SurrealDB
@@ -27,6 +29,7 @@ pub mod regex;
 pub mod set;
 /// Table value types for SurrealDB
 pub mod table;
+mod temporal;
 /// UUID value types for SurrealDB
 pub mod uuid;
 
@@ -37,6 +40,7 @@ pub use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 pub use self::array::Array;
+pub use self::bigdecimal::{BigDecimal, BigDecimalError};
 pub use self::bytes::Bytes;
 pub use self::datetime::{Datetime, fmt_datetime_sql};
 pub use self::duration::{Duration, fmt_duration_sql};
@@ -49,6 +53,7 @@ pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::set::Set;
 pub use self::table::Table;
+pub use self::temporal::{Date, Interval, Time, Timestamp};
 pub use self::uuid::Uuid;
 use crate::sql::{SqlFormat, ToSql};
 use crate::utils::escape::QuoteStr;
@@ -119,6 +124,14 @@ pub enum Value {
 	Object(Object),
 	/// A set of values
 	Set(Set),
+	/// A calendar date without a time zone
+	Date(Date),
+	/// A time of day without a date or time zone
+	Time(Time),
+	/// A date and time of day without a time zone
+	Timestamp(Timestamp),
+	/// A calendar-aware interval of months, days, and microseconds
+	Interval(Interval),
 }
 
 #[cfg(all(target_pointer_width = "64", feature = "regex-unicode"))]
@@ -154,6 +167,16 @@ impl Ord for Value {
 			(Value::File(a), Value::File(b)) => a.cmp(b),
 			(Value::Range(a), Value::Range(b)) => a.cmp(b),
 			(Value::Regex(a), Value::Regex(b)) => a.cmp(b),
+			(Value::Date(a), Value::Date(b)) => a.cmp(b),
+			(Value::Time(a), Value::Time(b)) => a.cmp(b),
+			(Value::Timestamp(a), Value::Timestamp(b)) => a.cmp(b),
+			(Value::Interval(a), Value::Interval(b)) => a.cmp(b),
+
+			// The temporal variants sort after every other variant, by rank.
+			(Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Interval(_), _)
+			| (_, Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Interval(_)) => {
+				self.temporal_rank().cmp(&other.temporal_rank())
+			}
 
 			// Different variant types - define a total order
 			// Order: None < Null < Bool < Number < String < Duration < Datetime < Uuid
@@ -486,6 +509,104 @@ impl Ord for Value {
 }
 
 impl Value {
+	/// The rank of a temporal variant among the variants that sort after all others, or 0.
+	fn temporal_rank(&self) -> u8 {
+		match self {
+			Value::Date(_) => 1,
+			Value::Time(_) => 2,
+			Value::Timestamp(_) => 3,
+			Value::Interval(_) => 4,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Array(_)
+			| Value::Object(_)
+			| Value::Set(_) => 0,
+		}
+	}
+
+	/// The form of this value that wire formats without a temporal member carry: a `date` and a
+	/// `timestamp` as a datetime, a `time` as a duration since midnight, and an `interval` as its
+	/// ISO 8601 text. Every other value is returned unchanged.
+	pub fn degrade_temporal(&self) -> Value {
+		match self {
+			Value::Date(v) => {
+				Value::Datetime(Datetime(v.into_inner().and_time(chrono::NaiveTime::MIN).and_utc()))
+			}
+			Value::Time(v) => Value::Duration(Duration::new(
+				v.nanos() / 1_000_000_000,
+				(v.nanos() % 1_000_000_000) as u32,
+			)),
+			Value::Timestamp(v) => Value::Datetime(Datetime(v.into_inner().and_utc())),
+			Value::Interval(v) => Value::String(v.to_string()),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Array(_)
+			| Value::Object(_)
+			| Value::Set(_) => self.clone(),
+		}
+	}
+
+	/// This value with every `date`, `time`, `timestamp` and `interval` it holds, at any depth in
+	/// an array, set or object, replaced by the form [`Value::degrade_temporal`] gives, for a
+	/// front end whose wire types have no member for them.
+	pub fn into_degraded_temporal(self) -> Value {
+		match self {
+			Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Interval(_) => {
+				self.degrade_temporal()
+			}
+			Value::Array(Array(items)) => {
+				Value::Array(Array(items.into_iter().map(Value::into_degraded_temporal).collect()))
+			}
+			Value::Set(Set(items)) => {
+				Value::Set(Set(items.into_iter().map(Value::into_degraded_temporal).collect()))
+			}
+			Value::Object(Object(entries)) => Value::Object(Object(
+				entries.into_iter().map(|(k, v)| (k, v.into_degraded_temporal())).collect(),
+			)),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_) => self,
+		}
+	}
+
 	/// Returns the kind of this value
 	///
 	/// This method maps each value variant to its corresponding `Kind`.
@@ -509,6 +630,10 @@ impl Value {
 			Value::File(_) => Kind::File(Vec::new()),
 			Value::Range(_) => Kind::Range,
 			Value::Regex(_) => Kind::Regex,
+			Value::Date(_) => Kind::Date,
+			Value::Time(_) => Kind::Time,
+			Value::Timestamp(_) => Kind::Timestamp,
+			Value::Interval(_) => Kind::Interval,
 		}
 	}
 
@@ -542,6 +667,10 @@ impl Value {
 			| Value::Number(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Geometry(_)
 			| Value::Table(_)
@@ -608,7 +737,12 @@ impl Value {
 			Kind::Bool => self.is_bool(),
 			Kind::Bytes => self.is_bytes(),
 			Kind::Datetime => self.is_datetime(),
+			Kind::Date => matches!(self, Value::Date(_)),
+			Kind::Time => matches!(self, Value::Time(_)),
+			Kind::Timestamp => matches!(self, Value::Timestamp(_)),
+			Kind::Interval => matches!(self, Value::Interval(_)),
 			Kind::Decimal => self.is_decimal(),
+			Kind::BigDecimal => matches!(self, Value::Number(Number::BigDecimal(_))),
 			Kind::Duration => self.is_duration(),
 			Kind::Float => self.is_float(),
 			Kind::Int => self.is_int(),
@@ -661,6 +795,10 @@ impl Value {
 			Kind::File(bucket) => {
 				self.is_file_and(|f| bucket.is_empty() || bucket.contains(&f.bucket().to_string()))
 			}
+			Kind::Enum(reference) => match reference {
+				crate::EnumRef::Named(_) => self.is_string(),
+				crate::EnumRef::Inline(labels) => self.is_string_and(|s| labels.contains(s)),
+			},
 			Kind::Function(_, _) => {
 				// Functions are not a value type
 				false
@@ -772,6 +910,10 @@ impl ToSql for Value {
 			}
 			Value::Duration(v) => v.fmt_sql(f, fmt),
 			Value::Datetime(v) => v.fmt_sql(f, fmt),
+			Value::Date(v) => v.fmt_sql(f, fmt),
+			Value::Time(v) => v.fmt_sql(f, fmt),
+			Value::Timestamp(v) => v.fmt_sql(f, fmt),
+			Value::Interval(v) => v.fmt_sql(f, fmt),
 			Value::Uuid(v) => v.fmt_sql(f, fmt),
 			Value::Array(v) => v.fmt_sql(f, fmt),
 			Value::Object(v) => v.fmt_sql(f, fmt),
@@ -1495,5 +1637,76 @@ mod tests {
 		for kind in not_kinds {
 			assert!(!value.is_kind(&kind), "{value:?} is a {kind} but should not be");
 		}
+	}
+
+	#[test]
+	fn temporal_values_order_after_every_other_variant_and_by_rank() {
+		let date = Value::Date(Date::from_days(5).unwrap());
+		let time = Value::Time(Time::from_nanos(1).unwrap());
+		let timestamp = Value::Timestamp(Timestamp::from_parts(0, 0).unwrap());
+		let interval = Value::Interval(Interval::new(0, 0, 1));
+		assert!(Value::Set(Set::default()) < date);
+		assert!(Value::Datetime(Datetime::from_timestamp(0, 0).unwrap()) < date);
+		assert!(date < time && time < timestamp && timestamp < interval);
+		assert!(Value::Date(Date::from_days(-1).unwrap()) < date);
+		assert_eq!(
+			Value::Interval(Interval::new(1, 0, 0)),
+			Value::Interval(Interval::new(0, 30, 0))
+		);
+	}
+
+	#[test]
+	fn temporal_values_render_as_keyword_prefixed_literals() {
+		let cases = [
+			(Value::Date(Date::from_days(0).unwrap()), "date'1970-01-01'"),
+			(Value::Time(Time::from_nanos(45_000_000_000_000).unwrap()), "time'12:30:00'"),
+			(
+				Value::Timestamp(Timestamp::from_parts(1, 500_000_000).unwrap()),
+				"timestamp'1970-01-01T00:00:01.500'",
+			),
+			(Value::Interval(Interval::new(14, 3, 14_706_500_000)), "interval'P1Y2M3DT4H5M6.5S'"),
+		];
+		for (value, expected) in cases {
+			assert_eq!(value.to_sql(), expected);
+		}
+		assert_eq!(Value::Date(Date::from_days(0).unwrap()).kind(), Kind::Date);
+		assert!(Value::Interval(Interval::ZERO).is_kind(&Kind::Interval));
+		assert!(!Value::Interval(Interval::ZERO).is_kind(&Kind::Duration));
+		assert_eq!(Kind::Timestamp.to_sql(), "timestamp");
+	}
+
+	#[test]
+	fn temporal_values_degrade_for_wires_without_a_member() {
+		let date = Value::Date(Date::from_days(1).unwrap());
+		assert_eq!(
+			date.degrade_temporal(),
+			Value::Datetime(Datetime::from_timestamp(86_400, 0).unwrap())
+		);
+		let time = Value::Time(Time::from_nanos(1_500_000_000).unwrap());
+		assert_eq!(time.degrade_temporal(), Value::Duration(Duration::new(1, 500_000_000)));
+		let interval = Value::Interval(Interval::new(0, 1, 0));
+		assert_eq!(interval.degrade_temporal(), Value::String("P1D".to_owned()));
+		let nested = Value::Array(Array::from(vec![date, Value::Null]));
+		assert_eq!(
+			nested.into_degraded_temporal(),
+			Value::Array(Array::from(vec![
+				Value::Datetime(Datetime::from_timestamp(86_400, 0).unwrap()),
+				Value::Null
+			]))
+		);
+	}
+
+	#[test]
+	fn temporal_values_serialise_to_json_text() {
+		let v = Value::Array(Array::from(vec![
+			Value::Date(Date::from_days(0).unwrap()),
+			Value::Time(Time::MAX),
+			Value::Timestamp(Timestamp::from_parts(0, 0).unwrap()),
+			Value::Interval(Interval::new(-1, 0, 0)),
+		]));
+		assert_eq!(
+			v.into_json_value().to_string(),
+			r#"["1970-01-01","24:00:00","1970-01-01T00:00:00","P-1M"]"#
+		);
 	}
 }

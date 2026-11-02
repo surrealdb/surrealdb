@@ -1592,7 +1592,8 @@ impl<'a> IndexAnalyzer<'a> {
 	/// `value`'s own key, in an index whose keys spell decimals without
 	/// trailing zeros when `normalised`. True for the kinds whose equality is
 	/// equality of their keys: `NONE`, `NULL`, booleans, strings, durations,
-	/// datetimes, UUIDs, record ids whose key is a whole number, string or
+	/// datetimes, dates, times, timestamps, intervals (equal intervals share the key of their
+	/// normalised total), UUIDs, record ids whose key is a whole number, string or
 	/// UUID, and a number keyed where it compares
 	/// ([`number_keyed_as_compared`]). An equality naming any other number, or
 	/// a record id whose key is an array, object or range and so may hold one,
@@ -1608,6 +1609,10 @@ impl<'a> IndexAnalyzer<'a> {
 				| Value::String(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 		) || matches!(value, Value::Number(n) if number_keyed_as_compared(n, normalised))
 			|| matches!(
@@ -2778,6 +2783,10 @@ impl<'a> IndexAnalyzer<'a> {
 					| Value::String(_)
 					| Value::Duration(_)
 					| Value::Datetime(_)
+					| Value::Date(_)
+					| Value::Time(_)
+					| Value::Timestamp(_)
+					| Value::Interval(_)
 					| Value::Uuid(_)
 					| Value::Array(_)
 					| Value::Set(_)
@@ -2809,6 +2818,10 @@ impl<'a> IndexAnalyzer<'a> {
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Bytes(_)
 			| Value::Table(_)
@@ -4266,7 +4279,15 @@ fn is_range_comparison(op: &BinaryOperator) -> bool {
 ///   so its index key does not agree with value equality or ordering.
 /// - A record id with an array or object key encodes its elements in the record-id key format,
 ///   where a datetime is RFC 3339 text whose byte order is not chronological, so a key holding a
-///   datetime is only an index operand for an equality.
+///   datetime is only an index operand for an equality. A key holding a `date`, `time`, `timestamp`
+///   or `interval` is not an index operand at all: the record-id encoding of an interval carries
+///   its exact triple after the normalised total, so equal intervals do not share a key there, and
+///   the other three are left to the scan that reads them.
+/// - A `date`, `time`, `timestamp` or `interval` is keyed where it compares: chronologically for
+///   the first three, by the normalised total for an interval, which is also where `Ord` and `Eq`
+///   compare it. It is an operand for an equality and for a range. A literal of another kind than
+///   the indexed column compares by kind rank, and the key opens with the kind, so the index holds
+///   it on the same side of the bound as the comparison does.
 ///
 /// A value or record-id key is judged through everything it holds, the bounds
 /// of a range in it included. A value nested in an array, set or object is
@@ -4276,6 +4297,7 @@ fn keyed_as_compared(value: &Value, range: bool) -> bool {
 	fn element_keyed(value: &Value, range: bool) -> bool {
 		match value {
 			Value::Regex(_) | Value::Geometry(_) => false,
+			Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Interval(_) => false,
 			Value::Datetime(_) => !range,
 			Value::Array(items) => items.iter().all(|v| element_keyed(v, range)),
 			Value::Set(items) => items.iter().all(|v| element_keyed(v, range)),
@@ -4326,6 +4348,10 @@ fn keyed_as_compared(value: &Value, range: bool) -> bool {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Bytes(_)
 		| Value::Table(_)
@@ -7032,7 +7058,7 @@ mod tests {
 				panic!("expected single tightened Range, got {:?}", c.access);
 			};
 			assert!(
-				matches!(range.start, Bound::Excluded(BoundOperand::Literal(crate::val::Value::Number(n))) if n.to_int() == 10)
+				matches!(range.start.clone(), Bound::Excluded(BoundOperand::Literal(crate::val::Value::Number(n))) if n.to_int() == 10)
 			);
 			assert!(matches!(range.end, Bound::Unbounded));
 		}
@@ -7052,7 +7078,7 @@ mod tests {
 			};
 			assert!(matches!(range.start, Bound::Unbounded));
 			assert!(
-				matches!(range.end, Bound::Excluded(BoundOperand::Literal(crate::val::Value::Number(n))) if n.to_int() == 50)
+				matches!(range.end.clone(), Bound::Excluded(BoundOperand::Literal(crate::val::Value::Number(n))) if n.to_int() == 50)
 			);
 		}
 
@@ -7683,6 +7709,25 @@ mod tests {
 					"expected no B-tree index candidate for `{sql}`, got {cands:?}"
 				);
 			}
+		}
+
+		#[test]
+		fn temporal_literals_are_keyed_as_compared() {
+			use crate::val::{Date, Interval, Time, Timestamp};
+			for value in [
+				Value::Date(Date(0)),
+				Value::Time(Time(0)),
+				Value::Timestamp(Timestamp::from_parts(0, 0).unwrap()),
+				Value::Interval(Interval::new(1, 0, 0)),
+			] {
+				assert!(keyed_as_compared(&value, false), "{value:?}");
+				assert!(keyed_as_compared(&value, true), "{value:?}");
+			}
+			let interval_id = Value::RecordId(crate::val::RecordId::new(
+				"t".into(),
+				RecordIdKey::Array(vec![Value::Interval(Interval::new(1, 0, 0))].into()),
+			));
+			assert!(!keyed_as_compared(&interval_id, false));
 		}
 	}
 

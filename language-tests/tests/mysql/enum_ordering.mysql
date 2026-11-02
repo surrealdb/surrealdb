@@ -1,0 +1,64 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_shirts_schema.surql"]
+
+[test]
+reason = "MySQL orders and compares an ENUM column by member index, not by the spelling of its members, and MIN and MAX follow it"
+
+[[test.results]]
+value = "[{ id: 3 }, { id: 1 }, { id: 4 }, { id: 2 }]"
+
+[[test.results]]
+value = "[{ id: 2 }, { id: 1 }, { id: 4 }, { id: 3 }]"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 2 }, { id: 4 }]"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 3 }, { id: 4 }]"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 3 }, { id: 4 }]"
+
+[[test.results]]
+value = "[{ hi: 'large', lo: 'small' }]"
+
+[[test.results]]
+value = "[{ id: 5, size: NULL }]"
+
+[[test.results]]
+value = "[{ id: 5 }, { id: 3 }, { id: 1 }, { id: 4 }, { id: 2 }]"
+
+[[test.results]]
+value = "[{ id: 2 }, { id: 1 }, { id: 4 }, { id: 3 }, { id: 5 }]"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 3 }, { id: 4 }]"
+
+[[test.results]]
+value = "[{ held: 4, hi: 'large', lo: 'small' }]"
+*/
+
+SELECT id FROM shirts ORDER BY size, id;
+
+SELECT id FROM shirts ORDER BY size DESC, id;
+
+SELECT id FROM shirts WHERE size > 'small' ORDER BY id;
+
+SELECT id FROM shirts WHERE size <= 'medium' ORDER BY id;
+
+SELECT id FROM shirts WHERE size BETWEEN 'small' AND 'medium' ORDER BY id;
+
+SELECT MIN(size) AS lo, MAX(size) AS hi FROM shirts;
+
+INSERT INTO shirts (id) VALUES (5);
+
+SELECT id FROM shirts ORDER BY size, id;
+
+SELECT id FROM shirts ORDER BY size DESC, id;
+
+SELECT id FROM shirts WHERE size < 'large' ORDER BY id;
+
+SELECT MIN(size) AS lo, MAX(size) AS hi, COUNT(size) AS held FROM shirts;

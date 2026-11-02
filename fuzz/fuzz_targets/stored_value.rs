@@ -40,6 +40,10 @@ pub fn identical(a: &Value, b: &Value) -> bool {
 		// `DateTime` equality covers a leap second's sub-second part.
 		(Value::Datetime(a), Value::Datetime(b)) => a.0 == b.0,
 		(Value::Uuid(a), Value::Uuid(b)) => a.0 == b.0,
+		(Value::Date(a), Value::Date(b)) => a == b,
+		(Value::Time(a), Value::Time(b)) => a == b,
+		(Value::Timestamp(a), Value::Timestamp(b)) => a == b,
+		(Value::Interval(a), Value::Interval(b)) => a.identical(b),
 		(Value::Array(a), Value::Array(b)) => all_identical(&a.0, &b.0),
 		(Value::Set(a), Value::Set(b)) => {
 			a.0.len() == b.0.len() && a.0.iter().zip(b.0.iter()).all(|(a, b)| identical(a, b))
@@ -77,7 +81,8 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_) => false,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => false,
 		},
 		Number::Float(a) => match b {
 			Number::Float(b) => a.to_bits() == b.to_bits(),
@@ -91,7 +96,8 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_) => false,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => false,
 		},
 		Number::Decimal(a) => match b {
 			// The serialized form holds the sign and scale as well as the mantissa.
@@ -106,7 +112,8 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_) => false,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => false,
 		},
 		Number::I8(a) => match b {
 			Number::I8(b) => a == b,
@@ -120,7 +127,8 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_) => false,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => false,
 		},
 		Number::U8(a) => match b {
 			Number::U8(b) => a == b,
@@ -134,7 +142,8 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_) => false,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => false,
 		},
 		Number::I16(a) => match b {
 			Number::I16(b) => a == b,
@@ -148,7 +157,8 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_) => false,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => false,
 		},
 		Number::U16(a) => match b {
 			Number::U16(b) => a == b,
@@ -162,7 +172,8 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_) => false,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => false,
 		},
 		Number::I32(a) => match b {
 			Number::I32(b) => a == b,
@@ -176,7 +187,8 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_) => false,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => false,
 		},
 		Number::U32(a) => match b {
 			Number::U32(b) => a == b,
@@ -190,7 +202,8 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::I32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_) => false,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => false,
 		},
 		Number::U64(a) => match b {
 			Number::U64(b) => a == b,
@@ -204,7 +217,8 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::I32(_)
 			| Number::U32(_)
 			| Number::F16(_)
-			| Number::F32(_) => false,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => false,
 		},
 		Number::F16(a) => match b {
 			Number::F16(b) => a.to_bits() == b.to_bits(),
@@ -218,7 +232,8 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::I32(_)
 			| Number::U32(_)
 			| Number::U64(_)
-			| Number::F32(_) => false,
+			| Number::F32(_)
+			| Number::BigDecimal(_) => false,
 		},
 		Number::F32(a) => match b {
 			Number::F32(b) => a.to_bits() == b.to_bits(),
@@ -232,7 +247,24 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::I32(_)
 			| Number::U32(_)
 			| Number::U64(_)
-			| Number::F16(_) => false,
+			| Number::F16(_)
+			| Number::BigDecimal(_) => false,
+		},
+		// A bigdecimal keeps its scale, so `1.50` and `1.5` are two values here.
+		Number::BigDecimal(a) => match b {
+			Number::BigDecimal(b) => a == b && a.scale() == b.scale(),
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => false,
 		},
 	}
 }
@@ -346,6 +378,10 @@ pub fn walk(r: ValueRef<'_>, v: &Value, canonical: bool) {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Array(_)
 		| Value::Set(_)
@@ -381,6 +417,10 @@ pub fn walk(r: ValueRef<'_>, v: &Value, canonical: bool) {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Array(_)
 		| Value::Set(_)
@@ -662,6 +702,10 @@ fn kind(v: &Value) -> Kind {
 		Value::String(_) => Kind::String,
 		Value::Duration(_) => Kind::Duration,
 		Value::Datetime(_) => Kind::Datetime,
+		Value::Date(_) => Kind::Date,
+		Value::Time(_) => Kind::Time,
+		Value::Timestamp(_) => Kind::Timestamp,
+		Value::Interval(_) => Kind::Interval,
 		Value::Uuid(_) => Kind::Uuid,
 		Value::Bytes(_) => Kind::Bytes,
 		Value::Table(_) => Kind::Table,
@@ -910,6 +954,24 @@ impl<'a, 'b> Gen<'a, 'b> {
 			d.set_sign_negative(true);
 		}
 		d
+	}
+
+	/// A bigdecimal of 1 to 80 digits, a scale of 0 to 70 and either sign: past what a decimal
+	/// holds as often as within it.
+	pub fn bigdecimal(&mut self) -> surrealdb_types::BigDecimal {
+		let len = 1 + self.below(80) as usize;
+		let mut text: String = (0..len).map(|_| char::from(b'0' + self.below(10) as u8)).collect();
+		let scale = self.below(71) as usize;
+		if scale > 0 {
+			if text.len() <= scale {
+				text = format!("{}{text}", "0".repeat(scale + 1 - text.len()));
+			}
+			text.insert(text.len() - scale, '.');
+		}
+		if self.below(2) == 1 {
+			text.insert(0, '-');
+		}
+		text.parse().unwrap_or_default()
 	}
 
 	/// A number of any variant within a few units in the last place of one of

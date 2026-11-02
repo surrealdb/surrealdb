@@ -276,6 +276,21 @@ fn cases() -> Vec<Case> {
 			RowFlags::NONE,
 			object(vec![("h", Value::Number(Number::F16(crate::half::f16::from_f32(1.5))))]),
 		),
+		case(
+			"bigdecimal_kind",
+			false,
+			vec![("n", leaf(K::BigDecimal, Required)), ("z", leaf(K::BigDecimal, Optional))],
+			1,
+			RowFlags::NONE,
+			object(vec![(
+				"n",
+				Value::Number(Number::BigDecimal(Box::new(
+					"-12345678901234567890123456789012345678.90"
+						.parse()
+						.expect("a bigdecimal literal"),
+				))),
+			)]),
+		),
 	]
 }
 
@@ -484,6 +499,14 @@ const FROZEN: &[(&str, &str, &str)] = &[
 		0100260500060c1218021401000768042601000a000626010001000826010002\
 		800a26010001000480068008820a80",
 		"ff0101003e",
+	),
+	(
+		"bigdecimal_kind",
+		"fe00808010260200090207666978747572650426010002260500535557590214\
+		020025260500060c121802140100076e042601001e0006260100010008260100\
+		03800a2601000100260500060c161c02140100077a042601001e000626010002\
+		26010002800826010003810a26010001000481068008810a82",
+		"ff01010013130102d20a3fce965fbcacb8f3dbc07520c9a003",
 	),
 ];
 

@@ -160,6 +160,17 @@ pub fn bind_select(
 					&& col.column != "*"
 				{
 					Some(col.column.clone())
+				} else if let Expr::FunctionCall {
+					name,
+					..
+				} = &target.expr && !matches!(
+					bound_expr,
+					BoundExpr::FunctionCall { .. } | BoundExpr::WindowFunction { .. }
+				) {
+					// A call is named after its function, also when the binder answers it with
+					// another expression (a catalog lookup), so that the name and the row field
+					// stay those of the call whichever catalog the select is bound against.
+					name.parts.last().map(|part| part.to_ascii_lowercase())
 				} else {
 					None
 				}
@@ -343,6 +354,7 @@ pub fn bind_select(
 		set_op,
 		for_update,
 		user_tables: catalog.all_tables(),
+		user_types: crate::catalog::UserTypes::of_catalog(catalog),
 		database: catalog.current_database().map(str::to_owned),
 		hnsw_indexes,
 	})
@@ -503,6 +515,7 @@ fn bind_lateral(
 		set_op: None,
 		for_update: false,
 		user_tables: Vec::new(),
+		user_types: crate::catalog::UserTypes::default(),
 		database: None,
 		hnsw_indexes: Vec::new(),
 	}));
@@ -511,6 +524,29 @@ fn bind_lateral(
 		relation_index,
 		alias: alias.name.clone(),
 	})
+}
+
+/// The `format_type` text of each type and modifier a column of the catalog's tables is declared
+/// with, once each: `(oid, typmod, text)`. A type without a modifier is left out, since
+/// `format_type` names it without the catalog.
+fn declared_type_formats(catalog: &dyn BinderCatalog) -> Vec<(i64, i64, String)> {
+	let mut formats: Vec<(i64, i64, String)> = Vec::new();
+	for table in catalog.all_tables() {
+		for column in &table.columns {
+			let Some(reported) =
+				column.declared.as_ref().and_then(crate::reported_type::pg_reported_type)
+			else {
+				continue;
+			};
+			let entry = (i64::from(reported.oid), i64::from(reported.typmod), reported.format);
+			if entry.1 >= 0
+				&& !formats.iter().any(|(oid, typmod, _)| (*oid, *typmod) == (entry.0, entry.1))
+			{
+				formats.push(entry);
+			}
+		}
+	}
+	formats
 }
 
 /// The functions whose answer is a property of the catalog (`pg_get_indexdef`,
@@ -524,6 +560,92 @@ fn bind_catalog_function(
 	bound_args: &[BoundExpr],
 	catalog: &dyn BinderCatalog,
 ) -> Result<Option<BoundExpr>, PlanError> {
+	if fn_name == "format_type"
+		&& over_is_none
+		&& let [
+			BoundExpr::Literal(BoundLiteral::Integer(oid)),
+			BoundExpr::Literal(BoundLiteral::Integer(typmod)),
+		] = bound_args
+		&& *typmod >= 0
+		&& let Some(text) = crate::reported_type::pg_format_type(*oid, *typmod)
+	{
+		return Ok(Some(BoundExpr::Literal(BoundLiteral::String(text))));
+	}
+	if matches!(fn_name, "format_type" | "to_regtype") && over_is_none && !bound_args.is_empty() {
+		// The modifiers of the declared column types are known only to the catalog, so a call
+		// with a modifier becomes a lookup over the pairs of type and modifier its columns have.
+		let modified = match bound_args {
+			[oid, typmod] if fn_name == "format_type" => declared_type_formats(catalog)
+				.into_iter()
+				.map(|(type_oid, type_modifier, text)| {
+					let equal = |left: &BoundExpr, value: i64| BoundExpr::Binary {
+						left: Box::new(left.clone()),
+						op: BoundBinaryOp::Equal,
+						right: Box::new(BoundExpr::Literal(BoundLiteral::Integer(value))),
+					};
+					(
+						BoundExpr::Binary {
+							left: Box::new(equal(oid, type_oid)),
+							op: BoundBinaryOp::And,
+							right: Box::new(equal(typmod, type_modifier)),
+						},
+						BoundExpr::Literal(BoundLiteral::String(text)),
+					)
+				})
+				.collect(),
+			_ => Vec::new(),
+		};
+		// The names and oids of the enum types are known only to the catalog, so the call becomes a
+		// lookup over them, and any other operand is answered as the call answers it.
+		let enums = catalog.enum_types();
+		let call = BoundExpr::FunctionCall {
+			name: fn_name.to_owned(),
+			args: bound_args.to_vec(),
+			distinct: false,
+		};
+		let rewritten = !modified.is_empty();
+		let call = if rewritten {
+			BoundExpr::Case {
+				operand: None,
+				branches: modified,
+				else_expr: Some(Box::new(call)),
+			}
+		} else {
+			call
+		};
+		if enums.is_empty() {
+			return Ok(rewritten.then_some(call));
+		}
+		{
+			let literal = |text: &str| BoundExpr::Literal(BoundLiteral::String(text.to_owned()));
+			let integer = |oid: u32| BoundExpr::Literal(BoundLiteral::Integer(i64::from(oid)));
+			let branches = if fn_name == "format_type" {
+				enums
+					.iter()
+					.flat_map(|ty| {
+						[
+							(integer(crate::descriptor::enum_type_oid(ty.id)), literal(&ty.name)),
+							(
+								integer(crate::descriptor::enum_array_type_oid(ty.id)),
+								literal(&format!("{}[]", ty.name)),
+							),
+						]
+					})
+					.collect()
+			} else {
+				enums
+					.iter()
+					.map(|ty| (literal(&ty.name), integer(crate::descriptor::enum_type_oid(ty.id))))
+					.collect()
+			};
+			return Ok(Some(BoundExpr::Case {
+				operand: Some(Box::new(bound_args[0].clone())),
+				branches,
+				else_expr: Some(Box::new(call)),
+			}));
+		}
+	}
+
 	if fn_name == "pg_get_indexdef" && over_is_none && bound_args.len() == 1 {
 		// The definition is a property of the index the oid names, which only the catalog
 		// knows: the call becomes a lookup over the indexes it lists, and an oid that
@@ -811,6 +933,7 @@ fn bind_table_ref(
 				set_op: None,
 				for_update: false,
 				user_tables: Vec::new(),
+				user_types: crate::catalog::UserTypes::default(),
 				database: None,
 				hnsw_indexes: Vec::new(),
 			};
@@ -995,114 +1118,7 @@ pub fn bind_expr(
 			op,
 			right,
 			..
-		} => {
-			let l = bind_expr(left, scope, catalog, policy)?;
-			let r = bind_expr(right, scope, catalog, policy)?;
-			if let surrealdb_pgsql::ast::op::BinaryOperator::Custom(custom) = op
-				&& let Some(metric) = crate::vector::VectorMetric::from_operator(custom)
-			{
-				return Ok(BoundExpr::Binary {
-					left: Box::new(vector_operand(l)),
-					op: BoundBinaryOp::VectorDistance(metric),
-					right: Box::new(vector_operand(r)),
-				});
-			}
-			let bound_op = match op {
-				surrealdb_pgsql::ast::op::BinaryOperator::Add => BoundBinaryOp::Add,
-				surrealdb_pgsql::ast::op::BinaryOperator::Sub => BoundBinaryOp::Subtract,
-				surrealdb_pgsql::ast::op::BinaryOperator::Mul => BoundBinaryOp::Multiply,
-				surrealdb_pgsql::ast::op::BinaryOperator::Div => BoundBinaryOp::Divide,
-				surrealdb_pgsql::ast::op::BinaryOperator::Mod => BoundBinaryOp::Remainder,
-				surrealdb_pgsql::ast::op::BinaryOperator::Eq => BoundBinaryOp::Equal,
-				surrealdb_pgsql::ast::op::BinaryOperator::NotEq => BoundBinaryOp::NotEqual,
-				surrealdb_pgsql::ast::op::BinaryOperator::Lt => BoundBinaryOp::LessThan,
-				surrealdb_pgsql::ast::op::BinaryOperator::LtEq => BoundBinaryOp::LessThanEqual,
-				surrealdb_pgsql::ast::op::BinaryOperator::Gt => BoundBinaryOp::GreaterThan,
-				surrealdb_pgsql::ast::op::BinaryOperator::GtEq => BoundBinaryOp::GreaterThanEqual,
-				surrealdb_pgsql::ast::op::BinaryOperator::And => BoundBinaryOp::And,
-				surrealdb_pgsql::ast::op::BinaryOperator::Or => BoundBinaryOp::Or,
-				surrealdb_pgsql::ast::op::BinaryOperator::Concat => BoundBinaryOp::Concat,
-				surrealdb_pgsql::ast::op::BinaryOperator::Like => BoundBinaryOp::Like,
-				surrealdb_pgsql::ast::op::BinaryOperator::NotLike => {
-					return Ok(BoundExpr::Unary {
-						op: BoundUnaryOp::Not,
-						expr: Box::new(BoundExpr::Binary {
-							left: Box::new(l),
-							op: BoundBinaryOp::Like,
-							right: Box::new(r),
-						}),
-					});
-				}
-				surrealdb_pgsql::ast::op::BinaryOperator::ILike => BoundBinaryOp::ILike,
-				surrealdb_pgsql::ast::op::BinaryOperator::NotILike => {
-					return Ok(BoundExpr::Unary {
-						op: BoundUnaryOp::Not,
-						expr: Box::new(BoundExpr::Binary {
-							left: Box::new(l),
-							op: BoundBinaryOp::ILike,
-							right: Box::new(r),
-						}),
-					});
-				}
-				surrealdb_pgsql::ast::op::BinaryOperator::RegexMatch => BoundBinaryOp::Regexp,
-				surrealdb_pgsql::ast::op::BinaryOperator::RegexMatchCi => BoundBinaryOp::RegexpCi,
-				surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatch => {
-					return Ok(BoundExpr::Unary {
-						op: BoundUnaryOp::Not,
-						expr: Box::new(BoundExpr::Binary {
-							left: Box::new(l),
-							op: BoundBinaryOp::Regexp,
-							right: Box::new(r),
-						}),
-					});
-				}
-				surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatchCi => {
-					return Ok(BoundExpr::Unary {
-						op: BoundUnaryOp::Not,
-						expr: Box::new(BoundExpr::Binary {
-							left: Box::new(l),
-							op: BoundBinaryOp::RegexpCi,
-							right: Box::new(r),
-						}),
-					});
-				}
-				surrealdb_pgsql::ast::op::BinaryOperator::Exp => BoundBinaryOp::Power,
-				surrealdb_pgsql::ast::op::BinaryOperator::Arrow => BoundBinaryOp::JsonExtract,
-				surrealdb_pgsql::ast::op::BinaryOperator::LongArrow => {
-					BoundBinaryOp::JsonExtractText
-				}
-				surrealdb_pgsql::ast::op::BinaryOperator::HashArrow => {
-					BoundBinaryOp::JsonPathExtract
-				}
-				surrealdb_pgsql::ast::op::BinaryOperator::HashLongArrow => {
-					BoundBinaryOp::JsonPathExtractText
-				}
-				surrealdb_pgsql::ast::op::BinaryOperator::Contains => BoundBinaryOp::JsonContains,
-				surrealdb_pgsql::ast::op::BinaryOperator::BitAnd => {
-					return Ok(BoundExpr::FunctionCall {
-						name: crate::functions::BIT_AND.to_owned(),
-						args: vec![l, r],
-						distinct: false,
-					});
-				}
-				surrealdb_pgsql::ast::op::BinaryOperator::BitOr
-				| surrealdb_pgsql::ast::op::BinaryOperator::BitXor
-				| surrealdb_pgsql::ast::op::BinaryOperator::ShiftLeft
-				| surrealdb_pgsql::ast::op::BinaryOperator::ShiftRight
-				| surrealdb_pgsql::ast::op::BinaryOperator::SimilarTo
-				| surrealdb_pgsql::ast::op::BinaryOperator::NotSimilarTo
-				| surrealdb_pgsql::ast::op::BinaryOperator::ContainedBy
-				| surrealdb_pgsql::ast::op::BinaryOperator::Custom(_) => {
-					return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}")));
-				}
-			};
-			let (l, r) = coerce_comparison_operands(bound_op, l, r, catalog);
-			Ok(BoundExpr::Binary {
-				left: Box::new(l),
-				op: bound_op,
-				right: Box::new(r),
-			})
-		}
+		} => bind_binary_op(left, op, right, scope, catalog, policy),
 		Expr::FunctionCall {
 			name,
 			args,
@@ -1110,141 +1126,18 @@ pub fn bind_expr(
 			filter,
 			over,
 			..
-		} => {
-			let fn_name =
-				if name.parts.len() == 2 && name.parts[0].eq_ignore_ascii_case("pg_catalog") {
-					name.parts[1].to_ascii_lowercase()
-				} else {
-					name.parts.last().map(|s| s.to_ascii_lowercase()).unwrap_or_default()
-				};
-			let func_def = FunctionRegistry::lookup(&fn_name, SqlDialect::Postgres)
-				.ok_or_else(|| PlanError::UndefinedFunction(fn_name.clone()))?;
-
-			// Validate arity
-			if args.len() < func_def.min_args {
-				return Err(PlanError::FunctionArgumentCountMismatch {
-					name: fn_name.clone(),
-					expected: format!("at least {}", func_def.min_args),
-					got: args.len(),
-				});
-			}
-			if let Some(max_args) = func_def.max_args
-				&& args.len() > max_args
-			{
-				return Err(PlanError::FunctionArgumentCountMismatch {
-					name: fn_name.clone(),
-					expected: format!("at most {}", max_args),
-					got: args.len(),
-				});
-			}
-
-			if over.is_none() && func_def.kind == SqlFunctionKind::Window {
-				return Err(PlanError::WindowFunctionWithoutOver(fn_name.clone()));
-			}
-			if over.is_some() && func_def.kind == SqlFunctionKind::Scalar {
-				return Err(PlanError::WindowNotAllowed(format!("scalar function '{fn_name}'")));
-			}
-			// A FILTER applies to the rows an aggregate folds; no other function folds rows.
-			if filter.is_some() && func_def.kind != SqlFunctionKind::Aggregate {
-				return Err(PlanError::UnsupportedExpression(if over.is_some() {
-					format!("FILTER on the non-aggregate window function {fn_name}")
-				} else {
-					format!("FILTER on {fn_name}, which is not an aggregate function")
-				}));
-			}
-
-			let bound_args = if let Some(cond) = filter {
-				let bound_cond = bind_expr(cond, scope, catalog, policy)?;
-				if fn_name == "count"
-					&& (args.is_empty()
-						|| (args.len() == 1
-							&& matches!(&args[0], Expr::ColumnRef(col) if col.fields.len() == 1 && col.fields[0] == "*")))
-				{
-					// COUNT(*) FILTER (WHERE cond) -> count(CASE WHEN cond THEN 1 ELSE NULL END)
-					vec![BoundExpr::Case {
-						operand: None,
-						branches: vec![(bound_cond, BoundExpr::Literal(BoundLiteral::Integer(1)))],
-						else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
-					}]
-				} else if args.len() == 1
-					&& matches!(fn_name.as_str(), "array_agg" | "json_agg" | "jsonb_agg")
-				{
-					// These keep the NULLs the rewrite below would leave for every filtered row.
-					return Err(PlanError::UnsupportedExpression(format!(
-						"FILTER (WHERE ...) on {}",
-						fn_name.to_uppercase()
-					)));
-				} else if args.len() == 1 {
-					let bound_arg = bind_expr(&args[0], scope, catalog, policy)?;
-					// AGG(arg) FILTER (WHERE cond) -> agg(CASE WHEN cond THEN arg ELSE NULL END)
-					vec![BoundExpr::Case {
-						operand: None,
-						branches: vec![(bound_cond, bound_arg)],
-						else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
-					}]
-				} else {
-					return Err(PlanError::UnsupportedExpression(
-						"FILTER (WHERE ...) only supported on single-argument aggregates".into(),
-					));
-				}
-			} else if fn_name == "count"
-				&& args.len() == 1
-				&& matches!(&args[0], Expr::ColumnRef(col) if col.fields.len() == 1 && col.fields[0] == "*")
-			{
-				vec![BoundExpr::Column(BoundColumnRef {
-					relation_index: 0,
-					relation_name: String::new(),
-					column: "*".to_string(),
-					correlation_depth: 0,
-					id_table: None,
-					link_table: None,
-					declared_type: crate::SqlType::Unknown,
-					aggregate_output: false,
-					key_read: crate::ir::KeyRead::None,
-					also_in: Vec::new(),
-				})]
-			} else {
-				args.iter()
-					.map(|a| bind_expr(a, scope, catalog, policy))
-					.collect::<Result<Vec<_>, _>>()?
-			};
-
-			let bound_args =
-				if crate::vector::is_distance_function(&fn_name) || fn_name == "inner_product" {
-					bound_args.into_iter().map(vector_operand).collect()
-				} else {
-					bound_args
-				};
-			if let Some(call) =
-				bind_catalog_function(&fn_name, over.is_none(), &bound_args, catalog)?
-			{
-				return Ok(call);
-			}
-
-			if let Some(spec) = over {
-				if bound_args.iter().any(|a| a.contains_window()) {
-					return Err(PlanError::WindowNotAllowed("window function arguments".into()));
-				}
-				let bound_spec = bind_window_spec(spec, scope, catalog, policy)?;
-				Ok(BoundExpr::WindowFunction {
-					name: fn_name,
-					args: bound_args,
-					distinct: *distinct,
-					spec: bound_spec,
-				})
-			} else {
-				if crate::functions::FunctionRegistry::is_bound_aggregate(&fn_name)
-					&& bound_args.iter().any(|a| a.contains_window())
-				{
-					return Err(PlanError::WindowNotAllowed("aggregate function calls".into()));
-				}
-				Ok(BoundExpr::FunctionCall {
-					name: fn_name,
-					args: bound_args,
-					distinct: *distinct,
-				})
-			}
-		}
+		} => bind_function_call(
+			FunctionCallParts {
+				name,
+				args,
+				distinct: *distinct,
+				filter,
+				over,
+			},
+			scope,
+			catalog,
+			policy,
+		),
 		Expr::Case {
 			operand,
 			branches,
@@ -1325,44 +1218,20 @@ pub fn bind_expr(
 			expr,
 			data_type,
 			..
-		} => {
-			let val = bind_expr(expr, scope, catalog, policy)?;
-			let mut target_type = data_type.name.parts.join(".");
-			if data_type.name.parts.last().is_some_and(|name| name.eq_ignore_ascii_case("vector")) {
-				if !data_type.array_bounds.is_empty() {
-					return Err(PlanError::UnsupportedExpression(
-						"a cast to an array of vector".into(),
-					));
-				}
-				target_type = "vector".to_string();
-				if data_type.modifiers.len() > 1 {
-					return Err(PlanError::InvalidParameterValue(
-						"type modifier is not allowed for type \"vector\"".into(),
-					));
-				}
-				if let Some(dimensions) = data_type.modifiers.first() {
-					let dimensions = dimensions.parse::<i64>().map_err(|_| {
-						PlanError::InvalidParameterValue(format!(
-							"invalid type modifier for type vector: {dimensions}"
-						))
-					})?;
-					target_type =
-						format!("vector({})", crate::vector::check_dimensions(dimensions)?);
-				}
-			} else {
-				for _ in &data_type.array_bounds {
-					target_type.push_str("[]");
-				}
-			}
-			Ok(BoundExpr::Cast {
-				expr: Box::new(val),
-				target_type,
-			})
-		}
+		} => bind_type_cast(expr, data_type, scope, catalog, policy),
 		Expr::Grouping {
 			expr,
 			..
 		} => bind_expr(expr, scope, catalog, policy),
+		// A field of a composite value, which a column of a composite type holds as an object.
+		Expr::FieldSelect {
+			expr,
+			field,
+			..
+		} => Ok(BoundExpr::Access {
+			base: Box::new(bind_expr(expr, scope, catalog, policy)?),
+			field: field.clone(),
+		}),
 		Expr::IsDistinctFrom {
 			left,
 			right,
@@ -1433,162 +1302,14 @@ pub fn bind_expr(
 			quantifier,
 			array,
 			..
-		} => {
-			use surrealdb_pgsql::Quantifier;
-			use surrealdb_pgsql::ast::op::BinaryOperator;
-
-			let (BinaryOperator::Eq | BinaryOperator::NotEq) = op else {
-				return Err(PlanError::UnsupportedExpression(format!(
-					"{op:?} {quantifier:?} (array)"
-				)));
-			};
-			let equal = *op == BinaryOperator::Eq;
-			// The comparison and the quantifier are the two literal arguments of the internal
-			// function the lowering reads three-valued.
-			Ok(BoundExpr::FunctionCall {
-				name: crate::functions::QUANTIFIED_ARRAY.to_owned(),
-				args: vec![
-					bind_expr(expr, scope, catalog, policy)?,
-					bind_expr(array, scope, catalog, policy)?,
-					BoundExpr::Literal(BoundLiteral::Boolean(equal)),
-					BoundExpr::Literal(BoundLiteral::Boolean(matches!(
-						quantifier,
-						Quantifier::All
-					))),
-				],
-				distinct: false,
-			})
-		}
+		} => bind_quantified_array(expr, op, *quantifier, array, scope, catalog, policy),
 		Expr::Quantified {
 			expr,
 			op,
 			quantifier,
 			subquery,
 			..
-		} => {
-			use surrealdb_pgsql::Quantifier;
-			use surrealdb_pgsql::ast::op::BinaryOperator;
-
-			let val = bind_expr(expr, scope, catalog, policy)?;
-			let bound_subquery =
-				bind_select(subquery, catalog, policy, Some(Arc::new(scope.clone())))?;
-
-			match (op, quantifier) {
-				(BinaryOperator::Eq, Quantifier::Any | Quantifier::Some) => {
-					Ok(BoundExpr::InSubquery {
-						expr: Box::new(val),
-						subquery: Box::new(bound_subquery),
-						negated: false,
-					})
-				}
-				(BinaryOperator::NotEq, Quantifier::All) => Ok(BoundExpr::InSubquery {
-					expr: Box::new(val),
-					subquery: Box::new(bound_subquery),
-					negated: true,
-				}),
-				_ => {
-					let bound_op = match op {
-						BinaryOperator::Lt => BoundBinaryOp::LessThan,
-						BinaryOperator::LtEq => BoundBinaryOp::LessThanEqual,
-						BinaryOperator::Gt => BoundBinaryOp::GreaterThan,
-						BinaryOperator::GtEq => BoundBinaryOp::GreaterThanEqual,
-						BinaryOperator::Eq => BoundBinaryOp::Equal,
-						BinaryOperator::NotEq => BoundBinaryOp::NotEqual,
-						BinaryOperator::Add
-						| BinaryOperator::Sub
-						| BinaryOperator::Mul
-						| BinaryOperator::Div
-						| BinaryOperator::Mod
-						| BinaryOperator::Exp
-						| BinaryOperator::BitAnd
-						| BinaryOperator::BitOr
-						| BinaryOperator::BitXor
-						| BinaryOperator::ShiftLeft
-						| BinaryOperator::ShiftRight
-						| BinaryOperator::And
-						| BinaryOperator::Or
-						| BinaryOperator::Concat
-						| BinaryOperator::Like
-						| BinaryOperator::NotLike
-						| BinaryOperator::ILike
-						| BinaryOperator::NotILike
-						| BinaryOperator::SimilarTo
-						| BinaryOperator::NotSimilarTo
-						| BinaryOperator::RegexMatch
-						| BinaryOperator::RegexMatchCi
-						| BinaryOperator::RegexNotMatch
-						| BinaryOperator::RegexNotMatchCi
-						| BinaryOperator::Arrow
-						| BinaryOperator::LongArrow
-						| BinaryOperator::HashArrow
-						| BinaryOperator::HashLongArrow
-						| BinaryOperator::Contains
-						| BinaryOperator::ContainedBy
-						| BinaryOperator::Custom(_) => {
-							return Err(PlanError::UnsupportedExpression(format!(
-								"Quantified op {op:?}"
-							)));
-						}
-					};
-					let agg_fn = match (op, quantifier) {
-						(
-							BinaryOperator::Gt | BinaryOperator::GtEq,
-							Quantifier::Any | Quantifier::Some,
-						) => "min",
-						(BinaryOperator::Gt | BinaryOperator::GtEq, Quantifier::All) => "max",
-						(
-							BinaryOperator::Lt | BinaryOperator::LtEq,
-							Quantifier::Any | Quantifier::Some,
-						) => "max",
-						(BinaryOperator::Lt | BinaryOperator::LtEq, Quantifier::All) => "min",
-						_ => {
-							return Err(PlanError::UnsupportedExpression(format!(
-								"Quantified comparison {op:?} {quantifier:?}"
-							)));
-						}
-					};
-
-					// The comparison is rewritten over one aggregate of the subquery's column,
-					// which reads the same only where the subquery answers every row of its
-					// source once.
-					if !bound_subquery.group_by.is_empty()
-						|| bound_subquery.having.is_some()
-						|| bound_subquery.set_op.is_some()
-						|| bound_subquery.limit.is_some()
-						|| bound_subquery.offset.is_some()
-					{
-						return Err(PlanError::UnsupportedExpression(
-							"a quantified comparison over a subquery with GROUP BY, HAVING, LIMIT, OFFSET or a set operation"
-								.into(),
-						));
-					}
-					// A `DISTINCT` or an `ORDER BY` of the subquery changes no `min` or `max` of
-					// its column, so the aggregate is taken over the rows it reads.
-					let mut transformed_subquery = bound_subquery;
-					transformed_subquery.distinct = None;
-					transformed_subquery.order_by.clear();
-					if transformed_subquery.targets.len() == 1 {
-						let original_expr = transformed_subquery.targets[0].expr.clone();
-						transformed_subquery.targets[0].expr = BoundExpr::FunctionCall {
-							name: agg_fn.to_string(),
-							args: vec![original_expr],
-							distinct: false,
-						};
-						Ok(BoundExpr::Binary {
-							left: Box::new(val),
-							op: bound_op,
-							right: Box::new(BoundExpr::ScalarSubquery(Box::new(
-								transformed_subquery,
-							))),
-						})
-					} else {
-						Err(PlanError::UnsupportedExpression(
-							"Quantified subquery must return exactly 1 column".into(),
-						))
-					}
-				}
-			}
-		}
+		} => bind_quantified(expr, op, *quantifier, subquery, scope, catalog, policy),
 		Expr::Subscript {
 			expr,
 			index,
@@ -1649,6 +1370,624 @@ pub fn bind_expr(
 			..
 		} => Err(PlanError::UnsupportedExpression(format!("{expr:?}"))),
 	}
+}
+
+/// A comparison quantified over a subquery, `x op ANY (SELECT ...)`. Out of line from
+/// [`bind_expr`], whose frame every level of a nested expression holds, so that frame does not
+/// carry this arm's temporaries.
+#[inline(never)]
+fn bind_quantified(
+	expr: &Expr,
+	op: &surrealdb_pgsql::BinaryOperator,
+	quantifier: surrealdb_pgsql::Quantifier,
+	subquery: &surrealdb_pgsql::ast::stmt::SelectStmt,
+	scope: &QueryScope,
+	catalog: &dyn BinderCatalog,
+	policy: &DialectPolicy,
+) -> Result<BoundExpr, PlanError> {
+	use surrealdb_pgsql::Quantifier;
+	use surrealdb_pgsql::ast::op::BinaryOperator;
+
+	let val = bind_expr(expr, scope, catalog, policy)?;
+	let bound_subquery = bind_select(subquery, catalog, policy, Some(Arc::new(scope.clone())))?;
+
+	match (op, quantifier) {
+		(BinaryOperator::Eq, Quantifier::Any | Quantifier::Some) => Ok(BoundExpr::InSubquery {
+			expr: Box::new(val),
+			subquery: Box::new(bound_subquery),
+			negated: false,
+		}),
+		(BinaryOperator::NotEq, Quantifier::All) => Ok(BoundExpr::InSubquery {
+			expr: Box::new(val),
+			subquery: Box::new(bound_subquery),
+			negated: true,
+		}),
+		_ => {
+			let bound_op = match op {
+				BinaryOperator::Lt => BoundBinaryOp::LessThan,
+				BinaryOperator::LtEq => BoundBinaryOp::LessThanEqual,
+				BinaryOperator::Gt => BoundBinaryOp::GreaterThan,
+				BinaryOperator::GtEq => BoundBinaryOp::GreaterThanEqual,
+				BinaryOperator::Eq => BoundBinaryOp::Equal,
+				BinaryOperator::NotEq => BoundBinaryOp::NotEqual,
+				BinaryOperator::Add
+				| BinaryOperator::Sub
+				| BinaryOperator::Mul
+				| BinaryOperator::Div
+				| BinaryOperator::Mod
+				| BinaryOperator::Exp
+				| BinaryOperator::BitAnd
+				| BinaryOperator::BitOr
+				| BinaryOperator::BitXor
+				| BinaryOperator::ShiftLeft
+				| BinaryOperator::ShiftRight
+				| BinaryOperator::And
+				| BinaryOperator::Or
+				| BinaryOperator::Concat
+				| BinaryOperator::Like
+				| BinaryOperator::NotLike
+				| BinaryOperator::ILike
+				| BinaryOperator::NotILike
+				| BinaryOperator::SimilarTo
+				| BinaryOperator::NotSimilarTo
+				| BinaryOperator::RegexMatch
+				| BinaryOperator::RegexMatchCi
+				| BinaryOperator::RegexNotMatch
+				| BinaryOperator::RegexNotMatchCi
+				| BinaryOperator::Arrow
+				| BinaryOperator::LongArrow
+				| BinaryOperator::HashArrow
+				| BinaryOperator::HashLongArrow
+				| BinaryOperator::Contains
+				| BinaryOperator::ContainedBy
+				| BinaryOperator::Custom(_) => {
+					return Err(PlanError::UnsupportedExpression(format!("Quantified op {op:?}")));
+				}
+			};
+			let agg_fn = match (op, quantifier) {
+				(BinaryOperator::Gt | BinaryOperator::GtEq, Quantifier::Any | Quantifier::Some) => {
+					"min"
+				}
+				(BinaryOperator::Gt | BinaryOperator::GtEq, Quantifier::All) => "max",
+				(BinaryOperator::Lt | BinaryOperator::LtEq, Quantifier::Any | Quantifier::Some) => {
+					"max"
+				}
+				(BinaryOperator::Lt | BinaryOperator::LtEq, Quantifier::All) => "min",
+				_ => {
+					return Err(PlanError::UnsupportedExpression(format!(
+						"Quantified comparison {op:?} {quantifier:?}"
+					)));
+				}
+			};
+
+			// The comparison is rewritten over one aggregate of the subquery's column,
+			// which reads the same only where the subquery answers every row of its
+			// source once.
+			if !bound_subquery.group_by.is_empty()
+				|| bound_subquery.having.is_some()
+				|| bound_subquery.set_op.is_some()
+				|| bound_subquery.limit.is_some()
+				|| bound_subquery.offset.is_some()
+			{
+				return Err(PlanError::UnsupportedExpression(
+						"a quantified comparison over a subquery with GROUP BY, HAVING, LIMIT, OFFSET or a set operation"
+							.into(),
+					));
+			}
+			// A `DISTINCT` or an `ORDER BY` of the subquery changes no `min` or `max` of
+			// its column, so the aggregate is taken over the rows it reads.
+			let mut transformed_subquery = bound_subquery;
+			transformed_subquery.distinct = None;
+			transformed_subquery.order_by.clear();
+			if transformed_subquery.targets.len() == 1 {
+				let original_expr = transformed_subquery.targets[0].expr.clone();
+				transformed_subquery.targets[0].expr = BoundExpr::FunctionCall {
+					name: agg_fn.to_string(),
+					args: vec![original_expr],
+					distinct: false,
+				};
+				Ok(BoundExpr::Binary {
+					left: Box::new(val),
+					op: bound_op,
+					right: Box::new(BoundExpr::ScalarSubquery(Box::new(transformed_subquery))),
+				})
+			} else {
+				Err(PlanError::UnsupportedExpression(
+					"Quantified subquery must return exactly 1 column".into(),
+				))
+			}
+		}
+	}
+}
+
+/// A comparison quantified over an array, `x op ANY (array)`. Out of line from [`bind_expr`], whose
+/// frame every level of a nested expression holds, so that frame does not carry this arm's
+/// temporaries.
+#[inline(never)]
+fn bind_quantified_array(
+	expr: &Expr,
+	op: &surrealdb_pgsql::BinaryOperator,
+	quantifier: surrealdb_pgsql::Quantifier,
+	array: &Expr,
+	scope: &QueryScope,
+	catalog: &dyn BinderCatalog,
+	policy: &DialectPolicy,
+) -> Result<BoundExpr, PlanError> {
+	use surrealdb_pgsql::Quantifier;
+	use surrealdb_pgsql::ast::op::BinaryOperator;
+
+	let (BinaryOperator::Eq | BinaryOperator::NotEq) = op else {
+		return Err(PlanError::UnsupportedExpression(format!("{op:?} {quantifier:?} (array)")));
+	};
+	let equal = *op == BinaryOperator::Eq;
+	// The comparison and the quantifier are the two literal arguments of the internal
+	// function the lowering reads three-valued.
+	Ok(BoundExpr::FunctionCall {
+		name: crate::functions::QUANTIFIED_ARRAY.to_owned(),
+		args: vec![
+			bind_expr(expr, scope, catalog, policy)?,
+			bind_expr(array, scope, catalog, policy)?,
+			BoundExpr::Literal(BoundLiteral::Boolean(equal)),
+			BoundExpr::Literal(BoundLiteral::Boolean(matches!(quantifier, Quantifier::All))),
+		],
+		distinct: false,
+	})
+}
+
+/// A cast, `expr::type` or `CAST(expr AS type)`. Out of line from [`bind_expr`], whose frame every
+/// level of a nested expression holds, so that frame does not carry this arm's temporaries.
+#[inline(never)]
+/// The attributes of the composite type `data_type` names, each paired with the value of `expr`
+/// at its position, when `expr` is a row constructor (`ROW(...)` or `(a, b, ...)`) and the type
+/// is a composite type of `catalog`. A row of another number of values than the type has
+/// attributes is refused.
+pub(crate) fn composite_row<'e>(
+	expr: &'e Expr,
+	data_type: &surrealdb_pgsql::ast::expr::TypeName,
+	catalog: &dyn BinderCatalog,
+) -> Result<Option<Vec<(String, &'e Expr)>>, PlanError> {
+	let mut inner = expr;
+	while let Expr::Grouping {
+		expr,
+		..
+	} = inner
+	{
+		inner = expr;
+	}
+	let Expr::Row {
+		fields,
+		..
+	} = inner
+	else {
+		return Ok(None);
+	};
+	if !data_type.array_bounds.is_empty() || data_type.name.parts.len() > 2 {
+		return Ok(None);
+	}
+	let Some(name) = data_type.name.parts.last() else {
+		return Ok(None);
+	};
+	let Some(composite) =
+		catalog.composite_type(name).or_else(|| catalog.composite_type(&name.to_lowercase()))
+	else {
+		return Ok(None);
+	};
+	if fields.len() != composite.fields.len() {
+		return Err(PlanError::DataException(format!(
+			"cannot cast a row of {} values to the type {} of {} attributes",
+			fields.len(),
+			composite.name,
+			composite.fields.len()
+		)));
+	}
+	Ok(Some(composite.fields.into_iter().map(|(field, _)| field).zip(fields.iter()).collect()))
+}
+
+fn bind_type_cast(
+	expr: &Expr,
+	data_type: &surrealdb_pgsql::ast::expr::TypeName,
+	scope: &QueryScope,
+	catalog: &dyn BinderCatalog,
+	policy: &DialectPolicy,
+) -> Result<BoundExpr, PlanError> {
+	if let Some(fields) = composite_row(expr, data_type, catalog)? {
+		// The object of the composite value: each attribute named, with the value at its position.
+		let mut args = Vec::with_capacity(fields.len() * 2);
+		for (name, value) in fields {
+			args.push(BoundExpr::Literal(BoundLiteral::String(name)));
+			args.push(bind_expr(value, scope, catalog, policy)?);
+		}
+		return Ok(BoundExpr::FunctionCall {
+			name: "json_build_object".to_owned(),
+			args,
+			distinct: false,
+		});
+	}
+	let val = bind_expr(expr, scope, catalog, policy)?;
+	let mut target_type = data_type.name.parts.join(".");
+	if data_type.name.parts.last().is_some_and(|name| name.eq_ignore_ascii_case("vector")) {
+		if !data_type.array_bounds.is_empty() {
+			return Err(PlanError::UnsupportedExpression("a cast to an array of vector".into()));
+		}
+		target_type = "vector".to_string();
+		if data_type.modifiers.len() > 1 {
+			return Err(PlanError::InvalidParameterValue(
+				"type modifier is not allowed for type \"vector\"".into(),
+			));
+		}
+		if let Some(dimensions) = data_type.modifiers.first() {
+			let dimensions = dimensions.parse::<i64>().map_err(|_| {
+				PlanError::InvalidParameterValue(format!(
+					"invalid type modifier for type vector: {dimensions}"
+				))
+			})?;
+			target_type = format!("vector({})", crate::vector::check_dimensions(dimensions)?);
+		}
+	} else {
+		// A `numeric` keeps its precision and scale, which choose a `decimal` or a `bigdecimal`.
+		let numeric = data_type.name.parts.last().is_some_and(|name| {
+			matches!(name.to_ascii_lowercase().as_str(), "numeric" | "decimal" | "dec")
+		});
+		if numeric && !data_type.modifiers.is_empty() {
+			target_type = format!("{target_type}({})", data_type.modifiers.join(","));
+		}
+		// An interval keeps its field qualifier and its precision, written as the declared type
+		// (`interval hour`, `interval day to second(3)`, `interval(2)`), which the cast truncates
+		// and rounds to. An array of intervals is a cast to `interval[]`.
+		if let [name] = data_type.name.parts.as_slice() {
+			let qualified = name.strip_prefix("interval ").is_some_and(|fields| {
+				surrealdb_pgsql::ast::expr::INTERVAL_FIELD_QUALIFIERS.contains(&fields)
+			});
+			if qualified || name.eq_ignore_ascii_case("interval") {
+				target_type = if !data_type.array_bounds.is_empty() {
+					"interval".to_string()
+				} else if data_type.modifiers.is_empty() {
+					name.to_ascii_lowercase()
+				} else {
+					format!("{}({})", name.to_ascii_lowercase(), data_type.modifiers.join(","))
+				};
+			}
+		}
+		for _ in &data_type.array_bounds {
+			target_type.push_str("[]");
+		}
+	}
+	// A type that is none of the built-in ones but an enum of the database is the enum.
+	// A built-in type is never asked of the catalog, which keeps the ordinary cast from
+	// reading the database's enum types.
+	let is_builtin = crate::SqlType::from_name(&target_type) != crate::SqlType::Unknown
+		|| !matches!(
+			crate::lower::expr::cast_kind(&target_type, SqlDialect::Postgres),
+			surrealdb_expr::expr::Kind::Any
+		);
+	let enum_name = (data_type.name.parts.len() <= 2 && !is_builtin)
+		.then(|| data_type.name.parts.last())
+		.flatten()
+		.filter(|name| catalog.enum_type(name).is_some());
+	if let Some(name) = enum_name {
+		target_type = format!("enum:{name}");
+		for _ in &data_type.array_bounds {
+			target_type.push_str("[]");
+		}
+	}
+	if target_type.eq_ignore_ascii_case("regtype") {
+		let enums = catalog.enum_types();
+		if !enums.is_empty() && !matches!(val, BoundExpr::Literal(_)) {
+			// An oid that names an enum type reads as the type's name.
+			let branches = enums
+				.iter()
+				.flat_map(|ty| {
+					[
+						(
+							BoundExpr::Literal(BoundLiteral::Integer(i64::from(
+								crate::descriptor::enum_type_oid(ty.id),
+							))),
+							BoundExpr::Literal(BoundLiteral::String(ty.name.clone())),
+						),
+						(
+							BoundExpr::Literal(BoundLiteral::Integer(i64::from(
+								crate::descriptor::enum_array_type_oid(ty.id),
+							))),
+							BoundExpr::Literal(BoundLiteral::String(format!("{}[]", ty.name))),
+						),
+					]
+				})
+				.collect();
+			return Ok(BoundExpr::Case {
+				operand: Some(Box::new(val.clone())),
+				branches,
+				else_expr: Some(Box::new(BoundExpr::Cast {
+					expr: Box::new(val),
+					target_type,
+				})),
+			});
+		}
+	}
+	Ok(BoundExpr::Cast {
+		expr: Box::new(val),
+		target_type,
+	})
+}
+
+/// The parts of a function call expression that [`bind_function_call`] binds.
+#[derive(Clone, Copy)]
+struct FunctionCallParts<'a> {
+	name: &'a QualifiedName,
+	args: &'a [Expr],
+	distinct: bool,
+	filter: &'a Option<Box<Expr>>,
+	over: &'a Option<surrealdb_pgsql::ast::expr::WindowSpec>,
+}
+
+/// A function, aggregate or window call. Out of line from [`bind_expr`], whose frame every level of
+/// a nested expression holds, so that frame does not carry this arm's temporaries.
+#[inline(never)]
+fn bind_function_call(
+	call: FunctionCallParts<'_>,
+	scope: &QueryScope,
+	catalog: &dyn BinderCatalog,
+	policy: &DialectPolicy,
+) -> Result<BoundExpr, PlanError> {
+	let FunctionCallParts {
+		name,
+		args,
+		distinct,
+		filter,
+		over,
+	} = call;
+	let fn_name = if name.parts.len() == 2 && name.parts[0].eq_ignore_ascii_case("pg_catalog") {
+		name.parts[1].to_ascii_lowercase()
+	} else {
+		name.parts.last().map(|s| s.to_ascii_lowercase()).unwrap_or_default()
+	};
+	let func_def = FunctionRegistry::lookup(&fn_name, SqlDialect::Postgres)
+		.ok_or_else(|| PlanError::UndefinedFunction(fn_name.clone()))?;
+
+	// Validate arity
+	if args.len() < func_def.min_args {
+		return Err(PlanError::FunctionArgumentCountMismatch {
+			name: fn_name.clone(),
+			expected: format!("at least {}", func_def.min_args),
+			got: args.len(),
+		});
+	}
+	if let Some(max_args) = func_def.max_args
+		&& args.len() > max_args
+	{
+		return Err(PlanError::FunctionArgumentCountMismatch {
+			name: fn_name.clone(),
+			expected: format!("at most {}", max_args),
+			got: args.len(),
+		});
+	}
+
+	if over.is_none() && func_def.kind == SqlFunctionKind::Window {
+		return Err(PlanError::WindowFunctionWithoutOver(fn_name.clone()));
+	}
+	if over.is_some() && func_def.kind == SqlFunctionKind::Scalar {
+		return Err(PlanError::WindowNotAllowed(format!("scalar function '{fn_name}'")));
+	}
+	// A FILTER applies to the rows an aggregate folds; no other function folds rows.
+	if filter.is_some() && func_def.kind != SqlFunctionKind::Aggregate {
+		return Err(PlanError::UnsupportedExpression(if over.is_some() {
+			format!("FILTER on the non-aggregate window function {fn_name}")
+		} else {
+			format!("FILTER on {fn_name}, which is not an aggregate function")
+		}));
+	}
+
+	let bound_args = if let Some(cond) = filter {
+		let bound_cond = bind_expr(cond, scope, catalog, policy)?;
+		if fn_name == "count"
+			&& (args.is_empty()
+				|| (args.len() == 1
+					&& matches!(&args[0], Expr::ColumnRef(col) if col.fields.len() == 1 && col.fields[0] == "*")))
+		{
+			// COUNT(*) FILTER (WHERE cond) -> count(CASE WHEN cond THEN 1 ELSE NULL END)
+			vec![BoundExpr::Case {
+				operand: None,
+				branches: vec![(bound_cond, BoundExpr::Literal(BoundLiteral::Integer(1)))],
+				else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
+			}]
+		} else if args.len() == 1
+			&& matches!(fn_name.as_str(), "array_agg" | "json_agg" | "jsonb_agg")
+		{
+			// These keep the NULLs the rewrite below would leave for every filtered row.
+			return Err(PlanError::UnsupportedExpression(format!(
+				"FILTER (WHERE ...) on {}",
+				fn_name.to_uppercase()
+			)));
+		} else if args.len() == 1 {
+			let bound_arg = bind_expr(&args[0], scope, catalog, policy)?;
+			// AGG(arg) FILTER (WHERE cond) -> agg(CASE WHEN cond THEN arg ELSE NULL END)
+			vec![BoundExpr::Case {
+				operand: None,
+				branches: vec![(bound_cond, bound_arg)],
+				else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
+			}]
+		} else {
+			return Err(PlanError::UnsupportedExpression(
+				"FILTER (WHERE ...) only supported on single-argument aggregates".into(),
+			));
+		}
+	} else if fn_name == "count"
+		&& args.len() == 1
+		&& matches!(&args[0], Expr::ColumnRef(col) if col.fields.len() == 1 && col.fields[0] == "*")
+	{
+		vec![BoundExpr::Column(BoundColumnRef {
+			relation_index: 0,
+			relation_name: String::new(),
+			column: "*".to_string(),
+			correlation_depth: 0,
+			id_table: None,
+			link_table: None,
+			enum_column: None,
+			composite: None,
+			declared_sql: None,
+			declared_type: crate::SqlType::Unknown,
+			aggregate_output: false,
+			key_read: crate::ir::KeyRead::None,
+			also_in: Vec::new(),
+		})]
+	} else {
+		args.iter().map(|a| bind_expr(a, scope, catalog, policy)).collect::<Result<Vec<_>, _>>()?
+	};
+
+	let bound_args = if crate::vector::is_distance_function(&fn_name) || fn_name == "inner_product"
+	{
+		bound_args.into_iter().map(vector_operand).collect()
+	} else {
+		bound_args
+	};
+	if let Some(call) = bind_catalog_function(&fn_name, over.is_none(), &bound_args, catalog)? {
+		return Ok(call);
+	}
+
+	if let Some(spec) = over {
+		if bound_args.iter().any(|a| a.contains_window()) {
+			return Err(PlanError::WindowNotAllowed("window function arguments".into()));
+		}
+		let bound_spec = bind_window_spec(spec, scope, catalog, policy)?;
+		Ok(BoundExpr::WindowFunction {
+			name: fn_name,
+			args: bound_args,
+			distinct,
+			spec: bound_spec,
+		})
+	} else {
+		if crate::functions::FunctionRegistry::is_bound_aggregate(&fn_name)
+			&& bound_args.iter().any(|a| a.contains_window())
+		{
+			return Err(PlanError::WindowNotAllowed("aggregate function calls".into()));
+		}
+		Ok(BoundExpr::FunctionCall {
+			name: fn_name,
+			args: bound_args,
+			distinct,
+		})
+	}
+}
+
+/// A binary operator applied to two operands. Out of line from [`bind_expr`], whose frame every
+/// level of a nested expression holds, so that frame does not carry this arm's temporaries.
+#[inline(never)]
+fn bind_binary_op(
+	left: &Expr,
+	op: &surrealdb_pgsql::BinaryOperator,
+	right: &Expr,
+	scope: &QueryScope,
+	catalog: &dyn BinderCatalog,
+	policy: &DialectPolicy,
+) -> Result<BoundExpr, PlanError> {
+	let l = bind_expr(left, scope, catalog, policy)?;
+	let r = bind_expr(right, scope, catalog, policy)?;
+	if let surrealdb_pgsql::ast::op::BinaryOperator::Custom(custom) = op
+		&& let Some(metric) = crate::vector::VectorMetric::from_operator(custom)
+	{
+		return Ok(BoundExpr::Binary {
+			left: Box::new(vector_operand(l)),
+			op: BoundBinaryOp::VectorDistance(metric),
+			right: Box::new(vector_operand(r)),
+		});
+	}
+	let bound_op = match op {
+		surrealdb_pgsql::ast::op::BinaryOperator::Add => BoundBinaryOp::Add,
+		surrealdb_pgsql::ast::op::BinaryOperator::Sub => BoundBinaryOp::Subtract,
+		surrealdb_pgsql::ast::op::BinaryOperator::Mul => BoundBinaryOp::Multiply,
+		surrealdb_pgsql::ast::op::BinaryOperator::Div => BoundBinaryOp::Divide,
+		surrealdb_pgsql::ast::op::BinaryOperator::Mod => BoundBinaryOp::Remainder,
+		surrealdb_pgsql::ast::op::BinaryOperator::Eq => BoundBinaryOp::Equal,
+		surrealdb_pgsql::ast::op::BinaryOperator::NotEq => BoundBinaryOp::NotEqual,
+		surrealdb_pgsql::ast::op::BinaryOperator::Lt => BoundBinaryOp::LessThan,
+		surrealdb_pgsql::ast::op::BinaryOperator::LtEq => BoundBinaryOp::LessThanEqual,
+		surrealdb_pgsql::ast::op::BinaryOperator::Gt => BoundBinaryOp::GreaterThan,
+		surrealdb_pgsql::ast::op::BinaryOperator::GtEq => BoundBinaryOp::GreaterThanEqual,
+		surrealdb_pgsql::ast::op::BinaryOperator::And => BoundBinaryOp::And,
+		surrealdb_pgsql::ast::op::BinaryOperator::Or => BoundBinaryOp::Or,
+		surrealdb_pgsql::ast::op::BinaryOperator::Concat => BoundBinaryOp::Concat,
+		surrealdb_pgsql::ast::op::BinaryOperator::Like => BoundBinaryOp::Like,
+		surrealdb_pgsql::ast::op::BinaryOperator::NotLike => {
+			return Ok(BoundExpr::Unary {
+				op: BoundUnaryOp::Not,
+				expr: Box::new(BoundExpr::Binary {
+					left: Box::new(l),
+					op: BoundBinaryOp::Like,
+					right: Box::new(r),
+				}),
+			});
+		}
+		surrealdb_pgsql::ast::op::BinaryOperator::ILike => BoundBinaryOp::ILike,
+		surrealdb_pgsql::ast::op::BinaryOperator::NotILike => {
+			return Ok(BoundExpr::Unary {
+				op: BoundUnaryOp::Not,
+				expr: Box::new(BoundExpr::Binary {
+					left: Box::new(l),
+					op: BoundBinaryOp::ILike,
+					right: Box::new(r),
+				}),
+			});
+		}
+		surrealdb_pgsql::ast::op::BinaryOperator::RegexMatch => BoundBinaryOp::Regexp,
+		surrealdb_pgsql::ast::op::BinaryOperator::RegexMatchCi => BoundBinaryOp::RegexpCi,
+		surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatch => {
+			return Ok(BoundExpr::Unary {
+				op: BoundUnaryOp::Not,
+				expr: Box::new(BoundExpr::Binary {
+					left: Box::new(l),
+					op: BoundBinaryOp::Regexp,
+					right: Box::new(r),
+				}),
+			});
+		}
+		surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatchCi => {
+			return Ok(BoundExpr::Unary {
+				op: BoundUnaryOp::Not,
+				expr: Box::new(BoundExpr::Binary {
+					left: Box::new(l),
+					op: BoundBinaryOp::RegexpCi,
+					right: Box::new(r),
+				}),
+			});
+		}
+		surrealdb_pgsql::ast::op::BinaryOperator::Exp => BoundBinaryOp::Power,
+		surrealdb_pgsql::ast::op::BinaryOperator::Arrow => BoundBinaryOp::JsonExtract,
+		surrealdb_pgsql::ast::op::BinaryOperator::LongArrow => BoundBinaryOp::JsonExtractText,
+		surrealdb_pgsql::ast::op::BinaryOperator::HashArrow => BoundBinaryOp::JsonPathExtract,
+		surrealdb_pgsql::ast::op::BinaryOperator::HashLongArrow => {
+			BoundBinaryOp::JsonPathExtractText
+		}
+		surrealdb_pgsql::ast::op::BinaryOperator::Contains => BoundBinaryOp::JsonContains,
+		// `a <@ b` is `b @> a`.
+		surrealdb_pgsql::ast::op::BinaryOperator::ContainedBy => {
+			return Ok(BoundExpr::Binary {
+				left: Box::new(r),
+				op: BoundBinaryOp::JsonContains,
+				right: Box::new(l),
+			});
+		}
+		surrealdb_pgsql::ast::op::BinaryOperator::BitAnd => {
+			return Ok(BoundExpr::FunctionCall {
+				name: crate::functions::BIT_AND.to_owned(),
+				args: vec![l, r],
+				distinct: false,
+			});
+		}
+		surrealdb_pgsql::ast::op::BinaryOperator::BitOr
+		| surrealdb_pgsql::ast::op::BinaryOperator::BitXor
+		| surrealdb_pgsql::ast::op::BinaryOperator::ShiftLeft
+		| surrealdb_pgsql::ast::op::BinaryOperator::ShiftRight
+		| surrealdb_pgsql::ast::op::BinaryOperator::SimilarTo
+		| surrealdb_pgsql::ast::op::BinaryOperator::NotSimilarTo
+		| surrealdb_pgsql::ast::op::BinaryOperator::Custom(_) => {
+			return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}")));
+		}
+	};
+	let (l, r) = coerce_comparison_operands(bound_op, l, r, catalog);
+	Ok(BoundExpr::Binary {
+		left: Box::new(l),
+		op: bound_op,
+		right: Box::new(r),
+	})
 }
 
 fn select_contains_table_reference(stmt: &SelectStmt, table_name: &str) -> bool {

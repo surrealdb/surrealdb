@@ -186,11 +186,19 @@ impl SurrealValue for RecordIdKey {
 			| Value::Null
 			| Value::Bool(_)
 			| Value::Number(
-				Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_),
+				Number::Float(_)
+				| Number::Decimal(_)
+				| Number::BigDecimal(_)
+				| Number::F16(_)
+				| Number::F32(_),
 			)
 			| Value::Bytes(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Geometry(_)
 			| Value::Table(_)
 			| Value::RecordId(_)
@@ -239,11 +247,19 @@ impl SurrealValue for RecordIdKey {
 			| Value::Null
 			| Value::Bool(_)
 			| Value::Number(
-				Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_),
+				Number::Float(_)
+				| Number::Decimal(_)
+				| Number::BigDecimal(_)
+				| Number::F16(_)
+				| Number::F32(_),
 			)
 			| Value::Bytes(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Geometry(_)
 			| Value::Table(_)
 			| Value::RecordId(_)

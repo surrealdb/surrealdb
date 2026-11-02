@@ -52,7 +52,11 @@ impl Request {
 				| PublicValue::Uuid(_)
 				| PublicValue::Number(_)
 				| PublicValue::String(_)
-				| PublicValue::Datetime(_),
+				| PublicValue::Datetime(_)
+				| PublicValue::Date(_)
+				| PublicValue::Time(_)
+				| PublicValue::Timestamp(_)
+				| PublicValue::Interval(_),
 			) => id,
 			_ => return Err(invalid_request()),
 		};

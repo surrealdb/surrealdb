@@ -582,6 +582,35 @@ pub(crate) enum DefineObject {
 		start: OperandSlot,
 		timeout: OperandSlot,
 	},
+	Enum {
+		name: Strand,
+		/// The labels in declaration order.
+		labels: Box<[String]>,
+		comment: OperandSlot,
+		permissions: PermissionShape,
+	},
+	/// A domain or composite type, whose whole definition is the op's template.
+	UserType {
+		name: Strand,
+	},
+}
+
+/// One change `ALTER ENUM` makes to the labels of an enum.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum EnumEdit {
+	/// `ADD VALUE`: `value` is placed before or after `anchor` when one is named (`after`
+	/// choosing the side), and last otherwise.
+	Add {
+		value: String,
+		anchor: Option<String>,
+		after: bool,
+		if_not_exists: bool,
+	},
+	/// `RENAME VALUE`.
+	Rename {
+		from: String,
+		to: String,
+	},
 }
 
 /// `DEFINE FUNCTION`.
@@ -640,6 +669,8 @@ pub(crate) struct DefineField {
 	/// `MIGRATE EXISTING ROWS`, as written: its transform is compiled, and its `FALLBACK` read
 	/// as a constant, where the statement commits the migration.
 	pub(crate) migrate: Option<Box<MigrateClause>>,
+	/// The `SQL TYPE` clause, as written.
+	pub(crate) sql_type: Option<crate::expr::statements::define::SqlType>,
 }
 
 /// `DEFINE USER`.
@@ -747,6 +778,14 @@ pub(crate) enum RemoveObject {
 	Config {
 		kind: ConfigKind,
 	},
+	Enum {
+		name: Strand,
+	},
+	/// A domain when `domain`, a composite type otherwise.
+	UserType {
+		name: Strand,
+		domain: bool,
+	},
 }
 
 /// One clause of `ALTER API`.
@@ -841,6 +880,10 @@ pub(crate) enum AlterObject {
 		comment: AlterKind<String>,
 		permissions: Option<PermissionShape>,
 	},
+	Enum {
+		name: Strand,
+		edits: Box<[EnumEdit]>,
+	},
 }
 
 /// `ALTER TABLE`.
@@ -891,6 +934,8 @@ pub(crate) struct AlterField {
 	pub(crate) reference: AlterKind<ReferenceShape>,
 	/// `MIGRATE EXISTING ROWS`, as written.
 	pub(crate) migrate: Option<Box<MigrateClause>>,
+	/// Set or drop the `SQL TYPE` clause.
+	pub(crate) sql_type: AlterKind<crate::expr::statements::define::SqlType>,
 }
 
 /// `ALTER FUNCTION`.

@@ -2,19 +2,25 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::hash;
 
+use num_bigint::BigInt;
+use num_traits::Zero;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
 use crate::Kind;
 use crate::sql::{SqlFormat, ToSql, fmt_non_finite_f64};
+use crate::value::bigdecimal::{BigDecimal, pow10};
 
 /// Represents a numeric value in SurrealDB
 ///
 /// Numbers in SurrealDB can be integers, floating-point numbers, or decimal numbers.
 /// This enum provides type-safe representation for all numeric types.
+///
+/// The enum is not `Copy`: [`BigDecimal`] owns a heap-allocated coefficient. The variant boxes
+/// its payload so that `Number` keeps the 24-byte size the other variants fit in.
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Number {
 	/// A 64-bit signed integer
@@ -42,9 +48,25 @@ pub enum Number {
 	F16(#[cfg_attr(feature = "arbitrary", arbitrary(with = arbitrary_f16))] half::f16),
 	/// A 32-bit IEEE 754 floating-point number
 	F32(f32),
+	/// An arbitrary-precision decimal number, `coefficient * 10^(-scale)`
+	BigDecimal(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = arbitrary_big_decimal))] Box<BigDecimal>,
+	),
 }
 
 const _: () = assert!(std::mem::size_of::<Number>() == 24);
+
+#[cfg(feature = "arbitrary")]
+fn arbitrary_big_decimal(
+	u: &mut arbitrary::Unstructured<'_>,
+) -> arbitrary::Result<Box<BigDecimal>> {
+	let coefficient = <i64 as arbitrary::Arbitrary>::arbitrary(u)?;
+	let scale = <u8 as arbitrary::Arbitrary>::arbitrary(u)?;
+	format!("{coefficient}e-{scale}")
+		.parse::<BigDecimal>()
+		.map(Box::new)
+		.map_err(|_| arbitrary::Error::IncorrectFormat)
+}
 
 mod serde_f16 {
 	use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -64,15 +86,19 @@ fn arbitrary_f16(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<half:
 	<u16 as arbitrary::Arbitrary>::arbitrary(u).map(half::f16::from_bits)
 }
 
-/// A number with its width dropped onto one of the three full-width representations.
+/// A number with its width dropped onto one of the full-width representations.
+///
+/// `BigDecimal` has no fixed width, so it is borrowed from the number rather than copied.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Wide {
+pub enum Wide<'a> {
 	/// A 64-bit signed integer
 	Int(i64),
 	/// A 64-bit floating-point number
 	Float(f64),
 	/// A decimal number
 	Decimal(Decimal),
+	/// An arbitrary-precision decimal number
+	BigDecimal(&'a BigDecimal),
 }
 
 /// The kind of a [`Number`].
@@ -102,6 +128,8 @@ pub enum NumberKind {
 	Float,
 	/// `decimal`
 	Decimal,
+	/// `bigdecimal`
+	BigDecimal,
 }
 
 impl NumberKind {
@@ -120,13 +148,20 @@ impl NumberKind {
 			Self::F32 => Kind::F32,
 			Self::Float => Kind::Float,
 			Self::Decimal => Kind::Decimal,
+			Self::BigDecimal => Kind::BigDecimal,
 		}
 	}
 
 	/// The arithmetic join (`⊔`) of two number kinds.
+	///
+	/// `bigdecimal` is the widest exact kind, so it absorbs every other kind, floats included.
+	/// That is the rule `decimal` already follows for floats.
 	pub const fn join(self, other: Self) -> Self {
-		use NumberKind::{Decimal, F16, F32, Float, I8, I16, I32, Int, U8, U16, U32, U64};
+		use NumberKind::{
+			BigDecimal, Decimal, F16, F32, Float, I8, I16, I32, Int, U8, U16, U32, U64,
+		};
 		match (self, other) {
+			(BigDecimal, _) | (_, BigDecimal) => BigDecimal,
 			(Decimal, _) | (_, Decimal) => Decimal,
 			(Float, _) | (_, Float) => Float,
 			(F32, F32 | F16 | I8 | U8 | I16 | U16) | (F16 | I8 | U8 | I16 | U16, F32) => F32,
@@ -157,37 +192,39 @@ impl Number {
 
 	/// The value with its width dropped. Exact for every kind: sized integers become `Int`,
 	/// a `u64` above `i64::MAX` becomes `Decimal`, `f16` and `f32` become the `Float` they equal.
-	pub fn wide(self) -> Wide {
+	pub fn wide(&self) -> Wide<'_> {
 		match self {
-			Number::Int(v) => Wide::Int(v),
-			Number::Float(v) => Wide::Float(v),
-			Number::Decimal(v) => Wide::Decimal(v),
-			Number::I8(v) => Wide::Int(i64::from(v)),
-			Number::U8(v) => Wide::Int(i64::from(v)),
-			Number::I16(v) => Wide::Int(i64::from(v)),
-			Number::U16(v) => Wide::Int(i64::from(v)),
-			Number::I32(v) => Wide::Int(i64::from(v)),
-			Number::U32(v) => Wide::Int(i64::from(v)),
-			Number::U64(v) => match i64::try_from(v) {
+			Number::Int(v) => Wide::Int(*v),
+			Number::Float(v) => Wide::Float(*v),
+			Number::Decimal(v) => Wide::Decimal(*v),
+			Number::I8(v) => Wide::Int(i64::from(*v)),
+			Number::U8(v) => Wide::Int(i64::from(*v)),
+			Number::I16(v) => Wide::Int(i64::from(*v)),
+			Number::U16(v) => Wide::Int(i64::from(*v)),
+			Number::I32(v) => Wide::Int(i64::from(*v)),
+			Number::U32(v) => Wide::Int(i64::from(*v)),
+			Number::U64(v) => match i64::try_from(*v) {
 				Ok(i) => Wide::Int(i),
-				Err(_) => Wide::Decimal(Decimal::from(v)),
+				Err(_) => Wide::Decimal(Decimal::from(*v)),
 			},
-			Number::F16(v) => Wide::Float(v.to_f64()),
-			Number::F32(v) => Wide::Float(f64::from(v)),
+			Number::F16(v) => Wide::Float(f64::from(*v)),
+			Number::F32(v) => Wide::Float(f64::from(*v)),
+			Number::BigDecimal(v) => Wide::BigDecimal(v.as_ref()),
 		}
 	}
 
-	/// `self.wide()` as a [`Number`].
-	pub fn widened(self) -> Number {
+	/// `self.wide()` as a [`Number`]. A `BigDecimal` is cloned.
+	pub fn widened(&self) -> Number {
 		match self.wide() {
 			Wide::Int(v) => Number::Int(v),
 			Wide::Float(v) => Number::Float(v),
 			Wide::Decimal(v) => Number::Decimal(v),
+			Wide::BigDecimal(v) => Number::BigDecimal(Box::new(v.clone())),
 		}
 	}
 
 	/// The number's kind as a [`NumberKind`].
-	pub const fn number_kind(self) -> NumberKind {
+	pub const fn number_kind(&self) -> NumberKind {
 		match self {
 			Number::Int(_) => NumberKind::Int,
 			Number::Float(_) => NumberKind::Float,
@@ -201,6 +238,7 @@ impl Number {
 			Number::U64(_) => NumberKind::U64,
 			Number::F16(_) => NumberKind::F16,
 			Number::F32(_) => NumberKind::F32,
+			Number::BigDecimal(_) => NumberKind::BigDecimal,
 		}
 	}
 
@@ -218,7 +256,8 @@ impl Number {
 			| Number::U16(_)
 			| Number::I32(_)
 			| Number::U32(_)
-			| Number::U64(_) => false,
+			| Number::U64(_)
+			| Number::BigDecimal(_) => false,
 		}
 	}
 
@@ -230,6 +269,7 @@ impl Number {
 			Wide::Int(v) => Some(v),
 			Wide::Float(v) => Some(v as i64),
 			Wide::Decimal(v) => v.to_i64(),
+			Wide::BigDecimal(v) => v.to_i64(),
 		}
 	}
 
@@ -241,6 +281,7 @@ impl Number {
 			Wide::Int(v) => Some(v as f64),
 			Wide::Float(v) => Some(v),
 			Wide::Decimal(v) => v.to_f64(),
+			Wide::BigDecimal(v) => Some(v.to_f64()),
 		}
 	}
 }
@@ -335,6 +376,7 @@ impl Display for Number {
 				f.write_str(&buf)
 			}
 			Number::Decimal(v) => write!(f, "{v}dec"),
+			Number::BigDecimal(v) => write!(f, "{v}bigdec"),
 		}
 	}
 }
@@ -385,6 +427,10 @@ impl ToSql for Number {
 			Number::F16(v) => fmt_f16_sql(*v, f),
 			Number::F32(v) => fmt_f32_sql(*v, f),
 			Number::Decimal(v) => v.fmt_sql(f, fmt),
+			Number::BigDecimal(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("bigdec");
+			}
 		}
 	}
 }
@@ -438,6 +484,7 @@ impl_number! (
 	U64(u64) => (is_u64, into_u64, from_u64),
 	F16(half::f16) => (is_f16, into_f16, from_f16),
 	F32(f32) => (is_f32, into_f32, from_f32),
+	BigDecimal(Box<BigDecimal>) => (is_bigdecimal, into_bigdecimal, from_bigdecimal),
 );
 
 impl Default for Number {
@@ -470,6 +517,14 @@ pub(crate) fn cmp_f64(a: f64, b: f64) -> Ordering {
 /// `+inf` included, as the engine orders it.
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
+		self.wide().total_cmp(&other.wide())
+	}
+}
+
+impl Wide<'_> {
+	/// The order of [`Number`], on the widened values, borrowing a `BigDecimal` rather than
+	/// copying it.
+	pub fn total_cmp(&self, other: &Self) -> Ordering {
 		fn total_cmp_f64(a: f64, b: f64) -> Ordering {
 			match (a.is_nan(), b.is_nan()) {
 				(true, true) => Ordering::Equal,
@@ -492,7 +547,9 @@ impl Ord for Number {
 			};
 		}
 
-		match (self.wide(), other.wide()) {
+		match (*self, *other) {
+			(Wide::BigDecimal(v), w) => cmp_big_wide(v, &w),
+			(w, Wide::BigDecimal(v)) => cmp_big_wide(v, &w).reverse(),
 			(Wide::Int(v), Wide::Int(w)) => v.cmp(&w),
 			(Wide::Float(v), Wide::Float(w)) => total_cmp_f64(v, w),
 			(Wide::Decimal(v), Wide::Decimal(w)) => v.cmp(&w),
@@ -527,6 +584,48 @@ impl Ord for Number {
 			(Wide::Decimal(v), Wide::Float(w)) => cmp_float_decimal(w, v).reverse(),
 		}
 	}
+}
+
+/// Orders a `BigDecimal` against any other width by exact value. A NaN is above it, and so is
+/// `+inf`; `-inf` is below it. Integers and decimals convert exactly.
+fn cmp_big_wide(b: &BigDecimal, w: &Wide<'_>) -> Ordering {
+	match w {
+		Wide::Int(i) => b.cmp(&BigDecimal::from(*i)),
+		Wide::Decimal(d) => b.cmp(&BigDecimal::from(*d)),
+		Wide::BigDecimal(o) => b.cmp(o),
+		Wide::Float(f) => cmp_big_float(b, *f),
+	}
+}
+
+/// Orders a `BigDecimal` against a float by their exact binary and decimal values.
+///
+/// For a finite nonzero float `a * 2^e` with `a` odd, the sign of `c * 10^-s - f` equals the
+/// sign of `c * 2^max(-e, 0) - (±a) * 10^s * 2^max(e, 0)`, where `c * 10^-s` is the decimal.
+fn cmp_big_float(b: &BigDecimal, f: f64) -> Ordering {
+	if f.is_nan() {
+		return Ordering::Less;
+	}
+	if f.is_infinite() {
+		return if f > 0.0 {
+			Ordering::Less
+		} else {
+			Ordering::Greater
+		};
+	}
+	let (coefficient, scale) = b.parts();
+	if f == 0.0 {
+		return coefficient.cmp(&BigInt::zero());
+	}
+	let (a, e) = float_parts(f.abs());
+	let lhs = coefficient << (-e).max(0).unsigned_abs() as usize;
+	let magnitude = BigInt::from(a) * pow10(scale.unsigned_abs());
+	let rhs = magnitude << e.max(0).unsigned_abs() as usize;
+	let rhs = if f < 0.0 {
+		-rhs
+	} else {
+		rhs
+	};
+	lhs.cmp(&rhs)
 }
 
 /// Orders a float against a decimal by their exact values, so `0.1f`, whose
@@ -614,36 +713,49 @@ fn cmp_shifted(x: u128, k: u32, y: u128) -> Ordering {
 	}
 }
 
-/// Equal numbers hash alike whatever their kind, with no allocation:
-/// `Int(1)`, `Float(1.0)` and `Decimal(1.00)` alike, `0.0` and `-0.0` alike,
-/// every NaN alike. So `a == b` implies `hash(a) == hash(b)`.
+/// Equal numbers hash alike whatever their kind: `Int(1)`, `Float(1.0)`, `Decimal(1.00)` and
+/// `BigDecimal(1.00)` alike, `0.0` and `-0.0` alike, every NaN alike. So `a == b` implies
+/// `hash(a) == hash(b)`.
 impl hash::Hash for Number {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		Canonical::of(*self).hash(state);
+		self.wide().hash_number(state);
+	}
+}
+
+impl Wide<'_> {
+	/// Feeds `state` as [`Number`]'s `Hash` does, borrowing a `BigDecimal` rather than
+	/// copying it.
+	pub fn hash_number<H: hash::Hasher>(&self, state: &mut H) {
+		hash::Hash::hash(&Canonical::of(*self), state);
 	}
 }
 
 /// The one form every number equal to a given one shares.
+///
+/// A value is `Int` when it is an integer within `i64`, and `Decimal` when its coefficient
+/// (without trailing zeros) fits a `u128` and its exponent fits an `i32`. Every other finite
+/// value is `Big`, which holds its exact decimal value. Each finite value has exactly one of
+/// these forms, so equal values produce equal forms.
 #[derive(Hash)]
 enum Canonical {
 	/// An integer within `i64`.
 	Int(i64),
-	/// `±coefficient · 10^exponent`, the coefficient holding no trailing zero:
-	/// any other value a decimal can equal.
+	/// `±coefficient · 10^exponent`, the coefficient holding no trailing zero.
 	Decimal {
 		negative: bool,
 		coefficient: u128,
 		exponent: i32,
 	},
-	/// The bits of a float no integer and no decimal equals: a NaN (all as
-	/// one), an infinity, a fraction finer than `10^-28`, or a magnitude of
-	/// `2^128` or more.
+	/// The bits of a float that is NaN (all as one), infinite, or has no `Int` or `Decimal`
+	/// form: more than 28 fractional binary digits, or a magnitude of 2^128 or more.
 	Float(u64),
+	/// Any other finite value, as its exact decimal value.
+	Big(BigDecimal),
 }
 
 impl Canonical {
-	fn of(n: Number) -> Self {
-		match n.wide() {
+	fn of(wide: Wide<'_>) -> Self {
+		match wide {
 			Wide::Int(v) => Canonical::Int(v),
 			Wide::Float(v) if v.is_nan() => Canonical::Float(f64::NAN.to_bits()),
 			Wide::Float(v) if v.is_infinite() => Canonical::Float(v.to_bits()),
@@ -654,20 +766,22 @@ impl Canonical {
 				if e < 0 {
 					// `a` is odd, so `a · 5^k / 10^k` has exactly `k` fractional digits.
 					let k = e.unsigned_abs();
-					if k > 28 {
-						return Canonical::Float(v.to_bits());
+					if k <= 28 {
+						return Canonical::Decimal {
+							negative,
+							coefficient: a as u128 * 5u128.pow(k),
+							exponent: e,
+						};
 					}
-					return Canonical::Decimal {
-						negative,
-						coefficient: a as u128 * 5u128.pow(k),
-						exponent: e,
-					};
+				} else {
+					let bits = u64::BITS - a.leading_zeros() + e.unsigned_abs();
+					if bits <= u128::BITS {
+						return Canonical::integer(negative, (a as u128) << e);
+					}
 				}
-				let bits = u64::BITS - a.leading_zeros() + e.unsigned_abs();
-				if bits > u128::BITS {
-					return Canonical::Float(v.to_bits());
-				}
-				Canonical::integer(negative, (a as u128) << e)
+				// Only a `BigDecimal` can equal such a float, so the float keeps its bits and
+				// `from_exact_big` maps an equal `BigDecimal` onto them.
+				Canonical::Float(v.to_bits())
 			}
 			Wide::Decimal(w) => {
 				let negative = w.mantissa() < 0;
@@ -687,7 +801,39 @@ impl Canonical {
 					}
 				}
 			}
+			Wide::BigDecimal(b) => Canonical::from_exact_big(b),
 		}
+	}
+
+	/// The form of a `BigDecimal`. A value with more than 28 fractional digits, or whose
+	/// magnitude does not fit a `u128` (2^128 or more), may be exactly a float that hashes as its
+	/// bits; it takes those bits. These are the complements of the float forms that take a
+	/// `Decimal` or an integer in [`Canonical::of`].
+	fn from_exact_big(b: &BigDecimal) -> Self {
+		let form = Canonical::from_big(b);
+		let may_be_float = match &form {
+			Canonical::Decimal {
+				exponent,
+				coefficient,
+				..
+			} => {
+				*exponent < -28
+					|| (*exponent > 0
+						&& 10u128
+							.checked_pow(exponent.unsigned_abs())
+							.and_then(|scale| coefficient.checked_mul(scale))
+							.is_none())
+			}
+			Canonical::Big(_) => true,
+			Canonical::Int(_) | Canonical::Float(_) => false,
+		};
+		if may_be_float {
+			let f = b.to_f64();
+			if f.is_finite() && f != 0.0 && cmp_big_float(b, f) == Ordering::Equal {
+				return Canonical::Float(f.to_bits());
+			}
+		}
+		form
 	}
 
 	/// The integer `±magnitude`.
@@ -711,16 +857,61 @@ impl Canonical {
 			exponent,
 		}
 	}
+
+	/// The form of an exact decimal value, following the rules of [`Canonical`].
+	fn from_big(v: &BigDecimal) -> Self {
+		if let Some(i) = v.to_i64() {
+			return Canonical::Int(i);
+		}
+		let (coefficient, exponent) = v.canonical();
+		if let (Some(c), Ok(exponent)) =
+			(coefficient.magnitude().to_u128(), i32::try_from(exponent))
+		{
+			return Canonical::Decimal {
+				negative: coefficient.sign() == num_bigint::Sign::Minus,
+				coefficient: c,
+				exponent,
+			};
+		}
+		Canonical::Big(v.clone())
+	}
+}
+
+/// The exact decimal value of `±a · 2^e`, for an odd `a`.
+#[cfg(test)]
+fn exact_float(negative: bool, a: u64, e: i32) -> BigDecimal {
+	let magnitude = if e >= 0 {
+		BigDecimal::from_parts(BigInt::from(a) << e.unsigned_abs() as usize, 0)
+	} else {
+		// `a / 2^k = a · 5^k / 10^k`.
+		let k = e.unsigned_abs();
+		BigDecimal::from_parts(BigInt::from(a) * BigInt::from(5u8).pow(k), i64::from(k))
+	};
+	if negative {
+		-magnitude
+	} else {
+		magnitude
+	}
 }
 
 impl PartialEq for Number {
 	fn eq(&self, other: &Self) -> bool {
+		self.wide().total_eq(&other.wide())
+	}
+}
+
+impl Wide<'_> {
+	/// The equality of [`Number`], on the widened values, borrowing a `BigDecimal` rather
+	/// than copying it.
+	pub fn total_eq(&self, other: &Self) -> bool {
 		// Every NaN is one value, as `Ord` orders it.
 		fn total_eq_f64(a: f64, b: f64) -> bool {
 			a.to_bits().eq(&b.to_bits()) || (a == 0.0 && b == 0.0) || (a.is_nan() && b.is_nan())
 		}
 
-		match (self.wide(), other.wide()) {
+		match (*self, *other) {
+			(Wide::BigDecimal(v), w) => cmp_big_wide(v, &w) == Ordering::Equal,
+			(w, Wide::BigDecimal(v)) => cmp_big_wide(v, &w) == Ordering::Equal,
 			(Wide::Int(v), Wide::Int(w)) => v.eq(&w),
 			(Wide::Float(v), Wide::Float(w)) => total_eq_f64(v, w),
 			(Wide::Decimal(v), Wide::Decimal(w)) => v.eq(&w),
@@ -838,6 +1029,12 @@ impl From<Decimal> for Number {
 	}
 }
 
+impl From<BigDecimal> for Number {
+	fn from(value: BigDecimal) -> Self {
+		Number::BigDecimal(Box::new(value))
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use std::cmp::Ordering;
@@ -869,16 +1066,16 @@ mod tests {
 			Number::Decimal(Decimal::MAX),
 			Number::Decimal(Decimal::MIN),
 		];
-		for x in nans {
-			for y in nans {
+		for x in &nans {
+			for y in &nans {
 				assert_eq!(x, y);
-				assert_eq!(x.cmp(&y), Ordering::Equal);
+				assert_eq!(x.cmp(y), Ordering::Equal);
 				assert_eq!(hasher.hash_one(x), hasher.hash_one(y));
 			}
 			for n in &numbers {
 				assert_eq!(x.cmp(n), Ordering::Greater, "{x:?} against {n:?}");
-				assert_eq!(n.cmp(&x), Ordering::Less, "{n:?} against {x:?}");
-				assert_ne!(&x, n);
+				assert_eq!(n.cmp(x), Ordering::Less, "{n:?} against {x:?}");
+				assert_ne!(x, n);
 			}
 		}
 	}
@@ -1056,10 +1253,105 @@ mod tests {
 	}
 
 	#[test]
+	fn a_bigdecimal_equal_to_a_float_hashes_as_its_bits() {
+		let state = RandomState::new();
+		// 2^55 · 10^22 is exact in f64, above 2^128, and its decimal coefficient fits a u128.
+		let above_u128 = 2f64.powi(55) * 1e22;
+		for f in [0.1, 2.71, -2.5e-300, 1.0e300, f64::MIN_POSITIVE, above_u128, -above_u128] {
+			let (a, e) = float_parts(f64::abs(f));
+			let b = Number::BigDecimal(Box::new(exact_float(f < 0.0, a, e)));
+			assert_eq!(Number::Float(f), b, "{f}");
+			assert_eq!(state.hash_one(Number::Float(f)), state.hash_one(&b), "{f}");
+		}
+	}
+
+	#[test]
 	fn equal_zeros_hash_alike() {
 		let hasher = RandomState::new();
 		let (zero, negative) = (Number::Float(0.0), Number::Float(-0.0));
 		assert_eq!(zero, negative);
 		assert_eq!(hasher.hash_one(zero), hasher.hash_one(negative));
+	}
+}
+
+#[cfg(test)]
+mod bigdecimal_tests {
+	use std::cmp::Ordering;
+	use std::hash::{BuildHasher, RandomState};
+
+	use super::*;
+
+	fn big(s: &str) -> Number {
+		Number::BigDecimal(Box::new(s.parse().expect("bigdecimal")))
+	}
+
+	fn hash_with(state: &RandomState, n: &Number) -> u64 {
+		state.hash_one(n)
+	}
+
+	#[test]
+	fn equal_across_kinds_and_hash_alike() {
+		let state = RandomState::new();
+		let equal = [
+			(Number::Int(1), big("1.00")),
+			(Number::Decimal(Decimal::new(150, 2)), big("1.5")),
+			(big("1.50"), Number::Float(1.5)),
+			(Number::U64(u64::MAX), big("18446744073709551615")),
+			(big("0.00"), Number::Int(0)),
+			(big("-0"), Number::Float(-0.0)),
+		];
+		for (a, b) in &equal {
+			assert_eq!(a, b, "{a:?} == {b:?}");
+			assert_eq!(b, a);
+			assert_eq!(a.cmp(b), Ordering::Equal, "{a:?} cmp {b:?}");
+			assert_eq!(hash_with(&state, a), hash_with(&state, b), "{a:?} hash {b:?}");
+		}
+	}
+
+	#[test]
+	fn ordering_mixes_ints_decimals_floats_and_bigdecimals() {
+		// Digits beyond a u128 coefficient: 40 and 65 significant digits.
+		let forty = "1234567890123456789012345678901234567890";
+		let sixty_five = "12345678901234567890123456789012345678901234567890123456789012345";
+		let ascending = [
+			big("-1e40"),
+			Number::Int(-2),
+			big("-1.5"),
+			Number::Float(-1.25),
+			Number::Decimal(Decimal::new(1, 1)),
+			big("0.1000000000000000000000000000001"),
+			Number::Float(0.1),
+			big("0.2"),
+			Number::Int(1),
+			Number::Float(1e30),
+			big(forty),
+			big(sixty_five),
+			Number::Float(f64::INFINITY),
+		];
+		for pair in ascending.windows(2) {
+			assert_eq!(pair[0].cmp(&pair[1]), Ordering::Less, "{:?} < {:?}", pair[0], pair[1]);
+			assert_eq!(pair[1].cmp(&pair[0]), Ordering::Greater);
+		}
+		assert_eq!(big(forty).cmp(&Number::Float(f64::NAN)), Ordering::Less);
+	}
+
+	#[test]
+	fn float_against_bigdecimal_is_exact() {
+		// 2^-30 is 0.000000000931322574615478515625 exactly, so it equals the bigdecimal form.
+		let exact = big("0.000000000931322574615478515625");
+		let float = Number::Float(2f64.powi(-30));
+		let state = RandomState::new();
+		assert_eq!(exact, float);
+		assert_eq!(hash_with(&state, &exact), hash_with(&state, &float));
+		// One unit in the last digit is a different number, and the shortest-text value is not
+		// the binary value of 0.1.
+		assert_ne!(big("0.1"), Number::Float(0.1));
+		assert_eq!(big("0.1").cmp(&Number::Float(0.1)), Ordering::Less);
+	}
+
+	#[test]
+	fn display_and_to_sql_keep_scale() {
+		assert_eq!(big("1.50").to_string(), "1.50bigdec");
+		assert_eq!(big("1.50").to_string(), "1.50bigdec");
 	}
 }

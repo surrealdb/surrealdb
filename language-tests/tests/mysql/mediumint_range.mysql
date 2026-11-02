@@ -1,0 +1,34 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL MEDIUMINT holds 24 bits: -8388608 to 8388607 signed, 0 to 16777215 unsigned"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, s: -8388608i32, u: 0u32 }, { id: 2, s: 8388607i32, u: 16777215u32 }]"
+
+[[test.results]]
+error = 'the value of column "s" is out of range for mediumint (field `s` of `m:3`, SQL TYPE mediumint)'
+
+[[test.results]]
+error = 'the value of column "s" is out of range for mediumint (field `s` of `m:4`, SQL TYPE mediumint)'
+
+[[test.results]]
+error = 'the value of column "u" is out of range for mediumint (field `u` of `m:5`, SQL TYPE mediumint unsigned)'
+
+[[test.results]]
+value = "[{ id: 1, s: -8388608i32, u: 0u32 }, { id: 2, s: 8388607i32, u: 16777215u32 }]"
+
+*/
+
+CREATE TABLE m (id INT PRIMARY KEY, s MEDIUMINT, u MEDIUMINT UNSIGNED);
+INSERT INTO m (id, s, u) VALUES (1, -8388608, 0), (2, 8388607, 16777215);
+INSERT INTO m (id, s, u) VALUES (3, 8388608, 0);
+INSERT INTO m (id, s, u) VALUES (4, -8388609, 0);
+INSERT INTO m (id, s, u) VALUES (5, 0, 16777216);
+SELECT id, s, u FROM m ORDER BY id;

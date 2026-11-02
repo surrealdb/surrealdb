@@ -262,6 +262,7 @@ impl_from_arg_via_coerce!(
 	surrealdb_expr::val::Duration,
 	surrealdb_expr::val::File,
 	surrealdb_expr::val::Geometry,
+	surrealdb_expr::val::Interval,
 	surrealdb_expr::val::Number,
 	surrealdb_expr::val::Regex,
 	surrealdb_expr::val::RecordId,
@@ -377,3 +378,6 @@ impl_tuple!(A);
 impl_tuple!(A, B);
 impl_tuple!(A, B, C);
 impl_tuple!(A, B, C, D);
+impl_tuple!(A, B, C, D, E);
+impl_tuple!(A, B, C, D, E, F);
+impl_tuple!(A, B, C, D, E, F, G);

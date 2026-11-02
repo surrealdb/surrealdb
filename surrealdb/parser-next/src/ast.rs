@@ -60,7 +60,8 @@ pub enum Tag {
 	Float,
 	NaN,
 	Infinity,
-	/// Value decoded from the span.
+	/// Value decoded from the span; `op` [`DECIMAL_BIG`] for a `bigdec`
+	/// literal, 0 for a `dec` one.
 	Decimal,
 	I8,
 	U8,
@@ -305,6 +306,8 @@ pub enum DefineKind {
 	Sequence,
 	/// `EXTENSION`, or its alias `MODULE`.
 	Module,
+	/// `ENUM`. Numbered after [`ALTER_SYSTEM`] so the two never share an `op`.
+	Enum = 17,
 }
 
 /// Deprecated spellings of an extension, as bits of the `b` of a
@@ -565,6 +568,18 @@ pub enum Cl {
 	/// `MATERIALIZE INTO table.field [WHERE cond]` on a field: `a` index into
 	/// `extra` of `[table Name, field Name, cond or NONE]`.
 	Materialize,
+	/// `VALUES a, b, …` of `DEFINE ENUM`: `a` the list of label strings.
+	EnumValues,
+	/// `ADD VALUE [IF NOT EXISTS] a [BEFORE|AFTER x]` of `ALTER ENUM`: `a` the
+	/// label string; `b` index into `extra` of `[anchor string or NONE, 0
+	/// append / 1 before / 2 after, 1 with `IF NOT EXISTS`]`.
+	EnumAdd,
+	/// `RENAME VALUE a TO b` of `ALTER ENUM`: `a` and `b` the label strings.
+	EnumRename,
+	/// `SQL TYPE dialect 'text'` on a field: `a` the dialect, 0 `POSTGRESQL`, 1
+	/// `MYSQL` or 2 `DYNAMODB`; `b` the string node of the text. Under
+	/// `ALTER FIELD … DROP SQL TYPE` this code is the [`Cl::AlterDrop`] payload.
+	SqlType,
 	/// `REVOKE SIGNATURES` on a bucket.
 	RevokeSignatures,
 }
@@ -638,6 +653,9 @@ pub const BASE_NS: u32 = 1;
 pub const BASE_DB: u32 = 2;
 pub const BASE_ROOT: u32 = 3;
 
+/// The `op` of a [`Tag::Decimal`] read from a `bigdec` literal.
+pub const DECIMAL_BIG: u8 = 1;
+
 /// [`Tag::Kind`] codes. Kinds without a payload have `a` and `b` unused.
 pub mod kind {
 	pub const ANY: u8 = 0;
@@ -694,7 +712,16 @@ pub mod kind {
 	pub const U64: u8 = 36;
 	pub const F16: u8 = 37;
 	pub const F32: u8 = 38;
-	pub const SIMPLE_LIMIT: u8 = 39;
+	pub const DATE: u8 = 39;
+	pub const TIME: u8 = 40;
+	pub const TIMESTAMP: u8 = 41;
+	pub const INTERVAL: u8 = 42;
+	/// `enum<name>` or `enum<'a', 'b'>`: `a` the list holding one `Name`, or
+	/// the list of `Str` labels when `b` is 1.
+	pub const ENUM: u8 = 43;
+	pub const SIMPLE_LIMIT: u8 = 44;
+	/// `bigdecimal`: an arbitrary-precision decimal.
+	pub const BIGDECIMAL: u8 = 45;
 }
 
 #[repr(u8)]

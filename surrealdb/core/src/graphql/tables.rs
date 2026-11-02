@@ -790,6 +790,10 @@ fn make_sub_field_resolver(
 					| Value::String(_)
 					| Value::Duration(_)
 					| Value::Datetime(_)
+					| Value::Date(_)
+					| Value::Time(_)
+					| Value::Timestamp(_)
+					| Value::Interval(_)
 					| Value::Uuid(_)
 					| Value::Array(_)
 					| Value::Set(_)
@@ -1738,6 +1742,10 @@ async fn resolve_field_value(
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Array(_)
 		| Value::Set(_)
@@ -1898,6 +1906,16 @@ macro_rules! filter_impl {
 	};
 }
 
+/// The `gt`, `gte`, `lt` and `lte` operators of a field of the scalar `scalar`, which orders
+/// chronologically.
+fn temporal_filter(mut filter: InputObject, scalar: &str) -> InputObject {
+	let ty = TypeRef::named(scalar);
+	for operator in ["gt", "gte", "lt", "lte"] {
+		filter = filter.field(InputValue::new(operator, ty.clone()));
+	}
+	filter
+}
+
 fn filter_id() -> InputObject {
 	let mut filter = InputObject::new("_filter_id");
 	let ty = TypeRef::named(TypeRef::ID);
@@ -1922,7 +1940,7 @@ fn filter_id() -> InputObject {
 /// based on the kind:
 /// - **String** -- `contains`, `startsWith`, `endsWith`, `regex`, `in`
 /// - **Numeric** (Int, Float, Number, Decimal) -- `gt`, `gte`, `lt`, `lte`, `in`
-/// - **Datetime** -- `gt`, `gte`, `lt`, `lte`
+/// - **Datetime**, **Date**, **Time**, **Timestamp** -- `gt`, `gte`, `lt`, `lte`
 /// - **Record** -- `in` (list of IDs)
 ///
 /// `option<record<T>>` is normalised to the inner record kind so filters
@@ -2059,7 +2077,7 @@ fn filter_from_type(
 			let list_ty = TypeRef::named_nn_list("number");
 			filter_impl!(filter, list_ty, "in");
 		}
-		Kind::Decimal => {
+		Kind::Decimal | Kind::BigDecimal => {
 			let num_ty = TypeRef::named("decimal");
 			filter_impl!(filter, num_ty, "gt");
 			filter_impl!(filter, num_ty, "gte");
@@ -2076,6 +2094,10 @@ fn filter_from_type(
 			filter_impl!(filter, dt_ty, "lt");
 			filter_impl!(filter, dt_ty, "lte");
 		}
+		// Date, time and timestamp order chronologically: gt, gte, lt, lte
+		Kind::Date => filter = temporal_filter(filter, "date"),
+		Kind::Time => filter = temporal_filter(filter, "time"),
+		Kind::Timestamp => filter = temporal_filter(filter, "timestamp"),
 		// Record: in (list of IDs)
 		Kind::Record(_) => {
 			let list_ty = TypeRef::named_nn_list(TypeRef::ID);
@@ -2094,6 +2116,7 @@ fn filter_from_type(
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Duration
+		| Kind::Interval
 		| Kind::Object
 		| Kind::Uuid
 		| Kind::Regex
@@ -2105,7 +2128,8 @@ fn filter_from_type(
 		| Kind::Function(_, _)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => {}
+		| Kind::File(_)
+		| Kind::Enum(_) => {}
 	};
 	Ok(filter)
 }

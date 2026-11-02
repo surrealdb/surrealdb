@@ -190,6 +190,9 @@ pub fn zero_volatile_system_block(value: &mut Value) {
 					Number::Int(_) => Number::Int(0),
 					Number::Float(_) => Number::Float(0.0),
 					Number::Decimal(_) => Number::Decimal(0.into()),
+					Number::BigDecimal(_) => {
+						Number::BigDecimal(Box::new(surrealdb_types::BigDecimal::from(0_i64)))
+					}
 					Number::I8(_) => Number::I8(0),
 					Number::U8(_) => Number::U8(0),
 					Number::I16(_) => Number::I16(0),
@@ -210,6 +213,10 @@ pub fn zero_volatile_system_block(value: &mut Value) {
 			| Value::Bytes(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Geometry(_)
 			| Value::Table(_)

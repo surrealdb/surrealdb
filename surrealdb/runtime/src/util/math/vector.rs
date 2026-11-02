@@ -1,6 +1,7 @@
 use anyhow::{Result, ensure};
 use surrealdb_expr::expr::Error;
 use surrealdb_expr::val::{Number, TryAdd, TryMul, TrySub, Value, Wide};
+use surrealdb_types::BigDecimal;
 
 use crate::util::math::ToFloat;
 
@@ -199,7 +200,7 @@ pub fn check_same_dimension<T>(fnc: &str, a: &[T], b: &[T]) -> Result<()> {
 pub fn add_assign(fnc: &str, acc: &mut [Number], other: &[Number]) -> Result<()> {
 	check_same_dimension(fnc, acc, other)?;
 	for (a, b) in acc.iter_mut().zip(other.iter()) {
-		*a = (*a).try_add(*b)?;
+		*a = a.clone().try_add(b.clone())?;
 	}
 	Ok(())
 }
@@ -212,7 +213,7 @@ pub trait Add {
 impl Add for Vec<Number> {
 	fn add(&self, other: &Self) -> Result<Vec<Number>> {
 		check_same_dimension("vector::add", self, other)?;
-		self.iter().zip(other.iter()).map(|(a, b)| (*a).try_add(*b)).collect()
+		self.iter().zip(other.iter()).map(|(a, b)| a.clone().try_add(b.clone())).collect()
 	}
 }
 
@@ -475,6 +476,10 @@ impl<T: AsNumber> ManhattanDistance for [T] {
 						}
 					}
 					Number::Decimal(acc) => Number::Decimal(acc + rust_decimal::Decimal::from(d)),
+					Number::BigDecimal(acc) => match acc.checked_add(&BigDecimal::from(d)) {
+						Some(sum) => Number::BigDecimal(Box::new(sum)),
+						None => Number::Float(acc.to_f64() + d as f64),
+					},
 					Number::Float(_)
 					| Number::I8(_)
 					| Number::U8(_)
@@ -499,9 +504,15 @@ impl<T: AsNumber> ManhattanDistance for [T] {
 fn int_abs_diff(a: &Number, b: &Number) -> Option<u64> {
 	match (a.wide(), b.wide()) {
 		(Wide::Int(a), Wide::Int(b)) => Some(a.abs_diff(b)),
-		(Wide::Int(_), Wide::Float(_) | Wide::Decimal(_))
-		| (Wide::Float(_), Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_))
-		| (Wide::Decimal(_), Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_)) => None,
+		(Wide::Int(_), Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_))
+		| (
+			Wide::Float(_),
+			Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_),
+		)
+		| (
+			Wide::Decimal(_) | Wide::BigDecimal(_),
+			Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_),
+		) => None,
 	}
 }
 
@@ -515,11 +526,12 @@ fn abs_diff(a: &Number, b: &Number) -> f64 {
 	match (a.wide(), b.wide()) {
 		(Wide::Float(a), Wide::Float(b)) => (a - b).abs(),
 		(Wide::Int(a), Wide::Int(b)) => a.abs_diff(b) as f64,
-		(Wide::Int(_), Wide::Float(_) | Wide::Decimal(_))
-		| (Wide::Float(_), Wide::Int(_) | Wide::Decimal(_))
-		| (Wide::Decimal(_), Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_)) => {
-			(a.to_float() - b.to_float()).abs()
-		}
+		(Wide::Int(_), Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_))
+		| (Wide::Float(_), Wide::Int(_) | Wide::Decimal(_) | Wide::BigDecimal(_))
+		| (
+			Wide::Decimal(_) | Wide::BigDecimal(_),
+			Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_),
+		) => (a.to_float() - b.to_float()).abs(),
 	}
 }
 
@@ -544,7 +556,7 @@ pub trait Multiply {
 impl Multiply for Vec<Number> {
 	fn multiply(&self, other: &Self) -> Result<Vec<Number>> {
 		check_same_dimension("vector::multiply", self, other)?;
-		self.iter().zip(other.iter()).map(|(a, b)| (*a).try_mul(*b)).collect()
+		self.iter().zip(other.iter()).map(|(a, b)| a.clone().try_mul(b.clone())).collect()
 	}
 }
 
@@ -554,7 +566,7 @@ pub trait Scale {
 
 impl Scale for Vec<Number> {
 	fn scale(&self, other: &Number) -> Result<Vec<Number>> {
-		self.iter().map(|a| (*a).try_mul(*other)).collect()
+		self.iter().map(|a| a.clone().try_mul(other.clone())).collect()
 	}
 }
 
@@ -604,7 +616,7 @@ pub trait Subtract {
 impl Subtract for Vec<Number> {
 	fn subtract(&self, other: &Self) -> Result<Vec<Number>> {
 		check_same_dimension("vector::subtract", self, other)?;
-		self.iter().zip(other.iter()).map(|(a, b)| (*a).try_sub(*b)).collect()
+		self.iter().zip(other.iter()).map(|(a, b)| a.clone().try_sub(b.clone())).collect()
 	}
 }
 
@@ -683,11 +695,12 @@ impl<T: AsNumber> EuclideanDistance for [T] {
 			match (a.wide(), b.wide()) {
 				(Wide::Float(a), Wide::Float(b)) => (a - b).powi(2),
 				(Wide::Int(a), Wide::Int(b)) => (a.abs_diff(b) as f64).powi(2),
-				(Wide::Int(_), Wide::Float(_) | Wide::Decimal(_))
-				| (Wide::Float(_), Wide::Int(_) | Wide::Decimal(_))
-				| (Wide::Decimal(_), Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_)) => {
-					(a.widened() - b.widened()).to_float().powi(2)
-				}
+				(Wide::Int(_), Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_))
+				| (Wide::Float(_), Wide::Int(_) | Wide::Decimal(_) | Wide::BigDecimal(_))
+				| (
+					Wide::Decimal(_) | Wide::BigDecimal(_),
+					Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_),
+				) => (a.widened() - b.widened()).to_float().powi(2),
 			}
 		})
 		.sqrt()

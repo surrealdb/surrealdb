@@ -65,7 +65,6 @@ pub const PLANNED_PHYSICAL_KINDS: &[(u32, &str)] = &[
 	(20, "DurationWide"),
 	(28, "DictionaryString"),
 	(29, "BigInt"),
-	(30, "BigDecimal"),
 	(31, "I128"),
 	(32, "U128"),
 	(33, "List"),
@@ -703,6 +702,10 @@ pub enum PhysicalKind {
 	/// A variable-width value in the stored-value grammar.
 	#[stored(n = 27)]
 	Value,
+	/// A variable-width `bigdecimal`: the payload of the stored grammar's BIGDECIMAL without its
+	/// tag.
+	#[stored(n = 30)]
+	BigDecimal,
 	/// An object node: no slot, and a presence that says whether the object is present.
 	#[stored(n = 34)]
 	Object,
@@ -725,6 +728,7 @@ impl PhysicalKind {
 			| Self::Bytes
 			| Self::RecordKey
 			| Self::DecimalVar
+			| Self::BigDecimal
 			| Self::Value
 			| Self::Object => None,
 		}
@@ -733,7 +737,12 @@ impl PhysicalKind {
 	/// Whether the kind is held in a variable-width slot.
 	pub const fn is_variable(self) -> bool {
 		match self {
-			Self::String | Self::Bytes | Self::RecordKey | Self::DecimalVar | Self::Value => true,
+			Self::String
+			| Self::Bytes
+			| Self::RecordKey
+			| Self::DecimalVar
+			| Self::BigDecimal
+			| Self::Value => true,
 			Self::Bool
 			| Self::I8
 			| Self::I16
@@ -1947,6 +1956,7 @@ pub(crate) mod tests {
 			PhysicalKind::Bytes,
 			PhysicalKind::RecordKey,
 			PhysicalKind::DecimalVar,
+			PhysicalKind::BigDecimal,
 			PhysicalKind::Value,
 			PhysicalKind::Object,
 		];

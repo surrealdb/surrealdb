@@ -164,6 +164,10 @@ pub(crate) fn is_plan_time_computable(expr: &LogicalExpr) -> bool {
 			| LogicalLiteral::Duration(_)
 			| LogicalLiteral::Uuid(_)
 			| LogicalLiteral::Datetime(_)
+			| LogicalLiteral::Date(_)
+			| LogicalLiteral::Time(_)
+			| LogicalLiteral::Timestamp(_)
+			| LogicalLiteral::Interval(_)
 			| LogicalLiteral::None
 			| LogicalLiteral::Null
 			| LogicalLiteral::Decimal(_)
@@ -321,7 +325,8 @@ pub(crate) fn is_rankable_query_vector(vector: &[Number]) -> bool {
 			| Number::I32(_)
 			| Number::U32(_)
 			| Number::U64(_)
-			| Number::Decimal(_) => true,
+			| Number::Decimal(_)
+			| Number::BigDecimal(_) => true,
 		})
 }
 

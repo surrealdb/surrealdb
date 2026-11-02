@@ -98,7 +98,7 @@ pub use self::function::{ExtPrefix, Function, FunctionCall};
 pub use self::group::{Group, Groups};
 pub use self::idiom::Idiom;
 pub use self::key_names::{KeyNames, KeyNamesError, KeyedKinds};
-pub use self::kind::{Kind, KindLiteral};
+pub use self::kind::{EnumRef, Kind, KindLiteral};
 pub use self::limit::Limit;
 pub use self::literal::{Literal, ObjectEntry};
 pub use self::lookup::Lookup;

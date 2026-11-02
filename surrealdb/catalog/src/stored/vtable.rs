@@ -20,9 +20,10 @@ use crate::node::Node;
 use crate::{
 	AccessGrant, AnalyzerDefinition, DatabaseDefinition, Error, NamespaceDefinition, NodeLiveQuery,
 	SequenceDefinition, StoredAccessDefinition, StoredApiDefinition, StoredBucketDefinition,
-	StoredConfigDefinition, StoredEventDefinition, StoredFieldDefinition, StoredFunctionDefinition,
-	StoredIndexDefinition, StoredMlModelDefinition, StoredModuleDefinition, StoredParamDefinition,
-	StoredSubscriptionDefinition, StoredTableDefinition, TaskLease, UserDefinition,
+	StoredConfigDefinition, StoredEnumDefinition, StoredEventDefinition, StoredFieldDefinition,
+	StoredFunctionDefinition, StoredIndexDefinition, StoredMlModelDefinition,
+	StoredModuleDefinition, StoredParamDefinition, StoredSubscriptionDefinition,
+	StoredTableDefinition, StoredUserTypeDefinition, TaskLease, UserDefinition,
 };
 
 /// The VM's view of one catalog type.
@@ -114,6 +115,8 @@ mod rows {
 	pub(super) const MODULE: CatalogVTable = catalog_vtable!(StoredModuleDefinition);
 	pub(super) const ML_MODEL: CatalogVTable = catalog_vtable!(StoredMlModelDefinition);
 	pub(super) const BUCKET: CatalogVTable = catalog_vtable!(StoredBucketDefinition);
+	pub(super) const ENUM: CatalogVTable = catalog_vtable!(StoredEnumDefinition);
+	pub(super) const USER_TYPE: CatalogVTable = catalog_vtable!(StoredUserTypeDefinition);
 	pub(super) const API: CatalogVTable = catalog_vtable!(StoredApiDefinition);
 	pub(super) const CONFIG: CatalogVTable = catalog_vtable!(StoredConfigDefinition);
 	pub(super) const SUBSCRIPTION: CatalogVTable = catalog_vtable!(StoredSubscriptionDefinition);
@@ -145,6 +148,8 @@ pub static CATALOG_TYPES: &[CatalogVTable] = &[
 	rows::MODULE,
 	rows::ML_MODEL,
 	rows::BUCKET,
+	rows::ENUM,
+	rows::USER_TYPE,
 	rows::API,
 	rows::CONFIG,
 	rows::SUBSCRIPTION,
@@ -179,6 +184,8 @@ pub static EDGE_CATALOG_TYPES: &[CatalogVTable] = &[
 	catalog_vtable!(read_only StoredModuleDefinition),
 	catalog_vtable!(read_only StoredMlModelDefinition),
 	catalog_vtable!(unserved StoredBucketDefinition),
+	catalog_vtable!(read_only StoredEnumDefinition),
+	catalog_vtable!(read_only StoredUserTypeDefinition),
 	catalog_vtable!(read_only StoredApiDefinition),
 	catalog_vtable!(read_only StoredConfigDefinition),
 	catalog_vtable!(read_only StoredSubscriptionDefinition),
@@ -209,6 +216,8 @@ pub static LEAF_CATALOG_TYPES: &[CatalogVTable] = &[
 	catalog_vtable!(unserved StoredModuleDefinition),
 	catalog_vtable!(unserved StoredMlModelDefinition),
 	catalog_vtable!(unserved StoredBucketDefinition),
+	catalog_vtable!(unserved StoredEnumDefinition),
+	catalog_vtable!(unserved StoredUserTypeDefinition),
 	catalog_vtable!(unserved StoredApiDefinition),
 	catalog_vtable!(unserved StoredConfigDefinition),
 	catalog_vtable!(unserved StoredSubscriptionDefinition),

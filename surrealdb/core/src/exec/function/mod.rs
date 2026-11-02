@@ -12,9 +12,9 @@
 
 mod aggregate;
 mod builtin;
-pub(crate) use builtin::evaluate_streaming;
 #[cfg(feature = "scripting")]
 pub(crate) use builtin::timezone_at;
+pub(crate) use builtin::{evaluate_streaming, run_statements};
 #[cfg(all(test, feature = "kv-mem"))]
 mod fallibility_probes;
 mod index;

@@ -22,6 +22,11 @@ fn natural_name(target: &BoundTarget) -> Option<String> {
 			name,
 			..
 		} => Some(name.clone()),
+		// A field of a composite value, `(c).f`, is named by the field, as PostgreSQL names it.
+		BoundExpr::Access {
+			field,
+			..
+		} => Some(field.clone()),
 		BoundExpr::UserVar(name) => Some(format!("@{name}")),
 		BoundExpr::SystemVar {
 			name,
@@ -33,9 +38,6 @@ fn natural_name(target: &BoundTarget) -> Option<String> {
 		}),
 		BoundExpr::Column(_)
 		| BoundExpr::Literal(_)
-		| BoundExpr::Access {
-			..
-		}
 		| BoundExpr::Param {
 			..
 		}

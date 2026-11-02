@@ -53,18 +53,26 @@ fn test_a_decimal_integer_beyond_64_bits_is_a_wide_integer() {
 	)
 	.unwrap();
 	assert_eq!(tokens[0].kind, TokenKind::IntLiteral(i64::MAX));
-	for (index, text, int8_minimum_magnitude) in [
-		(1, "9223372036854775808", true),
-		(2, "9223372036854775809", false),
-		(3, "18446744073709551616", false),
-		(4, "123456789012345678901234567890", false),
-		(5, "00009223372036854775808", true),
+	// The magnitude of the int8 minimum stays a double, so a sign can be folded into it.
+	assert_eq!(
+		tokens[1].kind,
+		TokenKind::WideIntLiteral {
+			value: 2f64.powi(63),
+			int8_minimum_magnitude: true,
+		}
+	);
+	// Every other integer up to `u64::MAX` is exact.
+	assert_eq!(tokens[2].kind, TokenKind::UnsignedIntLiteral(9223372036854775809));
+	for (index, text) in [
+		(3, "18446744073709551616"),
+		(4, "123456789012345678901234567890"),
+		(5, "00009223372036854775808"),
 	] {
 		assert_eq!(
 			tokens[index].kind,
 			TokenKind::WideIntLiteral {
 				value: text.parse::<f64>().unwrap(),
-				int8_minimum_magnitude,
+				int8_minimum_magnitude: text.parse::<u64>().is_ok(),
 			},
 			"{text}"
 		);

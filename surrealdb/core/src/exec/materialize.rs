@@ -68,12 +68,15 @@ pub(crate) const MARK: &str = "__materialize_write";
 static TOKEN: LazyLock<Value> =
 	LazyLock::new(|| Value::Uuid(crate::val::Uuid(uuid::Uuid::new_v4())));
 
-/// The marker binding for the frame of a write that maintains a list.
+/// The marker binding for the frame of a write that maintains a list. The rewrite of a renamed
+/// enum's stored labels (`vm::schema_host::rewrite_enum_labels`) carries it too, being engine
+/// bookkeeping of the same kind: it may change a `READONLY` field and fires no event.
 pub(crate) fn mark() -> (&'static str, Value) {
 	(MARK, TOKEN.clone())
 }
 
-/// Whether the frame `exec` is the frame of a write that maintains a list.
+/// Whether the frame `exec` is the frame of a write that maintains a list, or of another write
+/// that carries its marker ([`mark`]).
 pub(crate) fn is_marked(exec: &ExecutionContext) -> bool {
 	exec.ctx().value(MARK).is_some_and(|value| value == &*TOKEN)
 }

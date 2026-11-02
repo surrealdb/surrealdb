@@ -36,11 +36,14 @@
 //! serialized data should be interpreted by the current code.
 
 mod ann_pending;
+mod bigdecimal_keys;
+mod bigdecimal_stored;
 mod catalog_types_test;
 mod compiled_test;
 mod database_compatibility;
 mod diskann_state;
 mod durable_session;
+mod enum_definition;
 mod field_migrations;
 pub(crate) mod fixtures;
 mod generator;
@@ -49,6 +52,8 @@ mod module_definition;
 mod posting_blocks;
 mod stored_record;
 mod table_migration_state;
+mod temporal_keys;
+mod temporal_records;
 mod tests;
 
 #[rustfmt::skip]

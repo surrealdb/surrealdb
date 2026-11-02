@@ -157,6 +157,32 @@ async fn evaluate_nested(
 	}
 }
 
+/// Runs `statements` in order as nested queries of `exec`, in its transaction and as its principal,
+/// answering the value of the last. The statements come from the engine rather than from a
+/// caller's text, so no capability gates them: the one who reaches here has already been judged
+/// by the statement that runs them.
+pub(crate) async fn run_statements(
+	exec: &ExecutionContext,
+	depth: u32,
+	statements: Vec<crate::expr::Expr>,
+) -> Result<Value> {
+	crate::exec::compiles::nested_query(async {
+		let auth = Some(Arc::clone(&exec.root().auth));
+		let mut result = Value::None;
+		for mut stmt in statements {
+			stmt.prepare_credentials();
+			let op = lower(stmt).map_err(|reason| ExecError::PlannerUnsupported {
+				reason: reason.to_string(),
+			})?;
+			let plan = crate::exec::vm::serve::statement(exec, op, auth.clone(), depth, Vec::new())
+				.await?;
+			result = run_plan(plan, exec).await.catch_return()?;
+		}
+		Ok(result)
+	})
+	.await
+}
+
 /// Run a compiled plan to the single value it evaluates to.
 async fn run_plan(
 	plan: Arc<dyn ExecOperator>,

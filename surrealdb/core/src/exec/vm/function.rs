@@ -416,6 +416,7 @@ pub(super) async fn call(
 	evaluated: Vec<Value>,
 ) -> FlowResult<Value> {
 	let bound = bind_args(spec, entered, evaluated)?;
+	check_named_enums(spec, entered, ctx, &bound).await?;
 	// A body evaluated one expression at a time spends depth up to its first
 	// write as it is entered, and its deepest point must fit inside the
 	// re-entry the call spends. A body that writes, entered from code that is
@@ -461,7 +462,9 @@ pub(super) async fn call(
 	)?;
 	if spec.light {
 		let value = call_light(&body, limited_ctx, ctx, bound).await?;
-		return returned(spec, entered, value);
+		let value = returned(spec, entered, value)?;
+		check_returned_enums(spec, entered, ctx, &value).await?;
+		return Ok(value);
 	}
 	// The body runs one re-entry deeper, the budget being the context's,
 	// consumed per call, in the frame the call was reached in, as a scalar
@@ -501,7 +504,47 @@ pub(super) async fn call(
 		}
 		Err(e) => return Err(e),
 	};
-	returned(spec, entered, result)
+	let value = returned(spec, entered, result)?;
+	check_returned_enums(spec, entered, ctx, &value).await?;
+	Ok(value)
+}
+
+/// Judges the arguments `bound` against the labels of the named enums the entered definition
+/// declares for its parameters.
+async fn check_named_enums(
+	spec: &FunctionSpec,
+	entered: &EnteredCall,
+	ctx: &EvalContext<'_>,
+	bound: &[Value],
+) -> FlowResult<()> {
+	for ((param_name, kind), value) in entered.definition.args.iter().zip(bound) {
+		super::schema_host::check_enums_held(ctx.exec_ctx, kind, value).await.map_err(|e| {
+			ExprError::InvalidFunctionArguments {
+				name: spec.qualified.as_str().to_owned(),
+				message: format!("Failed to coerce argument `${param_name}`: {e}"),
+			}
+		})?;
+	}
+	Ok(())
+}
+
+/// Judges the value a function returned against the labels of the named enums its return type
+/// holds.
+async fn check_returned_enums(
+	spec: &FunctionSpec,
+	entered: &EnteredCall,
+	ctx: &EvalContext<'_>,
+	value: &Value,
+) -> FlowResult<()> {
+	let Some(kind) = entered.definition.returns.as_ref() else {
+		return Ok(());
+	};
+	super::schema_host::check_enums_held(ctx.exec_ctx, kind, value).await.map_err(|e| {
+		ControlFlow::from(anyhow::Error::new(ExecError::ReturnCoerce {
+			name: spec.qualified.clone(),
+			error: Box::new(e),
+		}))
+	})
 }
 
 /// The value `body`, a light body ([`FunctionSpec::light`]), computes for

@@ -172,7 +172,7 @@ impl MeasureSettled {
 				.iter()
 				.map(|value| {
 					if let Value::Number(number) = value {
-						Some(*number)
+						Some(number.clone())
 					} else {
 						None
 					}

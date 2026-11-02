@@ -626,7 +626,11 @@ impl RowReader for PackedRowReader<'_> {
 				Value::Number(Number::U32(v)) => Some(*v as i64),
 				Value::Number(Number::U64(v)) => i64::try_from(*v).ok(),
 				Value::Number(
-					Number::F16(_) | Number::F32(_) | Number::Float(_) | Number::Decimal(_),
+					Number::F16(_)
+					| Number::F32(_)
+					| Number::Float(_)
+					| Number::Decimal(_)
+					| Number::BigDecimal(_),
 				)
 				| Value::None
 				| Value::Null
@@ -634,6 +638,10 @@ impl RowReader for PackedRowReader<'_> {
 				| Value::String(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
 				| Value::Set(_)
@@ -908,6 +916,10 @@ mod tests {
 			Value::Regex(_) => 18,
 			Value::Range(_) => 19,
 			Value::Closure(_) => 20,
+			Value::Date(_) => 21,
+			Value::Time(_) => 22,
+			Value::Timestamp(_) => 23,
+			Value::Interval(_) => 24,
 		}
 	}
 

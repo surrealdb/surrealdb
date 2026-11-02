@@ -157,7 +157,11 @@ fn render(value: &Value) -> String {
 		| Value::File(_)
 		| Value::Range(_)
 		| Value::Regex(_)
-		| Value::Set(_) => surrealdb_types::ToSql::to_sql(value),
+		| Value::Set(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_) => surrealdb_types::ToSql::to_sql(value),
 	}
 }
 

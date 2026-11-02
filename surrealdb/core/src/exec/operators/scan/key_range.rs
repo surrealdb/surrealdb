@@ -133,6 +133,10 @@ pub(crate) fn equality_element(kind: &ComponentKind, value: &Value) -> Option<Va
 			Value::None
 			| Value::Null
 			| Value::Number(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Array(_)
 			| Value::Set(_)
 			| Value::Object(_)
@@ -171,7 +175,7 @@ fn side_element(
 			if let Some(int) = n.as_int_lossless() {
 				return Some((Value::Number(Number::Int(int)), inclusive));
 			}
-			let rounded = match (*n, side) {
+			let rounded = match (n.clone(), side) {
 				(Number::Float(f), Side::Low) => Number::Float(f.ceil()),
 				(Number::Float(f), Side::High) => Number::Float(f.floor()),
 				(Number::F32(f), Side::Low) => Number::F32(f.ceil()),
@@ -184,6 +188,10 @@ fn side_element(
 				}
 				(Number::Decimal(d), Side::Low) => Number::Decimal(d.ceil()),
 				(Number::Decimal(d), Side::High) => Number::Decimal(d.floor()),
+				(Number::BigDecimal(d), Side::Low) => Number::BigDecimal(Box::new(d.ceil().ok()?)),
+				(Number::BigDecimal(d), Side::High) => {
+					Number::BigDecimal(Box::new(d.floor().ok()?))
+				}
 				(
 					Number::Int(_)
 					| Number::I8(_)

@@ -1349,6 +1349,9 @@ pub(crate) fn exact_across_kinds(n: &Number) -> bool {
 				&& Decimal::from_f64_retain(f).is_some_and(|d| Decimal::from_f64(f) == Some(d))
 		}
 		Number::Decimal(d) => d.to_f64().is_some_and(|f| Decimal::from_f64_retain(f) == Some(*d)),
+		Number::BigDecimal(d) => {
+			surrealdb_types::BigDecimal::try_from_f64(d.to_f64()).is_ok_and(|f| f == **d)
+		}
 	}
 }
 
@@ -1765,7 +1768,12 @@ fn kind_at_admits_set(kind: &Kind, path: &[Part]) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -1789,7 +1797,8 @@ fn kind_at_admits_set(kind: &Kind, path: &[Part]) -> bool {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => false,
+		| Kind::File(_)
+		| Kind::Enum(_) => false,
 	}
 }
 
@@ -1837,7 +1846,12 @@ fn kind_admits_set(kind: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -1860,6 +1874,7 @@ fn kind_admits_set(kind: &Kind) -> bool {
 		| Kind::Record(_)
 		| Kind::Geometry(_)
 		| Kind::File(_)
+		| Kind::Enum(_)
 		| Kind::Function(..)
 		| Kind::Array(..)
 		| Kind::Literal(_) => false,
@@ -2358,7 +2373,12 @@ fn links_along<'a>(
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -2381,7 +2401,8 @@ fn links_along<'a>(
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => {}
+		| Kind::File(_)
+		| Kind::Enum(_) => {}
 	}
 }
 

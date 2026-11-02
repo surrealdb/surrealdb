@@ -137,6 +137,10 @@ impl Analyzer {
 				| Value::Null
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Set(_)
 				| Value::Geometry(_)

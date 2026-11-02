@@ -229,6 +229,7 @@ native-tls = "0.2.18"
 ndarray = "0.17.2"
 ndarray-stats = "0.7.0"
 nix = { version = "0.31.3", default-features = false }
+num-bigint = "0.4.8"
 num-traits = "0.2.19"
 num_cpus = "1.17.0"
 object_store = "0.14.2"

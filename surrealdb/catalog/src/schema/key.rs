@@ -76,6 +76,7 @@ impl ComponentKind {
 			| Kind::Null
 			| Kind::Float
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Number
 			| Kind::I8
 			| Kind::U8
@@ -86,6 +87,10 @@ impl ComponentKind {
 			| Kind::U64
 			| Kind::F16
 			| Kind::F32
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Object
 			| Kind::Array(..)
 			| Kind::Geometry(..)
@@ -97,7 +102,8 @@ impl ComponentKind {
 			| Kind::Either(..)
 			| Kind::Function(..)
 			| Kind::Literal(..)
-			| Kind::File(..) => return None,
+			| Kind::File(..)
+			| Kind::Enum(..) => return None,
 		})
 	}
 
@@ -134,8 +140,12 @@ impl ComponentKind {
 				Number::Decimal(_) if n.as_int_lossless().is_some() => {
 					Some("is a decimal; an int component holds only ints")
 				}
+				Number::BigDecimal(_) if n.as_int_lossless().is_some() => {
+					Some("is a bigdecimal; an int component holds only ints")
+				}
 				Number::Float(_)
 				| Number::Decimal(_)
+				| Number::BigDecimal(_)
 				| Number::I8(_)
 				| Number::I16(_)
 				| Number::I32(_)
@@ -675,8 +685,13 @@ fn group_component_kind(expr: &Expr) -> ComponentKind {
 		| Kind::None
 		| Kind::Null
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Float
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Number
 		| Kind::I8
 		| Kind::U8
@@ -699,7 +714,8 @@ fn group_component_kind(expr: &Expr) -> ComponentKind {
 		| Kind::Either(..)
 		| Kind::Function(..)
 		| Kind::Literal(..)
-		| Kind::File(..) => ComponentKind::Unknown,
+		| Kind::File(..)
+		| Kind::Enum(..) => ComponentKind::Unknown,
 	}
 }
 
@@ -1261,7 +1277,7 @@ mod tests {
 		let dec = |s: &str| Number::Decimal(s.parse().unwrap());
 
 		for ok in [Number::Int(0), Number::Int(5), Number::Int(i64::MIN), Number::Int(i64::MAX)] {
-			assert_eq!(conform(ok), Ok(()), "{ok:?}");
+			assert_eq!(conform(ok.clone()), Ok(()), "{ok:?}");
 		}
 
 		let float = "is a float; an int component holds only ints";
@@ -1286,7 +1302,7 @@ mod tests {
 			(dec("100000000000000000000"), not_an_int),
 		] {
 			assert_eq!(
-				conform(bad),
+				conform(bad.clone()),
 				Err(Nonconformance::Component {
 					position: 0,
 					name: Some("n".to_owned()),

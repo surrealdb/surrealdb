@@ -4,8 +4,8 @@ use std::sync::LazyLock;
 
 use rust_decimal::Decimal;
 use surrealdb_types::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Regex, Set, Uuid, Value,
+	Array, Bytes, Date, Datetime, Duration, File, Geometry, Interval, Number, Object, Range,
+	RecordId, RecordIdKey, RecordIdKeyRange, Regex, Set, Time, Timestamp, Uuid, Value,
 };
 
 #[derive(Debug, Clone)]
@@ -254,7 +254,17 @@ impl RoughlyEq for Number {
 	}
 }
 
-impl_roughly_eq_delegate!(i64, bool, String, Geometry, Bytes, Range, Regex, Duration, File);
+impl_roughly_eq_delegate!(
+	i64, bool, String, Geometry, Bytes, Range, Regex, Duration, File, Date, Time, Timestamp
+);
+
+/// An interval is equal to another only when its components are, so a test that expects
+/// `1 month` is not satisfied by `30 days`.
+impl RoughlyEq for Interval {
+	fn roughly_equal(&self, other: &Self, _: &RoughlyEqConfig) -> bool {
+		self.identical(other)
+	}
+}
 
 impl RoughlyEq for Array {
 	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
@@ -297,6 +307,10 @@ impl_roughly_eq_enum!(
 		String(s),
 		Duration(d),
 		Datetime(d),
+		Date(d),
+		Time(t),
+		Timestamp(t),
+		Interval(i),
 		Uuid(u),
 		Array(a),
 		Set(s),

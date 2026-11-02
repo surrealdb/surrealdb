@@ -57,7 +57,11 @@ pub(super) trait RowReader {
 			Scalar::Number(Number::U32(v)) => Some(v as i64),
 			Scalar::Number(Number::U64(v)) => i64::try_from(v).ok(),
 			Scalar::Number(
-				Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_),
+				Number::Float(_)
+				| Number::Decimal(_)
+				| Number::F16(_)
+				| Number::F32(_)
+				| Number::BigDecimal(_),
 			) => None,
 			Scalar::None
 			| Scalar::Null
@@ -459,7 +463,7 @@ pub(super) fn scalar_numbers(scalar: &Scalar<'_>, out: &mut Vec<Number>) -> bool
 		Scalar::Value(value) => match value.as_ref().as_array() {
 			Some(array) => array.iter().all(|value| match value.as_number() {
 				Some(number) => {
-					out.push(*number);
+					out.push(number.clone());
 					true
 				}
 				None => false,
@@ -499,6 +503,9 @@ pub(super) fn stored_numbers(value: ValueRef<'_>, out: &mut Vec<Number>) -> anyh
 			Kind::Int => element.as_int()?.map(Number::Int),
 			Kind::Float => element.as_float()?.map(Number::Float),
 			Kind::Decimal => element.as_decimal()?.map(Number::Decimal),
+			Kind::BigDecimal => {
+				element.as_bigdecimal()?.map(|big| Number::BigDecimal(Box::new(big)))
+			}
 			Kind::I8
 			| Kind::U8
 			| Kind::I16
@@ -520,6 +527,10 @@ pub(super) fn stored_numbers(value: ValueRef<'_>, out: &mut Vec<Number>) -> anyh
 			| Kind::String
 			| Kind::Duration
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Uuid
 			| Kind::Bytes
 			| Kind::Table
@@ -582,6 +593,9 @@ fn flatten_stored(
 			Kind::Int => element.as_int()?.map(Number::Int),
 			Kind::Float => element.as_float()?.map(Number::Float),
 			Kind::Decimal => element.as_decimal()?.map(Number::Decimal),
+			Kind::BigDecimal => {
+				element.as_bigdecimal()?.map(|big| Number::BigDecimal(Box::new(big)))
+			}
 			Kind::I8
 			| Kind::U8
 			| Kind::I16
@@ -612,6 +626,10 @@ fn flatten_stored(
 			| Kind::String
 			| Kind::Duration
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Uuid
 			| Kind::Bytes
 			| Kind::Table
@@ -648,6 +666,7 @@ pub(super) fn scalar_from_stored(v: ValueRef<'_>) -> anyhow::Result<Scalar<'_>> 
 		Kind::Int => Scalar::Number(Number::Int(some(v.as_int()?)?)),
 		Kind::Float => Scalar::Number(Number::Float(some(v.as_float()?)?)),
 		Kind::Decimal => Scalar::Number(Number::Decimal(some(v.as_decimal()?)?)),
+		Kind::BigDecimal => Scalar::Number(Number::BigDecimal(Box::new(some(v.as_bigdecimal()?)?))),
 		Kind::I8
 		| Kind::U8
 		| Kind::I16
@@ -676,6 +695,10 @@ pub(super) fn scalar_from_stored(v: ValueRef<'_>) -> anyhow::Result<Scalar<'_>> 
 		| Kind::Geometry
 		| Kind::Array
 		| Kind::Set
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Object
 		| Kind::Unknown => Scalar::Value(Held::Owned(v.decode()?)),
 	})
@@ -755,7 +778,11 @@ impl RowReader for StoredRow<'_> {
 				Scalar::Number(Number::U32(v)) => Some(v as i64),
 				Scalar::Number(Number::U64(v)) => i64::try_from(v).ok(),
 				Scalar::Number(
-					Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_),
+					Number::Float(_)
+					| Number::Decimal(_)
+					| Number::F16(_)
+					| Number::F32(_)
+					| Number::BigDecimal(_),
 				) => None,
 				Scalar::None
 				| Scalar::Null
@@ -966,6 +993,10 @@ pub(super) fn scalar_from_wire(bytes: &[u8]) -> anyhow::Result<Scalar<'_>> {
 		Value::Uuid(v) => Scalar::Uuid(v),
 		other @ (Value::String(_)
 		| Value::Array(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Set(_)
 		| Value::Object(_)
 		| Value::Geometry(_)
@@ -1098,7 +1129,8 @@ mod tests {
 						crate::val::Number::F16(_)
 						| crate::val::Number::F32(_)
 						| crate::val::Number::Float(_)
-						| crate::val::Number::Decimal(_),
+						| crate::val::Number::Decimal(_)
+						| Number::BigDecimal(_),
 					)
 					| Value::None
 					| Value::Null
@@ -1106,6 +1138,10 @@ mod tests {
 					| Value::String(_)
 					| Value::Duration(_)
 					| Value::Datetime(_)
+					| Value::Date(_)
+					| Value::Time(_)
+					| Value::Timestamp(_)
+					| Value::Interval(_)
 					| Value::Uuid(_)
 					| Value::Array(_)
 					| Value::Set(_)

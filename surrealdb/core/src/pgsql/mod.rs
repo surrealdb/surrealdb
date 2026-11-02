@@ -114,6 +114,11 @@ pub(crate) fn lower_statements(
 			| surrealdb_pgsql::ast::stmt::Statement::CreateIndex(_)
 			| surrealdb_pgsql::ast::stmt::Statement::CreateView(_)
 			| surrealdb_pgsql::ast::stmt::Statement::AlterTable(_)
+			| surrealdb_pgsql::ast::stmt::Statement::CreateType(_)
+			| surrealdb_pgsql::ast::stmt::Statement::AlterType(_)
+			| surrealdb_pgsql::ast::stmt::Statement::CreateDomain(_)
+			| surrealdb_pgsql::ast::stmt::Statement::AlterDomain(_)
+			| surrealdb_pgsql::ast::stmt::Statement::CreateCompositeType(_)
 			| surrealdb_pgsql::ast::stmt::Statement::Drop(_) => {
 				let mut table = None;
 				for parts in ddl_table_names(stmt) {
@@ -247,6 +252,11 @@ fn ddl_table_names(stmt: &surrealdb_pgsql::ast::stmt::Statement) -> Vec<&[String
 		}
 		Statement::AlterTable(alter) => vec![alter.name.parts.as_slice()],
 		Statement::Drop(drop) => drop.names.iter().map(|name| name.parts.as_slice()).collect(),
+		Statement::CreateType(create) => vec![create.name.parts.as_slice()],
+		Statement::AlterType(alter) => vec![alter.name.parts.as_slice()],
+		Statement::CreateDomain(create) => vec![create.name.parts.as_slice()],
+		Statement::AlterDomain(alter) => vec![alter.name.parts.as_slice()],
+		Statement::CreateCompositeType(create) => vec![create.name.parts.as_slice()],
 		Statement::Select(_)
 		| Statement::Insert(_)
 		| Statement::Update(_)
@@ -353,6 +363,34 @@ struct BatchCatalog<'a> {
 }
 
 impl surrealdb_sqlplan::BinderCatalog for BatchCatalog<'_> {
+	fn enum_type(&self, name: &str) -> Option<surrealdb_sqlplan::EnumType> {
+		self.inner.enum_type(name)
+	}
+
+	fn enum_types(&self) -> Vec<surrealdb_sqlplan::EnumType> {
+		self.inner.enum_types()
+	}
+
+	fn domain_type(&self, name: &str) -> Option<surrealdb_sqlplan::DomainType> {
+		self.inner.domain_type(name)
+	}
+
+	fn composite_type(&self, name: &str) -> Option<surrealdb_sqlplan::CompositeType> {
+		self.inner.composite_type(name)
+	}
+
+	fn domain_types(&self) -> Vec<surrealdb_sqlplan::DomainType> {
+		self.inner.domain_types()
+	}
+
+	fn composite_types(&self) -> Vec<surrealdb_sqlplan::CompositeType> {
+		self.inner.composite_types()
+	}
+
+	fn domain_columns(&self, name: &str) -> Vec<surrealdb_sqlplan::DomainColumn> {
+		self.inner.domain_columns(name)
+	}
+
 	fn get_table(
 		&self,
 		schema: Option<&str>,
@@ -400,6 +438,15 @@ impl surrealdb_sqlplan::BinderCatalog for BatchCatalog<'_> {
 
 	fn link_admits_none(&self, schema: Option<&str>, table: &str, column: &str) -> bool {
 		self.inner.link_admits_none(schema, table, column)
+	}
+
+	fn column_enum(
+		&self,
+		schema: Option<&str>,
+		table: &str,
+		column: &str,
+	) -> Option<surrealdb_sqlplan::EnumColumn> {
+		self.inner.column_enum(schema, table, column)
 	}
 
 	fn null_columns(&self, schema: Option<&str>, table: &str) -> Vec<String> {

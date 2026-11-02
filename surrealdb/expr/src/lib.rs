@@ -37,9 +37,9 @@ pub(crate) mod types {
 	#[allow(unused_imports)]
 	pub use surrealdb_types::{
 		Action as PublicAction, Array as PublicArray, Bytes as PublicBytes,
-		Datetime as PublicDatetime, Duration as PublicDuration, File as PublicFile,
-		Geometry as PublicGeometry, GeometryKind as PublicGeometryKind, Kind as PublicKind,
-		KindLiteral as PublicKindLiteral, Notification as PublicNotification,
+		Datetime as PublicDatetime, Duration as PublicDuration, EnumRef as PublicEnumRef,
+		File as PublicFile, Geometry as PublicGeometry, GeometryKind as PublicGeometryKind,
+		Kind as PublicKind, KindLiteral as PublicKindLiteral, Notification as PublicNotification,
 		Number as PublicNumber, Object as PublicObject, Range as PublicRange,
 		RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
 		RecordIdKeyRange as PublicRecordIdKeyRange, Set as PublicSet, SurrealValue,

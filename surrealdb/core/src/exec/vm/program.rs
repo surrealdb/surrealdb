@@ -2309,6 +2309,48 @@ pub(crate) enum StoreInstr {
 		columns: Reg,
 		schemafull: Reg,
 	},
+	/// Edit the stored enum definition in `definition` by `edits`, in order: refuse an edit that
+	/// names a label that does not exist, or adds one that does (an `IF NOT EXISTS` add is
+	/// skipped), and leave the edited definition in the register.
+	AlterEnum {
+		definition: Reg,
+		edits: Vec<crate::exec::ir::iface::statements::EnumEdit>,
+	},
+	/// Rewrite the stored values that carry a label `edits` renamed, in every field of the
+	/// database `ns`/`db` whose type names the enum `name`, through the writes of the records that
+	/// hold them, so that index entries, events and field clauses follow. Runs after the edited
+	/// definition is stored, in the same transaction.
+	RewriteEnumLabels {
+		ns: Reg,
+		db: Reg,
+		name: Reg,
+		edits: Vec<crate::exec::ir::iface::statements::EnumEdit>,
+	},
+	/// Refuse to remove the enum named in `name` of the database `ns`/`db` while a field of the
+	/// database has a type that names it, or a function declares it in a parameter or a return
+	/// type or its body names it.
+	CheckEnumUnreferenced {
+		ns: Reg,
+		db: Reg,
+		name: Reg,
+	},
+	/// Raise that the domain or composite type named in `name` already exists (`exists`), or does
+	/// not.
+	RaiseUserType {
+		name: Reg,
+		exists: bool,
+	},
+	/// Refuse to remove the stored domain or composite type in `definition`, named in `name`, of
+	/// the database `ns`/`db`: when it is not a domain and `domain` says it must be, or not a
+	/// composite type and `domain` says it must not be, and while a field of the database declares
+	/// its SQL type with it.
+	CheckUserTypeRemovable {
+		ns: Reg,
+		db: Reg,
+		name: Reg,
+		definition: Reg,
+		domain: bool,
+	},
 	/// Raise what `ALTER TABLE` raises when the table definition in `updated`,
 	/// formed from the one in `previous` by its clauses, changes a
 	/// `PERMISSIONS` clause to one with an effect (except in an import), is
@@ -2399,6 +2441,7 @@ pub(crate) enum Definitions {
 	Analyzer,
 	/// A database's buckets.
 	Bucket,
+	Enum,
 	/// The root's buckets.
 	RootBucket,
 	/// A namespace's buckets.
@@ -2447,6 +2490,7 @@ pub(crate) enum IdSequence {
 	Namespace,
 	Database,
 	Table,
+	Enum,
 }
 
 /// A refusal `DEFINE FIELD` makes of its definition, as plain data a program
@@ -3344,6 +3388,7 @@ pub(crate) enum StatementError {
 	ApAlreadyExists,
 	CgAlreadyExists,
 	BuAlreadyExists,
+	EnAlreadyExists,
 	MdAlreadyExists,
 	MlAlreadyExists,
 	/// A user that exists; the argument is an object of the error's fields.
@@ -3367,6 +3412,7 @@ pub(crate) enum StatementError {
 	SeqNotFound,
 	AzNotFound,
 	BuNotFound,
+	EnNotFound,
 	MdNotFound,
 	MlNotFound,
 	/// The not-found errors of access methods, users and APIs; the argument
@@ -4493,6 +4539,10 @@ impl CompareOp {
 					| Value::String(_)
 					| Value::Duration(_)
 					| Value::Datetime(_)
+					| Value::Date(_)
+					| Value::Time(_)
+					| Value::Timestamp(_)
+					| Value::Interval(_)
 					| Value::Uuid(_)
 					| Value::Array(_)
 					| Value::Set(_)
@@ -4917,6 +4967,10 @@ impl NavOp {
 				| Value::String(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
@@ -4938,6 +4992,10 @@ impl NavOp {
 				| Value::String(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
@@ -6042,6 +6100,10 @@ impl KeyShape {
 				| Value::String(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Set(_)
 				| Value::Object(_)
@@ -6063,6 +6125,10 @@ impl KeyShape {
 				| Value::String(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
 				| Value::Set(_)

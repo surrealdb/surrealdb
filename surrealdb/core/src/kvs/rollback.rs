@@ -51,17 +51,18 @@ use surrealdb_types::ToSql;
 use crate::key::schema::{
 	AnalyzerKey, AnalyzerPrefix, AnyKey, ApiKey, ApiPrefix, BucketKey, BucketPrefix, DatabaseKey,
 	DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessPrefix, DbConfigKey,
-	DbConfigPrefix, DbGrantKey, DbPrefix, DbRoot, DbUserKey, DbUserPrefix, EventKey, EventPrefix,
-	FeatureLevelKey, FieldKey, FieldPrefix, ForeignTableKey, ForeignTablePrefix, FunctionKey,
-	FunctionPrefix, GenerationMarkKey, GenerationMarkPrefix, IndexDefKey, IndexDefPrefix,
-	LayoutKey, LayoutPrefix, MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey,
-	NamespacePrefix, NodeEventQueueKey, NodeKey, NodeLiveQueryKey, NodePrefix, NodeReleaseKey,
-	NodeReleasePrefix, NodeStatePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessPrefix,
-	NsBucketKey, NsBucketPrefix, NsGrantKey, NsPrefix, NsRoot, NsUserKey, NsUserPrefix, ParamKey,
-	ParamPrefix, RootAccessMethodKey, RootAccessMethodPrefix, RootAccessPrefix, RootBucketKey,
-	RootBucketPrefix, RootConfigKey, RootConfigPrefix, RootGrantKey, RootUserKey, RootUserPrefix,
-	SequenceKey, SequencePrefix, SubscriptionKey, SubscriptionPrefix, TableConformanceKey,
-	TableKey, TableMigrationsKey, TablePrefix, TaskLeaseKey, TaskLeasePrefix, TblPrefix, TblRoot,
+	DbConfigPrefix, DbGrantKey, DbPrefix, DbRoot, DbUserKey, DbUserPrefix, EnumDefKey,
+	EnumDefPrefix, EventKey, EventPrefix, FeatureLevelKey, FieldKey, FieldPrefix, ForeignTableKey,
+	ForeignTablePrefix, FunctionKey, FunctionPrefix, GenerationMarkKey, GenerationMarkPrefix,
+	IndexDefKey, IndexDefPrefix, LayoutKey, LayoutPrefix, MlModelKey, MlModelPrefix, ModuleKey,
+	ModulePrefix, NamespaceKey, NamespacePrefix, NodeEventQueueKey, NodeKey, NodeLiveQueryKey,
+	NodePrefix, NodeReleaseKey, NodeReleasePrefix, NodeStatePrefix, NsAccessMethodKey,
+	NsAccessMethodPrefix, NsAccessPrefix, NsBucketKey, NsBucketPrefix, NsGrantKey, NsPrefix,
+	NsRoot, NsUserKey, NsUserPrefix, ParamKey, ParamPrefix, RootAccessMethodKey,
+	RootAccessMethodPrefix, RootAccessPrefix, RootBucketKey, RootBucketPrefix, RootConfigKey,
+	RootConfigPrefix, RootGrantKey, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix,
+	SubscriptionKey, SubscriptionPrefix, TableConformanceKey, TableKey, TableMigrationsKey,
+	TablePrefix, TaskLeaseKey, TaskLeasePrefix, TblPrefix, TblRoot, UserTypeKey, UserTypePrefix,
 	ViewStateKey, ViewStatePrefix,
 };
 use crate::key::{
@@ -872,6 +873,32 @@ impl Audit {
 			false,
 			&scope,
 			namer!(BucketKey, k => k.bu.into_owned()),
+			|_| {},
+		)
+		.await?;
+		self.family(
+			txn,
+			EnumDefPrefix {
+				ns,
+				db,
+			}
+			.range()?,
+			false,
+			&scope,
+			namer!(EnumDefKey, k => k.en.into_owned()),
+			|_| {},
+		)
+		.await?;
+		self.family(
+			txn,
+			UserTypePrefix {
+				ns,
+				db,
+			}
+			.range()?,
+			false,
+			&scope,
+			namer!(UserTypeKey, k => k.ty.into_owned()),
 			|_| {},
 		)
 		.await?;

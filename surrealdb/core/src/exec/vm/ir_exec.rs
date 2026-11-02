@@ -442,6 +442,10 @@ pub(super) fn scalar_of(value: Value) -> Scalar<'static> {
 		Value::Uuid(v) => Scalar::Uuid(v),
 		other @ (Value::String(_)
 		| Value::Array(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Set(_)
 		| Value::Object(_)
 		| Value::Geometry(_)

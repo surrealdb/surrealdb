@@ -175,6 +175,7 @@ enum ConstKey {
 	Int(i64),
 	Float(u64),
 	Decimal([u8; 16]),
+	BigDecimal(String),
 	I8(i8),
 	U8(u8),
 	I16(i16),
@@ -198,6 +199,7 @@ impl ConstKey {
 			Value::Number(Number::Float(f)) if f.is_nan() => Self::Float(f64::NAN.to_bits()),
 			Value::Number(Number::Float(f)) => Self::Float(f.to_bits()),
 			Value::Number(Number::Decimal(d)) => Self::Decimal(d.serialize()),
+			Value::Number(Number::BigDecimal(d)) => Self::BigDecimal(d.to_string()),
 			Value::Number(Number::I8(i)) => Self::I8(*i),
 			Value::Number(Number::U8(u)) => Self::U8(*u),
 			Value::Number(Number::I16(i)) => Self::I16(*i),
@@ -214,6 +216,10 @@ impl ConstKey {
 			Value::String(s) => Self::Strand(s.as_str().to_owned()),
 			other @ (Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Array(_)
 			| Value::Set(_)

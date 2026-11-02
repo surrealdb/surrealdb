@@ -135,6 +135,10 @@ fn value_byte_size(value: &Value) -> usize {
 		| Value::Number(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_) => return mem::size_of::<Value>(),
 		Value::Array(_)
 		| Value::Set(_)
@@ -206,6 +210,10 @@ fn value_byte_size(value: &Value) -> usize {
 			| Value::Number(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_) => {}
 		}
 		if total > cap {

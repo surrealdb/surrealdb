@@ -45,6 +45,14 @@ impl<'v> CoreShaped<'v> {
 			Value::Number(Number::F32(v)) => Leaf::F32(*v),
 			Value::Number(Number::Float(v)) => Leaf::Float(*v),
 			Value::Number(Number::Decimal(v)) => Leaf::Decimal(*v),
+			// A bigdecimal that fits a decimal is a decimal leaf. Any other value has no
+			// fixed-width leaf and is written through the dynamic path.
+			Value::Number(Number::BigDecimal(v)) => {
+				match rust_decimal::Decimal::try_from(v.as_ref()) {
+					Ok(d) => Leaf::Decimal(d),
+					Err(_) => Leaf::Other,
+				}
+			}
 			Value::String(v) => Leaf::String(v.as_str()),
 			Value::Bytes(v) => Leaf::Bytes(&v.0),
 			Value::Datetime(v) => Leaf::Datetime(v.0.timestamp(), v.0.timestamp_subsec_nanos()),
@@ -64,6 +72,10 @@ impl<'v> CoreShaped<'v> {
 			Value::Object(_) => Leaf::Object,
 			Value::Array(_) => Leaf::Array,
 			Value::Set(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Geometry(_)
 			| Value::Table(_)
 			| Value::File(_)
@@ -95,6 +107,12 @@ impl<'v> ShapedValue<'v> for CoreShaped<'v> {
 				Scalar::Number(Number::F32(v)) => Leaf::F32(*v),
 				Scalar::Number(Number::Float(v)) => Leaf::Float(*v),
 				Scalar::Number(Number::Decimal(v)) => Leaf::Decimal(*v),
+				Scalar::Number(Number::BigDecimal(v)) => {
+					match rust_decimal::Decimal::try_from(v.as_ref()) {
+						Ok(d) => Leaf::Decimal(d),
+						Err(_) => Leaf::Other,
+					}
+				}
 				Scalar::Str(v) => Leaf::String(v),
 				Scalar::Bytes(v) => Leaf::Bytes(v),
 				Scalar::Duration(v) => Leaf::Duration(v.0.as_secs(), v.0.subsec_nanos()),
@@ -634,6 +652,7 @@ fn write_link(
 		| StoredKind::Bool
 		| StoredKind::Float
 		| StoredKind::Decimal
+		| StoredKind::BigDecimal
 		| StoredKind::I8
 		| StoredKind::U8
 		| StoredKind::I16
@@ -645,6 +664,10 @@ fn write_link(
 		| StoredKind::F32
 		| StoredKind::Duration
 		| StoredKind::Datetime
+		| StoredKind::Date
+		| StoredKind::Time
+		| StoredKind::Timestamp
+		| StoredKind::Interval
 		| StoredKind::Uuid
 		| StoredKind::Bytes
 		| StoredKind::Table

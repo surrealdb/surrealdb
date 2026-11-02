@@ -149,6 +149,35 @@ fn test_parse_update_delete() {
 }
 
 #[test]
+fn test_parse_multi_word_and_serial_column_types() {
+	let Statement::CreateTable(create) = parse_statement(
+		"CREATE TABLE t (a NATIONAL CHARACTER VARYING(10), b LONG VARBINARY, c DOUBLE PRECISION, \
+		 d SERIAL, e BIGINT UNSIGNED, f LONG VARCHAR, g CHARACTER VARYING(5) NOT NULL)",
+	)
+	.unwrap() else {
+		panic!("expected CREATE TABLE");
+	};
+	let types: Vec<&str> = create.columns.iter().map(|c| c.data_type.as_str()).collect();
+	assert_eq!(
+		types,
+		[
+			"NATIONAL CHARACTER VARYING(10)",
+			"LONG VARBINARY",
+			"DOUBLE PRECISION",
+			"SERIAL",
+			"BIGINT UNSIGNED",
+			"LONG VARCHAR",
+			"CHARACTER VARYING(5)",
+		]
+	);
+	// SERIAL is BIGINT UNSIGNED NOT NULL AUTO_INCREMENT UNIQUE.
+	let serial = &create.columns[3];
+	assert!(serial.not_null && serial.auto_increment && serial.unique);
+	let plain = &create.columns[4];
+	assert!(!plain.not_null && !plain.auto_increment && !plain.unique);
+}
+
+#[test]
 fn test_parse_ddl_and_admin() {
 	let s = parse_statement(
 		"CREATE TABLE IF NOT EXISTS `users` (id INT PRIMARY KEY, name VARCHAR(255) NOT NULL)",
@@ -730,16 +759,24 @@ fn test_parse_executable_version_comments() {
 
 #[test]
 fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_float() {
-	for literal in [
-		"9223372036854775808",
-		"18446744073709551616",
-		"10000000000000000000",
-		"123456789012345678901234567890",
-	] {
+	for literal in ["9223372036854775808", "18446744073709551616", "123456789012345678901234567890"]
+	{
 		let e = parse_expr(literal).expect(literal);
 		assert_eq!(e, Expr::Literal(Literal::Float(literal.parse::<f64>().unwrap()), e.span()));
 	}
 	assert!(parse_expr(&"9".repeat(400)).is_err(), "a literal beyond a double has no value");
+}
+
+#[test]
+fn test_a_decimal_integer_literal_up_to_u64_max_is_exact_and_unsigned() {
+	for (literal, value) in [
+		("10000000000000000000", 10_000_000_000_000_000_000u64),
+		("9223372036854775809", 9_223_372_036_854_775_809u64),
+		("18446744073709551615", u64::MAX),
+	] {
+		let e = parse_expr(literal).expect(literal);
+		assert_eq!(e, Expr::Literal(Literal::Unsigned(value), e.span()), "{literal}");
+	}
 }
 
 #[test]
@@ -760,7 +797,11 @@ fn test_a_minus_applied_to_the_magnitude_of_the_int8_minimum_is_that_integer() {
 fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
 	let two_pow_63 = 2f64.powi(63);
 	for (sql, operator, operand) in [
-		("-9223372036854775809", UnaryOperator::Minus, Literal::Float(two_pow_63)),
+		(
+			"-9223372036854775809",
+			UnaryOperator::Minus,
+			Literal::Unsigned(9_223_372_036_854_775_809),
+		),
 		("-9223372036854775808.0", UnaryOperator::Minus, Literal::Float(two_pow_63)),
 		("-9223372036854775808e0", UnaryOperator::Minus, Literal::Float(two_pow_63)),
 		("-9223372036854775807", UnaryOperator::Minus, Literal::Integer(i64::MAX)),

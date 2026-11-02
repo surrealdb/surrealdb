@@ -10,7 +10,7 @@
 use anyhow::{Context as _, Result};
 
 use super::Rejected;
-use crate::val::{Datetime, Number, Value};
+use crate::val::{Number, Value};
 
 /// A state being saved, a field at a time.
 #[derive(Default)]
@@ -28,11 +28,6 @@ impl Saving {
 
 	pub(super) fn option_number(mut self, n: Option<Number>) -> Self {
 		self.0.push(n.map(Value::Number).unwrap_or(Value::None));
-		self
-	}
-
-	pub(super) fn option_datetime(mut self, d: Option<Datetime>) -> Self {
-		self.0.push(d.map(Value::Datetime).unwrap_or(Value::None));
 		self
 	}
 
@@ -55,7 +50,7 @@ impl Saving {
 
 	pub(super) fn numbers(mut self, numbers: &[Number]) -> Self {
 		self.0.push(Value::Array(
-			numbers.iter().copied().map(Value::Number).collect::<Vec<_>>().into(),
+			numbers.iter().cloned().map(Value::Number).collect::<Vec<_>>().into(),
 		));
 		self
 	}
@@ -114,14 +109,6 @@ impl Loading {
 	pub(super) fn option_number(&mut self) -> Result<Option<Number>> {
 		if let Value::Number(n) = self.next()? {
 			Ok(Some(n))
-		} else {
-			Ok(None)
-		}
-	}
-
-	pub(super) fn option_datetime(&mut self) -> Result<Option<Datetime>> {
-		if let Value::Datetime(d) = self.next()? {
-			Ok(Some(d))
 		} else {
 			Ok(None)
 		}

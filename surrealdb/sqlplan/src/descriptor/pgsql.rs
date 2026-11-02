@@ -7,6 +7,7 @@ use surrealdb_pgsql::ast::stmt::{OnConflictAction, ResTarget, SelectStmt, Statem
 
 use super::{ParameterDescriptor, ResultDescriptor, SqlType};
 use crate::binder::pgsql::{bind_expr, bind_select};
+use crate::ir::BoundSelect;
 use crate::{BinderCatalog, BoundBinaryOp, BoundExpr, DialectPolicy, PlanError, QueryScope};
 
 /// A SELECT-shaped analysis of a write's target, predicates and returned expressions.
@@ -27,6 +28,8 @@ pub struct PgWriteMetadata {
 	pub result: Option<ResultDescriptor>,
 	/// The declared types of the columns a `RETURNING *` stands for.
 	pub wildcard_types: HashMap<String, SqlType>,
+	/// The SQL types the columns a `RETURNING *` stands for are declared with.
+	pub wildcard_declared: HashMap<String, crate::declared_type::DeclaredSqlType>,
 }
 
 impl PgWriteAnalysis {
@@ -90,6 +93,11 @@ impl PgWriteAnalysis {
 			| Statement::AlterTable(_)
 			| Statement::CreateSchema(_)
 			| Statement::CreateExtension(_)
+			| Statement::CreateType(_)
+			| Statement::AlterType(_)
+			| Statement::CreateDomain(_)
+			| Statement::AlterDomain(_)
+			| Statement::CreateCompositeType(_)
 			| Statement::Drop(_)
 			| Statement::Transaction(_)
 			| Statement::Set(_)
@@ -150,6 +158,7 @@ impl PgWriteAnalysis {
 		}
 		let policy = DialectPolicy::postgres();
 		let bound = bind_select(&self.query, catalog, &policy, None)?;
+		let mut enum_params: HashMap<usize, u32> = HashMap::new();
 		let mut params: HashMap<usize, SqlType> = bound
 			.describe_parameters(catalog)
 			.param_types
@@ -178,6 +187,7 @@ impl PgWriteAnalysis {
 				right: Box::new(value),
 			};
 			bound.collect_param_types_from_expr(&constraint, catalog, &mut params);
+			BoundSelect::collect_enum_params(&constraint, catalog, &mut enum_params);
 		}
 		if let Some(condition) = &self.conflict_condition {
 			let condition = bind_expr(condition, &scope, catalog, &policy)?;
@@ -188,6 +198,7 @@ impl PgWriteAnalysis {
 			param_types: (1..=max)
 				.map(|i| params.get(&i).copied().unwrap_or(SqlType::Unknown))
 				.collect(),
+			enum_params: BoundSelect::enum_param_slots(&enum_params, max),
 		};
 		let result = if self.returning {
 			bound.describe_static(catalog, &policy)
@@ -228,15 +239,16 @@ impl PgWriteAnalysis {
 				));
 			}
 		}
-		let wildcard_types = if self.returning && result.is_none() {
-			bound.wildcard_column_types(catalog)
+		let (wildcard_types, wildcard_declared) = if self.returning && result.is_none() {
+			(bound.wildcard_column_types(catalog), bound.wildcard_declared_sql_types(catalog))
 		} else {
-			HashMap::new()
+			(HashMap::new(), HashMap::new())
 		};
 		Ok(PgWriteMetadata {
 			parameters,
 			result,
 			wildcard_types,
+			wildcard_declared,
 		})
 	}
 }
@@ -263,6 +275,10 @@ pub fn returning_name(target: &ResTarget) -> String {
 				name,
 				..
 			} => name.parts.last().cloned().unwrap_or_else(|| "?column?".into()),
+			Expr::FieldSelect {
+				field,
+				..
+			} => field.clone(),
 			Expr::Grouping {
 				expr,
 				..

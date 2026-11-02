@@ -3,7 +3,7 @@ use std::ops::Bound;
 
 use super::tag::*;
 use super::{DEPTH_LIMIT, Error, geometry, int_width, uint_width, varint};
-use crate::val::{Number, Object, RecordId, RecordIdKey, Value};
+use crate::val::{Date, Interval, Number, Object, RecordId, RecordIdKey, Time, Timestamp, Value};
 
 /// Writes stored encodings back to front.
 ///
@@ -96,6 +96,18 @@ pub fn put_decimal_payload(d: &rust_decimal::Decimal, out: &mut Vec<u8>) {
 	let (head, magnitude, len) = decimal_parts(d);
 	out.push(head);
 	out.extend_from_slice(&magnitude[..len]);
+}
+
+/// Appends the payload of the BIGDECIMAL `d` to `out`: the sign byte, the scale as a canonical
+/// varint, then the magnitude of the coefficient in the fewest bytes, little-endian. It is the
+/// payload [`Encoder::bigdecimal`] writes after the tag, and the only one
+/// [`bigdecimal_payload`](super::bigdecimal_payload) accepts.
+pub fn put_bigdecimal_payload(d: &surrealdb_types::BigDecimal, out: &mut Vec<u8>) {
+	out.push(u8::from(d.signum() < 0));
+	let mut buf = [0u8; varint::MAX_LEN];
+	// The scale of a value is never negative, so it is in u64's range.
+	out.extend_from_slice(varint::write_u64(d.scale() as u64, &mut buf));
+	out.extend_from_slice(&d.magnitude_le_bytes());
 }
 
 impl Encoder {
@@ -398,6 +410,17 @@ impl Encoder {
 		self.put_u8(DECIMAL);
 	}
 
+	/// Prepends the BIGDECIMAL `d`: the sign byte, the scale as a varint, then the magnitude of
+	/// the coefficient in the fewest bytes.
+	pub fn bigdecimal(&mut self, d: &surrealdb_types::BigDecimal) {
+		self.put(&d.magnitude_le_bytes());
+		let mut buf = [0u8; varint::MAX_LEN];
+		// The scale of a value is never negative, so it is in u64's range.
+		self.put(varint::write_u64(d.scale() as u64, &mut buf));
+		self.put_u8(u8::from(d.signum() < 0));
+		self.put_u8(BIGDECIMAL);
+	}
+
 	/// Prepends the `i8` `v`.
 	#[inline]
 	pub fn i8(&mut self, v: i8) {
@@ -463,8 +486,9 @@ impl Encoder {
 
 	/// Prepends `n`.
 	#[inline]
-	pub fn number(&mut self, n: &Number) {
+	pub fn number(&mut self, n: &Number) -> Result<(), Error> {
 		match n {
+			Number::BigDecimal(b) => self.bigdecimal(b),
 			Number::Int(i) => self.int(*i),
 			Number::Float(f) => self.float(*f),
 			Number::Decimal(d) => self.decimal(d),
@@ -478,6 +502,7 @@ impl Encoder {
 			Number::F16(v) => self.f16(*v),
 			Number::F32(v) => self.f32(*v),
 		}
+		Ok(())
 	}
 
 	/// Prepends the STRING `s`.
@@ -530,6 +555,44 @@ impl Encoder {
 			}
 		}
 		self.put_u8(DATETIME);
+	}
+
+	/// Prepends the DATE of `d` days from 1970-01-01 in the fewest bytes that hold it.
+	#[inline]
+	pub fn date(&mut self, d: &Date) {
+		self.put(&d.0.to_le_bytes()[..int_width(i64::from(d.0))]);
+		self.put_u8(DATE);
+	}
+
+	/// Prepends the TIME `t` as nanoseconds from midnight in the fewest bytes that hold it.
+	#[inline]
+	pub fn time(&mut self, t: &Time) {
+		self.put(&t.0.to_le_bytes()[..uint_width(t.0)]);
+		self.put_u8(TIME);
+	}
+
+	/// Prepends the TIMESTAMP `t`: wall-clock nanoseconds from the epoch when they fit, else
+	/// seconds and sub-second nanoseconds.
+	#[inline]
+	pub fn timestamp(&mut self, t: &Timestamp) {
+		let ns = t.secs.checked_mul(1_000_000_000).and_then(|s| s.checked_add(i64::from(t.nanos)));
+		match ns.filter(|_| t.nanos < 1_000_000_000) {
+			Some(ns) => self.put(&ns.to_le_bytes()),
+			None => {
+				self.put(&t.nanos.to_le_bytes());
+				self.put(&t.secs.to_le_bytes());
+			}
+		}
+		self.put_u8(TIMESTAMP);
+	}
+
+	/// Prepends the INTERVAL `i` with its components as written.
+	#[inline]
+	pub fn interval(&mut self, i: &Interval) {
+		self.put(&i.micros.to_le_bytes());
+		self.put(&i.days.to_le_bytes());
+		self.put(&i.months.to_le_bytes());
+		self.put_u8(INTERVAL);
 	}
 
 	/// Prepends the RECORD ID `r`.
@@ -627,10 +690,14 @@ impl Encoder {
 			Value::None => self.none(),
 			Value::Null => self.put_u8(NULL),
 			Value::Bool(b) => self.bool(*b),
-			Value::Number(n) => self.number(n),
+			Value::Number(n) => self.number(n)?,
 			Value::String(s) => self.string(s.as_str()),
 			Value::Duration(d) => self.duration(d.0),
 			Value::Datetime(d) => self.datetime(&d.0),
+			Value::Date(d) => self.date(d),
+			Value::Time(t) => self.time(t),
+			Value::Timestamp(t) => self.timestamp(t),
+			Value::Interval(i) => self.interval(i),
 			Value::Uuid(u) => self.uuid(&u.0),
 			Value::Array(a) => self.values_at(&a.0, depth)?,
 			Value::Set(s) => self.items(SET, s.0.iter().rev(), s.0.len(), depth)?,

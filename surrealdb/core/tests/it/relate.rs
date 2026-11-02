@@ -314,6 +314,7 @@ async fn relate_enforced() -> Result<()> {
 	buckets: {},
 	compatibility: 4,
 	configs: {},
+	enums: {},
 	extensions: {},
 	functions: {},
 	models: {},

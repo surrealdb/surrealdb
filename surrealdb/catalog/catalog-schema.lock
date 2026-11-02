@@ -128,6 +128,7 @@ type Distance enum since=4.0 reserved=[]
   8 Pearson unit since=4.0
   9 CosineNormalized unit since=4.0
   10 InnerProduct unit since=4.0
+type EnumId transparent:int:u32 since=4.0
 type EventKind enum since=4.0 reserved=[]
   1 Sync unit since=4.0
   2 Async fields since=4.0
@@ -343,6 +344,7 @@ type PhysicalKind enum since=4.0 reserved=[]
   25 RecordKey unit since=4.0
   26 DecimalVar unit since=4.0
   27 Value unit since=4.0
+  30 BigDecimal unit since=4.0
   34 Object unit since=4.0
 type Presence enum since=4.0 reserved=[]
   1 Required unit since=4.0
@@ -461,6 +463,12 @@ type StoredBucketDefinition struct since=4.0 reserved=[]
   8 permissions StoredPermission critical since=4.0 absent=required
   10 readonly bool critical since=4.0 absent=required
   12 presign_nonce uuid critical since=4.0 absent=default(Uuid::nil)
+type StoredComposite struct since=4.0 reserved=[]
+  2 fields list<StoredCompositeField> critical since=4.0 absent=required
+type StoredCompositeField struct since=4.0 reserved=[]
+  2 name string critical since=4.0 absent=required
+  4 kind text:kind critical since=4.0 absent=required
+  6 sql_type string critical since=4.0 absent=required
 type StoredConfigDefinition enum since=4.0 reserved=[]
   1 Default item:DefaultConfig since=4.0
   2 GraphQL item:GraphQLConfig since=4.0
@@ -469,6 +477,25 @@ type StoredDefineDefault enum since=4.0 reserved=[]
   1 None unit since=4.0
   2 Always item:text:expr since=4.0
   3 Set item:text:expr since=4.0
+type StoredDomain struct since=4.0 reserved=[]
+  2 base text:kind critical since=4.0 absent=required
+  4 base_type string critical since=4.0 absent=required
+  6 not_null bool critical since=4.0 absent=required
+  8 default option<text:expr> critical since=4.0 absent=none
+  10 checks list<StoredDomainCheck> critical since=4.0 absent=required
+type StoredDomainCheck struct since=4.0 reserved=[]
+  2 name option<string> critical since=4.0 absent=none
+  4 check text:expr critical since=4.0 absent=required
+type StoredEnumDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 id int:u32 critical since=4.0 absent=required
+  4 name string critical since=4.0 absent=required
+  6 labels list<StoredEnumLabel> critical since=4.0 absent=required
+  8 permissions StoredPermission critical since=4.0 absent=required
+type StoredEnumLabel struct since=4.0 reserved=[]
+  2 label string critical since=4.0 absent=required
+  4 order int:u64 critical since=4.0 absent=required
+  6 ident int:u32 critical since=4.0 absent=required
 type StoredEventDefinition struct since=4.0 reserved=[] revision_embedded
   1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
   2 name string critical since=4.0 absent=required
@@ -483,6 +510,7 @@ type StoredFeatureLevel struct since=4.0 reserved=[] floor_fixed
 type StoredFieldDefinition struct since=4.0 reserved=[]
   1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
   2 name text:idiom critical since=4.0 absent=required
+  3 sql_type option<StoredSqlType> ignorable since=4.0 absent=none independent="a release without the clause keeps the field kind and its writes; it only stops enforcing and canonicalising the declared SQL type"
   4 table string critical since=4.0 absent=required
   6 field_kind option<text:kind> critical since=4.0 absent=none
   8 flexible bool critical since=4.0 absent=required
@@ -561,6 +589,13 @@ type StoredReferenceDeleteStrategy enum since=4.0 reserved=[]
   3 Cascade unit since=4.0
   4 Unset unit since=4.0
   5 Custom item:text:expr since=4.0
+type StoredSqlType struct since=4.0 reserved=[]
+  2 dialect StoredSqlTypeDialect critical since=4.0 absent=required
+  4 text string critical since=4.0 absent=required
+type StoredSqlTypeDialect enum since=4.0 reserved=[]
+  1 PostgreSql unit since=4.0
+  2 MySql unit since=4.0
+  3 DynamoDb unit since=4.0
 type StoredStat enum since=4.0 reserved=[]
   1 Count fields since=4.0
     2 count int:i64 critical since=4.0 absent=required
@@ -601,6 +636,12 @@ type StoredStat enum since=4.0 reserved=[]
   11 Accumulate fields since=4.0
     2 arg int:u32 critical since=4.0 absent=required
     4 values list<value> critical since=4.0 absent=required
+  12 TemporalMax fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 max value critical since=4.0 absent=required
+  13 TemporalMin fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 min value critical since=4.0 absent=required
 type StoredSubscriptionDefinition struct since=4.0 reserved=[]
   2 id uuid critical since=4.0 absent=required
   4 node uuid critical since=4.0 absent=required
@@ -639,6 +680,13 @@ type StoredTableDefinition struct since=4.0 reserved=[] revision_embedded
   40 inline_edges_cap option<int:u32> critical since=4.0 absent=none
   42 inline_refs_cap option<int:u32> critical since=4.0 absent=none
   44 graph_inline_gen int:u32 critical since=4.0 absent=required
+type StoredUserTypeBody enum since=4.0 reserved=[]
+  1 Domain item:StoredDomain since=4.0
+  2 Composite item:StoredComposite since=4.0
+type StoredUserTypeDefinition struct since=4.0 reserved=[]
+  2 id int:u32 critical since=4.0 absent=required
+  4 name string critical since=4.0 absent=required
+  6 body StoredUserTypeBody critical since=4.0 absent=required
 type StoredViewDefinition enum since=4.0 reserved=[]
   - Aggregated legacy
   - Materialized legacy
@@ -685,6 +733,7 @@ type UserDefinition struct since=4.0 reserved=[]
   12 session_duration option<duration> critical since=4.0 absent=none
   14 base Base critical since=4.0 absent=required
   16 scram option<ScramCredential> critical since=4.0 absent=none
+type UserTypeId transparent:int:u32 since=4.0
 type VectorType enum since=4.0 reserved=[]
   1 F64 unit since=4.0
   2 F32 unit since=4.0

@@ -354,7 +354,13 @@ fn value_key_encoding_is_exact(value: &Value) -> bool {
 			| Number::U32(_)
 			| Number::U64(_),
 		) => true,
-		Value::Number(Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_))
+		Value::Number(
+			Number::Float(_)
+			| Number::Decimal(_)
+			| Number::BigDecimal(_)
+			| Number::F16(_)
+			| Number::F32(_),
+		)
 		| Value::Geometry(_)
 		| Value::Closure(_) => false,
 		Value::Array(a) => a.iter().all(value_key_encoding_is_exact),
@@ -368,6 +374,10 @@ fn value_key_encoding_is_exact(value: &Value) -> bool {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Bytes(_)
 		| Value::Table(_)
@@ -568,10 +578,18 @@ impl RecordIdKey {
 			| Value::Null
 			| Value::Bool(_)
 			| Value::Number(
-				Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_),
+				Number::Float(_)
+				| Number::Decimal(_)
+				| Number::BigDecimal(_)
+				| Number::F16(_)
+				| Number::F32(_),
 			)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Set(_)
 			| Value::Geometry(_)
 			| Value::Bytes(_)

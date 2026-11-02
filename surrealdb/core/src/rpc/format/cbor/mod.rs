@@ -1,6 +1,6 @@
 pub use surrealdb_types::cbor::{
-	TAG_F16, TAG_F32, TAG_I8, TAG_I16, TAG_I32, TAG_U8, TAG_U16, TAG_U32, TAG_U64, encode,
-	encode_v2,
+	TAG_BIGDECIMAL, TAG_DATE, TAG_F16, TAG_F32, TAG_I8, TAG_I16, TAG_I32, TAG_INTERVAL, TAG_TIME,
+	TAG_TIMESTAMP, TAG_U8, TAG_U16, TAG_U32, TAG_U64, encode, encode_v2,
 };
 use surrealdb_types::{RecordId, Value, cbor as convert};
 
@@ -125,6 +125,10 @@ pub fn request_id(bytes: &[u8], recursion_limit: usize) -> Option<Value> {
 					| Value::Number(_)
 					| Value::String(_)
 					| Value::Datetime(_)
+					| Value::Date(_)
+					| Value::Time(_)
+					| Value::Timestamp(_)
+					| Value::Interval(_)
 			) {
 				Some(val)
 			} else {
@@ -446,7 +450,7 @@ mod tests {
 		];
 
 		for (tag, num, widened) in cases {
-			let v = Value::Number(*num);
+			let v = Value::Number(num.clone());
 			let v2_bytes = encode_v2(v.clone()).unwrap();
 			assert_eq!(
 				decode(&v2_bytes, 64).expect_err("v1 must refuse sized tag").to_string(),
@@ -480,6 +484,121 @@ mod tests {
 			decoded_max_v1,
 			Value::Number(Number::Decimal(rust_decimal::Decimal::from(u64::MAX)))
 		);
+	}
+
+	#[test]
+	fn temporal_tags_round_trip_in_v2_and_degrade_in_v1() {
+		use surrealdb_types::{Date, Datetime, Duration, Interval, Time, Timestamp};
+
+		let date = Value::Date(Date::from_days(20_000).unwrap());
+		let time = Value::Time(Time::from_nanos(45_000_000_123).unwrap());
+		let midnight_end = Value::Time(Time::MAX);
+		let timestamp = Value::Timestamp(Timestamp::from_parts(-5, 7).unwrap());
+		let interval = Value::Interval(Interval::new(-14, 3, -4_000_001));
+
+		for (tag, v) in [
+			(TAG_DATE, &date),
+			(TAG_TIME, &time),
+			(TAG_TIME, &midnight_end),
+			(TAG_TIMESTAMP, &timestamp),
+			(TAG_INTERVAL, &interval),
+		] {
+			let v2_bytes = encode_v2(v.clone()).unwrap();
+			assert_eq!(decode_v2(&v2_bytes, 64).unwrap(), *v);
+			assert_eq!(
+				decode(&v2_bytes, 64).expect_err("v1 must refuse temporal tag").to_string(),
+				format!("CBOR tag {tag} is not accepted here: use cbor.2")
+			);
+		}
+		// The exact interval components survive.
+		let Value::Interval(back) = decode_v2(&encode_v2(interval.clone()).unwrap(), 64).unwrap()
+		else {
+			unreachable!()
+		};
+		assert!(back.months() == -14 && back.days() == 3 && back.micros() == -4_000_001);
+		// Tag 100 is an integer count of days since the epoch.
+		assert_eq!(
+			ciborium::from_reader::<Cbor, _>(encode_v2(date.clone()).unwrap().as_slice()).unwrap(),
+			Cbor::Tag(TAG_DATE, Box::new(Cbor::Integer(20_000.into())))
+		);
+
+		let datetime = |secs, nanos| Value::Datetime(Datetime::try_from((secs, nanos)).unwrap());
+		assert_eq!(decode(&encode(date).unwrap(), 64).unwrap(), datetime(20_000 * 86_400, 0));
+		assert_eq!(decode(&encode(timestamp).unwrap(), 64).unwrap(), datetime(-5, 7));
+		assert_eq!(
+			decode(&encode(time).unwrap(), 64).unwrap(),
+			Value::Duration(Duration::new(45, 123))
+		);
+		assert_eq!(
+			decode(&encode(midnight_end).unwrap(), 64).unwrap(),
+			Value::Duration(Duration::new(86_400, 0))
+		);
+		assert_eq!(
+			decode(&encode(interval).unwrap(), 64).unwrap(),
+			Value::String("P-1Y-2M3DT-4.000001S".to_owned())
+		);
+	}
+
+	/// A bigdecimal takes the form each protocol carries: tag 10 when it fits a decimal, and
+	/// otherwise tag 192 under `cbor.2` and plain text under `cbor`, which refuses tag 192.
+	#[test]
+	fn bigdecimal_takes_the_form_each_protocol_carries() {
+		use surrealdb_types::{BigDecimal, Number};
+
+		let fits: BigDecimal = "1.50".parse().unwrap();
+		let fits = Value::Number(Number::BigDecimal(Box::new(fits)));
+		assert_eq!(encode(fits.clone()).unwrap(), encode_v2(fits.clone()).unwrap());
+		let decimal = Value::Number(Number::Decimal(rust_decimal::Decimal::new(15, 1)));
+		assert_eq!(encode(fits.clone()).unwrap(), encode(decimal).unwrap());
+		assert_eq!(decode_v2(&encode_v2(fits.clone()).unwrap(), 64).unwrap(), fits);
+
+		let wide = "1234567890123456789012345678901234567890.5";
+		let value = Value::Number(Number::BigDecimal(Box::new(wide.parse().unwrap())));
+		let v2_bytes = encode_v2(value.clone()).unwrap();
+		assert_eq!(
+			ciborium::from_reader::<Cbor, _>(v2_bytes.as_slice()).unwrap(),
+			Cbor::Tag(TAG_BIGDECIMAL, Box::new(text(wide)))
+		);
+		assert_eq!(decode_v2(&v2_bytes, 64).unwrap(), value);
+		assert_eq!(decode(&encode(value).unwrap(), 64).unwrap(), Value::String(wide.into()));
+		assert_eq!(
+			decode(&encode_cbor(&Cbor::Tag(TAG_BIGDECIMAL, Box::new(text(wide)))), 64)
+				.expect_err("v1 must refuse tag 192")
+				.to_string(),
+			format!("CBOR tag {TAG_BIGDECIMAL} is not accepted here: use cbor.2")
+		);
+		assert!(
+			decode_v2(&encode_cbor(&Cbor::Tag(TAG_BIGDECIMAL, Box::new(text("1.5.5")))), 64)
+				.is_err()
+		);
+	}
+
+	#[test]
+	fn temporal_tags_refuse_out_of_range_and_malformed_payloads() {
+		let bad = [
+			Cbor::Tag(TAG_DATE, Box::new(Cbor::Integer(i64::from(i32::MAX).into()))),
+			Cbor::Tag(TAG_DATE, Box::new(Cbor::Integer(5_000_000_000i64.into()))),
+			Cbor::Tag(TAG_DATE, Box::new(text("2026-10-27"))),
+			Cbor::Tag(TAG_TIME, Box::new(Cbor::Integer(86_400_000_000_001u64.into()))),
+			Cbor::Tag(TAG_TIME, Box::new(Cbor::Integer((-1).into()))),
+			Cbor::Tag(TAG_TIMESTAMP, Box::new(Cbor::Array(vec![1.into()]))),
+			Cbor::Tag(
+				TAG_TIMESTAMP,
+				Box::new(Cbor::Array(vec![Cbor::Integer(i64::MAX.into()), 0.into()])),
+			),
+			Cbor::Tag(TAG_INTERVAL, Box::new(Cbor::Array(vec![1.into(), 2.into()]))),
+			Cbor::Tag(
+				TAG_INTERVAL,
+				Box::new(Cbor::Array(vec![
+					Cbor::Integer(5_000_000_000i64.into()),
+					0.into(),
+					0.into(),
+				])),
+			),
+		];
+		for item in bad {
+			assert!(decode_v2(&encode_cbor(&item), 64).is_err(), "{item:?}");
+		}
 	}
 
 	#[test]

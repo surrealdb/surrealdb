@@ -61,7 +61,7 @@ use std::ops::{Bound, ControlFlow};
 use common::fmt::{EscapeIdent, EscapeKwFreeIdent, EscapeObjectKey, EscapeRidKey, Fmt, QuoteStr};
 use rust_decimal::Decimal;
 use surrealdb_strand::{Strand, TableName};
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{BigDecimal, SqlFormat, ToSql, write_sql};
 
 use super::{EvalFrame, LogicalOp};
 use crate::expr::binding_power::BindingPower;
@@ -70,7 +70,9 @@ use crate::expr::method::is_builtin_method;
 use crate::expr::part::Recurse;
 use crate::expr::record_id::RecordIdKeyGen;
 use crate::expr::{BinaryOperator, Constant, Function, Kind, Literal, Mock, Param, PrefixOperator};
-use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Uuid};
+use crate::val::{
+	Bytes, Date, Datetime, Duration, File, Geometry, Interval, Regex, Time, Timestamp, Uuid,
+};
 
 /// A leaf literal: a value that needs no evaluation and holds no expression.
 ///
@@ -87,6 +89,7 @@ pub enum LogicalLiteral {
 	Float(f64),
 	Integer(i64),
 	Decimal(Decimal),
+	BigDecimal(Box<BigDecimal>),
 	String(Strand),
 	Bytes(Bytes),
 	Regex(Regex),
@@ -104,6 +107,10 @@ pub enum LogicalLiteral {
 	U64(u64),
 	F16(half::f16),
 	F32(f32),
+	Date(Date),
+	Time(Time),
+	Timestamp(Timestamp),
+	Interval(Interval),
 }
 
 impl LogicalLiteral {
@@ -118,11 +125,16 @@ impl LogicalLiteral {
 			LogicalLiteral::Float(x) => Literal::Float(*x),
 			LogicalLiteral::Integer(x) => Literal::Integer(*x),
 			LogicalLiteral::Decimal(x) => Literal::Decimal(*x),
+			LogicalLiteral::BigDecimal(x) => Literal::BigDecimal(x.clone()),
 			LogicalLiteral::String(x) => Literal::String(x.clone()),
 			LogicalLiteral::Bytes(x) => Literal::Bytes(x.clone()),
 			LogicalLiteral::Regex(x) => Literal::Regex(x.clone()),
 			LogicalLiteral::Duration(x) => Literal::Duration(*x),
 			LogicalLiteral::Datetime(x) => Literal::Datetime(*x),
+			LogicalLiteral::Date(x) => Literal::Date(*x),
+			LogicalLiteral::Time(x) => Literal::Time(*x),
+			LogicalLiteral::Timestamp(x) => Literal::Timestamp(*x),
+			LogicalLiteral::Interval(x) => Literal::Interval(*x),
 			LogicalLiteral::Uuid(x) => Literal::Uuid(*x),
 			LogicalLiteral::Geometry(x) => Literal::Geometry(x.clone()),
 			LogicalLiteral::File(x) => Literal::File(x.clone()),
@@ -154,6 +166,10 @@ impl PartialEq for LogicalLiteral {
 			(LogicalLiteral::Regex(a), LogicalLiteral::Regex(b)) => a == b,
 			(LogicalLiteral::Duration(a), LogicalLiteral::Duration(b)) => a == b,
 			(LogicalLiteral::Datetime(a), LogicalLiteral::Datetime(b)) => a == b,
+			(LogicalLiteral::Date(a), LogicalLiteral::Date(b)) => a == b,
+			(LogicalLiteral::Time(a), LogicalLiteral::Time(b)) => a == b,
+			(LogicalLiteral::Timestamp(a), LogicalLiteral::Timestamp(b)) => a == b,
+			(LogicalLiteral::Interval(a), LogicalLiteral::Interval(b)) => a.identical(b),
 			(LogicalLiteral::Uuid(a), LogicalLiteral::Uuid(b)) => a == b,
 			(LogicalLiteral::Geometry(a), LogicalLiteral::Geometry(b)) => a == b,
 			(LogicalLiteral::File(a), LogicalLiteral::File(b)) => a == b,
@@ -186,11 +202,16 @@ impl Hash for LogicalLiteral {
 			LogicalLiteral::Float(x) => x.to_bits().hash(state),
 			LogicalLiteral::Integer(x) => x.hash(state),
 			LogicalLiteral::Decimal(x) => x.hash(state),
+			LogicalLiteral::BigDecimal(x) => x.hash(state),
 			LogicalLiteral::String(x) => x.hash(state),
 			LogicalLiteral::Bytes(x) => x.hash(state),
 			LogicalLiteral::Regex(x) => x.hash(state),
 			LogicalLiteral::Duration(x) => x.hash(state),
 			LogicalLiteral::Datetime(x) => x.hash(state),
+			LogicalLiteral::Date(x) => x.hash(state),
+			LogicalLiteral::Time(x) => x.hash(state),
+			LogicalLiteral::Timestamp(x) => x.hash(state),
+			LogicalLiteral::Interval(x) => x.hash(state),
 			LogicalLiteral::Uuid(x) => x.hash(state),
 			LogicalLiteral::Geometry(x) => x.hash(state),
 			LogicalLiteral::File(x) => x.hash(state),
@@ -2893,7 +2914,14 @@ impl LogicalExpr {
 		match self {
 			LogicalExpr::Param(_)
 			| LogicalExpr::Call(_)
-			| LogicalExpr::Literal(LogicalLiteral::String(_) | LogicalLiteral::Datetime(_)) => false,
+			| LogicalExpr::Literal(
+				LogicalLiteral::String(_)
+				| LogicalLiteral::Datetime(_)
+				| LogicalLiteral::Date(_)
+				| LogicalLiteral::Time(_)
+				| LogicalLiteral::Timestamp(_)
+				| LogicalLiteral::Interval(_),
+			) => false,
 			LogicalExpr::Subquery(_) | LogicalExpr::If(_) => true,
 			// The path forms were handled above; every other form is named by
 			// its rendering.
@@ -4719,11 +4747,16 @@ mod tests {
 				| LogicalLiteral::Float(_)
 				| LogicalLiteral::Integer(_)
 				| LogicalLiteral::Decimal(_)
+				| LogicalLiteral::BigDecimal(_)
 				| LogicalLiteral::String(_)
 				| LogicalLiteral::Bytes(_)
 				| LogicalLiteral::Regex(_)
 				| LogicalLiteral::Duration(_)
 				| LogicalLiteral::Datetime(_)
+				| LogicalLiteral::Date(_)
+				| LogicalLiteral::Time(_)
+				| LogicalLiteral::Timestamp(_)
+				| LogicalLiteral::Interval(_)
 				| LogicalLiteral::Uuid(_)
 				| LogicalLiteral::Geometry(_)
 				| LogicalLiteral::File(_)

@@ -406,18 +406,28 @@ impl Display for LexDecimal {
 ///    - `0xC0` Positive infinity
 ///    - `0xFF` NaN
 ///
-/// 2. **Biased scale** (2 bytes):
-///    - We bias the "scale" (not the raw exponent). Scale is defined as: `scale = exponent +
+/// 2. **Scale** (2 bytes, or 9 for a scale outside the two-byte range):
+///    - We encode the "scale" (not the raw exponent). Scale is defined as: `scale = exponent +
 ///      (digit_count - 1)`, i.e., the position of the most-significant digit in a
 ///      scientific-notation sense.
-///    - Biased as `biased = scale + EXP_BIAS` (unsigned 16-bit), then written as the two base-255
-///      digits of `biased`, each plus one, so neither byte is ever 0x00.
-///    - For negative numbers: `0xFFFF - biased` is written instead, to reverse order
-///    - EXP_BIAS = 6144. Coefficients have at most 39 digits and exponents of encoded values stay
-///      within `[-6143, +6144]`, so `scale + EXP_BIAS` stays well within `u16`.
+///    - A scale from `MIN_TWO_BYTE_SCALE` (-5378) to `MAX_TWO_BYTE_SCALE` (6177) is biased as
+///      `biased = scale + EXP_BIAS` (unsigned 16-bit), then written as the two base-255 digits of
+///      `biased`, each plus one, so neither byte is ever 0x00. For negative numbers `0xFFFF -
+///      biased` is written instead, to reverse order. EXP_BIAS = 6144. Every `int`, float and
+///      `decimal` has a scale in this range, so their bytes are the two-byte form. In this range
+///      the first of the two bytes is never 0x01 or 0xFF, for either sign.
+///    - Any other scale, which only a `bigdecimal` has, is an escape byte followed by an ordinal
+///      written as eight base-255 digits, most significant first, each plus one. A scale above the
+///      range has the ordinal `scale-MAX_TWO_BYTE_SCALE-1` and one below it the ordinal
+///      `255^8+scale-MIN_TWO_BYTE_SCALE`, so the ordinal grows with the scale. A positive number
+///      writes the escape 0xFF above the range and 0x01 below it, and the ordinal as it is. A
+///      negative number writes 0x01 above and 0xFF below, and `255^8-1-ordinal`. Every `i64` scale
+///      has an ordinal below `255^8`, so the form is total, and each scale has one form: the
+///      decoder refuses a two-byte form outside the range.
 ///
 /// 3. **Packed digit representation** (variable length):
-///    - Digits are taken from the coefficient's base-10 representation
+///    - Digits are taken from the coefficient's base-10 representation, as many as it has: a
+///      `bigdecimal` coefficient is not limited to the 39 digits of a `u128`
 ///    - Each pair of digits is packed into one byte (4 bits per digit)
 ///    - For positive numbers: stored as-is
 ///    - For negative numbers: all bytes are bitwise complemented to reverse ordering
@@ -433,7 +443,35 @@ impl Display for LexDecimal {
 /// - Preserves lexicographic ordering: if `a < b` then `encode(a) < encode(b)`
 /// - Variable length encoding (3+ bytes typical: 1 sign + 2 scale + packed digits)
 /// - Uses packed digit encoding for efficient storage (2 digits per byte)
+/// - The bytes depend on the sign, the scale and the digits alone, so a `bigdecimal` and a
+///   `decimal` with the same coefficient and exponent have the same bytes
 pub struct DecimalLexEncoder;
+
+/// A number decoded from the key encoding: a [`LexDecimal`] when the encoding is one an `int`,
+/// float or `decimal` can have, and otherwise the parts of a `bigdecimal`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KeyDecimal {
+	/// A value with a two-byte scale whose coefficient fits a `u128`.
+	Lex(LexDecimal),
+	/// A finite nonzero value with a scale outside the two-byte range or a coefficient past a
+	/// `u128`: `digits * 10^exponent`, negated when `negative`.
+	Wide {
+		negative: bool,
+		/// The coefficient's decimal digits, as ASCII, as they were encoded.
+		digits: Vec<u8>,
+		exponent: i64,
+	},
+}
+
+/// The parts of an encoded finite nonzero value that precede its digits.
+struct FiniteHeader {
+	negative: bool,
+	scale: i64,
+	/// Whether the scale is in the two-byte form.
+	two_byte: bool,
+	/// Where the packed digits start.
+	digits_at: usize,
+}
 
 impl DecimalLexEncoder {
 	/// Bias mapping the signed scale into u16 space.
@@ -442,6 +480,32 @@ impl DecimalLexEncoder {
 	/// Largest scale a buffer may decode to. Values past it are not produced by
 	/// the encoder and are refused rather than decoded.
 	const MAX_DECODED_SCALE: i32 = 6177;
+
+	/// Least scale written in the two-byte form: the least whose first byte is neither escape
+	/// for a negative number, which complements the biased scale.
+	const MIN_TWO_BYTE_SCALE: i64 = -5378;
+
+	/// Greatest scale written in the two-byte form.
+	const MAX_TWO_BYTE_SCALE: i64 = Self::MAX_DECODED_SCALE as i64;
+
+	/// The first scale byte of a scale outside the two-byte range that sorts below every
+	/// two-byte form of its sign.
+	const LOW_ESCAPE: u8 = 0x01;
+
+	/// The first scale byte of a scale outside the two-byte range that sorts above every
+	/// two-byte form of its sign.
+	const HIGH_ESCAPE: u8 = 0xFF;
+
+	/// The number of base-255 digits of a wide scale's ordinal.
+	const WIDE_SCALE_DIGITS: usize = 8;
+
+	/// `255^8`: one past the largest ordinal of a wide scale.
+	const WIDE_SCALE_LIMIT: u64 = 255u64.pow(8);
+
+	/// The most digits a wide coefficient may decode to. A `bigdecimal` holds at most
+	/// [`MAX_COEFFICIENT_BYTES`](surrealdb_types::bigdecimal::MAX_COEFFICIENT_BYTES) bytes of
+	/// coefficient, which is fewer than three digits a byte.
+	const MAX_WIDE_DIGITS: usize = 3 * surrealdb_types::bigdecimal::MAX_COEFFICIENT_BYTES;
 
 	const FINITE_NEGATIVE_MARKER: u8 = 0x40;
 	const FINITE_POSITIVE_MARKER: u8 = 0xA0;
@@ -502,28 +566,207 @@ impl DecimalLexEncoder {
 
 		// The scale positions the first digit as the most significant one, as in
 		// scientific notation.
-		let scale = exponent + (digits.len() as i32 - 1);
-		let biased_exponent = (scale + Self::EXP_BIAS) as u16;
+		let scale = i64::from(exponent) + (digits.len() as i64 - 1);
+		Self::encode_finite(negative, digits, scale, out);
+	}
 
-		let encode_exponent = |e: u16| {
-			let q = (e / 255) as u8;
-			let r = (e % 255) as u8;
-			[q + 1, r + 1]
-		};
-
-		out.reserve(4 + digits.len().div_ceil(2) + 1);
+	/// Appends the encoding of the finite nonzero value whose coefficient has the decimal
+	/// `digits` (values `0..=9`, the first nonzero) and whose leading digit is at the power of
+	/// ten `scale`. Every finite nonzero value of any number kind is written through this, so
+	/// the bytes depend on the sign, scale and digits alone.
+	pub fn encode_finite(negative: bool, digits: &[u8], scale: i64, out: &mut Vec<u8>) {
+		out.reserve(11 + digits.len().div_ceil(2) + 1);
 		if negative {
 			// The marker sorts negatives first; the complemented scale and digits
 			// make larger magnitudes sort earlier among them.
 			out.push(Self::FINITE_NEGATIVE_MARKER);
-			out.extend(encode_exponent(0xFFFF - biased_exponent));
+			Self::encode_scale(true, scale, out);
 			Self::pack_digits(digits, 0xFF, out);
 		} else {
 			out.push(Self::FINITE_POSITIVE_MARKER);
-			out.extend(encode_exponent(biased_exponent));
+			Self::encode_scale(false, scale, out);
 			Self::pack_digits(digits, 0x00, out);
 		}
 		out.push(0x00);
+	}
+
+	/// Appends the scale field of a finite nonzero value: the two-byte form within its range,
+	/// and the escaped form outside it.
+	fn encode_scale(negative: bool, scale: i64, out: &mut Vec<u8>) {
+		if (Self::MIN_TWO_BYTE_SCALE..=Self::MAX_TWO_BYTE_SCALE).contains(&scale) {
+			// In range, so `scale + EXP_BIAS` is between 766 and 12321.
+			let biased = (scale + i64::from(Self::EXP_BIAS)) as u16;
+			let biased = if negative {
+				0xFFFF - biased
+			} else {
+				biased
+			};
+			out.extend([(biased / 255) as u8 + 1, (biased % 255) as u8 + 1]);
+			return;
+		}
+		let above = scale > Self::MAX_TWO_BYTE_SCALE;
+		// Computed in i128, where neither difference overflows; each is below 2^63 + 5379,
+		// so the ordinal is below `WIDE_SCALE_LIMIT`.
+		let scale = i128::from(scale);
+		let ordinal = if above {
+			scale - i128::from(Self::MAX_TWO_BYTE_SCALE) - 1
+		} else {
+			i128::from(Self::WIDE_SCALE_LIMIT)
+				- 1 - (i128::from(Self::MIN_TWO_BYTE_SCALE) - 1 - scale)
+		};
+		let ordinal = ordinal as u64;
+		let (escape, ordinal) = match (negative, above) {
+			(false, true) => (Self::HIGH_ESCAPE, ordinal),
+			(false, false) => (Self::LOW_ESCAPE, ordinal),
+			(true, true) => (Self::LOW_ESCAPE, Self::WIDE_SCALE_LIMIT - 1 - ordinal),
+			(true, false) => (Self::HIGH_ESCAPE, Self::WIDE_SCALE_LIMIT - 1 - ordinal),
+		};
+		out.push(escape);
+		let mut digits = [0u8; Self::WIDE_SCALE_DIGITS];
+		let mut rest = ordinal;
+		for digit in digits.iter_mut().rev() {
+			*digit = (rest % 255) as u8 + 1;
+			rest /= 255;
+		}
+		out.extend_from_slice(&digits);
+	}
+
+	/// Reads the marker and scale of the encoding of a finite nonzero value. `Ok(None)` is a
+	/// zero, NaN or an infinity, which [`Self::decode`] reads from the marker alone.
+	fn decode_header(bytes: &[u8]) -> Result<Option<FiniteHeader>> {
+		let Some(&marker) = bytes.first() else {
+			return Err(Error::Serialization("Cannot decode from empty buffer".to_string()).into());
+		};
+		let negative = match marker {
+			Self::ZERO_MARKER
+			| Self::INFINITE_NEGATIVE_MARKER
+			| Self::INFINITE_POSITIVE_MAKER
+			| Self::NAN_MARKER => return Ok(None),
+			Self::FINITE_NEGATIVE_MARKER => true,
+			Self::FINITE_POSITIVE_MARKER => false,
+			marker => {
+				return Err(Error::Serialization(format!("Invalid marker byte: {marker}")).into());
+			}
+		};
+		// Need at least 3 bytes: marker (1) + exponent (2)
+		if bytes.len() < 3 {
+			return Err(Error::Serialization(format!("Buffer too short: {}", bytes.len())).into());
+		}
+		if matches!(bytes[1], Self::LOW_ESCAPE | Self::HIGH_ESCAPE) {
+			let ordinal_at = 2..2 + Self::WIDE_SCALE_DIGITS;
+			let Some(ordinal_bytes) = bytes.get(ordinal_at) else {
+				return Err(
+					Error::Serialization(format!("Buffer too short: {}", bytes.len())).into()
+				);
+			};
+			let mut ordinal = 0u64;
+			for &byte in ordinal_bytes {
+				// Eight digits below 255 make an ordinal below 255^8, which a u64 holds.
+				ordinal = ordinal * 255 + u64::from(Self::exponent_byte(byte)?);
+			}
+			let above = (bytes[1] == Self::HIGH_ESCAPE) != negative;
+			let ordinal = if negative {
+				Self::WIDE_SCALE_LIMIT - 1 - ordinal
+			} else {
+				ordinal
+			};
+			let scale = if above {
+				i128::from(Self::MAX_TWO_BYTE_SCALE) + 1 + i128::from(ordinal)
+			} else {
+				i128::from(Self::MIN_TWO_BYTE_SCALE)
+					- 1 - (i128::from(Self::WIDE_SCALE_LIMIT) - 1 - i128::from(ordinal))
+			};
+			let scale = i64::try_from(scale)
+				.map_err(|_| Error::Serialization(format!("Exponent out of range: {scale}")))?;
+			return Ok(Some(FiniteHeader {
+				negative,
+				scale,
+				two_byte: false,
+				digits_at: 2 + Self::WIDE_SCALE_DIGITS,
+			}));
+		}
+		let biased_exponent = Self::exponent_byte(bytes[1])? * 255 + Self::exponent_byte(bytes[2])?;
+		let biased_exponent = if negative {
+			0xFFFF - biased_exponent
+		} else {
+			biased_exponent
+		};
+		let scale = i64::from(biased_exponent) - i64::from(Self::EXP_BIAS);
+		// A two-byte form outside its range is no encoding: that scale has the escaped form.
+		if !(Self::MIN_TWO_BYTE_SCALE..=Self::MAX_TWO_BYTE_SCALE).contains(&scale) {
+			return Err(Error::Serialization(format!("Exponent out of range: {scale}")).into());
+		}
+		Ok(Some(FiniteHeader {
+			negative,
+			scale,
+			two_byte: true,
+			digits_at: 3,
+		}))
+	}
+
+	/// Decodes an encoding of any number kind, `bigdecimal` included.
+	///
+	/// A zero, NaN, an infinity, and a value with a two-byte scale whose coefficient fits a
+	/// `u128` decode as [`Self::decode`] decodes them. Any other finite value decodes as
+	/// [`KeyDecimal::Wide`], with the digits exactly as encoded. A wide value of more than
+	/// `MAX_WIDE_DIGITS` digits, which no `bigdecimal` has, is refused rather than read.
+	pub fn decode_key(bytes: &[u8]) -> Result<KeyDecimal> {
+		let Some(header) = Self::decode_header(bytes)? else {
+			return Self::decode(bytes).map(KeyDecimal::Lex);
+		};
+		let flip = if header.negative {
+			0xFF
+		} else {
+			0x00
+		};
+		let digits = Self::unpack_digit_text(&bytes[header.digits_at..], flip)?;
+		if digits.is_empty() {
+			return Err(Error::Serialization("Empty mantissa".to_string()).into());
+		}
+		let exponent = header.scale.checked_sub(digits.len() as i64 - 1).ok_or_else(|| {
+			Error::Serialization(format!("Exponent out of range: {}", header.scale))
+		})?;
+		if header.two_byte && digits.len() <= 39 {
+			let coefficient =
+				std::str::from_utf8(&digits).ok().and_then(|text| text.parse::<u128>().ok());
+			if let Some(coefficient) = coefficient {
+				// A two-byte scale and at most 39 digits keep the exponent within i32.
+				return Ok(KeyDecimal::Lex(LexDecimal::Finite {
+					negative: header.negative,
+					coefficient,
+					exponent: exponent as i32,
+				}));
+			}
+		}
+		Ok(KeyDecimal::Wide {
+			negative: header.negative,
+			digits,
+			exponent,
+		})
+	}
+
+	/// Unpacks digits as [`Self::unpack_digits`] does, into their ASCII text, refusing more
+	/// than `MAX_WIDE_DIGITS` of them.
+	fn unpack_digit_text(buf: &[u8], flip: u8) -> Result<Vec<u8>> {
+		let mut digits = Vec::new();
+		for pack in buf {
+			let pack = *pack ^ flip;
+			for (half, nibble) in [("high", pack >> 4), ("low", pack & 0x0F)] {
+				if nibble == 0 {
+					return Ok(digits);
+				}
+				if !(1..=10).contains(&nibble) {
+					return Err(
+						Error::Serialization(format!("Invalid {half} nibble: {nibble}")).into()
+					);
+				}
+				if digits.len() >= Self::MAX_WIDE_DIGITS {
+					return Err(Error::Serialization("Mantissa too large".to_string()).into());
+				}
+				digits.push(b'0' + nibble - 1);
+			}
+		}
+		Ok(digits)
 	}
 
 	/// Decodes a lexicographically encoded byte sequence back to a value.
@@ -532,57 +775,37 @@ impl DecimalLexEncoder {
 	/// ignored. The coefficient comes back with exactly the digits that were
 	/// encoded.
 	pub fn decode(bytes: &[u8]) -> Result<LexDecimal> {
-		if bytes.is_empty() {
-			return Err(Error::Serialization("Cannot decode from empty buffer".to_string()).into());
-		}
-
-		let negative = match bytes[0] {
-			Self::ZERO_MARKER => return Ok(LexDecimal::ZERO),
-			Self::INFINITE_NEGATIVE_MARKER => {
-				return Ok(LexDecimal::Infinite {
+		let Some(header) = Self::decode_header(bytes)? else {
+			return Ok(match bytes.first().copied() {
+				Some(Self::INFINITE_NEGATIVE_MARKER) => LexDecimal::Infinite {
 					negative: true,
-				});
-			}
-			Self::INFINITE_POSITIVE_MAKER => {
-				return Ok(LexDecimal::Infinite {
+				},
+				Some(Self::INFINITE_POSITIVE_MAKER) => LexDecimal::Infinite {
 					negative: false,
-				});
-			}
-			Self::NAN_MARKER => return Ok(LexDecimal::NaN),
-			Self::FINITE_NEGATIVE_MARKER => true,
-			Self::FINITE_POSITIVE_MARKER => false,
-			marker => {
-				return Err(Error::Serialization(format!("Invalid marker byte: {marker}")).into());
-			}
+				},
+				Some(Self::NAN_MARKER) => LexDecimal::NaN,
+				// The header reads every other marker as finite or refuses it.
+				Some(_) | None => LexDecimal::ZERO,
+			});
 		};
-
-		// Need at least 3 bytes: marker (1) + exponent (2)
-		if bytes.len() < 3 {
-			return Err(Error::Serialization(format!("Buffer too short: {}", bytes.len())).into());
+		if !header.two_byte {
+			return Err(
+				Error::Serialization(format!("Exponent out of range: {}", header.scale)).into()
+			);
 		}
-
-		let biased_exponent = Self::exponent_byte(bytes[1])? * 255 + Self::exponent_byte(bytes[2])?;
-		let biased_exponent = if negative {
-			0xFFFF - biased_exponent
-		} else {
-			biased_exponent
-		};
-		let scale = biased_exponent as i32 - Self::EXP_BIAS;
-		if scale > Self::MAX_DECODED_SCALE {
-			return Err(Error::Serialization(format!("Exponent out of range: {scale}")).into());
-		}
-
-		let flip = if negative {
+		let flip = if header.negative {
 			0xFF
 		} else {
 			0x00
 		};
-		let (coefficient, digit_count) = Self::unpack_digits(&bytes[3..], flip)?;
+		let (coefficient, digit_count) = Self::unpack_digits(&bytes[header.digits_at..], flip)?;
 		if digit_count == 0 {
 			return Err(Error::Serialization("Empty mantissa".to_string()).into());
 		}
+		// A two-byte scale is within i32.
+		let scale = header.scale as i32;
 		Ok(LexDecimal::Finite {
-			negative,
+			negative: header.negative,
 			coefficient,
 			exponent: scale - (digit_count - 1),
 		})
@@ -780,7 +1003,7 @@ mod tests {
 
 	#[test]
 	fn test_decode_empty_mantissa() {
-		let result = DecimalLexEncoder::decode(&[0xA0, 0x01, 0x01, 0x00]);
+		let result = DecimalLexEncoder::decode(&[0xA0, 0x19, 0x19, 0x00]);
 		assert!(result.is_err());
 		let err = result.unwrap_err();
 		assert!(err.to_string().contains("Empty mantissa"), "{err:?}");
@@ -840,6 +1063,7 @@ mod tests {
 			Ok(Number::Int(v)) => format!("i:{v}"),
 			Ok(Number::Float(v)) => format!("f:{:x}", v.to_bits()),
 			Ok(Number::Decimal(d)) => format!("d:{}:{}", d.mantissa(), d.scale()),
+			Ok(Number::BigDecimal(b)) => format!("b:{}:{}", b, b.scale()),
 			Ok(Number::I8(v)) => format!("i8:{v}"),
 			Ok(Number::U8(v)) => format!("u8:{v}"),
 			Ok(Number::I16(v)) => format!("i16:{v}"),
@@ -869,6 +1093,7 @@ mod tests {
 				Number::Int(_) => NumberKind::Int,
 				Number::Float(_) => NumberKind::Float,
 				Number::Decimal(_) => NumberKind::Decimal,
+				Number::BigDecimal(_) => NumberKind::BigDecimal,
 				Number::I8(_) => NumberKind::I8,
 				Number::U8(_) => NumberKind::U8,
 				Number::I16(_) => NumberKind::I16,
@@ -900,7 +1125,7 @@ mod tests {
 		let mut decimals: Vec<_> =
 			cases.iter().filter(|c| matches!(c.value, Number::Decimal(_))).collect();
 		for set in [&mut ints, &mut floats, &mut decimals] {
-			set.sort_by_key(|a| a.value);
+			set.sort_by_key(|a| a.value.clone());
 			for w in set.windows(2) {
 				if w[0].value < w[1].value {
 					assert!(
@@ -1042,7 +1267,7 @@ mod tests {
 		for marker in
 			[DecimalLexEncoder::FINITE_POSITIVE_MARKER, DecimalLexEncoder::FINITE_NEGATIVE_MARKER]
 		{
-			for exponent in [[0x00, 0x01], [0x01, 0x00], [0x00, 0x00]] {
+			for exponent in [[0x00, 0x80], [0x80, 0x00], [0x00, 0x00]] {
 				let err =
 					DecimalLexEncoder::decode(&[marker, exponent[0], exponent[1], 0x20, 0x00])
 						.expect_err("a zero exponent byte is not part of any encoding");

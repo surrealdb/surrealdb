@@ -5,6 +5,8 @@ pub mod api;
 pub mod bucket;
 pub mod config;
 pub mod database;
+pub mod declared_type;
+pub mod enumeration;
 pub mod event;
 pub mod field;
 pub mod function;
@@ -14,8 +16,10 @@ pub mod module;
 pub mod namespace;
 pub mod param;
 pub mod sequence;
+pub mod sql_types;
 pub mod table;
 pub mod user;
+pub mod user_type;
 
 pub use access::DefineAccessStatement;
 pub use analyzer::DefineAnalyzerStatement;
@@ -23,8 +27,12 @@ pub use api::{ApiAction, DefineApiStatement};
 pub use bucket::DefineBucketStatement;
 pub use config::DefineConfigStatement;
 pub use database::DefineDatabaseStatement;
+pub use enumeration::DefineEnumStatement;
 pub use event::DefineEventStatement;
-pub use field::{DefineDefault, DefineFieldStatement, MigrateClause, kind_contains_object};
+pub use field::{
+	DefineDefault, DefineFieldStatement, MigrateClause, SqlType, SqlTypeDialect,
+	kind_contains_object,
+};
 pub use function::DefineFunctionStatement;
 pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;
@@ -34,6 +42,10 @@ pub use param::DefineParamStatement;
 pub use sequence::DefineSequenceStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
+pub use user_type::{
+	CompositeBody, CompositeField, DefineUserTypeStatement, DomainBody, DomainCheck, UserTypeBody,
+	UserTypeKind,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub enum DefineKind {
@@ -64,6 +76,8 @@ pub enum DefineStatement {
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
 	Module(DefineModuleStatement),
+	Enum(DefineEnumStatement),
+	UserType(DefineUserTypeStatement),
 }
 
 /// Written out and kept out of line so one copy serves every crate that clones a `DefineStatement`.
@@ -88,6 +102,8 @@ impl Clone for DefineStatement {
 			Self::Bucket(v) => Self::Bucket(v.clone()),
 			Self::Sequence(v) => Self::Sequence(v.clone()),
 			Self::Module(v) => Self::Module(v.clone()),
+			Self::Enum(v) => Self::Enum(v.clone()),
+			Self::UserType(v) => Self::UserType(v.clone()),
 		}
 	}
 }
@@ -112,6 +128,8 @@ impl ToSql for DefineStatement {
 			Self::Bucket(v) => v.fmt_sql(f, fmt),
 			Self::Sequence(v) => v.fmt_sql(f, fmt),
 			Self::Module(v) => v.fmt_sql(f, fmt),
+			Self::Enum(v) => v.fmt_sql(f, fmt),
+			Self::UserType(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

@@ -82,7 +82,7 @@ use crate::exec::ir::iface::statements::{
 	BindExpandShape, BindInsertEdge, BindInsertNode, BindJoinShape, BindPathShape, BindStepShape,
 	ConfigShape, ContentMode, DdlChecks, DdlGuard, DefaultConfigShape, DefaultShape, DefineAccess,
 	DefineApi, DefineField, DefineFunction, DefineObject, DefineTable, DefineUser,
-	DefinitionTemplate, IndexColumn, IndexSpec, InfoSubject, JwtIssueShape, JwtShape,
+	DefinitionTemplate, EnumEdit, IndexColumn, IndexSpec, InfoSubject, JwtIssueShape, JwtShape,
 	JwtVerifyShape, LiveShape, MatchBindings, MatchColumnShape, MatchData, MatchInsertEdge,
 	MatchInsertNode, MatchOutputShape, MatchPattern, MiddlewareShape, OnDeleteShape, OutputShape,
 	PermissionShape, PermissionsShape, Place, PlacePart, RecordAccessShape, ReferenceShape,
@@ -1136,6 +1136,29 @@ impl Text for Arc<crate::expr::logical::LogicalWrite> {
 }
 
 /// An expression a statement stores as written, as its SurrealQL text.
+impl Text for crate::expr::statements::define::SqlType {
+	fn put(&self, out: &mut String) {
+		put_str(out, self.dialect.keyword());
+		put_str(out, &self.text);
+	}
+
+	fn get(c: &mut Cursor<'_>) -> Result<Self, ParseError> {
+		use crate::expr::statements::define::SqlTypeDialect;
+		let keyword = c.string()?;
+		let dialect = match keyword.as_str() {
+			"POSTGRESQL" => SqlTypeDialect::PostgreSql,
+			"MYSQL" => SqlTypeDialect::MySql,
+			"DYNAMODB" => SqlTypeDialect::DynamoDb,
+			other => return c.fail(format!("unknown SQL type dialect `{other}`")),
+		};
+		let text = c.string()?;
+		Ok(crate::expr::statements::define::SqlType {
+			dialect,
+			text,
+		})
+	}
+}
+
 impl Text for crate::expr::Expr {
 	fn put(&self, out: &mut String) {
 		put_str(out, &self.to_sql());
@@ -1238,6 +1261,11 @@ impl Text for PublicNumber {
 				put_str(out, &n.to_string());
 				out.push(')');
 			}
+			PublicNumber::BigDecimal(n) => {
+				out.push_str("BigDecimal(");
+				put_str(out, &n.to_string());
+				out.push(')');
+			}
 			PublicNumber::I8(n) => {
 				out.push_str("I8(");
 				n.put(out);
@@ -1297,6 +1325,13 @@ impl Text for PublicNumber {
 				match text.parse() {
 					Ok(n) => PublicNumber::Decimal(n),
 					Err(_) => return c.fail(format!("`{text}` is not a decimal")),
+				}
+			}
+			"BigDecimal" => {
+				let text = c.string()?;
+				match text.parse::<surrealdb_types::BigDecimal>() {
+					Ok(n) => PublicNumber::BigDecimal(Box::new(n)),
+					Err(_) => return c.fail(format!("`{text}` is not a bigdecimal")),
 				}
 			}
 			"I8" => PublicNumber::I8(<i8 as Text>::get(c)?),
@@ -2655,7 +2690,18 @@ text_enum!(DefineObject {
 			readonly: bool,
 			comment: u16
 		},
-		Sequence { name: u16, batch: u16, start: u16, timeout: u16 }
+		Sequence { name: u16, batch: u16, start: u16, timeout: u16 },
+		Enum { name: Strand, labels: Box<[String]>, comment: u16, permissions: PermissionShape },
+		UserType { name: Strand }
+	]
+});
+
+text_enum!(EnumEdit {
+	unit []
+	tuple []
+	named [
+		Add { value: String, anchor: Option<String>, after: bool, if_not_exists: bool },
+		Rename { from: String, to: String }
 	]
 });
 
@@ -2679,7 +2725,9 @@ text_enum!(RemoveObject {
 		Bucket { name: u16, base: Base },
 		Sequence { name: u16 },
 		Module { name: ModuleName },
-		Config { kind: ConfigKind }
+		Config { kind: ConfigKind },
+		Enum { name: Strand },
+		UserType { name: Strand, domain: bool }
 	]
 });
 
@@ -2741,7 +2789,8 @@ text_enum!(AlterObject {
 			name: ModuleName,
 			comment: AlterKind<String>,
 			permissions: Option<PermissionShape>
-		}
+		},
+		Enum { name: Strand, edits: Box<[EnumEdit]> }
 	]
 });
 
@@ -3336,7 +3385,8 @@ text_struct!(DefineField {
 	reference: Option<ReferenceShape>,
 	graphql_alias: Option<String>,
 	graphql_deprecated: Option<String>,
-	migrate: Option<Box<MigrateClause>>
+	migrate: Option<Box<MigrateClause>>,
+	sql_type: Option<crate::expr::statements::define::SqlType>
 });
 text_struct!(MigrateClause {
 	name: String,
@@ -3409,7 +3459,8 @@ text_struct!(AlterField {
 	permissions: Option<PermissionsShape>,
 	comment: AlterKind<String>,
 	reference: AlterKind<ReferenceShape>,
-	migrate: Option<Box<MigrateClause>>
+	migrate: Option<Box<MigrateClause>>,
+	sql_type: AlterKind<crate::expr::statements::define::SqlType>
 });
 text_struct!(AlterFunction {
 	name: Strand,

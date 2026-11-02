@@ -40,6 +40,11 @@ pub fn translate_statement(
 		Statement::CreateTable(_)
 		| Statement::CreateIndex(_)
 		| Statement::CreateExtension(_)
+		| Statement::CreateType(_)
+		| Statement::AlterType(_)
+		| Statement::CreateDomain(_)
+		| Statement::AlterDomain(_)
+		| Statement::CreateCompositeType(_)
 		| Statement::CreateView(_)
 		| Statement::AlterTable(_)
 		| Statement::Drop(_) => {

@@ -283,6 +283,7 @@ pub fn bind_select(
 		set_op,
 		for_update,
 		user_tables: catalog.all_tables(),
+		user_types: crate::catalog::UserTypes::default(),
 		database: catalog.current_database().map(str::to_owned),
 		hnsw_indexes: Vec::new(),
 	})
@@ -464,6 +465,7 @@ pub fn bind_expr(
 	match expr {
 		Expr::Literal(lit, _) => match lit {
 			MyLiteral::Integer(i) => Ok(BoundExpr::Literal(BoundLiteral::Integer(*i))),
+			MyLiteral::Unsigned(u) => Ok(BoundExpr::Literal(BoundLiteral::Unsigned(*u))),
 			MyLiteral::Float(f) => Ok(BoundExpr::Literal(BoundLiteral::Float(*f))),
 			MyLiteral::String(s) => Ok(BoundExpr::Literal(BoundLiteral::String(s.clone()))),
 			MyLiteral::IntroducedString {
@@ -624,6 +626,9 @@ pub fn bind_expr(
 					correlation_depth: 0,
 					id_table: None,
 					link_table: None,
+					enum_column: None,
+					composite: None,
+					declared_sql: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
 					key_read: crate::ir::KeyRead::None,

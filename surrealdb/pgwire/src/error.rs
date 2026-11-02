@@ -436,7 +436,36 @@ const NAMED_PLANNER_ERRORS: &[(&str, &str, &str)] = &[
 	("operator class \"", "\"", "42704"),
 	("data type ", "\"", "42704"),
 	("extension \"", "\" is not available", "58P01"),
+	("type \"", "\" does not exist", "42704"),
+	("constraint \"", "\" already exists", "42710"),
+	("column \"", "\" specified more than once", "42701"),
 ];
+
+/// The SQLSTATE of a refusal of the engine to define, alter or drop a domain or composite type,
+/// worded as an invalid statement:
+/// - a type whose name is taken is `42710`, and one that does not exist is `42704`;
+/// - a type that a column still uses is `2BP01`;
+/// - `DROP DOMAIN` of a composite type, or `DROP TYPE` of a domain, is `42809`.
+///
+/// Any other message gives `None`. As for [`engine_sqlstate`], a message is read by the text it
+/// starts and ends with, which the client's own names do not choose.
+fn user_type_sqlstate(message: &str) -> Option<&'static str> {
+	let reason = message.strip_prefix("Invalid statement: ")?;
+	if reason.starts_with("type \"") && reason.ends_with("\" already exists") {
+		Some("42710")
+	} else if reason.starts_with("type \"") && reason.ends_with("\" does not exist") {
+		Some("42704")
+	} else if reason.starts_with("cannot drop type ") {
+		Some("2BP01")
+	} else if reason.starts_with('"')
+		&& (reason.ends_with("\" is not a domain")
+			|| reason.ends_with("\" is not a composite type"))
+	{
+		Some("42809")
+	} else {
+		None
+	}
+}
 
 /// The SQLSTATE of a refusal by the SQL planner, which is the code the planner chose for it
 /// (`PlanError::pg_sqlstate`). A feature the planner does not lower is `0A000`, a text it cannot
@@ -521,6 +550,29 @@ fn engine_sqlstate(message: &str) -> Option<&'static str> {
 		// A distance between vectors of different dimensions.
 		Some("22000")
 	} else {
+		sql_type_sqlstate(message)
+	}
+}
+
+/// The SQLSTATE of a value that does not fit its field's declared SQL type. The reason opens the
+/// message (`DocError::FieldSqlType`), before the client's field name and declared type, so only
+/// its start is read. Any other message gives `None`.
+fn sql_type_sqlstate(message: &str) -> Option<&'static str> {
+	if message.starts_with("value too long for type ")
+		|| message.starts_with("bit string too long for type ")
+	{
+		Some("22001")
+	} else if message.starts_with("bit string length ") {
+		Some("22026")
+	} else if message.starts_with("invalid binary digit in a bit string: ") {
+		Some("22P02")
+	} else if message.starts_with("numeric field overflow ") {
+		Some("22003")
+	} else if message.starts_with("date/time field value out of range") {
+		Some("22008")
+	} else if message.starts_with("JSON cannot hold a ") {
+		Some("22032")
+	} else {
 		None
 	}
 }
@@ -539,6 +591,10 @@ fn thrown_sqlstate(message: &str) -> &'static str {
 		"field position must not be zero" => "22023",
 		unit if unit.starts_with("unit \"") && unit.contains("\" not recognized for type ") => {
 			"22023"
+		}
+		// The NOT NULL of a domain, which a column of the domain asserts.
+		null if null.starts_with("domain ") && null.ends_with(" does not allow null values") => {
+			"23502"
 		}
 		_ => "P0001",
 	}
@@ -708,6 +764,9 @@ impl From<&TypesError> for PgError {
 			}
 		};
 
+		// The engine words its refusals of a user type as invalid statements, whatever kind of
+		// error carries them.
+		let code = user_type_sqlstate(msg).unwrap_or(code);
 		let mut pg_err = Self::new(code, msg);
 		if let Some(t) = table_name {
 			pg_err = pg_err.with_table(t);
@@ -909,6 +968,16 @@ mod tests {
 				method: "hnsw".to_string(),
 			},
 			PlanError::ExtensionNotAvailable(name()),
+			PlanError::UndefinedType(name()),
+			PlanError::UndefinedDomainConstraint {
+				constraint: name(),
+				domain: name(),
+			},
+			PlanError::DuplicateDomainConstraint {
+				constraint: name(),
+				domain: name(),
+			},
+			PlanError::DuplicateColumn(name()),
 			PlanError::Custom("each query must have the same number of columns".to_string()),
 		];
 		all.into_iter()
@@ -939,6 +1008,10 @@ mod tests {
 						"0A000"
 					}
 					PlanError::UndefinedObject(_)
+					| PlanError::UndefinedType(_)
+					| PlanError::UndefinedDomainConstraint {
+						..
+					}
 					| PlanError::UndefinedConstraint {
 						..
 					}
@@ -952,6 +1025,10 @@ mod tests {
 					PlanError::DataException(_) => "22000",
 					PlanError::ProgramLimitExceeded(_) => "54000",
 					PlanError::ExtensionNotAvailable(_) => "58P01",
+					PlanError::DuplicateDomainConstraint {
+						..
+					} => "42710",
+					PlanError::DuplicateColumn(_) => "42701",
 					// A planning error of no kind of its own is a syntax error.
 					PlanError::Custom(_) => "42601",
 					// No planner path raises these: the connection reports the state itself.
@@ -1134,6 +1211,42 @@ mod tests {
 		assert_eq!(planner_sqlstate("bigint out of range"), Some("22003"));
 		assert_eq!(planner_sqlstate("parameter $1 out of range"), None);
 		assert_eq!(unsupported_construct(overflow), None);
+	}
+
+	#[test]
+	fn test_user_type_refusals_have_postgres_codes() {
+		for (message, code) in [
+			("Invalid statement: type \"posint\" already exists", "42710"),
+			("Invalid statement: type \"posint\" does not exist", "42704"),
+			(
+				"Invalid statement: cannot drop type posint because other objects depend on it: column n of table t depends on type posint",
+				"2BP01",
+			),
+			("Invalid statement: \"address\" is not a domain", "42809"),
+			("Invalid statement: \"posint\" is not a composite type", "42809"),
+		] {
+			assert_eq!(user_type_sqlstate(message), Some(code), "{message}");
+		}
+		assert_eq!(user_type_sqlstate("type \"posint\" does not exist"), None);
+		assert_eq!(
+			thrown_sqlstate("An error occurred: domain posint does not allow null values"),
+			"23502"
+		);
+		assert_eq!(user_type_sqlstate("Invalid statement: something else"), None);
+		for (message, code) in [
+			("PostgreSQL DDL lowering error: type \"d\" does not exist", "42704"),
+			(
+				"PostgreSQL DDL lowering error: constraint \"c\" for domain \"d\" already exists",
+				"42710",
+			),
+			(
+				"PostgreSQL DDL lowering error: constraint \"c\" of domain \"d\" does not exist",
+				"42704",
+			),
+			("PostgreSQL DDL lowering error: column \"a\" specified more than once", "42701"),
+		] {
+			assert_eq!(planner_sqlstate(message), Some(code), "{message}");
+		}
 	}
 
 	#[test]

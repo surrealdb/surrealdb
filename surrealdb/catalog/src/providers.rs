@@ -1027,6 +1027,61 @@ pub trait BucketProvider: Sync {
 	}
 }
 
+pub trait EnumProvider: Sync {
+	/// Retrieve all enum definitions for a specific database.
+	fn all_db_enums(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		version: Option<u64>,
+	) -> BoxProviderFut<'_, Result<Arc<[catalog::EnumDefinition]>>>;
+
+	/// Retrieve a specific enum definition.
+	fn get_db_enum<'a>(
+		&'a self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		en: &'a str,
+		version: Option<u64>,
+	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::EnumDefinition>>>>;
+
+	/// Retrieve a specific enum definition returning an error if it does not exist.
+	fn expect_db_enum<'a>(
+		&'a self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		en: &'a str,
+	) -> BoxProviderFut<'a, Result<Arc<catalog::EnumDefinition>>> {
+		Box::pin(async move {
+			match self.get_db_enum(ns, db, en, None).await? {
+				Some(val) => Ok(val),
+				None => anyhow::bail!(Error::EnNotFound {
+					name: en.to_owned(),
+				}),
+			}
+		})
+	}
+}
+
+pub trait UserTypeProvider: Sync {
+	/// Retrieve every domain and composite type of a database.
+	fn all_db_user_types(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		version: Option<u64>,
+	) -> BoxProviderFut<'_, Result<Arc<[catalog::UserTypeDefinition]>>>;
+
+	/// Retrieve the domain or composite type `ty` of a database.
+	fn get_db_user_type<'a>(
+		&'a self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ty: &'a str,
+		version: Option<u64>,
+	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::UserTypeDefinition>>>>;
+}
+
 pub trait CatalogProvider:
 	NodeProvider
 	+ NamespaceProvider
@@ -1036,6 +1091,8 @@ pub trait CatalogProvider:
 	+ AuthorisationProvider
 	+ ApiProvider
 	+ BucketProvider
+	+ EnumProvider
+	+ UserTypeProvider
 {
 	/// Get or add a database with a default configuration, only if we are in
 	/// dynamic mode.

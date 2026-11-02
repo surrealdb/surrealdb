@@ -2,16 +2,16 @@
 //!
 //! A `Value` decodes to itself rather than to an object describing it, so
 //! its family is transcribed here instead of as descriptors: `Value`
-//! revisions 1 and 2, and each type a variant holds at every revision it
+//! revisions 1 to 3, and each type a variant holds at every revision it
 //! was written in.
 //!
 //! | type | revisions | framing |
 //! |---|---|---|
-//! | `Value` | 1, 2 | 1: discriminant varint; 2: `optimised` tag, inline `None`/`Null`, fixed(1) `Bool`, every other variant `varlen` |
+//! | `Value` | 1, 2, 3 | 1: discriminant varint; 2 and 3: `optimised` tag, inline `None`/`Null`, fixed(1) `Bool`, every other variant `varlen`; `Date`, `Time`, `Timestamp` and `Interval` start at 3 |
 //! | `Array`, `Set`, `Object` | 1, 2 | 1: length and items; 2: `optimised` struct around an indexed sequence, set or map |
-//! | `Number` | 1, 2 | 1: `Int`, `Float`, `Decimal`; 2 adds sized number variants |
+//! | `Number` | 1, 2, 3 | 1: `Int`, `Float`, `Decimal`; 2 adds sized number variants; 3 adds `BigDecimal`, as its text |
 //! | `RecordIdKey`, `Geometry` | 1 | plain enums |
-//! | `Duration`, `Datetime`, `Uuid`, `Bytes`, `Regex`, `File`, `Range`, `RecordId`, `RecordIdKeyRange` | 1 | plain structs |
+//! | `Date`, `Time`, `Timestamp`, `Interval`, `Duration`, `Datetime`, `Uuid`, `Bytes`, `Regex`, `File`, `Range`, `RecordId`, `RecordIdKeyRange` | 1 | plain structs |
 //!
 //! An indexed map sorts its entries by their encoded key bytes, an indexed
 //! set its elements by their encoded bytes, and both — like an indexed
@@ -26,8 +26,8 @@ use surrealdb_strand::Strand;
 use super::wire::{Reader, Writer};
 use crate::val::geometry::ring_before_closing;
 use crate::val::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Set, TableName, Uuid, Value,
+	Array, Bytes, Date, Datetime, Duration, File, Geometry, Interval, Number, Object, Range,
+	RecordId, RecordIdKey, RecordIdKeyRange, Set, TableName, Time, Timestamp, Uuid, Value,
 };
 
 /// Below this many entries an indexed compound has no offset table.
@@ -48,14 +48,21 @@ fn revision(r: &mut Reader<'_>, name: &str, max: u16) -> Result<u16> {
 // ---------------------------------------------------------------------------
 
 pub(super) fn decode(r: &mut Reader<'_>) -> Result<Value> {
-	match revision(r, "Value", 2)? {
+	let rev = revision(r, "Value", 3)?;
+	match rev {
 		1 => {
 			let variant = u8::try_from(r.varint()?).context("a Value variant past 255")?;
+			if variant > LAST_VARIANT_BEFORE_REVISION_3 {
+				bail!("no Value variant {variant} at revision 1");
+			}
 			decode_variant(variant, r)
 		}
 		_ => {
 			let tag = r.u8()?;
 			let variant = tag & 0b1_1111;
+			if rev == 2 && variant > LAST_VARIANT_BEFORE_REVISION_3 {
+				bail!("no Value variant {variant} at revision 2");
+			}
 			match (tag >> 5) & 0b11 {
 				0b00 => decode_variant(variant, &mut Reader::new(&[])),
 				0b01 => {
@@ -77,6 +84,9 @@ pub(super) fn decode(r: &mut Reader<'_>) -> Result<Value> {
 		}
 	}
 }
+
+/// The last variant a `Value` of revision 1 or 2 holds (`Closure`).
+const LAST_VARIANT_BEFORE_REVISION_3: u8 = 18;
 
 fn decode_variant(variant: u8, r: &mut Reader<'_>) -> Result<Value> {
 	Ok(match variant {
@@ -132,6 +142,31 @@ fn decode_variant(variant: u8, r: &mut Reader<'_>) -> Result<Value> {
 			}))
 		}
 		18 => bail!("a closure is not stored"),
+		19 => {
+			revision(r, "Date", 1)?;
+			let days = i32::try_from(r.zigzag()?)?;
+			Value::Date(Date::from_days(days).context("a date out of range")?)
+		}
+		20 => {
+			revision(r, "Time", 1)?;
+			let nanos = u64::try_from(r.varint()?)?;
+			Value::Time(Time::from_nanos(nanos).context("a time past 24:00:00")?)
+		}
+		21 => {
+			revision(r, "Timestamp", 1)?;
+			let secs = i64::try_from(r.zigzag()?)?;
+			let nanos = u32::try_from(r.varint()?)?;
+			Value::Timestamp(
+				Timestamp::from_parts(secs, nanos).context("a timestamp out of range")?,
+			)
+		}
+		22 => {
+			revision(r, "Interval", 1)?;
+			let months = i32::try_from(r.zigzag()?)?;
+			let days = i32::try_from(r.zigzag()?)?;
+			let micros = i64::try_from(r.zigzag()?)?;
+			Value::Interval(Interval::new(months, days, micros))
+		}
 		v => bail!("no Value variant {v}"),
 	})
 }
@@ -166,7 +201,7 @@ fn decode_uuid(r: &mut Reader<'_>) -> Result<Uuid> {
 }
 
 pub(super) fn decode_number(r: &mut Reader<'_>) -> Result<Number> {
-	let rev = revision(r, "Number", 2)?;
+	let rev = revision(r, "Number", 3)?;
 	let variant = r.varint()?;
 	match (rev, variant) {
 		(1, 0) | (2, 0) => Ok(Number::Int(i64::try_from(r.zigzag()?)?)),
@@ -181,6 +216,11 @@ pub(super) fn decode_number(r: &mut Reader<'_>) -> Result<Number> {
 		(2, 9) => Ok(Number::U64(u64::try_from(r.varint()?)?)),
 		(2, 10) => Ok(Number::F16(surrealdb_types::f16::from_bits(u16::try_from(r.varint()?)?))),
 		(2, 11) => Ok(Number::F32(f32::from_le_bytes(r.array()?))),
+		(3, 12) => {
+			let text = std::str::from_utf8(r.bytes()?).context("a bigdecimal's text")?;
+			let decimal = text.parse::<surrealdb_types::BigDecimal>()?;
+			Ok(Number::BigDecimal(Box::new(decimal)))
+		}
 		_ => bail!("no Number variant {variant} at revision {rev}"),
 	}
 }
@@ -373,7 +413,13 @@ fn decode_geometry(r: &mut Reader<'_>) -> Result<Geometry> {
 // ---------------------------------------------------------------------------
 
 pub(super) fn encode(value: &Value, w: &mut Writer) -> Result<()> {
-	w.varint(2);
+	let is_new =
+		matches!(value, Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Interval(_));
+	w.varint(if is_new {
+		3
+	} else {
+		2
+	});
 	let (variant, class): (u8, u8) = match value {
 		Value::None => (0, 0b00),
 		Value::Null => (1, 0b00),
@@ -393,6 +439,10 @@ pub(super) fn encode(value: &Value, w: &mut Writer) -> Result<()> {
 		Value::File(_) => (15, 0b10),
 		Value::Regex(_) => (16, 0b10),
 		Value::Range(_) => (17, 0b10),
+		Value::Date(_) => (19, 0b10),
+		Value::Time(_) => (20, 0b10),
+		Value::Timestamp(_) => (21, 0b10),
+		Value::Interval(_) => (22, 0b10),
 		Value::Closure(_) => return Err(closure_not_stored()),
 	};
 	w.u8(variant | class << 5);
@@ -406,6 +456,10 @@ pub(super) fn encode(value: &Value, w: &mut Writer) -> Result<()> {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Array(_)
 		| Value::Set(_)
@@ -423,7 +477,7 @@ pub(super) fn encode(value: &Value, w: &mut Writer) -> Result<()> {
 
 fn encode_body(value: &Value, w: &mut Writer) -> Result<()> {
 	match value {
-		Value::Number(n) => encode_number(n, w),
+		Value::Number(n) => encode_number(n, w)?,
 		Value::String(s) => w.bytes(s.as_bytes()),
 		Value::Duration(d) => {
 			w.varint(1);
@@ -432,6 +486,25 @@ fn encode_body(value: &Value, w: &mut Writer) -> Result<()> {
 		Value::Datetime(d) => {
 			w.varint(1);
 			encode_datetime(d, w);
+		}
+		Value::Date(d) => {
+			w.varint(1);
+			w.zigzag(i128::from(d.0));
+		}
+		Value::Time(t) => {
+			w.varint(1);
+			w.varint(u128::from(t.0));
+		}
+		Value::Timestamp(t) => {
+			w.varint(1);
+			w.zigzag(i128::from(t.secs));
+			w.varint(u128::from(t.nanos));
+		}
+		Value::Interval(i) => {
+			w.varint(1);
+			w.zigzag(i128::from(i.months));
+			w.zigzag(i128::from(i.days));
+			w.zigzag(i128::from(i.micros));
 		}
 		Value::Uuid(u) => encode_uuid(u, w),
 		Value::Array(a) => encode_array(a, w)?,
@@ -493,8 +566,14 @@ fn encode_uuid(u: &Uuid, w: &mut Writer) {
 	w.raw(u.0.as_bytes());
 }
 
-pub(super) fn encode_number(n: &Number, w: &mut Writer) {
+pub(super) fn encode_number(n: &Number, w: &mut Writer) -> Result<()> {
 	match n {
+		// Revision 3 adds the bigdecimal, held as its text.
+		Number::BigDecimal(d) => {
+			w.varint(3);
+			w.varint(12);
+			w.bytes(d.to_string().as_bytes());
+		}
 		Number::Int(v) => {
 			w.varint(1);
 			w.varint(0);
@@ -556,6 +635,7 @@ pub(super) fn encode_number(n: &Number, w: &mut Writer) {
 			w.raw(&v.to_le_bytes());
 		}
 	}
+	Ok(())
 }
 
 /// An indexed sequence or set body of already-encoded items.

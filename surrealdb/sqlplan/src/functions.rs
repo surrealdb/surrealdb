@@ -44,6 +44,9 @@ pub enum ReturnTypeStrategy {
 	CommonOfRest,
 	/// The type every argument has (e.g. COALESCE(a, b)), as for `CommonOfRest`.
 	CommonOfAll,
+	/// The type of the second argument, with a `date` promoted to `timestamptz` as `date_trunc`
+	/// does, and unknown for a type that is not a date or time.
+	SecondArgTemporal,
 	/// Numeric mathematical return type: Float8 if a float is involved, else the type of the first
 	/// argument, or Int8 when there is none.
 	NumericMath,
@@ -797,7 +800,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		kind: SqlFunctionKind::Scalar,
 		min_args: 2,
 		max_args: Some(2),
-		return_type: ReturnTypeStrategy::Fixed(SqlType::TimestampTz),
+		return_type: ReturnTypeStrategy::SecondArgTemporal,
 		internal_name: Some("time::floor"),
 		pgsql: true,
 		mysql: false,
@@ -811,6 +814,16 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		internal_name: None,
 		pgsql: true,
 		mysql: true,
+	},
+	SqlFunctionDef {
+		name: "isfinite",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 1,
+		max_args: Some(1),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Bool),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
 	},
 	SqlFunctionDef {
 		name: "date_part",
@@ -2257,6 +2270,56 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		mysql: false,
 	},
 	SqlFunctionDef {
+		name: "age",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 1,
+		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Interval),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "make_interval",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 0,
+		max_args: Some(7),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Interval),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "make_timestamp",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 6,
+		max_args: Some(6),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Timestamp),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "make_time",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 3,
+		max_args: Some(3),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Time),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "to_date",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 2,
+		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Date),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
 		name: "clock_timestamp",
 		kind: SqlFunctionKind::Scalar,
 		min_args: 0,
@@ -2752,6 +2815,16 @@ impl FunctionRegistry {
 		}
 	}
 
+	/// The return type of a call under `dialect`, where an argument of the literal `NULL` is
+	/// `None`.
+	pub(crate) fn infer_return_type_of_call_in(
+		name: &str,
+		dialect: SqlDialect,
+		arg_types: &[Option<SqlType>],
+	) -> SqlType {
+		Self::infer_return_type_of_call(name, dialect, arg_types)
+	}
+
 	fn infer_return_type_of_call(
 		name: &str,
 		dialect: SqlDialect,
@@ -2776,6 +2849,16 @@ impl FunctionRegistry {
 			ReturnTypeStrategy::FirstArg => {
 				arg_types.first().copied().flatten().unwrap_or(SqlType::Unknown)
 			}
+			ReturnTypeStrategy::SecondArgTemporal => match arg_types.get(1).copied().flatten() {
+				Some(SqlType::Date) => SqlType::TimestampTz,
+				Some(
+					ty @ (SqlType::Time
+					| SqlType::Timestamp
+					| SqlType::TimestampTz
+					| SqlType::Interval),
+				) => ty,
+				_ => SqlType::Unknown,
+			},
 			ReturnTypeStrategy::CommonOfRest => {
 				SqlType::common(arg_types.iter().skip(1).flatten().copied())
 			}

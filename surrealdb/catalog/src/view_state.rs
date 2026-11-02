@@ -139,6 +139,24 @@ pub enum StoredStat {
 		#[stored(n = 4)]
 		values: Vec<Value>,
 	},
+	/// A `time::max` over `date`, `time` or `timestamp` values; see
+	/// [`AggregationStat::TemporalMax`].
+	#[stored(n = 12)]
+	TemporalMax {
+		#[stored(n = 2)]
+		arg: u32,
+		#[stored(n = 4)]
+		max: Value,
+	},
+	/// A `time::min` over `date`, `time` or `timestamp` values; see
+	/// [`AggregationStat::TemporalMin`].
+	#[stored(n = 13)]
+	TemporalMin {
+		#[stored(n = 2)]
+		arg: u32,
+		#[stored(n = 4)]
+		min: Value,
+	},
 }
 
 impl TryFrom<&AggregationStat> for StoredStat {
@@ -167,21 +185,21 @@ impl TryFrom<&AggregationStat> for StoredStat {
 				max,
 			} => Self::NumberMax {
 				arg: index(*arg)?,
-				max: *max,
+				max: max.clone(),
 			},
 			AggregationStat::NumberMin {
 				arg,
 				min,
 			} => Self::NumberMin {
 				arg: index(*arg)?,
-				min: *min,
+				min: min.clone(),
 			},
 			AggregationStat::Sum {
 				arg,
 				sum,
 			} => Self::Sum {
 				arg: index(*arg)?,
-				sum: *sum,
+				sum: sum.clone(),
 			},
 			AggregationStat::Mean {
 				arg,
@@ -189,7 +207,7 @@ impl TryFrom<&AggregationStat> for StoredStat {
 				count,
 			} => Self::Mean {
 				arg: index(*arg)?,
-				sum: *sum,
+				sum: sum.clone(),
 				count: *count,
 			},
 			AggregationStat::StdDev {
@@ -200,9 +218,9 @@ impl TryFrom<&AggregationStat> for StoredStat {
 				count,
 			} => Self::StdDev {
 				arg: index(*arg)?,
-				shift: *shift,
-				sum: *sum,
-				sum_of_squares: *sum_of_squares,
+				shift: shift.clone(),
+				sum: sum.clone(),
+				sum_of_squares: sum_of_squares.clone(),
 				count: *count,
 			},
 			AggregationStat::Variance {
@@ -213,9 +231,9 @@ impl TryFrom<&AggregationStat> for StoredStat {
 				count,
 			} => Self::Variance {
 				arg: index(*arg)?,
-				shift: *shift,
-				sum: *sum,
-				sum_of_squares: *sum_of_squares,
+				shift: shift.clone(),
+				sum: sum.clone(),
+				sum_of_squares: sum_of_squares.clone(),
 				count: *count,
 			},
 			AggregationStat::TimeMax {
@@ -238,6 +256,20 @@ impl TryFrom<&AggregationStat> for StoredStat {
 			} => Self::Accumulate {
 				arg: index(*arg)?,
 				values: values.clone(),
+			},
+			AggregationStat::TemporalMax {
+				arg,
+				max,
+			} => Self::TemporalMax {
+				arg: index(*arg)?,
+				max: max.clone(),
+			},
+			AggregationStat::TemporalMin {
+				arg,
+				min,
+			} => Self::TemporalMin {
+				arg: index(*arg)?,
+				min: min.clone(),
 			},
 		})
 	}
@@ -336,6 +368,20 @@ impl From<StoredStat> for AggregationStat {
 			} => Self::Accumulate {
 				arg: index(arg),
 				values,
+			},
+			StoredStat::TemporalMax {
+				arg,
+				max,
+			} => Self::TemporalMax {
+				arg: index(arg),
+				max,
+			},
+			StoredStat::TemporalMin {
+				arg,
+				min,
+			} => Self::TemporalMin {
+				arg: index(arg),
+				min,
 			},
 		}
 	}

@@ -416,7 +416,12 @@ fn may_link(kind: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -439,7 +444,8 @@ fn may_link(kind: &Kind) -> bool {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => false,
+		| Kind::File(_)
+		| Kind::Enum(_) => false,
 	}
 }
 
@@ -466,7 +472,12 @@ fn field_kind(kind: &Kind, name: &str) -> Kind {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -487,7 +498,8 @@ fn field_kind(kind: &Kind, name: &str) -> Kind {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => Kind::None,
+		| Kind::File(_)
+		| Kind::Enum(_) => Kind::None,
 	}
 }
 
@@ -504,7 +516,12 @@ fn element_kind(kind: &Kind) -> Kind {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -528,7 +545,8 @@ fn element_kind(kind: &Kind) -> Kind {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_)) => kind.clone(),
+		| Kind::File(_)
+		| Kind::Enum(_)) => kind.clone(),
 	}
 }
 
@@ -1668,7 +1686,12 @@ fn holds(kind: &Kind, segment: &Part, flexible: bool) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -1691,7 +1714,8 @@ fn holds(kind: &Kind, segment: &Part, flexible: bool) -> bool {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => false,
+		| Kind::File(_)
+		| Kind::Enum(_) => false,
 	}
 }
 
@@ -1717,7 +1741,12 @@ fn literal_slot<'a>(kind: &'a Kind, segment: &Part) -> Option<&'a Kind> {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -1743,7 +1772,8 @@ fn literal_slot<'a>(kind: &'a Kind, segment: &Part) -> Option<&'a Kind> {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => None,
+		| Kind::File(_)
+		| Kind::Enum(_) => None,
 	}
 }
 
@@ -1901,7 +1931,12 @@ fn fold_children(
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -1924,7 +1959,8 @@ fn fold_children(
 		| Kind::Either(_)
 		| Kind::Function(..)
 		| Kind::Range
-		| Kind::File(_)) => Ok(other.clone()),
+		| Kind::File(_)
+		| Kind::Enum(_)) => Ok(other.clone()),
 	};
 	if let Kind::Either(arms) = kind {
 		Ok(Kind::Either(arms.iter().map(fold).collect::<Result<_, _>>()?))

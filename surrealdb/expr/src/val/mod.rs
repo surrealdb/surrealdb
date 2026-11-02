@@ -10,8 +10,11 @@ use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use common::fmt::QuoteStr;
 use geo_types::Point;
-use revision::optimised::tag::{SizeClass, read_tag};
-use revision::{DeserializeRevisioned, Error as RevisionError, SkipCheckRevisioned, revisioned};
+use revision::optimised::tag::{SizeClass, Tag, read_tag, write_tag};
+use revision::{
+	DeserializeRevisioned, Error as RevisionError, SerializeRevisioned, SkipCheckRevisioned,
+	revisioned,
+};
 use rust_decimal::prelude::*;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_collections::{VecMap, bounded};
@@ -49,6 +52,8 @@ pub mod set;
 pub mod stored;
 pub mod table_name_public;
 mod teardown;
+mod temporal;
+mod temporal_ops;
 pub mod uuid;
 pub mod value;
 
@@ -75,6 +80,7 @@ pub use self::range::Range;
 pub use self::record_id::{RecordAddress, RecordId, RecordIdKey, RecordIdKeyRange, RecordIdentity};
 pub use self::regex::Regex;
 pub use self::set::Set;
+pub use self::temporal::{Date, Interval, Time, Timestamp};
 pub use self::uuid::Uuid;
 pub use self::value::{CastError, CoerceError};
 
@@ -129,7 +135,15 @@ pub struct Null;
 // `Set` indexed prologues, the planner hot path gets O(log n) Map
 // binary search, O(1) Array random access, and O(1) skip past any Value
 // — all zero-alloc through the descent chain.
-#[revisioned(revision(1), revision(2, optimised), deserialize = false, skip = true, walk = true)]
+#[revisioned(
+	revision(1),
+	revision(2, optimised),
+	revision(3, optimised),
+	serialize = false,
+	deserialize = false,
+	skip = true,
+	walk = true
+)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
@@ -177,24 +191,110 @@ pub enum Value {
 	// variant to declare a size class under `optimised`.
 	#[revision(size = "varlen")]
 	Closure(Box<Closure>),
+	#[revision(start = 3, size = "varlen")]
+	Date(Date),
+	#[revision(start = 3, size = "varlen")]
+	Time(Time),
+	#[revision(start = 3, size = "varlen")]
+	Timestamp(Timestamp),
+	#[revision(start = 3, size = "varlen")]
+	Interval(Interval),
 	// Add new variants here
 }
 
-/// Reads exactly what the derived serializer writes.
+/// Writes a value in the `optimised` envelope: the revision, the tag, and for a variable-length
+/// variant the `u32` payload length and the payload.
 ///
-/// Revision 1 is a `u32` variant and the variant's value. Revision 2 is an `optimised` tag: `None`
-/// and `Null` are inline, `Bool` is one fixed byte, and every other variant is a `u32` payload
-/// length and the payload, which is read through [`bounded::read_payload`], decoded from the slice
-/// and refused if bytes are left over. A tag with its reserved bit set, or with a size class that
-/// is not its variant's, is refused. A closure is never stored and is always refused.
+/// A variant that exists at revision 2 is written as revision 2, byte for byte as 3.x writes it,
+/// so a value with none of the newer variants stays readable by a 3.x release. `Date`, `Time`,
+/// `Timestamp` and `Interval` are written as revision 3, which a 3.x release refuses.
+impl SerializeRevisioned for Value {
+	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), RevisionError> {
+		fn header<W: std::io::Write>(
+			writer: &mut W,
+			revision: u16,
+			id: u8,
+			size: SizeClass,
+		) -> Result<(), RevisionError> {
+			revision.serialize_revisioned(writer)?;
+			write_tag(writer, Tag::new(id, size))
+		}
+		fn varlen<W: std::io::Write, T: SerializeRevisioned>(
+			writer: &mut W,
+			revision: u16,
+			id: u8,
+			payload: &T,
+		) -> Result<(), RevisionError> {
+			header(writer, revision, id, SizeClass::Varlen)?;
+			let mut scratch: Vec<u8> = Vec::new();
+			payload.serialize_revisioned(&mut scratch)?;
+			let len: u32 = scratch.len().try_into().map_err(|_| {
+				RevisionError::Serialize(
+					"optimised varlen variant payload exceeds u32::MAX bytes".into(),
+				)
+			})?;
+			writer.write_all(&len.to_le_bytes()).map_err(RevisionError::Io)?;
+			writer.write_all(&scratch).map_err(RevisionError::Io)
+		}
+		match self {
+			Value::None => header(writer, 2, 0, SizeClass::Inline),
+			Value::Null => header(writer, 2, 1, SizeClass::Inline),
+			Value::Bool(v) => {
+				header(writer, 2, 2, SizeClass::Fixed)?;
+				v.serialize_revisioned(writer)
+			}
+			Value::Number(v) => varlen(writer, 2, 3, v),
+			Value::String(v) => varlen(writer, 2, 4, v),
+			Value::Duration(v) => varlen(writer, 2, 5, v),
+			Value::Datetime(v) => varlen(writer, 2, 6, v),
+			Value::Uuid(v) => varlen(writer, 2, 7, v),
+			Value::Array(v) => varlen(writer, 2, 8, v),
+			Value::Set(v) => varlen(writer, 2, 9, v),
+			Value::Object(v) => varlen(writer, 2, 10, v),
+			Value::Geometry(v) => varlen(writer, 2, 11, v),
+			Value::Bytes(v) => varlen(writer, 2, 12, v),
+			Value::Table(v) => varlen(writer, 2, 13, v),
+			Value::RecordId(v) => varlen(writer, 2, 14, v),
+			Value::File(v) => varlen(writer, 2, 15, v),
+			Value::Regex(v) => varlen(writer, 2, 16, v),
+			Value::Range(v) => varlen(writer, 2, 17, v),
+			Value::Closure(v) => varlen(writer, 2, 18, v),
+			Value::Date(v) => varlen(writer, 3, 19, v),
+			Value::Time(v) => varlen(writer, 3, 20, v),
+			Value::Timestamp(v) => varlen(writer, 3, 21, v),
+			Value::Interval(v) => varlen(writer, 3, 22, v),
+		}
+	}
+}
+
+/// Reads exactly what the serializer above writes.
+///
+/// Revision 1 is a `u32` variant and the variant's value. Revisions 2 and 3 are an `optimised` tag:
+/// `None` and `Null` are inline, `Bool` is one fixed byte, and every other variant is a `u32`
+/// payload length and the payload, which is read through [`bounded::read_payload`], decoded from
+/// the slice and refused if bytes are left over. A tag with its reserved bit set, or with a size
+/// class that is not its variant's, is refused. A variant is refused in a revision before the one
+/// that introduced it: `Date`, `Time`, `Timestamp` and `Interval` start at revision 3. A closure
+/// is never stored and is always refused.
 impl DeserializeRevisioned for Value {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, RevisionError> {
-		match bounded::read_revision(reader, "Value", 2)? {
+		let revision = bounded::read_revision(reader, "Value", 3)?;
+		match revision {
 			1 => {
 				let variant = u32::deserialize_revisioned(reader)?;
+				if variant > LAST_VARIANT_REVISION_2 {
+					return Err(RevisionError::Deserialize(format!(
+						"Invalid discriminant `{variant}` for enum `Value` revision `1`"
+					)));
+				}
 				read_variant(variant, reader)
 			}
 			_ => {
+				let last_variant = if revision == 2 {
+					LAST_VARIANT_REVISION_2
+				} else {
+					LAST_VARIANT_REVISION_3
+				};
 				let tag = read_tag(reader)?;
 				if tag.is_extended() {
 					return Err(RevisionError::InvalidOptimisedTag(tag.0));
@@ -204,25 +304,39 @@ impl DeserializeRevisioned for Value {
 					(0 | 1, SizeClass::Inline) | (2, SizeClass::Fixed) => {
 						read_variant(variant, reader)
 					}
-					(3..=18, SizeClass::Varlen) => {
+					(3..=22, SizeClass::Varlen) if variant <= last_variant => {
 						let payload = bounded::read_payload(reader)?;
 						let mut body = payload.as_slice();
 						let value = read_variant(variant, &mut body)?;
 						bounded::finish(body)?;
 						Ok(value)
 					}
-					_ => Err(RevisionError::Deserialize(
-						"Invalid tag for enum `Value` revision `2`".into(),
-					)),
+					_ => Err(RevisionError::Deserialize(format!(
+						"Invalid tag for enum `Value` revision `{revision}`"
+					))),
 				}
 			}
 		}
 	}
 }
 
+/// The last variant a revision 1 or 2 value can hold (`Closure`).
+const LAST_VARIANT_REVISION_2: u32 = 18;
+/// The last variant a revision 3 value can hold (`Interval`).
+const LAST_VARIANT_REVISION_3: u32 = 22;
+
 impl SkipCheckRevisioned for Value {
 	fn skip_check_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), RevisionError> {
 		Self::deserialize_revisioned(reader).map(drop)
+	}
+}
+
+/// Refuses a payload whose fields are outside the domain of its type.
+fn valid<T>(value: T, is_valid: bool, name: &str) -> Result<T, RevisionError> {
+	if is_valid {
+		Ok(value)
+	} else {
+		Err(RevisionError::Deserialize(format!("Out of range `{name}` in enum `Value`")))
 	}
 }
 
@@ -248,6 +362,19 @@ fn read_variant<R: std::io::Read>(variant: u32, reader: &mut R) -> Result<Value,
 		16 => Value::Regex(Regex::deserialize_revisioned(reader)?),
 		17 => Value::Range(Box::<Range>::deserialize_revisioned(reader)?),
 		18 => Value::Closure(Box::<Closure>::deserialize_revisioned(reader)?),
+		19 => {
+			let v = Date::deserialize_revisioned(reader)?;
+			Value::Date(valid(v, v.is_valid(), "Date")?)
+		}
+		20 => {
+			let v = Time::deserialize_revisioned(reader)?;
+			Value::Time(valid(v, v.is_valid(), "Time")?)
+		}
+		21 => {
+			let v = Timestamp::deserialize_revisioned(reader)?;
+			Value::Timestamp(valid(v, v.is_valid(), "Timestamp")?)
+		}
+		22 => Value::Interval(Interval::deserialize_revisioned(reader)?),
 		x => {
 			return Err(RevisionError::Deserialize(format!(
 				"Invalid discriminant `{x}` for enum `Value`"
@@ -298,6 +425,10 @@ impl Value {
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Bytes(_)
 			| Value::Number(_)
@@ -328,6 +459,10 @@ impl Value {
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Bytes(_)
 			| Value::Table(_)
@@ -401,7 +536,14 @@ impl Value {
 	pub fn is_truthy(&self) -> bool {
 		match self {
 			Value::Bool(v) => *v,
-			Value::Uuid(_) | Value::RecordId(_) | Value::Geometry(_) | Value::Datetime(_) => true,
+			Value::Uuid(_)
+			| Value::RecordId(_)
+			| Value::Geometry(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_) => true,
 			Value::Bytes(v) => !v.is_empty(),
 			Value::Array(v) => !v.is_empty(),
 			Value::Set(v) => !v.is_empty(),
@@ -454,6 +596,10 @@ impl Value {
 			Value::String(v) => v.into_string(),
 			Value::Uuid(v) => v.to_string(),
 			Value::Datetime(v) => v.to_string(),
+			Value::Date(v) => v.to_string(),
+			Value::Time(v) => v.to_string(),
+			Value::Timestamp(v) => v.to_string(),
+			Value::Interval(v) => v.to_string(),
 			Value::None
 			| Value::Null
 			| Value::Bool(_)
@@ -479,6 +625,10 @@ impl Value {
 			Value::String(v) => v.as_str().to_owned(),
 			Value::Uuid(v) => v.to_string(),
 			Value::Datetime(v) => v.to_string(),
+			Value::Date(v) => v.to_string(),
+			Value::Time(v) => v.to_string(),
+			Value::Timestamp(v) => v.to_string(),
+			Value::Interval(v) => v.to_string(),
 			Value::None
 			| Value::Null
 			| Value::Bool(_)
@@ -515,10 +665,15 @@ impl Value {
 			Self::String(_) => "string",
 			Self::Duration(_) => "duration",
 			Self::Datetime(_) => "datetime",
+			Self::Date(_) => "date",
+			Self::Time(_) => "time",
+			Self::Timestamp(_) => "timestamp",
+			Self::Interval(_) => "interval",
 			Self::Closure(_) => "function",
 			Self::Number(Number::Int(_)) => "int",
 			Self::Number(Number::Float(_)) => "float",
 			Self::Number(Number::Decimal(_)) => "decimal",
+			Self::Number(Number::BigDecimal(_)) => "bigdecimal",
 			Self::Number(Number::I8(_)) => "i8",
 			Self::Number(Number::U8(_)) => "u8",
 			Self::Number(Number::I16(_)) => "i16",
@@ -571,6 +726,10 @@ impl Value {
 			Value::Geometry(v) => other.is_geometry_and(|w| v == w),
 			Value::Duration(v) => other.is_duration_and(|w| v == w),
 			Value::Datetime(v) => other.is_datetime_and(|w| v == w),
+			Value::Date(v) => matches!(other, Value::Date(w) if v == w),
+			Value::Time(v) => matches!(other, Value::Time(w) if v == w),
+			Value::Timestamp(v) => matches!(other, Value::Timestamp(w) if v == w),
+			Value::Interval(v) => matches!(other, Value::Interval(w) if v == w),
 			Value::Bytes(_)
 			| Value::Table(_)
 			| Value::File(_)
@@ -591,6 +750,10 @@ impl Value {
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Object(_)
 			| Value::Geometry(_)
@@ -616,6 +779,10 @@ impl Value {
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Object(_)
 			| Value::Geometry(_)
@@ -645,6 +812,10 @@ impl Value {
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Array(_)
 			| Value::Set(_)
@@ -690,6 +861,10 @@ impl Value {
 				| Value::Number(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
 				| Value::Set(_)
@@ -720,6 +895,10 @@ impl Value {
 			| Value::Number(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Bytes(_)
 			| Value::Table(_)
 			| Value::RecordId(_)
@@ -741,6 +920,10 @@ impl Value {
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Object(_)
 			| Value::Bytes(_)
@@ -804,6 +987,10 @@ impl Value {
 			| Value::Number(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Object(_)
 			| Value::Geometry(_)
@@ -857,6 +1044,10 @@ impl Value {
 			| Value::Number(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Object(_)
 			| Value::Geometry(_)
@@ -923,6 +1114,9 @@ impl Value {
 			Value::Number(Number::Int(i)) => expr::Expr::Literal(expr::Literal::Integer(i)),
 			Value::Number(Number::Float(f)) => expr::Expr::Literal(expr::Literal::Float(f)),
 			Value::Number(Number::Decimal(d)) => expr::Expr::Literal(expr::Literal::Decimal(d)),
+			Value::Number(Number::BigDecimal(b)) => {
+				expr::Expr::Literal(expr::Literal::BigDecimal(b))
+			}
 			Value::Number(Number::I8(i)) => expr::Expr::Literal(expr::Literal::I8(i)),
 			Value::Number(Number::U8(u)) => expr::Expr::Literal(expr::Literal::U8(u)),
 			Value::Number(Number::I16(i)) => expr::Expr::Literal(expr::Literal::I16(i)),
@@ -935,6 +1129,10 @@ impl Value {
 			Value::String(strand) => expr::Expr::Literal(expr::Literal::String(strand)),
 			Value::Duration(duration) => expr::Expr::Literal(expr::Literal::Duration(duration)),
 			Value::Datetime(datetime) => expr::Expr::Literal(expr::Literal::Datetime(datetime)),
+			Value::Date(v) => expr::Expr::Literal(expr::Literal::Date(v)),
+			Value::Time(v) => expr::Expr::Literal(expr::Literal::Time(v)),
+			Value::Timestamp(v) => expr::Expr::Literal(expr::Literal::Timestamp(v)),
+			Value::Interval(v) => expr::Expr::Literal(expr::Literal::Interval(v)),
 			Value::Uuid(uuid) => expr::Expr::Literal(expr::Literal::Uuid(uuid)),
 			Value::Array(array) => expr::Expr::Literal(expr::Literal::Array(array.into_literal())),
 			Value::Set(set) => {
@@ -969,6 +1167,10 @@ impl ToSql for Value {
 			Value::String(v) => write_sql!(f, sql_fmt, "{}", QuoteStr(v.as_str())),
 			Value::Duration(v) => v.fmt_sql(f, sql_fmt),
 			Value::Datetime(v) => v.fmt_sql(f, sql_fmt),
+			Value::Date(v) => v.fmt_sql(f, sql_fmt),
+			Value::Time(v) => v.fmt_sql(f, sql_fmt),
+			Value::Timestamp(v) => v.fmt_sql(f, sql_fmt),
+			Value::Interval(v) => v.fmt_sql(f, sql_fmt),
 			Value::Uuid(v) => v.fmt_sql(f, sql_fmt),
 			Value::Array(v) => v.fmt_sql(f, sql_fmt),
 			Value::Set(v) => v.fmt_sql(f, sql_fmt),
@@ -1014,6 +1216,11 @@ impl TryAdd for Value {
 				s.push_str(w.as_str());
 				Value::String(s.into())
 			}
+			(Self::Datetime(v), Self::Duration(_)) | (Self::Duration(_), Self::Datetime(v))
+				if v.is_infinite() =>
+			{
+				Self::Datetime(v)
+			}
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
@@ -1029,7 +1236,12 @@ impl TryAdd for Value {
 				Self::Set(v)
 			}
 			(Self::Object(v), Self::Object(w)) => Self::Object(v.add(w)),
-			(v, w) => bail!(Error::TryAdd(v.kind_of().to_owned(), w.kind_of().to_owned())),
+			(v, w) => {
+				if let Some(r) = temporal_ops::add(&v, &w) {
+					return r;
+				}
+				bail!(Error::TryAdd(v.kind_of().to_owned(), w.kind_of().to_owned()))
+			}
 		})
 	}
 }
@@ -1046,7 +1258,11 @@ impl TrySub for Value {
 	fn try_sub(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
+			(Self::Datetime(v), Self::Datetime(w)) if v.is_infinite() || w.is_infinite() => {
+				bail!(Error::ArithmeticOverflow(format!("{v} - {w}")))
+			}
 			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v.try_sub(w)?),
+			(Self::Datetime(v), Self::Duration(_)) if v.is_infinite() => Self::Datetime(v),
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_sub(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),
@@ -1064,7 +1280,12 @@ impl TrySub for Value {
 				}
 				Self::from(v)
 			}
-			(v, w) => bail!(Error::TrySub(v.kind_of().to_owned(), w.kind_of().to_owned())),
+			(v, w) => {
+				if let Some(r) = temporal_ops::sub(&v, &w) {
+					return r;
+				}
+				bail!(Error::TrySub(v.kind_of().to_owned(), w.kind_of().to_owned()))
+			}
 		})
 	}
 }
@@ -1093,6 +1314,9 @@ impl TryMul for Value {
 					let res = StdDuration::new(secs, (nanos % 1_000_000_000) as u32);
 
 					Ok(Value::Duration(Duration(res)))
+				}
+				crate::val::number::Wide::BigDecimal(_) => {
+					bail!("A duration cannot be multiplied or divided by a bigdecimal");
 				}
 				crate::val::number::Wide::Float(f) => {
 					if !(f.is_finite() && f >= 0.0) {
@@ -1129,7 +1353,12 @@ impl TryMul for Value {
 					Ok(Value::Duration(Duration(StdDuration::new(secs, subsec_nanos))))
 				}
 			},
-			(v, w) => bail!(Error::TryMul(v.kind_of().to_owned(), w.kind_of().to_owned())),
+			(v, w) => {
+				if let Some(r) = temporal_ops::mul(&v, &w) {
+					return r;
+				}
+				bail!(Error::TryMul(v.kind_of().to_owned(), w.kind_of().to_owned()))
+			}
 		}
 	}
 }
@@ -1155,6 +1384,9 @@ impl TryDiv for Value {
 					let denom: u32 = i.try_into()?;
 					let res = d.0 / denom;
 					Ok(Value::Duration(Duration(res)))
+				}
+				crate::val::number::Wide::BigDecimal(_) => {
+					bail!("A duration cannot be multiplied or divided by a bigdecimal");
 				}
 				crate::val::number::Wide::Float(f) => {
 					if !(f.is_finite() && f > 0.0) {
@@ -1191,7 +1423,12 @@ impl TryDiv for Value {
 				}
 			},
 
-			(v, w) => bail!(Error::TryDiv(v.kind_of().to_owned(), w.kind_of().to_owned())),
+			(v, w) => {
+				if let Some(r) = temporal_ops::div(&v, &w) {
+					return r;
+				}
+				bail!(Error::TryDiv(v.kind_of().to_owned(), w.kind_of().to_owned()))
+			}
 		}
 	}
 }
@@ -1259,6 +1496,8 @@ impl TryNeg for Value {
 	fn try_neg(self) -> Result<Self> {
 		if let Self::Number(n) = self {
 			Ok(Self::Number(n.try_neg()?))
+		} else if let Some(r) = temporal_ops::neg(&self) {
+			r
 		} else {
 			bail!(Error::TryNeg(self.kind_of().to_owned()))
 		}
@@ -1401,6 +1640,10 @@ subtypes! {
 	Range(Box<Range>) => (is_range,is_range_and,as_range,as_range_mut,into_range,try_into_range),
 	Closure(Box<Closure>) => (is_closure,is_closure_and,as_closure,as_closure_mut,into_closure,try_into_closure),
 	File(File) => (is_file,is_file_and,as_file,as_file_mut,into_file,try_into_file),
+	Date(Date) => (is_date,is_date_and,as_date,as_date_mut,into_date,try_into_date),
+	Time(Time) => (is_time,is_time_and,as_time,as_time_mut,into_time,try_into_time),
+	Timestamp(Timestamp) => (is_timestamp,is_timestamp_and,as_timestamp,as_timestamp_mut,into_timestamp,try_into_timestamp),
+	Interval(Interval) => (is_interval,is_interval_and,as_interval,as_interval_mut,into_interval,try_into_interval),
 }
 
 macro_rules! impl_from_number {
@@ -1628,6 +1871,10 @@ fn within_shallow_depth(value: &Value, depth: usize) -> bool {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Bytes(_)
 		| Value::Table(_)
@@ -1719,6 +1966,10 @@ pub fn check_value_depth_from(value: &Value, base: usize) -> Result<()> {
 				| Value::String(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Bytes(_)
 				| Value::Table(_)
@@ -1831,6 +2082,10 @@ fn convert_value_to_public_value_at(
 		crate::val::Value::Number(value) => convert_number_to_public(value),
 		crate::val::Value::String(value) => Ok(surrealdb_types::Value::String(value.into())),
 		crate::val::Value::Datetime(value) => convert_datetime_to_public(value),
+		crate::val::Value::Date(v) => Ok(surrealdb_types::Value::Date(v.into())),
+		crate::val::Value::Time(v) => Ok(surrealdb_types::Value::Time(v.into())),
+		crate::val::Value::Timestamp(v) => Ok(surrealdb_types::Value::Timestamp(v.into())),
+		crate::val::Value::Interval(v) => Ok(surrealdb_types::Value::Interval(v.into())),
 		crate::val::Value::Duration(value) => convert_duration_to_public(value),
 		crate::val::Value::Uuid(value) => convert_uuid_to_public(value),
 		crate::val::Value::Array(value) => convert_array_to_public(value, depth),
@@ -2968,5 +3223,153 @@ mod tests {
 		let tiny_dec: Decimal = "0.0000000000000000000000000001".parse().unwrap();
 		let div_err = max_dur.try_div(Value::Number(Number::Decimal(tiny_dec))).unwrap_err();
 		assert!(matches!(div_err.downcast_ref::<Error>(), Some(Error::ArithmeticOverflow(_))));
+	}
+}
+
+#[cfg(test)]
+mod revision_tests {
+	use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
+
+	use super::*;
+
+	/// The variants `Value` had at revision 2, declared through the derive, as the reference for
+	/// the bytes the hand-written serializer writes for them.
+	#[revisioned(revision(1), revision(2, optimised))]
+	enum Rev2 {
+		#[revision(size = "inline")]
+		None,
+		#[revision(size = "inline")]
+		Null,
+		#[revision(size = "fixed(1)")]
+		Bool(bool),
+		#[revision(size = "varlen")]
+		Number(Number),
+		#[revision(size = "varlen")]
+		String(Strand),
+		#[revision(size = "varlen")]
+		Duration(Duration),
+		#[revision(size = "varlen")]
+		Datetime(Datetime),
+		#[revision(size = "varlen")]
+		Uuid(Uuid),
+		#[revision(size = "varlen")]
+		Array(Array),
+		#[revision(size = "varlen")]
+		Bytes(Bytes),
+	}
+
+	fn bytes<T: SerializeRevisioned>(v: &T) -> Vec<u8> {
+		let mut out = Vec::new();
+		v.serialize_revisioned(&mut out).unwrap();
+		out
+	}
+
+	fn read(bytes: &[u8]) -> Result<Value, revision::Error> {
+		Value::deserialize_revisioned(&mut &bytes[..])
+	}
+
+	#[test]
+	fn revision_2_variants_are_written_as_revision_2() {
+		let cases: Vec<(Value, Rev2)> = vec![
+			(Value::None, Rev2::None),
+			(Value::Null, Rev2::Null),
+			(Value::Bool(true), Rev2::Bool(true)),
+			(Value::Number(Number::Int(7)), Rev2::Number(Number::Int(7))),
+			(Value::String(Strand::new("a")), Rev2::String(Strand::new("a"))),
+			(Value::Datetime(Datetime::MIN_UTC), Rev2::Datetime(Datetime::MIN_UTC)),
+			(Value::Array(Array(vec![Value::Null])), Rev2::Array(Array(vec![Value::Null]))),
+		];
+		for (value, reference) in cases {
+			let written = bytes(&value);
+			assert_eq!(written[0], 2, "{value:?}");
+			assert_eq!(read(&written).unwrap(), value);
+			// The reference writes revision 2 for every variant, as the derive does.
+			let mut expected = bytes(&reference);
+			expected[0] = 2;
+			assert_eq!(&written[1..], &expected[1..], "{value:?}");
+		}
+	}
+
+	#[test]
+	fn new_variants_round_trip_as_revision_3() {
+		let values = [
+			Value::Date(Date(-5)),
+			Value::Time(Time(Time::NANOS_PER_DAY)),
+			Value::Timestamp(Timestamp {
+				secs: -1,
+				nanos: 3,
+			}),
+			Value::Interval(Interval::new(-1, 2, -3)),
+			Value::Array(Array(vec![Value::Date(Date(1)), Value::Null])),
+		];
+		for value in values {
+			let written = bytes(&value);
+			let back = read(&written).unwrap();
+			assert!(same_value(&back, &value), "{value:?}");
+			if !matches!(value, Value::Array(_)) {
+				assert_eq!(written[0], 3);
+			}
+		}
+	}
+
+	#[test]
+	fn older_revisions_refuse_the_new_variants() {
+		let written = bytes(&Value::Date(Date(1)));
+		assert_eq!(written[0], 3);
+		let mut as_rev2 = written;
+		as_rev2[0] = 2;
+		assert!(read(&as_rev2).is_err());
+		let mut as_rev1 = vec![1u8];
+		as_rev1.extend_from_slice(&19u32.to_le_bytes());
+		assert!(read(&as_rev1).is_err());
+		assert!(read(&[4, 0]).is_err());
+	}
+
+	#[test]
+	fn out_of_range_payloads_are_refused() {
+		let bad = [
+			Value::Date(Date(i32::MAX)),
+			Value::Time(Time(u64::MAX)),
+			Value::Timestamp(Timestamp {
+				secs: i64::MAX,
+				nanos: 0,
+			}),
+		];
+		for value in bad {
+			assert!(read(&bytes(&value)).is_err(), "{value:?}");
+		}
+	}
+
+	#[test]
+	fn temporal_values_order_after_every_other_variant() {
+		let ordered = [
+			Value::Range(Box::new(Range::unbounded())),
+			Value::Date(Date(i32::MIN + 1_000_000_000)),
+			Value::Time(Time(0)),
+			Value::Timestamp(Timestamp {
+				secs: 0,
+				nanos: 0,
+			}),
+			Value::Interval(Interval::new(0, 0, 0)),
+		];
+		for pair in ordered.windows(2) {
+			assert!(pair[0] < pair[1], "{:?} < {:?}", pair[0], pair[1]);
+		}
+		assert!(Value::Datetime(Datetime::MAX_UTC) < Value::Date(Date(0)));
+		assert!(Value::Date(Date(-1)) < Value::Date(Date(0)));
+		assert_eq!(
+			Value::Interval(Interval::new(1, 0, 0)),
+			Value::Interval(Interval::new(0, 30, 0))
+		);
+		assert!(!same_value(
+			&Value::Interval(Interval::new(1, 0, 0)),
+			&Value::Interval(Interval::new(0, 30, 0))
+		));
+		assert!(Value::Date(Date(1)).hash_agrees_with_eq());
+		assert!(
+			Value::Interval(Interval::new(1, 0, 0))
+				.equal(&Value::Interval(Interval::new(0, 30, 0)))
+		);
+		assert!(!Value::Date(Date(0)).equal(&Value::Time(Time(0))));
 	}
 }

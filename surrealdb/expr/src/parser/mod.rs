@@ -38,7 +38,7 @@ use surrealdb_types::ToSql;
 
 use crate::expr::data::Assignment;
 use crate::expr::field::Selector;
-use crate::expr::kind::{GeometryKind, KindLiteral};
+use crate::expr::kind::{EnumRef, GeometryKind, KindLiteral};
 use crate::expr::literal::ObjectEntry;
 use crate::expr::lookup::{LookupKind, LookupSubject};
 use crate::expr::operator::{
@@ -500,7 +500,7 @@ impl<'a> Lower<'a> {
 		} else if n.tag == Tag::UnboundedRange {
 			Expr::Literal(Literal::UnboundedRange)
 		} else if n.tag == Tag::Decimal {
-			Expr::Literal(lit::decimal(self.text(id)).map_err(|r| r.at(n.start, n.end))?)
+			Expr::Literal(lit::decimal_of(n.op, self.text(id)).map_err(|r| r.at(n.start, n.end))?)
 		} else if n.tag == Tag::Regex {
 			Expr::Literal(lit::regex_at(self.text(id), n.start, n.end)?)
 		} else if n.tag == Tag::Path {
@@ -807,6 +807,7 @@ impl<'a> Lower<'a> {
 			k::BYTES => Kind::Bytes,
 			k::DATETIME => Kind::Datetime,
 			k::DECIMAL => Kind::Decimal,
+			k::BIGDECIMAL => Kind::BigDecimal,
 			k::DURATION => Kind::Duration,
 			k::FLOAT => Kind::Float,
 			k::INT => Kind::Int,
@@ -819,6 +820,10 @@ impl<'a> Lower<'a> {
 			k::U64 => Kind::U64,
 			k::F16 => Kind::F16,
 			k::F32 => Kind::F32,
+			k::DATE => Kind::Date,
+			k::TIME => Kind::Time,
+			k::TIMESTAMP => Kind::Timestamp,
+			k::INTERVAL => Kind::Interval,
 			k::NUMBER => Kind::Number,
 			k::OBJECT => Kind::Object,
 			k::POINT => Kind::Geometry(vec![GeometryKind::Point]),
@@ -848,6 +853,21 @@ impl<'a> Lower<'a> {
 					.collect(),
 			),
 			k::FILE => Kind::File(names(n.a)?),
+			k::ENUM if n.b == 1 => {
+				let mut labels = Vec::new();
+				for &l in self.list(n.a) {
+					let mut s = String::new();
+					if !decode::unescape(decode::strip_delims(self.text(l)), &mut s) {
+						return Err(Reject::new("invalid escape"));
+					}
+					labels.push(s);
+				}
+				Kind::Enum(EnumRef::Inline(labels))
+			}
+			k::ENUM => {
+				let mut names = names(n.a)?;
+				Kind::Enum(EnumRef::Named(names.pop().unwrap_or_default()))
+			}
 			k::ARRAY | k::SET => {
 				let inner = if n.a == NONE {
 					Kind::Any
@@ -909,9 +929,14 @@ impl<'a> Lower<'a> {
 					| Literal::Set(_)
 					| Literal::Object(_)
 					| Literal::Datetime(_)
+					| Literal::Date(_)
+					| Literal::Time(_)
+					| Literal::Timestamp(_)
+					| Literal::Interval(_)
 					| Literal::Uuid(_)
 					| Literal::Geometry(_)
-					| Literal::File(_) => {
+					| Literal::File(_)
+					| Literal::BigDecimal(_) => {
 						return Err(Reject::new("not a literal kind"));
 					}
 				}

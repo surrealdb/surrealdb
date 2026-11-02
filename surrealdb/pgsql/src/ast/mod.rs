@@ -20,12 +20,14 @@ pub use json::{JsonTable, JsonTableColumn};
 pub use literal::Literal;
 pub use op::{BinaryOperator, UnaryOperator};
 pub use stmt::{
-	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CommonTableExpr, CopyDirection,
-	CopyFormat, CopyOptions, CopyStmt, CopyTarget, CreateExtensionStmt, CreateIndexStmt,
-	CreateSchemaStmt, CreateTableStmt, CreateViewStmt, DeallocateStmt, DeleteStmt, DistinctClause,
-	DropObjectType, DropStmt, ExecuteStmt, ExplainStmt, IndexElem, InsertStmt, IsolationLevel,
-	JoinCondition, JoinType, LockingClause, LockingStrength, LockingWaitPolicy, OnConflictAction,
-	OnConflictClause, PrepareStmt, RelOption, ResTarget, ResetStmt, SelectStmt, SetClause,
-	SetOpKind, SetOperation, SetStmt, ShowStmt, Statement, TableAlias, TableConstraint, TableRef,
-	TransactionStmt, UpdateStmt, WindowDef, WithClause,
+	AlterDomainAction, AlterDomainStmt, AlterTableAction, AlterTableStmt, AlterTypeAction,
+	AlterTypeStmt, ColumnConstraint, ColumnDef, CommonTableExpr, CompositeAttribute, CopyDirection,
+	CopyFormat, CopyOptions, CopyStmt, CopyTarget, CreateCompositeTypeStmt, CreateDomainStmt,
+	CreateExtensionStmt, CreateIndexStmt, CreateSchemaStmt, CreateTableStmt, CreateTypeStmt,
+	CreateViewStmt, DeallocateStmt, DeleteStmt, DistinctClause, DomainConstraint,
+	DomainConstraintKind, DropObjectType, DropStmt, EnumValuePlacement, ExecuteStmt, ExplainStmt,
+	IndexElem, InsertStmt, IsolationLevel, JoinCondition, JoinType, LockingClause, LockingStrength,
+	LockingWaitPolicy, OnConflictAction, OnConflictClause, PrepareStmt, RelOption, ResTarget,
+	ResetStmt, SelectStmt, SetClause, SetOpKind, SetOperation, SetStmt, ShowStmt, Statement,
+	TableAlias, TableConstraint, TableRef, TransactionStmt, UpdateStmt, WindowDef, WithClause,
 };

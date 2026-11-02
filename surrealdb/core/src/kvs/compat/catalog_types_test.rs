@@ -211,7 +211,8 @@ use crate::val::{Datetime, TableName, Value};
 	auth_limit: AuthLimit::default(),
 	graphql_alias: None,
 	graphql_deprecated: None,
-}, 46)]
+	sql_type: None,
+}, 47)]
 #[case::function(StoredFunctionDefinition {
 	name: "function".into(),
 	args: vec![],

@@ -1,0 +1,19 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_sized_columns.surql"]
+
+[test]
+reason = "information_schema.COLUMNS reports a column declared with a sized MySQL type by its COLUMN_TYPE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE and DATETIME_PRECISION, YEAR, BIT(n), DECIMAL(p,s) and DATETIME(fsp) among them"
+
+[[test.results]]
+value = "[{ character_maximum_length: 5, column_name: 'c', column_type: 'char(5)', data_type: 'char', datetime_precision: NULL, numeric_precision: NULL, numeric_scale: NULL }, { character_maximum_length: NULL, column_name: 'n', column_type: 'decimal(10,2)', data_type: 'decimal', datetime_precision: NULL, numeric_precision: 10, numeric_scale: 2 }, { character_maximum_length: NULL, column_name: 'ts', column_type: 'timestamp(3)', data_type: 'timestamp', datetime_precision: 3, numeric_precision: NULL, numeric_scale: NULL }, { character_maximum_length: 20, column_name: 'v', column_type: 'varchar(20)', data_type: 'varchar', datetime_precision: NULL, numeric_precision: NULL, numeric_scale: NULL }]"
+
+[[test.results]]
+value = "[{ character_maximum_length: NULL, column_name: 'b', column_type: 'bit(8)', data_type: 'bit', datetime_precision: NULL, numeric_precision: 8, numeric_scale: NULL }, { character_maximum_length: NULL, column_name: 'd', column_type: 'decimal(10,2)', data_type: 'decimal', datetime_precision: NULL, numeric_precision: 10, numeric_scale: 2 }, { character_maximum_length: NULL, column_name: 'dt', column_type: 'datetime(3)', data_type: 'datetime', datetime_precision: 3, numeric_precision: NULL, numeric_scale: NULL }, { character_maximum_length: NULL, column_name: 'y', column_type: 'year', data_type: 'year', datetime_precision: NULL, numeric_precision: NULL, numeric_scale: NULL }]"
+*/
+
+SELECT COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, DATETIME_PRECISION FROM information_schema.COLUMNS WHERE TABLE_NAME = 'sized' AND COLUMN_NAME <> 'id' ORDER BY COLUMN_NAME;
+
+SELECT COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, DATETIME_PRECISION FROM information_schema.COLUMNS WHERE TABLE_NAME = 'ytypes' AND COLUMN_NAME <> 'id' ORDER BY COLUMN_NAME;

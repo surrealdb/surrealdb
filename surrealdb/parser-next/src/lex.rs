@@ -35,7 +35,8 @@ pub enum T {
 	/// A run of ASCII digits; see [`Lexer::numeric`].
 	Digits,
 	/// `'…'` or `"…"`; [`Tok::aux`] holds the prefix byte (`0`, `r`, `u`, `d`,
-	/// `b` or `f`), with `0` also for an `s` string, which is a plain one.
+	/// `b` or `f`, or one of the `PREFIX_` codes for `date`, `time`, `timestamp`
+	/// and `interval`), with `0` also for an `s` string, which is a plain one.
 	Str,
 	/// A regex, produced only by [`Lexer::regex`].
 	Regex,
@@ -97,6 +98,31 @@ pub enum T {
 	AllInside,
 	AnyInside,
 	NoneInside,
+}
+
+/// [`Tok::aux`] of a `date'…'` string.
+pub const PREFIX_DATE: u8 = b'D';
+/// [`Tok::aux`] of a `time'…'` string.
+pub const PREFIX_TIME: u8 = b'T';
+/// [`Tok::aux`] of a `timestamp'…'` string.
+pub const PREFIX_TIMESTAMP: u8 = b'M';
+/// [`Tok::aux`] of an `interval'…'` string.
+pub const PREFIX_INTERVAL: u8 = b'I';
+
+/// The [`Tok::aux`] of the multi-letter string prefix `word`, or `None` if it is not one.
+fn long_prefix(word: &[u8]) -> Option<u8> {
+	match word {
+		b"date" => Some(PREFIX_DATE),
+		b"time" => Some(PREFIX_TIME),
+		b"timestamp" => Some(PREFIX_TIMESTAMP),
+		b"interval" => Some(PREFIX_INTERVAL),
+		_ => None,
+	}
+}
+
+/// The length of the string prefix `text` starts with, as the letters before its opening quote.
+pub fn string_prefix_len(text: &str) -> usize {
+	text.bytes().take_while(u8::is_ascii_lowercase).count()
 }
 
 /// A token: 12 bytes, no payload. Values are read back from the span.
@@ -178,6 +204,8 @@ pub enum NumKind {
 	Int,
 	Float,
 	Decimal,
+	/// A `bigdec` suffix: an arbitrary-precision decimal.
+	BigDecimal,
 	Duration,
 	I8,
 	U8,
@@ -428,6 +456,13 @@ impl<'a> Lexer<'a> {
 					self.pos += 1;
 				}
 				let text = &self.src[start as usize..self.pos as usize];
+				let q = self.peek_at(0);
+				if (q == b'\'' || q == b'"')
+					&& let Some(prefix) = long_prefix(text)
+				{
+					self.pos += 1;
+					return self.string(ws, start, q, prefix);
+				}
 				let kw = kw::lookup(text);
 				let kind = match text {
 					b"NaN" => T::NaN,
@@ -602,6 +637,15 @@ impl<'a> Lexer<'a> {
 		if b0 == b'd' && b1 == b'e' && b2 == b'c' {
 			self.pos += 3;
 			kind = NumKind::Decimal;
+		} else if b0 == b'b'
+			&& b1 == b'i'
+			&& b2 == b'g'
+			&& self.peek_at(3) == b'd'
+			&& self.peek_at(4) == b'e'
+			&& self.peek_at(5) == b'c'
+		{
+			self.pos += 6;
+			kind = NumKind::BigDecimal;
 		} else if b0 == b'f' && b1 == b'1' && b2 == b'6' {
 			self.pos += 3;
 			kind = NumKind::F16;
@@ -1372,6 +1416,17 @@ pub fn invalid_reason(src: &[u8], start: u32) -> crate::parse::Diag {
 			Diag::message(start, start + 2, "Unexpected end of file, expected string to end.")
 				.with_label("String starting here.")
 		}
+		b'a'..=b'z'
+			if {
+				let n = src[s..].iter().take_while(|&&c| is_ident_cont(c)).count();
+				matches!(src.get(s + n), Some(b'\'' | b'"'))
+					&& long_prefix(&src[s..s + n]).is_some()
+			} =>
+		{
+			let n = src[s..].iter().take_while(|&&c| is_ident_cont(c)).count() as u32;
+			Diag::message(start, start + n + 1, "Unexpected end of file, expected string to end.")
+				.with_label("String starting here.")
+		}
 		b'`' => unterminated_ident(src, start, 1, BACKTICK_END),
 		b'$' if at(1) == b'`' => unterminated_ident(src, start, 2, BACKTICK_END),
 		0xE2 if at(1) == 0x9F && at(2) == 0xA8 => unterminated_ident(src, start, 3, ANGLE_END),
@@ -1619,7 +1674,7 @@ pub fn decode_number(kind: NumKind, text: &[u8]) -> Option<DecodedNumber> {
 			}
 			Some(DecodedNumber::Float(f))
 		}
-		NumKind::Decimal | NumKind::Duration => None,
+		NumKind::Decimal | NumKind::BigDecimal | NumKind::Duration => None,
 	}
 }
 
@@ -1711,6 +1766,9 @@ mod test {
 			("1e10", NumKind::Float),
 			("1.5f", NumKind::Float),
 			("3dec", NumKind::Decimal),
+			("3bigdec", NumKind::BigDecimal),
+			("1.50bigdec", NumKind::BigDecimal),
+			("1e40bigdec", NumKind::BigDecimal),
 			("1h30m", NumKind::Duration),
 			("5ms", NumKind::Duration),
 			("5us", NumKind::Duration),
@@ -1736,7 +1794,7 @@ mod test {
 			assert_eq!(l.numeric(0), Ok(kind), "{src}");
 			assert_eq!(l.pos as usize, src.len(), "{src}");
 		}
-		for src in ["1.5u8", "1e3i32", "1.5i16", "1e3u64"] {
+		for src in ["1.5u8", "1e3i32", "1.5i16", "1e3u64", "1big", "1bigdecimal", "1bigdecx"] {
 			let mut l = Lexer::new(src.as_bytes());
 			assert_eq!(l.numeric(0), Err(LexError::InvalidNumber), "{src}");
 		}

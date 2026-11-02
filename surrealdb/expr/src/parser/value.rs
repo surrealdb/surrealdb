@@ -14,7 +14,8 @@ use std::time::Duration;
 use surrealdb_parser_next::decode;
 use surrealdb_parser_next::kw::Kw;
 use surrealdb_parser_next::lex::{
-	Compound, Lexer, NumKind, T, Tok, compound_error, decode_duration, invalid_reason,
+	Compound, Lexer, NumKind, PREFIX_DATE, PREFIX_INTERVAL, PREFIX_TIME, PREFIX_TIMESTAMP, T, Tok,
+	compound_error, decode_duration, invalid_reason,
 };
 use surrealdb_parser_next::parse::starts_expression;
 use surrealdb_types::{
@@ -592,6 +593,9 @@ impl<'a> Parser<'a> {
 						NumKind::Decimal => {
 							lit::decimal(text).map_err(Error::Lower)?;
 						}
+						NumKind::BigDecimal => {
+							lit::bigdecimal(text).map_err(Error::Lower)?;
+						}
 						NumKind::Duration => {}
 					}
 					Ok(text.to_owned())
@@ -637,7 +641,7 @@ impl<'a> Parser<'a> {
 			..t
 		};
 		let parsed_num = match kind {
-			NumKind::Decimal | NumKind::Duration => None,
+			NumKind::Decimal | NumKind::BigDecimal | NumKind::Duration => None,
 			NumKind::Int
 			| NumKind::Float
 			| NumKind::I8
@@ -662,6 +666,9 @@ impl<'a> Parser<'a> {
 				};
 				Value::Number(Number::Decimal(d))
 			}
+			NumKind::BigDecimal => Value::Number(Number::BigDecimal(
+				lit::bigdecimal_value(text).map_err(Error::Lower)?,
+			)),
 			NumKind::Duration => {
 				let (s, ns) = decode_duration(text.as_bytes())
 					.ok_or_else(|| self.number_err(t.start, Compound::Numeric))?;
@@ -756,6 +763,39 @@ impl<'a> Parser<'a> {
 					}
 					done(Value::String(s))
 				}
+				PREFIX_DATE | PREFIX_TIME | PREFIX_TIMESTAMP | PREFIX_INTERVAL => {
+					self.bump();
+					let body = self.string(t)?;
+					let token = &self.src[t.start as usize..t.end as usize];
+					let at = |r| Error::Lower(lit::in_token(r, token, t.start));
+					let v = match t.aux() {
+						PREFIX_DATE => {
+							let Literal::Date(v) = lit::date(&body).map_err(at)? else {
+								unreachable!("a date literal");
+							};
+							Value::Date(v.into())
+						}
+						PREFIX_TIME => {
+							let Literal::Time(v) = lit::time(&body).map_err(at)? else {
+								unreachable!("a time literal");
+							};
+							Value::Time(v.into())
+						}
+						PREFIX_TIMESTAMP => {
+							let Literal::Timestamp(v) = lit::timestamp(&body).map_err(at)? else {
+								unreachable!("a timestamp literal");
+							};
+							Value::Timestamp(v.into())
+						}
+						_ => {
+							let Literal::Interval(v) = lit::interval(&body).map_err(at)? else {
+								unreachable!("an interval literal");
+							};
+							Value::Interval(v.into())
+						}
+					};
+					done(v)
+				}
 				b'd' | b'u' | b'b' | b'f' => {
 					self.bump();
 					let body = self.string(t)?;
@@ -822,7 +862,7 @@ impl<'a> Parser<'a> {
 						match num.wide() {
 							Wide::Int(i) => i as f64,
 							Wide::Float(f) if !f.is_nan() => f,
-							Wide::Float(_) | Wide::Decimal(_) => {
+							Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_) => {
 								return Err(Error::Lower(
 									Reject::new(
 										"Unexpected token, expected a non-decimal, non-NaN, number",
@@ -926,7 +966,9 @@ impl<'a> Parser<'a> {
 					match num.wide() {
 						Wide::Int(i) => Ok(i as f64),
 						Wide::Float(f) => Ok(f),
-						Wide::Decimal(_) => Err(self.number_err(t.start, Compound::Float)),
+						Wide::Decimal(_) | Wide::BigDecimal(_) => {
+							Err(self.number_err(t.start, Compound::Float))
+						}
 					}
 				} else {
 					Err(self.number_err(t.start, Compound::Float))

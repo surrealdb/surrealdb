@@ -26,7 +26,7 @@ value = "[{ id: 4 }]"
 value = "[{ lowest: -9223372036854775808 }]"
 
 [[test.results]]
-value = "[{ wide: 10000000000000000000f }]"
+value = "[{ wide: 10000000000000000000u64 }]"
 
 [[test.results]]
 value = "[{ remainder: 0 }]"

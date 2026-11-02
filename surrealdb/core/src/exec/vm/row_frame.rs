@@ -62,6 +62,7 @@ const TAG_U32: u64 = 185;
 const TAG_U64: u64 = 186;
 const TAG_F16: u64 = 187;
 const TAG_F32: u64 = 188;
+const TAG_BIGDECIMAL: u64 = 192;
 
 // CBOR major types.
 const MAJOR_POSITIVE: u8 = 0;
@@ -850,7 +851,7 @@ pub(super) fn encode_value(
 		} else {
 			0xf4
 		}),
-		Value::Number(n) => number(out, *n, v2),
+		Value::Number(n) => number(out, n.clone(), v2)?,
 		Value::String(s) => text(out, s.as_str()),
 		Value::Duration(d) => duration(out, d.0.as_secs(), d.0.subsec_nanos()),
 		Value::Datetime(d) => datetime(out, d),
@@ -878,6 +879,10 @@ pub(super) fn encode_value(
 		}
 		// Kinds rare in result rows go through the public conversion.
 		Value::Set(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Geometry(_)
 		| Value::File(_)
 		| Value::Regex(_)
@@ -903,8 +908,29 @@ fn public(out: &mut Vec<u8>, value: &Value, depth: usize, v2: bool) -> anyhow::R
 	Ok(())
 }
 
-fn number(out: &mut Vec<u8>, n: Number, v2: bool) {
+#[allow(
+	clippy::needless_pass_by_value,
+	reason = "Number is not Copy; this takes its operand by value like the arithmetic it feeds"
+)]
+/// A bigdecimal as `rpc::format::cbor` writes it: tag 10 when it fits a decimal exactly, else
+/// tag 192 under `cbor.2` and plain text without it.
+fn big_decimal(out: &mut Vec<u8>, v: &surrealdb_types::BigDecimal, v2: bool) {
+	match rust_decimal::Decimal::try_from(v) {
+		Ok(d) => {
+			tag(out, TAG_STRING_DECIMAL);
+			decimal_text(out, d);
+		}
+		Err(_) if v2 => {
+			tag(out, TAG_BIGDECIMAL);
+			text(out, &v.to_string());
+		}
+		Err(_) => text(out, &v.to_string()),
+	}
+}
+
+fn number(out: &mut Vec<u8>, n: Number, v2: bool) -> anyhow::Result<()> {
 	match n {
+		Number::BigDecimal(v) => big_decimal(out, &v, v2),
 		Number::Int(v) => int(out, v),
 		Number::Float(v) => float(out, v),
 		Number::Decimal(v) => {
@@ -971,6 +997,7 @@ fn number(out: &mut Vec<u8>, n: Number, v2: bool) {
 			float(out, f64::from(v));
 		}
 	}
+	Ok(())
 }
 
 fn duration(out: &mut Vec<u8>, secs: u64, nanos: u32) {
@@ -1080,7 +1107,7 @@ pub(super) fn encode_scalar(
 		} else {
 			0xf4
 		}),
-		Scalar::Number(n) => number(out, *n, v2),
+		Scalar::Number(n) => number(out, n.clone(), v2)?,
 		Scalar::Str(s) => text(out, s),
 		Scalar::Bytes(b) => bytes(out, b),
 		Scalar::Duration(d) => duration(out, d.0.as_secs(), d.0.subsec_nanos()),
@@ -1595,8 +1622,13 @@ impl<'b> Stored<'b, '_> {
 						| Kind::Bool
 						| Kind::Float
 						| Kind::Decimal
+						| Kind::BigDecimal
 						| Kind::Duration
 						| Kind::Datetime
+						| Kind::Date
+						| Kind::Time
+						| Kind::Timestamp
+						| Kind::Interval
 						| Kind::Bytes
 						| Kind::Table
 						| Kind::RecordId
@@ -1631,6 +1663,7 @@ impl<'b> Stored<'b, '_> {
 			| Kind::Int
 			| Kind::Float
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::I8
 			| Kind::U8
 			| Kind::I16
@@ -1643,6 +1676,10 @@ impl<'b> Stored<'b, '_> {
 			| Kind::String
 			| Kind::Duration
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Uuid
 			| Kind::Bytes
 			| Kind::Table
@@ -1927,6 +1964,7 @@ impl<'a> PackedSink<'a, '_> {
 					| Kind::Bool
 					| Kind::Float
 					| Kind::Decimal
+					| Kind::BigDecimal
 					| Kind::I8
 					| Kind::U8
 					| Kind::I16
@@ -1938,6 +1976,10 @@ impl<'a> PackedSink<'a, '_> {
 					| Kind::F32
 					| Kind::Duration
 					| Kind::Datetime
+					| Kind::Date
+					| Kind::Time
+					| Kind::Timestamp
+					| Kind::Interval
 					| Kind::Bytes
 					| Kind::Table
 					| Kind::RecordId
@@ -2126,6 +2168,35 @@ mod tests {
 					String::from_utf8_lossy(frame.row(0)),
 					String::from_utf8_lossy(&expected_in(format, &value)),
 					"{format:?} {d:?}"
+				);
+			}
+		}
+	}
+
+	/// A bigdecimal is written as the RPC layer writes it in each format: as a decimal when it
+	/// fits one exactly, and otherwise as tag 192 under `cbor.2`, plain text without it, and
+	/// text in JSON. Values at and beyond the decimal's 28 digits and scale take the second case.
+	#[test]
+	fn a_bigdecimal_encodes_as_the_rpc_layer_encodes_it() {
+		for text in [
+			"1.50",
+			"-0",
+			"79228162514264337593543950335",
+			"1234567890123456789012345678901234567890",
+			"-0.0000000000000000000000000000001",
+			"0.00000000000000000000000000000000000000000000000000000000000000001",
+			"1.5000000000000000000000000000000000000000000000000000000000000000000000000001",
+			"123456789012345678901234567890.5",
+		] {
+			let value =
+				Value::Number(Number::BigDecimal(Box::new(text.parse().expect("a bigdecimal"))));
+			for format in [RowFormat::Cbor, RowFormat::Cbor2, RowFormat::Json] {
+				let mut frame = RowFrame::with_format(format);
+				frame.push_value(&value).expect("encodes");
+				assert_eq!(
+					frame.row(0),
+					expected_in(format, &value).as_slice(),
+					"{format:?} {text}"
 				);
 			}
 		}

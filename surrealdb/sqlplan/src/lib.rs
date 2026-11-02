@@ -5,6 +5,7 @@
 pub mod array_literal;
 pub mod binder;
 pub mod catalog;
+pub use surrealdb_expr::expr::statements::define::{declared_type, sql_types};
 pub mod descriptor;
 pub mod dialect;
 pub mod error;
@@ -15,6 +16,7 @@ pub mod namespace;
 pub mod observability;
 mod output_keys;
 pub mod presentation;
+pub mod reported_type;
 pub mod scope;
 pub mod semantics;
 mod system_vars;
@@ -22,11 +24,14 @@ pub mod vector;
 
 pub use catalog::staged::StagedCatalog;
 pub use catalog::{
-	BinderCatalog, ColumnAssert, ColumnInfo, ColumnShape, EmptyCatalog, ForeignKeyInfo, IndexInfo,
-	MemoryCatalog, ReferentialAction, TableSchema, kind_admits_none, kind_admits_null, link_target,
+	BinderCatalog, ColumnAssert, ColumnInfo, ColumnShape, CompositeType, DomainCheck, DomainColumn,
+	DomainType, EmptyCatalog, EnumColumn, EnumShape, EnumType, EnumTypeLabel, ForeignKeyInfo,
+	IndexInfo, MemoryCatalog, ReferentialAction, TableSchema, UserTypes, kind_admits_none,
+	kind_admits_null, link_target,
 };
 pub use descriptor::{
-	ParameterDescriptor, ResultColumn, ResultDescriptor, SqlType, StatementDescriptor,
+	ParameterDescriptor, RangeElement, ResultColumn, ResultComposite, ResultDescriptor, ResultEnum,
+	SqlType, StatementDescriptor,
 };
 pub use dialect::{DialectPolicy, NamePolicy, NullOrderPolicy, SqlDialect};
 pub use error::PlanError;
@@ -59,6 +64,7 @@ pub use presentation::show_record_ids_as_keys;
 pub use scope::{QueryScope, RelationEntry};
 pub use semantics::{fold_expr, fold_select};
 pub use surrealdb_expr::expr::logical::LogicalOp;
+pub use surrealdb_expr::expr::statements::define::SqlTypeDialect;
 use surrealdb_mysql::ast::stmt::SelectStmt as MySelectStmt;
 use surrealdb_pgsql::ast::stmt::SelectStmt as PgSelectStmt;
 pub use system_vars::{

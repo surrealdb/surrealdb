@@ -296,7 +296,7 @@ impl Lower<'_> {
 		} else if tag == Tag::UnboundedRange {
 			out.push_str("..");
 		} else if tag == Tag::Decimal {
-			put(out, &lit::decimal(self.text(id))?);
+			put(out, &lit::decimal_of(n.op, self.text(id))?);
 		} else if tag == Tag::Regex {
 			put(out, &lit::regex_at(self.text(id), n.start, n.end)?);
 		} else if tag == Tag::Path {
@@ -481,8 +481,11 @@ impl Lower<'_> {
 				})
 			} else if tag == Tag::Decimal {
 				Shape::Lit({
-					let lit = lit::decimal(self.text(id))?;
-					if let Literal::Decimal(d) = lit {
+					if n.op == surrealdb_parser_next::ast::DECIMAL_BIG {
+						LitShape::Decimal {
+							neg: lit::bigdecimal_value(self.text(id))?.signum() < 0,
+						}
+					} else if let Literal::Decimal(d) = lit::decimal(self.text(id))? {
 						LitShape::Decimal {
 							neg: d.is_sign_negative(),
 						}

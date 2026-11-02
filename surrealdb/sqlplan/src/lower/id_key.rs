@@ -255,6 +255,9 @@ fn literal_key(literal: &LogicalLiteral) -> Option<LogicalLiteral> {
 		LogicalLiteral::Decimal(decimal) => {
 			Number::Decimal(*decimal).as_int_lossless().map(LogicalLiteral::Integer)
 		}
+		LogicalLiteral::BigDecimal(decimal) => {
+			Number::BigDecimal(decimal.clone()).as_int_lossless().map(LogicalLiteral::Integer)
+		}
 		LogicalLiteral::String(_)
 		| LogicalLiteral::None
 		| LogicalLiteral::Null
@@ -264,6 +267,10 @@ fn literal_key(literal: &LogicalLiteral) -> Option<LogicalLiteral> {
 		| LogicalLiteral::Regex(_)
 		| LogicalLiteral::Duration(_)
 		| LogicalLiteral::Datetime(_)
+		| LogicalLiteral::Date(_)
+		| LogicalLiteral::Time(_)
+		| LogicalLiteral::Timestamp(_)
+		| LogicalLiteral::Interval(_)
 		| LogicalLiteral::Geometry(_)
 		| LogicalLiteral::File(_) => None,
 	}

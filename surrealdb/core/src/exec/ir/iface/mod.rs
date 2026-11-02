@@ -85,12 +85,12 @@ pub(crate) use statements::{
 	AlterTable, AlterTemplate, AlterUser, ApiActionShape, ApiConfigShape, BearerShape, ConfigShape,
 	ContentMode, DdlChecks, DdlGuard, DefaultConfigShape, DefaultShape, DefineAccess, DefineApi,
 	DefineField, DefineFunction, DefineObject, DefineTable, DefineUser, DefinitionTemplate,
-	IndexColumn, IndexSpec, InfoSubject, JwtIssueShape, JwtShape, JwtVerifyShape, LiveShape,
-	MatchBindings, MatchColumnShape, MatchData, MatchInsertEdge, MatchInsertNode, MatchOutputShape,
-	MatchPattern, MiddlewareShape, OnDeleteShape, OperandSlot, OutputShape, PermissionShape,
-	PermissionsShape, Place, PlacePart, RecordAccessShape, ReferenceShape, RegionSlot,
-	RemoveObject, ShowSince, TemplateHole, UnaddressedPart, UserDurationShape, UserSecrets,
-	ViewShape, WriteFlags, WriteForm,
+	EnumEdit, IndexColumn, IndexSpec, InfoSubject, JwtIssueShape, JwtShape, JwtVerifyShape,
+	LiveShape, MatchBindings, MatchColumnShape, MatchData, MatchInsertEdge, MatchInsertNode,
+	MatchOutputShape, MatchPattern, MiddlewareShape, OnDeleteShape, OperandSlot, OutputShape,
+	PermissionShape, PermissionsShape, Place, PlacePart, RecordAccessShape, ReferenceShape,
+	RegionSlot, RemoveObject, ShowSince, TemplateHole, UnaddressedPart, UserDurationShape,
+	UserSecrets, ViewShape, WriteFlags, WriteForm,
 };
 #[allow(unused_imports)]
 pub(crate) use types::{FactSource, HintSource, TypeKnowledge};

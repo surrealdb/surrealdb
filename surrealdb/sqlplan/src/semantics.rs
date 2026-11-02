@@ -317,12 +317,17 @@ pub fn fold_expr(expr: &BoundExpr, policy: &DialectPolicy) -> Result<BoundExpr, 
 		} => {
 			let folded_inner = fold_expr(inner, policy)?;
 			// A cast to an array type is read when the expression is lowered, which knows the
-			// element type, and so is a cast to `vector`, whose text form the lowering knows;
-			// there is no literal to fold either to.
+			// element type, and so is a cast to `vector`, whose text form the lowering knows, and
+			// a cast to a type with a family of its own, which the lowering reads with the
+			// type's reader; there is no literal to fold any of them to.
 			if let BoundExpr::Literal(lit) = &folded_inner
 				&& !target_type.ends_with("[]")
 				&& !is_temporal_type(target_type)
 				&& !target_type.starts_with("vector")
+				&& !target_type.starts_with("enum:")
+				&& !is_exact_numeric_cast(lit, target_type)
+				&& !(policy.dialect == SqlDialect::Postgres
+					&& crate::lower::family_cast::is_family_target(target_type))
 			{
 				let result = eval_cast(lit, target_type, policy)?;
 				Ok(BoundExpr::Literal(result))
@@ -448,11 +453,13 @@ pub fn eval_unary_op(
 				Ok(BoundLiteral::Boolean(*i == 0))
 			}
 			BoundLiteral::Float(f) => Ok(BoundLiteral::Boolean(*f == 0.0)),
+			BoundLiteral::Unsigned(u) => Ok(BoundLiteral::Boolean(*u == 0)),
 			_ => Ok(BoundLiteral::Null),
 		},
 		BoundUnaryOp::Positive => match lit {
 			BoundLiteral::Null => Ok(BoundLiteral::Null),
 			BoundLiteral::Integer(i) => Ok(BoundLiteral::Integer(*i)),
+			BoundLiteral::Unsigned(u) => Ok(BoundLiteral::Unsigned(*u)),
 			BoundLiteral::Float(f) => Ok(BoundLiteral::Float(*f)),
 			BoundLiteral::String(s) if policy.dialect == SqlDialect::MySql => {
 				let (num, is_int) = mysql_parse_leading_number(s);
@@ -467,6 +474,12 @@ pub fn eval_unary_op(
 		BoundUnaryOp::Negate => match lit {
 			BoundLiteral::Null => Ok(BoundLiteral::Null),
 			BoundLiteral::Integer(i) => checked_integer(i.checked_neg()),
+			// A value above `i64::MAX` negates below the 64-bit range, which MySQL gives as a
+			// double.
+			BoundLiteral::Unsigned(u) => match i64::try_from(*u) {
+				Ok(i) => checked_integer(i.checked_neg()),
+				Err(_) => Ok(BoundLiteral::Float(-(*u as f64))),
+			},
 			BoundLiteral::Float(f) => Ok(BoundLiteral::Float(-*f)),
 			BoundLiteral::String(s) if policy.dialect == SqlDialect::MySql => {
 				let (num, is_int) = mysql_parse_leading_number(s);
@@ -625,6 +638,7 @@ pub fn eval_binary_op(
 fn eval_power(left: &BoundLiteral, right: &BoundLiteral) -> Result<BoundLiteral, PlanError> {
 	let operand = |lit: &BoundLiteral| match lit {
 		BoundLiteral::Integer(i) => Ok(*i as f64),
+		BoundLiteral::Unsigned(u) => Ok(*u as f64),
 		BoundLiteral::Float(f) => Ok(*f),
 		BoundLiteral::String(s) => s
 			.parse::<f64>()
@@ -704,6 +718,25 @@ fn compare_literals(
 		(BoundLiteral::Float(l), BoundLiteral::Float(r)) => l.partial_cmp(r),
 		(BoundLiteral::Integer(l), BoundLiteral::Float(r)) => (*l as f64).partial_cmp(r),
 		(BoundLiteral::Float(l), BoundLiteral::Integer(r)) => l.partial_cmp(&(*r as f64)),
+		// Integers compare exactly, including an unsigned value above `i64::MAX`.
+		(
+			l @ (BoundLiteral::Integer(_) | BoundLiteral::Unsigned(_)),
+			r @ (BoundLiteral::Integer(_) | BoundLiteral::Unsigned(_)),
+		) => Some(exact_integer(l)?.cmp(&exact_integer(r)?)),
+		(BoundLiteral::Unsigned(l), BoundLiteral::Float(r)) => (*l as f64).partial_cmp(r),
+		(BoundLiteral::Float(l), BoundLiteral::Unsigned(r)) => l.partial_cmp(&(*r as f64)),
+		(BoundLiteral::String(s), BoundLiteral::Unsigned(u))
+			if policy.dialect == SqlDialect::MySql =>
+		{
+			let (num, _) = mysql_parse_leading_number(s);
+			num.partial_cmp(&(*u as f64))
+		}
+		(BoundLiteral::Unsigned(u), BoundLiteral::String(s))
+			if policy.dialect == SqlDialect::MySql =>
+		{
+			let (num, _) = mysql_parse_leading_number(s);
+			(*u as f64).partial_cmp(&num)
+		}
 		// In MySQL, string vs number coerces string to number
 		(BoundLiteral::String(s), BoundLiteral::Integer(i))
 			if policy.dialect == SqlDialect::MySql =>
@@ -777,6 +810,68 @@ impl Number {
 	}
 }
 
+/// The exact value of an integer literal. An unsigned literal can exceed `i64::MAX`.
+fn exact_integer(lit: &BoundLiteral) -> Option<i128> {
+	match lit {
+		BoundLiteral::Integer(i) => Some(i128::from(*i)),
+		BoundLiteral::Unsigned(u) => Some(i128::from(*u)),
+		BoundLiteral::Float(_)
+		| BoundLiteral::String(_)
+		| BoundLiteral::Boolean(_)
+		| BoundLiteral::Null => None,
+	}
+}
+
+/// Integer arithmetic where an operand is unsigned, as MySQL does: the result is unsigned, so a
+/// negative result or one above `u64::MAX` is `NumericValueOutOfRange`. A zero divisor is NULL.
+/// `None` for an operator that is not integer arithmetic, which keeps its double-precision rule.
+fn unsigned_arithmetic(
+	a: i128,
+	op: BoundBinaryOp,
+	b: i128,
+) -> Option<Result<BoundLiteral, PlanError>> {
+	let exact = match op {
+		BoundBinaryOp::Add => a + b,
+		BoundBinaryOp::Subtract => a - b,
+		BoundBinaryOp::Multiply => match a.checked_mul(b) {
+			Some(product) => product,
+			None => return Some(Err(PlanError::NumericValueOutOfRange)),
+		},
+		BoundBinaryOp::IntDiv | BoundBinaryOp::Remainder if b == 0 => {
+			return Some(Ok(BoundLiteral::Null));
+		}
+		BoundBinaryOp::IntDiv => a / b,
+		BoundBinaryOp::Remainder => a % b,
+		BoundBinaryOp::Divide
+		| BoundBinaryOp::Equal
+		| BoundBinaryOp::NotEqual
+		| BoundBinaryOp::LessThan
+		| BoundBinaryOp::LessThanEqual
+		| BoundBinaryOp::GreaterThan
+		| BoundBinaryOp::GreaterThanEqual
+		| BoundBinaryOp::And
+		| BoundBinaryOp::Or
+		| BoundBinaryOp::Concat
+		| BoundBinaryOp::NullSafeEqual
+		| BoundBinaryOp::DistinctFrom
+		| BoundBinaryOp::Like
+		| BoundBinaryOp::ILike
+		| BoundBinaryOp::Regexp
+		| BoundBinaryOp::RegexpCi
+		| BoundBinaryOp::Power
+		| BoundBinaryOp::JsonExtract
+		| BoundBinaryOp::JsonExtractText
+		| BoundBinaryOp::JsonPathExtract
+		| BoundBinaryOp::JsonPathExtractText
+		| BoundBinaryOp::JsonContains
+		| BoundBinaryOp::VectorDistance(_) => return None,
+	};
+	Some(match u64::try_from(exact) {
+		Ok(value) => Ok(BoundLiteral::Unsigned(value)),
+		Err(_) => Err(PlanError::NumericValueOutOfRange),
+	})
+}
+
 /// The integer result of a checked 64-bit operation, or the out of range error when it overflowed.
 fn checked_integer(result: Option<i64>) -> Result<BoundLiteral, PlanError> {
 	result.map(BoundLiteral::Integer).ok_or(PlanError::NumericValueOutOfRange)
@@ -795,6 +890,13 @@ fn eval_arithmetic(
 	right: &BoundLiteral,
 	policy: &DialectPolicy,
 ) -> Result<BoundLiteral, PlanError> {
+	if policy.dialect == SqlDialect::MySql
+		&& (matches!(left, BoundLiteral::Unsigned(_)) || matches!(right, BoundLiteral::Unsigned(_)))
+		&& let (Some(a), Some(b)) = (exact_integer(left), exact_integer(right))
+		&& let Some(result) = unsigned_arithmetic(a, op, b)
+	{
+		return result;
+	}
 	let l = to_number(left, policy)?;
 	let r = to_number(right, policy)?;
 
@@ -889,6 +991,9 @@ fn eval_arithmetic(
 fn to_number(lit: &BoundLiteral, policy: &DialectPolicy) -> Result<Number, PlanError> {
 	match lit {
 		BoundLiteral::Integer(i) => Ok(Number::Int(*i)),
+		// An unsigned value above `i64::MAX` is a double here. Exact unsigned arithmetic is handled
+		// before this conversion.
+		BoundLiteral::Unsigned(u) => Ok(Number::Float(*u as f64)),
 		BoundLiteral::Float(f) => Ok(Number::Float(*f)),
 		BoundLiteral::String(s) if policy.dialect == SqlDialect::MySql => {
 			let (num, is_int) = mysql_parse_leading_number(s);
@@ -993,12 +1098,29 @@ pub fn eval_in_list(
 }
 
 /// Evaluate type cast.
-/// Whether a cast to the type yields a date or a time, which no literal is: the cast is left for
-/// the engine to run.
+/// Whether a cast to the type yields a date, a time, a timestamp or an interval, which no literal
+/// is: the cast is left for the engine to run.
 fn is_temporal_type(target_type: &str) -> bool {
 	let lower = target_type.to_ascii_lowercase();
 	let base = lower.split('(').next().unwrap_or(&lower).trim();
-	base.starts_with("date") || base.starts_with("timestamp")
+	base.starts_with("date") || base.starts_with("time") || base.starts_with("interval")
+}
+
+/// Whether a cast of `lit` to `target_type` is a cast of a number, or of the text of one, to
+/// `numeric` or `decimal`. The engine runs it, to a `decimal` or a `bigdecimal` by the declared
+/// precision, so its digits are kept exactly rather than folded through a float. Text that is not
+/// a number is still folded, as MySQL reads its leading number.
+fn is_exact_numeric_cast(lit: &BoundLiteral, target_type: &str) -> bool {
+	let lower = target_type.to_ascii_lowercase();
+	let base = lower.split('(').next().unwrap_or(&lower).trim();
+	if !matches!(base, "numeric" | "decimal" | "dec") {
+		return false;
+	}
+	match lit {
+		BoundLiteral::Integer(_) | BoundLiteral::Unsigned(_) | BoundLiteral::Float(_) => true,
+		BoundLiteral::String(text) => text.trim().parse::<surrealdb_types::BigDecimal>().is_ok(),
+		BoundLiteral::Boolean(_) | BoundLiteral::Null => false,
+	}
 }
 
 pub fn eval_cast(
@@ -1011,33 +1133,60 @@ pub fn eval_cast(
 	}
 
 	let norm_type = target_type.to_lowercase();
+	// A `numeric` folds alike whatever its precision and scale.
+	let norm_type = match norm_type.split_once('(') {
+		Some((base, _)) if matches!(base.trim(), "numeric" | "decimal") => base.trim().to_string(),
+		Some(_) | None => norm_type,
+	};
 	match norm_type.as_str() {
 		"text" | "varchar" | "char" | "string" => Ok(BoundLiteral::String(literal_to_string(lit))),
-		"int" | "integer" | "int2" | "int4" | "int8" | "bigint" | "smallint" | "signed"
-		| "unsigned" => match lit {
-			BoundLiteral::Integer(i) => Ok(BoundLiteral::Integer(*i)),
-			BoundLiteral::Float(f) => Ok(BoundLiteral::Integer(*f as i64)),
-			BoundLiteral::Boolean(b) => Ok(BoundLiteral::Integer(if *b {
-				1
-			} else {
-				0
-			})),
-			BoundLiteral::String(s) => match s.trim().parse::<i64>() {
-				Ok(i) => Ok(BoundLiteral::Integer(i)),
+		"unsigned" => match lit {
+			BoundLiteral::Integer(i) => Ok(BoundLiteral::Unsigned(*i as u64)),
+			BoundLiteral::Unsigned(u) => Ok(BoundLiteral::Unsigned(*u)),
+			BoundLiteral::Float(f) => Ok(BoundLiteral::Unsigned(*f as u64)),
+			BoundLiteral::Boolean(b) => Ok(BoundLiteral::Unsigned(u64::from(*b))),
+			BoundLiteral::String(s) => match s.trim().parse::<u64>() {
+				Ok(u) => Ok(BoundLiteral::Unsigned(u)),
 				Err(_) => {
 					if policy.dialect == SqlDialect::Postgres {
 						Err(PlanError::InvalidTextRepresentation(format!("integer: \"{s}\"")))
 					} else {
 						let (num, _) = mysql_parse_leading_number(s);
-						Ok(BoundLiteral::Integer(num as i64))
+						Ok(BoundLiteral::Unsigned(num as u64))
 					}
 				}
 			},
 			BoundLiteral::Null => Ok(BoundLiteral::Null),
 		},
+		"int" | "integer" | "int2" | "int4" | "int8" | "bigint" | "smallint" | "signed" => {
+			match lit {
+				BoundLiteral::Integer(i) => Ok(BoundLiteral::Integer(*i)),
+				// MySQL reads an unsigned 64-bit value as the signed value with the same bits.
+				BoundLiteral::Unsigned(u) => Ok(BoundLiteral::Integer(*u as i64)),
+				BoundLiteral::Float(f) => Ok(BoundLiteral::Integer(*f as i64)),
+				BoundLiteral::Boolean(b) => Ok(BoundLiteral::Integer(if *b {
+					1
+				} else {
+					0
+				})),
+				BoundLiteral::String(s) => match s.trim().parse::<i64>() {
+					Ok(i) => Ok(BoundLiteral::Integer(i)),
+					Err(_) => {
+						if policy.dialect == SqlDialect::Postgres {
+							Err(PlanError::InvalidTextRepresentation(format!("integer: \"{s}\"")))
+						} else {
+							let (num, _) = mysql_parse_leading_number(s);
+							Ok(BoundLiteral::Integer(num as i64))
+						}
+					}
+				},
+				BoundLiteral::Null => Ok(BoundLiteral::Null),
+			}
+		}
 		"float" | "float4" | "float8" | "real" | "double" | "numeric" | "decimal" => match lit {
 			BoundLiteral::Float(f) => Ok(BoundLiteral::Float(*f)),
 			BoundLiteral::Integer(i) => Ok(BoundLiteral::Float(*i as f64)),
+			BoundLiteral::Unsigned(u) => Ok(BoundLiteral::Float(*u as f64)),
 			BoundLiteral::Boolean(b) => Ok(BoundLiteral::Float(if *b {
 				1.0
 			} else {
@@ -1059,6 +1208,7 @@ pub fn eval_cast(
 		"bool" | "boolean" => match lit {
 			BoundLiteral::Boolean(b) => Ok(BoundLiteral::Boolean(*b)),
 			BoundLiteral::Integer(i) => Ok(BoundLiteral::Boolean(*i != 0)),
+			BoundLiteral::Unsigned(u) => Ok(BoundLiteral::Boolean(*u != 0)),
 			BoundLiteral::Float(f) => Ok(BoundLiteral::Boolean(*f != 0.0)),
 			BoundLiteral::String(s) => match s.trim().to_lowercase().as_str() {
 				"true" | "t" | "1" | "yes" | "on" => Ok(BoundLiteral::Boolean(true)),
@@ -1180,6 +1330,7 @@ fn literal_to_bool(lit: &BoundLiteral) -> Option<bool> {
 	match lit {
 		BoundLiteral::Boolean(b) => Some(*b),
 		BoundLiteral::Integer(i) => Some(*i != 0),
+		BoundLiteral::Unsigned(u) => Some(*u != 0),
 		BoundLiteral::Float(f) => Some(*f != 0.0),
 		BoundLiteral::Null => None,
 		BoundLiteral::String(s) => match s.trim().to_lowercase().as_str() {
@@ -1194,6 +1345,7 @@ fn literal_to_string(lit: &BoundLiteral) -> String {
 	match lit {
 		BoundLiteral::String(s) => s.clone(),
 		BoundLiteral::Integer(i) => i.to_string(),
+		BoundLiteral::Unsigned(u) => u.to_string(),
 		BoundLiteral::Float(f) => f.to_string(),
 		BoundLiteral::Boolean(b) => b.to_string(),
 		BoundLiteral::Null => String::new(),

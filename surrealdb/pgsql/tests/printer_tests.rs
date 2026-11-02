@@ -112,6 +112,9 @@ fn test_print_complex_expressions() {
 	assert_expr_roundtrip("count(DISTINCT id)");
 	assert_expr_roundtrip("x::int4");
 	assert_expr_roundtrip("(a + b)::text");
+	assert_expr_roundtrip("x::interval day to second(3)");
+	assert_expr_roundtrip("x::interval year to month");
+	assert_expr_roundtrip("x::interval(2)");
 	assert_expr_roundtrip("arr[1]");
 	assert_expr_roundtrip("arr[1:5]");
 	assert_expr_roundtrip("CASE WHEN a = 1 THEN 'one' WHEN a = 2 THEN 'two' ELSE 'other' END");

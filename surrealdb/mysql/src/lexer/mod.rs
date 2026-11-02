@@ -742,6 +742,17 @@ impl<'a> Lexer<'a> {
 			match num_str.parse::<i64>() {
 				Ok(val) => Ok(Token::new(TokenKind::IntLiteral(val), Span::new(start, end))),
 				Err(_) => {
+					// The magnitude of the minimum 64-bit integer stays a double, so the sign of
+					// the literal can be folded into it. Every other integer up to `u64::MAX`
+					// is exact.
+					if let Ok(val) = num_str.parse::<u64>()
+						&& val != 1 << 63
+					{
+						return Ok(Token::new(
+							TokenKind::UnsignedIntLiteral(val),
+							Span::new(start, end),
+						));
+					}
 					let value =
 						num_str.parse::<f64>().ok().filter(|value| value.is_finite()).ok_or(
 							LexError::InvalidNumber {

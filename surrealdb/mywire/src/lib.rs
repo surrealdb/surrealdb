@@ -35,6 +35,7 @@ use {
 };
 
 pub mod auth;
+mod cells;
 pub mod codec;
 pub mod conn;
 pub mod constants;

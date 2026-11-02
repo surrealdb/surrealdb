@@ -34,6 +34,7 @@ impl Value {
 				Number::I32(int) => JsonValue::Number(JsonNumber::from(int)),
 				Number::U32(int) => JsonValue::Number(JsonNumber::from(int)),
 				Number::U64(int) => JsonValue::Number(JsonNumber::from(int)),
+				Number::BigDecimal(decimal) => JsonValue::String(decimal.to_string()),
 				Number::Float(float) => {
 					// This is replicating serde_json::to_string default behavior.
 					// f64 will convert to null if it is either NaN of infinity.
@@ -69,6 +70,10 @@ impl Value {
 			Value::Datetime(datetime) => {
 				JsonValue::String(datetime.0.to_rfc3339_opts(SecondsFormat::AutoSi, true))
 			}
+			Value::Date(v) => JsonValue::String(v.to_string()),
+			Value::Time(v) => JsonValue::String(v.to_string()),
+			Value::Timestamp(v) => JsonValue::String(v.to_string()),
+			Value::Interval(v) => JsonValue::String(v.to_string()),
 			Value::Uuid(uuid) => {
 				// This buffer is the exact size needed to be able to encode the uuid.
 				let mut buffer = [0u8; uuid::fmt::Hyphenated::LENGTH];
@@ -109,6 +114,18 @@ impl Value {
 	/// serialising [`Value::into_json_value`] would produce, without building
 	/// the intermediate tree (one allocation per node) or consuming the value.
 	pub fn write_json(&self, out: &mut Vec<u8>) {
+		self.write_json_as(out, Decimals::Strings);
+	}
+
+	/// Appends the JSON encoding of this value as a SQL `json` or `jsonb`
+	/// column returns it: [`Value::write_json`], except that a `decimal` and a
+	/// `bigdecimal` are JSON numbers spelled with their exact digits, since a
+	/// SQL JSON number has arbitrary precision.
+	pub fn write_sql_json(&self, out: &mut Vec<u8>) {
+		self.write_json_as(out, Decimals::Numbers);
+	}
+
+	fn write_json_as(&self, out: &mut Vec<u8>, decimals: Decimals) {
 		// Strings and numbers go through serde_json's own formatting, so the
 		// escaping and float formatting are the ones `into_json_value` gets.
 		fn put<T: serde::Serialize + ?Sized>(out: &mut Vec<u8>, v: &T) {
@@ -147,14 +164,22 @@ impl Value {
 					out.extend_from_slice(b"null")
 				}
 			}
-			Value::Number(Number::Decimal(decimal)) => put(out, &decimal.to_string()),
+			// Both spell their value in positional notation, which is a JSON number.
+			Value::Number(Number::Decimal(decimal)) => match decimals {
+				Decimals::Strings => put(out, &decimal.to_string()),
+				Decimals::Numbers => out.extend_from_slice(decimal.to_string().as_bytes()),
+			},
+			Value::Number(Number::BigDecimal(decimal)) => match decimals {
+				Decimals::Strings => put(out, &decimal.to_string()),
+				Decimals::Numbers => out.extend_from_slice(decimal.to_string().as_bytes()),
+			},
 			Value::String(strand) => put(out, strand.as_str()),
 			Value::Uuid(uuid) => {
 				let mut buffer = [0u8; uuid::fmt::Hyphenated::LENGTH];
 				put(out, &*uuid.0.hyphenated().encode_lower(&mut buffer))
 			}
-			Value::Array(array) => write_json_seq(out, array.0.iter()),
-			Value::Set(set) => write_json_seq(out, set.0.iter()),
+			Value::Array(array) => write_json_seq(out, array.0.iter(), decimals),
+			Value::Set(set) => write_json_seq(out, set.0.iter(), decimals),
 			Value::Object(object) => {
 				out.push(b'{');
 				for (i, (k, v)) in object.0.iter().enumerate() {
@@ -163,7 +188,7 @@ impl Value {
 					}
 					put(out, k.as_str());
 					out.push(b':');
-					v.write_json(out);
+					v.write_json_as(out, decimals);
 				}
 				out.push(b'}');
 			}
@@ -180,6 +205,10 @@ impl Value {
 			// Rare or string-shaped: the conversion itself, so they cannot drift.
 			other @ (Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Geometry(_)
 			| Value::Table(_)
 			| Value::RecordId(_)
@@ -190,13 +219,26 @@ impl Value {
 	}
 }
 
-fn write_json_seq<'a>(out: &mut Vec<u8>, items: impl Iterator<Item = &'a Value>) {
+/// How a `decimal` or `bigdecimal` is written to JSON.
+#[derive(Clone, Copy)]
+enum Decimals {
+	/// As a string, so a reader that parses JSON numbers as `f64` keeps every digit.
+	Strings,
+	/// As a number.
+	Numbers,
+}
+
+fn write_json_seq<'a>(
+	out: &mut Vec<u8>,
+	items: impl Iterator<Item = &'a Value>,
+	decimals: Decimals,
+) {
 	out.push(b'[');
 	for (i, v) in items.enumerate() {
 		if i > 0 {
 			out.push(b',');
 		}
-		v.write_json(out);
+		v.write_json_as(out, decimals);
 	}
 	out.push(b']');
 }
@@ -270,6 +312,31 @@ mod write_json_tests {
 	use std::collections::BTreeMap;
 
 	use crate::{Array, Number, Object, Value};
+
+	#[test]
+	fn sql_json_writes_decimals_as_numbers() {
+		let big: crate::BigDecimal = "-12345678901234567890123456789012345.50".parse().unwrap();
+		let decimal: rust_decimal::Decimal = "1.50".parse().unwrap();
+		let value = Value::Array(Array::from(vec![
+			Value::Number(Number::BigDecimal(Box::new(big))),
+			Value::Number(Number::Decimal(decimal)),
+			Value::Object(Object::from(BTreeMap::from([(
+				"n".to_owned(),
+				Value::Number(Number::Decimal(decimal)),
+			)]))),
+		]));
+		let mut sql = Vec::new();
+		value.write_sql_json(&mut sql);
+		let sql = String::from_utf8(sql).unwrap();
+		assert_eq!(sql, r#"[-12345678901234567890123456789012345.50,1.50,{"n":1.50}]"#);
+		assert!(serde_json::from_str::<serde_json::Value>(&sql).is_ok());
+		let mut json = Vec::new();
+		value.write_json(&mut json);
+		assert_eq!(
+			String::from_utf8(json).unwrap(),
+			r#"["-12345678901234567890123456789012345.50","1.50",{"n":"1.50"}]"#
+		);
+	}
 
 	#[test]
 	fn matches_into_json_value() {

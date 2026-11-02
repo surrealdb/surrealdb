@@ -1818,7 +1818,9 @@ text_enum!(RemoveObject {
 		Bucket { name: u16, base: Base },
 		Sequence { name: u16 },
 		Module { name: ModuleName },
-		Config { kind: ConfigKind }
+		Config { kind: ConfigKind },
+		Enum { name: Strand },
+		UserType { name: Strand, domain: bool }
 	]
 });
 
@@ -3128,6 +3130,11 @@ impl Text for Number {
 				put_str(out, &n.to_string());
 				out.push(')');
 			}
+			Number::BigDecimal(n) => {
+				out.push_str("BigDecimal(");
+				put_str(out, &n.to_string());
+				out.push(')');
+			}
 			Number::I8(n) => {
 				out.push_str("I8(");
 				n.put(out);
@@ -3187,6 +3194,13 @@ impl Text for Number {
 				match text.parse() {
 					Ok(n) => Number::Decimal(n),
 					Err(_) => return c.fail(format!("`{text}` is not a decimal")),
+				}
+			}
+			"BigDecimal" => {
+				let text = c.string()?;
+				match text.parse::<surrealdb_types::BigDecimal>() {
+					Ok(n) => Number::BigDecimal(Box::new(n)),
+					Err(_) => return c.fail(format!("`{text}` is not a bigdecimal")),
 				}
 			}
 			"I8" => Number::I8(<i8 as Text>::get(c)?),
@@ -4917,6 +4931,7 @@ mod tests {
 				Number::Float(back) => assert_eq!(back.to_bits(), float.to_bits(), "{out}"),
 				other @ (Number::Int(_)
 				| Number::Decimal(_)
+				| Number::BigDecimal(_)
 				| Number::I8(_)
 				| Number::U8(_)
 				| Number::I16(_)

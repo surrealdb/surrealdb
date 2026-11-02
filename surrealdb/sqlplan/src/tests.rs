@@ -3100,6 +3100,58 @@ fn test_count_of_a_column_folds_the_column_as_written() {
 }
 
 #[test]
+fn isfinite_compares_with_the_infinite_values_of_its_own_kind() {
+	let catalog = MemoryCatalog::new();
+	let cases = [
+		("SELECT isfinite(CAST('2020-01-01' AS date))", "type::date"),
+		("SELECT isfinite(CAST('2020-01-01 00:00:00' AS timestamp))", "type::timestamp"),
+		("SELECT isfinite(CAST('2020-01-01 00:00:00+00' AS timestamptz))", "type::datetime"),
+	];
+	for (sql, constructor) in cases {
+		let plan = format!("{:?}", lower_pgsql_select(&catalog, sql).unwrap());
+		assert!(plan.contains(constructor), "{sql}: {plan}");
+		assert!(plan.contains("infinity") && plan.contains("-infinity"), "{sql}: {plan}");
+	}
+	let err = lower_pgsql_select(&catalog, "SELECT isfinite('2020-01-01')").unwrap_err();
+	assert!(err.to_string().contains("isfinite"), "{err}");
+}
+
+#[test]
+fn format_type_of_a_column_names_the_declared_modifiers_of_the_catalog() {
+	use crate::declared_type::DeclaredSqlType;
+	let mut catalog = MemoryCatalog::new();
+	catalog.add_table(
+		TableSchema::new(
+			"decl",
+			vec![
+				ColumnInfo::new("v", 0).with_type("varchar").with_declared(
+					DeclaredSqlType::parse(crate::SqlTypeDialect::PostgreSql, "varchar(20)")
+						.expect("a PostgreSQL type"),
+				),
+			],
+		)
+		.with_schema("public"),
+	);
+	let sql = "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_catalog.pg_attribute AS a";
+	let lowered = lower_pgsql_select(&catalog, sql).unwrap();
+	let plan = format!("{lowered:?}");
+	assert!(plan.contains("character varying(20)"), "{plan}");
+	assert!(plan.contains("integer"), "{plan}");
+	// The lookup keeps the name of the call, against this catalog and against one without the
+	// declared column alike.
+	assert!(plan.contains("Field(\"format_type\")"), "{plan}");
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let policy = DialectPolicy::postgres();
+	for catalog in [&catalog, &MemoryCatalog::new()] {
+		let bound = binder::pgsql::bind_select(select, catalog, &policy, None).unwrap();
+		assert_eq!(bound.describe(catalog, &policy).columns[0].name, "format_type");
+	}
+}
+
+#[test]
 fn generate_series_over_fractional_bounds_is_refused_when_planned() {
 	let catalog = MemoryCatalog::new();
 	let policy = DialectPolicy::postgres();

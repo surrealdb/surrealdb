@@ -91,8 +91,16 @@ pub(crate) fn extremes_of(analysis: &AggregationAnalysis) -> Vec<(String, usize)
 			AggregationStat::TimeMax {
 				arg,
 				..
+			}
+			| AggregationStat::TemporalMax {
+				arg,
+				..
 			} => ("time::max", arg),
 			AggregationStat::TimeMin {
+				arg,
+				..
+			}
+			| AggregationStat::TemporalMin {
 				arg,
 				..
 			} => ("time::min", arg),

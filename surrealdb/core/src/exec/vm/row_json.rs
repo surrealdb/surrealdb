@@ -26,8 +26,28 @@ pub(super) fn encode_json(
 		Value::None | Value::Null => out.extend_from_slice(b"null"),
 		Value::Bool(true) => out.extend_from_slice(b"true"),
 		Value::Bool(false) => out.extend_from_slice(b"false"),
-		Value::Number(n) => number(out, *n, scratch)?,
+		Value::Number(n) => number(out, n.clone(), scratch)?,
 		Value::String(s) => string(out, s.as_str())?,
+		Value::Date(v) => {
+			scratch.clear();
+			scratch.push_str(&v.to_string());
+			string(out, scratch)?;
+		}
+		Value::Time(v) => {
+			scratch.clear();
+			scratch.push_str(&v.to_string());
+			string(out, scratch)?;
+		}
+		Value::Timestamp(v) => {
+			scratch.clear();
+			scratch.push_str(&v.to_string());
+			string(out, scratch)?;
+		}
+		Value::Interval(v) => {
+			scratch.clear();
+			scratch.push_str(&v.to_string());
+			string(out, scratch)?;
+		}
 		Value::Duration(d) => {
 			scratch.clear();
 			surrealdb_types::Duration::from_std(d.0).fmt_sql(scratch, SqlFormat::SingleLine);
@@ -149,7 +169,7 @@ pub(super) fn encode_json_scalar(
 		Scalar::None | Scalar::Null => out.extend_from_slice(b"null"),
 		Scalar::Bool(true) => out.extend_from_slice(b"true"),
 		Scalar::Bool(false) => out.extend_from_slice(b"false"),
-		Scalar::Number(n) => number(out, *n, scratch)?,
+		Scalar::Number(n) => number(out, n.clone(), scratch)?,
 		Scalar::Str(s) => string(out, s)?,
 		Scalar::Bytes(b) => {
 			out.push(b'[');
@@ -256,6 +276,12 @@ fn number(out: &mut Vec<u8>, n: Number, scratch: &mut String) -> anyhow::Result<
 		Number::F32(v) if v.is_finite() => serde_json::to_writer(&mut *out, &v)?,
 		Number::F32(_) => out.extend_from_slice(b"null"),
 		Number::Decimal(d) => {
+			use std::fmt::Write as _;
+			scratch.clear();
+			let _ = write!(scratch, "{d}");
+			string(out, scratch)?;
+		}
+		Number::BigDecimal(d) => {
 			use std::fmt::Write as _;
 			scratch.clear();
 			let _ = write!(scratch, "{d}");

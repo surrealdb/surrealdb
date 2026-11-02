@@ -28,6 +28,10 @@ pub fn mul(a: Value, b: Value) -> Result<Value> {
 }
 
 pub fn div(a: Value, b: Value) -> Result<Value> {
+	// An interval's division by zero is an error, not `NaN`.
+	if let Value::Interval(_) = a {
+		return a.try_div(b);
+	}
 	Ok(a.try_div(b).unwrap_or(f64::NAN.into()))
 }
 

@@ -60,6 +60,10 @@ pub(crate) fn value_hash(value: &Value) -> u64 {
 		}
 		Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Set(_)
 		| Value::Geometry(_)
 		| Value::Bytes(_)

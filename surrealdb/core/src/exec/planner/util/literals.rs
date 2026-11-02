@@ -72,6 +72,10 @@ pub(crate) fn substitution_is_lossy(value: &Value) -> bool {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Geometry(_)
 		| Value::Bytes(_)
@@ -112,9 +116,14 @@ pub(crate) fn try_value_to_logical_expr(value: Value) -> Option<LogicalExpr> {
 		Value::Number(Number::F16(x)) => leaf(LogicalLiteral::F16(x)),
 		Value::Number(Number::F32(x)) => leaf(LogicalLiteral::F32(x)),
 		Value::Number(Number::Decimal(x)) => leaf(LogicalLiteral::Decimal(x)),
+		Value::Number(Number::BigDecimal(x)) => leaf(LogicalLiteral::BigDecimal(x)),
 		Value::String(x) => leaf(LogicalLiteral::String(x)),
 		Value::Duration(x) => leaf(LogicalLiteral::Duration(x)),
 		Value::Datetime(x) => leaf(LogicalLiteral::Datetime(x)),
+		Value::Date(x) => leaf(LogicalLiteral::Date(x)),
+		Value::Time(x) => leaf(LogicalLiteral::Time(x)),
+		Value::Timestamp(x) => leaf(LogicalLiteral::Timestamp(x)),
+		Value::Interval(x) => leaf(LogicalLiteral::Interval(x)),
 		Value::Uuid(x) => leaf(LogicalLiteral::Uuid(x)),
 		Value::Geometry(x) => leaf(LogicalLiteral::Geometry(x)),
 		Value::Bytes(x) => leaf(LogicalLiteral::Bytes(x)),
@@ -243,11 +252,16 @@ pub(crate) fn leaf_literal_to_value(lit: &LogicalLiteral) -> Value {
 		LogicalLiteral::U32(x) => Value::Number(Number::U32(*x)),
 		LogicalLiteral::U64(x) => Value::Number(Number::U64(*x)),
 		LogicalLiteral::Decimal(x) => Value::Number(Number::Decimal(*x)),
+		LogicalLiteral::BigDecimal(x) => Value::Number(Number::BigDecimal(x.clone())),
 		LogicalLiteral::String(x) => Value::String(x.clone()),
 		LogicalLiteral::Bytes(x) => Value::Bytes(x.clone()),
 		LogicalLiteral::Regex(x) => Value::Regex(x.clone()),
 		LogicalLiteral::Duration(x) => Value::Duration(*x),
 		LogicalLiteral::Datetime(x) => Value::Datetime(*x),
+		LogicalLiteral::Date(x) => Value::Date(*x),
+		LogicalLiteral::Time(x) => Value::Time(*x),
+		LogicalLiteral::Timestamp(x) => Value::Timestamp(*x),
+		LogicalLiteral::Interval(x) => Value::Interval(*x),
 		LogicalLiteral::Uuid(x) => Value::Uuid(*x),
 		LogicalLiteral::Geometry(x) => Value::Geometry(x.clone()),
 		LogicalLiteral::File(x) => Value::File(x.clone()),
@@ -765,6 +779,10 @@ fn field_of_literal(value: &Value, name: &str) -> Option<Value> {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Bytes(_)
 		| Value::Table(_)

@@ -529,6 +529,21 @@ pub(super) async fn step(
 		| StoreInstr::CheckIndexColumns {
 			..
 		}
+		| StoreInstr::AlterEnum {
+			..
+		}
+		| StoreInstr::RewriteEnumLabels {
+			..
+		}
+		| StoreInstr::CheckEnumUnreferenced {
+			..
+		}
+		| StoreInstr::RaiseUserType {
+			..
+		}
+		| StoreInstr::CheckUserTypeRemovable {
+			..
+		}
 		| StoreInstr::CheckTableAlter {
 			..
 		} => {

@@ -7,22 +7,27 @@ use std::collections::{BTreeSet, HashMap};
 
 use surrealdb_expr::expr::field::Selector;
 use surrealdb_expr::expr::index_kind::Index;
+use surrealdb_expr::expr::kind::GeometryKind;
 use surrealdb_expr::expr::operator::BinaryOperator;
 use surrealdb_expr::expr::reference::{Reference, ReferenceDeleteStrategy};
-use surrealdb_expr::expr::statements::alter::{AlterDefault, AlterKind};
+use surrealdb_expr::expr::statements::alter::{
+	AlterDefault, AlterEnumAction, AlterEnumStatement, AlterKind, EnumPosition,
+};
 use surrealdb_expr::expr::statements::define::{
-	DefineDatabaseStatement, DefineDefault, DefineFieldStatement, DefineIndexStatement, DefineKind,
-	DefineSequenceStatement, DefineStatement, DefineTableStatement,
+	DefineDatabaseStatement, DefineDefault, DefineEnumStatement, DefineFieldStatement,
+	DefineIndexStatement, DefineKind, DefineSequenceStatement, DefineStatement,
+	DefineTableStatement, SqlType, SqlTypeDialect, UserTypeKind,
 };
 use surrealdb_expr::expr::statements::remove::{
-	RemoveDatabaseStatement, RemoveFieldStatement, RemoveIndexStatement, RemoveSequenceStatement,
-	RemoveStatement, RemoveTableStatement,
+	RemoveDatabaseStatement, RemoveEnumStatement, RemoveFieldStatement, RemoveIndexStatement,
+	RemoveSequenceStatement, RemoveStatement, RemoveTableStatement,
 };
-use surrealdb_expr::expr::statements::{IfelseStatement, InfoStatement};
+use surrealdb_expr::expr::statements::{AlterStatement, IfelseStatement, InfoStatement};
 use surrealdb_expr::expr::table_type::TableType;
+use surrealdb_expr::expr::visit::{MutVisitor, VisitMut};
 use surrealdb_expr::expr::{
-	Block, Cond, Expr, Field, Fields, Function, FunctionCall, Idiom, Kind, Literal, Param, Part,
-	View,
+	Block, Cond, EnumRef, Expr, Field, Fields, Function, FunctionCall, Idiom, Kind, KindLiteral,
+	Literal, Param, Part, View,
 };
 use surrealdb_mysql::ast::stmt::{
 	AlterTableAction as MyAlterTableAction, AlterTableStmt as MyAlterTableStmt,
@@ -33,9 +38,11 @@ use surrealdb_mysql::ast::stmt::{
 	TableConstraint as MyTableConstraint, TableRef as MyTableRef,
 };
 use surrealdb_pgsql::ast::stmt::{
-	AlterTableAction, AlterTableStmt, ColumnConstraint, CreateIndexStmt,
-	CreateTableStmt as PgCreateTableStmt, CreateViewStmt, DropObjectType, DropStmt as PgDropStmt,
-	Statement as PgStatement, TableConstraint as PgTableConstraint, TableRef as PgTableRef,
+	AlterTableAction, AlterTableStmt, AlterTypeAction as PgAlterTypeAction,
+	AlterTypeStmt as PgAlterTypeStmt, ColumnConstraint, CreateIndexStmt,
+	CreateTableStmt as PgCreateTableStmt, CreateTypeStmt as PgCreateTypeStmt, CreateViewStmt,
+	DropObjectType, DropStmt as PgDropStmt, EnumValuePlacement, Statement as PgStatement,
+	TableConstraint as PgTableConstraint, TableRef as PgTableRef,
 };
 use surrealdb_strand::{Strand, TableName};
 
@@ -47,13 +54,62 @@ use super::foreign_key::{
 use super::write::{link_assignment, lower_mysql_expr, lower_pgsql_expr};
 use crate::catalog::relations::{ConstraintTarget, constraint_target};
 use crate::catalog::staged::StagedCatalog;
-use crate::catalog::{BinderCatalog, EmptyCatalog, TableSchema, kind_admits_none};
+use crate::catalog::{BinderCatalog, DomainType, EmptyCatalog, TableSchema, kind_admits_none};
+use crate::declared_type::DeclaredSqlType;
 use crate::error::PlanError;
 
 /// Whether the modifiers of a `float(p)` column request at most the 24 bits of mantissa that
 /// PostgreSQL stores as `float4`. A `float` with no precision is `float8`.
 fn has_single_precision(modifiers: &[String]) -> bool {
 	modifiers.first().and_then(|p| p.trim().parse::<u32>().ok()).is_some_and(|p| p <= 24)
+}
+
+/// The most digits a `decimal` holds; a `numeric` of more is a `bigdecimal` (ADR 0014 D2).
+const DECIMAL_DIGITS: u32 = 28;
+
+/// The kind of a `numeric` or `decimal` column of `precision`: `decimal` up to 28 digits and
+/// `bigdecimal` above, or with no precision, which in PostgreSQL is a `numeric` of any size.
+pub(crate) fn decimal_kind(precision: Option<&str>) -> Kind {
+	match precision.map(|p| p.trim().parse::<u32>()) {
+		Some(Ok(p)) if p <= DECIMAL_DIGITS => Kind::Decimal,
+		Some(Ok(_)) | Some(Err(_)) | None => Kind::BigDecimal,
+	}
+}
+
+/// The declared SQL type of a PostgreSQL column: its type name, modifiers, and array dimensions,
+/// in the canonical form [`DeclaredSqlType`] reads. A type the declaration cannot spell is refused.
+pub(crate) fn pgsql_declared_type(
+	type_name: &surrealdb_pgsql::ast::expr::TypeName,
+) -> Result<SqlType, PlanError> {
+	let name = type_name.name.parts.last().map_or("", String::as_str);
+	let base = name.trim_end_matches("[]");
+	let dimensions = type_name.array_bounds.len().max(name.matches("[]").count());
+	let mut text = base.to_string();
+	if !type_name.modifiers.is_empty() {
+		text.push_str(&format!("({})", type_name.modifiers.join(",")));
+	}
+	for dimension in 0..dimensions {
+		match type_name.array_bounds.get(dimension) {
+			Some(Some(bound)) => text.push_str(&format!("[{bound}]")),
+			Some(None) | None => text.push_str("[]"),
+		}
+	}
+	declared_sql_type(SqlTypeDialect::PostgreSql, &text)
+}
+
+/// The declared SQL type of a MySQL column, from the type as the column definition wrote it.
+pub(crate) fn mysql_declared_type(type_str: &str) -> Result<SqlType, PlanError> {
+	declared_sql_type(SqlTypeDialect::MySql, type_str)
+}
+
+/// Read `text` as a type of `dialect` and return its canonical form as the field's `SQL TYPE`.
+fn declared_sql_type(dialect: SqlTypeDialect, text: &str) -> Result<SqlType, PlanError> {
+	let declared = DeclaredSqlType::parse(dialect, text)
+		.map_err(|err| PlanError::UnsupportedStatement(err.to_string()))?;
+	Ok(SqlType {
+		dialect,
+		text: declared.canonical_text(),
+	})
 }
 
 /// Map PostgreSQL TypeName to SurrealDB Kind. Integer and float widths follow PostgreSQL's
@@ -67,7 +123,9 @@ pub fn map_pgsql_type(type_name: &surrealdb_pgsql::ast::expr::TypeName) -> Kind 
 		None => return Kind::Any,
 	};
 
-	let is_array = !type_name.array_bounds.is_empty() || raw_name.ends_with("[]");
+	// Each dimension is one array level: `int[][]` is an array of arrays of `int`. A bound in the
+	// brackets does not fix the length, as for one dimension.
+	let dimensions = type_name.array_bounds.len().max(raw_name.matches("[]").count());
 	let base_name = raw_name.trim_end_matches("[]");
 
 	let inner_kind = match base_name {
@@ -77,30 +135,193 @@ pub fn map_pgsql_type(type_name: &surrealdb_pgsql::ast::expr::TypeName) -> Kind 
 		"float4" | "real" => Kind::F32,
 		"float" if has_single_precision(&type_name.modifiers) => Kind::F32,
 		"float" | "float8" | "double precision" | "double" => Kind::Float,
-		"numeric" | "decimal" | "dec" => Kind::Decimal,
-		"text" | "varchar" | "char" | "character" | "character varying" | "bpchar" | "string" => {
-			Kind::String
+		"numeric" | "decimal" | "dec" => {
+			decimal_kind(type_name.modifiers.first().map(String::as_str))
 		}
+		// `money` is a decimal with two fractional digits; the declared type carries the scale.
+		"money" => Kind::Decimal,
+		// The object identifier types and the transaction id of 32 bits.
+		"oid" | "regclass" | "regproc" | "regprocedure" | "regoper" | "regoperator" | "regtype"
+		| "regnamespace" | "regrole" | "regconfig" | "regdictionary" | "regcollation" | "xid"
+		| "cid" => Kind::U32,
+		// The 64-bit transaction id and the write-ahead log position.
+		"xid8" | "pg_lsn" => Kind::U64,
+		"text" | "varchar" | "char" | "character" | "character varying" | "bpchar" | "string"
+		| "name" | "citext" | "inet" | "cidr" | "macaddr" | "macaddr8" | "bit" | "bit varying"
+		| "varbit" | "xml" | "tsvector" | "tsquery" | "jsonpath" | "tid" | "pg_snapshot"
+		| "txid_snapshot" => Kind::String,
 		"bool" | "boolean" => Kind::Bool,
-		"date"
-		| "time"
-		| "timestamp"
-		| "timestamptz"
-		| "timestamp with time zone"
-		| "timestamp without time zone"
-		| "time with time zone"
-		| "time without time zone" => Kind::Datetime,
+		"date" => Kind::Date,
+		"time" | "timetz" | "time with time zone" | "time without time zone" => Kind::Time,
+		"timestamp" | "timestamp without time zone" => Kind::Timestamp,
+		"timestamptz" | "timestamp with time zone" => Kind::Datetime,
+		// An interval with a field qualifier, such as `interval day to second`, is an interval;
+		// its declared SQL type truncates a written value to the qualifier's fields.
+		"interval" => Kind::Interval,
+		name if name.strip_prefix("interval ").is_some_and(|fields| {
+			surrealdb_pgsql::ast::expr::INTERVAL_FIELD_QUALIFIERS.contains(&fields)
+		}) =>
+		{
+			Kind::Interval
+		}
 		"uuid" => Kind::Uuid,
-		"json" | "jsonb" => Kind::Object,
+		// A JSON document is any JSON value; its declared SQL type restricts a write to the
+		// values JSON can carry.
+		"json" | "jsonb" => Kind::Any,
 		"bytea" => Kind::Bytes,
+		// Geometric types (ADR 0014 D6). An open or closed `path` is a line or a polygon ring, so
+		// its kind admits both; `line` and `circle` are objects of a fixed shape.
+		"point" => Kind::Geometry(vec![GeometryKind::Point]),
+		"lseg" => Kind::Geometry(vec![GeometryKind::Line]),
+		"path" => Kind::Geometry(vec![GeometryKind::Line, GeometryKind::Polygon]),
+		"polygon" | "box" => Kind::Geometry(vec![GeometryKind::Polygon]),
+		"line" | "circle" => Kind::Object,
+		// A range's element kind is in its declared SQL type (ADR 0014 D1, D7), so every range
+		// shares one kind, and a multirange is an array of them.
+		"int4range" | "int8range" | "numrange" | "tsrange" | "tstzrange" | "daterange" => {
+			Kind::Range
+		}
+		"int4multirange" | "int8multirange" | "nummultirange" | "tsmultirange"
+		| "tstzmultirange" | "datemultirange" => Kind::Array(Box::new(Kind::Range), None),
 		_ => Kind::Any,
 	};
 
-	if is_array {
-		Kind::Array(Box::new(inner_kind), None)
-	} else {
-		inner_kind
+	(0..dimensions).fold(inner_kind, |kind, _| Kind::Array(Box::new(kind), None))
+}
+
+/// [`map_pgsql_type`], where a type name the mapping does not know is looked up as a user-defined
+/// enum type in `catalog`, and a column declared with one has the kind `enum<name>`.
+pub fn map_pgsql_type_in(
+	type_name: &surrealdb_pgsql::ast::expr::TypeName,
+	catalog: &dyn BinderCatalog,
+) -> Kind {
+	let kind = map_pgsql_type(type_name);
+	// The innermost element, under every array dimension.
+	let mut element = &kind;
+	while let Kind::Array(inner, _) = element {
+		element = inner;
 	}
+	if !matches!(element, Kind::Any) {
+		return kind;
+	}
+	let Some(raw_name) = type_name.name.parts.last() else {
+		return kind;
+	};
+	let name = raw_name.trim_end_matches("[]");
+	let lowered = name.to_lowercase();
+	if let Some(found) = catalog.enum_type(name).or_else(|| catalog.enum_type(&lowered)) {
+		return with_element(&kind, Kind::Enum(surrealdb_expr::expr::EnumRef::Named(found.name)));
+	}
+	if let Some(composite) =
+		catalog.composite_type(name).or_else(|| catalog.composite_type(&lowered))
+	{
+		let fields = composite
+			.fields
+			.into_iter()
+			.map(|(field, kind)| (Strand::from(field.as_str()), kind))
+			.collect();
+		return with_element(&kind, Kind::Literal(KindLiteral::Object(fields)));
+	}
+	if let Some(domain) = catalog.domain_type(name).or_else(|| catalog.domain_type(&lowered)) {
+		return with_element(&kind, domain.base);
+	}
+	kind
+}
+
+/// `shape` with its innermost element replaced by `element`, keeping each array level and bound.
+fn with_element(shape: &Kind, element: Kind) -> Kind {
+	if let Kind::Array(inner, len) = shape {
+		Kind::Array(Box::new(with_element(inner, element)), *len)
+	} else {
+		element
+	}
+}
+
+/// The user-defined domain a column of `type_name` is declared with, if it is one. An array of a
+/// domain is refused: the domain's `NOT NULL` and checks apply to each element, which the field
+/// definition cannot state.
+pub(crate) fn domain_of(
+	type_name: &surrealdb_pgsql::ast::expr::TypeName,
+	catalog: &dyn BinderCatalog,
+) -> Result<Option<DomainType>, PlanError> {
+	let mut element = map_pgsql_type(type_name);
+	while let Kind::Array(inner, _) = element {
+		element = *inner;
+	}
+	if !matches!(element, Kind::Any) {
+		return Ok(None);
+	}
+	let Some(raw_name) = type_name.name.parts.last() else {
+		return Ok(None);
+	};
+	let name = raw_name.trim_end_matches("[]");
+	let lowered = name.to_lowercase();
+	let Some(domain) = catalog.domain_type(name).or_else(|| catalog.domain_type(&lowered)) else {
+		return Ok(None);
+	};
+	if !type_name.array_bounds.is_empty() || raw_name.ends_with("[]") {
+		return Err(PlanError::unsupported(format!("an array of the domain \"{}\"", domain.name)));
+	}
+	Ok(Some(domain))
+}
+
+/// Lower the value a domain `CHECK` tests, which names the value under test as `VALUE`, to the
+/// SurrealQL expression over `$value` that a column's `ASSERT` evaluates.
+pub fn lower_pgsql_domain_check(
+	check: &surrealdb_pgsql::ast::expr::Expr,
+) -> Result<Expr, PlanError> {
+	let mut lowered = lower_pgsql_expr(check)?;
+	match lowered.visit_mut(&mut BindValue) {
+		Ok(()) => Ok(lowered),
+		Err(never) => match never {},
+	}
+}
+
+/// Replaces each reference to the bare name `value` with the parameter `$value`.
+struct BindValue;
+
+impl MutVisitor for BindValue {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		if let Expr::Idiom(Idiom(parts)) = expr
+			&& let [Part::Field(name)] = parts.as_slice()
+			&& name.as_str().eq_ignore_ascii_case("value")
+		{
+			*expr = Expr::Param(Param::from("value".to_string()));
+			return Ok(());
+		}
+		expr.visit_mut(self)
+	}
+}
+
+/// Join a column's own `NOT NULL` assertion, the domain's `NOT NULL` and the checks of its domain
+/// into the one `ASSERT` of the field. `None` when none applies. [`not_null_assertion`] leads the
+/// assertion exactly when the column itself refuses NULL; the domain's `NOT NULL` is
+/// [`domain_not_null_assertion`], so that `ALTER DOMAIN` changes the assertion and never the kind
+/// of the field, which admits NULL unless the column itself refuses it.
+///
+/// A CHECK passes unless it is false, so a check that yields NULL, as a comparison with a NULL or
+/// NONE value does, passes. The assertion therefore tests `check != false`, which holds for NULL
+/// and NONE, rather than the check itself.
+pub(crate) fn domain_assertion(not_null: bool, domain: &DomainType) -> Option<Expr> {
+	let mut parts: Vec<Expr> = Vec::new();
+	if not_null {
+		parts.push(not_null_assertion());
+	}
+	if domain.not_null {
+		parts.push(domain_not_null_assertion(&domain.name));
+	}
+	parts.extend(domain.checks.iter().map(|check| Expr::Binary {
+		left: Box::new(check.check.clone()),
+		op: BinaryOperator::NotEqual,
+		right: Box::new(Expr::Literal(Literal::Bool(false))),
+	}));
+	parts.into_iter().reduce(|left, right| Expr::Binary {
+		left: Box::new(left),
+		op: BinaryOperator::And,
+		right: Box::new(right),
+	})
 }
 
 /// Whether a MySQL `FLOAT(p)` column is stored in double precision: MySQL takes a lone precision
@@ -114,52 +335,161 @@ fn mysql_float_is_double(type_str: &str) -> bool {
 	!args.contains(',') && args.trim().parse::<u32>().is_ok_and(|p| p > 24)
 }
 
+/// The members of an `ENUM('a', 'b')` or `SET('a', 'b')` type text, in declaration order, with
+/// a doubled quote read as one. `None` when the text holds no well-formed member list.
+pub(crate) fn mysql_members(type_str: &str) -> Option<Vec<String>> {
+	let open = type_str.find('(')?;
+	let close = type_str.rfind(')')?;
+	let mut chars = type_str.get(open + 1..close)?.chars().peekable();
+	let mut members = Vec::new();
+	loop {
+		while chars.peek().is_some_and(|c| c.is_whitespace()) {
+			chars.next();
+		}
+		if chars.next()? != '\'' {
+			return None;
+		}
+		let mut member = String::new();
+		loop {
+			match chars.next()? {
+				'\'' if chars.peek() == Some(&'\'') => {
+					chars.next();
+					member.push('\'');
+				}
+				'\'' => break,
+				c => member.push(c),
+			}
+		}
+		members.push(member);
+		while chars.peek().is_some_and(|c| c.is_whitespace()) {
+			chars.next();
+		}
+		match chars.next() {
+			None => return Some(members),
+			Some(',') => {}
+			Some(_) => return None,
+		}
+	}
+}
+
+/// The most members a MySQL `SET` holds.
+pub(crate) const MYSQL_SET_MEMBER_LIMIT: usize = 64;
+
+/// Refuses a MySQL `SET` column of more than [`MYSQL_SET_MEMBER_LIMIT`] members.
+pub(crate) fn check_mysql_set_limit(type_str: &str) -> Result<(), PlanError> {
+	let lower = type_str.trim_start().to_ascii_lowercase();
+	if lower.starts_with("set")
+		&& !lower.starts_with("set_")
+		&& let Some(members) = mysql_members(type_str)
+		&& members.len() > MYSQL_SET_MEMBER_LIMIT
+	{
+		return Err(PlanError::unsupported(format!(
+			"a SET column holds at most {MYSQL_SET_MEMBER_LIMIT} members, not {}",
+			members.len()
+		)));
+	}
+	Ok(())
+}
+
 /// Map MySQL data_type string to SurrealDB Kind. Integer widths follow MySQL's (`tinyint` 8 bits,
-/// `smallint` 16, `mediumint` and `int` 32, `bigint` 64) and a trailing `UNSIGNED` selects the
-/// unsigned kind of the same width.
+/// `smallint` 16, `mediumint` and `int` 32, `bigint` 64) and a trailing `UNSIGNED` or `ZEROFILL`
+/// selects the unsigned kind of the same width. `BIGINT UNSIGNED` and `SERIAL` are `u64`, which
+/// holds every value of the column they declare; the aliases name the same kinds as the types they
+/// abbreviate.
 pub fn map_mysql_type(type_str: &str) -> Kind {
 	let lower = type_str.to_ascii_lowercase();
 	let without_paren = lower.split('(').next().unwrap_or(&lower).trim();
 	let first_word = without_paren.split_whitespace().next().unwrap_or("").trim();
 
-	if without_paren == "double precision" {
-		return Kind::Float;
+	// A name of several words is not known by its first word alone.
+	match without_paren {
+		"double precision" => return Kind::Float,
+		"national char"
+		| "national character"
+		| "national varchar"
+		| "national char varying"
+		| "national character varying"
+		| "character varying"
+		| "long"
+		| "long varchar" => return Kind::String,
+		"long varbinary" => return Kind::Bytes,
+		_ => {}
 	}
 
-	let unsigned = lower.split_whitespace().any(|w| w == "unsigned");
+	// `ZEROFILL` implies `UNSIGNED`.
+	let unsigned = lower.split_whitespace().any(|w| w == "unsigned" || w == "zerofill");
 
 	match first_word {
-		"tinyint" if unsigned => Kind::U8,
-		"tinyint" => Kind::I8,
-		"smallint" if unsigned => Kind::U16,
-		"smallint" => Kind::I16,
-		"mediumint" | "int" | "integer" if unsigned => Kind::U32,
-		"mediumint" | "int" | "integer" => Kind::I32,
-		// The values of an unsigned 64-bit column above the signed range have no exact form in a
-		// text literal or in the wire metadata, so the column holds the signed range and refuses
-		// the rest.
-		"bigint" => Kind::Int,
+		"tinyint" | "int1" if unsigned => Kind::U8,
+		"tinyint" | "int1" => Kind::I8,
+		"smallint" | "int2" if unsigned => Kind::U16,
+		"smallint" | "int2" => Kind::I16,
+		"mediumint" | "middleint" | "int3" | "int" | "integer" | "int4" if unsigned => Kind::U32,
+		"mediumint" | "middleint" | "int3" | "int" | "integer" | "int4" => Kind::I32,
+		"bigint" | "int8" if unsigned => Kind::U64,
+		"bigint" | "int8" => Kind::Int,
+		"serial" => Kind::U64,
+		"float4" => Kind::F32,
+		"float8" => Kind::Float,
 		"float" if mysql_float_is_double(&lower) => Kind::Float,
 		"float" => Kind::F32,
 		"double" | "real" => Kind::Float,
-		"decimal" | "dec" | "numeric" | "fixed" => Kind::Decimal,
-		"char" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext" | "enum" | "set" => {
-			Kind::String
+		"decimal" | "dec" | "numeric" | "fixed" => {
+			// MySQL `DECIMAL` without a precision is `DECIMAL(10,0)`.
+			let precision = lower
+				.split_once('(')
+				.map(|(_, rest)| rest.split([',', ')']).next().unwrap_or("").trim());
+			decimal_kind(Some(precision.unwrap_or("10")))
 		}
+		"enum" => match mysql_members(type_str) {
+			Some(members) if !members.is_empty() => Kind::Enum(EnumRef::Inline(members)),
+			Some(_) | None => Kind::String,
+		},
+		"set" => match mysql_members(type_str) {
+			Some(members) if !members.is_empty() => {
+				Kind::Set(Box::new(Kind::Enum(EnumRef::Inline(members))), None)
+			}
+			Some(_) | None => Kind::String,
+		},
+		"char" | "nchar" | "varchar" | "nvarchar" | "tinytext" | "text" | "mediumtext"
+		| "longtext" => Kind::String,
 		"bool" | "boolean" => Kind::Bool,
-		"date" | "time" | "datetime" | "timestamp" | "year" => Kind::Datetime,
-		"json" => Kind::Object,
-		"binary" | "varbinary" | "tinyblob" | "blob" | "mediumblob" | "longblob" | "bit" => {
-			Kind::Bytes
-		}
+		"date" => Kind::Date,
+		// A MySQL `TIME` is a signed duration of up to 838:59:59, not a time of day.
+		"time" => Kind::Interval,
+		"datetime" => Kind::Timestamp,
+		"timestamp" => Kind::Datetime,
+		// A `YEAR` also takes text, which it reads differently from a number ('0' is 2000); the
+		// declared type's validation stores either as the year it names.
+		"year" => Kind::Either(vec![Kind::U16, Kind::String]),
+		// A JSON document is any JSON value; its declared SQL type restricts a write to the
+		// values JSON can carry.
+		"json" => Kind::Any,
+		"binary" | "varbinary" | "tinyblob" | "blob" | "mediumblob" | "longblob" => Kind::Bytes,
+		// `BIT(n)` for n in 1 to 64 is the unsigned integer of its bits.
+		"bit" => Kind::U64,
+		"vector" => super::vector_ddl::mysql_kind(&lower),
+		// Spatial types (ADR 0014 D6). `GEOMETRY` admits every geometry kind.
+		"geometry" => Kind::Geometry(Vec::new()),
+		"point" => Kind::Geometry(vec![GeometryKind::Point]),
+		"linestring" => Kind::Geometry(vec![GeometryKind::Line]),
+		"polygon" => Kind::Geometry(vec![GeometryKind::Polygon]),
+		"multipoint" => Kind::Geometry(vec![GeometryKind::MultiPoint]),
+		"multilinestring" => Kind::Geometry(vec![GeometryKind::MultiLine]),
+		"multipolygon" => Kind::Geometry(vec![GeometryKind::MultiPolygon]),
+		"geometrycollection" | "geomcollection" => Kind::Geometry(vec![GeometryKind::Collection]),
 		_ => Kind::Any,
 	}
 }
 
 /// The type of a column that may hold NULL unless a constraint forbids it, so
 /// a column added to a table with rows accepts the rows that have no value.
-fn column_kind(data_type: &surrealdb_pgsql::ast::expr::TypeName, not_null: bool) -> Kind {
-	let base_kind = map_pgsql_type(data_type);
+pub(crate) fn column_kind(
+	data_type: &surrealdb_pgsql::ast::expr::TypeName,
+	not_null: bool,
+	catalog: &dyn BinderCatalog,
+) -> Kind {
+	let base_kind = map_pgsql_type_in(data_type, catalog);
 	if not_null || matches!(base_kind, Kind::Any) {
 		base_kind
 	} else {
@@ -181,7 +511,12 @@ fn holds_json(kind: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -205,7 +540,19 @@ fn holds_json(kind: &Kind) -> bool {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => false,
+		| Kind::File(_)
+		| Kind::Enum(_) => false,
+	}
+}
+
+/// The kind of the MySQL column `name` mapped to `kind`. The `id` column is the record id key,
+/// whose integers are signed 64-bit, so a `BIGINT UNSIGNED` or `SERIAL` key is an `int`; the
+/// column's declared SQL type still names the unsigned type. Every other column keeps `kind`.
+fn key_column_kind(name: &str, kind: Kind) -> Kind {
+	if name == "id" && matches!(kind, Kind::U64) {
+		Kind::Int
+	} else {
+		kind
 	}
 }
 
@@ -302,6 +649,49 @@ fn restart_sequence_of_new_table(table: &str, column: &str) -> Expr {
 	}))
 }
 
+/// The `DEFAULT` of a column of `domain` that names none of its own: the domain's, or NULL. A write
+/// that omits the column then stores a value, which the assertion of the domain judges, as it
+/// judges no absent value.
+pub(crate) fn domain_default(domain: &DomainType) -> Expr {
+	domain.default.clone().unwrap_or(Expr::Literal(Literal::Null))
+}
+
+/// The `DEFAULT` of a column that names none of its own and so takes the domain's: the domain's
+/// default as the one expression of a block. The block evaluates as its expression does, and marks
+/// the default as inherited, which an `ALTER DOMAIN ... SET DEFAULT` reads to restate it. A
+/// column's own default is lowered from its SQL text, which never yields a block, so a column
+/// whose own default equals the domain's keeps it.
+pub(crate) fn inherited_default(domain: &DomainType) -> Expr {
+	Expr::Block(Box::new(Block(vec![domain_default(domain)])))
+}
+
+/// The assertion of the `NOT NULL` of the domain `domain`: the value is neither NONE nor NULL, or
+/// the write fails with the error PostgreSQL raises, which the wire layer maps to `23502`.
+pub(crate) fn domain_not_null_assertion(domain: &str) -> Expr {
+	let value = || Expr::Param(Param::from("value".to_string()));
+	let present = Expr::Binary {
+		left: Box::new(Expr::Binary {
+			left: Box::new(value()),
+			op: BinaryOperator::NotEqual,
+			right: Box::new(Expr::Literal(Literal::None)),
+		}),
+		op: BinaryOperator::And,
+		right: Box::new(Expr::Binary {
+			left: Box::new(value()),
+			op: BinaryOperator::NotEqual,
+			right: Box::new(Expr::Literal(Literal::Null)),
+		}),
+	};
+	let refusal = Expr::Throw(Box::new(Expr::Literal(Literal::String(Strand::from(
+		format!("domain {domain} does not allow null values").as_str(),
+	)))));
+	Expr::Binary {
+		left: Box::new(present),
+		op: BinaryOperator::Or,
+		right: Box::new(refusal),
+	}
+}
+
 pub(crate) fn not_null_assertion() -> Expr {
 	Expr::Binary {
 		left: Box::new(Expr::Param(Param::from("value".to_string()))),
@@ -319,6 +709,15 @@ pub(crate) fn is_not_null_assertion(expr: &Expr) -> bool {
 ///
 /// A column with a foreign key is a link to the referenced table; see [`super::foreign_key`].
 pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>, PlanError> {
+	lower_pgsql_create_table_with(create, &EmptyCatalog)
+}
+
+/// [`lower_pgsql_create_table`], where a column may be declared with a user-defined enum type
+/// that `catalog` holds.
+pub fn lower_pgsql_create_table_with(
+	create: &PgCreateTableStmt,
+	catalog: &dyn BinderCatalog,
+) -> Result<Vec<Expr>, PlanError> {
 	let (_, tbl_name_str) = crate::namespace::resolve_pgsql_table_name(&create.name.parts, None)?;
 	let tbl_name = tbl_name_str.as_str();
 	let safe_idx_prefix = tbl_name.replace('.', "_");
@@ -355,13 +754,21 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 		});
 		super::vector_ddl::check_column(&col.data_type)?;
 		let serial = is_serial(&col.data_type);
-		let is_not_null = is_id
+		let domain = domain_of(&col.data_type, catalog)?;
+		let own_not_null = is_id
 			|| is_table_pk
 			|| serial || col
 			.constraints
 			.iter()
 			.any(|c| matches!(c, ColumnConstraint::NotNull | ColumnConstraint::PrimaryKey));
+		let is_not_null = own_not_null;
 		let foreign_key = foreign_keys.get(col.name.as_str());
+		if foreign_key.is_some() && domain.is_some() {
+			return Err(PlanError::unsupported(format!(
+				"a foreign key on the column \"{}\" of \"{tbl_name}\", which is of a domain",
+				col.name
+			)));
+		}
 		if foreign_key.is_some() && (is_id || serial) {
 			return Err(PlanError::UnsupportedStatement(format!(
 				"a foreign key on the {} column \"{}\" of \"{tbl_name}\"",
@@ -375,7 +782,7 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 		}
 		let field_kind = match foreign_key {
 			Some((target, _)) => link_kind(target, !is_not_null),
-			None => column_kind(&col.data_type, is_not_null),
+			None => column_kind(&col.data_type, is_not_null, catalog),
 		};
 
 		let mut field_def = DefineFieldStatement {
@@ -388,6 +795,7 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 			} else {
 				DefineKind::Default
 			},
+			sql_type: Some(pgsql_declared_type(&col.data_type)?),
 			..Default::default()
 		};
 
@@ -461,6 +869,13 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 		if let Some((target, on_delete)) = foreign_key {
 			field_def.reference = Some(reference(*on_delete));
 			field_def.assert = Some(existence_assertion(tbl_name, &col.name, target, !is_not_null));
+		}
+
+		if let Some(domain) = &domain {
+			if matches!(field_def.default, DefineDefault::None) {
+				field_def.default = DefineDefault::Set(inherited_default(domain));
+			}
+			field_def.assert = domain_assertion(own_not_null, domain);
 		}
 
 		if serial && matches!(field_def.default, DefineDefault::None) {
@@ -778,26 +1193,35 @@ pub fn lower_pgsql_alter_table_with(
 				column,
 			} => {
 				super::vector_ddl::check_column(&column.data_type)?;
-				let not_null = column
+				let domain = domain_of(&column.data_type, catalog)?;
+				let own_not_null = column
 					.constraints
 					.iter()
 					.any(|c| matches!(c, ColumnConstraint::NotNull | ColumnConstraint::PrimaryKey));
+				let not_null = own_not_null;
 				let foreign_key = column_foreign_key(column)?;
 				if let Some((target, _)) = &foreign_key {
 					check_target_exists(&staged, target, tbl_name)?;
+					if domain.is_some() {
+						return Err(PlanError::unsupported(format!(
+							"a foreign key on the column \"{}\" of \"{tbl_name}\", which is of a domain",
+							column.name
+						)));
+					}
 				}
 				let mut field_def = DefineFieldStatement {
 					name: Expr::Idiom(Idiom::field(column.name.as_str())),
 					what: Expr::Table(TableName::from(tbl_name)),
 					field_kind: Some(match &foreign_key {
 						Some((target, _)) => link_kind(target, !not_null),
-						None => column_kind(&column.data_type, not_null),
+						None => column_kind(&column.data_type, not_null, catalog),
 					}),
 					kind: if *if_not_exists {
 						DefineKind::IfNotExists
 					} else {
 						DefineKind::Default
 					},
+					sql_type: Some(pgsql_declared_type(&column.data_type)?),
 					..Default::default()
 				};
 				for con in &column.constraints {
@@ -827,6 +1251,12 @@ pub fn lower_pgsql_alter_table_with(
 					field_def.assert =
 						Some(existence_assertion(tbl_name, &column.name, target, !not_null));
 				}
+				if let Some(domain) = &domain {
+					if matches!(field_def.default, DefineDefault::None) {
+						field_def.default = DefineDefault::Set(inherited_default(domain));
+					}
+					field_def.assert = domain_assertion(own_not_null, domain);
+				}
 				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
 			}
 			AlterTableAction::DropColumn {
@@ -846,11 +1276,18 @@ pub fn lower_pgsql_alter_table_with(
 				data_type,
 			} => {
 				super::vector_ddl::check_column(data_type)?;
+				if let Some(domain) = domain_of(data_type, catalog)? {
+					return Err(PlanError::unsupported(format!(
+						"ALTER COLUMN \"{name}\" TYPE to the domain \"{}\", whose NOT NULL and checks the field definition cannot restate",
+						domain.name
+					)));
+				}
 				let field_def = DefineFieldStatement {
 					name: Expr::Idiom(Idiom::field(name.as_str())),
 					what: Expr::Table(TableName::from(tbl_name)),
-					field_kind: Some(map_pgsql_type(data_type)),
+					field_kind: Some(map_pgsql_type_in(data_type, catalog)),
 					kind: DefineKind::Overwrite,
+					sql_type: Some(pgsql_declared_type(data_type)?),
 					..Default::default()
 				};
 				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
@@ -984,11 +1421,58 @@ pub fn lower_pgsql_alter_table_with(
 	Ok(exprs)
 }
 
-/// Lower a PostgreSQL DROP statement into SurrealDB expressions.
+/// Lower `CREATE TYPE name AS ENUM (...)` to `DEFINE ENUM`.
+pub fn lower_pgsql_create_type(create: &PgCreateTypeStmt) -> Result<Vec<Expr>, PlanError> {
+	let (_, name) = crate::namespace::resolve_pgsql_table_name(&create.name.parts, None)?;
+	let define = DefineEnumStatement {
+		name: Strand::new(name.as_str()),
+		labels: create.labels.clone(),
+		..Default::default()
+	};
+	Ok(vec![Expr::Define(Box::new(DefineStatement::Enum(define)))])
+}
+
+/// Lower `ALTER TYPE name ADD VALUE ...` and `ALTER TYPE name RENAME VALUE ...` to `ALTER ENUM`.
+pub fn lower_pgsql_alter_type(alter: &PgAlterTypeStmt) -> Result<Vec<Expr>, PlanError> {
+	let (_, name) = crate::namespace::resolve_pgsql_table_name(&alter.name.parts, None)?;
+	let action = match &alter.action {
+		PgAlterTypeAction::AddValue {
+			if_not_exists,
+			value,
+			placement,
+		} => AlterEnumAction::AddValue {
+			value: value.clone(),
+			position: placement.as_ref().map(|placement| match placement {
+				EnumValuePlacement::Before(anchor) => EnumPosition::Before(anchor.clone()),
+				EnumValuePlacement::After(anchor) => EnumPosition::After(anchor.clone()),
+			}),
+			if_not_exists: *if_not_exists,
+		},
+		PgAlterTypeAction::RenameValue {
+			from,
+			to,
+		} => AlterEnumAction::RenameValue {
+			from: from.clone(),
+			to: to.clone(),
+		},
+	};
+	let stmt = AlterEnumStatement {
+		name: Strand::new(name.as_str()),
+		if_exists: false,
+		actions: vec![action],
+	};
+	Ok(vec![Expr::Alter(Box::new(AlterStatement::Enum(stmt)))])
+}
+
+/// Lower a PostgreSQL DROP statement into SurrealDB expressions. `catalog` says which `DROP TYPE`
+/// names are composite types, which are removed as user types rather than as enums.
 ///
 /// `DROP SCHEMA` needs the tables of the database and is refused here; see
 /// [`lower_pgsql_drop_with`].
-pub fn lower_pgsql_drop(drop: &PgDropStmt) -> Result<Vec<Expr>, PlanError> {
+pub fn lower_pgsql_drop(
+	drop: &PgDropStmt,
+	catalog: &dyn BinderCatalog,
+) -> Result<Vec<Expr>, PlanError> {
 	let mut exprs = Vec::new();
 
 	for name in &drop.names {
@@ -1012,7 +1496,31 @@ pub fn lower_pgsql_drop(drop: &PgDropStmt) -> Result<Vec<Expr>, PlanError> {
 				};
 				exprs.push(Expr::Remove(Box::new(RemoveStatement::Index(rem))));
 			}
-			DropObjectType::Schema | DropObjectType::Type => {
+			DropObjectType::Type => {
+				if catalog.composite_type(obj_name).is_some() {
+					exprs.push(user_types::drop_user_type(
+						obj_name,
+						UserTypeKind::Composite,
+						drop.if_exists,
+						drop.cascade,
+					)?);
+					continue;
+				}
+				let rem = RemoveEnumStatement {
+					name: Strand::new(obj_name),
+					if_exists: drop.if_exists,
+				};
+				exprs.push(Expr::Remove(Box::new(RemoveStatement::Enum(rem))));
+			}
+			DropObjectType::Domain => {
+				exprs.push(user_types::drop_user_type(
+					obj_name,
+					UserTypeKind::Domain,
+					drop.if_exists,
+					drop.cascade,
+				)?);
+			}
+			DropObjectType::Schema => {
 				return Err(PlanError::unsupported(format!(
 					"DROP {:?} is not supported for typed lowering",
 					drop.object_type
@@ -1099,7 +1607,7 @@ pub fn lower_pgsql_drop_with(
 	catalog: &dyn BinderCatalog,
 ) -> Result<Vec<Expr>, PlanError> {
 	if !matches!(drop.object_type, DropObjectType::Schema) {
-		return lower_pgsql_drop(drop);
+		return lower_pgsql_drop(drop, catalog);
 	}
 	let mut exprs = Vec::new();
 	for name in &drop.names {
@@ -1188,13 +1696,18 @@ fn lower_pgsql_ddl_definitions_over(
 	match stmt {
 		PgStatement::CreateTable(s) => {
 			check_create_targets(s, catalog)?;
-			lower_pgsql_create_table(s)
+			lower_pgsql_create_table_with(s, catalog)
 		}
+		PgStatement::CreateType(s) => lower_pgsql_create_type(s),
+		PgStatement::AlterType(s) => lower_pgsql_alter_type(s),
 		PgStatement::CreateIndex(s) => lower_pgsql_create_index_over(s, dimensions),
 		PgStatement::CreateExtension(s) => super::vector_ddl::lower_create_extension(s),
 		PgStatement::CreateView(s) => lower_pgsql_create_view(s),
 		PgStatement::AlterTable(s) => lower_pgsql_alter_table_with(s, catalog),
 		PgStatement::Drop(s) => lower_pgsql_drop_with(s, catalog),
+		PgStatement::CreateDomain(s) => user_types::lower_create_domain(s, catalog),
+		PgStatement::AlterDomain(s) => user_types::lower_alter_domain(s, catalog),
+		PgStatement::CreateCompositeType(s) => user_types::lower_create_composite(s, catalog),
 		PgStatement::Copy(_)
 		| PgStatement::Select(_)
 		| PgStatement::Insert(_)
@@ -1244,7 +1757,8 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 	for col in &create.columns {
 		let is_id = col.name == "id";
 		let is_not_null = is_id || col.not_null || col.primary_key || col.auto_increment;
-		let base_kind = map_mysql_type(&col.data_type);
+		check_mysql_set_limit(&col.data_type)?;
+		let base_kind = key_column_kind(&col.name, map_mysql_type(&col.data_type));
 		let field_kind = if is_not_null || matches!(base_kind, Kind::Any) {
 			base_kind
 		} else {
@@ -1261,6 +1775,7 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 			} else {
 				DefineKind::Default
 			},
+			sql_type: Some(mysql_declared_type(&col.data_type)?),
 			..Default::default()
 		};
 
@@ -1602,7 +2117,8 @@ pub fn lower_mysql_alter_table(alter: &MyAlterTableStmt) -> Result<Vec<Expr>, Pl
 	for action in &alter.actions {
 		match action {
 			MyAlterTableAction::AddColumn(col) => {
-				let base_kind = map_mysql_type(&col.data_type);
+				check_mysql_set_limit(&col.data_type)?;
+				let base_kind = key_column_kind(&col.name, map_mysql_type(&col.data_type));
 				let is_not_null = col.name == "id" || col.not_null || col.primary_key;
 				let field_kind = if is_not_null || matches!(base_kind, Kind::Any) {
 					base_kind
@@ -1615,6 +2131,7 @@ pub fn lower_mysql_alter_table(alter: &MyAlterTableStmt) -> Result<Vec<Expr>, Pl
 					what: Expr::Table(TableName::from(tbl_name)),
 					field_kind: Some(field_kind),
 					kind: DefineKind::Default,
+					sql_type: Some(mysql_declared_type(&col.data_type)?),
 					..Default::default()
 				};
 				if let Some(def) = &col.default {
@@ -1633,7 +2150,8 @@ pub fn lower_mysql_alter_table(alter: &MyAlterTableStmt) -> Result<Vec<Expr>, Pl
 				exprs.push(Expr::Remove(Box::new(RemoveStatement::Field(rem))));
 			}
 			MyAlterTableAction::ModifyColumn(col) => {
-				let base_kind = map_mysql_type(&col.data_type);
+				check_mysql_set_limit(&col.data_type)?;
+				let base_kind = key_column_kind(&col.name, map_mysql_type(&col.data_type));
 				let is_not_null = col.name == "id" || col.not_null || col.primary_key;
 				let field_kind = if is_not_null || matches!(base_kind, Kind::Any) {
 					base_kind
@@ -1646,6 +2164,7 @@ pub fn lower_mysql_alter_table(alter: &MyAlterTableStmt) -> Result<Vec<Expr>, Pl
 					what: Expr::Table(TableName::from(tbl_name)),
 					field_kind: Some(field_kind),
 					kind: DefineKind::Overwrite,
+					sql_type: Some(mysql_declared_type(&col.data_type)?),
 					..Default::default()
 				};
 				if let Some(def) = &col.default {
@@ -1664,7 +2183,8 @@ pub fn lower_mysql_alter_table(alter: &MyAlterTableStmt) -> Result<Vec<Expr>, Pl
 				};
 				exprs.push(Expr::Remove(Box::new(RemoveStatement::Field(rem))));
 
-				let base_kind = map_mysql_type(&new_def.data_type);
+				check_mysql_set_limit(&new_def.data_type)?;
+				let base_kind = key_column_kind(&new_def.name, map_mysql_type(&new_def.data_type));
 				let is_not_null = new_def.name == "id" || new_def.not_null || new_def.primary_key;
 				let field_kind = if is_not_null || matches!(base_kind, Kind::Any) {
 					base_kind
@@ -1677,6 +2197,7 @@ pub fn lower_mysql_alter_table(alter: &MyAlterTableStmt) -> Result<Vec<Expr>, Pl
 					what: Expr::Table(TableName::from(tbl_name)),
 					field_kind: Some(field_kind),
 					kind: DefineKind::Default,
+					sql_type: Some(mysql_declared_type(&new_def.data_type)?),
 					..Default::default()
 				};
 				if let Some(def) = &new_def.default {
@@ -1865,3 +2386,4 @@ fn one_statement(mut definitions: Vec<Expr>) -> Expr {
 
 #[cfg(test)]
 mod statement_tests;
+mod user_types;

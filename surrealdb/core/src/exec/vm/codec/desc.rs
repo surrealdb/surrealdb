@@ -586,6 +586,10 @@ fn encode_ty(ty: &Ty, value: &Value, w: &mut Writer) -> Result<()> {
 			| Value::Number(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Array(_)
 			| Value::Set(_)
@@ -620,6 +624,10 @@ fn encode_ty(ty: &Ty, value: &Value, w: &mut Writer) -> Result<()> {
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Array(_)
 			| Value::Set(_)
@@ -646,6 +654,10 @@ fn encode_ty(ty: &Ty, value: &Value, w: &mut Writer) -> Result<()> {
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Array(_)
 			| Value::Set(_)
@@ -681,7 +693,7 @@ fn encode_ty(ty: &Ty, value: &Value, w: &mut Writer) -> Result<()> {
 		Ty::Named(name) => encode_named(w.codec()?.lookup(name)?, value, w)?,
 		Ty::Native(native) => match (native, value) {
 			(Native::Value, value) => value::encode(value, w)?,
-			(Native::Number, Value::Number(n)) => value::encode_number(n, w),
+			(Native::Number, Value::Number(n)) => value::encode_number(n, w)?,
 			(Native::Datetime, Value::Datetime(d)) => value::encode_val_datetime(d, w),
 			(Native::RecordId, Value::RecordId(rid)) => value::encode_record_id(rid, w)?,
 			(Native::RecordIdKey, Value::RecordId(rid)) => {

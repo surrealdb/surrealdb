@@ -421,6 +421,7 @@ impl Cx<'_> {
 						| PhysicalKind::Bytes
 						| PhysicalKind::RecordKey
 						| PhysicalKind::DecimalVar
+						| PhysicalKind::BigDecimal
 						| PhysicalKind::Value
 						| PhysicalKind::Object => (Kind::Dynamic, NO_SLOT, Fill::Dynamic, Some((offset, width))),
 					}
@@ -429,6 +430,8 @@ impl Cx<'_> {
 				(PhysicalKind::Bytes, _) => (Kind::Bytes, NO_SLOT, Fill::RawBytes, None),
 				(PhysicalKind::DecimalVar, _) => (Kind::Decimal, NO_SLOT, Fill::Decimal, None),
 				(PhysicalKind::RecordKey, _) => (Kind::Record, NO_SLOT, Fill::Record, None),
+				// A bigdecimal is read as the stored BIGDECIMAL it holds, and written as its CBOR.
+				(PhysicalKind::BigDecimal, _) => (Kind::Dynamic, NO_SLOT, Fill::Dynamic, None),
 				// A `Value` slice holds `NULL` as a value of its own, written as CBOR `null`.
 				_ => match self.declared_array(depth, &column.path[depth]) {
 					Some(element) => (Kind::Array, NO_SLOT, Fill::Array(element), None),
@@ -612,6 +615,12 @@ fn declared(kind: &crate::expr::Kind) -> (Kind, Option<Kind>, u8, String) {
 		| K::Function(..)
 		| K::Range
 		| K::Literal(_)
-		| K::File(_) => plain(Kind::Dynamic),
+		| K::File(_)
+		| K::Enum(_)
+		| K::Date
+		| K::Time
+		| K::Timestamp
+		| K::Interval
+		| K::BigDecimal => plain(Kind::Dynamic),
 	}
 }

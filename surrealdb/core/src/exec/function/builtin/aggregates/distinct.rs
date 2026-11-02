@@ -95,8 +95,8 @@ impl<A: Accumulator> DistinctAccumulator<A> {
 	/// succeeds, and `seen` gives it up where the update fails. A fold that fails therefore leaves
 	/// the accumulator as it was, provided `inner.update` leaves `inner` unchanged when it fails.
 	fn fold(&mut self, number: Number) -> Result<()> {
-		if self.seen.insert(number) {
-			if let Err(e) = self.inner.update(Value::Number(number)) {
+		if self.seen.insert(number.clone()) {
+			if let Err(e) = self.inner.update(Value::Number(number.clone())) {
 				self.seen.remove(&number);
 				return Err(e);
 			}
@@ -149,7 +149,7 @@ impl<A: Accumulator + Clone + Default + 'static> Accumulator for DistinctAccumul
 			self.inner.clone_from(&other.inner);
 		} else {
 			for number in &other.numbers {
-				self.fold(*number)?;
+				self.fold(number.clone())?;
 			}
 		}
 		Ok(())

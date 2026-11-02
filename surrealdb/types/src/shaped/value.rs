@@ -900,6 +900,12 @@ impl<'v> ShapedValue<'v> for PublicShaped<'v> {
 			Value::Number(Number::F32(v)) => Leaf::F32(*v),
 			Value::Number(Number::Float(v)) => Leaf::Float(*v),
 			Value::Number(Number::Decimal(v)) => Leaf::Decimal(*v),
+			// A bigdecimal that fits a decimal is a decimal leaf. Any other value has no
+			// fixed-width leaf and is written through the dynamic path.
+			Value::Number(Number::BigDecimal(v)) => match Decimal::try_from(v.as_ref()) {
+				Ok(d) => Leaf::Decimal(d),
+				Err(_) => Leaf::Other,
+			},
 			Value::String(v) => Leaf::String(v),
 			Value::Bytes(v) => Leaf::Bytes(&v.0),
 			Value::Datetime(v) => Leaf::Datetime(v.0.timestamp(), v.0.timestamp_subsec_nanos()),
@@ -923,7 +929,11 @@ impl<'v> ShapedValue<'v> for PublicShaped<'v> {
 			| Value::File(_)
 			| Value::Range(_)
 			| Value::Regex(_)
-			| Value::Set(_) => Leaf::Other,
+			| Value::Set(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_) => Leaf::Other,
 		}
 	}
 

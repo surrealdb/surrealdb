@@ -2035,6 +2035,14 @@ impl Ddl<'_, '_> {
 				start,
 				timeout,
 			} => self.define_sequence(attrs, *name, (*batch, *start, *timeout)),
+			DefineObject::Enum {
+				name,
+				comment,
+				..
+			} => self.define_enum(attrs, name.as_str(), *comment),
+			DefineObject::UserType {
+				name,
+			} => self.define_user_type(attrs, name.as_str()),
 		}
 	}
 
@@ -2514,6 +2522,139 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
+	/// `DEFINE ENUM`: the enum's id is the existing definition's, or a fresh one, so a redefinition
+	/// keeps the identity the database knows it by.
+	fn define_enum(
+		&mut self,
+		attrs: &DefineAttrs,
+		name: &str,
+		comment: OperandSlot,
+	) -> Result<(), IrError> {
+		self.guard()?;
+		let (ns, db) = self.ids_creating()?;
+		let name = self.constant(Value::String(name.into()))?;
+		let key =
+			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("en", name)])?;
+		let existing = self.reg()?;
+		self.store(StoreInstr::Get {
+			route: RouteId::named("EnumDefKey"),
+			key,
+			ty: TypeId::named("StoredEnumDefinition"),
+			dst: existing,
+		});
+		let name_reg = self.load(name)?;
+		let id = self.reg()?;
+		let missing =
+			self.exists(&attrs.mode, existing, StatementError::EnAlreadyExists, name_reg)?;
+		self.get_field(existing, "id", id)?;
+		let built = self.label()?;
+		self.emit(Instr::Jump {
+			target: built,
+		});
+		self.bind(missing)?;
+		self.store(StoreInstr::NextId {
+			sequence: IdSequence::Enum,
+			ns: Some(ns),
+			db: Some(db),
+			dst: id,
+			draw: 0,
+			reserved: None,
+		});
+		self.bind(built)?;
+		let comment = self.comment(comment)?;
+		let template = self.constant(attrs.template.value.clone())?;
+		let definition = self.load(template)?;
+		self.set_comment(definition, &comment)?;
+		self.set_field(definition, "id", Operand::Reg(id))?;
+		self.store(StoreInstr::Put {
+			route: RouteId::named("EnumDefKey"),
+			key,
+			ty: TypeId::named("StoredEnumDefinition"),
+			value: definition,
+		});
+		self.store(StoreInstr::ClearCache);
+		self.answer_none()
+	}
+
+	/// The definition of a domain or composite type, whose whole body is the op's template: the
+	/// type's id is the existing definition's, or a fresh one drawn from the sequence that numbers
+	/// the database's enums. A name an enum of the database holds is refused, as the two share
+	/// PostgreSQL's name space of types.
+	fn define_user_type(&mut self, attrs: &DefineAttrs, name: &str) -> Result<(), IrError> {
+		self.guard()?;
+		let (ns, db) = self.ids_creating()?;
+		let name = self.constant(Value::String(name.into()))?;
+		let key =
+			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("ty", name)])?;
+		let existing = self.reg()?;
+		self.store(StoreInstr::Get {
+			route: RouteId::named("UserTypeKey"),
+			key,
+			ty: TypeId::named("StoredUserTypeDefinition"),
+			dst: existing,
+		});
+		let name_reg = self.load(name)?;
+		let enum_key =
+			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("en", name)])?;
+		let enumeration = self.reg()?;
+		self.store(StoreInstr::Get {
+			route: RouteId::named("EnumDefKey"),
+			key: enum_key,
+			ty: TypeId::named("StoredEnumDefinition"),
+			dst: enumeration,
+		});
+		let no_enum = self.label()?;
+		self.emit(Instr::JumpIf {
+			cond: Operand::Reg(enumeration),
+			truthy: false,
+			target: no_enum,
+		});
+		self.store(StoreInstr::RaiseUserType {
+			name: name_reg,
+			exists: true,
+		});
+		self.bind(no_enum)?;
+		let id = self.reg()?;
+		let missing = self.exists_with(
+			&attrs.mode,
+			existing,
+			|l| {
+				l.store(StoreInstr::RaiseUserType {
+					name: name_reg,
+					exists: true,
+				});
+				Ok(())
+			},
+			|_| Ok(()),
+		)?;
+		self.get_field(existing, "id", id)?;
+		let built = self.label()?;
+		self.emit(Instr::Jump {
+			target: built,
+		});
+		self.bind(missing)?;
+		self.store(StoreInstr::NextId {
+			sequence: IdSequence::Enum,
+			ns: Some(ns),
+			db: Some(db),
+			dst: id,
+			draw: 0,
+			reserved: None,
+		});
+		self.bind(built)?;
+		let template = self.constant(attrs.template.value.clone())?;
+		let definition = self.load(template)?;
+		self.set_field(definition, "id", Operand::Reg(id))?;
+		self.store(StoreInstr::Put {
+			route: RouteId::named("UserTypeKey"),
+			key,
+			ty: TypeId::named("StoredUserTypeDefinition"),
+			value: definition,
+		});
+		self.store(StoreInstr::ClearCache);
+		self.answer_none()
+	}
+
 	/// The key route of a bucket at `base`, and the ids of the namespace and database its key
 	/// lies under: none at the root, the session's namespace at `NAMESPACE`, its namespace and
 	/// database at `DATABASE`. With `creating`, a namespace or database that does not exist is
@@ -2809,6 +2950,13 @@ impl Ddl<'_, '_> {
 				name,
 				base,
 			} => self.remove_bucket(*name, *base, if_exists),
+			RemoveObject::Enum {
+				name,
+			} => self.remove_enum(name.as_str(), if_exists),
+			RemoveObject::UserType {
+				name,
+				domain,
+			} => self.remove_user_type(name.as_str(), *domain, if_exists),
 			RemoveObject::Module {
 				name,
 			} => self.remove_module(&name.get_storage_name(), if_exists),
@@ -3008,6 +3156,86 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
+	/// `REMOVE ENUM`: refused while a field has a type that names the enum.
+	fn remove_enum(&mut self, name: &str, if_exists: bool) -> Result<(), IrError> {
+		self.guard()?;
+		let (ns, db) = self.session_ids()?;
+		let name = self.constant(Value::String(name.into()))?;
+		let key =
+			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("en", name)])?;
+		let definition = self.reg()?;
+		self.store(StoreInstr::Get {
+			route: RouteId::named("EnumDefKey"),
+			key,
+			ty: TypeId::named("StoredEnumDefinition"),
+			dst: definition,
+		});
+		let name_reg = self.load(name)?;
+		self.must_exist(if_exists, definition, StatementError::EnNotFound, name_reg)?;
+		self.store(StoreInstr::CheckEnumUnreferenced {
+			ns,
+			db,
+			name: name_reg,
+		});
+		self.store(StoreInstr::Delete {
+			route: RouteId::named("EnumDefKey"),
+			key,
+		});
+		self.store(StoreInstr::ClearCache);
+		self.answer_none()
+	}
+
+	/// The removal of a domain (`domain`) or a composite type: refused when the type is of the
+	/// other kind, and while a field of the database declares its SQL type with it.
+	fn remove_user_type(
+		&mut self,
+		name: &str,
+		domain: bool,
+		if_exists: bool,
+	) -> Result<(), IrError> {
+		self.guard()?;
+		let (ns, db) = self.session_ids()?;
+		let name = self.constant(Value::String(name.into()))?;
+		let key =
+			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("ty", name)])?;
+		let definition = self.reg()?;
+		self.store(StoreInstr::Get {
+			route: RouteId::named("UserTypeKey"),
+			key,
+			ty: TypeId::named("StoredUserTypeDefinition"),
+			dst: definition,
+		});
+		let name_reg = self.load(name)?;
+		let present = self.label()?;
+		self.emit(Instr::JumpIf {
+			cond: Operand::Reg(definition),
+			truthy: true,
+			target: present,
+		});
+		if if_exists {
+			self.answer_none()?;
+		} else {
+			self.store(StoreInstr::RaiseUserType {
+				name: name_reg,
+				exists: false,
+			});
+		}
+		self.bind(present)?;
+		self.store(StoreInstr::CheckUserTypeRemovable {
+			ns,
+			db,
+			name: name_reg,
+			definition,
+			domain,
+		});
+		self.store(StoreInstr::Delete {
+			route: RouteId::named("UserTypeKey"),
+			key,
+		});
+		self.store(StoreInstr::ClearCache);
+		self.answer_none()
+	}
+
 	/// `REMOVE BUCKET`: the definition at `base`, deleted under the name it is stored by.
 	fn remove_bucket(
 		&mut self,
@@ -3036,6 +3264,50 @@ impl Ddl<'_, '_> {
 			key: stored_at,
 		});
 		self.store(StoreInstr::ClearCache);
+		self.answer_none()
+	}
+
+	/// `ALTER ENUM`: the stored definition edited by the statement's changes and written back.
+	fn alter_enum(
+		&mut self,
+		attrs: &AlterAttrs,
+		name: &str,
+		edits: &[crate::exec::ir::iface::statements::EnumEdit],
+	) -> Result<(), IrError> {
+		self.guard()?;
+		let (ns, db) = self.session_ids()?;
+		let name = self.constant(Value::String(name.into()))?;
+		let key =
+			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("en", name)])?;
+		let definition = self.stored_at(
+			("EnumDefKey", "StoredEnumDefinition"),
+			key,
+			attrs.if_exists,
+			(StatementError::EnNotFound, name),
+		)?;
+		self.store(StoreInstr::AlterEnum {
+			definition,
+			edits: edits.to_vec(),
+		});
+		self.store(StoreInstr::Put {
+			route: RouteId::named("EnumDefKey"),
+			key,
+			ty: TypeId::named("StoredEnumDefinition"),
+			value: definition,
+		});
+		self.store(StoreInstr::ClearCache);
+		if edits
+			.iter()
+			.any(|edit| matches!(edit, crate::exec::ir::iface::statements::EnumEdit::Rename { .. }))
+		{
+			let name = self.load(name)?;
+			self.store(StoreInstr::RewriteEnumLabels {
+				ns,
+				db,
+				name,
+				edits: edits.to_vec(),
+			});
+		}
 		self.answer_none()
 	}
 
@@ -3599,6 +3871,10 @@ impl Ddl<'_, '_> {
 				matches!(backend, AlterKind::Set(_)) || !matches!(readonly, AlterKind::None),
 				*revoke_signatures,
 			),
+			AlterObject::Enum {
+				name,
+				edits,
+			} => self.alter_enum(attrs, name.as_str(), edits),
 			AlterObject::Config {
 				inner,
 				..

@@ -25,6 +25,7 @@ value = """{
 	buckets: {},
 	compatibility: 4,
 	configs: {},
+	enums: {},
 	extensions: {},
 	functions: {},
 	models: {},

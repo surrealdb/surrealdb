@@ -816,7 +816,7 @@ async fn test_prepared_statement_binary_rows_carry_datetimes_durations_and_json(
 			("born".to_string(), MYSQL_TYPE_TIMESTAMP),
 			("seen".to_string(), MYSQL_TYPE_TIMESTAMP),
 			("tags".to_string(), MYSQL_TYPE_JSON),
-			("took".to_string(), MYSQL_TYPE_VAR_STRING),
+			("took".to_string(), MYSQL_TYPE_TIME),
 		]
 	);
 
@@ -829,9 +829,8 @@ async fn test_prepared_statement_binary_rows_carry_datetimes_durations_and_json(
 	// tags: JSON as a length-encoded string.
 	expected.push(13);
 	expected.extend_from_slice(b"[\"rust\",\"db\"]");
-	// took: a declared duration is text in the MySQL TIME form.
-	expected.push(8);
-	expected.extend_from_slice(b"26:00:00");
+	// took: a duration is a binary TIME of 1 day and 2 hours (length 8, positive).
+	expected.extend_from_slice(&[8, 0, 1, 0, 0, 0, 2, 0, 0]);
 	assert_eq!(row, expected);
 
 	let (_, term) = read_packet(&mut stream).await;

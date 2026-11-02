@@ -4,14 +4,20 @@
 //! MySQL differ on the position of a string, on NULL, and on what is an error.
 
 use surrealdb_expr::expr::logical::{LogicalCall, LogicalExpr, LogicalIf, LogicalLiteral};
+use surrealdb_expr::expr::statements::define::SqlTypeDialect;
+use surrealdb_expr::expr::statements::define::declared_type::{
+	DeclaredSqlType, IntervalFinestField,
+};
 use surrealdb_expr::expr::{BinaryOperator, Function, Kind, PrefixOperator};
 use surrealdb_expr::val::{Duration, Regex};
 use surrealdb_strand::Strand;
 
+use crate::descriptor::SqlType;
 use crate::dialect::{DialectPolicy, SqlDialect};
 use crate::error::PlanError;
 use crate::ir::{BoundExpr, BoundLiteral};
 use crate::lower::expr::{is_not_null_expr, is_null_expr, lower_bound_expr};
+use crate::lower::temporal::static_type;
 
 mod dates;
 mod json;
@@ -359,17 +365,6 @@ fn lower_mysql_length(
 	Ok(strict(values, |values| {
 		call("bytes::len", vec![call("type::bytes", vec![values[0].clone()])])
 	}))
-}
-
-/// The start of the current day, which is what `CURRENT_DATE` is.
-fn today() -> LogicalExpr {
-	call(
-		"time::floor",
-		vec![
-			call("time::now", Vec::new()),
-			LogicalExpr::Literal(LogicalLiteral::Duration(Duration::from_secs(86_400))),
-		],
-	)
 }
 
 fn string_literal(expr: &BoundExpr) -> Option<&str> {
@@ -802,9 +797,10 @@ fn lower_date_part(args: &[BoundExpr], policy: &DialectPolicy) -> Result<Logical
 		return Err(PlanError::UnsupportedExpression(format!("the extract unit {field}")));
 	}
 	let mut value = lower_args(&args[1..], policy)?;
-	if policy.dialect == SqlDialect::MySql {
-		value = value.into_iter().map(mysql_datetime).collect();
+	if policy.dialect == SqlDialect::Postgres {
+		return lower_pg_date_part(&field, value.remove(0));
 	}
+	value = value.into_iter().map(mysql_datetime).collect();
 	let part = |function: &str, v: &[LogicalExpr]| call(function, vec![v[0].clone()]);
 	Ok(strict(value, |v| match field.as_str() {
 		"year" => part("time::year", v),
@@ -845,6 +841,80 @@ fn lower_date_part(args: &[BoundExpr], policy: &DialectPolicy) -> Result<Logical
 			vec![binary(part("time::month", v), BinaryOperator::Divide, float(3.0))],
 		),
 		_ => failure(&format!("unit \"{field}\" not recognized for type timestamp")),
+	}))
+}
+
+/// The fields PostgreSQL's `extract` and `date_part` read from a date, time, timestamp or
+/// interval, by their canonical names.
+const PG_EXTRACT_FIELDS: [&str; 19] = [
+	"year",
+	"month",
+	"day",
+	"quarter",
+	"decade",
+	"century",
+	"millennium",
+	"dow",
+	"isodow",
+	"doy",
+	"week",
+	"isoyear",
+	"julian",
+	"hour",
+	"minute",
+	"second",
+	"milliseconds",
+	"microseconds",
+	"epoch",
+];
+
+/// The canonical name of a PostgreSQL date field, which also accepts the plural and the
+/// singular of the time units.
+fn pg_extract_field(field: &str) -> &str {
+	match field {
+		"years" => "year",
+		"months" => "month",
+		"days" => "day",
+		"hours" => "hour",
+		"minutes" => "minute",
+		"seconds" => "second",
+		"millisecond" => "milliseconds",
+		"microsecond" => "microseconds",
+		"centuries" => "century",
+		"decades" => "decade",
+		"millennia" => "millennium",
+		other => other,
+	}
+}
+
+/// PostgreSQL `date_part(field, v)` and `extract(field FROM v)` over a date, time, timestamp,
+/// timestamptz or interval.
+fn lower_pg_date_part(field: &str, value: LogicalExpr) -> Result<LogicalExpr, PlanError> {
+	let field = pg_extract_field(field);
+	if !PG_EXTRACT_FIELDS.contains(&field) {
+		return Ok(strict(vec![value], |_| {
+			failure(&format!("unit \"{field}\" not recognized for type timestamp"))
+		}));
+	}
+	let interval_part = match field {
+		"year" => Some("interval::years"),
+		"month" => Some("interval::months"),
+		"day" => Some("interval::days"),
+		"hour" => Some("interval::hours"),
+		"minute" => Some("interval::mins"),
+		"second" => Some("interval::secs"),
+		_ => None,
+	};
+	Ok(strict(vec![value], |v| {
+		let temporal = call("time::extract", vec![v[0].clone(), text(field)]);
+		match interval_part {
+			Some(function) => when(
+				call("type::is_interval", vec![v[0].clone()]),
+				call(function, vec![v[0].clone()]),
+				temporal,
+			),
+			None => temporal,
+		}
 	}))
 }
 
@@ -903,7 +973,51 @@ fn mysql_week(date: LogicalExpr) -> LogicalExpr {
 	})
 }
 
-/// `date_trunc(unit, ts)`.
+/// `isfinite(x)` for a `date`, `timestamp` or `timestamptz`: `x` is neither `infinity` nor
+/// `-infinity`. The infinite values are compared with the typed constructor of the operand's kind,
+/// so a comparison never crosses kinds, where the greatest date would not equal the greatest
+/// timestamp. An operand whose type is not known when the statement is lowered (a value an
+/// `INSERT` writes) is compared with the infinite values of all three kinds, of which only those
+/// of its own kind can equal it. A bare text literal is refused, as PostgreSQL finds the call
+/// ambiguous, and so is an operand of any other known type. A NULL operand gives NULL, as in
+/// PostgreSQL.
+fn lower_isfinite(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalExpr, PlanError> {
+	let [arg] = args else {
+		return Err(PlanError::UnsupportedExpression("isfinite takes one argument".to_owned()));
+	};
+	let kind = static_type(arg, SqlDialect::Postgres);
+	let constructors: &[&str] = if kind == SqlType::Date {
+		&["type::date"]
+	} else if kind == SqlType::Timestamp {
+		&["type::timestamp"]
+	} else if kind == SqlType::TimestampTz {
+		&["type::datetime"]
+	} else if kind == SqlType::Unknown && string_literal(arg).is_none() {
+		&["type::date", "type::timestamp", "type::datetime"]
+	} else {
+		return Err(PlanError::UnsupportedExpression(format!(
+			"isfinite of a value of type {kind:?}; it takes a date, timestamp or timestamptz"
+		)));
+	};
+	let value = lower_bound_expr(arg, policy)?;
+	let mut comparisons = constructors.iter().flat_map(|constructor| {
+		["infinity", "-infinity"].map(|bound| {
+			binary(value.clone(), BinaryOperator::Equal, call(constructor, vec![text(bound)]))
+		})
+	});
+	let first = comparisons.next().ok_or_else(|| {
+		PlanError::UnsupportedExpression("isfinite with no kind to compare".to_owned())
+	})?;
+	let infinite =
+		comparisons.fold(first, |either, equal| binary(either, BinaryOperator::Or, equal));
+	Ok(LogicalExpr::Prefix {
+		op: PrefixOperator::Not,
+		expr: Box::new(infinite),
+	})
+}
+
+/// `date_trunc(unit, v)`: a timestamp and a timestamptz keep their type, and a date is a
+/// timestamptz as PostgreSQL's promotion makes it.
 fn lower_date_trunc(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalExpr, PlanError> {
 	let unit = string_literal(&args[0])
 		.ok_or_else(|| {
@@ -912,53 +1026,54 @@ fn lower_date_trunc(args: &[BoundExpr], policy: &DialectPolicy) -> Result<Logica
 			)
 		})?
 		.to_ascii_lowercase();
+	let unit = match unit.as_str() {
+		"years" => "year".to_owned(),
+		"months" => "month".to_owned(),
+		"days" => "day".to_owned(),
+		"hours" => "hour".to_owned(),
+		"minutes" => "minute".to_owned(),
+		"seconds" => "second".to_owned(),
+		"millisecond" => "milliseconds".to_owned(),
+		"microsecond" => "microseconds".to_owned(),
+		"centuries" => "century".to_owned(),
+		"decades" => "decade".to_owned(),
+		"millennia" => "millennium".to_owned(),
+		_ => unit,
+	};
+	const UNITS: [&str; 13] = [
+		"microseconds",
+		"milliseconds",
+		"second",
+		"minute",
+		"hour",
+		"day",
+		"week",
+		"month",
+		"quarter",
+		"year",
+		"decade",
+		"century",
+		"millennium",
+	];
 	let value = lower_args(&args[1..], policy)?;
-	let group = |name: &str, v: &[LogicalExpr]| call("time::group", vec![v[0].clone(), text(name)]);
-	Ok(strict(value, |v| match unit.as_str() {
-		"year" | "month" | "day" | "hour" | "minute" | "second" => group(&unit, v),
-		"quarter" => {
-			let index = call(
-				"math::floor",
-				vec![binary(
-					binary(
-						call("time::month", vec![v[0].clone()]),
-						BinaryOperator::Subtract,
-						int(1),
-					),
-					BinaryOperator::Divide,
-					float(3.0),
-				)],
-			);
-			let months = LogicalExpr::Array(vec![text("01"), text("04"), text("07"), text("10")]);
-			call(
-				"type::datetime",
-				vec![call(
-					"string::concat",
-					vec![
-						call("time::format", vec![v[0].clone(), text("%Y-")]),
-						call("array::at", vec![months, index]),
-						text("-01T00:00:00Z"),
-					],
-				)],
-			)
+	Ok(strict(value, |v| {
+		if !UNITS.contains(&unit.as_str()) {
+			return failure(&format!(
+				"unit \"{unit}\" not recognized for type timestamp with time zone"
+			));
 		}
-		"week" => binary(
-			group("day", v),
-			BinaryOperator::Subtract,
-			binary(
-				LogicalExpr::Literal(LogicalLiteral::Duration(
-					Duration::from_days(1).expect("a day"),
-				)),
-				BinaryOperator::Multiply,
-				binary(call("time::wday", vec![v[0].clone()]), BinaryOperator::Subtract, int(1)),
-			),
-		),
-		_ => failure(&format!("unit \"{unit}\" not recognized for type timestamp with time zone")),
+		let operand = when(
+			call("type::is_date", vec![v[0].clone()]),
+			call("type::datetime", vec![v[0].clone()]),
+			v[0].clone(),
+		);
+		call("time::trunc", vec![operand, text(&unit)])
 	}))
 }
 
-/// A MySQL date or datetime as a datetime: a datetime stays one, and text as MySQL writes it
-/// (`2024-03-15` or `2024-03-15 10:20:30`) is read as UTC.
+/// A MySQL date or datetime as a datetime: a datetime stays one, a `date` or `timestamp` value is
+/// read as UTC midnight or wall time, and text as MySQL writes it (`2024-03-15` or
+/// `2024-03-15 10:20:30`) is read as UTC.
 fn mysql_datetime(value: LogicalExpr) -> LogicalExpr {
 	let current = LogicalExpr::Current;
 	LogicalExpr::Optional {
@@ -969,13 +1084,17 @@ fn mysql_datetime(value: LogicalExpr) -> LogicalExpr {
 			call(
 				"type::datetime",
 				vec![when(
-					binary(len(&current), BinaryOperator::Equal, int(10)),
-					binary(current.clone(), BinaryOperator::Add, text("T00:00:00Z")),
-					binary(
-						call("string::replace", vec![current, text(" "), text("T")]),
-						BinaryOperator::Add,
-						text("Z"),
+					call("type::is_string", vec![current.clone()]),
+					when(
+						binary(len(&current), BinaryOperator::Equal, int(10)),
+						binary(current.clone(), BinaryOperator::Add, text("T00:00:00Z")),
+						binary(
+							call("string::replace", vec![current.clone(), text(" "), text("T")]),
+							BinaryOperator::Add,
+							text("Z"),
+						),
 					),
+					current,
 				)],
 			),
 		)),
@@ -1102,6 +1221,10 @@ fn lower_pg_typeof(args: &[BoundExpr], policy: &DialectPolicy) -> Result<Logical
 		("decimal", "numeric"),
 		("string", "text"),
 		("datetime", "timestamp with time zone"),
+		("date", "date"),
+		("time", "time without time zone"),
+		("timestamp", "timestamp without time zone"),
+		("interval", "interval"),
 		("duration", "interval"),
 		("uuid", "uuid"),
 		("bytes", "bytea"),
@@ -1503,7 +1626,7 @@ fn lower_mysql_date_part(
 				BinaryOperator::Add,
 				int(1),
 			),
-			"date" => call("time::group", vec![date, text("day")]),
+			"date" => call("type::date", vec![date]),
 			_ => {
 				let first = call("time::group", vec![date, text("month")]);
 				let some_day_of_next_month = binary(
@@ -1513,10 +1636,13 @@ fn lower_mysql_date_part(
 						Duration::from_days(32).expect("32 days"),
 					)),
 				);
-				binary(
-					call("time::group", vec![some_day_of_next_month, text("month")]),
-					BinaryOperator::Subtract,
-					one_day(),
+				call(
+					"type::date",
+					vec![binary(
+						call("time::group", vec![some_day_of_next_month, text("month")]),
+						BinaryOperator::Subtract,
+						one_day(),
+					)],
 				)
 			}
 		}
@@ -1810,101 +1936,135 @@ fn lower_date_add(
 	} else {
 		1
 	};
-	let values = vec![
-		mysql_datetime(lower_bound_expr(&args[0], policy)?),
-		lower_bound_expr(&args[1], policy)?,
-	];
-	Ok(strict(values, |v| {
-		// MySQL reads a quoted amount, as in INTERVAL '1' DAY, as a number.
-		let number = when(
-			call("type::is_string", vec![v[1].clone()]),
-			call("type::number", vec![v[1].clone()]),
-			v[1].clone(),
-		);
-		let amount = binary(number, BinaryOperator::Multiply, int(sign));
-		if let Some((secs, nanos)) = seconds {
-			let unit = Duration::from_secs(secs) + Duration::from_nanos(u64::from(nanos));
-			let span = |count: LogicalExpr| {
-				binary(
-					LogicalExpr::Literal(LogicalLiteral::Duration(unit)),
-					BinaryOperator::Multiply,
-					count,
-				)
+	let calendar_unit = !matches!(unit.as_str(), "MICROSECOND" | "SECOND" | "MINUTE" | "HOUR");
+	let values = vec![lower_bound_expr(&args[0], policy)?, lower_bound_expr(&args[1], policy)?];
+	Ok(strict(values, |outer| {
+		let (given, amount) = (outer[0].clone(), outer[1].clone());
+		// The sum is a datetime; MySQL answers a `DATE` with a `DATE` for a unit of a day or more
+		// and with a `DATETIME` for a smaller one, and a `DATETIME` with a `DATETIME`.
+		let restore_kind = |sum: LogicalExpr| {
+			let from_date = if calendar_unit {
+				call("type::date", vec![sum.clone()])
+			} else {
+				call("type::timestamp", vec![sum.clone()])
 			};
-			return binary(
-				binary(v[0].clone(), BinaryOperator::Add, span(max2(amount.clone(), int(0)))),
-				BinaryOperator::Subtract,
-				span(max2(negate(amount), int(0))),
+			when(
+				call("type::is_date", vec![given.clone()]),
+				from_date,
+				when(
+					call("type::is_timestamp", vec![given.clone()]),
+					call("type::timestamp", vec![sum.clone()]),
+					sum,
+				),
+			)
+		};
+		restore_kind(bind(vec![mysql_datetime(given.clone()), amount], |v| {
+			// MySQL reads a quoted amount, as in INTERVAL '1' DAY, as a number.
+			let number = when(
+				call("type::is_string", vec![v[1].clone()]),
+				call("type::number", vec![v[1].clone()]),
+				v[1].clone(),
 			);
-		}
-		let months = binary(amount, BinaryOperator::Multiply, int(months_per_unit));
-		let date = v[0].clone();
-		let total = binary(
-			binary(
-				binary(call("time::year", vec![date.clone()]), BinaryOperator::Multiply, int(12)),
+			let amount = binary(number, BinaryOperator::Multiply, int(sign));
+			if let Some((secs, nanos)) = seconds {
+				let unit = Duration::from_secs(secs) + Duration::from_nanos(u64::from(nanos));
+				let span = |count: LogicalExpr| {
+					binary(
+						LogicalExpr::Literal(LogicalLiteral::Duration(unit)),
+						BinaryOperator::Multiply,
+						count,
+					)
+				};
+				return binary(
+					binary(v[0].clone(), BinaryOperator::Add, span(max2(amount.clone(), int(0)))),
+					BinaryOperator::Subtract,
+					span(max2(negate(amount), int(0))),
+				);
+			}
+			let months = binary(amount, BinaryOperator::Multiply, int(months_per_unit));
+			let date = v[0].clone();
+			let total = binary(
+				binary(
+					binary(
+						call("time::year", vec![date.clone()]),
+						BinaryOperator::Multiply,
+						int(12),
+					),
+					BinaryOperator::Add,
+					binary(
+						call("time::month", vec![date.clone()]),
+						BinaryOperator::Subtract,
+						int(1),
+					),
+				),
 				BinaryOperator::Add,
-				binary(call("time::month", vec![date.clone()]), BinaryOperator::Subtract, int(1)),
-			),
-			BinaryOperator::Add,
-			months,
-		);
-		let year =
-			call("math::floor", vec![binary(total.clone(), BinaryOperator::Divide, int(12))]);
-		let month = binary(
-			binary(
-				total,
-				BinaryOperator::Subtract,
-				binary(year.clone(), BinaryOperator::Multiply, int(12)),
-			),
-			BinaryOperator::Add,
-			int(1),
-		);
-		let day = call("time::day", vec![date.clone()]);
-		bind(vec![date, year, month, day], |a| {
-			let (year, month) = (&a[1], &a[2]);
-			let december = binary(month.clone(), BinaryOperator::Equal, int(12));
-			let next_year = when(
-				december.clone(),
-				binary(year.clone(), BinaryOperator::Add, int(1)),
-				year.clone(),
+				months,
 			);
-			let next_month =
-				when(december, int(1), binary(month.clone(), BinaryOperator::Add, int(1)));
-			let first_of_next = call(
-				"type::datetime",
-				vec![call(
-					"string::concat",
-					vec![
-						padded(next_year, 4),
-						text("-"),
-						padded(next_month, 2),
-						text("-01T00:00:00Z"),
-					],
-				)],
+			let year =
+				call("math::floor", vec![binary(total.clone(), BinaryOperator::Divide, int(12))]);
+			let month = binary(
+				binary(
+					total,
+					BinaryOperator::Subtract,
+					binary(year.clone(), BinaryOperator::Multiply, int(12)),
+				),
+				BinaryOperator::Add,
+				int(1),
 			);
-			let days_in_month =
-				call("time::day", vec![binary(first_of_next, BinaryOperator::Subtract, one_day())]);
-			bind(vec![a[0].clone(), a[1].clone(), a[2].clone(), days_in_month, a[3].clone()], |b| {
-				let day =
-					call("math::min", vec![LogicalExpr::Array(vec![b[4].clone(), b[3].clone()])]);
-				call(
+			let day = call("time::day", vec![date.clone()]);
+			bind(vec![date, year, month, day], |a| {
+				let (year, month) = (&a[1], &a[2]);
+				let december = binary(month.clone(), BinaryOperator::Equal, int(12));
+				let next_year = when(
+					december.clone(),
+					binary(year.clone(), BinaryOperator::Add, int(1)),
+					year.clone(),
+				);
+				let next_month =
+					when(december, int(1), binary(month.clone(), BinaryOperator::Add, int(1)));
+				let first_of_next = call(
 					"type::datetime",
 					vec![call(
 						"string::concat",
 						vec![
-							padded(b[1].clone(), 4),
+							padded(next_year, 4),
 							text("-"),
-							padded(b[2].clone(), 2),
-							text("-"),
-							padded(day, 2),
-							text("T"),
-							call("time::format", vec![b[0].clone(), text("%H:%M:%S%.f")]),
-							text("Z"),
+							padded(next_month, 2),
+							text("-01T00:00:00Z"),
 						],
 					)],
+				);
+				let days_in_month = call(
+					"time::day",
+					vec![binary(first_of_next, BinaryOperator::Subtract, one_day())],
+				);
+				bind(
+					vec![a[0].clone(), a[1].clone(), a[2].clone(), days_in_month, a[3].clone()],
+					|b| {
+						let day = call(
+							"math::min",
+							vec![LogicalExpr::Array(vec![b[4].clone(), b[3].clone()])],
+						);
+						call(
+							"type::datetime",
+							vec![call(
+								"string::concat",
+								vec![
+									padded(b[1].clone(), 4),
+									text("-"),
+									padded(b[2].clone(), 2),
+									text("-"),
+									padded(day, 2),
+									text("T"),
+									call("time::format", vec![b[0].clone(), text("%H:%M:%S%.f")]),
+									text("Z"),
+								],
+							)],
+						)
+					},
 				)
 			})
-		})
+		}))
 	}))
 }
 
@@ -1913,6 +2073,79 @@ const DATE_ONLY: &str = r"^\d{4}-\d{2}-\d{2}$";
 const TIME_TO_MINUTES: &str = r"T\d{2}:\d{2}$";
 const TIME_WITHOUT_ZONE: &str = r"T\d{2}:\d{2}:\d{2}(\.\d+)?$";
 const HOURS_ONLY_ZONE: &str = r"T[0-9:.]+[+-]\d{2}$";
+
+/// The declared PostgreSQL interval type a cast target names when it bounds the value: one with
+/// a field qualifier (`interval hour`) or a precision (`interval(2)`). `None` for a plain
+/// `interval` and every other target.
+pub(crate) fn interval_typmod(target_type: &str) -> Option<DeclaredSqlType> {
+	let lower = target_type.to_ascii_lowercase();
+	if !lower.starts_with("interval ") && !lower.starts_with("interval(") {
+		return None;
+	}
+	let declared = DeclaredSqlType::parse(SqlTypeDialect::PostgreSql, &lower).ok()?;
+	(declared.interval_fields().is_some() || declared.fractional_seconds() != Some(6))
+		.then_some(declared)
+}
+
+/// `value`, an interval, truncated to the finest field of the declared type and its time rounded
+/// to the declared fractional digits, half away from zero, as PostgreSQL's
+/// `AdjustIntervalForTypmod` does. Each field is read toward zero, so a negative interval is
+/// truncated toward zero too. NULL stays NULL.
+pub(crate) fn adjust_interval(value: LogicalExpr, declared: &DeclaredSqlType) -> LogicalExpr {
+	let finest = declared.interval_fields().map(|fields| fields.finest());
+	let digits = declared.fractional_seconds().unwrap_or(6).min(6);
+	strict(vec![value], |v| {
+		let v = &v[0];
+		let field = |name: &str| call(&format!("interval::{name}"), vec![v.clone()]);
+		let make = |args: Vec<LogicalExpr>| call("interval::make", args);
+		match finest {
+			Some(IntervalFinestField::Year) => make(vec![field("years")]),
+			Some(IntervalFinestField::Month) => make(vec![field("years"), field("months")]),
+			Some(IntervalFinestField::Day) => {
+				make(vec![field("years"), field("months"), int(0), field("days")])
+			}
+			Some(IntervalFinestField::Hour) => {
+				make(vec![field("years"), field("months"), int(0), field("days"), field("hours")])
+			}
+			Some(IntervalFinestField::Minute) => make(vec![
+				field("years"),
+				field("months"),
+				int(0),
+				field("days"),
+				field("hours"),
+				field("mins"),
+			]),
+			Some(IntervalFinestField::Second) | None if digits < 6 => {
+				let decimal = |value: LogicalExpr| call("type::decimal", vec![value]);
+				let scale = int(10i64.pow(digits));
+				let scaled = binary(field("secs"), BinaryOperator::Multiply, scale.clone());
+				let rounded = call(
+					"math::floor",
+					vec![binary(
+						call("math::abs", vec![scaled.clone()]),
+						BinaryOperator::Add,
+						decimal(float(0.5)),
+					)],
+				);
+				let secs = binary(
+					binary(call("math::sign", vec![scaled]), BinaryOperator::Multiply, rounded),
+					BinaryOperator::Divide,
+					decimal(scale),
+				);
+				make(vec![
+					field("years"),
+					field("months"),
+					int(0),
+					field("days"),
+					field("hours"),
+					field("mins"),
+					secs,
+				])
+			}
+			Some(IntervalFinestField::Second) | None => v.clone(),
+		}
+	})
+}
 
 /// A datetime as the servers write it (`2024-03-15`, `2024-03-15 10:20:30`, `2024-03-15
 /// 10:20:30+02`) in the form the engine reads: `T` between the date and the time, a zone, and a
@@ -1972,15 +2205,57 @@ pub(crate) fn datetime_cast_operand(value: LogicalExpr) -> LogicalExpr {
 	}
 }
 
-/// A datetime cast to `date`, which has no time of day: the start of its day. Any other type is
-/// left as it is.
-pub(crate) fn truncated_to_date(target: &str, value: LogicalExpr) -> LogicalExpr {
-	let lower = target.to_ascii_lowercase();
-	if lower.split('(').next().unwrap_or(&lower).trim() == "date" {
-		call("time::group", vec![value, text("day")])
-	} else {
-		value
+/// A `timetz` text (`10:20:30+02`) as the UTC time of day it names, wrapped to the day: the offset
+/// is applied on input and the value is stored as a `time`. Text with no offset is `None`.
+pub(crate) fn timetz_text_to_utc(text: &str) -> Option<String> {
+	let re =
+		regex::Regex::new(r"^(\d{2}):(\d{2})(?::(\d{2})(\.\d+)?)?\s*([+-])(\d{2})(?::?(\d{2}))?$")
+			.ok()?;
+	let caps = re.captures(text.trim())?;
+	let field = |i: usize| caps.get(i).map_or(Some(0i64), |m| m.as_str().parse().ok());
+	let (hour, minute, second) = (field(1)?, field(2)?, field(3)?);
+	if hour > 24 || minute > 59 || second > 59 {
+		return None;
 	}
+	let offset = (field(6)? * 60 + field(7)?) * 60;
+	let offset = if &caps[5] == "-" {
+		offset
+	} else {
+		-offset
+	};
+	let seconds = (hour * 3600 + minute * 60 + second + offset).rem_euclid(86_400);
+	let fraction = caps.get(4).map_or("", |m| m.as_str());
+	Some(format!("{:02}:{:02}:{:02}{fraction}", seconds / 3600, seconds / 60 % 60, seconds % 60))
+}
+
+/// The operand of a cast to `time`: a text literal that names a date as well (`2024-03-15
+/// 10:20:30`) is read as the timestamp it names, whose time of day is the value. Any other
+/// operand is left as it is.
+pub(crate) fn time_of_timestamp_text(value: LogicalExpr) -> LogicalExpr {
+	if let LogicalExpr::Literal(LogicalLiteral::String(literal)) = &value
+		&& regex::Regex::new(r"^\s*\d{4}-\d{2}-\d{2}").is_ok_and(|re| re.is_match(literal.as_str()))
+	{
+		return LogicalExpr::Prefix {
+			op: PrefixOperator::Cast(Kind::Timestamp),
+			expr: Box::new(text(&normalize_datetime_text(literal.as_str()))),
+		};
+	}
+	value
+}
+
+/// The operand of a cast to `timetz`: a text literal with a zone offset is read as the UTC time of
+/// day it names, and any other operand is left as it is.
+pub(crate) fn timetz_cast_operand(target: &str, value: LogicalExpr) -> LogicalExpr {
+	let base = target.split('(').next().unwrap_or(target).trim();
+	if !matches!(base, "timetz" | "time with time zone") {
+		return value;
+	}
+	if let LogicalExpr::Literal(LogicalLiteral::String(literal)) = &value
+		&& let Some(utc) = timetz_text_to_utc(literal.as_str())
+	{
+		return text(&utc);
+	}
+	value
 }
 
 /// The lowering of `name` called with `args`, or `None` when the engine function the registry
@@ -2001,8 +2276,13 @@ pub(super) fn lower_function(
 		("concat", _) => lower_concat(args, policy)?,
 		("concat_ws", _) => lower_concat_ws(args, policy)?,
 		("length", SqlDialect::MySql) => lower_mysql_length(args, policy)?,
-		("current_date" | "curdate", _) => today(),
-		("current_time" | "curtime", _) => call("time::now", Vec::new()),
+		("current_date" | "curdate", _) => call("type::date", vec![call("time::now", Vec::new())]),
+		("current_time" | "curtime", SqlDialect::Postgres) => {
+			call("type::time", vec![call("time::now", Vec::new())])
+		}
+		("current_time" | "curtime", _) => {
+			call("type::interval", vec![call("type::time", vec![call("time::now", Vec::new())])])
+		}
 		("mod", _) => lower_mod(args, policy)?,
 		("pi", _) => float(std::f64::consts::PI),
 		("exp", _) => lower_exp(args, policy)?,
@@ -2017,6 +2297,7 @@ pub(super) fn lower_function(
 		("chr" | "char", _) => lower_chr(name, args)?,
 		("date_part" | "extract", _) => lower_date_part(args, policy)?,
 		("date_trunc", _) => lower_date_trunc(args, policy)?,
+		("isfinite", SqlDialect::Postgres) => lower_isfinite(args, policy)?,
 		("date_format", _) => lower_date_format(args, policy)?,
 		("date_add" | "date_sub", _) => lower_date_add(name, args, policy)?,
 		("from_unixtime", _) => lower_from_unixtime(args, policy)?,

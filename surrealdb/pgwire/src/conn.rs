@@ -55,8 +55,8 @@ use super::guc::{GucStore, ShowResult, normalize_name};
 use super::msg::{self, DescribeTarget, Frontend, StartupMessage};
 use super::sqlprepare::{Argument, BindError, PrepareError, SqlPrepared, first_keyword};
 use super::typing::{
-	PgColumn, PgType, ResultShape, shape_result, shape_result_declared, shape_result_jsonb,
-	shape_result_with_descriptor,
+	PgColumn, PgType, ResultShape, WildcardTypes, shape_result, shape_result_declared,
+	shape_result_jsonb, shape_result_with_descriptor,
 };
 use super::{AuthRequest, Authenticator, BoxedIo, CancelRegistry, LOG, Start, encode, sasl};
 use crate::tls::{TlsAcceptor, TlsStream};
@@ -115,6 +115,11 @@ enum StatementKind {
 	CreateView,
 	CreateSchema,
 	CreateExtension,
+	CreateType,
+	AlterType,
+	CreateDomain,
+	AlterDomain,
+	DropType,
 	Truncate,
 	Other,
 }
@@ -135,8 +140,16 @@ impl StatementKind {
 			PgStatement::CreateSchema(_) => Some((Self::CreateSchema, false)),
 			PgStatement::CreateExtension(_) => Some((Self::CreateExtension, false)),
 			PgStatement::AlterTable(_) => Some((Self::AlterTable, false)),
+			PgStatement::CreateType(_) | PgStatement::CreateCompositeType(_) => {
+				Some((Self::CreateType, false))
+			}
+			PgStatement::AlterType(_) => Some((Self::AlterType, false)),
+			PgStatement::CreateDomain(_) => Some((Self::CreateDomain, false)),
+			PgStatement::AlterDomain(_) => Some((Self::AlterDomain, false)),
 			PgStatement::Drop(drop) => Some((
-				if matches!(drop.object_type, DropObjectType::Schema) {
+				if matches!(drop.object_type, DropObjectType::Type) {
+					Self::DropType
+				} else if matches!(drop.object_type, DropObjectType::Schema) {
 					Self::DropSchema
 				} else {
 					Self::DropTable
@@ -173,6 +186,11 @@ impl StatementKind {
 			Self::CreateView => "CREATE VIEW".to_string(),
 			Self::CreateSchema => "CREATE SCHEMA".to_string(),
 			Self::CreateExtension => "CREATE EXTENSION".to_string(),
+			Self::CreateType => "CREATE TYPE".to_string(),
+			Self::AlterType => "ALTER TYPE".to_string(),
+			Self::CreateDomain => "CREATE DOMAIN".to_string(),
+			Self::AlterDomain => "ALTER DOMAIN".to_string(),
+			Self::DropType => "DROP TYPE".to_string(),
 			Self::Truncate => "TRUNCATE TABLE".to_string(),
 			Self::Other => format!("SELECT {count}"),
 		}
@@ -209,7 +227,7 @@ struct PreparedStatement {
 	/// for a statement over one base table whose columns the planner cannot list. Resolved when
 	/// the statement is parsed; a declaration that no longer holds the values is ignored when
 	/// the result is shaped.
-	wildcard_types: Arc<HashMap<String, PgType>>,
+	wildcard_types: Arc<WildcardTypes>,
 	/// Syntactic kind of statement (Select, Insert, Update, CreateTable, etc.)
 	kind: StatementKind,
 	/// Whether this statement produces result rows (e.g. SELECT, or INSERT/UPDATE with RETURNING).
@@ -223,7 +241,7 @@ impl PreparedStatement {
 			+ self.param_types.capacity() * std::mem::size_of::<i32>()
 			+ self
 				.wildcard_types
-				.keys()
+				.names()
 				.map(|name| name.capacity() + std::mem::size_of::<(String, PgType)>())
 				.sum::<usize>()
 			+ if self.cached_plan.is_some() {
@@ -325,6 +343,10 @@ impl Portal {
 						| Value::Number(_)
 						| Value::Duration(_)
 						| Value::Datetime(_)
+						| Value::Date(_)
+						| Value::Time(_)
+						| Value::Timestamp(_)
+						| Value::Interval(_)
 						| Value::Uuid(_)
 						| Value::Geometry(_)
 						| Value::Table(_)
@@ -1423,7 +1445,7 @@ impl Connection {
 			msg::write_parse_complete(out);
 			return Ok(());
 		}
-		let mut wildcard_types = HashMap::new();
+		let mut wildcard_types = WildcardTypes::default();
 		let (query, cached_plan, param_count, param_types, empty, descriptor, kind, returns_rows) =
 			match self.dialect {
 				Dialect::SurrealQl => return Err(not_over_pgwire(Dialect::SurrealQl)),
@@ -1468,8 +1490,17 @@ impl Connection {
 									param_count = param_count.max(param_desc.param_types.len());
 									param_types.resize(param_count, 0);
 									descriptor = bound.describe_static(&catalog, &policy);
-									wildcard_types =
-										declared_pg_types(&bound.wildcard_column_types(&catalog));
+									wildcard_types = WildcardTypes::of(
+										&bound.wildcard_column_types(&catalog),
+										&bound.wildcard_declared_sql_types(&catalog),
+									);
+									for (idx, id) in param_desc.enum_params.iter().enumerate() {
+										if let Some(id) = id
+											&& idx < param_types.len() && param_types[idx] == 0
+										{
+											param_types[idx] = PgType::Enum(*id).oid();
+										}
+									}
 									for (idx, sql_ty) in param_desc.param_types.iter().enumerate() {
 										if *sql_ty != surrealdb_sqlplan::SqlType::Unknown {
 											let oid = PgType::from_sql_type(*sql_ty).oid();
@@ -1676,6 +1707,26 @@ impl Connection {
 								kind = StatementKind::CreateExtension;
 								returns_rows = false;
 							}
+							PgStatement::CreateType(_) => {
+								kind = StatementKind::CreateType;
+								returns_rows = false;
+							}
+							PgStatement::AlterType(_) => {
+								kind = StatementKind::AlterType;
+								returns_rows = false;
+							}
+							PgStatement::CreateDomain(_) => {
+								kind = StatementKind::CreateDomain;
+								returns_rows = false;
+							}
+							PgStatement::AlterDomain(_) => {
+								kind = StatementKind::AlterDomain;
+								returns_rows = false;
+							}
+							PgStatement::CreateCompositeType(_) => {
+								kind = StatementKind::CreateType;
+								returns_rows = false;
+							}
 						}
 					}
 					if let Some(statement) = stmts.first()
@@ -1684,6 +1735,15 @@ impl Connection {
 					{
 						param_count = param_count.max(metadata.parameters.param_types.len());
 						param_types.resize(param_count, 0);
+						for (slot, id) in
+							param_types.iter_mut().zip(&metadata.parameters.enum_params)
+						{
+							if *slot == 0
+								&& let Some(id) = id
+							{
+								*slot = PgType::Enum(*id).oid();
+							}
+						}
 						for (slot, ty) in
 							param_types.iter_mut().zip(metadata.parameters.param_types)
 						{
@@ -1692,7 +1752,10 @@ impl Connection {
 							}
 						}
 						descriptor = metadata.result;
-						wildcard_types = declared_pg_types(&metadata.wildcard_types);
+						wildcard_types = WildcardTypes::of(
+							&metadata.wildcard_types,
+							&metadata.wildcard_declared,
+						);
 					}
 
 					param_types.resize(param_count, 0);
@@ -1854,17 +1917,12 @@ impl Connection {
 				if empty || !returns_rows {
 					msg::write_no_data(out);
 				} else if let Some(desc) = &stmt.descriptor {
-					let columns: Vec<PgColumn> = desc
-						.columns
-						.iter()
-						.map(|c| PgColumn {
-							name: c.name.clone(),
-							ty: PgType::from_sql_type(c.ty),
-						})
-						.collect();
+					let columns: Vec<PgColumn> =
+						desc.columns.iter().map(PgColumn::of_result_column).collect();
 					msg::write_row_description(out, &columns, |_| FORMAT_TEXT);
 				} else {
 					let columns = [PgColumn {
+						typmod: -1,
 						name: "result".to_string(),
 						ty: PgType::Jsonb,
 					}];
@@ -1909,17 +1967,12 @@ impl Connection {
 				if let Some(executed) = &portal.executed {
 					msg::write_row_description(out, &executed.columns, |i| format_at(&formats, i));
 				} else if let Some(desc) = &stmt.descriptor {
-					let columns: Vec<PgColumn> = desc
-						.columns
-						.iter()
-						.map(|c| PgColumn {
-							name: c.name.clone(),
-							ty: PgType::from_sql_type(c.ty),
-						})
-						.collect();
+					let columns: Vec<PgColumn> =
+						desc.columns.iter().map(PgColumn::of_result_column).collect();
 					msg::write_row_description(out, &columns, |i| format_at(&formats, i));
 				} else if stmt.described {
 					let columns = [PgColumn {
+						typmod: -1,
 						name: "result".to_string(),
 						ty: PgType::Jsonb,
 					}];
@@ -2518,7 +2571,7 @@ impl Connection {
 	async fn run_pgsql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
 		global_metrics().record_query(SqlDialect::Postgres);
 		let mut descriptor = None;
-		let mut wildcard_types = HashMap::new();
+		let mut wildcard_types = WildcardTypes::default();
 		let mut write_kind = None;
 		let mut returns_rows = true;
 		if let Ok(stmts) = surrealdb_pgsql::parse_statements(sql) {
@@ -2544,7 +2597,10 @@ impl Connection {
 				match self.describe_pgsql_write(stmt, &[]).await {
 					Ok(Some(metadata)) => {
 						descriptor = metadata.result;
-						wildcard_types = declared_pg_types(&metadata.wildcard_types);
+						wildcard_types = WildcardTypes::of(
+							&metadata.wildcard_types,
+							&metadata.wildcard_declared,
+						);
 					}
 					Ok(None) => {}
 					Err(error) => {
@@ -2570,8 +2626,10 @@ impl Connection {
 							Ok(bound) => {
 								if descriptor.is_none() {
 									descriptor = bound.describe_static(&catalog, &policy);
-									wildcard_types =
-										declared_pg_types(&bound.wildcard_column_types(&catalog));
+									wildcard_types = WildcardTypes::of(
+										&bound.wildcard_column_types(&catalog),
+										&bound.wildcard_declared_sql_types(&catalog),
+									);
 								}
 							}
 							Err(e) => {
@@ -2692,6 +2750,11 @@ impl Connection {
 					PgStatement::Copy(_)
 					| PgStatement::CreateSchema(_)
 					| PgStatement::CreateExtension(_)
+					| PgStatement::CreateType(_)
+					| PgStatement::AlterType(_)
+					| PgStatement::CreateDomain(_)
+					| PgStatement::AlterDomain(_)
+					| PgStatement::CreateCompositeType(_)
 					| PgStatement::Transaction(_)
 					| PgStatement::Set(_)
 					| PgStatement::Show(_)
@@ -3848,14 +3911,17 @@ impl Connection {
 		if param.eq_ignore_ascii_case("ALL") {
 			let columns = vec![
 				PgColumn {
+					typmod: -1,
 					name: "name".to_string(),
 					ty: PgType::Text,
 				},
 				PgColumn {
+					typmod: -1,
 					name: "setting".to_string(),
 					ty: PgType::Text,
 				},
 				PgColumn {
+					typmod: -1,
 					name: "description".to_string(),
 					ty: PgType::Text,
 				},
@@ -3864,6 +3930,7 @@ impl Connection {
 		} else {
 			let norm = normalize_name(param);
 			let columns = vec![PgColumn {
+				typmod: -1,
 				name: norm,
 				ty: PgType::Text,
 			}];
@@ -4374,6 +4441,7 @@ fn advisory_parameters(
 /// The single column an advisory call returns.
 fn advisory_columns(call: &AdvisoryCall) -> [PgColumn; 1] {
 	[PgColumn {
+		typmod: -1,
 		name: call.column.clone(),
 		ty: if call.op.returns_void() {
 			PgType::Void
@@ -4440,6 +4508,10 @@ fn affected_rows(value: &Value) -> usize {
 		| Value::Bytes(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Geometry(_)
 		| Value::Table(_)
@@ -5651,13 +5723,6 @@ fn dialect_name(dialect: Dialect) -> &'static str {
 		Dialect::PgSql => "pgsql",
 		Dialect::MySql => "mysql",
 	}
-}
-
-/// The wire types of the declared columns of a `*` result, by column name.
-fn declared_pg_types(
-	declared: &HashMap<String, surrealdb_sqlplan::SqlType>,
-) -> HashMap<String, PgType> {
-	declared.iter().map(|(name, ty)| (name.clone(), PgType::from_sql_type(*ty))).collect()
 }
 
 #[cfg(test)]

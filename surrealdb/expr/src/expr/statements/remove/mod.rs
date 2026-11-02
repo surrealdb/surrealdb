@@ -5,6 +5,7 @@ pub mod api;
 pub mod bucket;
 pub mod config;
 pub mod database;
+pub mod enumeration;
 pub mod event;
 pub mod field;
 pub mod function;
@@ -16,6 +17,7 @@ pub mod param;
 pub mod sequence;
 pub mod table;
 pub mod user;
+pub mod user_type;
 
 pub use access::RemoveAccessStatement;
 pub use analyzer::RemoveAnalyzerStatement;
@@ -23,6 +25,7 @@ pub use api::RemoveApiStatement;
 pub use bucket::RemoveBucketStatement;
 pub use config::RemoveConfigStatement;
 pub use database::RemoveDatabaseStatement;
+pub use enumeration::RemoveEnumStatement;
 pub use event::RemoveEventStatement;
 pub use field::RemoveFieldStatement;
 pub use function::RemoveFunctionStatement;
@@ -34,6 +37,7 @@ pub use param::RemoveParamStatement;
 pub use sequence::RemoveSequenceStatement;
 pub use table::RemoveTableStatement;
 pub use user::RemoveUserStatement;
+pub use user_type::RemoveUserTypeStatement;
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub enum RemoveStatement {
@@ -54,6 +58,8 @@ pub enum RemoveStatement {
 	Sequence(RemoveSequenceStatement),
 	Module(RemoveModuleStatement),
 	Config(RemoveConfigStatement),
+	Enum(RemoveEnumStatement),
+	UserType(RemoveUserTypeStatement),
 }
 
 /// Written out and kept out of line so one copy serves every crate that clones a `RemoveStatement`.
@@ -78,6 +84,8 @@ impl Clone for RemoveStatement {
 			Self::Sequence(v) => Self::Sequence(v.clone()),
 			Self::Module(v) => Self::Module(v.clone()),
 			Self::Config(v) => Self::Config(v.clone()),
+			Self::Enum(v) => Self::Enum(v.clone()),
+			Self::UserType(v) => Self::UserType(v.clone()),
 		}
 	}
 }
@@ -102,6 +110,8 @@ impl ToSql for RemoveStatement {
 			Self::Sequence(v) => v.fmt_sql(f, fmt),
 			Self::Module(v) => v.fmt_sql(f, fmt),
 			Self::Config(v) => v.fmt_sql(f, fmt),
+			Self::Enum(v) => v.fmt_sql(f, fmt),
+			Self::UserType(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

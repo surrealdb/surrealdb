@@ -341,6 +341,22 @@ pub fn translate_expr(
 			out.push(')');
 			Ok(())
 		}
+		Expr::FieldSelect {
+			expr,
+			field,
+			..
+		} => {
+			translate_expr(expr, ctx, out)?;
+			out.push('.');
+			if is_identifier_safe(field) {
+				out.push_str(field);
+			} else {
+				out.push('`');
+				out.push_str(field);
+				out.push('`');
+			}
+			Ok(())
+		}
 		Expr::IsBound {
 			expr,
 			negated,

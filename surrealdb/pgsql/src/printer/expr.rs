@@ -3,8 +3,8 @@
 use core::fmt;
 
 use crate::ast::expr::{
-	ColumnRef, Expr, QualifiedName, Quantifier, TypeName, WhenClause, WindowFrame,
-	WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
+	ColumnRef, Expr, INTERVAL_FIELD_QUALIFIERS, QualifiedName, Quantifier, TypeName, WhenClause,
+	WindowFrame, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
 };
 use crate::ast::literal::Literal;
 use crate::ast::op::{BinaryOperator, UnaryOperator};
@@ -99,7 +99,20 @@ impl ToPgSql for QualifiedName {
 
 impl ToPgSql for TypeName {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		self.name.to_pgsql(f)?;
+		// An interval with a field qualifier is written as the keyword and its field words, which
+		// the precision of `SECOND(p)` follows. A qualifier without seconds takes no precision.
+		let qualified_interval = match self.name.parts.as_slice() {
+			[only] => only.strip_prefix("interval ").is_some_and(|fields| {
+				INTERVAL_FIELD_QUALIFIERS.contains(&fields)
+					&& (self.modifiers.is_empty() || fields.ends_with("second"))
+			}),
+			_ => false,
+		};
+		if qualified_interval {
+			self.name.parts.iter().try_for_each(|part| f.write_str(part))?;
+		} else {
+			self.name.to_pgsql(f)?;
+		}
 		if !self.modifiers.is_empty() {
 			f.write_str("(")?;
 			for (i, m) in self.modifiers.iter().enumerate() {
@@ -248,6 +261,9 @@ pub fn expr_precedence(expr: &Expr) -> u8 {
 			..
 		}
 		| Expr::Grouping {
+			..
+		}
+		| Expr::FieldSelect {
 			..
 		}
 		| Expr::JsonObject {
@@ -598,6 +614,16 @@ impl ToPgSql for Expr {
 				f.write_str("(")?;
 				expr.to_pgsql(f)?;
 				f.write_str(")")
+			}
+
+			Self::FieldSelect {
+				expr,
+				field,
+				..
+			} => {
+				expr.to_pgsql(f)?;
+				f.write_str(".")?;
+				print_ident(f, field)
 			}
 
 			Self::IsBound {

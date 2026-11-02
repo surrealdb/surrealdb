@@ -1,15 +1,47 @@
 //! Time aggregate functions.
 //!
-//! Provides aggregates for datetime operations: min and max.
+//! Provides aggregates over the temporal kinds: min and max of `date`, `time`, `timestamp` or
+//! `datetime` values, one kind per group, answering that kind.
 
 use anyhow::Result;
 
 use super::Rejected;
 use super::saved::{Loading, Saving};
-use crate::exec::function::{Accumulator, AggregateFunction, Signature};
+use crate::exec::function::{Accumulator, AggregateFunction, ReturnRule, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
-use crate::val::{Datetime, Value};
+use crate::val::Value;
+
+/// The kinds a `time::min` or `time::max` argument may have.
+fn temporal_kind() -> Kind {
+	Kind::Either(vec![Kind::Datetime, Kind::Date, Kind::Time, Kind::Timestamp])
+}
+
+/// Whether `candidate` replaces `held`, a value of the same temporal kind, in a fold that keeps the
+/// smaller (`smallest`) or the larger value.
+fn replaces(candidate: &Value, held: &Value, smallest: bool) -> bool {
+	if smallest {
+		candidate < held
+	} else {
+		candidate > held
+	}
+}
+
+/// Folds `candidate` into the value `held` keeps, the smallest (`smallest`) or the largest of a
+/// group's values of one temporal kind. A value of another kind is recorded in `rejected`.
+fn fold(
+	rejected: &mut Rejected,
+	func: &str,
+	candidate: &Value,
+	held: &mut Option<Value>,
+	smallest: bool,
+) {
+	if let Some(v) = rejected.temporal(func, candidate, held.as_ref())
+		&& held.as_ref().is_none_or(|current| replaces(&v, current, smallest))
+	{
+		*held = Some(v);
+	}
+}
 
 // ============================================================================
 // TimeMin
@@ -33,41 +65,33 @@ impl AggregateFunction for TimeMin {
 	}
 
 	fn signature(&self) -> Signature {
-		Signature::new().arg("value", Kind::Datetime).returns(Kind::Datetime)
+		Signature::new()
+			.arg("value", temporal_kind())
+			.returns(Kind::Datetime)
+			.rule(ReturnRule::SameAsArg(0))
 	}
 }
 
 #[derive(Debug, Clone, Default)]
 struct TimeMinAccumulator {
-	min: Option<Datetime>,
+	min: Option<Value>,
 	rejected: Rejected,
 }
 
 impl Accumulator for TimeMinAccumulator {
 	fn save(&self) -> Option<Value> {
-		Some(Saving::default().option_datetime(self.min).rejected(&self.rejected).done())
+		Some(Saving::default().option_value(&self.min).rejected(&self.rejected).done())
 	}
 
 	fn load(&mut self, state: Value) -> Result<()> {
 		let mut state = Loading::new(state)?;
-		self.min = state.option_datetime()?;
+		self.min = state.option_value()?;
 		self.rejected = state.rejected()?;
 		Ok(())
 	}
 
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Some(d) = self.rejected.datetime("time::min", &value) {
-			self.min = Some(match &self.min {
-				None => d,
-				Some(current) => {
-					if d < *current {
-						d
-					} else {
-						*current
-					}
-				}
-			});
-		}
+		fold(&mut self.rejected, "time::min", &value, &mut self.min, true);
 		Ok(())
 	}
 
@@ -78,16 +102,7 @@ impl Accumulator for TimeMinAccumulator {
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
 		self.rejected.merge_from(&other.rejected);
 		if let Some(other_min) = &other.min {
-			self.min = Some(match &self.min {
-				None => *other_min,
-				Some(current) => {
-					if *other_min < *current {
-						*other_min
-					} else {
-						*current
-					}
-				}
-			});
+			fold(&mut self.rejected, "time::min", other_min, &mut self.min, true);
 		}
 		Ok(())
 	}
@@ -97,10 +112,7 @@ impl Accumulator for TimeMinAccumulator {
 		// `catalog/aggregation.rs` returns `Datetime::MAX_UTC` for empty groups
 		// instead. Changing that path needs a new revision of `AggregationStat`.
 		self.rejected.check()?;
-		match &self.min {
-			Some(d) => Ok(Value::Datetime(*d)),
-			None => Ok(Value::None),
-		}
+		Ok(self.min.clone().unwrap_or(Value::None))
 	}
 
 	fn reset(&mut self) {
@@ -139,41 +151,33 @@ impl AggregateFunction for TimeMax {
 	}
 
 	fn signature(&self) -> Signature {
-		Signature::new().arg("value", Kind::Datetime).returns(Kind::Datetime)
+		Signature::new()
+			.arg("value", temporal_kind())
+			.returns(Kind::Datetime)
+			.rule(ReturnRule::SameAsArg(0))
 	}
 }
 
 #[derive(Debug, Clone, Default)]
 struct TimeMaxAccumulator {
-	max: Option<Datetime>,
+	max: Option<Value>,
 	rejected: Rejected,
 }
 
 impl Accumulator for TimeMaxAccumulator {
 	fn save(&self) -> Option<Value> {
-		Some(Saving::default().option_datetime(self.max).rejected(&self.rejected).done())
+		Some(Saving::default().option_value(&self.max).rejected(&self.rejected).done())
 	}
 
 	fn load(&mut self, state: Value) -> Result<()> {
 		let mut state = Loading::new(state)?;
-		self.max = state.option_datetime()?;
+		self.max = state.option_value()?;
 		self.rejected = state.rejected()?;
 		Ok(())
 	}
 
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Some(d) = self.rejected.datetime("time::max", &value) {
-			self.max = Some(match &self.max {
-				None => d,
-				Some(current) => {
-					if d > *current {
-						d
-					} else {
-						*current
-					}
-				}
-			});
-		}
+		fold(&mut self.rejected, "time::max", &value, &mut self.max, false);
 		Ok(())
 	}
 
@@ -184,16 +188,7 @@ impl Accumulator for TimeMaxAccumulator {
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
 		self.rejected.merge_from(&other.rejected);
 		if let Some(other_max) = &other.max {
-			self.max = Some(match &self.max {
-				None => *other_max,
-				Some(current) => {
-					if *other_max > *current {
-						*other_max
-					} else {
-						*current
-					}
-				}
-			});
+			fold(&mut self.rejected, "time::max", other_max, &mut self.max, false);
 		}
 		Ok(())
 	}
@@ -203,10 +198,7 @@ impl Accumulator for TimeMaxAccumulator {
 		// `catalog/aggregation.rs` returns `Datetime::MIN_UTC` for empty groups
 		// instead. Changing that path needs a new revision of `AggregationStat`.
 		self.rejected.check()?;
-		match &self.max {
-			Some(d) => Ok(Value::Datetime(*d)),
-			None => Ok(Value::None),
-		}
+		Ok(self.max.clone().unwrap_or(Value::None))
 	}
 
 	fn reset(&mut self) {
@@ -232,6 +224,7 @@ mod tests {
 	use chrono::{TimeZone, Utc};
 
 	use super::*;
+	use crate::val::{Date, Datetime, Time, Timestamp};
 
 	// Helper to extract Datetime from Value
 	fn as_datetime(v: &Value) -> &Datetime {
@@ -502,5 +495,70 @@ mod tests {
 			err.contains("time::max") && err.contains("Expected `datetime`"),
 			"unexpected error: {err}"
 		);
+	}
+
+	// -------------------------------------------------------------------------
+	// The other temporal kinds
+	// -------------------------------------------------------------------------
+
+	fn date(days: i32) -> Value {
+		Value::Date(Date::from_days(days).expect("a date"))
+	}
+
+	#[test]
+	fn min_and_max_of_dates_answer_a_date() {
+		let (min, max) = (TimeMin, TimeMax);
+		let (mut lo, mut hi) = (min.create_accumulator(), max.create_accumulator());
+		for days in [20_000, 19_000, 21_000] {
+			lo.update(date(days)).unwrap();
+			hi.update(date(days)).unwrap();
+		}
+		assert_eq!(lo.finalize().unwrap(), date(19_000));
+		assert_eq!(hi.finalize().unwrap(), date(21_000));
+	}
+
+	#[test]
+	fn min_and_max_of_times_and_timestamps_answer_their_own_kind() {
+		let time = |n: u64| Value::Time(Time::from_nanos(n).expect("a time"));
+		let stamp = |s: i64| Value::Timestamp(Timestamp::from_parts(s, 0).expect("a timestamp"));
+		let mut lo = TimeMin.create_accumulator();
+		let mut hi = TimeMax.create_accumulator();
+		for n in [5, 1, 9] {
+			lo.update(time(n)).unwrap();
+			hi.update(time(n)).unwrap();
+		}
+		assert_eq!(lo.finalize().unwrap(), time(1));
+		assert_eq!(hi.finalize().unwrap(), time(9));
+		let mut lo = TimeMin.create_accumulator();
+		for s in [50, 10, 90] {
+			lo.update(stamp(s)).unwrap();
+		}
+		assert_eq!(lo.finalize().unwrap(), stamp(10));
+	}
+
+	#[test]
+	fn a_value_of_another_temporal_kind_is_skipped_once_the_group_holds_one() {
+		let mut acc = TimeMin.create_accumulator();
+		acc.update(date(5)).unwrap();
+		acc.update(Value::Datetime(make_datetime(1970, 1, 2))).unwrap();
+		acc.update(date(3)).unwrap();
+		assert_eq!(acc.finalize().unwrap(), date(3));
+	}
+
+	#[test]
+	fn a_group_with_no_temporal_value_is_refused() {
+		let mut acc = TimeMax.create_accumulator();
+		acc.update(Value::String("2024-01-01".into())).unwrap();
+		assert!(acc.finalize().is_err());
+	}
+
+	#[test]
+	fn a_saved_date_state_loads_back() {
+		let mut acc = TimeMax.create_accumulator();
+		acc.update(date(7)).unwrap();
+		let state = acc.save().expect("a state");
+		let mut loaded = TimeMax.create_accumulator();
+		loaded.load(state).unwrap();
+		assert_eq!(loaded.finalize().unwrap(), date(7));
 	}
 }

@@ -3292,21 +3292,28 @@ fn process_fields(em: &mut Emitter, cx: &mut Stages<'_, '_>) -> Result<(), IrErr
 		}
 		match value {
 			// A place holding nothing is produced by the `VALUE` and coerced after it; one holding
-			// a value is coerced, rewritten, and coerced again.
+			// a value is coerced, rewritten, and coerced again. Only the last coercion holds the
+			// value to the declared SQL type, so the type judges the value the field stores, once.
 			Some(pipeline) => {
 				let empty = em.label()?;
 				em.emit(schema(SchemaInstr::JumpIfPlaceNone {
 					target: empty,
 				}));
-				em.emit(schema(SchemaInstr::Coerce));
+				em.emit(schema(SchemaInstr::Coerce {
+					sql_type: false,
+				}));
 				em.bind(empty)?;
 				em.emit(schema(SchemaInstr::Value {
 					pipeline,
 				}));
-				em.emit(schema(SchemaInstr::Coerce));
+				em.emit(schema(SchemaInstr::Coerce {
+					sql_type: true,
+				}));
 			}
 			None => {
-				em.emit(schema(SchemaInstr::Coerce));
+				em.emit(schema(SchemaInstr::Coerce {
+					sql_type: true,
+				}));
 			}
 		}
 		if asserted {
@@ -6371,7 +6378,9 @@ mod tests {
 				schema(SchemaInstr::NextPlace {
 					done: 6
 				}),
-				schema(SchemaInstr::Coerce),
+				schema(SchemaInstr::Coerce {
+					sql_type: true
+				}),
 				schema(SchemaInstr::Land),
 				Instr::Jump {
 					target: 2
@@ -6441,11 +6450,15 @@ mod tests {
 				schema(SchemaInstr::JumpIfPlaceNone {
 					target: 6
 				}),
-				schema(SchemaInstr::Coerce),
+				schema(SchemaInstr::Coerce {
+					sql_type: false
+				}),
 				schema(SchemaInstr::Value {
 					pipeline: 1
 				}),
-				schema(SchemaInstr::Coerce),
+				schema(SchemaInstr::Coerce {
+					sql_type: true
+				}),
 				schema(SchemaInstr::DeferAssert),
 				schema(SchemaInstr::Land),
 				Instr::Jump {
@@ -6543,7 +6556,9 @@ mod tests {
 				schema(SchemaInstr::NextPlace {
 					done: 7
 				}),
-				schema(SchemaInstr::Coerce),
+				schema(SchemaInstr::Coerce {
+					sql_type: true
+				}),
 				// A field that does not permit every change keeps the value the record held.
 				schema(SchemaInstr::Permit),
 				schema(SchemaInstr::Land),

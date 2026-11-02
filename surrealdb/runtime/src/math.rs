@@ -52,6 +52,36 @@ async fn sorted(array: Vec<Number>) -> Sorted<Vec<Number>> {
 	Sorted(fuel::sort_by(array, Number::cmp, usize::MAX, fuel::quantum()).await)
 }
 
+/// `arg` with a `bigdecimal` converted to a `decimal`, for the functions that compute through
+/// `decimal` or `float` rather than exactly. A `bigdecimal` outside the range or scale of a
+/// `decimal` is refused with the function's name, since no approximation of it is attempted.
+fn narrowed(name: &str, arg: Number) -> Result<Number> {
+	match arg {
+		Number::BigDecimal(ref v) => match rust_decimal::Decimal::try_from(v.as_ref()) {
+			Ok(d) => Ok(Number::Decimal(d)),
+			Err(_) => bail!(Error::InvalidFunctionArguments {
+				name: name.to_string(),
+				message: format!(
+					"The bigdecimal {} is outside the range of a decimal, which this function computes with.",
+					arg.to_sql()
+				),
+			}),
+		},
+		Number::Int(_)
+		| Number::Float(_)
+		| Number::Decimal(_)
+		| Number::I8(_)
+		| Number::U8(_)
+		| Number::I16(_)
+		| Number::U16(_)
+		| Number::I32(_)
+		| Number::U32(_)
+		| Number::U64(_)
+		| Number::F16(_)
+		| Number::F32(_) => Ok(arg),
+	}
+}
+
 pub fn abs((arg,): (Number,)) -> Result<Value> {
 	let Some(x) = arg.checked_abs() else {
 		bail!(Error::ArithmeticOverflow(format!("math::abs({})", arg.to_sql())));
@@ -60,19 +90,19 @@ pub fn abs((arg,): (Number,)) -> Result<Value> {
 }
 
 pub fn acos((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.acos().into())
+	Ok(narrowed("math::acos", arg)?.acos().into())
 }
 
 pub fn acot((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.acot().into())
+	Ok(narrowed("math::acot", arg)?.acot().into())
 }
 
 pub fn asin((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.asin().into())
+	Ok(narrowed("math::asin", arg)?.asin().into())
 }
 
 pub fn atan((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.atan().into())
+	Ok(narrowed("math::atan", arg)?.atan().into())
 }
 
 pub async fn bottom_walk((array, c): (Vec<Number>, i64)) -> Result<Value> {
@@ -109,14 +139,14 @@ pub fn clamp((arg, min, max): (Number, Number, Number)) -> Result<Value> {
 }
 
 pub fn cos((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.cos().into())
+	Ok(narrowed("math::cos", arg)?.cos().into())
 }
 pub fn cot((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.cot().into())
+	Ok(narrowed("math::cot", arg)?.cot().into())
 }
 
 pub fn deg2rad((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.deg2rad().into())
+	Ok(narrowed("math::deg2rad", arg)?.deg2rad().into())
 }
 
 pub fn fixed((arg, p): (Number, i64)) -> Result<Value> {
@@ -151,27 +181,31 @@ pub async fn interquartile_walk((array,): (Vec<Number>,)) -> Result<Value> {
 }
 
 pub fn lerp((from, to, factor): (Number, Number, Number)) -> Result<Value> {
-	Ok(factor.lerp(from, to).into())
+	let name = "math::lerp";
+	let factor = narrowed(name, factor)?;
+	Ok(factor.lerp(narrowed(name, from)?, narrowed(name, to)?).into())
 }
 
 pub fn lerpangle((from, to, factor): (Number, Number, Number)) -> Result<Value> {
-	Ok(factor.lerp_angle(from, to).into())
+	let name = "math::lerpangle";
+	let factor = narrowed(name, factor)?;
+	Ok(factor.lerp_angle(narrowed(name, from)?, narrowed(name, to)?).into())
 }
 
 pub fn ln((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.ln().into())
+	Ok(narrowed("math::ln", arg)?.ln().into())
 }
 
 pub fn log((arg, base): (Number, Number)) -> Result<Value> {
-	Ok(arg.log(base).into())
+	Ok(narrowed("math::log", arg)?.log(narrowed("math::log", base)?).into())
 }
 
 pub fn log10((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.log10().into())
+	Ok(narrowed("math::log10", arg)?.log10().into())
 }
 
 pub fn log2((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.log2().into())
+	Ok(narrowed("math::log2", arg)?.log2().into())
 }
 
 pub async fn max_walk((array,): (Vec<Number>,)) -> Result<Value> {
@@ -243,7 +277,7 @@ pub async fn product_walk((array,): (Vec<Number>,)) -> Result<Value> {
 }
 
 pub fn rad2deg((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.rad2deg().into())
+	Ok(narrowed("math::rad2deg", arg)?.rad2deg().into())
 }
 
 pub fn round((arg,): (Number,)) -> Result<Value> {
@@ -255,13 +289,13 @@ pub fn sign((arg,): (Number,)) -> Result<Value> {
 }
 
 pub fn sin((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.sin().into())
+	Ok(narrowed("math::sin", arg)?.sin().into())
 }
 
 pub async fn spread_walk((array,): (Vec<Number>,)) -> Result<Value> {
-	let init = array.first().copied();
-	let (min, max) = fuel::fold(array.iter(), (init, init), |(min, max), n| {
-		(std::cmp::min(min, Some(*n)), std::cmp::max(max, Some(*n)))
+	let init = array.first().cloned();
+	let (min, max) = fuel::fold(array.iter(), (init.clone(), init), |(min, max), n| {
+		(std::cmp::min(min, Some(n.clone())), std::cmp::max(max, Some(n.clone())))
 	})
 	.await;
 	Ok(match (min, max) {
@@ -272,6 +306,7 @@ pub async fn spread_walk((array,): (Vec<Number>,)) -> Result<Value> {
 }
 
 pub fn sqrt((arg,): (Number,)) -> Result<Value> {
+	let arg = narrowed("math::sqrt", arg)?;
 	if arg >= Number::Int(0) {
 		Ok(arg.sqrt().into())
 	} else {
@@ -287,7 +322,7 @@ pub async fn sum_walk((array,): (Vec<Number>,)) -> Result<Value> {
 	Ok(fuel::try_fold(array, Number::Int(0), |sum, n| sum.try_add(n.widened())).await?.into())
 }
 pub fn tan((arg,): (Number,)) -> Result<Value> {
-	Ok(arg.tan().into())
+	Ok(narrowed("math::tan", arg)?.tan().into())
 }
 
 pub async fn top_walk((array, c): (Vec<Number>, i64)) -> Result<Value> {

@@ -36,6 +36,9 @@ pub fn integer(value: &Value) -> Result<i128, SchemaError> {
 			Number::I32(v) => Ok(i128::from(*v)),
 			Number::U32(v) => Ok(i128::from(*v)),
 			Number::U64(v) => Ok(i128::from(*v)),
+			Number::BigDecimal(b) => {
+				b.to_i64().map(i128::from).ok_or(SchemaError::vm("int", "an integer bigdecimal"))
+			}
 			Number::Decimal(d) if d.fract().is_zero() => d
 				.mantissa()
 				.checked_div(10i128.pow(d.scale()))
@@ -58,6 +61,7 @@ pub fn float(value: &Value) -> Result<f64, SchemaError> {
 			Number::F32(v) => Ok(*v as f64),
 			Number::Int(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::I16(_)

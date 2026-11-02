@@ -67,7 +67,12 @@ impl RecordIdKeyLit {
 			| Kind::Bool
 			| Kind::Bytes
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Duration
 			| Kind::Float
 			| Kind::U64
@@ -80,7 +85,8 @@ impl RecordIdKeyLit {
 			| Kind::Set(_, _)
 			| Kind::Function(_, _)
 			| Kind::Range
-			| Kind::File(_) => false,
+			| Kind::File(_)
+			| Kind::Enum(_) => false,
 		}
 	}
 }

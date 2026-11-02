@@ -45,6 +45,8 @@ impl<'a, 's> Parser<'a, 's> {
 			DefineKind::Api as u8
 		} else if t.kw == Kw::Extension || t.kw == Kw::Module {
 			DefineKind::Module as u8
+		} else if self.ident_is(t, "ENUM", true) {
+			DefineKind::Enum as u8
 		} else {
 			return Err(self.unexpected("a alter statement keyword"));
 		};
@@ -89,7 +91,7 @@ impl<'a, 's> Parser<'a, 's> {
 				if self.at_kw(Kw::Comment) {
 					self.string_clause(Cl::Comment)?;
 				} else if self.at_kw(Kw::Drop) {
-					self.alter_drop(&[(Kw::Comment, Cl::Comment)], "COMMENT")?;
+					self.alter_drop(&[(Kw::Comment, Cl::Comment)], false, "COMMENT")?;
 				}
 			} else {
 				let clauses = self.vals.len();
@@ -180,8 +182,10 @@ impl<'a, 's> Parser<'a, 's> {
 		const ACCESS: u8 = DefineKind::Access as u8;
 		const CONFIG: u8 = DefineKind::Config as u8;
 		const MODULE: u8 = DefineKind::Module as u8;
+		const ENUM: u8 = DefineKind::Enum as u8;
 		const BUCKET: u8 = DefineKind::Bucket as u8;
 		match kind {
+			ENUM => rec[1] = self.name()?,
 			TABLE => rec[1] = self.expr(false)?,
 			EVENT | INDEX | FIELD => {
 				rec[1] = self.expr(true)?;
@@ -254,9 +258,27 @@ impl<'a, 's> Parser<'a, 's> {
 
 	/// A `DROP x` clause, where `x` must be one of `allowed`; anything else
 	/// is reported as not the `expected` clauses.
-	fn alter_drop(&mut self, allowed: &[(Kw, Cl)], expected: &'static str) -> R<()> {
+	///
+	/// With `sql_type`, `SQL TYPE` is also allowed, matched by its words.
+	fn alter_drop(
+		&mut self,
+		allowed: &[(Kw, Cl)],
+		sql_type: bool,
+		expected: &'static str,
+	) -> R<()> {
 		let t = self.bump();
 		let n = self.tok;
+		if sql_type && self.is_word(n, "SQL") {
+			self.bump();
+			self.expect_kw(Kw::Type, "TYPE")?;
+			return self.push_clause(
+				Cl::AlterDrop,
+				Cl::SqlType as u32,
+				0,
+				t.start,
+				self.ast.nodes.len(),
+			);
+		}
 		let Some(&(_, cl)) = allowed.iter().find(|(k, _)| n.kind == T::Ident && n.kw == *k) else {
 			return Err(self.unexpected(expected));
 		};
@@ -360,7 +382,7 @@ impl<'a, 's> Parser<'a, 's> {
 							(Kw::Comment, Cl::Comment),
 							(Kw::Reference, Cl::Reference),
 						],
-						"`FLEXIBLE`, `TYPE`, `READONLY`, `INLINE`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, or `REFERENCE`",
+						"`FLEXIBLE`, `TYPE`, `READONLY`, `INLINE`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, `REFERENCE`, or `SQL TYPE`",
 					),
 					x if x == k(D::Bucket) => (
 						&[(Kw::Readonly, Cl::Readonly), (Kw::Comment, Cl::Comment)],
@@ -387,13 +409,48 @@ impl<'a, 's> Parser<'a, 's> {
 					x if x == k(D::Api) => (&[(Kw::Comment, Cl::Comment)], "COMMENT"),
 					_ => (&[(Kw::Comment, Cl::Comment)], "`COMMENT`"),
 				};
-				self.alter_drop(allowed, expected)?;
+				self.alter_drop(allowed, kind == k(D::Field), expected)?;
 			} else {
 				if !self.alter_clause(kind, field_is_id, t)? {
 					return Ok(());
 				}
 			}
 		}
+	}
+
+	/// `ADD VALUE [IF NOT EXISTS] 'x' [BEFORE 'y' | AFTER 'y']`.
+	fn enum_add_clause(&mut self) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		self.expect_kw(Kw::Value, "VALUE")?;
+		let if_not_exists = if self.eat_kw(Kw::If) {
+			self.expect_kw(Kw::Not, "NOT")?;
+			self.expect_kw(Kw::Exists, "EXISTS")?;
+			1
+		} else {
+			0
+		};
+		let value = self.string_lit()?;
+		let (anchor, position) = if self.eat_kw(Kw::Before) {
+			(self.string_lit()?, 1)
+		} else if self.eat_kw(Kw::After) {
+			(self.string_lit()?, 2)
+		} else {
+			(NONE, 0)
+		};
+		let idx = self.record(&[anchor, position, if_not_exists]);
+		self.push_clause(Cl::EnumAdd, value, idx, t.start, first)
+	}
+
+	/// `RENAME VALUE 'a' TO 'b'`.
+	fn enum_rename_clause(&mut self) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		self.expect_kw(Kw::Value, "VALUE")?;
+		let from = self.string_lit()?;
+		self.expect_kw(Kw::To, "TO")?;
+		let to = self.string_lit()?;
+		self.push_clause(Cl::EnumRename, from, to, t.start, first)
 	}
 
 	/// One kind-specific `ALTER` clause at `t`; `false` when `t` starts none.
@@ -475,6 +532,8 @@ impl<'a, 's> Parser<'a, 's> {
 			self.materialize_clause()?;
 		} else if t.kw == Kw::Migrate && is(D::Field) {
 			self.migrate_clause(false)?;
+		} else if self.is_word(t, "SQL") && is(D::Field) {
+			self.sql_type_clause()?;
 		} else if t.kw == Kw::Permissions
 			&& (is(D::Param) || is(D::Bucket) || is(D::Function) || is(D::Module))
 		{
@@ -486,6 +545,10 @@ impl<'a, 's> Parser<'a, 's> {
 			let first = self.ast.nodes.len();
 			self.expect_kw(Kw::Signatures, "SIGNATURES")?;
 			self.push_clause(Cl::RevokeSignatures, 0, 0, t.start, first)?;
+		} else if is(D::Enum) && self.ident_is(t, "ADD", true) {
+			self.enum_add_clause()?;
+		} else if is(D::Enum) && self.ident_is(t, "RENAME", true) {
+			self.enum_rename_clause()?;
 		} else if t.kw == Kw::Function && is(D::Analyzer) {
 			self.analyzer_function_clause()?;
 		} else if t.kw == Kw::Tokenizers && is(D::Analyzer) {

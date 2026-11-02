@@ -14,8 +14,8 @@ use serde::de::DeserializeOwned;
 use crate::error::{ConversionError, LengthMismatchError, OutOfRangeError, SerializationError};
 use crate::traits::ser::Serializer;
 use crate::{
-	Array, Bytes, Datetime, Duration, Error, File, Geometry, Kind, Number, Object, Range, RecordId,
-	Set, SurrealNone, SurrealNull, Table, Uuid, Value, kind,
+	Array, Bytes, Date, Datetime, Duration, Error, File, Geometry, Interval, Kind, Number, Object,
+	Range, RecordId, Set, SurrealNone, SurrealNull, Table, Time, Timestamp, Uuid, Value, kind,
 };
 
 /// Trait for converting between SurrealDB values and Rust types
@@ -412,6 +412,10 @@ impl_surreal_value!(
 					// integer types
 					whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<i64>(d))
 				}
+				crate::Wide::BigDecimal(b) => match Decimal::try_from(b) {
+					Ok(d) => whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<i64>(d)),
+					Err(_) => Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into()),
+				},
 				crate::Wide::Float(_) => {
 					Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
 				}
@@ -434,6 +438,9 @@ impl_surreal_value!(
 			match n.wide() {
 				crate::Wide::Int(n) => callback(&n),
 				crate::Wide::Decimal(d) => whole_decimal_to::<i64>(&d).is_some_and(|n| callback(&n)),
+				crate::Wide::BigDecimal(b) => {
+					Decimal::try_from(b).ok().and_then(|d| whole_decimal_to::<i64>(&d)).is_some_and(|n| callback(&n))
+				}
 				crate::Wide::Float(_) => false,
 			}
 		} else {
@@ -462,7 +469,7 @@ impl_surreal_value!(
 		if let Value::Number(n) = value {
 			match n.wide() {
 				crate::Wide::Float(n) => Ok(n),
-				crate::Wide::Int(_) | crate::Wide::Decimal(_) => {
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) | crate::Wide::BigDecimal(_) => {
 					Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
 				}
 			}
@@ -481,7 +488,7 @@ impl_surreal_value!(
 		if let Value::Number(n) = self {
 			match n.wide() {
 				crate::Wide::Float(n) => callback(&n),
-				crate::Wide::Int(_) | crate::Wide::Decimal(_) => false,
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) | crate::Wide::BigDecimal(_) => false,
 			}
 		} else {
 			false
@@ -672,14 +679,152 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	chrono::NaiveDate as kind!(datetime),
-	(value) => matches!(value, Value::Datetime(_)),
-	(self) => Value::Datetime(Datetime(chrono::DateTime::from_naive_utc_and_offset(self.and_time(chrono::NaiveTime::MIN), chrono::Utc))),
-	(value) => {
-		let Value::Datetime(Datetime(d)) = value else {
+	Date as kind!(date),
+	is_date(value) => matches!(value, Value::Date(_)),
+	from_date(self) => Value::Date(self),
+	into_date(value) => {
+		let Value::Date(d) = value else {
 			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
 		};
-		Ok(d.date_naive())
+		Ok(d)
+	},
+	as_ty => as_date(self) => {
+		if let Value::Date(d) = self {
+			Some(d)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_date_and(self, callback) => {
+		if let Value::Date(d) = self {
+			callback(d)
+		} else {
+			false
+		}
+	}
+);
+
+impl_surreal_value!(
+	Time as kind!(time),
+	is_time(value) => matches!(value, Value::Time(_)),
+	from_time(self) => Value::Time(self),
+	into_time(value) => {
+		let Value::Time(d) = value else {
+			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
+		};
+		Ok(d)
+	},
+	as_ty => as_time(self) => {
+		if let Value::Time(d) = self {
+			Some(d)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_time_and(self, callback) => {
+		if let Value::Time(d) = self {
+			callback(d)
+		} else {
+			false
+		}
+	}
+);
+
+impl_surreal_value!(
+	Timestamp as kind!(timestamp),
+	is_timestamp(value) => matches!(value, Value::Timestamp(_)),
+	from_timestamp(self) => Value::Timestamp(self),
+	into_timestamp(value) => {
+		let Value::Timestamp(d) = value else {
+			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
+		};
+		Ok(d)
+	},
+	as_ty => as_timestamp(self) => {
+		if let Value::Timestamp(d) = self {
+			Some(d)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_timestamp_and(self, callback) => {
+		if let Value::Timestamp(d) = self {
+			callback(d)
+		} else {
+			false
+		}
+	}
+);
+
+impl_surreal_value!(
+	Interval as kind!(interval),
+	is_interval(value) => matches!(value, Value::Interval(_)),
+	from_interval(self) => Value::Interval(self),
+	into_interval(value) => {
+		let Value::Interval(d) = value else {
+			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
+		};
+		Ok(d)
+	},
+	as_ty => as_interval(self) => {
+		if let Value::Interval(d) = self {
+			Some(d)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_interval_and(self, callback) => {
+		if let Value::Interval(d) = self {
+			callback(d)
+		} else {
+			false
+		}
+	}
+);
+
+impl_surreal_value!(
+	chrono::NaiveDate as kind!(date),
+	(value) => matches!(value, Value::Date(_) | Value::Datetime(_)),
+	(self) => Value::Date(Date::from(self)),
+	(value) => {
+		if let Value::Date(d) = &value {
+			return Ok(d.into_inner());
+		}
+		if let Value::Datetime(d) = &value {
+			return Ok(d.0.date_naive());
+		}
+		Err(ConversionError::from_value(Self::kind_of(), &value).into())
+	}
+);
+
+impl_surreal_value!(
+	chrono::NaiveTime as kind!(time),
+	(value) => matches!(value, Value::Time(_)),
+	(self) => Value::Time(Time::from(self)),
+	(value) => {
+		if let Value::Time(t) = &value {
+			return t.into_inner().ok_or_else(|| {
+				Error::internal(
+					"The time 24:00:00 cannot be represented as a chrono::NaiveTime".to_owned(),
+				)
+			});
+		}
+		Err(ConversionError::from_value(Self::kind_of(), &value).into())
+	}
+);
+
+impl_surreal_value!(
+	chrono::NaiveDateTime as kind!(timestamp),
+	(value) => matches!(value, Value::Timestamp(_) | Value::Datetime(_)),
+	(self) => Value::Timestamp(Timestamp::from(self)),
+	(value) => {
+		if let Value::Timestamp(t) = &value {
+			return Ok(t.into_inner());
+		}
+		if let Value::Datetime(d) = &value {
+			return Ok(d.0.naive_utc());
+		}
+		Err(ConversionError::from_value(Self::kind_of(), &value).into())
 	}
 );
 
@@ -913,6 +1058,10 @@ impl_surreal_value!(
 			| Value::Bytes(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Geometry(_)
 			| Value::Table(_)
@@ -943,6 +1092,10 @@ impl_surreal_value!(
 			| Value::Bytes(_)
 			| Value::Duration(_)
 			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
 			| Value::Uuid(_)
 			| Value::Geometry(_)
 			| Value::Table(_)
@@ -1345,6 +1498,10 @@ macro_rules! impl_numeric {
 							crate::Wide::Decimal(d) => {
 								whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<$k>(d))
 							}
+							crate::Wide::BigDecimal(b) => match Decimal::try_from(b) {
+								Ok(d) => whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<$k>(d)),
+								Err(_) => Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into()),
+							},
 							crate::Wide::Float(_) => {
 								Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
 							}
@@ -1385,6 +1542,7 @@ macro_rules! impl_numeric {
 						Value::Number(n) => match n.wide() {
 							crate::Wide::Int(i) => <$k>::try_from(i).ok(),
 							crate::Wide::Decimal(d) => whole_decimal_to(&d),
+							crate::Wide::BigDecimal(b) => Decimal::try_from(b).ok().and_then(|d| whole_decimal_to(&d)),
 							crate::Wide::Float(_) => None,
 						},
 						_ => None,
@@ -1425,6 +1583,10 @@ macro_rules! impl_numeric {
 							crate::Wide::Decimal(d) => {
 								whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<$k>(d))
 							}
+							crate::Wide::BigDecimal(b) => match Decimal::try_from(b) {
+								Ok(d) => whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<$k>(d)),
+								Err(_) => Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into()),
+							},
 							crate::Wide::Float(_) => {
 								Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
 							}
@@ -1465,6 +1627,7 @@ macro_rules! impl_numeric {
 						Value::Number(n) => match n.wide() {
 							crate::Wide::Int(i) => <$k>::try_from(i).ok(),
 							crate::Wide::Decimal(d) => whole_decimal_to(&d),
+							crate::Wide::BigDecimal(b) => Decimal::try_from(b).ok().and_then(|d| whole_decimal_to(&d)),
 							crate::Wide::Float(_) => None,
 						},
 						_ => None,
@@ -1512,7 +1675,7 @@ impl SurrealValue for f32 {
 		if let Value::Number(n) = value {
 			match n.wide() {
 				crate::Wide::Float(n) => Ok(n as f32),
-				crate::Wide::Int(_) | crate::Wide::Decimal(_) => {
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) | crate::Wide::BigDecimal(_) => {
 					Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
 				}
 			}
@@ -1548,7 +1711,7 @@ impl Value {
 		if let Value::Number(n) = self {
 			match n.wide() {
 				crate::Wide::Float(n) => Some(n as f32),
-				crate::Wide::Int(_) | crate::Wide::Decimal(_) => None,
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) | crate::Wide::BigDecimal(_) => None,
 			}
 		} else {
 			None
@@ -1573,7 +1736,7 @@ impl SurrealValue for half::f16 {
 		if let Value::Number(n) = value {
 			match n.wide() {
 				crate::Wide::Float(n) => Ok(half::f16::from_f64(n)),
-				crate::Wide::Int(_) | crate::Wide::Decimal(_) => {
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) | crate::Wide::BigDecimal(_) => {
 					Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
 				}
 			}
@@ -1609,7 +1772,7 @@ impl Value {
 		if let Value::Number(n) = self {
 			match n.wide() {
 				crate::Wide::Float(n) => Some(half::f16::from_f64(n)),
-				crate::Wide::Int(_) | crate::Wide::Decimal(_) => None,
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) | crate::Wide::BigDecimal(_) => None,
 			}
 		} else {
 			None
@@ -1798,6 +1961,10 @@ impl SurrealValue for http::HeaderMap {
 				| Value::Bytes(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Geometry(_)
 				| Value::Table(_)

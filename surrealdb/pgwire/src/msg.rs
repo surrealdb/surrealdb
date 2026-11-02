@@ -415,8 +415,7 @@ pub(super) fn write_row_description(
 			buf.put_i16(0);
 			buf.put_i32(column.ty.oid());
 			buf.put_i16(column.ty.typlen());
-			// Type modifier: none.
-			buf.put_i32(-1);
+			buf.put_i32(column.typmod);
 			buf.put_i16(format_of(i));
 		}
 	});
@@ -683,6 +682,7 @@ mod tests {
 		write_row_description(
 			&mut buf,
 			&[PgColumn {
+				typmod: -1,
 				name: "id".to_string(),
 				ty: PgType::Int8,
 			}],

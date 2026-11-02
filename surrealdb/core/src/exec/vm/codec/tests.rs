@@ -309,6 +309,14 @@ fn a_view_rows_stats_read_in_either_encoding_and_write_the_stored_one() {
 			arg: 9,
 			values: vec![Value::from(1), Value::from("a"), Value::None],
 		},
+		AggregationStat::TemporalMax {
+			arg: 10,
+			max: Value::Date(crate::val::Date(19_000)),
+		},
+		AggregationStat::TemporalMin {
+			arg: 11,
+			min: Value::Timestamp(crate::val::Date(-3).at_midnight()),
+		},
 	];
 	let mut data = Object::default();
 	data.insert("n".to_owned(), Value::from(3));
@@ -507,7 +515,7 @@ fn the_leaf_codec_refuses_every_catalog_kind() {
 
 /// The VM codec writes and reads every `Number` variant identically to its
 /// `revision` implementation, including multi-byte varint payloads for sized
-/// integers and `f16`.
+/// integers and `f16`, and a bigdecimal's scale.
 #[test]
 fn vm_value_codec_matches_revision_encoding_for_all_number_variants() {
 	use crate::val::{Number, Value};
@@ -533,9 +541,14 @@ fn vm_value_codec_matches_revision_encoding_for_all_number_variants() {
 		Number::F16(surrealdb_types::f16::from_f32(1.5)),
 		Number::F16(surrealdb_types::f16::from_f32(-1024.0)),
 		Number::F32(2.75),
+		Number::BigDecimal(Box::new("1.50".parse().unwrap())),
+		Number::BigDecimal(Box::new("0".parse().unwrap())),
+		Number::BigDecimal(Box::new(
+			"-123456789012345678901234567890123456789012345.6789".parse().unwrap(),
+		)),
 	];
 	for n in numbers {
-		let val = Value::Number(n);
+		let val = Value::Number(n.clone());
 		let rust = revision::to_vec(&val).unwrap();
 		let mut w = wire::Writer::default();
 		value::encode(&val, &mut w).unwrap();
@@ -545,6 +558,48 @@ fn vm_value_codec_matches_revision_encoding_for_all_number_variants() {
 		let mut r = wire::Reader::new(&rust);
 		let decoded = value::decode(&mut r).unwrap();
 		assert_eq!(decoded, val, "VM decode mismatch for {n:?}");
+		// `==` is numeric; the debug form also holds a bigdecimal's scale.
+		assert_eq!(format!("{decoded:?}"), format!("{val:?}"), "VM decode mismatch for {n:?}");
 		assert!(r.is_empty(), "trailing bytes after decoding {n:?}");
 	}
+}
+
+/// The VM codec writes and reads the temporal variants identically to their `revision`
+/// implementation, at revision 3, and reads the variants older than them at revision 2.
+#[test]
+fn vm_value_codec_matches_revision_encoding_for_the_temporal_variants() {
+	use crate::val::{Date, Interval, Time, Timestamp, Value};
+
+	let values = [
+		Value::Date(Date(0)),
+		Value::Date(Date(-719_162)),
+		Value::Date(Date(100_000)),
+		Value::Time(Time(0)),
+		Value::Time(Time(Time::NANOS_PER_DAY)),
+		Value::Timestamp(Timestamp {
+			secs: -1,
+			nanos: 999_999_999,
+		}),
+		Value::Timestamp(Timestamp {
+			secs: 8_000_000_000_000,
+			nanos: 7,
+		}),
+		Value::Interval(Interval::new(-14, 3, i64::MIN)),
+		Value::Interval(Interval::new(i32::MAX, i32::MIN, i64::MAX)),
+		Value::Array(crate::val::Array(vec![Value::Date(Date(1)), Value::Null])),
+		Value::Number(crate::val::Number::Int(5)),
+	];
+	for val in values {
+		let rust = revision::to_vec(&val).unwrap();
+		let mut w = wire::Writer::default();
+		value::encode(&val, &mut w).unwrap();
+		assert_eq!(w.into_bytes(), rust, "VM encode mismatch for {val:?}");
+		let mut r = wire::Reader::new(&rust);
+		let decoded = value::decode(&mut r).unwrap();
+		assert!(crate::val::same_value(&decoded, &val), "VM decode mismatch for {val:?}");
+		assert!(r.is_empty(), "trailing bytes after decoding {val:?}");
+	}
+	let mut as_rev2 = revision::to_vec(&Value::Date(Date(1))).unwrap();
+	as_rev2[0] = 2;
+	assert!(value::decode(&mut wire::Reader::new(&as_rev2)).is_err());
 }

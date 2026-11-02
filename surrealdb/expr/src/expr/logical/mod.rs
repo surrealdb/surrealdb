@@ -3487,7 +3487,12 @@ fn element_kind(kind: &Kind) -> Kind {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -3510,7 +3515,8 @@ fn element_kind(kind: &Kind) -> Kind {
 		| Kind::Geometry(_)
 		| Kind::Function(..)
 		| Kind::Range
-		| Kind::File(_) => kind.clone(),
+		| Kind::File(_)
+		| Kind::Enum(_) => kind.clone(),
 	}
 }
 

@@ -880,7 +880,7 @@ impl KnnContext {
 	/// Look up the distance for a record. Called by vector::distance::knn().
 	pub async fn get(&self, rid: &RecordId) -> Option<Number> {
 		let key = (rid.table.clone(), RecordIdentity(rid.key.clone()));
-		self.distances.read().await.get(&key).copied()
+		self.distances.read().await.get(&key).cloned()
 	}
 }
 

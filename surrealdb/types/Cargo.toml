@@ -60,8 +60,11 @@ regex = { workspace = true, optional = true }
 regex-lite.workspace = true
 # Used for generating random regexes for fuzzing with arbitrary
 regex-syntax = { workspace = true, optional = true }
+num-bigint.workspace = true
+num-traits.workspace = true
 rust_decimal.workspace = true
 serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
 serde_json.workspace = true
 surrealdb-collections = { workspace = true, features = ["serde"] }
 surrealdb-protocol = { workspace = true, features = ["flatbuffers"] }

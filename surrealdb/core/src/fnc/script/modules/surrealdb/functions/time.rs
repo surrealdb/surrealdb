@@ -6,7 +6,13 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"time",
+	"age" => run,
 	"ceil" => run,
+	"extract" => run,
+	"make_date" => run,
+	"make_time" => run,
+	"make_timestamp" => run,
+	"trunc" => run,
 	"day" => run,
 	"floor" => run,
 	"format" => run,

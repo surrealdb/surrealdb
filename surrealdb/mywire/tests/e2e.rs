@@ -1663,7 +1663,7 @@ async fn test_mywire_datetimes_and_durations_use_mysql_text_forms() {
 	let mut stream = connect_and_handshake(addr).await;
 	seed_person_with_json_and_arrays(addr).await;
 	let res = query_text(&mut stream, "SELECT * FROM person WHERE name = 'Tobie'").await;
-	assert_eq!(res.type_of("born"), MYSQL_TYPE_DATETIME);
+	assert_eq!(res.type_of("born"), MYSQL_TYPE_TIMESTAMP);
 	assert_eq!(res.cell(0, "born"), Some("1980-01-01 00:00:00"));
 	assert_eq!(res.cell(0, "seen"), Some("1980-01-01 12:30:45.123456"));
 	assert_eq!(res.type_of("took"), MYSQL_TYPE_TIME);
@@ -1830,9 +1830,9 @@ async fn test_mywire_a_named_column_and_select_star_show_one_text_for_a_value() 
 	}
 	// The temporal fields are typed apart in the two results, and show one text.
 	for (field, ty, text) in [
-		("born", MYSQL_TYPE_DATETIME, "1980-01-01 00:00:00"),
-		("seen", MYSQL_TYPE_DATETIME, "1980-01-01 12:30:45.123456"),
-		("early", MYSQL_TYPE_DATETIME, "1969-12-31 23:59:59"),
+		("born", MYSQL_TYPE_TIMESTAMP, "1980-01-01 00:00:00"),
+		("seen", MYSQL_TYPE_TIMESTAMP, "1980-01-01 12:30:45.123456"),
+		("early", MYSQL_TYPE_TIMESTAMP, "1969-12-31 23:59:59"),
 		("took", MYSQL_TYPE_TIME, "26:00:00"),
 		("short", MYSQL_TYPE_TIME, "01:30:00"),
 		("zero", MYSQL_TYPE_TIME, "00:00:00"),

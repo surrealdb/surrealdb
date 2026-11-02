@@ -4,6 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::AlterKind;
 use crate::expr::permission::{FieldPermissions, Permissions};
 use crate::expr::reference::Reference;
+use crate::expr::statements::define::SqlType;
 use crate::expr::{CoverStmts, Expr, KeyNames, KeyNamesError, Kind, KindLiteral, Literal};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -38,6 +39,8 @@ pub struct AlterFieldStatement {
 	pub reference: AlterKind<Reference>,
 	/// `MIGRATE EXISTING ROWS …`: what the alteration does to stored rows.
 	pub migrate: Option<crate::expr::statements::define::MigrateClause>,
+	/// Set or drop the `SQL TYPE` clause.
+	pub sql_type: AlterKind<SqlType>,
 }
 
 impl Default for AlterFieldStatement {
@@ -58,6 +61,7 @@ impl Default for AlterFieldStatement {
 			comment: AlterKind::None,
 			reference: AlterKind::None,
 			migrate: None,
+			sql_type: AlterKind::None,
 		}
 	}
 }
@@ -166,6 +170,11 @@ impl ToSql for AlterFieldStatement {
 		match self.reference {
 			AlterKind::Set(ref x) => write_sql!(f, fmt, " REFERENCE {x}"),
 			AlterKind::Drop => write_sql!(f, fmt, " DROP REFERENCE"),
+			AlterKind::None => {}
+		}
+		match self.sql_type {
+			AlterKind::Set(ref x) => write_sql!(f, fmt, " {x}"),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP SQL TYPE"),
 			AlterKind::None => {}
 		}
 		if let Some(ref migrate) = self.migrate {

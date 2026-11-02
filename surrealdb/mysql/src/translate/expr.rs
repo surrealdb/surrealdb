@@ -348,6 +348,7 @@ pub fn translate_expr(
 fn translate_literal(lit: &Literal, out: &mut String) -> Result<(), TranslationError> {
 	match lit {
 		Literal::Integer(n) => write!(out, "{n}")?,
+		Literal::Unsigned(n) => write!(out, "{n}u64")?,
 		Literal::Float(fl) => write!(out, "{fl}")?,
 		Literal::String(s) => {
 			out.push('\'');

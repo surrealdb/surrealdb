@@ -202,7 +202,7 @@ fn column(
 }
 
 fn leaf_kind(g: &mut Gen<'_, '_>) -> PhysicalKind {
-	match g.below(25) {
+	match g.below(26) {
 		0 => PhysicalKind::Bool,
 		1 => PhysicalKind::I8,
 		2 => PhysicalKind::I16,
@@ -227,6 +227,7 @@ fn leaf_kind(g: &mut Gen<'_, '_>) -> PhysicalKind {
 		21 => PhysicalKind::Bytes,
 		22 => PhysicalKind::RecordKey,
 		23 => PhysicalKind::DecimalVar,
+		24 => PhysicalKind::BigDecimal,
 		_ => PhysicalKind::Value,
 	}
 }
@@ -373,6 +374,7 @@ fn fitting(g: &mut Gen<'_, '_>, column: &Column) -> Value {
 		PhysicalKind::Decimal16 | PhysicalKind::DecimalVar => {
 			Value::Number(Number::Decimal(g.decimal()))
 		}
+		PhysicalKind::BigDecimal => Value::Number(Number::BigDecimal(Box::new(g.bigdecimal()))),
 		PhysicalKind::Fixed(width) => {
 			Value::Bytes(Bytes::from((0..width).map(|_| g.bits() as u8).collect::<Vec<u8>>()))
 		}

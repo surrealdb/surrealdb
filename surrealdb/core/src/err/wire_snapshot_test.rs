@@ -696,6 +696,15 @@ fn every_doc_variant() -> Vec<(&'static str, DocError)> {
 				error: Box::new(sample_coerce_error()),
 			},
 		),
+		(
+			"FieldSqlType",
+			DocError::FieldSqlType {
+				record: "sample".to_string(),
+				field_name: "sample".to_string(),
+				sql_type: "POSTGRESQL 'varchar(3)'".to_string(),
+				message: "value too long for type character varying(3)".to_string(),
+			},
+		),
 		("PatchPointerNotAllowed", DocError::PatchPointerNotAllowed("sample".to_string())),
 		(
 			"DeleteRejectedByReference",
@@ -897,6 +906,12 @@ fn every_catalog_variant() -> Vec<(&'static str, CatalogError)> {
 			},
 		),
 		(
+			"EnNotFound",
+			CatalogError::EnNotFound {
+				name: "sample".to_string(),
+			},
+		),
+		(
 			"IxNotFound",
 			CatalogError::IxNotFound {
 				name: "sample".to_string(),
@@ -983,6 +998,12 @@ fn every_catalog_variant() -> Vec<(&'static str, CatalogError)> {
 		(
 			"BuAlreadyExists",
 			CatalogError::BuAlreadyExists {
+				value: "sample".to_string(),
+			},
+		),
+		(
+			"EnAlreadyExists",
+			CatalogError::EnAlreadyExists {
 				value: "sample".to_string(),
 			},
 		),
@@ -1832,7 +1853,11 @@ fn snapshot_covers_every_variant() {
 // 173: idx::Error carries a `FileAccessDenied` twin of the buc variant with a
 // byte-identical message, so the mapper allowlist is enforced inside idx; the
 // wire output of the affected sites is unchanged.
-const UNTYPED_INTERNAL_BUDGET: usize = 168;
+// 175: catalog::Error carries `EnNotFound` and `EnAlreadyExists` for the enum entity, as it
+// carries `BuNotFound` and `BuAlreadyExists` for buckets, mapped as those are: the public
+// `NotFoundError` and `AlreadyExistsError` name no enum, and a new public detail variant would
+// widen the wire for a condition a client reads from the message.
+const UNTYPED_INTERNAL_BUDGET: usize = 170;
 
 /// Counts variants whose OWN kind is `Internal`.
 ///

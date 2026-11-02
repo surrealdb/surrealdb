@@ -1614,7 +1614,7 @@ pub(super) async fn run_pipelines(
 									(Some(Value::Number(distance)), Value::Object(object)) => {
 										match object.get("id") {
 											Some(Value::RecordId(rid)) => {
-												Some((rid.clone(), *distance))
+												Some((rid.clone(), distance.clone()))
 											}
 											_ => None,
 										}
@@ -2064,6 +2064,10 @@ pub(super) async fn run_storage_source(
 				| Value::String(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
 				| Value::Set(_)
@@ -2769,6 +2773,10 @@ pub(super) async fn run_storage_source(
 					| Value::String(_)
 					| Value::Duration(_)
 					| Value::Datetime(_)
+					| Value::Date(_)
+					| Value::Time(_)
+					| Value::Timestamp(_)
+					| Value::Interval(_)
 					| Value::Uuid(_)
 					| Value::Array(_)
 					| Value::Set(_)
@@ -2923,6 +2931,10 @@ pub(super) fn lookup_key(key: &Value) -> bool {
 		| Value::Number(crate::val::Number::Int(_))
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Bytes(_)
 		| Value::String(_) => true,
@@ -9573,6 +9585,10 @@ async fn destructure(
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Geometry(_)
 		| Value::Bytes(_)

@@ -1,0 +1,22 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL YEAR reads a quoted zero as 2000 and a numeric zero as 0000"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, v: 2000u16 }, { id: 2, v: 2000u16 }, { id: 3, v: 0u16 }, { id: 4, v: 2005u16 }, { id: 5, v: 2005u16 }, { id: 6, v: 0u16 }, { id: 7, v: 2024u16 }]"
+
+[[test.results]]
+value = "[{ id: 1, v: 2000u16 }, { id: 2, v: 2000u16 }, { id: 3, v: 0u16 }, { id: 4, v: 2005u16 }, { id: 5, v: 2005u16 }, { id: 6, v: 0u16 }, { id: 7, v: 2024u16 }]"
+
+*/
+
+CREATE TABLE y (id INT PRIMARY KEY, v YEAR);
+INSERT INTO y (id, v) VALUES (1, '0'), (2, '00'), (3, 0), (4, '5'), (5, 5), (6, '0000'), (7, '2024');
+SELECT id, v FROM y ORDER BY id;

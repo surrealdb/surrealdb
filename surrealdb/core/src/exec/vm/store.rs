@@ -563,6 +563,21 @@ fn dml_inner(
 		| StoreInstr::CheckIndexColumns {
 			..
 		}
+		| StoreInstr::AlterEnum {
+			..
+		}
+		| StoreInstr::RewriteEnumLabels {
+			..
+		}
+		| StoreInstr::CheckEnumUnreferenced {
+			..
+		}
+		| StoreInstr::RaiseUserType {
+			..
+		}
+		| StoreInstr::CheckUserTypeRemovable {
+			..
+		}
 		| StoreInstr::CheckTableAlter {
 			..
 		} => {
@@ -758,6 +773,7 @@ async fn step_inner(
 			draw,
 			reserved,
 		} => {
+			let bounded = matches!(sequence, IdSequence::Enum);
 			let sequence = match sequence {
 				IdSequence::Namespace => CatalogSequence::Namespaces,
 				IdSequence::Database => CatalogSequence::Databases(crate::catalog::NamespaceId(
@@ -767,8 +783,20 @@ async fn step_inner(
 					crate::catalog::NamespaceId(scope(regs, *ns, "namespace")?),
 					crate::catalog::DatabaseId(scope(regs, *db, "database")?),
 				),
+				IdSequence::Enum => CatalogSequence::Enums(
+					crate::catalog::NamespaceId(scope(regs, *ns, "namespace")?),
+					crate::catalog::DatabaseId(scope(regs, *db, "database")?),
+				),
 			};
 			let id = catalog_id(program, *reserved, reserved_taken, ctx, sequence, *draw).await?;
+			if bounded && id >= crate::catalog::EnumId::LIMIT {
+				return Err(ControlFlow::Err(anyhow::Error::new(
+					crate::exec::Error::InvalidStatement(format!(
+						"The database has used all {} enum and type ids",
+						crate::catalog::EnumId::LIMIT
+					)),
+				)));
+			}
 			write(regs, *dst, Value::from(id as i64));
 		}
 		StoreInstr::SessionNs {
@@ -1293,6 +1321,7 @@ async fn step_inner(
 						| StatementError::ApAlreadyExists
 						| StatementError::CgAlreadyExists
 						| StatementError::BuAlreadyExists
+						| StatementError::EnAlreadyExists
 						| StatementError::MdAlreadyExists
 						| StatementError::MlAlreadyExists
 						| StatementError::IxAlreadyExists
@@ -1306,6 +1335,7 @@ async fn step_inner(
 						| StatementError::SeqNotFound
 						| StatementError::AzNotFound
 						| StatementError::BuNotFound
+						| StatementError::EnNotFound
 						| StatementError::MdNotFound
 						| StatementError::MlNotFound
 						| StatementError::MdNeedsTrust
@@ -1328,6 +1358,7 @@ async fn step_inner(
 				| StatementError::ApAlreadyExists
 				| StatementError::CgAlreadyExists
 				| StatementError::BuAlreadyExists
+				| StatementError::EnAlreadyExists
 				| StatementError::MdAlreadyExists
 				| StatementError::MlAlreadyExists
 				| StatementError::IxAlreadyExists
@@ -1340,6 +1371,7 @@ async fn step_inner(
 				| StatementError::SeqNotFound
 				| StatementError::AzNotFound
 				| StatementError::BuNotFound
+				| StatementError::EnNotFound
 				| StatementError::MdNotFound
 				| StatementError::MlNotFound => {}
 			}
@@ -1395,6 +1427,9 @@ async fn step_inner(
 				StatementError::BuAlreadyExists => crate::catalog::Error::BuAlreadyExists {
 					value: name,
 				},
+				StatementError::EnAlreadyExists => crate::catalog::Error::EnAlreadyExists {
+					value: name,
+				},
 				StatementError::MdAlreadyExists => crate::catalog::Error::MdAlreadyExists {
 					name,
 				},
@@ -1429,6 +1464,9 @@ async fn step_inner(
 					name,
 				},
 				StatementError::BuNotFound => crate::catalog::Error::BuNotFound {
+					name,
+				},
+				StatementError::EnNotFound => crate::catalog::Error::EnNotFound {
 					name,
 				},
 				StatementError::MdNotFound => crate::catalog::Error::MdNotFound {
@@ -3451,6 +3489,93 @@ async fn step_inner(
 				.await
 				.map_err(ControlFlow::Err)?;
 			}
+		}
+		StoreInstr::AlterEnum {
+			definition,
+			edits,
+		} => {
+			use crate::catalog::FromStored as _;
+			let stored: crate::catalog::StoredEnumDefinition = rust(&read(regs, *definition))?;
+			let mut altered =
+				crate::catalog::EnumDefinition::from_stored(&stored).map_err(ControlFlow::Err)?;
+			super::schema_host::edit_enum(&mut altered, edits).map_err(ControlFlow::Err)?;
+			let value = altered
+				.to_stored()
+				.into_vm_value()
+				.map_err(|e| ControlFlow::Err(anyhow::Error::from(e)))?;
+			write(regs, *definition, value);
+		}
+		StoreInstr::RewriteEnumLabels {
+			ns,
+			db,
+			name,
+			edits,
+		} => {
+			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
+			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
+			let name_val = read(regs, *name);
+			let Value::String(name) = &name_val else {
+				return Err(ControlFlow::Err(anyhow!("an enum name that is not a string")));
+			};
+			super::schema_host::rewrite_enum_labels(ctx, ns, db, name.as_str(), edits)
+				.await
+				.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::CheckEnumUnreferenced {
+			ns,
+			db,
+			name,
+		} => {
+			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
+			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
+			let name_val = read(regs, *name);
+			let Value::String(name) = &name_val else {
+				return Err(ControlFlow::Err(anyhow!("an enum name that is not a string")));
+			};
+			super::schema_host::check_enum_unreferenced(&ctx.txn(), ns, db, name.as_str())
+				.await
+				.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::RaiseUserType {
+			name,
+			exists,
+		} => {
+			let name_val = read(regs, *name);
+			let Value::String(name) = &name_val else {
+				return Err(ControlFlow::Err(anyhow!("a type name that is not a string")));
+			};
+			return Err(ControlFlow::Err(super::schema_host::user_type_error(
+				name.as_str(),
+				*exists,
+			)));
+		}
+		StoreInstr::CheckUserTypeRemovable {
+			ns,
+			db,
+			name,
+			definition,
+			domain,
+		} => {
+			use crate::catalog::FromStored as _;
+			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
+			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
+			let name_val = read(regs, *name);
+			let Value::String(name) = &name_val else {
+				return Err(ControlFlow::Err(anyhow!("a type name that is not a string")));
+			};
+			let stored: crate::catalog::StoredUserTypeDefinition = rust(&read(regs, *definition))?;
+			let definition = crate::catalog::UserTypeDefinition::from_stored(&stored)
+				.map_err(ControlFlow::Err)?;
+			super::schema_host::check_user_type_removable(
+				&ctx.txn(),
+				ns,
+				db,
+				name.as_str(),
+				&definition,
+				*domain,
+			)
+			.await
+			.map_err(ControlFlow::Err)?;
 		}
 		StoreInstr::CheckTableAlter {
 			previous,

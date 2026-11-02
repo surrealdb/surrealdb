@@ -129,6 +129,26 @@ impl<'a> IdScope<'a> {
 			.filter(|_| !self.is_key_name(column))
 	}
 
+	/// Whether the column `column` of the target table holds a set of enum labels.
+	fn holds_label_set(&self, column: &str) -> bool {
+		matches!(
+			self.catalog.column_enum(self.schema.as_deref(), &self.table, column),
+			Some(crate::catalog::EnumColumn {
+				shape: crate::catalog::EnumShape::Set,
+				..
+			})
+		)
+	}
+
+	/// Whether the column `column` of the target table is declared `json` or `jsonb` (MySQL
+	/// `JSON`), so that text written to it is JSON text.
+	fn json_column(&self, column: &str) -> bool {
+		matches!(
+			self.catalog.column_type(self.schema.as_deref(), &self.table, column),
+			crate::SqlType::Json
+		)
+	}
+
 	/// Whether the link column `column` of the target table admits `NONE`.
 	fn link_admits_none(&self, column: &str) -> bool {
 		self.catalog.link_admits_none(self.schema.as_deref(), &self.table, column)
@@ -244,6 +264,74 @@ enum WriteKey {
 	Str(String),
 	Param(String),
 	Value(Expr),
+}
+
+fn is_comparison(op: &BinaryOperator) -> bool {
+	matches!(
+		op,
+		BinaryOperator::Equal
+			| BinaryOperator::NotEqual
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+	)
+}
+
+/// Whether a call of `name` answers a date, timestamp or datetime whatever its arguments.
+fn returns_instant(name: &str, dialect: SqlDialect) -> bool {
+	matches!(
+		FunctionRegistry::infer_return_type(&name.to_ascii_lowercase(), dialect, &[]),
+		crate::SqlType::Date | crate::SqlType::Timestamp | crate::SqlType::TimestampTz
+	)
+}
+
+/// Whether the expression is, by its syntax, a date, timestamp or datetime: a call of a function
+/// that answers one, or a cast to one.
+fn pgsql_is_instant(expr: &surrealdb_pgsql::ast::expr::Expr) -> bool {
+	if let surrealdb_pgsql::ast::expr::Expr::FunctionCall {
+		name,
+		..
+	} = expr
+	{
+		name.parts.last().is_some_and(|name| returns_instant(name, SqlDialect::Postgres))
+	} else if let surrealdb_pgsql::ast::expr::Expr::TypeCast {
+		data_type,
+		..
+	} = expr
+	{
+		matches!(
+			crate::lower::ddl::map_pgsql_type(data_type),
+			surrealdb_expr::expr::Kind::Date
+				| surrealdb_expr::expr::Kind::Timestamp
+				| surrealdb_expr::expr::Kind::Datetime
+		)
+	} else {
+		false
+	}
+}
+
+fn mysql_is_instant(expr: &surrealdb_mysql::ast::expr::Expr) -> bool {
+	if let surrealdb_mysql::ast::expr::Expr::FunctionCall {
+		name,
+		..
+	} = expr
+	{
+		returns_instant(name, SqlDialect::MySql)
+	} else if let surrealdb_mysql::ast::expr::Expr::Cast {
+		target_type,
+		..
+	} = expr
+	{
+		matches!(
+			crate::lower::expr::cast_kind(target_type, SqlDialect::MySql),
+			surrealdb_expr::expr::Kind::Date
+				| surrealdb_expr::expr::Kind::Timestamp
+				| surrealdb_expr::expr::Kind::Datetime
+		)
+	} else {
+		false
+	}
 }
 
 fn call(name: &str, arguments: Vec<Expr>) -> Expr {
@@ -710,8 +798,51 @@ fn assigned_value(scope: &IdScope<'_>, column: &str, value: Expr) -> Expr {
 			let admits_none = scope.link_admits_none(column);
 			link_assignment(&table, read_as_key(scope, &table, value), admits_none)
 		}
+		None if scope.holds_label_set(column) => label_set_value(value),
+		None if scope.json_column(column) => json_value(value),
 		None => text_assignment(scope.write_type(column), value),
 	}
+}
+
+/// The `value` written to a `json` or `jsonb` column: text is JSON text, parsed into the value it
+/// spells, with the last of duplicate keys kept. Any other value is a JSON value already and is
+/// written as it is, for the column's declared type to judge.
+fn json_value(value: Expr) -> Expr {
+	evaluated_once(value, |value| {
+		Expr::IfElse(Box::new(IfelseStatement {
+			exprs: vec![(
+				call("type::is_string", vec![value.clone()]),
+				call("encoding::json::decode", vec![value.clone()]),
+			)],
+			close: Some(value),
+		}))
+	})
+}
+
+/// The `value` written to a column that holds a set of enum labels (a MySQL `SET`): text is the
+/// comma-separated list of the members, and the empty text is the empty set. Any other value is
+/// written as it is, and the column's kind judges the members.
+fn label_set_value(value: Expr) -> Expr {
+	evaluated_once(value, |value| {
+		let text = |s: &str| Expr::Literal(Literal::String(Strand::from(s)));
+		Expr::IfElse(Box::new(IfelseStatement {
+			exprs: vec![(
+				call("type::is_string", vec![value.clone()]),
+				Expr::IfElse(Box::new(IfelseStatement {
+					exprs: vec![(
+						Expr::Binary {
+							left: Box::new(value.clone()),
+							op: BinaryOperator::Equal,
+							right: Box::new(text("")),
+						},
+						Expr::Literal(Literal::Array(Vec::new())),
+					)],
+					close: Some(call("string::split", vec![value.clone(), text(",")])),
+				})),
+			)],
+			close: Some(value),
+		}))
+	})
 }
 
 /// The key `key` an `id` comparison names, read as the type of the table's `id` when it is text: a
@@ -1013,27 +1144,31 @@ pub fn lower_pgsql_expr(expr: &surrealdb_pgsql::ast::expr::Expr) -> Result<Expr,
 	lower_pgsql_expr_in(expr, None)
 }
 
-/// A datetime cast to `date`, which has no time of day: the start of its day.
-fn truncated_to_date_expr(target: &str, value: Expr) -> Expr {
-	let lower = target.to_ascii_lowercase();
-	if lower.split('(').next().unwrap_or(&lower).trim() != "date" {
-		return value;
+/// A text literal that is cast to `timetz`, as the UTC time of day it names (see
+/// `functions::timetz_text_to_utc`). Any other operand is left as it is.
+fn timetz_text_literal(target: &str, value: Expr) -> Expr {
+	if matches!(target, "timetz" | "time with time zone")
+		&& let Expr::Literal(Literal::String(text)) = &value
+		&& let Some(utc) = crate::lower::functions::timetz_text_to_utc(text.as_str())
+	{
+		Expr::Literal(Literal::String(Strand::from(utc.as_str())))
+	} else {
+		value
 	}
-	Expr::FunctionCall(Box::new(FunctionCall {
-		receiver: Function::Normal("time::group".to_owned()),
-		arguments: vec![value, Expr::Literal(Literal::String(Strand::from("day")))],
-	}))
 }
 
-/// A text literal that is cast to a datetime, in the form the engine reads (see
+/// A text literal that is cast to a datetime, date or timestamp, in the form the engine reads (see
 /// `functions::normalize_datetime_text`). Any other operand is left as it is.
 fn datetime_text_literal(kind: &surrealdb_expr::expr::Kind, value: Expr) -> Expr {
 	match (kind, &value) {
-		(surrealdb_expr::expr::Kind::Datetime, Expr::Literal(Literal::String(text))) => {
-			Expr::Literal(Literal::String(Strand::from(
-				crate::lower::functions::normalize_datetime_text(text.as_str()).as_str(),
-			)))
-		}
+		(
+			surrealdb_expr::expr::Kind::Datetime
+			| surrealdb_expr::expr::Kind::Date
+			| surrealdb_expr::expr::Kind::Timestamp,
+			Expr::Literal(Literal::String(text)),
+		) => Expr::Literal(Literal::String(Strand::from(
+			crate::lower::functions::normalize_datetime_text(text.as_str()).as_str(),
+		))),
 		_ => value,
 	}
 }
@@ -1077,6 +1212,57 @@ fn lower_write_function(
 	})))
 }
 
+/// A text literal cast to an array of two or more dimensions, `'{{1,2},{3,4}}'::int[][]`, read
+/// as the nested array it spells with each element cast to the element type, as the read path
+/// lowers the same cast. A cast to one dimension, or of an operand that is not a text literal, is
+/// `None`. A literal that is not a well-formed array of equal sub-arrays is refused as malformed.
+fn multidim_array_literal(
+	expr: &surrealdb_pgsql::ast::expr::Expr,
+	data_type: &surrealdb_pgsql::ast::expr::TypeName,
+) -> Result<Option<Expr>, PlanError> {
+	use crate::array_literal::{ArrayElement, parse_array_literal};
+	let name = data_type.name.parts.last().map_or("", String::as_str);
+	let dimensions = data_type.array_bounds.len().max(name.matches("[]").count());
+	if dimensions < 2 {
+		return Ok(None);
+	}
+	let surrealdb_pgsql::ast::expr::Expr::Literal {
+		lit: surrealdb_pgsql::ast::literal::Literal::String(text),
+		..
+	} = expr
+	else {
+		return Ok(None);
+	};
+	let element = name.trim_end_matches("[]").to_ascii_lowercase();
+	let kind = crate::lower::expr::cast_kind(&element, SqlDialect::Postgres);
+	let items = parse_array_literal(text).ok_or_else(|| {
+		PlanError::InvalidTextRepresentation(format!("malformed array literal: \"{text}\""))
+	})?;
+	fn nested(items: Vec<ArrayElement>, kind: &surrealdb_expr::expr::Kind) -> Expr {
+		Expr::Literal(Literal::Array(
+			items
+				.into_iter()
+				.map(|item| match item {
+					ArrayElement::Null => Expr::Literal(Literal::Null),
+					ArrayElement::Text(text) => {
+						let text = Expr::Literal(Literal::String(Strand::from(text.as_str())));
+						if matches!(kind, surrealdb_expr::expr::Kind::Any) {
+							text
+						} else {
+							Expr::Prefix {
+								op: PrefixOperator::Cast(kind.clone()),
+								expr: Box::new(text),
+							}
+						}
+					}
+					ArrayElement::Array(items) => nested(items, kind),
+				})
+				.collect(),
+		))
+	}
+	Ok(Some(nested(items, &kind)))
+}
+
 /// Lower a PostgreSQL AST expression into a SurrealDB `Expr`, reading the `id` column of the
 /// statement's target table (`scope`) as the key of the record id, and a link column of it as the
 /// key of its link.
@@ -1090,6 +1276,25 @@ fn lower_pgsql_expr_in(
 /// Lower a PostgreSQL AST expression that stands alone (an assigned value, an item of a projection,
 /// the operand of `IS NULL`, an operand handed to `type::record`): as [`lower_pgsql_expr_in`],
 /// except that a link column of the target table is the link itself.
+/// Lower a value of a row of `INSERT ... VALUES`. A row cast to a composite type of the catalog
+/// (`ROW(...)::t`) is the object of its attributes; any other value lowers as an expression that
+/// reads no column.
+fn lower_pgsql_row_value(
+	value: &surrealdb_pgsql::ast::expr::Expr,
+	scope: &IdScope<'_>,
+) -> Result<Expr, PlanError> {
+	if let surrealdb_pgsql::ast::expr::Expr::TypeCast {
+		expr,
+		data_type,
+		..
+	} = value
+		&& crate::binder::pgsql::composite_row(expr, data_type, scope.catalog)?.is_some()
+	{
+		return lower_pgsql_expr_as(value, Some(scope), false);
+	}
+	lower_pgsql_expr(value)
+}
+
 fn lower_pgsql_stored_in(
 	expr: &surrealdb_pgsql::ast::expr::Expr,
 	scope: Option<&IdScope<'_>>,
@@ -1195,6 +1400,7 @@ fn lower_pgsql_expr_as(
 			right,
 			..
 		} => {
+			let (left_ast, right_ast) = (left, right);
 			if let Some(scope) = scope.filter(|scope| !scope.deleted_row)
 				&& let Some(comparison) = pgsql_link_comparison(left, op, right, scope)?
 			{
@@ -1261,6 +1467,10 @@ fn lower_pgsql_expr_as(
 					)));
 				}
 			};
+			if is_comparison(&bin_op) && (pgsql_is_instant(left_ast) || pgsql_is_instant(right_ast))
+			{
+				return Ok(sql_null::promoting_comparison(l, bin_op, r, true));
+			}
 			Ok(sql_null::binary(l, bin_op, r))
 		}
 
@@ -1269,8 +1479,32 @@ fn lower_pgsql_expr_as(
 			data_type,
 			..
 		} => {
+			// A row cast to a composite type is the object of its attributes.
+			if let Some(scope) = scope
+				&& let Some(fields) =
+					crate::binder::pgsql::composite_row(expr, data_type, scope.catalog)?
+			{
+				let mut entries = Vec::with_capacity(fields.len());
+				for (name, value) in fields {
+					entries.push(ObjectEntry {
+						key: Strand::from(name.as_str()),
+						value: lower_pgsql_expr_as(value, Some(scope), stored)?,
+					});
+				}
+				return Ok(Expr::Literal(Literal::Object(entries)));
+			}
 			let kind = crate::lower::ddl::map_pgsql_type(data_type);
-			let value = datetime_text_literal(&kind, lower_pgsql_expr_in(expr, scope)?);
+			if let Some(array) = multidim_array_literal(expr, data_type)? {
+				return Ok(Expr::Prefix {
+					op: PrefixOperator::Cast(kind),
+					expr: Box::new(array),
+				});
+			}
+			let value = timetz_text_literal(
+				&data_type.name.parts.join(".").to_ascii_lowercase(),
+				lower_pgsql_expr_in(expr, scope)?,
+			);
+			let value = datetime_text_literal(&kind, value);
 			if let Some(dimensions) = crate::lower::vector_cast_target(data_type)? {
 				return Ok(sql_null::unary(
 					PrefixOperator::Cast(kind),
@@ -1280,11 +1514,7 @@ fn lower_pgsql_expr_as(
 			if matches!(kind, surrealdb_expr::expr::Kind::Any) {
 				Ok(value)
 			} else {
-				let target = data_type.name.parts.join(".");
-				Ok(truncated_to_date_expr(
-					&target,
-					sql_null::unary(PrefixOperator::Cast(kind), value),
-				))
+				Ok(sql_null::unary(PrefixOperator::Cast(kind), value))
 			}
 		}
 
@@ -1318,6 +1548,22 @@ fn lower_pgsql_expr_as(
 			expr,
 			..
 		} => lower_pgsql_expr_as(expr, scope, stored),
+
+		// A field of a composite value is a field of the object that holds it.
+		surrealdb_pgsql::ast::expr::Expr::FieldSelect {
+			expr,
+			field,
+			..
+		} => {
+			let field = Part::Field(Strand::from(field.as_str()));
+			let base = lower_pgsql_expr_as(expr, scope, stored)?;
+			Ok(if let Expr::Idiom(Idiom(mut parts)) = base {
+				parts.push(field);
+				Expr::Idiom(Idiom(parts))
+			} else {
+				Expr::Idiom(Idiom(vec![Part::Start(base), field]))
+			})
+		}
 
 		surrealdb_pgsql::ast::expr::Expr::IsNull {
 			expr,
@@ -1579,6 +1825,9 @@ fn lower_pgsql_predicate(
 		| PgExpr::Row {
 			..
 		}
+		| PgExpr::FieldSelect {
+			..
+		}
 		| PgExpr::IsBound {
 			..
 		}
@@ -1689,6 +1938,9 @@ fn pgsql_key_operand(expr: &surrealdb_pgsql::ast::expr::Expr) -> Option<WriteKey
 			..
 		}
 		| surrealdb_pgsql::ast::expr::Expr::Grouping {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::FieldSelect {
 			..
 		}
 		| surrealdb_pgsql::ast::expr::Expr::IsBound {
@@ -1903,6 +2155,9 @@ fn pgsql_column_fields(expr: &surrealdb_pgsql::ast::expr::Expr) -> Option<&[Stri
 			..
 		}
 		| surrealdb_pgsql::ast::expr::Expr::Grouping {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::FieldSelect {
 			..
 		}
 		| surrealdb_pgsql::ast::expr::Expr::IsBound {
@@ -2342,8 +2597,11 @@ pub fn lower_pgsql_insert(
 					} else {
 						format!("_{idx}")
 					};
-					let lowered_val =
-						assigned_pgsql_value(&scope, &col_name, lower_pgsql_expr(val)?)?;
+					let lowered_val = assigned_pgsql_value(
+						&scope,
+						&col_name,
+						lower_pgsql_row_value(val, &scope)?,
+					)?;
 					row_tuples.push((Idiom::field(col_name), lowered_val));
 				}
 				// A row that is not matched to the listed columns by position leaves out columns
@@ -2711,6 +2969,9 @@ fn lower_mysql_expr_as(
 			surrealdb_mysql::ast::literal::Literal::Integer(i) => {
 				Ok(Expr::Literal(Literal::Integer(*i)))
 			}
+			surrealdb_mysql::ast::literal::Literal::Unsigned(u) => {
+				Ok(Expr::Literal(Literal::U64(*u)))
+			}
 			surrealdb_mysql::ast::literal::Literal::Float(f) => {
 				Ok(Expr::Literal(Literal::Float(*f)))
 			}
@@ -2837,6 +3098,9 @@ fn lower_mysql_expr_as(
 					)));
 				}
 			};
+			if is_comparison(&bin_op) && (mysql_is_instant(left) || mysql_is_instant(right)) {
+				return Ok(sql_null::promoting_comparison(l, bin_op, r, false));
+			}
 			Ok(Expr::Binary {
 				left: Box::new(l),
 				op: bin_op,
@@ -2892,15 +3156,12 @@ fn lower_mysql_expr_as(
 			target_type,
 			..
 		} => {
-			let kind = crate::lower::expr::cast_kind(target_type);
+			let kind = crate::lower::expr::cast_kind(target_type, SqlDialect::MySql);
 			let value = datetime_text_literal(&kind, lower_mysql_expr_in(expr, scope)?);
 			if matches!(kind, surrealdb_expr::expr::Kind::Any) {
 				Ok(value)
 			} else {
-				Ok(truncated_to_date_expr(
-					target_type,
-					sql_null::unary(PrefixOperator::Cast(kind), value),
-				))
+				Ok(sql_null::unary(PrefixOperator::Cast(kind), value))
 			}
 		}
 

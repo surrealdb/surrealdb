@@ -2,7 +2,8 @@
 
 use surrealdb_expr::expr::statements::{IfelseStatement, SetStatement};
 use surrealdb_expr::expr::{
-	BinaryOperator, Block, Expr, Idiom, Literal, Param, Part, PrefixOperator,
+	BinaryOperator, Block, Expr, Function, FunctionCall, Idiom, Literal, Param, Part,
+	PrefixOperator,
 };
 use surrealdb_strand::Strand;
 
@@ -278,5 +279,59 @@ pub(super) fn between(value: Expr, low: Expr, high: Expr, negated: bool) -> Expr
 		} else {
 			result
 		}
+	})
+}
+
+/// A comparison where one operand is a date, timestamp or datetime by its syntax: a date is
+/// compared as the timestamp, and a date or timestamp as the datetime, that the other operand is,
+/// as PostgreSQL and MySQL promote them. SurrealQL compares values of different kinds by kind, so
+/// the promotion is written into the expression. With `sql_nulls` the comparison follows SQL's
+/// three-valued logic; without it, as MySQL's lowering writes it, it is the plain comparison.
+pub(super) fn promoting_comparison(
+	left: Expr,
+	op: BinaryOperator,
+	right: Expr,
+	sql_nulls: bool,
+) -> Expr {
+	let is = |kind: &str, value: &Expr| {
+		Expr::FunctionCall(Box::new(FunctionCall {
+			receiver: Function::Normal(format!("type::is_{kind}")),
+			arguments: vec![value.clone()],
+		}))
+	};
+	let convert = |function: &str, value: &Expr| {
+		Expr::FunctionCall(Box::new(FunctionCall {
+			receiver: Function::Normal(function.to_owned()),
+			arguments: vec![value.clone()],
+		}))
+	};
+	let widen = |value: &Expr, other: &Expr| {
+		choose(
+			vec![
+				(
+					raw(is("date", value), BinaryOperator::And, is("timestamp", other)),
+					convert("type::timestamp", value),
+				),
+				(
+					raw(
+						raw(is("date", value), BinaryOperator::Or, is("timestamp", value)),
+						BinaryOperator::And,
+						is("datetime", other),
+					),
+					convert("type::datetime", value),
+				),
+			],
+			value.clone(),
+		)
+	};
+	once(left, "_sql_pl", |left| {
+		once(right, "_sql_pr", |right| {
+			let (l, r) = (widen(&left, &right), widen(&right, &left));
+			if sql_nulls {
+				binary(l, op, r)
+			} else {
+				raw(l, op, r)
+			}
+		})
 	})
 }

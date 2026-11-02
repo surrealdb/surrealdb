@@ -46,10 +46,19 @@ impl SqlType {
 		if self == other {
 			return self;
 		}
+		// A `UInt8` takes its place among the numbers as `Numeric`, the type that holds both it and
+		// every signed integer, so a mixture with one of them is `Numeric`.
+		let as_number = |ty: SqlType| {
+			if ty == SqlType::UInt8 {
+				SqlType::Numeric
+			} else {
+				ty
+			}
+		};
 		let position = |ty: SqlType| NUMBER_TYPES.iter().position(|number| *number == ty);
-		match (position(self), position(other)) {
-			(Some(own), Some(theirs)) if own >= theirs => self,
-			(Some(_), Some(_)) => other,
+		match (position(as_number(self)), position(as_number(other))) {
+			(Some(own), Some(theirs)) if own >= theirs => as_number(self),
+			(Some(_), Some(_)) => as_number(other),
 			(None, _) | (_, None) => Self::Unknown,
 		}
 	}
@@ -66,6 +75,16 @@ mod tests {
 	use crate::ir::BoundSelect;
 
 	const SAMPLE: [SqlType; 9] = [Unknown, Bool, Int2, Int4, Int8, Float4, Float8, Numeric, Text];
+
+	#[test]
+	fn a_u64_mixed_with_signed_integers_is_described_by_numeric() {
+		assert_eq!(SqlType::common([UInt8, UInt8]), UInt8);
+		assert_eq!(SqlType::common([UInt8, Int8]), Numeric);
+		assert_eq!(SqlType::common([Int4, UInt8]), Numeric);
+		assert_eq!(SqlType::common([Numeric, UInt8]), Numeric);
+		assert_eq!(SqlType::common([UInt8, Float8]), Float8);
+		assert_eq!(SqlType::common([UInt8, Text]), Unknown);
+	}
 
 	#[test]
 	fn alternatives_of_one_type_are_described_by_it() {

@@ -16,8 +16,8 @@ use storekey::{BorrowDecode, BorrowReader, DecodeError, EscapedSlice};
 
 use super::number::NumberKind;
 use super::{
-	Bytes, Closure, Datetime, Duration, File, Geometry, Number, RecordId, Regex, Set, TableName,
-	Uuid,
+	Bytes, Closure, Date, Datetime, Duration, File, Geometry, Interval, Number, RecordId, Regex,
+	Set, TableName, Time, Timestamp, Uuid,
 };
 
 /// The id of a record key, read as `RecordIdKey`'s decode reads it and built not at all: decoding
@@ -135,6 +135,10 @@ enum Element<'a> {
 	Regex(Regex),
 	Range(Box<Span<'a>>),
 	Closure(Box<Closure>),
+	Date(Date),
+	Time(Time),
+	Timestamp(Timestamp),
+	Interval(Interval),
 }
 
 /// What `Range`'s decode reads.

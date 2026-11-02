@@ -37,6 +37,10 @@ pub(super) fn numeric_variants(id: &RecordIdKey, cap: usize) -> Vec<RecordIdKey>
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Set(_)
 		| Value::Geometry(_)
@@ -65,7 +69,9 @@ pub(super) fn numeric_variants(id: &RecordIdKey, cap: usize) -> Vec<RecordIdKey>
 /// [`numeric_variants`] over a value.
 pub(super) fn value_variants(value: &Value, cap: usize) -> Vec<Value> {
 	match value {
-		Value::Number(n) => number_variants(*n).into_iter().map(Value::Number).take(cap).collect(),
+		Value::Number(n) => {
+			number_variants(n.clone()).into_iter().map(Value::Number).take(cap).collect()
+		}
 		Value::Array(a) => {
 			let parts = a.0.iter().map(|v| value_variants(v, cap)).collect();
 			capped_product(parts, cap).into_iter().map(|vs| Value::Array(Array(vs))).collect()
@@ -84,6 +90,10 @@ pub(super) fn value_variants(value: &Value, cap: usize) -> Vec<Value> {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Set(_)
 		| Value::Geometry(_)
@@ -97,10 +107,13 @@ pub(super) fn value_variants(value: &Value, cap: usize) -> Vec<Value> {
 	}
 }
 
-/// The integer, float and decimal a number's value can be written as.
+/// The integer, float, decimal and bigdecimal a number's value can be written as, and a
+/// bigdecimal as it is written: the index format spells a bigdecimal from its coefficient and
+/// scale, as it spells a decimal.
 pub(super) fn number_variants(n: Number) -> Vec<Number> {
 	use rust_decimal::Decimal;
 	use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
+	let mut written = None;
 	let exact = match n {
 		Number::Int(i) => Decimal::from(i),
 		Number::Float(f) => match Decimal::from_f64(f) {
@@ -123,8 +136,15 @@ pub(super) fn number_variants(n: Number) -> Vec<Number> {
 			Some(d) => d,
 			None => return vec![n],
 		},
+		Number::BigDecimal(ref b) => match Decimal::try_from(b.as_ref()) {
+			Ok(d) => {
+				written = Some(n.clone());
+				d
+			}
+			Err(_) => return vec![n],
+		},
 	};
-	let mut out = Vec::with_capacity(3);
+	let mut out = Vec::with_capacity(5);
 	if exact.is_integer()
 		&& let Some(i) = exact.to_i64()
 	{
@@ -134,6 +154,8 @@ pub(super) fn number_variants(n: Number) -> Vec<Number> {
 		out.push(Number::Float(f));
 	}
 	out.push(Number::Decimal(exact));
+	out.push(Number::BigDecimal(Box::new(surrealdb_types::BigDecimal::from(exact))));
+	out.extend(written);
 	out
 }
 

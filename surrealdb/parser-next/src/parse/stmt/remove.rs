@@ -43,6 +43,8 @@ impl<'a, 's> Parser<'a, 's> {
 			DefineKind::Bucket
 		} else if t.kw == Kw::Config {
 			DefineKind::Config
+		} else if self.ident_is(t, "ENUM", true) {
+			DefineKind::Enum
 		} else {
 			return Err(self.unexpected("a remove statement keyword"));
 		};
@@ -120,6 +122,9 @@ impl<'a, 's> Parser<'a, 's> {
 				self.expect_kw(Kw::On, "ON")?;
 				self.eat_kw(Kw::Table);
 				rec[remove::ON] = self.expr(true)?;
+			}
+			DefineKind::Enum => {
+				rec[remove::NAME] = self.name()?;
 			}
 			DefineKind::Namespace
 			| DefineKind::Database

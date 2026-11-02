@@ -139,6 +139,17 @@ pub(crate) enum Error {
 		error: Box<CoerceError>,
 	},
 
+	/// The value a write stores in a field does not fit the field's declared SQL type. The message
+	/// is the type's own reason, which begins the text and is read for the SQLSTATE the wires
+	/// report; the field's name and the declared type follow it.
+	#[error("{message} (field `{field_name}` of `{record}`, SQL TYPE {sql_type})")]
+	FieldSqlType {
+		record: String,
+		field_name: String,
+		sql_type: String,
+		message: String,
+	},
+
 	/// A `PATCH` pointer reads a field the caller may not select
 	#[error(
 		"Cannot read `{0}` in a JSON Patch operation: the field's PERMISSIONS FOR select clause does not allow it"
@@ -247,6 +258,7 @@ impl Error {
 		matches!(
 			self,
 			Error::FieldCoerce { .. }
+				| Error::FieldSqlType { .. }
 				| Error::FieldValue { .. }
 				| Error::FieldReadonly { .. }
 				| Error::FieldUndefined { .. }
@@ -344,6 +356,9 @@ impl LeafError for Error {
 			// A write whose value does not coerce to the TYPE of its field. The author of the
 			// statement can correct the value, so it is a validation fault, not an internal one.
 			| Error::FieldCoerce {
+				..
+			}
+			| Error::FieldSqlType {
 				..
 			} => TypesError::validation(message, ValidationError::InvalidRequest),
 		}

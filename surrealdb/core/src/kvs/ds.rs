@@ -10566,8 +10566,10 @@ impl Datastore {
 		let first = lower(&recorder);
 		let listing = recorder.asked_table_listing();
 		let deferred = recorder.deferred_schema_checks();
+		let enums_asked = recorder.asked_user_types();
+		let domain_columns_asked = recorder.asked_domain_columns();
 		let tables = recorder.into_tables();
-		if tables.is_empty() && !listing && !deferred {
+		if tables.is_empty() && !listing && !deferred && !enums_asked {
 			return first.map_err(invalid);
 		}
 		let mut catalog = None;
@@ -10608,6 +10610,22 @@ impl Datastore {
 				catalog = Some(listing_catalog);
 			}
 		}
+		if enums_asked {
+			let (types, columns) =
+				self.user_types_of(session, database, transaction, domain_columns_asked).await?;
+			if !types.enums.is_empty() || !types.domains.is_empty() || !types.composites.is_empty()
+			{
+				let mut types_catalog = catalog
+					.take()
+					.unwrap_or_default()
+					.with_enums(types.enums)
+					.with_domains(types.domains)
+					.with_composites(types.composites)
+					.with_domain_columns(columns);
+				types_catalog.set_database(active_db.map(str::to_owned));
+				catalog = Some(types_catalog);
+			}
+		}
 		match catalog {
 			Some(catalog) => lower(&catalog).map_err(invalid),
 			// The schema names no link and lists no table, which is an answer to a lowering that
@@ -10615,6 +10633,43 @@ impl Datastore {
 			None if deferred => lower(&surrealdb_sqlplan::MemoryCatalog::new()).map_err(invalid),
 			None => first.map_err(invalid),
 		}
+	}
+
+	/// The user-defined enum, domain and composite types of the selected database, and with
+	/// `with_columns` the columns declared with each domain, read as [`Self::listed_tables`] reads
+	/// the tables and for the same sessions.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	async fn user_types_of(
+		&self,
+		session: &Session,
+		database: Option<&str>,
+		transaction: Option<&Arc<Transaction>>,
+		with_columns: bool,
+	) -> std::result::Result<
+		(surrealdb_sqlplan::UserTypes, Vec<(String, surrealdb_sqlplan::DomainColumn)>),
+		TypesError,
+	> {
+		self.check_session(session)?;
+		let (Some(ns), Some(db)) = (session.ns.as_deref(), database.or(session.db.as_deref()))
+		else {
+			return Ok(Default::default());
+		};
+		if !session.au.can_access_ns_db(ns, db)
+			|| self.check(session, Action::View, ResourceKind::Any.on_db(ns, db)).is_err()
+		{
+			return Ok(Default::default());
+		}
+		let types = match transaction {
+			Some(txn) => sql_links::user_types(txn, ns, db, with_columns).await,
+			None => {
+				let txn =
+					self.transaction(Read).await.map_err(crate::err::anyhow_to_types_error)?;
+				let types = sql_links::user_types(&txn, ns, db, with_columns).await;
+				let _ = txn.cancel().await;
+				types
+			}
+		};
+		types.map_err(crate::err::anyhow_to_types_error)
 	}
 
 	/// Every table of the selected database with its columns, for the system views that list them
@@ -10757,7 +10812,7 @@ impl Datastore {
 		};
 		let columns = declared_columns
 			&& session.au.is_allowed(Action::View, &ResourceKind::Table.on_db(ns, db)).is_ok();
-		let types = purpose.types_columns();
+		let types = purpose.column_types();
 		let described = match transaction {
 			Some(txn) => sql_links::describe_tables(txn, ns, db, tables, columns, types).await,
 			None => {

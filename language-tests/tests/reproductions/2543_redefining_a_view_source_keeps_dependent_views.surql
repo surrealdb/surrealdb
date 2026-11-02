@@ -31,7 +31,7 @@ value = "[{ x_value: 1, y_value: NONE }]"
 value = "{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: { z: 'DEFINE TABLE z TYPE ANY SCHEMALESS AS SELECT * FROM y PERMISSIONS NONE' } }"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { x: 'DEFINE TABLE x TYPE ANY SCHEMALESS PERMISSIONS NONE', y: 'DEFINE TABLE y TYPE ANY SCHEMALESS AS SELECT * FROM x PERMISSIONS NONE', z: 'DEFINE TABLE z TYPE ANY SCHEMALESS AS SELECT * FROM y PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, enums: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { x: 'DEFINE TABLE x TYPE ANY SCHEMALESS PERMISSIONS NONE', y: 'DEFINE TABLE y TYPE ANY SCHEMALESS AS SELECT * FROM x PERMISSIONS NONE', z: 'DEFINE TABLE z TYPE ANY SCHEMALESS AS SELECT * FROM y PERMISSIONS NONE' }, users: {  } }"
 
 [[test.results]]
 value = "[{ id: x:2, x_value: 2 }]"

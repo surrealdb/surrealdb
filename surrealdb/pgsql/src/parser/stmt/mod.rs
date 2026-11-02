@@ -82,8 +82,20 @@ impl<'a> Parser<'a> {
 		} else if self.peek().kind == TokenKind::Keyword(Keyword::Create) {
 			self.parse_create_stmt()
 		} else if self.peek().kind == TokenKind::Keyword(Keyword::Alter) {
-			let s = self.parse_alter_table_stmt()?;
-			Ok(Statement::AlterTable(Box::new(s)))
+			let is_domain = matches!(
+				&self.peek2()?.kind,
+				TokenKind::Ident(word) if word.eq_ignore_ascii_case("domain")
+			);
+			if self.peek2()?.kind == TokenKind::Keyword(Keyword::Type) {
+				let s = self.parse_alter_type_stmt()?;
+				Ok(Statement::AlterType(Box::new(s)))
+			} else if is_domain {
+				let s = self.parse_alter_domain_stmt()?;
+				Ok(Statement::AlterDomain(Box::new(s)))
+			} else {
+				let s = self.parse_alter_table_stmt()?;
+				Ok(Statement::AlterTable(Box::new(s)))
+			}
 		} else if self.peek().kind == TokenKind::Keyword(Keyword::Drop) {
 			self.parse_drop_stmt()
 		} else if self.peek().kind == TokenKind::Keyword(Keyword::Prepare) {

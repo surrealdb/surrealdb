@@ -43,10 +43,12 @@ use {
 extern crate tracing;
 
 mod advisory;
+pub mod codec;
 pub mod conn;
 mod copy;
 pub mod encode;
 pub mod error;
+mod families;
 pub(crate) mod guc;
 mod maintenance;
 pub mod msg;

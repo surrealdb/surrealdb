@@ -410,6 +410,7 @@ impl LogicalLiteral {
 			LogicalLiteral::Float(_) => Kind::Float,
 			LogicalLiteral::Integer(_) => Kind::Int,
 			LogicalLiteral::Decimal(_) => Kind::Decimal,
+			LogicalLiteral::BigDecimal(_) => Kind::BigDecimal,
 			LogicalLiteral::I8(_) => Kind::I8,
 			LogicalLiteral::U8(_) => Kind::U8,
 			LogicalLiteral::I16(_) => Kind::I16,
@@ -424,6 +425,10 @@ impl LogicalLiteral {
 			LogicalLiteral::Regex(_) => Kind::Regex,
 			LogicalLiteral::Duration(_) => Kind::Duration,
 			LogicalLiteral::Datetime(_) => Kind::Datetime,
+			LogicalLiteral::Date(_) => Kind::Date,
+			LogicalLiteral::Time(_) => Kind::Time,
+			LogicalLiteral::Timestamp(_) => Kind::Timestamp,
+			LogicalLiteral::Interval(_) => Kind::Interval,
 			LogicalLiteral::Uuid(_) => Kind::Uuid,
 			LogicalLiteral::Geometry(_) => Kind::Geometry(Vec::new()),
 			LogicalLiteral::File(_) => Kind::File(Vec::new()),
@@ -452,7 +457,12 @@ pub fn kind_may_be_record(kind: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -474,7 +484,8 @@ pub fn kind_may_be_record(kind: &Kind) -> bool {
 		| Kind::Geometry(_)
 		| Kind::Function(..)
 		| Kind::Range
-		| Kind::File(_) => false,
+		| Kind::File(_)
+		| Kind::Enum(_) => false,
 	}
 }
 
@@ -518,7 +529,12 @@ pub fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
 			| Kind::Bool
 			| Kind::Bytes
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Duration
 			| Kind::Float
 			| Kind::Int
@@ -541,6 +557,7 @@ pub fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
 			| Kind::Function(..)
 			| Kind::Range
 			| Kind::File(_)
+			| Kind::Enum(_)
 			| Kind::Array(..)
 			| Kind::Set(..)
 			| Kind::Either(_)
@@ -554,7 +571,12 @@ pub fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -575,6 +597,7 @@ pub fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::File(_)
+		| Kind::Enum(_)
 		| Kind::Array(_, Some(_))
 		| Kind::Set(_, Some(_))
 		| Kind::Literal(_) => declared == actual,
@@ -593,7 +616,12 @@ fn each_keeps_element_kind(kind: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -616,6 +644,7 @@ fn each_keeps_element_kind(kind: &Kind) -> bool {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::File(_)
+		| Kind::Enum(_)
 		| Kind::Array(..)
 		| Kind::Set(..) => true,
 	}

@@ -188,6 +188,12 @@ pub(crate) async fn alter_field_statement_apply(
 		AlterKind::None => {}
 	}
 
+	match this.sql_type {
+		AlterKind::Set(ref k) => df.sql_type = Some(k.clone()),
+		AlterKind::Drop => df.sql_type = None,
+		AlterKind::None => {}
+	}
+
 	let kind_changed = !matches!(this.kind, AlterKind::None);
 	let reference_altered = !matches!(this.reference, AlterKind::None);
 	let migration = crate::exec::migrate::FieldMigration {
@@ -258,6 +264,7 @@ pub(crate) async fn alter_field_definition_apply(
 			"update_permission" => df.update_permission.clone_from(&altered.update_permission),
 			"comment" => df.comment.clone_from(&altered.comment),
 			"reference" => df.reference.clone_from(&altered.reference),
+			"sql_type" => df.sql_type.clone_from(&altered.sql_type),
 			other => anyhow::bail!(
 				"an altered field clause `{other}` that no clause of ALTER FIELD names"
 			),

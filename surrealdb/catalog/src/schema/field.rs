@@ -13,6 +13,7 @@ use crate::catalog::{
 };
 use crate::expr::logical::{LogicalExpr, LogicalPermission};
 use crate::expr::reference::Reference as ExprReference;
+use crate::expr::statements::define::{SqlType, SqlTypeDialect};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, KeyNames, Kind};
 use crate::stored::Stored;
@@ -62,7 +63,31 @@ pub struct ComputedDeps {
 	pub is_complete: bool,
 }
 
-#[revisioned(revision = 6)]
+/// The SQL dialect of a stored `SQL TYPE` clause.
+#[revisioned(revision = 1)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub enum StoredSqlTypeDialect {
+	#[stored(n = 1)]
+	PostgreSql,
+	#[stored(n = 2)]
+	MySql,
+	#[stored(n = 3)]
+	DynamoDb,
+}
+
+/// A stored `SQL TYPE` clause: the dialect and the type text as written.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub struct StoredSqlType {
+	#[stored(n = 2)]
+	pub dialect: StoredSqlTypeDialect,
+	#[stored(n = 4)]
+	pub text: String,
+}
+
+#[revisioned(revision = 7)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
 #[stored(since = "4.0")]
 pub struct StoredFieldDefinition {
@@ -154,6 +179,20 @@ pub struct StoredFieldDefinition {
 	#[revision(start = 6)]
 	#[stored(n = 34)]
 	pub inline: bool,
+
+	/// The declared SQL type, the `SQL TYPE` clause. Every write to the field, SurrealQL
+	/// included, is checked and canonicalised against it (length, precision and scale,
+	/// padding), and the SQL front ends report it as the column type. The field is
+	/// ignorable by design: a release that skips it keeps the field's kind and still
+	/// accepts writes, but no longer refuses an overlong `varchar(n)`, rounds a
+	/// `numeric(p,s)`, or pads a `char(n)` / `BINARY(n)` value.
+	#[revision(start = 7)]
+	#[stored(
+		n = 3,
+		ignorable,
+		independent = "a release without the clause keeps the field kind and its writes; it only stops enforcing and canonicalising the declared SQL type"
+	)]
+	pub sql_type: Option<StoredSqlType>,
 }
 
 impl StoredFieldDefinition {
@@ -212,6 +251,10 @@ impl InfoStructure for FieldDefinition {
 			"comment", if let Some(v) = self.comment => v.into(),
 			"graphql_alias", if let Some(v) = self.graphql_alias => v.into(),
 			"graphql_deprecated", if let Some(v) = self.graphql_deprecated => v.into(),
+			"sql_type", if let Some(v) = self.sql_type => Value::from(map!{
+				"dialect" => Value::String(v.dialect.keyword().into()),
+				"text" => Value::String(v.text.into()),
+			}),
 		})
 	}
 }
@@ -257,6 +300,7 @@ impl FieldDefinition {
 			graphql_alias: self.graphql_alias.clone(),
 			graphql_deprecated: self.graphql_deprecated.clone(),
 			migrate: None,
+			sql_type: self.sql_type.clone(),
 		}
 	}
 
@@ -380,6 +424,8 @@ pub struct FieldDefinition {
 	pub comment: Option<String>,
 	pub graphql_alias: Option<String>,
 	pub graphql_deprecated: Option<String>,
+	/// The declared SQL type, the `SQL TYPE` clause.
+	pub sql_type: Option<SqlType>,
 }
 
 impl FromStored for FieldDefinition {
@@ -423,6 +469,7 @@ impl FromStored for FieldDefinition {
 				comment: stored.comment.clone(),
 				graphql_alias: stored.graphql_alias.clone(),
 				graphql_deprecated: stored.graphql_deprecated.clone(),
+				sql_type: stored.sql_type.as_ref().map(sql_type_runtime),
 			};
 			definition.set_type(field_kind, names);
 			Ok(definition)
@@ -699,7 +746,32 @@ impl FieldDefinition {
 			auth_limit: self.auth_limit.clone(),
 			graphql_alias: self.graphql_alias.clone(),
 			graphql_deprecated: self.graphql_deprecated.clone(),
+			sql_type: self.sql_type.as_ref().map(sql_type_to_stored),
 		}
+	}
+}
+
+/// The stored form of a declared SQL type.
+fn sql_type_to_stored(sql_type: &SqlType) -> StoredSqlType {
+	StoredSqlType {
+		dialect: match sql_type.dialect {
+			SqlTypeDialect::PostgreSql => StoredSqlTypeDialect::PostgreSql,
+			SqlTypeDialect::MySql => StoredSqlTypeDialect::MySql,
+			SqlTypeDialect::DynamoDb => StoredSqlTypeDialect::DynamoDb,
+		},
+		text: sql_type.text.clone(),
+	}
+}
+
+/// The runtime form of a stored declared SQL type.
+fn sql_type_runtime(stored: &StoredSqlType) -> SqlType {
+	SqlType {
+		dialect: match stored.dialect {
+			StoredSqlTypeDialect::PostgreSql => SqlTypeDialect::PostgreSql,
+			StoredSqlTypeDialect::MySql => SqlTypeDialect::MySql,
+			StoredSqlTypeDialect::DynamoDb => SqlTypeDialect::DynamoDb,
+		},
+		text: stored.text.clone(),
 	}
 }
 
@@ -1049,6 +1121,48 @@ mod tests {
 		};
 		assert_eq!(bare.to_stored().field_kind, None);
 		assert_eq!(FieldDefinition::from_stored(&bare.to_stored()).unwrap(), bare);
+	}
+
+	/// A declared SQL type survives the stored form and its encoded entry, and a
+	/// definition without one holds no `sql_type` entry, so an earlier reader sees
+	/// the bytes it always did.
+	#[test]
+	fn sql_type_round_trips_through_the_stored_form_and_its_entry() {
+		use crate::stored::private::KVValue;
+
+		let mut definition = FieldDefinition {
+			name: Idiom::field("n"),
+			table: TableName::from("t"),
+			..Default::default()
+		};
+		let plain = definition.to_stored();
+		assert_eq!(plain.sql_type, None);
+
+		definition.sql_type = Some(SqlType {
+			dialect: SqlTypeDialect::PostgreSql,
+			text: "numeric(10,2)".to_owned(),
+		});
+		let stored = definition.to_stored();
+		assert_eq!(FieldDefinition::from_stored(&stored).unwrap(), definition);
+
+		let encoded = stored.kv_encode_value().unwrap();
+		let decoded = StoredFieldDefinition::kv_decode_value(&encoded, ()).unwrap();
+		assert_eq!(decoded, stored);
+		assert_eq!(FieldDefinition::from_stored(&decoded).unwrap(), definition);
+
+		for (dialect, expected) in [
+			(SqlTypeDialect::PostgreSql, StoredSqlTypeDialect::PostgreSql),
+			(SqlTypeDialect::MySql, StoredSqlTypeDialect::MySql),
+			(SqlTypeDialect::DynamoDb, StoredSqlTypeDialect::DynamoDb),
+		] {
+			definition.sql_type = Some(SqlType {
+				dialect,
+				text: "t".to_owned(),
+			});
+			let stored_type = definition.to_stored().sql_type.unwrap();
+			assert_eq!(stored_type.dialect, expected);
+			assert_eq!(stored_type.text, "t");
+		}
 	}
 
 	/// The names are read only for `id`: text on any other field is the plain

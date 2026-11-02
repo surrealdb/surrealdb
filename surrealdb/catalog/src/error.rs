@@ -117,6 +117,12 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The requested enum does not exist
+	#[error("The enum '{name}' does not exist")]
+	EnNotFound {
+		name: String,
+	},
+
 	/// The requested index does not exist
 	#[error("The index '{name}' does not exist")]
 	IxNotFound {
@@ -204,6 +210,12 @@ pub enum Error {
 	/// The requested bucket already exists
 	#[error("The bucket '{value}' already exists")]
 	BuAlreadyExists {
+		value: String,
+	},
+
+	/// The requested enum already exists
+	#[error("The enum '{value}' already exists")]
+	EnAlreadyExists {
 		value: String,
 	},
 
@@ -591,6 +603,9 @@ impl LeafError for Error {
 			| Error::BuNotFound {
 				..
 			}
+			| Error::EnNotFound {
+				..
+			}
 			| Error::IxNotFound {
 				..
 			}
@@ -628,6 +643,9 @@ impl LeafError for Error {
 				..
 			}
 			| Error::BuAlreadyExists {
+				..
+			}
+			| Error::EnAlreadyExists {
 				..
 			}
 			| Error::EvAlreadyExists {

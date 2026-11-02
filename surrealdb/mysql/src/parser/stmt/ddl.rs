@@ -13,6 +13,20 @@ use crate::lexer::token::TokenKind;
 use crate::parser::Parser;
 use crate::parser::error::{ErrorKind, ParseError, ParseResult};
 
+/// The type names of more than one word a column may declare, in lower case. A word that extends
+/// one of them, such as `varying` after `national character`, is read into the same name.
+const MULTI_WORD_TYPES: [&str; 9] = [
+	"double precision",
+	"national char",
+	"national char varying",
+	"national character",
+	"national character varying",
+	"national varchar",
+	"character varying",
+	"long varchar",
+	"long varbinary",
+];
+
 impl<'a> Parser<'a> {
 	/// Parse a column definition.
 	pub fn parse_column_def(&mut self) -> ParseResult<ColumnDef> {
@@ -58,15 +72,18 @@ impl<'a> Parser<'a> {
 			}
 		}
 
+		// SERIAL is an alias for BIGINT UNSIGNED NOT NULL AUTO_INCREMENT UNIQUE, so the column has
+		// those attributes whether or not they are written.
+		let serial = data_type.eq_ignore_ascii_case("serial");
 		let c_end = self.peek().span;
 		Ok(ColumnDef {
 			name: col_name,
 			data_type,
-			not_null,
+			not_null: not_null || serial,
 			default,
-			auto_increment,
+			auto_increment: auto_increment || serial,
 			primary_key,
-			unique,
+			unique: unique || serial,
 			span: c_start.merge(c_end),
 		})
 	}
@@ -222,13 +239,41 @@ impl<'a> Parser<'a> {
 		let mut type_str = base;
 		let mut end_span = start_span;
 
+		// A name of several words is read whole while each word extends a name in
+		// `MULTI_WORD_TYPES`, so `NATIONAL CHARACTER VARYING(10)` is one type.
+		loop {
+			let next = if let TokenKind::Ident(s) = &self.peek().kind {
+				s.to_ascii_lowercase()
+			} else if let TokenKind::Keyword(kw) = &self.peek().kind {
+				kw.as_str().to_ascii_lowercase()
+			} else {
+				break;
+			};
+			let candidate = format!("{} {next}", type_str.to_ascii_lowercase());
+			if !MULTI_WORD_TYPES.contains(&candidate.as_str()) {
+				break;
+			}
+			let (word, span) = self.parse_ident()?;
+			end_span = end_span.merge(span);
+			type_str.push(' ');
+			type_str.push_str(&word);
+		}
+
 		// Parameters like (255) or (10, 2)
 		if self.peek().kind == TokenKind::LParen {
 			self.bump();
 			type_str.push('(');
 			loop {
 				let tok = self.bump();
-				type_str.push_str(&tok.kind.to_string());
+				// A member list keeps each string as a quoted MySQL string, so a member that
+				// holds a quote or a comma survives the flattening.
+				if let TokenKind::StringLiteral(s) = &tok.kind {
+					type_str.push('\'');
+					type_str.push_str(&s.replace('\'', "''"));
+					type_str.push('\'');
+				} else {
+					type_str.push_str(&tok.kind.to_string());
+				}
 				if self.peek().kind == TokenKind::Comma {
 					self.bump();
 					type_str.push_str(", ");
@@ -242,13 +287,20 @@ impl<'a> Parser<'a> {
 			}
 		}
 
-		// Optional UNSIGNED / ZEROFILL
-		if self.peek().kind == TokenKind::Ident("unsigned".to_string())
-			|| self.peek().kind == TokenKind::Ident("UNSIGNED".to_string())
-		{
+		// Optional SIGNED / UNSIGNED / ZEROFILL, in any order and case.
+		while let TokenKind::Ident(word) = &self.peek().kind {
+			let attribute = if word.eq_ignore_ascii_case("unsigned") {
+				" UNSIGNED"
+			} else if word.eq_ignore_ascii_case("zerofill") {
+				" ZEROFILL"
+			} else if word.eq_ignore_ascii_case("signed") {
+				" SIGNED"
+			} else {
+				break;
+			};
 			let span = self.bump().span;
 			end_span = end_span.merge(span);
-			type_str.push_str(" UNSIGNED");
+			type_str.push_str(attribute);
 		}
 
 		Ok((type_str, start_span.merge(end_span)))

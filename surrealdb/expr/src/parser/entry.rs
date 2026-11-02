@@ -533,7 +533,9 @@ pub(crate) fn first_escape_error(src: &str, from: u32, before: u32, json: bool) 
 	// Only an escape or a prefixed string can fail here.
 	let rest = src.as_bytes().get(from as usize..)?;
 	let prefixed = |w: &[u8]| matches!(w, [b'd' | b'u' | b'b' | b'f' | b'r', b'"' | b'\'']);
-	if !rest.contains(&b'\\') && !rest.windows(2).any(prefixed) {
+	// The last letter of `date`, `time`, `timestamp` and `interval`.
+	let long = |w: &[u8]| matches!(w, [b'e' | b'p' | b'l', b'"' | b'\'']);
+	if !rest.contains(&b'\\') && !rest.windows(2).any(|w| prefixed(w) || long(w)) {
 		return None;
 	}
 	let mut l = Lexer::new(src.as_bytes());

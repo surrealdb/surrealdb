@@ -18,7 +18,11 @@ use super::relations::{
 	IndexEntry, default_opclass, oid_of_table, user_constraints, user_indexes,
 	visible_serial_columns, with_visible_sequence_names,
 };
-use super::{ColumnInfo, TableSchema};
+use super::{ColumnInfo, TableSchema, UserTypes, kind_type_name};
+use crate::catalog::{CompositeType, DomainType};
+use crate::descriptor::{composite_relation_oid, composite_type_oid, domain_type_oid};
+use crate::dialect::SqlDialect;
+use crate::reported_type::{mysql_reported_type, pg_reported_type};
 
 // --- Helper constructors for LogicalExpr rows ---
 
@@ -103,8 +107,8 @@ pub fn is_system_catalog_table(schema: Option<&str>, name: &str) -> bool {
 				norm_name,
 				"tables"
 					| "columns" | "schemata"
-					| "views" | "sequences"
-					| "table_constraints"
+					| "domains" | "views"
+					| "sequences" | "table_constraints"
 					| "constraint_column_usage"
 					| "column_statistics"
 			)
@@ -149,6 +153,16 @@ const ATTRDEF_OID_BASE: i64 = 3_000_000;
 const SEQUENCE_OID_BASE: i64 = 5_000_000;
 
 const TABLE_TYPE_OID_BASE: i64 = 4_000_000;
+
+/// The sort-key stride `EnumDefinition` leaves between labels declared together, so that
+/// `enumsortorder` of such labels counts 1, 2, 3, and a label inserted between two takes a
+/// fraction.
+const ENUM_SORT_ORDER_UNIT: u64 = 1 << 32;
+
+/// The element type oid of an enum array type oid.
+fn array_elem(array_oid: i64) -> u32 {
+	(array_oid as u32).wrapping_sub(crate::descriptor::ENUM_ARRAY_OID_OFFSET)
+}
 
 /// The default expression of a column numbered by `sequence`, as `pg_get_expr` reads it back.
 fn nextval_default(sequence: &str) -> String {
@@ -280,6 +294,167 @@ fn system_column_type(column: &str) -> Option<&'static str> {
 		"data_type" | "is_nullable" | "is_identity" => "varchar",
 		_ => return None,
 	})
+}
+
+/// How the system views name a column that holds the labels of an enum: its `data_type` and its
+/// MySQL-style `column_type` (`enum('a','b')`, `set('a','b')`), with `udt` set to the name of a
+/// named enum's type. Both are `None` for a column that holds none.
+fn enum_column_names(
+	held: Option<&crate::catalog::EnumColumn>,
+	user_enums: &[crate::catalog::EnumType],
+	udt: &mut String,
+) -> (Option<&'static str>, Option<String>) {
+	use crate::catalog::EnumShape;
+	let Some(held) = held else {
+		return (None, None);
+	};
+	let labels: Vec<String> = match &held.reference {
+		surrealdb_expr::expr::EnumRef::Named(name) => {
+			match user_enums.iter().find(|ty| ty.name == *name) {
+				Some(ty) => {
+					*udt = match held.shape {
+						EnumShape::Scalar | EnumShape::Set => ty.name.clone(),
+						EnumShape::Array => format!("_{}", ty.name),
+					};
+					ty.labels.iter().map(|l| l.label.clone()).collect()
+				}
+				None => Vec::new(),
+			}
+		}
+		surrealdb_expr::expr::EnumRef::Inline(labels) => labels.clone(),
+	};
+	let list = labels
+		.iter()
+		.map(|label| format!("'{}'", label.replace('\'', "''")))
+		.collect::<Vec<_>>()
+		.join(",");
+	let named = matches!(held.reference, surrealdb_expr::expr::EnumRef::Named(_));
+	match (held.shape, named) {
+		(EnumShape::Scalar, true) => (Some("USER-DEFINED"), Some(format!("enum({list})"))),
+		(EnumShape::Scalar, false) => (Some("enum"), Some(format!("enum({list})"))),
+		(EnumShape::Set, _) => (Some("set"), Some(format!("set({list})"))),
+		(EnumShape::Array, _) => (Some("ARRAY"), Some(format!("enum({list})[]"))),
+	}
+}
+
+/// What `information_schema.columns` lists for a column declared with a SQL type, in the
+/// dialect of the statement that reads it.
+struct DeclaredColumnFacts {
+	data_type: String,
+	column_type: String,
+	/// `udt_name`, which only PostgreSQL names.
+	udt_name: Option<String>,
+	character_maximum_length: Option<i64>,
+	character_octet_length: Option<i64>,
+	numeric_precision: Option<i64>,
+	numeric_precision_radix: Option<i64>,
+	numeric_scale: Option<i64>,
+	datetime_precision: Option<i64>,
+}
+
+impl DeclaredColumnFacts {
+	/// The facts of `column` for a statement of `dialect`, or `None` when the column has no
+	/// declared SQL type that dialect reports, or holds an enum or a composite, which the views
+	/// name by their own types.
+	fn of(column: &ColumnInfo, dialect: SqlDialect) -> Option<Self> {
+		if column.enum_held.is_some() || column.composite.is_some() || column.domain.is_some() {
+			return None;
+		}
+		let declared = column.declared.as_ref()?;
+		match dialect {
+			SqlDialect::Postgres => {
+				let reported = pg_reported_type(declared)?;
+				Some(Self {
+					data_type: reported.data_type,
+					column_type: reported.format,
+					udt_name: Some(reported.udt_name),
+					character_maximum_length: reported.character_maximum_length,
+					character_octet_length: reported.character_octet_length,
+					numeric_precision: reported.numeric_precision,
+					numeric_precision_radix: reported.numeric_precision_radix,
+					numeric_scale: reported.numeric_scale,
+					datetime_precision: reported.datetime_precision,
+				})
+			}
+			SqlDialect::MySql => {
+				let reported = mysql_reported_type(declared)?;
+				Some(Self {
+					data_type: reported.data_type,
+					column_type: reported.column_type,
+					udt_name: None,
+					character_maximum_length: reported.character_maximum_length,
+					character_octet_length: reported.character_octet_length,
+					numeric_precision: reported.numeric_precision,
+					numeric_precision_radix: None,
+					numeric_scale: reported.numeric_scale,
+					datetime_precision: reported.datetime_precision,
+				})
+			}
+		}
+	}
+}
+
+/// The `pg_type` OID of the base type of `domain`, which is the type a column of the domain
+/// holds values of.
+fn domain_base_oid(domain: &DomainType) -> i64 {
+	attribute_type_oid(kind_type_name(&domain.base).as_deref().unwrap_or("text"))
+}
+
+/// The `pg_attribute.attlen` of a type with OID `oid`: its fixed width, or -1 when it is variable.
+fn attribute_len(oid: i64) -> i64 {
+	match oid {
+		16 => 1,
+		21 => 2,
+		23 | 700 => 4,
+		20 | 701 => 8,
+		2950 => 16,
+		_ => -1,
+	}
+}
+
+/// The `pg_type.typcategory` of a base type with OID `oid`, as PostgreSQL categorises it.
+fn type_category(oid: i64) -> char {
+	match oid {
+		16 => 'B',
+		18 | 19 | 25 | 1042 | 1043 => 'S',
+		20 | 21 | 23 | 26 | 700 | 701 | 1700 => 'N',
+		1082 | 1083 | 1114 | 1184 | 1266 => 'D',
+		1186 => 'T',
+		_ => 'U',
+	}
+}
+
+/// The `atttypid` of a column declared with the user-defined domain `name`: the OID of the domain.
+fn domain_attribute_oid(name: Option<&str>, domains: &[DomainType]) -> Option<i64> {
+	let name = name?;
+	let domain = domains.iter().find(|domain| domain.name == name)?;
+	Some(i64::from(domain_type_oid(domain.id)))
+}
+
+/// The `atttypid` of a column declared with the user-defined composite type `name`: the OID of the
+/// composite type.
+fn composite_attribute_oid(name: Option<&str>, composites: &[CompositeType]) -> Option<i64> {
+	let name = name?;
+	let composite = composites.iter().find(|composite| composite.name == name)?;
+	Some(i64::from(composite_type_oid(composite.id)))
+}
+
+/// The `atttypid` of a column that holds the labels of a named enum: the OID of its type, or of the
+/// array of it.
+fn enum_attribute_oid(
+	held: Option<&crate::catalog::EnumColumn>,
+	user_enums: &[crate::catalog::EnumType],
+) -> Option<i64> {
+	use crate::catalog::EnumShape;
+	let held = held?;
+	let surrealdb_expr::expr::EnumRef::Named(name) = &held.reference else {
+		return None;
+	};
+	let ty = user_enums.iter().find(|ty| ty.name == *name)?;
+	Some(i64::from(match held.shape {
+		EnumShape::Scalar | EnumShape::Set => crate::descriptor::enum_type_oid(ty.id),
+		EnumShape::Array => crate::descriptor::enum_array_type_oid(ty.id),
+	}))
 }
 
 /// Helper to build a `TableSchema` with column names and ordinal indices.
@@ -874,6 +1049,39 @@ pub fn get_system_table_schema(schema: Option<&str>, name: &str) -> Option<Table
 				"commit_action",
 			],
 		)),
+		(Some("information_schema"), "domains") => Some(make_schema(
+			Some("information_schema"),
+			"domains",
+			&[
+				"domain_catalog",
+				"domain_schema",
+				"domain_name",
+				"data_type",
+				"character_maximum_length",
+				"character_octet_length",
+				"character_set_catalog",
+				"character_set_schema",
+				"character_set_name",
+				"collation_catalog",
+				"collation_schema",
+				"collation_name",
+				"numeric_precision",
+				"numeric_precision_radix",
+				"numeric_scale",
+				"datetime_precision",
+				"interval_type",
+				"interval_precision",
+				"domain_default",
+				"udt_catalog",
+				"udt_schema",
+				"udt_name",
+				"scope_catalog",
+				"scope_schema",
+				"scope_name",
+				"maximum_cardinality",
+				"dtd_identifier",
+			],
+		)),
 		(Some("information_schema"), "columns") => Some(make_schema(
 			Some("information_schema"),
 			"columns",
@@ -922,6 +1130,7 @@ pub fn get_system_table_schema(schema: Option<&str>, name: &str) -> Option<Table
 				"is_generated",
 				"generation_expression",
 				"is_updatable",
+				"column_type",
 			],
 		)),
 		(Some("information_schema"), "column_statistics") => Some(make_schema(
@@ -1011,6 +1220,52 @@ pub fn get_system_table_rows(
 	user_tables: &[TableSchema],
 	database: &str,
 ) -> Option<Vec<LogicalExpr>> {
+	get_system_table_rows_with_enums(schema, name, user_tables, &[], database)
+}
+
+/// [`get_system_table_rows`], where `pg_type` and `pg_enum` also hold the user-defined enum types
+/// `user_enums`.
+pub fn get_system_table_rows_with_enums(
+	schema: Option<&str>,
+	name: &str,
+	user_tables: &[TableSchema],
+	user_enums: &[crate::catalog::EnumType],
+	database: &str,
+) -> Option<Vec<LogicalExpr>> {
+	let types = UserTypes {
+		enums: user_enums.to_vec(),
+		..UserTypes::default()
+	};
+	get_system_table_rows_with_types(schema, name, user_tables, &types, database)
+}
+
+/// [`get_system_table_rows`], where the catalog views also hold the user-defined types `types`:
+/// `pg_type` lists its enums, domains and composite types, `pg_class` and `pg_attribute` the
+/// relations of its composite types, and `information_schema.domains` its domains.
+pub fn get_system_table_rows_with_types(
+	schema: Option<&str>,
+	name: &str,
+	user_tables: &[TableSchema],
+	types: &UserTypes,
+	database: &str,
+) -> Option<Vec<LogicalExpr>> {
+	get_system_table_rows_in(schema, name, user_tables, types, database, SqlDialect::Postgres)
+}
+
+/// [`get_system_table_rows_with_types`] for a statement of `dialect`: a column declared with a
+/// SQL type is listed by `information_schema.columns` as that type, or as the nearest type of
+/// `dialect` when it is declared in the other one.
+pub fn get_system_table_rows_in(
+	schema: Option<&str>,
+	name: &str,
+	user_tables: &[TableSchema],
+	types: &UserTypes,
+	database: &str,
+	dialect: SqlDialect,
+) -> Option<Vec<LogicalExpr>> {
+	let user_enums = types.enums.as_slice();
+	let domains = types.domains.as_slice();
+	let composites = types.composites.as_slice();
 	let visible_tables = with_visible_sequence_names(user_tables);
 	let user_tables = &*visible_tables;
 	let (norm_schema, norm_name) = normalize_table_name(schema, name);
@@ -1292,6 +1547,109 @@ pub fn get_system_table_rows(
 						("typacl", null_val()),
 					])
 				})
+				.chain(user_enums.iter().flat_map(|en| {
+					let oid = i64::from(crate::descriptor::enum_type_oid(en.id));
+					let array_oid = i64::from(crate::descriptor::enum_array_type_oid(en.id));
+					let enum_row = |oid: i64, name: String, array: bool| {
+						row(vec![
+							("oid", int_val(oid)),
+							("typname", str_val(&name)),
+							("typnamespace", int_val(2200)),
+							("typowner", int_val(10)),
+							(
+								"typlen",
+								int_val(if array {
+									-1
+								} else {
+									4
+								}),
+							),
+							("typbyval", bool_val(!array)),
+							(
+								"typtype",
+								str_val(if array {
+									"b"
+								} else {
+									"e"
+								}),
+							),
+							(
+								"typcategory",
+								str_val(if array {
+									"A"
+								} else {
+									"E"
+								}),
+							),
+							("typispreferred", bool_val(false)),
+							("typisdefined", bool_val(true)),
+							("typdelim", str_val(",")),
+							("typrelid", int_val(0)),
+							(
+								"typelem",
+								int_val(if array {
+									i64::from(array_elem(oid))
+								} else {
+									0
+								}),
+							),
+							(
+								"typarray",
+								int_val(if array {
+									0
+								} else {
+									array_oid
+								}),
+							),
+							(
+								"typinput",
+								str_val(if array {
+									"array_in"
+								} else {
+									"enum_in"
+								}),
+							),
+							(
+								"typoutput",
+								str_val(if array {
+									"array_out"
+								} else {
+									"enum_out"
+								}),
+							),
+							(
+								"typreceive",
+								str_val(if array {
+									"array_recv"
+								} else {
+									"enum_recv"
+								}),
+							),
+							(
+								"typsend",
+								str_val(if array {
+									"array_send"
+								} else {
+									"enum_send"
+								}),
+							),
+							("typalign", str_val("i")),
+							("typstorage", str_val("p")),
+							("typnotnull", bool_val(false)),
+							("typbasetype", int_val(0)),
+							("typtypmod", int_val(-1)),
+							("typndims", int_val(0)),
+							("typcollation", int_val(0)),
+							("typdefaultbin", null_val()),
+							("typdefault", null_val()),
+							("typacl", null_val()),
+						])
+					};
+					[
+						enum_row(oid, en.name.clone(), false),
+						enum_row(array_oid, format!("_{}", en.name), true),
+					]
+				}))
 				.chain(user_tables.iter().enumerate().map(|(position, table)| {
 					row(vec![
 						("oid", int_val(TABLE_TYPE_OID_BASE + position as i64)),
@@ -1306,6 +1664,72 @@ pub fn get_system_table_rows(
 						("typisdefined", bool_val(true)),
 						("typdelim", str_val(",")),
 						("typrelid", int_val(16384 + position as i64)),
+						("typelem", int_val(0)),
+						("typarray", int_val(0)),
+						("typinput", str_val("record_in")),
+						("typoutput", str_val("record_out")),
+						("typreceive", str_val("record_recv")),
+						("typsend", str_val("record_send")),
+						("typalign", str_val("d")),
+						("typstorage", str_val("x")),
+						("typnotnull", bool_val(false)),
+						("typbasetype", int_val(0)),
+						("typtypmod", int_val(-1)),
+						("typndims", int_val(0)),
+						("typcollation", int_val(0)),
+						("typdefaultbin", null_val()),
+						("typdefault", null_val()),
+						("typacl", null_val()),
+					])
+				}))
+				.chain(domains.iter().map(|domain| {
+					let base = domain_base_oid(domain);
+					let base_len = attribute_len(base);
+					row(vec![
+						("oid", int_val(i64::from(domain_type_oid(domain.id)))),
+						("typname", str_val(&domain.name)),
+						("typnamespace", int_val(2200)),
+						("typowner", int_val(10)),
+						("typlen", int_val(base_len)),
+						("typbyval", bool_val(matches!(base_len, 1 | 2 | 4 | 8))),
+						("typtype", str_val("d")),
+						("typcategory", str_val(type_category(base).to_string())),
+						("typispreferred", bool_val(false)),
+						("typisdefined", bool_val(true)),
+						("typdelim", str_val(",")),
+						("typrelid", int_val(0)),
+						("typelem", int_val(0)),
+						("typarray", int_val(0)),
+						("typinput", str_val("domain_in")),
+						("typoutput", str_val("domain_out")),
+						("typreceive", str_val("domain_recv")),
+						("typsend", str_val("domain_send")),
+						("typalign", str_val("i")),
+						("typstorage", str_val("p")),
+						("typnotnull", bool_val(domain.not_null)),
+						("typbasetype", int_val(base)),
+						("typtypmod", int_val(-1)),
+						("typndims", int_val(0)),
+						("typcollation", int_val(0)),
+						("typdefaultbin", null_val()),
+						("typdefault", null_val()),
+						("typacl", null_val()),
+					])
+				}))
+				.chain(composites.iter().map(|composite| {
+					row(vec![
+						("oid", int_val(i64::from(composite_type_oid(composite.id)))),
+						("typname", str_val(&composite.name)),
+						("typnamespace", int_val(2200)),
+						("typowner", int_val(10)),
+						("typlen", int_val(-1)),
+						("typbyval", bool_val(false)),
+						("typtype", str_val("c")),
+						("typcategory", str_val("C")),
+						("typispreferred", bool_val(false)),
+						("typisdefined", bool_val(true)),
+						("typdelim", str_val(",")),
+						("typrelid", int_val(i64::from(composite_relation_oid(composite.id)))),
 						("typelem", int_val(0)),
 						("typarray", int_val(0)),
 						("typinput", str_val("record_in")),
@@ -1514,6 +1938,46 @@ pub fn get_system_table_rows(
 				]));
 			}
 
+			// The relation of each composite type, which its `pg_type.typrelid` names.
+			for composite in composites {
+				rows.push(row(vec![
+					("oid", int_val(i64::from(composite_relation_oid(composite.id)))),
+					("relname", str_val(&composite.name)),
+					("relnamespace", int_val(2200)),
+					("reltype", int_val(i64::from(composite_type_oid(composite.id)))),
+					("reloftype", int_val(0)),
+					("relowner", int_val(10)),
+					("relam", int_val(0)),
+					("relfilenode", int_val(0)),
+					("reltablespace", int_val(0)),
+					("relpages", int_val(0)),
+					("reltuples", float_val(0.0)),
+					("relallvisible", int_val(0)),
+					("reltoastrelid", int_val(0)),
+					("relhasindex", bool_val(false)),
+					("relisshared", bool_val(false)),
+					("relpersistence", str_val("p")),
+					("relkind", str_val("c")),
+					("relnatts", int_val(composite.fields.len() as i64)),
+					("relchecks", int_val(0)),
+					("relhasrules", bool_val(false)),
+					("relhastriggers", bool_val(false)),
+					("relhassubclass", bool_val(false)),
+					("relrowsecurity", bool_val(false)),
+					("relforcerowsecurity", bool_val(false)),
+					("relispopulated", bool_val(true)),
+					("relreplident", str_val("n")),
+					("relispartitioned", bool_val(false)),
+					("relispartition", bool_val(false)),
+					("relrewrite", int_val(0)),
+					("relfrozenxid", int_val(0)),
+					("relminmxid", int_val(0)),
+					("relacl", null_val()),
+					("reloptions", null_val()),
+					("relpartbound", null_val()),
+				]));
+			}
+
 			// Index relations of the user tables
 			for index in &indexes {
 				rows.push(row(vec![
@@ -1607,21 +2071,33 @@ pub fn get_system_table_rows(
 			for (t_idx, ut) in user_tables.iter().enumerate() {
 				let relid = 16384 + t_idx as i64;
 				for (col_idx, col) in ut.columns.iter().enumerate() {
-					let atttypid = attribute_type_oid(col.data_type.as_deref().unwrap_or("text"));
-					let attlen = match atttypid {
-						16 => 1,
-						21 => 2,
-						23 | 700 => 4,
-						20 | 701 => 8,
-						2950 => 16,
-						_ => -1,
+					// A column declared with a SQL type has that type and its modifier.
+					let reported = col.declared.as_ref().and_then(pg_reported_type);
+					// A domain column reports the domain's OID here, and its base type's length.
+					let base_oid = match &reported {
+						Some(reported) => i64::from(reported.oid),
+						None => attribute_type_oid(col.data_type.as_deref().unwrap_or("text")),
 					};
+					let atttypid = enum_attribute_oid(col.enum_held.as_ref(), user_enums)
+						.or_else(|| domain_attribute_oid(col.domain.as_deref(), domains))
+						.or_else(|| composite_attribute_oid(col.composite.as_deref(), composites))
+						.unwrap_or(base_oid);
+					let atttypmod = match &reported {
+						Some(reported) if atttypid == base_oid => i64::from(reported.typmod),
+						Some(_) | None => -1,
+					};
+					let attlen = attribute_len(base_oid);
 					// PostgreSQL records the declared dimensions of an array column, which Drizzle
 					// reads to tell `text[]` from `text`.
-					let attndims = i64::from(matches!(
-						crate::SqlType::from_name(col.data_type.as_deref().unwrap_or("text")),
-						crate::SqlType::Array(_)
-					));
+					let attndims = match (&reported, &col.declared) {
+						(Some(_), Some(declared)) => {
+							i64::try_from(declared.array_dimensions().len()).unwrap_or(1)
+						}
+						(Some(_), None) | (None, _) => i64::from(matches!(
+							crate::SqlType::from_name(col.data_type.as_deref().unwrap_or("text")),
+							crate::SqlType::Array(_)
+						)),
+					};
 					rows.push(row(vec![
 						("attrelid", int_val(relid)),
 						("attname", str_val(&col.name)),
@@ -1631,12 +2107,49 @@ pub fn get_system_table_rows(
 						("attnum", int_val((col_idx + 1) as i64)),
 						("attndims", int_val(attndims)),
 						("attcacheoff", int_val(-1)),
-						("atttypmod", int_val(-1)),
+						("atttypmod", int_val(atttypmod)),
 						("attbyval", bool_val(attlen > 0)),
 						("attstorage", str_val("p")),
 						("attalign", str_val("i")),
 						("attnotnull", bool_val(!col.is_nullable)),
 						("atthasdef", bool_val(col.sequence.is_some())),
+						("atthasmissing", bool_val(false)),
+						("attidentity", str_val("")),
+						("attgenerated", str_val("")),
+						("attisdropped", bool_val(false)),
+						("attislocal", bool_val(true)),
+						("attinhcount", int_val(0)),
+						("attcollation", int_val(0)),
+						("attacl", null_val()),
+						("attoptions", null_val()),
+						("attfdwoptions", null_val()),
+						("attmissingval", null_val()),
+					]));
+				}
+			}
+
+			// The fields of each composite type, as the attributes of its relation.
+			for composite in composites {
+				let relid = i64::from(composite_relation_oid(composite.id));
+				for (index, (field, kind)) in composite.fields.iter().enumerate() {
+					let atttypid =
+						attribute_type_oid(kind_type_name(kind).as_deref().unwrap_or("text"));
+					let attlen = attribute_len(atttypid);
+					rows.push(row(vec![
+						("attrelid", int_val(relid)),
+						("attname", str_val(field)),
+						("atttypid", int_val(atttypid)),
+						("attstattarget", int_val(-1)),
+						("attlen", int_val(attlen)),
+						("attnum", int_val((index + 1) as i64)),
+						("attndims", int_val(0)),
+						("attcacheoff", int_val(-1)),
+						("atttypmod", int_val(-1)),
+						("attbyval", bool_val(attlen > 0)),
+						("attstorage", str_val("p")),
+						("attalign", str_val("i")),
+						("attnotnull", bool_val(false)),
+						("atthasdef", bool_val(false)),
 						("atthasmissing", bool_val(false)),
 						("attidentity", str_val("")),
 						("attgenerated", str_val("")),
@@ -2217,10 +2730,38 @@ pub fn get_system_table_rows(
 				.collect(),
 		),
 
+		(Some("pg_catalog") | None, "pg_enum") => Some(
+			user_enums
+				.iter()
+				.flat_map(|en| {
+					en.labels.iter().map(move |label| {
+						row(vec![
+							(
+								"oid",
+								int_val(i64::from(crate::descriptor::enum_label_oid(
+									en.id,
+									label.ident,
+								))),
+							),
+							(
+								"enumtypid",
+								int_val(i64::from(crate::descriptor::enum_type_oid(en.id))),
+							),
+							(
+								"enumsortorder",
+								float_val(label.order as f64 / ENUM_SORT_ORDER_UNIT as f64),
+							),
+							("enumlabel", str_val(&label.label)),
+						])
+					})
+				})
+				.collect(),
+		),
+
 		// Empty standard tables returning 0 rows but valid schema
 		(
 			Some("pg_catalog") | None,
-			"pg_enum" | "pg_description" | "pg_foreign_data_wrapper" | "pg_foreign_server",
+			"pg_description" | "pg_foreign_data_wrapper" | "pg_foreign_server",
 		) => Some(Vec::new()),
 
 		// information_schema.tables
@@ -2323,6 +2864,47 @@ pub fn get_system_table_rows(
 		}
 
 		// information_schema.columns
+		(Some("information_schema"), "domains") => Some(
+			domains
+				.iter()
+				.map(|domain| {
+					let base = kind_type_name(&domain.base).unwrap_or_else(|| "text".to_owned());
+					let udt = crate::SqlType::from_name(&base)
+						.udt_name()
+						.unwrap_or_else(|| "text".to_owned());
+					row(vec![
+						("domain_catalog", str_val(database)),
+						("domain_schema", str_val("public")),
+						("domain_name", str_val(&domain.name)),
+						("data_type", str_val(&base)),
+						("character_maximum_length", null_val()),
+						("character_octet_length", null_val()),
+						("character_set_catalog", null_val()),
+						("character_set_schema", null_val()),
+						("character_set_name", null_val()),
+						("collation_catalog", null_val()),
+						("collation_schema", null_val()),
+						("collation_name", null_val()),
+						("numeric_precision", null_val()),
+						("numeric_precision_radix", null_val()),
+						("numeric_scale", null_val()),
+						("datetime_precision", null_val()),
+						("interval_type", null_val()),
+						("interval_precision", null_val()),
+						("domain_default", null_val()),
+						("udt_catalog", str_val(database)),
+						("udt_schema", str_val("pg_catalog")),
+						("udt_name", str_val(udt)),
+						("scope_catalog", null_val()),
+						("scope_schema", null_val()),
+						("scope_name", null_val()),
+						("maximum_cardinality", null_val()),
+						("dtd_identifier", str_val("1")),
+					])
+				})
+				.collect(),
+		),
+
 		(Some("information_schema"), "columns") => {
 			let mut rows = Vec::new();
 
@@ -2331,14 +2913,22 @@ pub fn get_system_table_rows(
 				for (col_idx, col) in ut.columns.iter().enumerate() {
 					let dt = col.data_type.as_deref().unwrap_or("text");
 					let sql_type = crate::SqlType::from_name(dt);
-					let udt = sql_type.udt_name().unwrap_or_else(|| "text".to_string());
+					let mut udt = sql_type.udt_name().unwrap_or_else(|| "text".to_string());
+					let (enum_data_type, enum_column_type) =
+						enum_column_names(col.enum_held.as_ref(), user_enums, &mut udt);
+					if let Some(composite) = &col.composite {
+						udt.clone_from(composite);
+					}
 					// PostgreSQL reports every array column as `ARRAY`; the element is only
 					// visible through `udt_name` (`_text`) and `format_type` (`text[]`).
 					let dt = if matches!(sql_type, crate::SqlType::Array(_)) {
 						"ARRAY"
+					} else if col.composite.is_some() {
+						"USER-DEFINED"
 					} else {
-						dt
+						enum_data_type.unwrap_or(dt)
 					};
+					let column_type = enum_column_type.unwrap_or_else(|| dt.to_owned());
 					let (precision, radix, scale) = match udt.as_str() {
 						"int2" => (int_val(16), int_val(2), int_val(0)),
 						"int4" => (int_val(32), int_val(2), int_val(0)),
@@ -2346,6 +2936,26 @@ pub fn get_system_table_rows(
 						"float4" => (int_val(24), int_val(2), null_val()),
 						"float8" => (int_val(53), int_val(2), null_val()),
 						_ => (null_val(), null_val(), null_val()),
+					};
+					let declared = DeclaredColumnFacts::of(col, dialect);
+					let (dt, column_type, udt) = match &declared {
+						Some(facts) => (
+							facts.data_type.as_str(),
+							facts.column_type.clone(),
+							facts.udt_name.clone().unwrap_or(udt),
+						),
+						None => (dt, column_type, udt),
+					};
+					let fact = |pick: fn(&DeclaredColumnFacts) -> Option<i64>| {
+						declared.as_ref().and_then(pick).map_or_else(null_val, int_val)
+					};
+					let (precision, radix, scale) = match &declared {
+						Some(_) => (
+							fact(|facts| facts.numeric_precision),
+							fact(|facts| facts.numeric_precision_radix),
+							fact(|facts| facts.numeric_scale),
+						),
+						None => (precision, radix, scale),
 					};
 					rows.push(row(vec![
 						("table_catalog", str_val(database)),
@@ -2368,12 +2978,12 @@ pub fn get_system_table_rows(
 							}),
 						),
 						("data_type", str_val(dt)),
-						("character_maximum_length", null_val()),
-						("character_octet_length", null_val()),
+						("character_maximum_length", fact(|facts| facts.character_maximum_length)),
+						("character_octet_length", fact(|facts| facts.character_octet_length)),
 						("numeric_precision", precision),
 						("numeric_precision_radix", radix),
 						("numeric_scale", scale),
-						("datetime_precision", null_val()),
+						("datetime_precision", fact(|facts| facts.datetime_precision)),
 						("interval_type", null_val()),
 						("interval_precision", null_val()),
 						("character_set_catalog", null_val()),
@@ -2382,9 +2992,15 @@ pub fn get_system_table_rows(
 						("collation_catalog", null_val()),
 						("collation_schema", null_val()),
 						("collation_name", null_val()),
-						("domain_catalog", null_val()),
-						("domain_schema", null_val()),
-						("domain_name", null_val()),
+						(
+							"domain_catalog",
+							col.domain.as_ref().map_or_else(null_val, |_| str_val(database)),
+						),
+						(
+							"domain_schema",
+							col.domain.as_ref().map_or_else(null_val, |_| str_val("public")),
+						),
+						("domain_name", col.domain.as_ref().map_or_else(null_val, str_val)),
 						("udt_catalog", str_val(database)),
 						("udt_schema", str_val("pg_catalog")),
 						("udt_name", str_val(udt)),
@@ -2404,6 +3020,7 @@ pub fn get_system_table_rows(
 						("is_generated", str_val("NEVER")),
 						("generation_expression", null_val()),
 						("is_updatable", str_val("YES")),
+						("column_type", str_val(column_type)),
 					]));
 				}
 			}
@@ -2902,5 +3519,183 @@ mod tests {
 			index.find_column("indrelid", false).and_then(|c| c.data_type.as_deref()),
 			Some("oid")
 		);
+	}
+
+	/// A table `people` with a domain column `rank` over `integer`, and a composite column `home`,
+	/// with the domain `posint` (id 3) and the composite `address` (id 2) that they name.
+	fn user_types_fixture() -> (Vec<TableSchema>, UserTypes) {
+		let people = TableSchema::new(
+			"people",
+			vec![
+				crate::ColumnInfo::new("id", 0),
+				crate::ColumnInfo::new("rank", 1).with_type("integer").with_domain("posint"),
+				crate::ColumnInfo::new("home", 2).with_type("jsonb").with_composite("address"),
+			],
+		)
+		.with_schema("public");
+		let types = UserTypes {
+			enums: Vec::new(),
+			domains: vec![DomainType {
+				name: "posint".to_owned(),
+				id: 3,
+				base: surrealdb_expr::expr::Kind::I32,
+				base_type: "int4".to_owned(),
+				not_null: true,
+				default: None,
+				checks: Vec::new(),
+			}],
+			composites: vec![CompositeType {
+				name: "address".to_owned(),
+				id: 2,
+				fields: vec![
+					("street".to_owned(), surrealdb_expr::expr::Kind::String),
+					("zip".to_owned(), surrealdb_expr::expr::Kind::I32),
+				],
+			}],
+		};
+		(vec![people], types)
+	}
+
+	/// The row of `rows` whose `column` holds `value`.
+	fn row_where<'a>(
+		rows: &'a [LogicalExpr],
+		column: &str,
+		value: &LogicalExpr,
+	) -> &'a LogicalExpr {
+		rows.iter()
+			.find(|row| field(row, column) == value)
+			.unwrap_or_else(|| panic!("no row with {column} = {value:?}"))
+	}
+
+	fn typed_rows(name: &str, tables: &[TableSchema], types: &UserTypes) -> Vec<LogicalExpr> {
+		get_system_table_rows_with_types(None, name, tables, types, "test").unwrap()
+	}
+
+	#[test]
+	fn a_domain_is_a_pg_type_over_its_base_type() {
+		let (tables, types) = user_types_fixture();
+		let rows = typed_rows("pg_type", &tables, &types);
+		let domain = row_where(&rows, "typname", &str_val("posint"));
+		let oid = i64::from(crate::descriptor::domain_type_oid(3));
+		assert_eq!(field(domain, "oid"), &int_val(oid));
+		assert_eq!(field(domain, "typtype"), &str_val("d"));
+		assert_eq!(field(domain, "typbasetype"), &int_val(23));
+		assert_eq!(field(domain, "typnotnull"), &bool_val(true));
+		assert_eq!(field(domain, "typlen"), &int_val(4));
+		assert_eq!(field(domain, "typarray"), &int_val(0));
+	}
+
+	#[test]
+	fn a_composite_is_a_pg_type_whose_relation_holds_its_fields() {
+		let (tables, types) = user_types_fixture();
+		let rows = typed_rows("pg_type", &tables, &types);
+		let composite = row_where(&rows, "typname", &str_val("address"));
+		let relation = i64::from(crate::descriptor::composite_relation_oid(2));
+		assert_eq!(
+			field(composite, "oid"),
+			&int_val(i64::from(crate::descriptor::composite_type_oid(2)))
+		);
+		assert_eq!(field(composite, "typtype"), &str_val("c"));
+		assert_eq!(field(composite, "typrelid"), &int_val(relation));
+
+		let classes = typed_rows("pg_class", &tables, &types);
+		let class = row_where(&classes, "relname", &str_val("address"));
+		assert_eq!(field(class, "oid"), &int_val(relation));
+		assert_eq!(field(class, "relkind"), &str_val("c"));
+		assert_eq!(field(class, "relnatts"), &int_val(2));
+		assert_eq!(
+			field(class, "reltype"),
+			&int_val(i64::from(crate::descriptor::composite_type_oid(2)))
+		);
+
+		let attributes = typed_rows("pg_attribute", &tables, &types);
+		let fields: Vec<_> =
+			attributes.iter().filter(|row| field(row, "attrelid") == &int_val(relation)).collect();
+		let names: Vec<_> = fields.iter().map(|row| field(row, "attname").clone()).collect();
+		assert_eq!(names, vec![str_val("street"), str_val("zip")]);
+		assert_eq!(field(fields[0], "atttypid"), &int_val(25));
+		assert_eq!(field(fields[1], "atttypid"), &int_val(23));
+		assert_eq!(field(fields[1], "attnum"), &int_val(2));
+	}
+
+	#[test]
+	fn a_domain_column_is_attributed_to_the_domain_and_a_composite_column_to_the_composite() {
+		let (tables, types) = user_types_fixture();
+		let attributes = typed_rows("pg_attribute", &tables, &types);
+		let rank = attributes
+			.iter()
+			.find(|row| field(row, "attname") == &str_val("rank"))
+			.expect("the rank attribute");
+		assert_eq!(
+			field(rank, "atttypid"),
+			&int_val(i64::from(crate::descriptor::domain_type_oid(3)))
+		);
+		assert_eq!(field(rank, "attlen"), &int_val(4));
+		let home = attributes
+			.iter()
+			.find(|row| field(row, "attname") == &str_val("home"))
+			.expect("the home attribute");
+		assert_eq!(
+			field(home, "atttypid"),
+			&int_val(i64::from(crate::descriptor::composite_type_oid(2)))
+		);
+		assert_eq!(field(home, "attlen"), &int_val(-1));
+	}
+
+	#[test]
+	fn information_schema_names_the_domain_of_a_column_and_lists_the_domains() {
+		let (tables, types) = user_types_fixture();
+		let columns = typed_rows_of_schema("columns", &tables, &types);
+		let rank = row_where(&columns, "column_name", &str_val("rank"));
+		assert_eq!(field(rank, "domain_name"), &str_val("posint"));
+		assert_eq!(field(rank, "domain_schema"), &str_val("public"));
+		assert_eq!(field(rank, "data_type"), &str_val("integer"));
+		let id = row_where(&columns, "column_name", &str_val("id"));
+		assert_eq!(field(id, "domain_name"), &null_val());
+		let home = row_where(&columns, "column_name", &str_val("home"));
+		assert_eq!(field(home, "data_type"), &str_val("USER-DEFINED"));
+		assert_eq!(field(home, "udt_name"), &str_val("address"));
+		assert_eq!(field(home, "domain_name"), &null_val());
+
+		let domains = typed_rows_of_schema("domains", &tables, &types);
+		assert_eq!(domains.len(), 1);
+		let posint = &domains[0];
+		assert_eq!(field(posint, "domain_name"), &str_val("posint"));
+		assert_eq!(field(posint, "data_type"), &str_val("integer"));
+		assert_eq!(field(posint, "udt_name"), &str_val("int4"));
+	}
+
+	fn typed_rows_of_schema(
+		name: &str,
+		tables: &[TableSchema],
+		types: &UserTypes,
+	) -> Vec<LogicalExpr> {
+		get_system_table_rows_with_types(Some("information_schema"), name, tables, types, "test")
+			.unwrap()
+	}
+
+	#[test]
+	fn user_type_oids_are_disjoint_from_the_other_ranges_and_fit_a_signed_word() {
+		use crate::descriptor::{
+			COMPOSITE_RELATION_OID_BASE, COMPOSITE_TYPE_OID_BASE, DOMAIN_TYPE_OID_BASE,
+			ENUM_ARRAY_OID_OFFSET, ENUM_LABEL_OID_STRIDE, ENUM_TYPE_OID_BASE, USER_TYPE_ID_LIMIT,
+			composite_relation_oid, composite_type_oid, domain_type_oid, enum_label_oid,
+		};
+		let last = USER_TYPE_ID_LIMIT - 1;
+		// The domain range ends where the composite type range begins, and so on up the space.
+		assert!(domain_type_oid(last) < COMPOSITE_TYPE_OID_BASE);
+		assert!(composite_type_oid(last) < COMPOSITE_RELATION_OID_BASE);
+		assert!(composite_relation_oid(last) < 1 << 31, "a relation oid must be a positive i32");
+		// Clear of the enum types and their arrays, the table row types and the sequences.
+		let enums_end = ENUM_TYPE_OID_BASE + 2 * ENUM_ARRAY_OID_OFFSET;
+		assert!(DOMAIN_TYPE_OID_BASE >= enums_end);
+		let table_and_sequence_oids_end = 6_000_000;
+		assert!(DOMAIN_TYPE_OID_BASE >= table_and_sequence_oids_end);
+		// Below the enum label oids, which start at 3e9 and take one block per enum.
+		assert!(composite_relation_oid(last) < enum_label_oid(0, 0));
+		let last_enum = ENUM_ARRAY_OID_OFFSET - 1;
+		assert_eq!(enum_label_oid(0, ENUM_LABEL_OID_STRIDE - 1) + 1, enum_label_oid(1, 0));
+		assert!(enum_label_oid(last_enum, ENUM_LABEL_OID_STRIDE - 1) < u32::MAX);
+		assert_ne!(domain_type_oid(0), composite_type_oid(0));
 	}
 }

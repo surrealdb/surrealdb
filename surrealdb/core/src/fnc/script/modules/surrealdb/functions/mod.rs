@@ -15,10 +15,12 @@ mod bytes;
 mod crypto;
 mod duration;
 mod encoding;
+mod enumeration;
 mod eval;
 mod file;
 mod geo;
 mod http;
+mod interval;
 mod math;
 mod meta;
 mod object;
@@ -48,10 +50,12 @@ impl_module_def!(
 	"crypto" => (crypto::Package),
 	"duration" => (duration::Package),
 	"encoding" => (encoding::Package),
+	"enum" => (enumeration::Package),
 	"eval" => (eval::Package),
 	"file" => (file::Package),
 	"geo" => (geo::Package),
 	"http" => (http::Package),
+	"interval" => (interval::Package),
 	"math" => (math::Package),
 	"meta" => (meta::Package),
 	"not" => run,

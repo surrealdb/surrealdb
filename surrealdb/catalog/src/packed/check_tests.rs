@@ -591,6 +591,28 @@ fn targeted() -> Vec<Targeted> {
 	let at = slot_at(&decimal, 0);
 	bytes[at + 2] = 0xFF;
 	push("decimal_flag_bits", &decimal, bytes, false);
+	// A bigdecimal slot holds exactly one payload per value: the sign byte, the scale as a
+	// canonical varint and a magnitude with no zero high byte, and no negative zero.
+	let big = layout(descriptor(
+		false,
+		&named(vec![("n", leaf(PhysicalKind::BigDecimal, Pres::Required))]),
+	));
+	let one: surrealdb_types::BigDecimal = "1.5".parse().expect("a bigdecimal");
+	let row = packed_row(
+		&big,
+		&object(vec![("n", Value::Number(crate::val::Number::BigDecimal(Box::new(one))))]),
+	);
+	push("bigdecimal_canonical", &big, with_raw_slice(&big, &row, 0, &[0, 1, 15]), true);
+	push("bigdecimal_sign", &big, with_raw_slice(&big, &row, 0, &[2, 1, 15]), false);
+	push("bigdecimal_negative_zero", &big, with_raw_slice(&big, &row, 0, &[1, 0]), false);
+	push("bigdecimal_zero_high_byte", &big, with_raw_slice(&big, &row, 0, &[0, 1, 15, 0]), false);
+	push(
+		"bigdecimal_overlong_scale",
+		&big,
+		with_raw_slice(&big, &row, 0, &[0, 0x81, 0, 15]),
+		false,
+	);
+	push("bigdecimal_no_scale", &big, with_raw_slice(&big, &row, 0, &[0]), false);
 	let keys = layout(descriptor(
 		false,
 		&[(

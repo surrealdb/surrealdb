@@ -32,6 +32,11 @@ impl Datetime {
 impl Datetime {
 	pub const MIN_UTC: Self = Datetime(DateTime::<Utc>::MIN_UTC);
 	pub const MAX_UTC: Self = Datetime(DateTime::<Utc>::MAX_UTC);
+
+	/// Whether this is `infinity` or `-infinity`, the greatest and least values of the kind.
+	pub fn is_infinite(&self) -> bool {
+		*self == Self::MAX_UTC || *self == Self::MIN_UTC
+	}
 }
 
 impl From<DateTime<Utc>> for Datetime {
@@ -60,7 +65,25 @@ impl From<Datetime> for surrealdb_types::Datetime {
 
 impl FromStr for Datetime {
 	type Err = ();
+	/// Parses `infinity` and `-infinity`, in any letter case and with an optional `+` sign, as the
+	/// greatest and least datetimes, and `epoch` as the Unix epoch. Any other text is parsed as a
+	/// SurrealQL datetime.
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let text = s.trim();
+		let (positive, rest) = match text.strip_prefix('-') {
+			Some(rest) => (false, rest),
+			None => (true, text.strip_prefix('+').unwrap_or(text)),
+		};
+		if rest.eq_ignore_ascii_case("infinity") {
+			return Ok(if positive {
+				Self::MAX_UTC
+			} else {
+				Self::MIN_UTC
+			});
+		}
+		if text.eq_ignore_ascii_case("epoch") {
+			return Ok(Self(DateTime::<Utc>::UNIX_EPOCH));
+		}
 		match syn::datetime(s) {
 			Ok(v) => Ok(v.into()),
 			Err(_) => Err(()),

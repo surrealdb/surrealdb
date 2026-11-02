@@ -22,7 +22,12 @@ pub fn kind_contains_object(kind: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -52,7 +57,48 @@ pub fn kind_contains_object(kind: &Kind) -> bool {
 			| KindLiteral::Duration(_)
 			| KindLiteral::Bool(_),
 		)
-		| Kind::File(_) => false,
+		| Kind::File(_)
+		| Kind::Enum(_) => false,
+	}
+}
+
+/// The SQL dialect a `SQL TYPE` clause names.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum SqlTypeDialect {
+	PostgreSql,
+	MySql,
+	DynamoDb,
+}
+
+impl SqlTypeDialect {
+	/// The keyword that spells the dialect in SurrealQL.
+	pub fn keyword(self) -> &'static str {
+		match self {
+			SqlTypeDialect::PostgreSql => "POSTGRESQL",
+			SqlTypeDialect::MySql => "MYSQL",
+			SqlTypeDialect::DynamoDb => "DYNAMODB",
+		}
+	}
+}
+
+/// The declared SQL type of a field: the type as the named dialect spells it,
+/// such as `numeric(10,2)` for PostgreSQL. The text is stored as written; the
+/// declaration does not change the field's kind or what a write accepts.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct SqlType {
+	pub dialect: SqlTypeDialect,
+	pub text: String,
+}
+
+impl ToSql for SqlType {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(
+			f,
+			sql_fmt,
+			"SQL TYPE {} {}",
+			self.dialect.keyword(),
+			common::fmt::QuoteStr(&self.text)
+		);
 	}
 }
 
@@ -117,6 +163,8 @@ pub struct DefineFieldStatement {
 	pub graphql_deprecated: Option<String>,
 	/// `MIGRATE EXISTING ROWS …`: what the definition does to stored rows.
 	pub migrate: Option<MigrateClause>,
+	/// The declared SQL type, the `SQL TYPE` clause.
+	pub sql_type: Option<SqlType>,
 }
 
 impl Default for DefineFieldStatement {
@@ -140,6 +188,7 @@ impl Default for DefineFieldStatement {
 			graphql_alias: None,
 			graphql_deprecated: None,
 			migrate: None,
+			sql_type: None,
 		}
 	}
 }
@@ -203,6 +252,9 @@ impl ToSql for DefineFieldStatement {
 			if self.flexible {
 				f.push_str(" FLEXIBLE");
 			}
+		}
+		if let Some(ref sql_type) = self.sql_type {
+			write_sql!(f, sql_fmt, " {sql_type}");
 		}
 		match self.default {
 			DefineDefault::None => {}

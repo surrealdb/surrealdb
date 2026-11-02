@@ -1873,8 +1873,9 @@ impl Connection {
 		}
 
 		// 4. Rows
-		for row in &shape.rows {
-			let row_buf = encode_text_row(row);
+		for (index, row) in shape.rows.iter().enumerate() {
+			let raw_row = shape.raw_rows.get(index).map_or(&[][..], Vec::as_slice);
+			let row_buf = encode_shape_text_row(&shape.columns, row, raw_row);
 			self.writer.write_packet(*seq, &row_buf).await?;
 			*seq = seq.wrapping_add(1);
 		}
@@ -2116,7 +2117,7 @@ impl Connection {
 				.iter()
 				.map(|c| {
 					let tbl = c.table.as_deref().unwrap_or("");
-					ColumnDefinition41::new(&schema, tbl, &c.name, c.ty.to_mysql_type())
+					column_definition(&schema, tbl, c)
 				})
 				.collect()
 		} else {

@@ -586,6 +586,7 @@ async fn a_range_crossing_special_numbers_agrees(unique: bool) {
 				Number::Int(i) => *i == 0,
 				Number::Float(f) => *f == 0.0,
 				Number::Decimal(d) => d.is_zero(),
+				Number::BigDecimal(d) => d.is_zero(),
 				Number::I8(i) => *i == 0,
 				Number::U8(u) => *u == 0,
 				Number::I16(i) => *i == 0,

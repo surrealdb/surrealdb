@@ -291,7 +291,12 @@ fn extract_tables_from_kind_impl(kind: &Kind, tables: &mut HashSet<String>) {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -351,7 +356,7 @@ fn extract_tables_from_kind_impl(kind: &Kind, tables: &mut HashSet<String>) {
 			| KindLiteral::Duration(_)
 			| KindLiteral::Bool(_) => {}
 		},
-		Kind::File(_) => {}
+		Kind::File(_) | Kind::Enum(_) => {}
 	}
 }
 

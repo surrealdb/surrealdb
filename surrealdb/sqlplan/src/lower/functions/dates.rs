@@ -7,7 +7,7 @@ use surrealdb_expr::expr::logical::{LogicalExpr, LogicalLiteral};
 use surrealdb_expr::val::Duration;
 
 use super::{
-	binary, call, float, int, lower_args, lower_bound_expr, lower_date_add, mysql_datetime,
+	binary, bind, call, float, int, lower_args, lower_bound_expr, lower_date_add, mysql_datetime,
 	mysql_format, mysql_week, null, one_day, padded, strict, string_literal, text, when,
 };
 use crate::dialect::{DialectPolicy, SqlDialect};
@@ -22,7 +22,8 @@ pub(super) fn handles(name: &str, dialect: SqlDialect, arguments: usize) -> bool
 			dialect == SqlDialect::MySql
 		}
 		"now" => arguments == 1,
-		"to_char" | "make_date" => dialect == SqlDialect::Postgres,
+		"to_char" | "make_date" | "make_time" | "make_timestamp" | "make_interval" | "age"
+		| "to_date" => dialect == SqlDialect::Postgres,
 		_ => false,
 	}
 }
@@ -67,6 +68,11 @@ pub(super) fn lower(
 		"now" if policy.dialect == SqlDialect::MySql => lower_now(args),
 		"to_char" => lower_to_char(args, policy),
 		"make_date" => lower_make_date(args, policy),
+		"make_time" => lower_strict_call("time::make_time", args, policy),
+		"make_timestamp" => lower_strict_call("time::make_timestamp", args, policy),
+		"make_interval" => lower_make_interval(args, policy),
+		"age" => lower_age(args, policy),
+		"to_date" => lower_to_date(args, policy),
 		_ => Err(PlanError::UnsupportedExpression(name.to_owned())),
 	}
 }
@@ -107,14 +113,17 @@ fn lower_makedate(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalE
 		when(
 			binary(v[1].clone(), BinaryOperator::LessThan, int(1)),
 			null(),
-			binary(
-				january_first,
-				BinaryOperator::Add,
-				binary(
-					one_day(),
-					BinaryOperator::Multiply,
-					binary(v[1].clone(), BinaryOperator::Subtract, int(1)),
-				),
+			call(
+				"type::date",
+				vec![binary(
+					january_first,
+					BinaryOperator::Add,
+					binary(
+						one_day(),
+						BinaryOperator::Multiply,
+						binary(v[1].clone(), BinaryOperator::Subtract, int(1)),
+					),
+				)],
 			),
 		)
 	}))
@@ -205,21 +214,113 @@ fn lower_now(args: &[BoundExpr]) -> Result<LogicalExpr, PlanError> {
 
 /// PostgreSQL `make_date(year, month, day)`.
 fn lower_make_date(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalExpr, PlanError> {
-	Ok(strict(lower_args(args, policy)?, |v| {
-		call(
-			"type::datetime",
-			vec![call(
-				"string::concat",
-				vec![
-					padded(v[0].clone(), 4),
-					text("-"),
-					padded(v[1].clone(), 2),
-					text("-"),
-					padded(v[2].clone(), 2),
-					text("T00:00:00Z"),
-				],
-			)],
+	lower_strict_call("time::make_date", args, policy)
+}
+
+/// The engine function `function` over the arguments, NULL when any is NULL.
+fn lower_strict_call(
+	function: &str,
+	args: &[BoundExpr],
+	policy: &DialectPolicy,
+) -> Result<LogicalExpr, PlanError> {
+	Ok(strict(lower_args(args, policy)?, |v| call(function, v.to_vec())))
+}
+
+/// PostgreSQL `make_interval(years, months, weeks, days, hours, mins, secs)`, each argument
+/// defaulting to zero.
+fn lower_make_interval(
+	args: &[BoundExpr],
+	policy: &DialectPolicy,
+) -> Result<LogicalExpr, PlanError> {
+	lower_strict_call("interval::make", args, policy)
+}
+
+/// PostgreSQL `age(a, b)`, and `age(a)` which is `age(current_date, a)`.
+fn lower_age(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalExpr, PlanError> {
+	let mut values = lower_args(args, policy)?;
+	if values.len() == 1 {
+		let today = call("type::date", vec![call("time::now", Vec::new())]);
+		values.insert(0, today);
+	}
+	Ok(strict(values, |v| call("time::age", v.to_vec())))
+}
+
+/// PostgreSQL `to_date(text, template)` for a template of `YYYY`, `YY`, `MM` and `DD` fields with
+/// literal separators, which read the digits at fixed positions. Any other pattern has no
+/// equivalent.
+fn lower_to_date(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalExpr, PlanError> {
+	let template = string_literal(&args[1]).ok_or_else(|| {
+		PlanError::UnsupportedExpression(
+			"to_date with a template that is not a string literal".to_owned(),
 		)
+	})?;
+	let unsupported = || {
+		PlanError::UnsupportedExpression(
+			"to_date with a template pattern that has no equivalent".to_owned(),
+		)
+	};
+	let (mut year, mut month, mut day): (Option<(usize, usize)>, Option<usize>, Option<usize>) =
+		(None, None, None);
+	let mut offset = 0usize;
+	let mut rest = template;
+	while !rest.is_empty() {
+		if let Some(after) = rest.strip_prefix("YYYY") {
+			year = Some((offset, 4));
+			offset += 4;
+			rest = after;
+		} else if let Some(after) = rest.strip_prefix("YY") {
+			year = Some((offset, 2));
+			offset += 2;
+			rest = after;
+		} else if let Some(after) = rest.strip_prefix("MM") {
+			month = Some(offset);
+			offset += 2;
+			rest = after;
+		} else if let Some(after) = rest.strip_prefix("DD") {
+			day = Some(offset);
+			offset += 2;
+			rest = after;
+		} else {
+			let c = rest.chars().next().ok_or_else(unsupported)?;
+			if c.is_ascii_alphanumeric() || c == '"' {
+				return Err(unsupported());
+			}
+			offset += 1;
+			rest = &rest[c.len_utf8()..];
+		}
+	}
+	let ((year_at, year_width), month_at, day_at) = match (year, month, day) {
+		(Some(y), Some(m), Some(d)) => (y, m, d),
+		_ => return Err(unsupported()),
+	};
+	let value = lower_bound_expr(&args[0], policy)?;
+	Ok(strict(vec![value], |v| {
+		let field = |at: usize, width: usize| {
+			call(
+				"type::int",
+				vec![call(
+					"string::slice",
+					vec![v[0].clone(), int(at as i64), int((at + width) as i64)],
+				)],
+			)
+		};
+		let year = if year_width == 4 {
+			field(year_at, 4)
+		} else {
+			// PostgreSQL reads a two-digit year of 70 to 99 as 19xx and 00 to 69 as 20xx.
+			bind(vec![field(year_at, 2)], |y| {
+				binary(
+					y[0].clone(),
+					BinaryOperator::Add,
+					when(
+						binary(y[0].clone(), BinaryOperator::LessThan, int(70)),
+						int(2000),
+						int(1900),
+					),
+				)
+			})
+		};
+		call("time::make_date", vec![year, field(month_at, 2), field(day_at, 2)])
 	}))
 }
 
@@ -314,10 +415,35 @@ fn lower_to_char(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalEx
 	})?;
 	let value = lower_bound_expr(&args[0], policy)?;
 	Ok(strict(vec![value], |v| {
+		let format_of = |at: LogicalExpr| call("time::format", vec![at, text(&format)]);
 		when(
-			call("type::is_datetime", vec![v[0].clone()]),
-			call("time::format", vec![v[0].clone(), text(&format)]),
-			LogicalExpr::Throw(Box::new(text("to_char is supported for timestamps only"))),
+			binary(
+				binary(
+					call("type::is_datetime", vec![v[0].clone()]),
+					BinaryOperator::Or,
+					call("type::is_timestamp", vec![v[0].clone()]),
+				),
+				BinaryOperator::Or,
+				call("type::is_date", vec![v[0].clone()]),
+			),
+			format_of(v[0].clone()),
+			when(
+				call("type::is_time", vec![v[0].clone()]),
+				format_of(call(
+					"type::datetime",
+					vec![call(
+						"string::concat",
+						vec![
+							text("1970-01-01T"),
+							call("type::string", vec![v[0].clone()]),
+							text("Z"),
+						],
+					)],
+				)),
+				LogicalExpr::Throw(Box::new(text(
+					"to_char is supported for dates, times and timestamps only",
+				))),
+			),
 		)
 	}))
 }

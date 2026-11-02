@@ -955,6 +955,7 @@ fn is_literal(expr: &LogicalExpr) -> bool {
 			| LogicalLiteral::Float(_)
 			| LogicalLiteral::Integer(_)
 			| LogicalLiteral::Decimal(_)
+			| LogicalLiteral::BigDecimal(_)
 			| LogicalLiteral::I8(_)
 			| LogicalLiteral::U8(_)
 			| LogicalLiteral::I16(_)
@@ -968,6 +969,10 @@ fn is_literal(expr: &LogicalExpr) -> bool {
 			| LogicalLiteral::Bytes(_)
 			| LogicalLiteral::Duration(_)
 			| LogicalLiteral::Datetime(_)
+			| LogicalLiteral::Date(_)
+			| LogicalLiteral::Time(_)
+			| LogicalLiteral::Timestamp(_)
+			| LogicalLiteral::Interval(_)
 			| LogicalLiteral::Uuid(_) => true,
 			LogicalLiteral::UnboundedRange
 			| LogicalLiteral::Regex(_)

@@ -25,7 +25,7 @@ impl<'js> IntoJs<'js> for &Value {
 			Value::None => Undefined.into_js(ctx),
 			Value::Bool(boolean) => Ok(js::Value::new_bool(ctx.clone(), boolean)),
 			Value::String(ref v) => js::String::from_str(ctx.clone(), v)?.into_js(ctx),
-			Value::Number(n) => match n.wide() {
+			Value::Number(ref n) => match n.wide() {
 				Wide::Int(v) => {
 					if ((i32::MIN as i64)..=(i32::MAX as i64)).contains(&v) {
 						Ok(js::Value::new_int(ctx.clone(), v as i32))
@@ -36,6 +36,7 @@ impl<'js> IntoJs<'js> for &Value {
 					}
 				}
 				Wide::Float(v) => Ok(js::Value::new_float(ctx.clone(), v)),
+				Wide::BigDecimal(v) => Ok(js::Value::new_float(ctx.clone(), v.to_f64())),
 				Wide::Decimal(v) => {
 					if v.is_integer() {
 						if let Some(v) = v.to_i64() {
@@ -70,6 +71,14 @@ impl<'js> IntoJs<'js> for &Value {
 			Value::Datetime(ref v) => {
 				let date: js::function::Constructor = ctx.globals().get("Date")?;
 				date.construct((v.0.timestamp_millis(),))
+			}
+			Value::Date(ref v) => js::String::from_str(ctx.clone(), &v.to_string())?.into_js(ctx),
+			Value::Time(ref v) => js::String::from_str(ctx.clone(), &v.to_string())?.into_js(ctx),
+			Value::Timestamp(ref v) => {
+				js::String::from_str(ctx.clone(), &v.to_string())?.into_js(ctx)
+			}
+			Value::Interval(ref v) => {
+				js::String::from_str(ctx.clone(), &v.to_string())?.into_js(ctx)
 			}
 			Value::RecordId(ref v) => Ok(Class::<classes::record::Record>::instance(
 				ctx.clone(),

@@ -9,9 +9,11 @@ use surrealdb_mysql::ast::operator::UnaryOperator;
 use surrealdb_mysql::ast::stmt::{SelectItem, SelectStmt};
 use surrealdb_mysql::lexer::span::Span;
 use surrealdb_sqlplan::ResultDescriptor;
+use surrealdb_sqlplan::reported_type::{MySqlReportedType, mysql_reported_type};
 use surrealdb_types::{Number, ToSql, Value, Wide};
 
-use crate::codec::{read_lenenc_bytes, write_lenenc_str};
+use crate::codec::geometry::Wkb;
+use crate::codec::{read_lenenc_bytes, write_lenenc_bytes, write_lenenc_str};
 use crate::constants::*;
 use crate::msg::ColumnDefinition41;
 
@@ -23,11 +25,13 @@ pub fn infer_mysql_type(value: &Value) -> u8 {
 		Value::Number(n) => match n.wide() {
 			Wide::Int(_) => MYSQL_TYPE_LONGLONG,
 			Wide::Float(_) => MYSQL_TYPE_DOUBLE,
-			Wide::Decimal(_) => MYSQL_TYPE_NEWDECIMAL,
+			Wide::Decimal(_) | Wide::BigDecimal(_) => MYSQL_TYPE_NEWDECIMAL,
 		},
 		Value::String(_) => MYSQL_TYPE_VAR_STRING,
-		Value::Datetime(_) => MYSQL_TYPE_DATETIME,
-		Value::Duration(_) => MYSQL_TYPE_TIME,
+		Value::Datetime(_) => MYSQL_TYPE_TIMESTAMP,
+		Value::Timestamp(_) => MYSQL_TYPE_DATETIME,
+		Value::Date(_) => MYSQL_TYPE_DATE,
+		Value::Duration(_) | Value::Time(_) | Value::Interval(_) => MYSQL_TYPE_TIME,
 		Value::Uuid(_) => MYSQL_TYPE_VAR_STRING,
 		Value::Bytes(_) => MYSQL_TYPE_BLOB,
 		Value::RecordId(_)
@@ -50,11 +54,45 @@ struct DatetimeParts {
 	micros: u32,
 }
 
+/// The `DATETIME` fields of an infinite date, timestamp or datetime. MySQL has no infinity, so the
+/// value is clamped to the latest datetime it holds (`9999-12-31 23:59:59.999999`) or the earliest
+/// one (`1000-01-01 00:00:00`).
+fn clamped_infinity(positive: bool) -> DatetimeParts {
+	if positive {
+		DatetimeParts {
+			year: 9999,
+			month: 12,
+			day: 31,
+			hour: 23,
+			minute: 59,
+			second: 59,
+			micros: 999_999,
+		}
+	} else {
+		DatetimeParts {
+			year: 1000,
+			month: 1,
+			day: 1,
+			hour: 0,
+			minute: 0,
+			second: 0,
+			micros: 0,
+		}
+	}
+}
+
 /// Split a datetime into `DATETIME` fields; `None` for years outside 0..=9999,
-/// which MySQL cannot represent.
+/// which MySQL cannot represent. An infinite datetime is clamped, see [`clamped_infinity`].
 fn datetime_parts(dt: &surrealdb_types::Datetime) -> Option<DatetimeParts> {
+	if dt.is_infinite() {
+		return Some(clamped_infinity(*dt == surrealdb_types::Datetime::MAX_UTC));
+	}
 	let utc = (*dt).into_inner();
-	let seconds = utc.timestamp();
+	parts_of_seconds(utc.timestamp(), utc.timestamp_subsec_micros())
+}
+
+/// Split the wall time `seconds` after 1970-01-01T00:00:00 into `DATETIME` fields.
+fn parts_of_seconds(seconds: i64, micros: u32) -> Option<DatetimeParts> {
 	let (year, month, day) = civil_date(seconds.div_euclid(86_400));
 	if !(0..=9999).contains(&year) {
 		return None;
@@ -67,8 +105,144 @@ fn datetime_parts(dt: &surrealdb_types::Datetime) -> Option<DatetimeParts> {
 		hour: (second_of_day / 3600) as u8,
 		minute: (second_of_day % 3600 / 60) as u8,
 		second: (second_of_day % 60) as u8,
-		micros: utc.timestamp_subsec_micros(),
+		micros,
 	})
+}
+
+/// The `DATETIME` fields of a `date` (at midnight) or a `timestamp`.
+fn temporal_parts(val: &Value) -> Option<DatetimeParts> {
+	match val {
+		Value::Date(d) if d.is_infinite() => Some(clamped_infinity(d.days() > 0)),
+		Value::Date(d) => parts_of_seconds(i64::from(d.days()) * 86_400, 0),
+		Value::Timestamp(t) if t.is_infinite() => Some(clamped_infinity(t.seconds() > 0)),
+		Value::Timestamp(t) => parts_of_seconds(t.seconds(), t.nanos() / 1_000),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Array(_)
+		| Value::Object(_)
+		| Value::Set(_)
+		| Value::Time(_)
+		| Value::Interval(_) => None,
+	}
+}
+
+fn date_text_of(p: &DatetimeParts) -> String {
+	format!("{:04}-{:02}-{:02}", p.year, p.month, p.day)
+}
+
+fn datetime_text_of(p: &DatetimeParts) -> String {
+	let mut out = format!(
+		"{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+		p.year, p.month, p.day, p.hour, p.minute, p.second
+	);
+	if p.micros != 0 {
+		out.push_str(&format!(".{:06}", p.micros));
+	}
+	out
+}
+
+/// The sign, whole seconds and microseconds of a value in a `TIME` column, which holds a signed
+/// duration up to `838:59:59` either way: a duration, a time of day, the time of day of a
+/// timestamp or datetime, or an interval (a month counts as 30 days, as an interval compares).
+/// An interval beyond the limit is the limit.
+fn time_value_parts(val: &Value) -> Option<(bool, u64, u32)> {
+	let clamp = |negative: bool, total_micros: u128| {
+		let secs = total_micros / 1_000_000;
+		if secs >= u128::from(MAX_TIME_SECS) {
+			(negative, MAX_TIME_SECS, 0)
+		} else {
+			(negative, secs as u64, (total_micros % 1_000_000) as u32)
+		}
+	};
+	match val {
+		Value::Duration(d) => {
+			let (secs, micros) = time_parts(d);
+			Some((false, secs, micros))
+		}
+		Value::Datetime(dt) => datetime_parts(dt).map(|p| {
+			(
+				false,
+				u64::from(p.hour) * 3600 + u64::from(p.minute) * 60 + u64::from(p.second),
+				p.micros,
+			)
+		}),
+		Value::Timestamp(t) => {
+			let micros =
+				t.seconds().rem_euclid(86_400) as u128 * 1_000_000 + u128::from(t.nanos() / 1_000);
+			Some(clamp(false, micros))
+		}
+		Value::Time(t) => Some(clamp(false, u128::from(t.nanos() / 1_000))),
+		Value::Interval(i) => {
+			let total = i.normalised_micros();
+			Some(clamp(total < 0, total.unsigned_abs()))
+		}
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Array(_)
+		| Value::Object(_)
+		| Value::Set(_)
+		| Value::Date(_) => None,
+	}
+}
+
+/// The `TIME` text form of a value in a `TIME` column, with a `-` for a negative one.
+fn time_value_text(val: &Value) -> Option<String> {
+	let (negative, secs, micros) = time_value_parts(val)?;
+	let mut out = format!(
+		"{}{:02}:{:02}:{:02}",
+		if negative {
+			"-"
+		} else {
+			""
+		},
+		secs / 3600,
+		(secs % 3600) / 60,
+		secs % 60
+	);
+	if micros != 0 {
+		out.push_str(&format!(".{micros:06}"));
+	}
+	Some(out)
+}
+
+/// The days after 1970-01-01 of a proleptic Gregorian date, or `None` when the month or day is
+/// not one the calendar has.
+fn days_from_civil(year: i64, month: u8, day: u8) -> Option<i64> {
+	if !(1..=12).contains(&month) || day == 0 {
+		return None;
+	}
+	let shifted_year = year - i64::from(month <= 2);
+	let era = shifted_year.div_euclid(400);
+	let year_of_era = shifted_year.rem_euclid(400);
+	let month_from_march = (i64::from(month) + 9) % 12;
+	let day_of_year = (153 * month_from_march + 2) / 5 + i64::from(day) - 1;
+	let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+	let days = era * 146_097 + day_of_era - 719_468;
+	(civil_date(days) == (year, month, day)).then_some(days)
 }
 
 /// The year, month and day of the proleptic Gregorian date `days` days after 1970-01-01.
@@ -135,6 +309,9 @@ fn time_text(d: &surrealdb_types::Duration) -> String {
 /// The text of `value` in a column MySQL types `col_type`: a datetime in a `DATE` column is its
 /// date and in a `TIME` column its time of day; every other value is its usual text.
 fn typed_text(col_type: u8, value: &Value) -> Option<String> {
+	if let Some(year) = crate::cells::year_cell(col_type, value) {
+		return Some(year);
+	}
 	match (col_type, value) {
 		(MYSQL_TYPE_DATE, Value::Datetime(dt)) => {
 			datetime_parts(dt).map(|p| format!("{:04}-{:02}-{:02}", p.year, p.month, p.day))
@@ -146,8 +323,40 @@ fn typed_text(col_type: u8, value: &Value) -> Option<String> {
 			}
 			out
 		}),
+		(MYSQL_TYPE_DATE, Value::Date(_) | Value::Timestamp(_)) => {
+			temporal_parts(value).map(|p| date_text_of(&p))
+		}
+		(MYSQL_TYPE_TIME, Value::Time(_) | Value::Timestamp(_) | Value::Interval(_)) => {
+			time_value_text(value)
+		}
 		_ => value_to_text(value),
 	}
+}
+
+/// The text of a `SET` value: its members joined by commas in the declaration order of `labels`,
+/// which is how MySQL reads a set back. `None` for `NULL`, and for a value that is no collection
+/// of labels.
+fn member_list_text(labels: &[String], value: &Value) -> Option<String> {
+	fn label(value: &Value) -> Option<&str> {
+		if let Value::String(s) = value {
+			Some(s.as_str())
+		} else {
+			None
+		}
+	}
+	let held: Vec<&str> = if let Value::Array(items) = value {
+		items.iter().filter_map(label).collect()
+	} else if let Value::Set(items) = value {
+		items.iter().filter_map(label).collect()
+	} else if matches!(value, Value::None | Value::Null) {
+		return None;
+	} else {
+		return value_to_text(value);
+	};
+	let mut members: Vec<&str> =
+		labels.iter().map(String::as_str).filter(|label| held.contains(label)).collect();
+	members.dedup();
+	Some(members.join(","))
 }
 
 /// The MySQL type of a column whose cells are `cells`: the type they share, or text when their
@@ -191,12 +400,16 @@ pub fn value_to_text(value: &Value) -> Option<String> {
 					Wide::Int(i) => Some(i.to_string()),
 					Wide::Float(f) => Some(f.to_string()),
 					Wide::Decimal(d) => Some(d.to_string()),
+					Wide::BigDecimal(d) => Some(d.to_string()),
 				}
 			}
 		}
 		Value::String(s) => Some(s.clone()),
 		Value::Datetime(dt) => Some(datetime_text(dt)),
 		Value::Duration(d) => Some(time_text(d)),
+		Value::Date(_) => temporal_parts(value).map(|p| date_text_of(&p)),
+		Value::Timestamp(_) => temporal_parts(value).map(|p| datetime_text_of(&p)),
+		Value::Time(_) | Value::Interval(_) => time_value_text(value),
 		Value::Uuid(u) => Some(u.to_string()),
 		v @ (Value::RecordId(_)
 		| Value::Range(_)
@@ -205,7 +418,9 @@ pub fn value_to_text(value: &Value) -> Option<String> {
 		| Value::Table(_)) => Some(v.to_sql()),
 		Value::Bytes(b) => Some(String::from_utf8_lossy(b).into_owned()),
 		v @ (Value::Object(_) | Value::Array(_) | Value::Set(_) | Value::Geometry(_)) => {
-			Some(v.clone().into_json_value().to_string())
+			let mut json = Vec::new();
+			v.write_sql_json(&mut json);
+			Some(String::from_utf8_lossy(&json).into_owned())
 		}
 	}
 }
@@ -401,6 +616,10 @@ pub fn shape_result(schema: &str, table: &str, value: Value) -> ResultShape {
 		| Value::Bytes(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Geometry(_)
 		| Value::Table(_)
@@ -437,12 +656,48 @@ pub fn shape_result_with_descriptor(
 	{
 		return shape_result(schema, table, value);
 	}
-	let columns: Vec<ColumnDefinition41> = descriptor
+	// The MySQL type each column is declared as, read in this dialect.
+	let reports: Vec<Option<MySqlReportedType>> = descriptor
 		.columns
 		.iter()
 		.map(|c| {
+			c.declared
+				.as_ref()
+				.filter(|_| c.enum_type.is_none() && c.composite.is_none())
+				.and_then(mysql_reported_type)
+		})
+		.collect();
+	let columns: Vec<ColumnDefinition41> = descriptor
+		.columns
+		.iter()
+		.zip(&reports)
+		.map(|(c, report)| {
 			let tbl = c.table.as_deref().unwrap_or(table);
-			ColumnDefinition41::new(schema, tbl, &c.name, c.ty.to_mysql_type())
+			let mut column = column_definition(schema, tbl, c);
+			match &c.enum_type {
+				Some(surrealdb_sqlplan::ResultEnum {
+					shape: surrealdb_sqlplan::EnumShape::Scalar,
+					..
+				}) => {
+					column.column_type = MYSQL_TYPE_ENUM;
+					column.flags |= ENUM_FLAG;
+				}
+				Some(surrealdb_sqlplan::ResultEnum {
+					shape: surrealdb_sqlplan::EnumShape::Set | surrealdb_sqlplan::EnumShape::Array,
+					..
+				}) => {
+					column.column_type = MYSQL_TYPE_SET;
+					column.flags |= SET_FLAG;
+				}
+				None => {}
+			}
+			if c.ty.mysql_unsigned() {
+				column.flags |= UNSIGNED_FLAG;
+			}
+			if let Some(report) = report {
+				declare_column(&mut column, report);
+			}
+			column
 		})
 		.collect();
 
@@ -455,6 +710,10 @@ pub fn shape_result_with_descriptor(
 		| Value::Bytes(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Geometry(_)
 		| Value::Table(_)
@@ -490,8 +749,24 @@ pub fn shape_result_with_descriptor(
 						}),
 				};
 				let col_type = columns[i].column_type;
-				row.push(val.and_then(|v| typed_text(col_type, v)));
-				raw_row.push(val.cloned().unwrap_or(Value::None));
+				let members = col
+					.enum_type
+					.as_ref()
+					.filter(|held| held.shape != surrealdb_sqlplan::EnumShape::Scalar);
+				let text = match (members, val) {
+					(Some(held), Some(v)) => member_list_text(&held.labels, v),
+					(Some(_), None) | (None, _) => val.and_then(|v| typed_text(col_type, v)),
+				};
+				let text = match (&reports[i], text) {
+					(Some(report), Some(text)) => Some(declared_text(report, text)),
+					(_, text) => text,
+				};
+				// The binary protocol sends a set's cell as the text of its members.
+				raw_row.push(match (members, &text) {
+					(Some(_), Some(text)) => Value::String(text.clone()),
+					(Some(_), None) | (None, _) => val.cloned().unwrap_or(Value::None),
+				});
+				row.push(text);
 			}
 			rows.push(row);
 			raw_rows.push(raw_row);
@@ -506,6 +781,204 @@ pub fn shape_result_with_descriptor(
 		rows,
 		raw_rows,
 	}
+}
+
+/// The definition of a result column the planner described: its MySQL type and flags, and for a
+/// `YEAR`, `BIT(n)`, or spatial column the length, flags, and SRID MySQL announces it with.
+pub fn column_definition(
+	schema: &str,
+	table: &str,
+	column: &surrealdb_sqlplan::ResultColumn,
+) -> ColumnDefinition41 {
+	let mut definition =
+		ColumnDefinition41::new(schema, table, &column.name, column.ty.to_mysql_type());
+	if column.ty.mysql_unsigned() {
+		definition.flags |= UNSIGNED_FLAG;
+	}
+	if column.ty == surrealdb_sqlplan::SqlType::Year {
+		definition.column_length = 4;
+		definition.flags |= ZEROFILL_FLAG;
+	}
+	if let surrealdb_sqlplan::SqlType::MySqlBit(width) = column.ty {
+		definition.column_length = u32::from(width);
+		definition.character_set = CHARSET_BINARY;
+		definition.flags |= BINARY_FLAG;
+	}
+	if let surrealdb_sqlplan::SqlType::Geometry(srid) = column.ty {
+		definition.srid = srid;
+		definition.column_length = u32::MAX;
+		definition.character_set = CHARSET_BINARY;
+		definition.flags |= BINARY_FLAG | BLOB_FLAG;
+	}
+	definition
+}
+
+/// Give `column` the type, length, decimals and flags of the declared type `report`.
+fn declare_column(column: &mut ColumnDefinition41, report: &MySqlReportedType) {
+	column.column_type = report.type_code;
+	column.column_length = report.length;
+	column.decimals = report.decimals;
+	column.flags &= !(UNSIGNED_FLAG | ZEROFILL_FLAG | BINARY_FLAG | BLOB_FLAG);
+	if report.unsigned {
+		column.flags |= UNSIGNED_FLAG;
+	}
+	if report.zerofill {
+		column.flags |= ZEROFILL_FLAG;
+	}
+	if report.binary {
+		column.flags |= BINARY_FLAG;
+		column.character_set = CHARSET_BINARY;
+	}
+	if report.blob {
+		column.flags |= BLOB_FLAG;
+	}
+	if let Some(srid) = report.srid {
+		column.srid = srid;
+	}
+}
+
+/// The text of a value of a column declared `report`, given its usual `text`: a `YEAR` has four
+/// digits, and a temporal type with fractional seconds has exactly that many digits after the
+/// point, as MySQL writes them.
+fn declared_text(report: &MySqlReportedType, text: String) -> String {
+	match report.type_code {
+		MYSQL_TYPE_YEAR => match text.parse::<u16>() {
+			Ok(year) => crate::codec::year::year_text(year),
+			Err(_) => text,
+		},
+		MYSQL_TYPE_DATETIME | MYSQL_TYPE_TIMESTAMP | MYSQL_TYPE_TIME => {
+			with_fraction_digits(text, usize::from(report.decimals))
+		}
+		MYSQL_TYPE_NEWDECIMAL => with_scale_digits(text, usize::from(report.decimals)),
+		_ => text,
+	}
+}
+
+/// `text`, a plain decimal, with at least `scale` digits after the point, as a `DECIMAL(p,s)`
+/// value is written. A fraction longer than `scale` is kept, and any other text is returned as
+/// it is.
+fn with_scale_digits(text: String, scale: usize) -> String {
+	let digits = text.strip_prefix('-').unwrap_or(&text);
+	let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+	if scale == 0
+		|| fraction.len() >= scale
+		|| whole.is_empty()
+		|| !whole.bytes().chain(fraction.bytes()).all(|b| b.is_ascii_digit())
+	{
+		return text;
+	}
+	let mut out = String::with_capacity(text.len() + 1 + scale);
+	out.push_str(&text);
+	if fraction.is_empty() && !text.contains('.') {
+		out.push('.');
+	}
+	out.extend(std::iter::repeat_n('0', scale - fraction.len()));
+	out
+}
+
+/// `text`, a time or a datetime, with exactly `digits` fractional-second digits: the fraction
+/// it has is cut or padded with zeros, and none is written for zero digits.
+fn with_fraction_digits(text: String, digits: usize) -> String {
+	let Some(colon) = text.rfind(':') else {
+		return text;
+	};
+	let (whole, fraction) = match text[colon..].find('.') {
+		Some(dot) => (&text[..colon + dot], &text[colon + dot + 1..]),
+		None => (text.as_str(), ""),
+	};
+	if !fraction.bytes().all(|b| b.is_ascii_digit()) {
+		return text;
+	}
+	if digits == 0 {
+		return whole.to_owned();
+	}
+	let mut out = String::with_capacity(whole.len() + 1 + digits);
+	out.push_str(whole);
+	out.push('.');
+	out.extend(fraction.chars().chain(std::iter::repeat('0')).take(digits));
+	out
+}
+
+/// The bytes a cell of `column` travels as in both protocols when its type is sent as bytes
+/// rather than text: a `BIT(n)` value as its `ceil(n / 8)` big-endian bytes, and a spatial value
+/// as its SRID and WKB. `None` for every other column, and for a value of another kind, which
+/// travels as its text.
+pub(crate) fn raw_cell(column: &ColumnDefinition41, value: &Value) -> Option<Vec<u8>> {
+	match (column.column_type, value) {
+		(MYSQL_TYPE_BIT, Value::Number(number)) => {
+			let bits = if let Number::U64(n) = number {
+				*n
+			} else {
+				match number.wide() {
+					Wide::Int(i) => u64::try_from(i).ok()?,
+					Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_) => return None,
+				}
+			};
+			crate::codec::bit::bit_bytes(bits, column.column_length)
+		}
+		(MYSQL_TYPE_GEOMETRY, Value::Geometry(geometry)) => {
+			Some(crate::codec::geometry::encode(column.srid, &wkb_of(geometry)))
+		}
+		_ => None,
+	}
+}
+
+/// A geometry value as the plain coordinates of its WKB.
+fn wkb_of(geometry: &surrealdb_types::Geometry) -> Wkb {
+	use surrealdb_types::Geometry;
+	// The coordinates of a line string, and the rings of a polygon, exterior first.
+	macro_rules! ring {
+		($line:expr) => {
+			$line.coords().map(|c| (c.x, c.y)).collect::<Vec<(f64, f64)>>()
+		};
+	}
+	macro_rules! rings {
+		($polygon:expr) => {{
+			let polygon = $polygon;
+			let mut rings = vec![ring!(polygon.exterior())];
+			rings.extend(polygon.interiors().iter().map(|interior| ring!(interior)));
+			rings
+		}};
+	}
+	match geometry {
+		Geometry::Point(point) => Wkb::Point((point.x(), point.y())),
+		Geometry::Line(line) => Wkb::LineString(ring!(line)),
+		Geometry::Polygon(polygon) => Wkb::Polygon(rings!(polygon)),
+		Geometry::MultiPoint(points) => {
+			Wkb::MultiPoint(points.0.iter().map(|point| (point.x(), point.y())).collect())
+		}
+		Geometry::MultiLine(lines) => {
+			Wkb::MultiLineString(lines.0.iter().map(|line| ring!(line)).collect())
+		}
+		Geometry::MultiPolygon(polygons) => {
+			Wkb::MultiPolygon(polygons.0.iter().map(|polygon| rings!(polygon)).collect())
+		}
+		Geometry::Collection(members) => {
+			Wkb::GeometryCollection(members.iter().map(wkb_of).collect())
+		}
+	}
+}
+
+/// Encode one text row of a result: each cell as its text, except a cell of a `BIT` or a spatial
+/// column, which travels as its bytes ([`raw_cell`]). `raw_row` holds the values of the cells.
+pub fn encode_shape_text_row(
+	columns: &[ColumnDefinition41],
+	row: &[Option<String>],
+	raw_row: &[Value],
+) -> Vec<u8> {
+	let mut buf = Vec::with_capacity(row.len() * 16);
+	for (index, cell) in row.iter().enumerate() {
+		let raw = columns
+			.get(index)
+			.zip(raw_row.get(index))
+			.and_then(|(column, value)| raw_cell(column, value));
+		match (cell, raw) {
+			(None, _) => buf.push(NULL_VALUE),
+			(Some(_), Some(bytes)) => write_lenenc_bytes(&mut buf, &bytes),
+			(Some(text), None) => write_lenenc_str(&mut buf, text),
+		}
+	}
+	buf
 }
 
 /// Encode one text row packet into bytes.
@@ -548,6 +1021,10 @@ pub fn serialize_binary_row(columns: &[ColumnDefinition41], values: &[Value]) ->
 		if matches!(val, Value::None | Value::Null) {
 			continue;
 		}
+		if let Some(bytes) = columns.get(i).and_then(|column| raw_cell(column, val)) {
+			write_lenenc_bytes(&mut buf, &bytes);
+			continue;
+		}
 		let col_type = columns.get(i).map(|c| c.column_type).unwrap_or(MYSQL_TYPE_VAR_STRING);
 		encode_binary_value(&mut buf, col_type, val);
 	}
@@ -563,7 +1040,7 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 				Value::Bool(b) => u8::from(*b),
 				Value::Number(n) => match n.wide() {
 					Wide::Int(i) => i as u8,
-					Wide::Float(_) | Wide::Decimal(_) => 0u8,
+					Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_) => 0u8,
 				},
 				Value::None
 				| Value::Null
@@ -571,6 +1048,10 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 				| Value::Bytes(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Geometry(_)
 				| Value::Table(_)
@@ -588,7 +1069,7 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 			let n = match val {
 				Value::Number(n) => match n.wide() {
 					Wide::Int(i) => i as i16,
-					Wide::Float(_) | Wide::Decimal(_) => 0i16,
+					Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_) => 0i16,
 				},
 				Value::None
 				| Value::Null
@@ -597,6 +1078,10 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 				| Value::Bytes(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Geometry(_)
 				| Value::Table(_)
@@ -614,7 +1099,7 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 			let n = match val {
 				Value::Number(n) => match n.wide() {
 					Wide::Int(i) => i as i32,
-					Wide::Float(_) | Wide::Decimal(_) => 0i32,
+					Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_) => 0i32,
 				},
 				Value::None
 				| Value::Null
@@ -623,6 +1108,10 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 				| Value::Bytes(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Geometry(_)
 				| Value::Table(_)
@@ -638,9 +1127,12 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 		}
 		MYSQL_TYPE_LONGLONG => {
 			let n = match val {
+				// A `u64` beyond `i64::MAX` travels as the bits of the same eight bytes, which an
+				// `UNSIGNED` LONGLONG reads back as that value.
+				Value::Number(Number::U64(v)) => *v as i64,
 				Value::Number(n) => match n.wide() {
 					Wide::Int(i) => i,
-					Wide::Float(_) | Wide::Decimal(_) => 0i64,
+					Wide::Float(_) | Wide::Decimal(_) | Wide::BigDecimal(_) => 0i64,
 				},
 				Value::None
 				| Value::Null
@@ -649,6 +1141,10 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 				| Value::Bytes(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Geometry(_)
 				| Value::Table(_)
@@ -672,6 +1168,10 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 				| Value::Bytes(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Geometry(_)
 				| Value::Table(_)
@@ -695,6 +1195,10 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 				| Value::Bytes(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Geometry(_)
 				| Value::Table(_)
@@ -729,6 +1233,7 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 fn binary_datetime_parts(val: &Value) -> Option<DatetimeParts> {
 	match val {
 		Value::Datetime(dt) => datetime_parts(dt),
+		Value::Date(_) | Value::Timestamp(_) => temporal_parts(val),
 		Value::String(text) => {
 			let text = text.strip_suffix('Z').unwrap_or(text);
 			let (date, time) = text.split_once([' ', 'T']).unwrap_or((text, ""));
@@ -766,6 +1271,8 @@ fn binary_datetime_parts(val: &Value) -> Option<DatetimeParts> {
 		| Value::Number(_)
 		| Value::Bytes(_)
 		| Value::Duration(_)
+		| Value::Time(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Geometry(_)
 		| Value::Table(_)
@@ -815,32 +1322,7 @@ fn encode_binary_datetime(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 /// Encode a `TIME` cell in the binary protocol: a length byte (0, 8 or 12)
 /// followed by the sign, whole days, clock fields and microseconds.
 fn encode_binary_time(buf: &mut Vec<u8>, val: &Value) {
-	let (secs, micros) = match val {
-		Value::Duration(d) => time_parts(d),
-		Value::Datetime(dt) => match datetime_parts(dt) {
-			Some(p) => (
-				u64::from(p.hour) * 3600 + u64::from(p.minute) * 60 + u64::from(p.second),
-				p.micros,
-			),
-			None => (0, 0),
-		},
-		Value::None
-		| Value::Null
-		| Value::Bool(_)
-		| Value::Number(_)
-		| Value::String(_)
-		| Value::Bytes(_)
-		| Value::Uuid(_)
-		| Value::Geometry(_)
-		| Value::Table(_)
-		| Value::RecordId(_)
-		| Value::File(_)
-		| Value::Range(_)
-		| Value::Regex(_)
-		| Value::Array(_)
-		| Value::Object(_)
-		| Value::Set(_) => (0, 0),
-	};
+	let (negative, secs, micros) = time_value_parts(val).unwrap_or((false, 0, 0));
 	if secs == 0 && micros == 0 {
 		buf.push(0);
 		return;
@@ -850,7 +1332,7 @@ fn encode_binary_time(buf: &mut Vec<u8>, val: &Value) {
 	} else {
 		8
 	});
-	buf.push(0);
+	buf.push(u8::from(negative));
 	buf.extend_from_slice(&((secs / 86_400) as u32).to_le_bytes());
 	buf.push(((secs % 86_400) / 3600) as u8);
 	buf.push(((secs % 3600) / 60) as u8);
@@ -934,37 +1416,77 @@ pub fn decode_binary_param(cursor: &mut &[u8], type_code: u8, unsigned: bool) ->
 			let data = &cursor[..len];
 			*cursor = &cursor[len..];
 			if len == 0 {
-				Ok(Value::String("0000-00-00 00:00:00".to_string()))
-			} else if len >= 4 {
-				let year = u16::from_le_bytes([data[0], data[1]]);
-				let month = data[2];
-				let day = data[3];
-				if len == 4 {
-					Ok(Value::String(format!("{year:04}-{month:02}-{day:02}")))
-				} else if len >= 7 {
-					let hour = data[4];
-					let min = data[5];
-					let sec = data[6];
-					if len == 7 {
-						Ok(Value::String(format!(
-							"{year:04}-{month:02}-{day:02} {hour:02}:{min:02}:{sec:02}"
-						)))
-					} else if len == 11 {
-						let micro = u32::from_le_bytes([data[7], data[8], data[9], data[10]]);
-						Ok(Value::String(format!(
-							"{year:04}-{month:02}-{day:02} {hour:02}:{min:02}:{sec:02}.{micro:06}"
-						)))
-					} else {
-						Ok(Value::String(format!(
-							"{year:04}-{month:02}-{day:02} {hour:02}:{min:02}:{sec:02}"
-						)))
-					}
+				return Ok(Value::String(if type_code == MYSQL_TYPE_DATE {
+					"0000-00-00".to_string()
 				} else {
-					Ok(Value::String(format!("{year:04}-{month:02}-{day:02}")))
-				}
-			} else {
-				Ok(Value::Null)
+					"0000-00-00 00:00:00".to_string()
+				}));
 			}
+			// The protocol sends 4 (date), 7 (date and time) or 11 (with microseconds) bytes, and a
+			// `DATE` only the 4 of a date: time fields in a `DATE` would be dropped.
+			let valid = if type_code == MYSQL_TYPE_DATE {
+				len == 4
+			} else {
+				matches!(len, 4 | 7 | 11)
+			};
+			ensure!(valid, "invalid binary datetime length {len}");
+			let year = i64::from(u16::from_le_bytes([data[0], data[1]]));
+			let (month, day) = (data[2], data[3]);
+			let (hour, min, sec) = if len >= 7 {
+				(i64::from(data[4]), i64::from(data[5]), i64::from(data[6]))
+			} else {
+				(0, 0, 0)
+			};
+			let micro = if len >= 11 {
+				u32::from_le_bytes([data[7], data[8], data[9], data[10]])
+			} else {
+				0
+			};
+			// A year past 9999 or a time of day out of its range is refused. A date MySQL admits
+			// and the calendar does not (a zero month or day) stays text, as MySQL writes the
+			// parameter's type: a `DATE` as a date alone, a value sent with microseconds with
+			// all six of them.
+			ensure!(year <= 9999, "invalid binary year {year}: MySQL holds years 0000 to 9999");
+			ensure!(
+				hour < 24 && min < 60 && sec < 60 && micro < 1_000_000,
+				"invalid binary time of day {hour:02}:{min:02}:{sec:02}.{micro:06}"
+			);
+			let Some(days) = days_from_civil(year, month, day) else {
+				let mut text = format!("{year:04}-{month:02}-{day:02}");
+				if type_code != MYSQL_TYPE_DATE {
+					text.push_str(&format!(" {hour:02}:{min:02}:{sec:02}"));
+				}
+				if len == 11 {
+					text.push_str(&format!(".{micro:06}"));
+				}
+				return Ok(Value::String(text));
+			};
+			let seconds = days * 86_400 + hour * 3600 + min * 60 + sec;
+			let out_of_range = || anyhow::anyhow!("datetime out of range");
+			Ok(match type_code {
+				MYSQL_TYPE_DATE => Value::Date(
+					i32::try_from(days)
+						.ok()
+						.and_then(surrealdb_types::Date::from_finite_days)
+						.ok_or_else(out_of_range)?,
+				),
+				MYSQL_TYPE_DATETIME => Value::Timestamp(
+					surrealdb_types::Timestamp::from_finite_parts(seconds, micro * 1_000)
+						.ok_or_else(out_of_range)?,
+				),
+				_ => Value::Datetime(
+					surrealdb_types::Datetime::from_timestamp(seconds, micro * 1_000)
+						.ok_or_else(out_of_range)?,
+				),
+			})
+		}
+		MYSQL_TYPE_BIT => {
+			let bytes = read_lenenc_bytes(cursor).unwrap_or(&[]);
+			crate::cells::bit_param(bytes)
+		}
+		MYSQL_TYPE_GEOMETRY => {
+			let bytes = read_lenenc_bytes(cursor).unwrap_or(&[]);
+			crate::cells::geometry_param(bytes)
 		}
 		MYSQL_TYPE_TIME => {
 			ensure!(!cursor.is_empty(), "unexpected EOF reading time length");
@@ -973,28 +1495,41 @@ pub fn decode_binary_param(cursor: &mut &[u8], type_code: u8, unsigned: bool) ->
 			ensure!(cursor.len() >= len, "unexpected EOF reading time body");
 			let data = &cursor[..len];
 			*cursor = &cursor[len..];
+			// The protocol sends 0 (zero), 8 (no microseconds) or 12 bytes.
+			ensure!(matches!(len, 0 | 8 | 12), "invalid binary time length {len}");
 			if len == 0 {
-				Ok(Value::String("00:00:00".to_string()))
-			} else if len >= 8 {
-				let is_neg = data[0] != 0;
-				let days = u32::from_le_bytes([data[1], data[2], data[3], data[4]]);
-				let hour = data[5] as u32 + days * 24;
-				let min = data[6];
-				let sec = data[7];
-				let sign = if is_neg {
-					"-"
-				} else {
-					""
-				};
-				if len >= 12 {
-					let micro = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-					Ok(Value::String(format!("{sign}{hour:02}:{min:02}:{sec:02}.{micro:06}")))
-				} else {
-					Ok(Value::String(format!("{sign}{hour:02}:{min:02}:{sec:02}")))
-				}
-			} else {
-				Ok(Value::String("00:00:00".to_string()))
+				return Ok(Value::Interval(surrealdb_types::Interval::ZERO));
 			}
+			// Each field within its unit, and the whole within the `838:59:59` a `TIME` holds,
+			// before anything is scaled: the day count alone can overflow the micros.
+			ensure!(data[0] <= 1, "invalid binary time sign {}", data[0]);
+			let negative = data[0] == 1;
+			let days = u64::from(u32::from_le_bytes([data[1], data[2], data[3], data[4]]));
+			let (hours, minutes, seconds) = (data[5], data[6], data[7]);
+			let micro = if len >= 12 {
+				u32::from_le_bytes([data[8], data[9], data[10], data[11]])
+			} else {
+				0
+			};
+			ensure!(
+				hours < 24 && minutes < 60 && seconds < 60 && micro < 1_000_000,
+				"time parameter field out of range"
+			);
+			let secs = days
+				.checked_mul(86_400)
+				.map(|d| d + u64::from(hours) * 3600 + u64::from(minutes) * 60 + u64::from(seconds))
+				.filter(|secs| *secs < MAX_TIME_SECS || (*secs == MAX_TIME_SECS && micro == 0))
+				.ok_or_else(|| anyhow::anyhow!("time parameter beyond 838:59:59"))?;
+			let total = secs as i64 * 1_000_000 + i64::from(micro);
+			Ok(Value::Interval(surrealdb_types::Interval::new(
+				0,
+				0,
+				if negative {
+					-total
+				} else {
+					total
+				},
+			)))
 		}
 		_ => {
 			// String / Blob / JSON / Decimal (lenenc-string format)
@@ -1009,7 +1544,64 @@ pub fn decode_binary_param(cursor: &mut &[u8], type_code: u8, unsigned: bool) ->
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_sqlplan::declared_type::DeclaredSqlType;
+
 	use super::*;
+
+	#[test]
+	fn a_u64_beyond_the_signed_range_is_sent_as_the_bits_an_unsigned_longlong_reads() {
+		let value = Value::Number(Number::U64(u64::MAX));
+		let mut buf = Vec::new();
+		encode_binary_value(&mut buf, MYSQL_TYPE_LONGLONG, &value);
+		assert_eq!(buf, u64::MAX.to_le_bytes());
+		let back = decode_binary_param(&mut &buf[..], MYSQL_TYPE_LONGLONG, true).unwrap();
+		assert_eq!(back, value);
+		assert_eq!(value_to_text(&value).as_deref(), Some("18446744073709551615"));
+	}
+
+	#[test]
+	fn a_u64_at_the_signed_boundary_is_sent_as_the_same_bits_in_both_protocols() {
+		let boundary = i64::MAX as u64 + 1;
+		let value = Value::Number(Number::U64(boundary));
+		let mut buf = Vec::new();
+		encode_binary_value(&mut buf, MYSQL_TYPE_LONGLONG, &value);
+		assert_eq!(buf, boundary.to_le_bytes());
+		assert_eq!(value_to_text(&value).as_deref(), Some("9223372036854775808"));
+	}
+
+	#[test]
+	fn a_declared_u64_column_is_announced_as_unsigned_longlong() {
+		let descriptor = surrealdb_sqlplan::ResultDescriptor {
+			columns: vec![surrealdb_sqlplan::ResultColumn {
+				name: "v".to_string(),
+				ty: surrealdb_sqlplan::SqlType::UInt8,
+				..surrealdb_sqlplan::ResultColumn::default()
+			}],
+		};
+		let mut obj = surrealdb_types::Object::new();
+		obj.insert("v".to_string(), Value::Number(Number::U64(u64::MAX)));
+		let shape = shape_result_with_descriptor(&descriptor, "test", "rs", Value::Object(obj));
+		let column = &shape.columns[0];
+		assert_eq!(column.column_type, MYSQL_TYPE_LONGLONG);
+		assert_ne!(column.flags & UNSIGNED_FLAG, 0);
+		assert_eq!(shape.rows[0][0].as_deref(), Some("18446744073709551615"));
+	}
+
+	#[test]
+	fn a_declared_signed_column_is_not_announced_unsigned() {
+		let descriptor = surrealdb_sqlplan::ResultDescriptor {
+			columns: vec![surrealdb_sqlplan::ResultColumn {
+				name: "v".to_string(),
+				ty: surrealdb_sqlplan::SqlType::Int8,
+				..surrealdb_sqlplan::ResultColumn::default()
+			}],
+		};
+		let mut obj = surrealdb_types::Object::new();
+		obj.insert("v".to_string(), Value::Number(Number::Int(-1)));
+		let shape = shape_result_with_descriptor(&descriptor, "test", "rs", Value::Object(obj));
+		assert_eq!(shape.columns[0].column_type, MYSQL_TYPE_LONGLONG);
+		assert_eq!(shape.columns[0].flags & UNSIGNED_FLAG, 0);
+	}
 
 	#[test]
 	fn test_shape_result_empty_array() {
@@ -1029,6 +1621,19 @@ mod tests {
 		assert_eq!(shape.columns.len(), 2);
 		assert_eq!(shape.rows.len(), 1);
 		assert_eq!(shape.raw_rows.len(), 1);
+	}
+
+	#[test]
+	fn a_shaped_result_keeps_the_temporal_kinds() {
+		let mut obj = surrealdb_types::Object::new();
+		obj.insert("d".to_string(), date("2024-01-15"));
+		obj.insert("i".to_string(), interval(90_000_000));
+		obj.insert("t".to_string(), timestamp("2024-01-15T12:30:45"));
+		let shape = shape_result("test", "items", Value::Array(vec![Value::Object(obj)].into()));
+		let types: Vec<u8> = shape.columns.iter().map(|c| c.column_type).collect();
+		assert_eq!(types, vec![MYSQL_TYPE_DATE, MYSQL_TYPE_TIME, MYSQL_TYPE_DATETIME]);
+		assert_eq!(shape.rows[0][0].as_deref(), Some("2024-01-15"));
+		assert_eq!(shape.rows[0][2].as_deref(), Some("2024-01-15 12:30:45"));
 	}
 
 	#[test]
@@ -1111,6 +1716,30 @@ mod tests {
 		let mut buf = Vec::new();
 		encode_binary_time(&mut buf, &Value::Duration(surrealdb_types::Duration::from_secs(0)));
 		assert_eq!(buf, vec![0]);
+	}
+
+	#[test]
+	fn a_time_parameter_beyond_what_mysql_holds_is_refused() {
+		let decode = |body: &[u8]| {
+			let mut data = vec![body.len() as u8];
+			data.extend_from_slice(body);
+			decode_binary_param(&mut &data[..], MYSQL_TYPE_TIME, false)
+		};
+		// 838:59:59 either way is the longest a `TIME` holds.
+		let micros = (838 * 3600 + 59 * 60 + 59) * 1_000_000;
+		assert_eq!(
+			decode(&[1, 34, 0, 0, 0, 22, 59, 59]).unwrap(),
+			Value::Interval(surrealdb_types::Interval::new(0, 0, -micros))
+		);
+		// A second, or a microsecond, past it.
+		assert!(decode(&[0, 34, 0, 0, 0, 23, 0, 0]).is_err());
+		assert!(decode(&[0, 34, 0, 0, 0, 22, 59, 59, 1, 0, 0, 0]).is_err());
+		// A day count whose micros overflow an `i64`.
+		assert!(decode(&[0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0]).is_err());
+		// A field past its unit.
+		assert!(decode(&[0, 0, 0, 0, 0, 24, 0, 0]).is_err());
+		assert!(decode(&[0, 0, 0, 0, 0, 0, 60, 0]).is_err());
+		assert!(decode(&[0, 0, 0, 0, 0, 0, 0, 0, 0x40, 0x42, 0x0F, 0]).is_err());
 	}
 
 	#[test]
@@ -1265,5 +1894,398 @@ mod tests {
 		let last = at(253_402_300_799, 0).expect("the last second of 9999");
 		assert_eq!((last.year, last.month, last.day, last.hour), (9999, 12, 31, 23));
 		assert!(at(253_402_300_800, 0).is_none());
+	}
+
+	fn date(text: &str) -> Value {
+		Value::Date(text.parse::<surrealdb_types::Date>().unwrap())
+	}
+
+	fn timestamp(text: &str) -> Value {
+		Value::Timestamp(text.parse::<surrealdb_types::Timestamp>().unwrap())
+	}
+
+	fn interval(micros: i64) -> Value {
+		Value::Interval(surrealdb_types::Interval::new(0, 0, micros))
+	}
+
+	#[test]
+	fn the_temporal_values_have_their_own_wire_types() {
+		assert_eq!(infer_mysql_type(&date("2026-10-27")), MYSQL_TYPE_DATE);
+		assert_eq!(infer_mysql_type(&timestamp("2026-10-27T12:30:00")), MYSQL_TYPE_DATETIME);
+		assert_eq!(infer_mysql_type(&interval(1)), MYSQL_TYPE_TIME);
+		let at = surrealdb_types::Datetime::from_timestamp(0, 0).unwrap();
+		assert_eq!(infer_mysql_type(&Value::Datetime(at)), MYSQL_TYPE_TIMESTAMP);
+	}
+
+	#[test]
+	fn the_temporal_values_have_mysql_text_forms() {
+		assert_eq!(value_to_text(&date("2026-10-27")).as_deref(), Some("2026-10-27"));
+		assert_eq!(
+			value_to_text(&timestamp("2026-10-27T12:30:00.5")).as_deref(),
+			Some("2026-10-27 12:30:00.500000")
+		);
+		assert_eq!(
+			value_to_text(&Value::Time("12:30:00.123456789".parse().unwrap())).as_deref(),
+			Some("12:30:00.123456")
+		);
+		let hours = |h: i64| h * 3_600_000_000;
+		assert_eq!(value_to_text(&interval(hours(100))).as_deref(), Some("100:00:00"));
+		assert_eq!(
+			value_to_text(&interval(-hours(1) - 500_000)).as_deref(),
+			Some("-01:00:00.500000")
+		);
+		// A `TIME` holds no more than 838:59:59 either way.
+		assert_eq!(value_to_text(&interval(hours(900))).as_deref(), Some("838:59:59"));
+		assert_eq!(value_to_text(&interval(-hours(900))).as_deref(), Some("-838:59:59"));
+	}
+
+	#[test]
+	fn a_binary_time_carries_its_sign() {
+		let mut buf = Vec::new();
+		encode_binary_time(&mut buf, &interval(-(26 * 3_600_000_000 + 5_000_000)));
+		// Negative, one day, 2 hours, 0 minutes, 5 seconds.
+		assert_eq!(buf, vec![8, 1, 1, 0, 0, 0, 2, 0, 5]);
+		let mut buf = Vec::new();
+		encode_binary_time(&mut buf, &interval(0));
+		assert_eq!(buf, vec![0]);
+	}
+
+	#[test]
+	fn a_binary_date_and_datetime_carry_their_calendar_fields() {
+		let mut buf = Vec::new();
+		encode_binary_datetime(&mut buf, MYSQL_TYPE_DATE, &date("2024-01-15"));
+		assert_eq!(buf, vec![4, 0xe8, 0x07, 1, 15]);
+		let mut buf = Vec::new();
+		encode_binary_datetime(&mut buf, MYSQL_TYPE_DATETIME, &timestamp("2024-01-15T12:30:45"));
+		assert_eq!(buf, vec![7, 0xe8, 0x07, 1, 15, 12, 30, 45]);
+	}
+
+	#[test]
+	fn a_binary_date_holds_only_a_date() {
+		let mut cursor: &[u8] = &[4, 0xe8, 0x07, 1, 15];
+		assert!(decode_binary_param(&mut cursor, MYSQL_TYPE_DATE, false).is_ok());
+		for body in [
+			&[7u8, 0xe8, 0x07, 1, 15, 12, 30, 45][..],
+			&[11, 0xe8, 0x07, 1, 15, 0, 0, 0, 0, 0, 0, 0],
+		] {
+			let mut cursor = body;
+			assert!(decode_binary_param(&mut cursor, MYSQL_TYPE_DATE, false).is_err(), "{body:?}");
+		}
+	}
+
+	#[test]
+	fn a_binary_year_past_9999_is_refused() {
+		// 10000 is 0x2710; 9999 (0x270F) is the last year MySQL holds.
+		for ty in [MYSQL_TYPE_DATE, MYSQL_TYPE_DATETIME, MYSQL_TYPE_TIMESTAMP] {
+			let mut cursor: &[u8] = &[4, 0x10, 0x27, 1, 1];
+			assert!(decode_binary_param(&mut cursor, ty, false).is_err(), "{ty}");
+			let mut cursor: &[u8] = &[4, 0xFF, 0xFF, 1, 1];
+			assert!(decode_binary_param(&mut cursor, ty, false).is_err(), "{ty}");
+			let mut cursor: &[u8] = &[4, 0x0F, 0x27, 12, 31];
+			assert!(decode_binary_param(&mut cursor, ty, false).is_ok(), "{ty}");
+		}
+	}
+
+	#[test]
+	fn a_binary_time_of_another_length_is_refused() {
+		for len in [1u8, 7, 9, 11, 13] {
+			let body = [vec![len], vec![0; len as usize]].concat();
+			let mut cursor = body.as_slice();
+			assert!(decode_binary_param(&mut cursor, MYSQL_TYPE_TIME, false).is_err(), "{len}");
+		}
+		let mut cursor: &[u8] = &[8, 2, 0, 0, 0, 0, 1, 0, 0];
+		assert!(decode_binary_param(&mut cursor, MYSQL_TYPE_TIME, false).is_err(), "sign 2");
+		for len in [0u8, 8, 12] {
+			let body = [vec![len], vec![0; len as usize]].concat();
+			let mut cursor = body.as_slice();
+			assert!(decode_binary_param(&mut cursor, MYSQL_TYPE_TIME, false).is_ok(), "{len}");
+		}
+	}
+
+	#[test]
+	fn a_binary_datetime_of_another_length_is_refused() {
+		for body in [
+			&[1u8, 0xe8][..],
+			&[3, 0xe8, 0x07, 1],
+			&[5, 0xe8, 0x07, 1, 15, 12],
+			&[8, 0xe8, 0x07, 1, 15, 12, 30, 45, 0],
+		] {
+			let mut cursor = body;
+			assert!(
+				decode_binary_param(&mut cursor, MYSQL_TYPE_DATETIME, false).is_err(),
+				"{body:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn binary_parameters_decode_into_the_new_kinds() {
+		let mut cursor: &[u8] = &[4, 0xe8, 0x07, 1, 15];
+		assert_eq!(
+			decode_binary_param(&mut cursor, MYSQL_TYPE_DATE, false).unwrap(),
+			date("2024-01-15")
+		);
+		let mut cursor: &[u8] = &[7, 0xe8, 0x07, 1, 15, 12, 30, 45];
+		assert_eq!(
+			decode_binary_param(&mut cursor, MYSQL_TYPE_DATETIME, false).unwrap(),
+			timestamp("2024-01-15T12:30:45")
+		);
+		let mut cursor: &[u8] = &[7, 0xe8, 0x07, 1, 15, 12, 30, 45];
+		assert!(matches!(
+			decode_binary_param(&mut cursor, MYSQL_TYPE_TIMESTAMP, false).unwrap(),
+			Value::Datetime(_)
+		));
+		let mut cursor: &[u8] = &[8, 1, 1, 0, 0, 0, 2, 0, 5];
+		assert_eq!(
+			decode_binary_param(&mut cursor, MYSQL_TYPE_TIME, false).unwrap(),
+			interval(-(26 * 3_600_000_000 + 5_000_000))
+		);
+		// A zero month is a date the calendar does not have, which stays text written as the
+		// parameter's type: a date alone, or a datetime with the microseconds it was sent with.
+		let text = |body: &[u8], ty: u8| {
+			let mut cursor = body;
+			decode_binary_param(&mut cursor, ty, false).unwrap()
+		};
+		let string = |s: &str| Value::String(s.to_string());
+		assert_eq!(text(&[4, 0xe8, 0x07, 0, 0], MYSQL_TYPE_DATE), string("2024-00-00"));
+		assert_eq!(text(&[0], MYSQL_TYPE_DATE), string("0000-00-00"));
+		assert_eq!(
+			text(&[7, 0xe8, 0x07, 0, 0, 12, 0, 0], MYSQL_TYPE_DATETIME),
+			string("2024-00-00 12:00:00")
+		);
+		let micros = 123_456u32.to_le_bytes();
+		assert_eq!(
+			text(
+				&[11, 0xe8, 0x07, 0, 0, 12, 0, 0, micros[0], micros[1], micros[2], micros[3]],
+				MYSQL_TYPE_DATETIME
+			),
+			string("2024-00-00 12:00:00.123456")
+		);
+		// An impossible time of day is an error, not text, on a real or an incomplete date.
+		for body in [
+			&[7, 0xe8, 0x07, 1, 1, 25, 0, 0][..],
+			&[7, 0xe8, 0x07, 1, 1, 0, 60, 0],
+			&[7, 0xe8, 0x07, 0, 0, 0, 0, 60],
+			&[11, 0xe8, 0x07, 1, 1, 0, 0, 0, 0x40, 0x42, 0x0f, 0x00],
+		] {
+			let mut cursor = body;
+			assert!(
+				decode_binary_param(&mut cursor, MYSQL_TYPE_DATETIME, false).is_err(),
+				"{body:?}"
+			);
+		}
+	}
+	fn enum_column(
+		name: &str,
+		shape: surrealdb_sqlplan::EnumShape,
+	) -> surrealdb_sqlplan::ResultColumn {
+		surrealdb_sqlplan::ResultColumn {
+			name: name.to_owned(),
+			enum_type: Some(surrealdb_sqlplan::ResultEnum {
+				id: None,
+				labels: ["small", "medium", "large"].map(str::to_owned).to_vec(),
+				shape,
+			}),
+			..Default::default()
+		}
+	}
+
+	#[test]
+	fn an_enum_column_is_typed_and_flagged_by_its_declaration() {
+		let descriptor = surrealdb_sqlplan::ResultDescriptor {
+			columns: vec![
+				enum_column("size", surrealdb_sqlplan::EnumShape::Scalar),
+				enum_column("sizes", surrealdb_sqlplan::EnumShape::Set),
+			],
+		};
+		let row = Value::Object(surrealdb_types::Object::from_iter([
+			("size".to_owned(), Value::String("medium".to_owned())),
+			(
+				"sizes".to_owned(),
+				Value::Set(surrealdb_types::Set::from(vec![
+					Value::String("large".to_owned()),
+					Value::String("small".to_owned()),
+				])),
+			),
+		]));
+		let shape =
+			shape_result_with_descriptor(&descriptor, "db", "t", Value::Array(vec![row].into()));
+		assert_eq!(shape.columns[0].column_type, MYSQL_TYPE_ENUM);
+		assert_eq!(shape.columns[0].flags & ENUM_FLAG, ENUM_FLAG);
+		assert_eq!(shape.columns[1].column_type, MYSQL_TYPE_SET);
+		assert_eq!(shape.columns[1].flags & SET_FLAG, SET_FLAG);
+		assert_eq!(shape.rows[0][0].as_deref(), Some("medium"));
+		// The members read back in declaration order, not the order the set holds them in.
+		assert_eq!(shape.rows[0][1].as_deref(), Some("small,large"));
+		assert_eq!(shape.raw_rows[0][1], Value::String("small,large".to_owned()));
+	}
+
+	#[test]
+	fn the_empty_set_reads_as_the_empty_text() {
+		let labels = ["a".to_owned(), "b".to_owned()];
+		assert_eq!(
+			member_list_text(&labels, &Value::Set(surrealdb_types::Set::new())).as_deref(),
+			Some("")
+		);
+		assert_eq!(member_list_text(&labels, &Value::Null), None);
+	}
+
+	/// A descriptor of one column `v` of kind `ty` declared as `text` in `dialect`.
+	fn declared_descriptor(
+		dialect: surrealdb_sqlplan::SqlTypeDialect,
+		text: &str,
+		ty: surrealdb_sqlplan::SqlType,
+	) -> surrealdb_sqlplan::ResultDescriptor {
+		surrealdb_sqlplan::ResultDescriptor {
+			columns: vec![surrealdb_sqlplan::ResultColumn {
+				name: "v".to_string(),
+				ty,
+				declared: Some(DeclaredSqlType::parse(dialect, text).expect("a declared type")),
+				..surrealdb_sqlplan::ResultColumn::default()
+			}],
+		}
+	}
+
+	/// The shape of one row holding `value` in a column declared as `text` in `dialect`.
+	fn shape_declared(
+		dialect: surrealdb_sqlplan::SqlTypeDialect,
+		text: &str,
+		ty: surrealdb_sqlplan::SqlType,
+		value: Value,
+	) -> ResultShape {
+		let mut obj = surrealdb_types::Object::new();
+		obj.insert("v".to_string(), value);
+		let descriptor = declared_descriptor(dialect, text, ty);
+		shape_result_with_descriptor(
+			&descriptor,
+			"db",
+			"t",
+			Value::Array(vec![Value::Object(obj)].into()),
+		)
+	}
+
+	#[test]
+	fn a_declared_column_is_defined_by_its_mysql_type() {
+		use surrealdb_sqlplan::SqlType;
+		use surrealdb_sqlplan::SqlTypeDialect::MySql;
+		let defined = |text: &str, ty: SqlType| {
+			let shape = shape_declared(MySql, text, ty, Value::None);
+			let column = shape.columns.into_iter().next().expect("a column");
+			(column.column_type, column.column_length, column.decimals, column.flags)
+		};
+		let (code, length, decimals, flags) = defined("year", SqlType::Int2);
+		assert_eq!((code, length, decimals), (MYSQL_TYPE_YEAR, 4, 0));
+		assert_eq!(flags & (UNSIGNED_FLAG | ZEROFILL_FLAG), UNSIGNED_FLAG | ZEROFILL_FLAG);
+		let (code, length, decimals, flags) = defined("bit(8)", SqlType::Int8);
+		assert_eq!((code, length, decimals), (MYSQL_TYPE_BIT, 8, 0));
+		// MySQL flags a BIT column UNSIGNED, as it holds the unsigned integer of its bits.
+		assert_eq!(flags & UNSIGNED_FLAG, UNSIGNED_FLAG);
+		assert_eq!(defined("decimal(10,2)", SqlType::Numeric).0, MYSQL_TYPE_NEWDECIMAL);
+		assert_eq!(defined("decimal(10,2)", SqlType::Numeric).1, 12);
+		assert_eq!(defined("decimal(10,2)", SqlType::Numeric).2, 2);
+		assert_eq!(defined("datetime(3)", SqlType::Timestamp).0, MYSQL_TYPE_DATETIME);
+		assert_eq!(defined("datetime(3)", SqlType::Timestamp).2, 3);
+		assert_eq!(defined("varchar(20)", SqlType::Text).0, MYSQL_TYPE_VAR_STRING);
+		assert_eq!(defined("varchar(20)", SqlType::Text).1, 80);
+		assert_eq!(defined("char(5)", SqlType::Text).0, MYSQL_TYPE_STRING);
+		assert_eq!(defined("char(5)", SqlType::Text).1, 20);
+		assert_eq!(defined("int unsigned", SqlType::Int8).3 & UNSIGNED_FLAG, UNSIGNED_FLAG);
+		let shape = shape_declared(MySql, "binary(16)", SqlType::Bytea, Value::None);
+		assert_eq!(shape.columns[0].flags & BINARY_FLAG, BINARY_FLAG);
+		assert_eq!(shape.columns[0].character_set, CHARSET_BINARY);
+		let shape = shape_declared(MySql, "point srid 4326", SqlType::Unknown, Value::None);
+		assert_eq!(
+			(shape.columns[0].column_type, shape.columns[0].srid),
+			(MYSQL_TYPE_GEOMETRY, 4326)
+		);
+	}
+
+	#[test]
+	fn a_postgres_declared_column_is_defined_by_the_nearest_mysql_type() {
+		use surrealdb_sqlplan::SqlType;
+		use surrealdb_sqlplan::SqlTypeDialect::PostgreSql;
+		let shape = shape_declared(PostgreSql, "numeric(10,2)", SqlType::Numeric, Value::None);
+		assert_eq!(
+			(shape.columns[0].column_type, shape.columns[0].decimals),
+			(MYSQL_TYPE_NEWDECIMAL, 2)
+		);
+		let shape = shape_declared(PostgreSql, "timestamp(3)", SqlType::Timestamp, Value::None);
+		assert_eq!(
+			(shape.columns[0].column_type, shape.columns[0].decimals),
+			(MYSQL_TYPE_DATETIME, 3)
+		);
+		let shape = shape_declared(PostgreSql, "text", SqlType::Text, Value::None);
+		assert_eq!(shape.columns[0].column_type, MYSQL_TYPE_BLOB);
+	}
+
+	#[test]
+	fn a_year_is_written_with_four_digits() {
+		use surrealdb_sqlplan::SqlTypeDialect::MySql;
+		let shape = shape_declared(
+			MySql,
+			"year",
+			surrealdb_sqlplan::SqlType::Int2,
+			Value::Number(Number::Int(2026)),
+		);
+		assert_eq!(shape.rows[0][0].as_deref(), Some("2026"));
+		let shape = shape_declared(
+			MySql,
+			"year",
+			surrealdb_sqlplan::SqlType::Int2,
+			Value::Number(Number::Int(0)),
+		);
+		assert_eq!(shape.rows[0][0].as_deref(), Some("0000"));
+	}
+
+	#[test]
+	fn a_temporal_value_has_as_many_fraction_digits_as_its_declaration() {
+		assert_eq!(
+			with_fraction_digits("2026-10-30 12:00:00.5".into(), 3),
+			"2026-10-30 12:00:00.500"
+		);
+		assert_eq!(
+			with_fraction_digits("2026-10-30 12:00:00.123456".into(), 3),
+			"2026-10-30 12:00:00.123"
+		);
+		assert_eq!(
+			with_fraction_digits("2026-10-30 12:00:00.123".into(), 0),
+			"2026-10-30 12:00:00"
+		);
+		assert_eq!(with_fraction_digits("2026-10-30 12:00:00".into(), 2), "2026-10-30 12:00:00.00");
+		assert_eq!(with_fraction_digits("-838:59:59".into(), 1), "-838:59:59.0");
+		assert_eq!(with_fraction_digits("2026-10-30".into(), 3), "2026-10-30");
+	}
+
+	#[test]
+	fn a_decimal_value_has_the_digits_of_its_scale() {
+		assert_eq!(with_scale_digits("12.5".into(), 2), "12.50");
+		assert_eq!(with_scale_digits("-3".into(), 2), "-3.00");
+		assert_eq!(with_scale_digits("1.234".into(), 2), "1.234");
+		assert_eq!(with_scale_digits("7".into(), 0), "7");
+		assert_eq!(with_scale_digits("NaN".into(), 2), "NaN");
+		assert_eq!(with_scale_digits("1e5".into(), 2), "1e5");
+	}
+
+	#[test]
+	fn a_bit_value_travels_as_its_bytes_in_both_protocols() {
+		use surrealdb_sqlplan::SqlTypeDialect::MySql;
+		let shape = shape_declared(
+			MySql,
+			"bit(12)",
+			surrealdb_sqlplan::SqlType::Int8,
+			Value::Number(Number::Int(0x0a5)),
+		);
+		assert_eq!(shape.columns[0].column_length, 12);
+		let text = encode_shape_text_row(&shape.columns, &shape.rows[0], &shape.raw_rows[0]);
+		// A length of two and the two big-endian bytes of the value.
+		assert_eq!(text, vec![2, 0x00, 0xa5]);
+		let binary = serialize_binary_row(&shape.columns, &shape.raw_rows[0]);
+		assert!(binary.ends_with(&[2, 0x00, 0xa5]), "{binary:?}");
+		// A NULL stays a NULL.
+		let shape = shape_declared(MySql, "bit(8)", surrealdb_sqlplan::SqlType::Int8, Value::Null);
+		assert_eq!(
+			encode_shape_text_row(&shape.columns, &shape.rows[0], &shape.raw_rows[0]),
+			vec![NULL_VALUE]
+		);
 	}
 }

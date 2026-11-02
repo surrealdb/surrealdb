@@ -11,7 +11,7 @@ reason = "Casting NULL, a literal or a column, gives NULL whatever the target ty
 value = "[{ i: NULL, t: NULL }]"
 
 [[test.results]]
-value = "[{ f: 36f, i: 36, n: 36dec, t: '36' }, { f: NULL, i: NULL, n: NULL, t: NULL }, { f: 29f, i: 29, n: 29dec, t: '29' }, { f: NULL, i: NULL, n: NULL, t: NULL }, { f: NULL, i: NULL, n: NULL, t: NULL }]"
+value = "[{ f: 36f, i: 36, n: 36bigdec, t: '36' }, { f: NULL, i: NULL, n: NULL, t: NULL }, { f: 29f, i: 29, n: 29bigdec, t: '29' }, { f: NULL, i: NULL, n: NULL, t: NULL }, { f: NULL, i: NULL, n: NULL, t: NULL }]"
 
 [[test.results]]
 value = "[{ i: 36 }, { i: 29 }]"

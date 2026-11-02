@@ -430,23 +430,19 @@ pub(super) fn read(
 	})
 }
 
-/// The names of the direct child fields of the node at `path`.
-fn child_names<'d>(packed: &'d PackedDescriptor, path: &[String]) -> Vec<&'d str> {
-	packed
-		.columns
-		.iter()
-		.filter(|column| {
-			column.role == ColumnRole::Field
-				&& column.path.len() == path.len() + 1
-				&& column.path.starts_with(path)
-		})
-		.filter_map(|column| column.path.last().map(String::as_str))
-		.collect()
-}
-
 /// What a whole decode, `decoded`, holds of column `index`: the value at a field's path, or the
-/// keys of a remainder's node that have no column of their own. `None` is absent.
-pub(super) fn expected(packed: &PackedDescriptor, decoded: &Object, index: usize) -> Option<Value> {
+/// keys of a remainder's node that no column holds. `None` is absent.
+///
+/// The decode admits a key in an open node's remainder when the column of that name is absent,
+/// and a read of that column reads the remainder's value. `remainder_keys` are the keys a read of
+/// the remainder column `index` returns: a column's name among them is the remainder's, and any
+/// other column's name never is.
+pub(super) fn expected(
+	packed: &PackedDescriptor,
+	decoded: &Object,
+	index: usize,
+	remainder_keys: &[String],
+) -> Option<Value> {
 	let column = &packed.columns[index];
 	let (walk, last) = match column.role {
 		ColumnRole::Field => {
@@ -465,10 +461,20 @@ pub(super) fn expected(packed: &PackedDescriptor, decoded: &Object, index: usize
 	match last {
 		Some(key) => node.get(key.as_str()).cloned(),
 		None => {
-			let names = child_names(packed, &column.path);
+			let held: Vec<&str> = packed
+				.columns
+				.iter()
+				.filter(|column| {
+					column.role == ColumnRole::Field
+						&& column.path.len() == walk.len() + 1
+						&& column.path.starts_with(walk)
+				})
+				.filter_map(|column| column.path.last().map(String::as_str))
+				.filter(|name| !remainder_keys.iter().any(|key| key == name))
+				.collect();
 			let mut rest = Object::default();
 			for (key, value) in node.iter() {
-				if !names.contains(&key.as_str()) {
+				if !held.contains(&key.as_str()) {
 					rest.0.insert(key.clone(), value.clone());
 				}
 			}
@@ -514,8 +520,15 @@ fn check_fields_but(
 		if skip.contains(&index) {
 			continue;
 		}
-		let want = expected(packed, decoded, index);
-		match read(column, checked.read_column(index)) {
+		let got = read(column, checked.read_column(index));
+		let remainder_keys: Vec<String> = match &got {
+			Ok(Read::Value(Value::Object(rest))) if column.role == ColumnRole::Remainder => {
+				rest.keys().map(|key| key.as_str().to_owned()).collect()
+			}
+			_ => Vec::new(),
+		};
+		let want = expected(packed, decoded, index, &remainder_keys);
+		match got {
 			Ok(got) if agrees(&got, want.as_ref()) => {}
 			got => panic!(
 				"read_column({index}) of {:?} disagrees with the whole decode\nread     {got:?}\n\
@@ -562,6 +575,7 @@ const LEAF_KINDS: &[PhysicalKind] = &[
 	PhysicalKind::RecordKey,
 	PhysicalKind::DecimalVar,
 	PhysicalKind::Value,
+	PhysicalKind::BigDecimal,
 ];
 
 /// A name for each kind, by an exhaustive match, so that a kind added to [`PhysicalKind`] does not
@@ -592,6 +606,7 @@ fn kind_name(kind: PhysicalKind) -> &'static str {
 		PhysicalKind::Bytes => "Bytes",
 		PhysicalKind::RecordKey => "RecordKey",
 		PhysicalKind::DecimalVar => "DecimalVar",
+		PhysicalKind::BigDecimal => "BigDecimal",
 		PhysicalKind::Value => "Value",
 		PhysicalKind::Object => "Object",
 	}
@@ -675,6 +690,7 @@ fn gen_leaf(rng: &mut Rng, presence: Pres) -> Spec {
 		| PhysicalKind::String
 		| PhysicalKind::Bytes
 		| PhysicalKind::DecimalVar
+		| PhysicalKind::BigDecimal
 		| PhysicalKind::Value
 		| PhysicalKind::Object => {}
 	}
@@ -728,6 +744,29 @@ fn gen_int_in(rng: &mut Rng, lo: i64, hi: i64) -> i64 {
 			(lo as i128 + (u128::from(rng.next()) % span) as i128) as i64
 		}
 	}
+}
+/// A `bigdecimal` of 1 to 80 significant digits, a scale of 0 to 70 and either sign: past what a
+/// `decimal` holds as often as within it.
+fn gen_bigdecimal(rng: &mut Rng) -> Value {
+	let len = match rng.below(4) {
+		0 => 1,
+		1 => 40,
+		2 => 65,
+		_ => 1 + rng.index(80),
+	};
+	let mut digits: String = (0..len).map(|_| char::from(b'0' + rng.below(10) as u8)).collect();
+	let scale = rng.index(71);
+	if scale > 0 {
+		if digits.len() <= scale {
+			digits = format!("{}{digits}", "0".repeat(scale + 1 - digits.len()));
+		}
+		digits.insert(digits.len() - scale, '.');
+	}
+	if rng.one_in(2) {
+		digits.insert(0, '-');
+	}
+	let d: surrealdb_types::BigDecimal = digits.parse().expect("generated digits parse");
+	Value::Number(Number::BigDecimal(Box::new(d)))
 }
 
 fn gen_decimal(rng: &mut Rng) -> Decimal {
@@ -856,6 +895,7 @@ fn gen_value(rng: &mut Rng, kind: PhysicalKind, literals: &[Value], tables: &[Ta
 			| PhysicalKind::String
 			| PhysicalKind::Bytes
 			| PhysicalKind::DecimalVar
+			| PhysicalKind::BigDecimal
 			| PhysicalKind::Object => Value::Bool(true),
 		};
 	}
@@ -881,6 +921,7 @@ fn gen_value(rng: &mut Rng, kind: PhysicalKind, literals: &[Value], tables: &[Ta
 		PhysicalKind::F32 => Value::Number(Number::F32(f32::from_bits(rng.next() as u32))),
 		PhysicalKind::F64 => float(f64::from_bits(rng.next())),
 		PhysicalKind::Decimal16 | PhysicalKind::DecimalVar => decimal(gen_decimal(rng)),
+		PhysicalKind::BigDecimal => gen_bigdecimal(rng),
 		PhysicalKind::Fixed(width) => bytes(&gen_bytes(rng, width as usize)),
 		PhysicalKind::Uuid => uuid(u128::from(rng.next()) << 64 | u128::from(rng.next())),
 		PhysicalKind::Datetime => datetime(gen_datetime(rng, false)),
@@ -1077,7 +1118,10 @@ fn check_mutant(layout: &Arc<LayoutDescriptor>, bytes: &[u8], coverage: &mut Cov
 				);
 			}
 		}
-		Packing::Misfit => panic!(
+		// A remainder may hold a key whose column the row leaves absent, with a value that column
+		// cannot hold: the record it decodes to is one the packer writes as a document.
+		Packing::Misfit => assert!(
+			packed.columns.iter().any(|c| c.role == ColumnRole::Remainder),
 			"a row that decodes does not pack again\nrow     {}\ndecoded {decoded:?}",
 			hex(bytes)
 		),

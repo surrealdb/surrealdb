@@ -996,11 +996,12 @@ impl InfoLowerer<'_, '_> {
 		});
 		self.set(out, "compatibility", Operand::Reg(compatibility))?;
 		let scope = [("ns", Operand::Reg(ns)), ("db", Operand::Reg(db))];
-		let parts: [(&str, Part); 12] = [
+		let parts: [(&str, Part); 13] = [
 			("accesses", ("DbAccessMethodPrefix", "StoredAccessDefinition", Definitions::Access)),
 			("apis", ("ApiPrefix", "StoredApiDefinition", Definitions::Api)),
 			("analyzers", ("AnalyzerPrefix", "AnalyzerDefinition", Definitions::Analyzer)),
 			("buckets", ("BucketPrefix", "StoredBucketDefinition", Definitions::Bucket)),
+			("enums", ("EnumDefPrefix", "StoredEnumDefinition", Definitions::Enum)),
 			("functions", ("FunctionPrefix", "StoredFunctionDefinition", Definitions::Function)),
 			("extensions", ("ModulePrefix", "StoredModuleDefinition", Definitions::Extension)),
 			("models", ("MlModelPrefix", "StoredMlModelDefinition", Definitions::Model)),
@@ -1513,7 +1514,7 @@ mod tests {
 			]
 		);
 		let db = info(InfoSubject::Db, false, |_| Vec::new());
-		assert_eq!(renders(&db).len(), 12);
+		assert_eq!(renders(&db).len(), 13);
 		let table = info(InfoSubject::Table, false, |b| vec![name(b, "t")]);
 		assert_eq!(
 			renders(&table),

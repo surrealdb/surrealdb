@@ -14,8 +14,12 @@
 //!   admit the same numbers, and `Hash` agrees with `Eq`.
 //! - Decimal scale in keys: the encoding keeps a decimal's trailing zeros, so a computed `2.50dec`
 //!   and the literal `2.5dec` encode apart though one value. A B-tree index stamped at
-//!   `BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION` or later respells each decimal without them
-//!   before encoding, so its keys agree with the order above.
+//!   `BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION` or later respells each decimal and bigdecimal
+//!   without them before encoding, so its keys agree with the order above.
+//! - Bigdecimals in keys: a `bigdecimal` is spelled from its coefficient's digits and scale in the
+//!   same encoding, so it orders among every other kind, and `1.5bigdec` has the bytes of `1.5dec`.
+//!   Its coefficient may be longer than any other kind's and its scale wider; both take forms of
+//!   the encoding that no other kind reaches (see `DecimalLexEncoder`).
 //! - Normalization in keys: 0 (Int), 0.0 (Float) and 0dec (Decimal) encode to the same byte
 //!   sequence for keys, so UNIQUE indexes treat them as equal.
 //! - Special float values: NaN, +∞ and −∞ are given fixed encodings that fit in the total ordering
@@ -42,11 +46,11 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_collections::bounded;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{BigDecimal, SqlFormat, ToSql};
 
 use super::{IndexFormat, IndexIdFormat};
 use crate::expr::Error;
-use crate::expr::decimal::{DecimalLexEncoder, LexDecimal};
+use crate::expr::decimal::{DecimalLexEncoder, KeyDecimal, LexDecimal};
 use crate::val::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
@@ -63,6 +67,7 @@ pub enum NumberKind {
 	U64 = 9,
 	F16 = 10,
 	F32 = 11,
+	BigDecimal = 12,
 }
 
 impl NumberKind {
@@ -81,6 +86,7 @@ impl NumberKind {
 			Self::U64 => surrealdb_types::NumberKind::U64,
 			Self::F16 => surrealdb_types::NumberKind::F16,
 			Self::F32 => surrealdb_types::NumberKind::F32,
+			Self::BigDecimal => surrealdb_types::NumberKind::BigDecimal,
 		}
 	}
 
@@ -99,6 +105,7 @@ impl NumberKind {
 			surrealdb_types::NumberKind::U64 => Self::U64,
 			surrealdb_types::NumberKind::F16 => Self::F16,
 			surrealdb_types::NumberKind::F32 => Self::F32,
+			surrealdb_types::NumberKind::BigDecimal => Self::BigDecimal,
 		}
 	}
 
@@ -123,7 +130,7 @@ impl From<NumberKind> for surrealdb_types::NumberKind {
 	}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Number {
 	Int(i64),
@@ -138,6 +145,9 @@ pub enum Number {
 	U64(u64),
 	F16(#[cfg_attr(feature = "arbitrary", arbitrary(with = arbitrary_f16))] half::f16),
 	F32(f32),
+	/// An arbitrary-precision decimal. Boxed so that `Number` keeps its 24-byte size; the
+	/// enum is therefore not `Copy`.
+	BigDecimal(Box<surrealdb_types::BigDecimal>),
 }
 
 const _: () = assert!(std::mem::size_of::<Number>() == 24);
@@ -150,7 +160,7 @@ fn arbitrary_f16(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<half:
 impl Revisioned for Number {
 	#[inline]
 	fn revision() -> u16 {
-		2
+		3
 	}
 }
 
@@ -220,6 +230,11 @@ impl SerializeRevisioned for Number {
 				11u32.serialize_revisioned(writer)?;
 				v.serialize_revisioned(writer)
 			}
+			Self::BigDecimal(v) => {
+				3u16.serialize_revisioned(writer)?;
+				12u32.serialize_revisioned(writer)?;
+				v.to_string().serialize_revisioned(writer)
+			}
 		}
 	}
 }
@@ -228,7 +243,7 @@ impl DeserializeRevisioned for Number {
 	fn deserialize_revisioned<R: std::io::Read>(
 		reader: &mut R,
 	) -> std::result::Result<Self, revision::Error> {
-		let rev = bounded::read_revision(reader, "Number", 2)?;
+		let rev = bounded::read_revision(reader, "Number", 3)?;
 		let variant = u32::deserialize_revisioned(reader)?;
 		match (rev, variant) {
 			(1, 0) | (2, 0) => Ok(Self::Int(i64::deserialize_revisioned(reader)?)),
@@ -243,6 +258,13 @@ impl DeserializeRevisioned for Number {
 			(2, 9) => Ok(Self::U64(u64::deserialize_revisioned(reader)?)),
 			(2, 10) => Ok(Self::F16(half::f16::from_bits(u16::deserialize_revisioned(reader)?))),
 			(2, 11) => Ok(Self::F32(f32::deserialize_revisioned(reader)?)),
+			(3, 12) => {
+				let text = String::deserialize_revisioned(reader)?;
+				let decimal = text
+					.parse::<surrealdb_types::BigDecimal>()
+					.map_err(|e| revision::Error::Deserialize(e.to_string()))?;
+				Ok(Self::BigDecimal(Box::new(decimal)))
+			}
 			_ => Err(revision::Error::Deserialize(format!(
 				"Invalid enum variant `{variant}` for type `Number` at revision `{rev}`"
 			))),
@@ -254,7 +276,7 @@ impl SkipRevisioned for Number {
 	fn skip_revisioned<R: std::io::Read>(
 		reader: &mut R,
 	) -> std::result::Result<(), revision::Error> {
-		let rev = bounded::read_revision(reader, "Number", 2)?;
+		let rev = bounded::read_revision(reader, "Number", 3)?;
 		let variant = u32::deserialize_revisioned(reader)?;
 		match (rev, variant) {
 			(1, 0) | (2, 0) => i64::skip_revisioned(reader),
@@ -269,6 +291,7 @@ impl SkipRevisioned for Number {
 			(2, 9) => u64::skip_revisioned(reader),
 			(2, 10) => u16::skip_revisioned(reader),
 			(2, 11) => f32::skip_revisioned(reader),
+			(3, 12) => String::skip_revisioned(reader),
 			_ => Err(revision::Error::Deserialize(format!(
 				"Invalid enum variant `{variant}` for type `Number` at revision `{rev}`"
 			))),
@@ -278,7 +301,7 @@ impl SkipRevisioned for Number {
 	fn skip_revisioned_slice(
 		reader: &mut revision::SliceReader<'_>,
 	) -> std::result::Result<(), revision::Error> {
-		let rev = bounded::read_revision(reader, "Number", 2)?;
+		let rev = bounded::read_revision(reader, "Number", 3)?;
 		let variant = u32::deserialize_revisioned(reader)?;
 		match (rev, variant) {
 			(1, 0) | (2, 0) => i64::skip_revisioned_slice(reader),
@@ -293,6 +316,7 @@ impl SkipRevisioned for Number {
 			(2, 9) => u64::skip_revisioned_slice(reader),
 			(2, 10) => u16::skip_revisioned_slice(reader),
 			(2, 11) => f32::skip_revisioned_slice(reader),
+			(3, 12) => String::skip_revisioned_slice(reader),
 			_ => Err(revision::Error::Deserialize(format!(
 				"Invalid enum variant `{variant}` for type `Number` at revision `{rev}`"
 			))),
@@ -424,6 +448,7 @@ impl From<surrealdb_types::Number> for Number {
 			surrealdb_types::Number::U64(u) => Self::U64(u),
 			surrealdb_types::Number::F16(f) => Self::F16(f),
 			surrealdb_types::Number::F32(f) => Self::F32(f),
+			surrealdb_types::Number::BigDecimal(b) => Self::BigDecimal(b),
 		}
 	}
 }
@@ -443,6 +468,7 @@ impl From<Number> for surrealdb_types::Number {
 			Number::U64(u) => Self::U64(u),
 			Number::F16(f) => Self::F16(f),
 			Number::F32(f) => Self::F32(f),
+			Number::BigDecimal(b) => Self::BigDecimal(b),
 		}
 	}
 }
@@ -482,6 +508,10 @@ macro_rules! try_into_prim {
 							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
 						},
 						Number::Decimal(ref v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
+						},
+						Number::BigDecimal(ref v) => match Decimal::try_from(v.as_ref()).ok().and_then(|d| d.$to_int()) {
 							Some(v) => Ok(v),
 							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
 						},
@@ -554,6 +584,10 @@ impl TryFrom<Number> for Decimal {
 				_ => Err(Error::TryFrom(value.to_sql(), "Decimal")),
 			},
 			Number::Decimal(x) => Ok(x),
+			Number::BigDecimal(ref v) => match Decimal::try_from(v.as_ref()) {
+				Ok(d) => Ok(d),
+				_ => Err(Error::TryFrom(value.to_sql(), "Decimal")),
+			},
 			Number::I8(v) => Ok(Decimal::from(v)),
 			Number::U8(v) => Ok(Decimal::from(v)),
 			Number::I16(v) => Ok(Decimal::from(v)),
@@ -594,13 +628,14 @@ impl Display for Number {
 				f.write_str(s.strip_suffix("f16").unwrap_or(&s))
 			}
 			Number::F32(v) => Display::fmt(v, f),
+			Number::BigDecimal(v) => write!(f, "{v}bigdec"),
 		}
 	}
 }
 
 impl ToSql for Number {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		surrealdb_types::Number::from(*self).fmt_sql(f, sql_fmt);
+		surrealdb_types::Number::from(self.clone()).fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -621,8 +656,9 @@ impl Number {
 		matches!(self, Number::Int(_))
 	}
 
-	pub fn wide(self) -> Wide {
-		match self {
+	pub fn wide(&self) -> Wide<'_> {
+		match *self {
+			Number::BigDecimal(ref v) => Wide::BigDecimal(v.as_ref()),
 			Number::Int(v) => Wide::Int(v),
 			Number::Float(v) => Wide::Float(v),
 			Number::Decimal(v) => Wide::Decimal(v),
@@ -641,16 +677,53 @@ impl Number {
 		}
 	}
 
-	pub fn widened(self) -> Number {
+	pub fn widened(&self) -> Number {
 		match self.wide() {
 			Wide::Int(v) => Number::Int(v),
 			Wide::Float(v) => Number::Float(v),
 			Wide::Decimal(v) => Number::Decimal(v),
+			Wide::BigDecimal(v) => Number::BigDecimal(Box::new(v.clone())),
+		}
+	}
+
+	/// The value as a `bigdecimal` for a cast: every number that has one, floats included. A
+	/// float converts through its shortest decimal text, and NaN or an infinity has none.
+	pub(crate) fn as_bigdecimal_cast(&self) -> Option<BigDecimal> {
+		self.to_big_for_op()
+	}
+
+	/// The value as a `bigdecimal` for a coercion. Every finite number has one: a float converts
+	/// through its shortest decimal text, as a coercion to `decimal` converts it, so a column of
+	/// either kind accepts the same numbers. NaN and the infinities have none.
+	pub(crate) fn as_bigdecimal_lossless(&self) -> Option<BigDecimal> {
+		self.to_big_for_op()
+	}
+
+	/// The value as a [`BigDecimal`], for arithmetic in which a `bigdecimal` operand makes the
+	/// result a `bigdecimal`. Integers and `decimal` convert exactly. A float converts through
+	/// its shortest decimal text, as a `decimal` operand converts a float, and is `None` when
+	/// it is NaN or infinite.
+	fn to_big_for_op(&self) -> Option<BigDecimal> {
+		match *self {
+			Number::Int(v) => Some(BigDecimal::from(v)),
+			Number::Float(v) => BigDecimal::try_from_f64(v).ok(),
+			Number::Decimal(v) => Some(BigDecimal::from(v)),
+			Number::I8(v) => Some(BigDecimal::from(i64::from(v))),
+			Number::U8(v) => Some(BigDecimal::from(u64::from(v))),
+			Number::I16(v) => Some(BigDecimal::from(i64::from(v))),
+			Number::U16(v) => Some(BigDecimal::from(u64::from(v))),
+			Number::I32(v) => Some(BigDecimal::from(i64::from(v))),
+			Number::U32(v) => Some(BigDecimal::from(u64::from(v))),
+			Number::U64(v) => Some(BigDecimal::from(v)),
+			Number::F16(v) => BigDecimal::try_from_f64(v.to_f64()).ok(),
+			Number::F32(v) => BigDecimal::try_from_f64(f64::from(v)).ok(),
+			Number::BigDecimal(ref v) => Some(v.as_ref().clone()),
 		}
 	}
 
 	pub fn number_kind(&self) -> NumberKind {
-		match self {
+		match *self {
+			Number::BigDecimal(_) => NumberKind::BigDecimal,
 			Number::Int(_) => NumberKind::Int,
 			Number::Float(_) => NumberKind::Float,
 			Number::Decimal(_) => NumberKind::Decimal,
@@ -679,7 +752,8 @@ impl Number {
 			| Number::U16(_)
 			| Number::I32(_)
 			| Number::U32(_)
-			| Number::U64(_) => false,
+			| Number::U64(_)
+			| Number::BigDecimal(_) => false,
 		}
 	}
 
@@ -692,6 +766,10 @@ impl Number {
 	/// pairing is [`TryAdd`]. Used by aggregates that finish with a division
 	/// (`math::mean`), where an intermediate total may leave `i64` range and
 	/// come back.
+	#[allow(
+		clippy::needless_pass_by_value,
+		reason = "Number is not Copy; the arithmetic methods take their operands by value like the operator impls"
+	)]
 	pub fn add_exact(self, other: Number) -> Result<Number> {
 		match (self.wide(), other.wide()) {
 			(Wide::Int(v), Wide::Int(w)) => Ok(match v.checked_add(w) {
@@ -706,13 +784,19 @@ impl Number {
 			| (Wide::Float(_), Wide::Float(_))
 			| (Wide::Int(_), Wide::Decimal(_))
 			| (Wide::Decimal(_), Wide::Int(_))
-			| (Wide::Decimal(_), Wide::Decimal(_)) => self.widened().try_add(other.widened()),
+			| (Wide::Decimal(_), Wide::Decimal(_))
+			| (Wide::BigDecimal(_), _)
+			| (_, Wide::BigDecimal(_)) => self.widened().try_add(other.widened()),
 		}
 	}
 
 	/// Subtracts `other` from a running total kept by [`Self::add_exact`], with
 	/// the same widening: two integers whose difference does not fit an `i64`
 	/// are subtracted as a `Decimal`, and a float makes the result a float.
+	#[allow(
+		clippy::needless_pass_by_value,
+		reason = "Number is not Copy; the arithmetic methods take their operands by value like the operator impls"
+	)]
 	pub fn sub_exact(self, other: Number) -> Result<Number> {
 		match (self.wide(), other.wide()) {
 			(Wide::Int(v), Wide::Int(w)) => Ok(match v.checked_sub(w) {
@@ -730,7 +814,9 @@ impl Number {
 			| (Wide::Float(_), Wide::Float(_))
 			| (Wide::Int(_), Wide::Decimal(_))
 			| (Wide::Decimal(_), Wide::Int(_))
-			| (Wide::Decimal(_), Wide::Decimal(_)) => self.widened().try_sub(other.widened()),
+			| (Wide::Decimal(_), Wide::Decimal(_))
+			| (Wide::BigDecimal(_), _)
+			| (_, Wide::BigDecimal(_)) => self.widened().try_sub(other.widened()),
 		}
 	}
 
@@ -740,6 +826,7 @@ impl Number {
 
 	pub fn is_truthy(&self) -> bool {
 		match self {
+			Number::BigDecimal(v) => !v.is_zero(),
 			Number::Int(v) => *v != 0,
 			Number::Float(v) => *v != 0.0,
 			Number::Decimal(v) => *v != Decimal::ZERO,
@@ -757,6 +844,7 @@ impl Number {
 
 	pub fn is_zero(&self) -> bool {
 		match self {
+			Number::BigDecimal(v) => v.is_zero(),
 			Number::Int(v) => *v == 0,
 			Number::Float(v) => *v == 0.0,
 			Number::Decimal(v) => *v == Decimal::ZERO,
@@ -776,8 +864,11 @@ impl Number {
 	// Simple conversion of number
 	// -----------------------------------
 
-	pub fn as_usize(self) -> usize {
-		match self {
+	pub fn as_usize(&self) -> usize {
+		match *self {
+			Number::BigDecimal(ref v) => {
+				big_trunc_i64(v).and_then(|i| usize::try_from(i).ok()).unwrap_or_default()
+			}
 			Number::Int(v) => v as usize,
 			Number::Float(v) => v as usize,
 			Number::Decimal(v) => v.try_into().unwrap_or_default(),
@@ -793,8 +884,9 @@ impl Number {
 		}
 	}
 
-	pub fn as_int(self) -> i64 {
-		match self {
+	pub fn as_int(&self) -> i64 {
+		match *self {
+			Number::BigDecimal(ref v) => big_trunc_i64(v).unwrap_or_default(),
 			Number::Int(v) => v,
 			Number::Float(v) => v as i64,
 			Number::Decimal(v) => v.try_into().unwrap_or_default(),
@@ -810,8 +902,9 @@ impl Number {
 		}
 	}
 
-	pub fn as_float(self) -> f64 {
-		match self {
+	pub fn as_float(&self) -> f64 {
+		match *self {
+			Number::BigDecimal(ref v) => v.to_f64(),
 			Number::Int(v) => v as f64,
 			Number::Float(v) => v,
 			Number::Decimal(v) => v.try_into().unwrap_or_default(),
@@ -827,8 +920,9 @@ impl Number {
 		}
 	}
 
-	pub fn as_decimal(self) -> Decimal {
-		match self {
+	pub fn as_decimal(&self) -> Decimal {
+		match *self {
+			Number::BigDecimal(ref v) => Decimal::try_from(v.as_ref()).unwrap_or_default(),
 			Number::Int(v) => Decimal::from(v),
 			Number::Float(v) => Decimal::try_from(v).unwrap_or_default(),
 			Number::Decimal(v) => v,
@@ -855,8 +949,9 @@ impl Number {
 	/// out-of-range magnitudes. Lossy `as` casts (which saturate or truncate
 	/// silently) are deliberately avoided so callers can reject the input
 	/// rather than write a wrong value.
-	pub fn as_int_lossless(self) -> Option<i64> {
-		match self {
+	pub fn as_int_lossless(&self) -> Option<i64> {
+		match *self {
+			Number::BigDecimal(ref v) => v.to_i64(),
 			Number::Int(v) => Some(v),
 			Number::Float(v) => {
 				// `i64::MAX as f64` rounds up to 2^63 (the next representable
@@ -906,8 +1001,9 @@ impl Number {
 	}
 
 	/// Convert to an `f64` only when the value can be represented as an `f64`.
-	pub fn as_float_lossless(self) -> Option<f64> {
-		match self {
+	pub fn as_float_lossless(&self) -> Option<f64> {
+		match *self {
+			Number::BigDecimal(ref v) => Some(v.to_f64()).filter(|f| f.is_finite()),
 			Number::Int(v) => Some(v as f64),
 			Number::Float(v) => Some(v),
 			Number::Decimal(v) => f64::try_from(v).ok(),
@@ -924,9 +1020,10 @@ impl Number {
 	}
 
 	/// Convert to a `u64` only when the value represents an exact integer in `0..=u64::MAX`.
-	pub fn as_u64_lossless(self) -> Option<u64> {
+	pub fn as_u64_lossless(&self) -> Option<u64> {
 		const TWO_POW_64: f64 = f64::from_bits(0x43f0_0000_0000_0000);
-		match self {
+		match *self {
+			Number::BigDecimal(ref v) => v.to_u64(),
 			Number::Int(v) => u64::try_from(v).ok(),
 			Number::Float(v) => {
 				if !v.is_finite() || v < 0.0 || v.fract() != 0.0 || v >= TWO_POW_64 {
@@ -966,7 +1063,7 @@ impl Number {
 	}
 
 	/// Convert to an `f32`, refusing finite inputs that overflow to infinity.
-	pub fn as_f32(self) -> Option<f32> {
+	pub fn as_f32(&self) -> Option<f32> {
 		let f = self.as_float_lossless()?;
 		let res = f as f32;
 		if f.is_finite() && !res.is_finite() {
@@ -977,7 +1074,7 @@ impl Number {
 	}
 
 	/// Convert to an `f16`, refusing finite inputs that overflow to infinity.
-	pub fn as_f16(self) -> Option<half::f16> {
+	pub fn as_f16(&self) -> Option<half::f16> {
 		let f = self.as_float_lossless()?;
 		let res = half::f16::from_f64(f);
 		if f.is_finite() && !res.is_finite() {
@@ -988,8 +1085,9 @@ impl Number {
 	}
 
 	/// Convert to a `Decimal` only when the value can be represented as a `Decimal`.
-	pub fn as_decimal_lossless(self) -> Option<Decimal> {
-		match self {
+	pub fn as_decimal_lossless(&self) -> Option<Decimal> {
+		match *self {
+			Number::BigDecimal(ref v) => Decimal::try_from(v.as_ref()).ok(),
 			Number::Int(v) => Some(Decimal::from(v)),
 			Number::Float(v) => Decimal::try_from(v).ok(),
 			Number::Decimal(v) => Some(v),
@@ -1010,8 +1108,9 @@ impl Number {
 	/// Returns `None` for any value that does not represent an exact
 	/// non-negative integer within `usize` range — including negatives,
 	/// NaN, infinities, fractional values, and out-of-range magnitudes.
-	pub fn as_array_index(self) -> Option<usize> {
-		match self {
+	pub fn as_array_index(&self) -> Option<usize> {
+		match *self {
+			Number::BigDecimal(ref v) => v.to_u64().and_then(|u| usize::try_from(u).ok()),
 			Number::Int(v) => usize::try_from(v).ok(),
 			Number::Float(v) => {
 				if !v.is_finite() || v < 0.0 || v.fract() != 0.0 {
@@ -1054,8 +1153,9 @@ impl Number {
 		}
 	}
 
-	pub fn to_int(self) -> i64 {
-		match self {
+	pub fn to_int(&self) -> i64 {
+		match *self {
+			Number::BigDecimal(ref v) => big_trunc_i64(v).unwrap_or_default(),
 			Number::Int(v) => v,
 			Number::Float(v) => v as i64,
 			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
@@ -1075,8 +1175,9 @@ impl Number {
 	/// crates (the vector functions' norms and distances) compile it into the
 	/// loop whatever link-time optimisation decides.
 	#[inline]
-	pub fn to_float(self) -> f64 {
-		match self {
+	pub fn to_float(&self) -> f64 {
+		match *self {
+			Number::BigDecimal(ref v) => v.to_f64(),
 			Number::Int(v) => v as f64,
 			Number::Float(v) => v,
 			Number::Decimal(v) => v.try_into().unwrap_or_default(),
@@ -1092,8 +1193,9 @@ impl Number {
 		}
 	}
 
-	pub fn to_decimal(self) -> Decimal {
-		match self {
+	pub fn to_decimal(&self) -> Decimal {
+		match *self {
+			Number::BigDecimal(ref v) => Decimal::try_from(v.as_ref()).unwrap_or_default(),
 			Number::Int(v) => Decimal::from(v),
 			Number::Float(v) => Decimal::from_f64(v).unwrap_or_default(),
 			Number::Decimal(v) => v,
@@ -1131,14 +1233,24 @@ impl Number {
 	///   to a [`LexDecimal`] first, which is what orders them against each other.
 	/// - Special float values (NaN/±∞) are mapped to fixed encodings at the extremes to preserve a
 	///   total order.
+	///
+	/// A `bigdecimal` is spelled in the same encoding, from its coefficient's digits as written
+	/// and its scale, so it orders among every other kind and has the bytes of a `decimal` with
+	/// the same coefficient and scale: `1.50bigdec` is spelled as `1.50dec` and `1bigdec` as
+	/// `1`. A coefficient past 39 digits, or a scale past the two-byte range, takes the
+	/// encoding's wide forms, which no other kind reaches.
 	pub fn as_decimal_buf(&self) -> Vec<u8> {
-		DecimalLexEncoder::encode(self.as_lex_decimal())
+		match self.key_form() {
+			KeyForm::Lex(dec) => DecimalLexEncoder::encode(dec),
+			KeyForm::Big(v) => bigdecimal_buf(v),
+		}
 	}
 
-	/// The value in the form the key encoding works on; see
-	/// [`LexDecimal`] for how each variant converts.
-	fn as_lex_decimal(&self) -> LexDecimal {
-		match self {
+	/// The value in the form the key encoding works on: a [`LexDecimal`] for every kind but a
+	/// `bigdecimal` (see [`LexDecimal`] for how each converts), and the `bigdecimal` itself,
+	/// whose coefficient a [`LexDecimal`] need not hold and which is spelled from its digits.
+	fn key_form(&self) -> KeyForm<'_> {
+		KeyForm::Lex(match self {
 			Self::Int(v) => LexDecimal::from_i64(*v),
 			Self::Float(v) => LexDecimal::from_f64(*v),
 			Self::Decimal(v) => LexDecimal::from_decimal(*v),
@@ -1154,7 +1266,8 @@ impl Number {
 			},
 			Self::F16(v) => LexDecimal::from_f64(f64::from(*v)),
 			Self::F32(v) => LexDecimal::from_f64(*v as f64),
-		}
+			Self::BigDecimal(v) => return KeyForm::Big(v),
+		})
 	}
 
 	/// Reconstructs a Number from a lexicographically ordered byte buffer.
@@ -1177,13 +1290,22 @@ impl Number {
 	/// depends on the value's magnitude alone, and the decoded value is within rounding of the
 	/// encoded one at every magnitude. NaN and the infinities decode as the `f64` they stand for.
 	///
+	/// A value in one of the wide forms, which only a `bigdecimal` is written in (a coefficient
+	/// past a `u128`, or a scale past the two-byte range), decodes exactly as a `bigdecimal`.
+	///
 	/// Returns the reconstructed Number or an error if the buffer is empty or
 	/// cannot be decoded.
 	pub fn from_decimal_buf(b: &[u8]) -> Result<Self> {
-		let dec = DecimalLexEncoder::decode(b)?;
-		Ok(match dec.to_decimal_rounded() {
-			Some(dec) => Number::Decimal(dec),
-			None => Number::Float(dec.to_f64()),
+		Ok(match DecimalLexEncoder::decode_key(b)? {
+			KeyDecimal::Lex(dec) => match dec.to_decimal_rounded() {
+				Some(dec) => Number::Decimal(dec),
+				None => Number::Float(dec.to_f64()),
+			},
+			KeyDecimal::Wide {
+				negative,
+				digits,
+				exponent,
+			} => Number::BigDecimal(Box::new(BigDecimal::from_digits(negative, &digits, exponent)?)),
 		})
 	}
 
@@ -1197,10 +1319,42 @@ impl Number {
 	/// therefore reproduces the buffer, which a record id read back out of a key
 	/// relies on to address its own record.
 	///
-	/// A float is decoded from the decimal digits by [`LexDecimal::to_f64`].
+	/// A float is decoded from the decimal digits by [`LexDecimal::to_f64`]. A `bigdecimal`
+	/// decodes from its digits exactly, with the scale its trailing zeros give it, in any form
+	/// of the encoding; every other kind is read only from the forms it is written in.
 	pub fn from_decimal_buf_kind(b: &[u8], kind: NumberKind) -> Result<Self> {
+		if kind == NumberKind::BigDecimal {
+			let decimal = match DecimalLexEncoder::decode_key(b)? {
+				KeyDecimal::Lex(LexDecimal::Finite {
+					negative,
+					coefficient,
+					exponent,
+				}) => BigDecimal::from_digits(
+					negative,
+					coefficient.to_string().as_bytes(),
+					i64::from(exponent),
+				)?,
+				KeyDecimal::Lex(
+					dec @ (LexDecimal::NaN
+					| LexDecimal::Infinite {
+						..
+					}),
+				) => {
+					bail!("Invalid bigdecimal value: {dec}")
+				}
+				KeyDecimal::Wide {
+					negative,
+					digits,
+					exponent,
+				} => BigDecimal::from_digits(negative, &digits, exponent)?,
+			};
+			return Ok(Number::BigDecimal(Box::new(decimal)));
+		}
 		let dec = DecimalLexEncoder::decode(b)?;
 		match kind {
+			NumberKind::BigDecimal => {
+				bail!("a bigdecimal is read from its key above")
+			}
 			NumberKind::Int => {
 				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
 				Ok(Number::Int(dec.to_i64_positional()?))
@@ -1254,8 +1408,9 @@ impl Number {
 	//
 	// -----------------------------------
 
-	pub fn abs(self) -> Self {
-		match self {
+	pub fn abs(&self) -> Self {
+		match *self {
+			Number::BigDecimal(ref v) => Number::BigDecimal(Box::new(v.abs())),
 			Number::Int(v) => Number::Int(v.abs()),
 			Number::Float(v) => Number::Float(v.abs()),
 			Number::Decimal(v) => Number::Decimal(v.abs()),
@@ -1271,8 +1426,9 @@ impl Number {
 		}
 	}
 
-	pub fn checked_abs(self) -> Option<Self> {
-		match self {
+	pub fn checked_abs(&self) -> Option<Self> {
+		match *self {
+			Number::BigDecimal(ref v) => Some(Number::BigDecimal(Box::new(v.abs()))),
 			Number::Int(v) => v.checked_abs().map(Number::Int),
 			Number::Float(v) => Some(Number::Float(v.abs())),
 			Number::Decimal(v) => Some(Number::Decimal(v.abs())),
@@ -1301,12 +1457,13 @@ impl Number {
 			| Number::U16(_)
 			| Number::I32(_)
 			| Number::U32(_)
-			| Number::U64(_) => Number::Float(f(self.to_float())),
+			| Number::U64(_)
+			| Number::BigDecimal(_) => Number::Float(f(self.to_float())),
 		}
 	}
 
-	pub(crate) fn as_i128(self) -> Option<i128> {
-		match self {
+	pub(crate) fn as_i128(&self) -> Option<i128> {
+		match *self {
 			Number::Int(v) => Some(v as i128),
 			Number::I8(v) => Some(v as i128),
 			Number::U8(v) => Some(v as i128),
@@ -1315,7 +1472,11 @@ impl Number {
 			Number::I32(v) => Some(v as i128),
 			Number::U32(v) => Some(v as i128),
 			Number::U64(v) => Some(v as i128),
-			Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_) => None,
+			Number::Float(_)
+			| Number::Decimal(_)
+			| Number::F16(_)
+			| Number::F32(_)
+			| Number::BigDecimal(_) => None,
 		}
 	}
 
@@ -1330,6 +1491,7 @@ impl Number {
 			NumberKind::Int => i64::try_from(v).ok().map(Number::Int),
 			NumberKind::U64 => u64::try_from(v).ok().map(Number::U64),
 			NumberKind::Decimal => Decimal::from_i128(v).map(Number::Decimal),
+			NumberKind::BigDecimal => Some(Number::BigDecimal(Box::new(BigDecimal::from(v)))),
 			NumberKind::F16 => Some(Number::F16(half::f16::from_f64(v as f64))),
 			NumberKind::F32 => Some(Number::F32(v as f32)),
 			NumberKind::Float => Some(Number::Float(v as f64)),
@@ -1347,6 +1509,7 @@ impl Number {
 			NumberKind::Int => Number::Int(v as i64),
 			NumberKind::U64 => Number::U64(v as u64),
 			NumberKind::Decimal => Number::Decimal(Decimal::from_i128(v).unwrap_or_default()),
+			NumberKind::BigDecimal => Number::BigDecimal(Box::new(BigDecimal::from(v))),
 			NumberKind::F16 => Number::F16(half::f16::from_f64(v as f64)),
 			NumberKind::F32 => Number::F32(v as f32),
 			NumberKind::Float => Number::Float(v as f64),
@@ -1357,6 +1520,8 @@ impl Number {
 		match kind {
 			NumberKind::F16 => Number::F16(half::f16::from_f64(v)),
 			NumberKind::F32 => Number::F32(v as f32),
+			NumberKind::BigDecimal => BigDecimal::try_from_f64(v)
+				.map_or(Number::Float(v), |b| Number::BigDecimal(Box::new(b))),
 			NumberKind::Float
 			| NumberKind::Int
 			| NumberKind::Decimal
@@ -1370,11 +1535,11 @@ impl Number {
 		}
 	}
 
-	fn to_decimal_for_op(self) -> Option<Decimal> {
+	fn to_decimal_for_op(&self) -> Option<Decimal> {
 		self.as_decimal_lossless()
 	}
 
-	fn op_err_string(self) -> String {
+	fn op_err_string(&self) -> String {
 		match self {
 			Number::Decimal(d) => d.to_string(),
 			Number::Int(_)
@@ -1387,7 +1552,8 @@ impl Number {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_) => self.to_sql(),
+			| Number::F32(_)
+			| Number::BigDecimal(_) => self.to_sql(),
 		}
 	}
 
@@ -1421,6 +1587,7 @@ impl Number {
 			Number::U64(v) => Number::U64(v),
 			Number::F16(v) => Number::F16(half::f16::from_f64(v.to_f64().ceil())),
 			Number::F32(v) => Number::F32((v as f64).ceil() as f32),
+			Number::BigDecimal(v) => rounded_big(v.ceil(), &v),
 		}
 	}
 
@@ -1428,6 +1595,10 @@ impl Number {
 	/// between bounds that do not convert to an ordered pair of decimals is clamped as a float.
 	/// Never panics: bounds that the conversion to floats leaves out of order hold `self` at the
 	/// bound it passes, and a NaN `self` stays NaN.
+	#[allow(
+		clippy::needless_pass_by_value,
+		reason = "Number is not Copy; the arithmetic methods take their operands by value like the operator impls"
+	)]
 	pub fn clamp(self, min: Self, max: Self) -> Self {
 		fn clamp_f64(n: f64, low: f64, high: f64) -> f64 {
 			if n < low {
@@ -1438,10 +1609,11 @@ impl Number {
 				n
 			}
 		}
-		let exact = |bound: Self| match bound {
-			Number::Float(f) => Decimal::from_f64(f),
-			Number::F16(f) => Decimal::from_f64(f.to_f64()),
-			Number::F32(f) => Decimal::from_f64(f as f64),
+		let exact = |bound: &Self| match bound {
+			Number::Float(f) => Decimal::from_f64(*f),
+			Number::F16(f) => Decimal::from_f64(f64::from(*f)),
+			Number::F32(f) => Decimal::from_f64(*f as f64),
+			Number::BigDecimal(b) => Decimal::try_from(b.as_ref()).ok(),
 			Number::Int(_)
 			| Number::Decimal(_)
 			| Number::I8(_)
@@ -1458,24 +1630,41 @@ impl Number {
 		{
 			return res;
 		}
-		match (self, min, max) {
-			(Number::Decimal(n), min, max) => match (exact(min), exact(max)) {
-				(Some(low), Some(high)) if low <= high => Number::Decimal(n.clamp(low, high)),
+		if let Number::BigDecimal(n) = &self
+			&& let (Some(low), Some(high)) = (min.to_big_for_op(), max.to_big_for_op())
+			&& low <= high
+		{
+			return Number::BigDecimal(Box::new(n.as_ref().clone().clamp(low, high)));
+		}
+		match &self {
+			Number::Decimal(n) => match (exact(&min), exact(&max)) {
+				(Some(low), Some(high)) if low <= high => Number::Decimal((*n).clamp(low, high)),
 				_ => Number::Float(clamp_f64(
-					Number::Decimal(n).to_float(),
+					Number::Decimal(*n).to_float(),
 					min.to_float(),
 					max.to_float(),
 				)),
 			},
-			(Number::F16(n), min, max) => Number::F16(half::f16::from_f64(clamp_f64(
-				n.to_f64(),
+			Number::F16(n) => Number::F16(half::f16::from_f64(clamp_f64(
+				f64::from(*n),
 				min.to_float(),
 				max.to_float(),
 			))),
-			(Number::F32(n), min, max) => {
-				Number::F32(clamp_f64(n as f64, min.to_float(), max.to_float()) as f32)
+			Number::F32(n) => {
+				Number::F32(clamp_f64(*n as f64, min.to_float(), max.to_float()) as f32)
 			}
-			(n, min, max) => Number::Float(clamp_f64(n.to_float(), min.to_float(), max.to_float())),
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::BigDecimal(_) => {
+				Number::Float(clamp_f64(self.to_float(), min.to_float(), max.to_float()))
+			}
 		}
 	}
 
@@ -1505,6 +1694,7 @@ impl Number {
 			Number::U64(v) => Number::U64(v),
 			Number::F16(v) => Number::F16(half::f16::from_f64(v.to_f64().floor())),
 			Number::F32(v) => Number::F32((v as f64).floor() as f32),
+			Number::BigDecimal(v) => rounded_big(v.floor(), &v),
 		}
 	}
 
@@ -1516,47 +1706,49 @@ impl Number {
 		to.checked_sub(from)?.checked_mul(factor)?.checked_add(from)
 	}
 
+	#[allow(
+		clippy::needless_pass_by_value,
+		reason = "Number is not Copy; the arithmetic methods take their operands by value like the operator impls"
+	)]
 	pub fn lerp(self, from: Self, to: Self) -> Self {
-		let exact = |n: Self| match n {
-			Number::Float(f) => Decimal::from_f64(f),
-			Number::F16(v) => Decimal::from_f64(v.to_f64()),
-			Number::F32(v) => Decimal::from_f64(v as f64),
-			other @ (Number::Int(_)
-			| Number::Decimal(_)
-			| Number::I8(_)
-			| Number::U8(_)
-			| Number::I16(_)
-			| Number::U16(_)
-			| Number::I32(_)
-			| Number::U32(_)
-			| Number::U64(_)) => other.as_decimal_lossless(),
-		};
-		match (self, from, to) {
-			(Number::Decimal(val), from, to) => exact(from)
-				.zip(exact(to))
+		if let Number::Decimal(val) = self {
+			return exact_decimal(&from)
+				.zip(exact_decimal(&to))
 				.and_then(|(from, to)| Self::lerp_decimal(from, to, val))
 				.map(Self::Decimal)
 				.unwrap_or_else(|| {
 					Self::lerp_f64(from.to_float(), to.to_float(), Number::Decimal(val).to_float())
 						.into()
-				}),
-			(val, from, to) => {
-				let res = Self::lerp_f64(from.to_float(), to.to_float(), val.to_float());
-				match val.number_kind().join(from.number_kind()).join(to.number_kind()) {
-					NumberKind::F16 => Number::F16(half::f16::from_f64(res)),
-					NumberKind::F32 => Number::F32(res as f32),
-					NumberKind::Int
-					| NumberKind::Float
-					| NumberKind::Decimal
-					| NumberKind::I8
-					| NumberKind::U8
-					| NumberKind::I16
-					| NumberKind::U16
-					| NumberKind::I32
-					| NumberKind::U32
-					| NumberKind::U64 => Number::Float(res),
-				}
-			}
+				});
+		}
+		if let Number::BigDecimal(val) = &self {
+			return match (from.to_big_for_op(), to.to_big_for_op()) {
+				(Some(f), Some(t)) => t
+					.checked_sub(&f)
+					.and_then(|d| d.checked_mul(val.as_ref()))
+					.and_then(|p| p.checked_add(&f))
+					.map(|r| Number::BigDecimal(Box::new(r)))
+					.unwrap_or_else(|| {
+						Number::Float(Self::lerp_f64(f.to_f64(), t.to_f64(), val.to_f64()))
+					}),
+				_ => Number::Float(Self::lerp_f64(from.to_float(), to.to_float(), val.to_f64())),
+			};
+		}
+		let res = Self::lerp_f64(from.to_float(), to.to_float(), self.to_float());
+		match self.number_kind().join(from.number_kind()).join(to.number_kind()) {
+			NumberKind::F16 => Number::F16(half::f16::from_f64(res)),
+			NumberKind::F32 => Number::F32(res as f32),
+			NumberKind::Int
+			| NumberKind::Float
+			| NumberKind::Decimal
+			| NumberKind::I8
+			| NumberKind::U8
+			| NumberKind::I16
+			| NumberKind::U16
+			| NumberKind::I32
+			| NumberKind::U32
+			| NumberKind::U64
+			| NumberKind::BigDecimal => Number::Float(res),
 		}
 	}
 
@@ -1570,24 +1762,14 @@ impl Number {
 		Some(t.checked_sub(prod)?.clamp(Decimal::ZERO, m))
 	}
 
+	#[allow(
+		clippy::needless_pass_by_value,
+		reason = "Number is not Copy; the arithmetic methods take their operands by value like the operator impls"
+	)]
 	pub fn lerp_angle(self, from: Self, to: Self) -> Self {
-		let exact = |n: Self| match n {
-			Number::Float(f) => Decimal::from_f64(f),
-			Number::F16(v) => Decimal::from_f64(v.to_f64()),
-			Number::F32(v) => Decimal::from_f64(v as f64),
-			other @ (Number::Int(_)
-			| Number::Decimal(_)
-			| Number::I8(_)
-			| Number::U8(_)
-			| Number::I16(_)
-			| Number::U16(_)
-			| Number::I32(_)
-			| Number::U32(_)
-			| Number::U64(_)) => other.as_decimal_lossless(),
-		};
-		match (self, from, to) {
-			(Number::Decimal(val), from, to) => exact(from)
-				.zip(exact(to))
+		if let Number::Decimal(val) = self {
+			return exact_decimal(&from)
+				.zip(exact_decimal(&to))
 				.and_then(|(from, to)| {
 					let diff = to.checked_sub(from)?;
 					let mut dt = Self::repeat_decimal(diff, Decimal::from(360))?;
@@ -1607,31 +1789,30 @@ impl Number {
 						dt = 360.0 - dt;
 					}
 					Self::lerp_f64(from, from + dt, val).into()
-				}),
-			(val, from, to) => {
-				let v_f = val.to_float();
-				let from_f = from.to_float();
-				let to_f = to.to_float();
-				let mut dt = Self::repeat_f64(to_f - from_f, 360.0);
-				if dt > 180.0 {
-					dt = 360.0 - dt;
-				}
-				let res = Self::lerp_f64(from_f, from_f + dt, v_f);
-				match val.number_kind().join(from.number_kind()).join(to.number_kind()) {
-					NumberKind::F16 => Number::F16(half::f16::from_f64(res)),
-					NumberKind::F32 => Number::F32(res as f32),
-					NumberKind::Int
-					| NumberKind::Float
-					| NumberKind::Decimal
-					| NumberKind::I8
-					| NumberKind::U8
-					| NumberKind::I16
-					| NumberKind::U16
-					| NumberKind::I32
-					| NumberKind::U32
-					| NumberKind::U64 => Number::Float(res),
-				}
-			}
+				});
+		}
+		let v_f = self.to_float();
+		let from_f = from.to_float();
+		let to_f = to.to_float();
+		let mut dt = Self::repeat_f64(to_f - from_f, 360.0);
+		if dt > 180.0 {
+			dt = 360.0 - dt;
+		}
+		let res = Self::lerp_f64(from_f, from_f + dt, v_f);
+		match self.number_kind().join(from.number_kind()).join(to.number_kind()) {
+			NumberKind::F16 => Number::F16(half::f16::from_f64(res)),
+			NumberKind::F32 => Number::F32(res as f32),
+			NumberKind::Int
+			| NumberKind::Float
+			| NumberKind::Decimal
+			| NumberKind::I8
+			| NumberKind::U8
+			| NumberKind::I16
+			| NumberKind::U16
+			| NumberKind::I32
+			| NumberKind::U32
+			| NumberKind::U64
+			| NumberKind::BigDecimal => Number::Float(res),
 		}
 	}
 
@@ -1639,6 +1820,10 @@ impl Number {
 		self.map_float_fn(f64::ln)
 	}
 
+	#[allow(
+		clippy::needless_pass_by_value,
+		reason = "Number is not Copy; the arithmetic methods take their operands by value like the operator impls"
+	)]
 	pub fn log(self, base: Self) -> Self {
 		let res = self.to_float().log(base.to_float());
 		match self.number_kind().join(base.number_kind()) {
@@ -1653,7 +1838,8 @@ impl Number {
 			| NumberKind::U16
 			| NumberKind::I32
 			| NumberKind::U32
-			| NumberKind::U64 => Number::Float(res),
+			| NumberKind::U64
+			| NumberKind::BigDecimal => Number::Float(res),
 		}
 	}
 
@@ -1683,6 +1869,7 @@ impl Number {
 			Number::U64(v) => Number::U64(v),
 			Number::F16(v) => Number::F16(half::f16::from_f64(v.to_f64().round())),
 			Number::F32(v) => Number::F32((v as f64).round() as f32),
+			Number::BigDecimal(v) => rounded_big(v.round(0), &v),
 		}
 	}
 
@@ -1698,6 +1885,14 @@ impl Number {
 					.expect("formatted f64 always parses back as f64"),
 			),
 			Number::Decimal(v) => Number::Decimal(v.round_dp(precision as u32)),
+			Number::BigDecimal(v) => {
+				let places = i64::try_from(precision).unwrap_or(i64::MAX);
+				if v.scale() <= places {
+					Number::BigDecimal(v)
+				} else {
+					rounded_big(v.round(places), &v)
+				}
+			}
 			Number::I8(v) => Number::I8(v),
 			Number::U8(v) => Number::U8(v),
 			Number::I16(v) => Number::I16(v),
@@ -1768,6 +1963,9 @@ impl Number {
 			} else {
 				n.signum()
 			}),
+			Number::BigDecimal(v) => {
+				Number::BigDecimal(Box::new(BigDecimal::from(i64::from(v.signum()))))
+			}
 		}
 	}
 
@@ -1793,7 +1991,45 @@ impl Number {
 			Number::U64(v) => Number::Float((v as f64).sqrt()),
 			Number::F16(v) => Number::F16(half::f16::from_f64(v.to_f64().sqrt())),
 			Number::F32(v) => Number::F32((v as f64).sqrt() as f32),
+			Number::BigDecimal(v) => {
+				match Decimal::try_from(v.as_ref()).ok().and_then(|d| d.sqrt()) {
+					Some(d) => Number::Decimal(d),
+					None => Number::Float(v.to_f64().sqrt()),
+				}
+			}
 		}
+	}
+}
+
+/// The exact `Decimal` of a number, or `None` where it has none. Used by `lerp` and `clamp`.
+fn exact_decimal(n: &Number) -> Option<Decimal> {
+	match n {
+		Number::Float(f) => Decimal::from_f64(*f),
+		Number::F16(v) => Decimal::from_f64(f64::from(*v)),
+		Number::F32(v) => Decimal::from_f64(f64::from(*v)),
+		Number::BigDecimal(v) => Decimal::try_from(v.as_ref()).ok(),
+		Number::Int(_)
+		| Number::Decimal(_)
+		| Number::I8(_)
+		| Number::U8(_)
+		| Number::I16(_)
+		| Number::U16(_)
+		| Number::I32(_)
+		| Number::U32(_)
+		| Number::U64(_) => n.as_decimal_lossless(),
+	}
+}
+
+/// The integer part of a `bigdecimal`, truncated toward zero, when it fits an `i64`.
+fn big_trunc_i64(v: &BigDecimal) -> Option<i64> {
+	v.trunc(0).ok()?.to_i64()
+}
+
+/// The rounded `bigdecimal`, or the float of `original` if the rounding cannot be formed.
+fn rounded_big<E>(result: std::result::Result<BigDecimal, E>, original: &BigDecimal) -> Number {
+	match result {
+		Ok(v) => Number::BigDecimal(Box::new(v)),
+		Err(_) => Number::Float(original.to_f64()),
 	}
 }
 
@@ -1830,19 +2066,19 @@ pub(crate) fn cmp_f64(a: f64, b: f64) -> Ordering {
 /// the rounding never reaches or crosses a decimal.
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
-		surrealdb_types::Number::from(*self).cmp(&surrealdb_types::Number::from(*other))
+		self.wide().total_cmp(&other.wide())
 	}
 }
 
 impl hash::Hash for Number {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		surrealdb_types::Number::from(*self).hash(state);
+		self.wide().hash_number(state);
 	}
 }
 
 impl PartialEq for Number {
 	fn eq(&self, other: &Self) -> bool {
-		surrealdb_types::Number::from(*self).eq(&surrealdb_types::Number::from(*other))
+		self.wide().total_eq(&other.wide())
 	}
 }
 
@@ -1852,8 +2088,115 @@ impl PartialOrd for Number {
 	}
 }
 
+/// `lhs` and `rhs` as `BigDecimal`s, combined by `op`. `None` when an operand has no `BigDecimal`
+/// (a NaN or infinite float) or when `op` refuses the result.
+fn big_checked(
+	lhs: &Number,
+	rhs: &Number,
+	op: fn(&BigDecimal, &BigDecimal) -> Option<BigDecimal>,
+) -> Option<BigDecimal> {
+	let v = lhs.to_big_for_op()?;
+	let w = rhs.to_big_for_op()?;
+	op(&v, &w)
+}
+
+/// Exact quotient rounded as [`BigDecimal::div_default`]. `None` for a zero divisor.
+fn big_div(a: &BigDecimal, b: &BigDecimal) -> Option<BigDecimal> {
+	a.div_default(b).ok()
+}
+
+/// The remainder with the sign of the dividend, as `Decimal::checked_rem` gives it: `a - b * q`
+/// with `q = a / b` truncated toward zero. `None` for a zero divisor.
+fn big_rem(a: &BigDecimal, b: &BigDecimal) -> Option<BigDecimal> {
+	if b.is_zero() {
+		return None;
+	}
+	// Rounding the quotient to the nearest integer leaves a remainder of at most |b| / 2 in
+	// magnitude. Its sign can be the opposite of the dividend's, and adding or subtracting |b|
+	// once moves it to the dividend's side, which is the truncated remainder.
+	let nearest = a.div(b, 0).ok()?;
+	let remainder = a.checked_sub(&nearest.checked_mul(b)?)?;
+	if remainder.is_zero() || remainder.signum() == a.signum() {
+		return Some(remainder);
+	}
+	let step = if a.signum() < 0 {
+		-b.abs()
+	} else {
+		b.abs()
+	};
+	remainder.checked_add(&step)
+}
+
+/// `base` raised to `power` for a `bigdecimal` result.
+///
+/// An integer exponent is exact: a non-negative one by repeated multiplication, a negative one as
+/// the reciprocal rounded as [`BigDecimal::div_default`] rounds. A power that is not an integer is
+/// taken as a float. `None` when the exact result cannot be formed within the digit and scale
+/// bounds, when the base is NaN or infinite, or when a zero base has a negative exponent.
+fn big_pow(base: &Number, power: &Number) -> Option<Number> {
+	let as_float = || Number::Float(base.to_float().powf(power.to_float()));
+	let Some(exponent) = power.to_big_for_op() else {
+		return Some(as_float());
+	};
+	let exponent = exponent.normalized();
+	if exponent.scale() != 0 {
+		return Some(as_float());
+	}
+	let Some(p) = exponent.to_i64() else {
+		return Some(as_float());
+	};
+	let v = base.to_big_for_op()?;
+	let one = BigDecimal::from(1i64);
+	let magnitude = p.unsigned_abs();
+	let result = if v.is_zero() {
+		match p.cmp(&0) {
+			Ordering::Less => return None,
+			Ordering::Equal => BigDecimal::from(1i64),
+			Ordering::Greater => BigDecimal::from(0i64),
+		}
+	} else if v.normalized() == one || v.normalized() == -one.clone() {
+		let negative = v.signum() < 0 && magnitude % 2 == 1;
+		BigDecimal::from(if negative {
+			-1i64
+		} else {
+			1i64
+		})
+	} else {
+		// The coefficient of `v^|p|` has at most |p| times the digits of `v`'s, trailing zeros
+		// included: `1e145455` is one significant digit but 145456 positions.
+		let coefficient = v.coefficient_digits().len() as u128;
+		let digits = coefficient.checked_mul(u128::from(magnitude))?;
+		if digits > u128::try_from(surrealdb_types::bigdecimal::MAX_DIGITS).ok()? {
+			return None;
+		}
+		let power_of_base = big_powi(&v, magnitude)?;
+		if p >= 0 {
+			power_of_base
+		} else {
+			one.div_default(&power_of_base).ok()?
+		}
+	};
+	Some(Number::BigDecimal(Box::new(result)))
+}
+
+/// `base^exponent` by repeated squaring, every product checked for the scale bound.
+fn big_powi(base: &BigDecimal, mut exponent: u64) -> Option<BigDecimal> {
+	let mut result = BigDecimal::from(1i64);
+	let mut square = base.clone();
+	loop {
+		if exponent & 1 == 1 {
+			result = result.checked_mul(&square)?;
+		}
+		exponent >>= 1;
+		if exponent == 0 {
+			return Some(result);
+		}
+		square = square.checked_mul(&square)?;
+	}
+}
+
 macro_rules! impl_simple_try_op {
-	($trt:ident, $fn:ident, $unchecked:ident, $checked:ident) => {
+	($trt:ident, $fn:ident, $unchecked:ident, $checked:ident, $big:expr) => {
 		impl $trt for Number {
 			type Output = Self;
 			fn $fn(self, other: Self) -> Result<Self> {
@@ -1888,17 +2231,23 @@ macro_rules! impl_simple_try_op {
 							})?;
 						Ok(Number::Decimal(res))
 					}
+					NumberKind::BigDecimal => {
+						let res = big_checked(&self, &other, $big).ok_or_else(|| {
+							Error::$trt(self.op_err_string(), other.op_err_string())
+						})?;
+						Ok(Number::BigDecimal(Box::new(res)))
+					}
 				}
 			}
 		}
 	};
 }
 
-impl_simple_try_op!(TryAdd, try_add, add, checked_add);
-impl_simple_try_op!(TrySub, try_sub, sub, checked_sub);
-impl_simple_try_op!(TryMul, try_mul, mul, checked_mul);
-impl_simple_try_op!(TryDiv, try_div, div, checked_div);
-impl_simple_try_op!(TryRem, try_rem, rem, checked_rem);
+impl_simple_try_op!(TryAdd, try_add, add, checked_add, BigDecimal::checked_add);
+impl_simple_try_op!(TrySub, try_sub, sub, checked_sub, BigDecimal::checked_sub);
+impl_simple_try_op!(TryMul, try_mul, mul, checked_mul, BigDecimal::checked_mul);
+impl_simple_try_op!(TryDiv, try_div, div, checked_div, big_div);
+impl_simple_try_op!(TryRem, try_rem, rem, checked_rem, big_rem);
 
 impl TryPow for Number {
 	type Output = Self;
@@ -1949,6 +2298,8 @@ impl TryPow for Number {
 				let res = self.as_float().powf(power.as_float());
 				Ok(Self::from_f64_in_kind(res, target))
 			}
+			NumberKind::BigDecimal => Ok(big_pow(&self, &power)
+				.ok_or_else(|| Error::TryPow(self.op_err_string(), power.op_err_string()))?),
 			NumberKind::Decimal => match (self.wide(), power.wide()) {
 				(Wide::Decimal(v), Wide::Int(p)) => {
 					if v.is_zero() && p < 0 {
@@ -1998,7 +2349,9 @@ impl TryPow for Number {
 				}
 				(Wide::Int(_), Wide::Float(_))
 				| (Wide::Float(_), Wide::Int(_))
-				| (Wide::Float(_), Wide::Float(_)) => Ok(self.as_float().powf(power.as_float()).into()),
+				| (Wide::Float(_), Wide::Float(_))
+				| (Wide::BigDecimal(_), _)
+				| (_, Wide::BigDecimal(_)) => Ok(self.as_float().powf(power.as_float()).into()),
 			},
 		}
 	}
@@ -2014,6 +2367,7 @@ impl TryNeg for Number {
 			}
 			Self::Float(n) => Number::Float(-n),
 			Self::Decimal(n) => Number::Decimal(-n),
+			Self::BigDecimal(n) => Number::BigDecimal(Box::new(-*n)),
 			Self::I8(n) => {
 				Number::I8(n.checked_neg().ok_or_else(|| Error::TryNeg(self.op_err_string()))?)
 			}
@@ -2083,9 +2437,11 @@ impl TryFloatDiv for Number {
 					None => bail!(Error::TryDiv(self.op_err_string(), other.op_err_string())),
 				}
 			}
-			NumberKind::F16 | NumberKind::F32 | NumberKind::Float | NumberKind::Decimal => {
-				self.try_div(other)
-			}
+			NumberKind::F16
+			| NumberKind::F32
+			| NumberKind::Float
+			| NumberKind::Decimal
+			| NumberKind::BigDecimal => self.try_div(other),
 		}
 	}
 }
@@ -2098,13 +2454,26 @@ impl TryFloatDiv for Number {
 /// `exact` of `lhs` and `rhs` as a decimal, or `float` of the two as floats where either operand
 /// or the result cannot be represented as a decimal.
 fn decimal_or_float(
-	lhs: Number,
-	rhs: Number,
+	lhs: &Number,
+	rhs: &Number,
 	exact: fn(Decimal, Decimal) -> Option<Decimal>,
 	float: fn(f64, f64) -> f64,
 ) -> Number {
 	match lhs.to_decimal_for_op().zip(rhs.to_decimal_for_op()).and_then(|(v, w)| exact(v, w)) {
 		Some(result) => Number::Decimal(result),
+		None => Number::Float(float(lhs.to_float(), rhs.to_float())),
+	}
+}
+
+/// The `bigdecimal` counterpart of [`decimal_or_float`].
+fn big_or_float(
+	lhs: &Number,
+	rhs: &Number,
+	exact: fn(&BigDecimal, &BigDecimal) -> Option<BigDecimal>,
+	float: fn(f64, f64) -> f64,
+) -> Number {
+	match big_checked(lhs, rhs, exact) {
+		Some(result) => Number::BigDecimal(Box::new(result)),
 		None => Number::Float(float(lhs.to_float(), rhs.to_float())),
 	}
 }
@@ -2130,7 +2499,10 @@ impl ops::Add for Number {
 				Self::from_f64_in_kind(self.as_float() + other.as_float(), target)
 			}
 			NumberKind::Decimal => {
-				decimal_or_float(self, other, Decimal::checked_add, |a, b| a + b)
+				decimal_or_float(&self, &other, Decimal::checked_add, |a, b| a + b)
+			}
+			NumberKind::BigDecimal => {
+				big_or_float(&self, &other, BigDecimal::checked_add, |a, b| a + b)
 			}
 		}
 	}
@@ -2139,7 +2511,7 @@ impl ops::Add for Number {
 impl<'b> ops::Add<&'b Number> for &Number {
 	type Output = Number;
 	fn add(self, other: &'b Number) -> Number {
-		(*self).add(*other)
+		self.clone().add(other.clone())
 	}
 }
 
@@ -2164,7 +2536,10 @@ impl ops::Sub for Number {
 				Self::from_f64_in_kind(self.as_float() - other.as_float(), target)
 			}
 			NumberKind::Decimal => {
-				decimal_or_float(self, other, Decimal::checked_sub, |a, b| a - b)
+				decimal_or_float(&self, &other, Decimal::checked_sub, |a, b| a - b)
+			}
+			NumberKind::BigDecimal => {
+				big_or_float(&self, &other, BigDecimal::checked_sub, |a, b| a - b)
 			}
 		}
 	}
@@ -2173,7 +2548,7 @@ impl ops::Sub for Number {
 impl<'b> ops::Sub<&'b Number> for &Number {
 	type Output = Number;
 	fn sub(self, other: &'b Number) -> Number {
-		(*self).sub(*other)
+		self.clone().sub(other.clone())
 	}
 }
 
@@ -2198,7 +2573,10 @@ impl ops::Mul for Number {
 				Self::from_f64_in_kind(self.as_float() * other.as_float(), target)
 			}
 			NumberKind::Decimal => {
-				decimal_or_float(self, other, Decimal::checked_mul, |a, b| a * b)
+				decimal_or_float(&self, &other, Decimal::checked_mul, |a, b| a * b)
+			}
+			NumberKind::BigDecimal => {
+				big_or_float(&self, &other, BigDecimal::checked_mul, |a, b| a * b)
 			}
 		}
 	}
@@ -2207,7 +2585,7 @@ impl ops::Mul for Number {
 impl<'b> ops::Mul<&'b Number> for &Number {
 	type Output = Number;
 	fn mul(self, other: &'b Number) -> Number {
-		(*self).mul(*other)
+		self.clone().mul(other.clone())
 	}
 }
 
@@ -2235,8 +2613,9 @@ impl ops::Div for Number {
 				Self::from_f64_in_kind(self.as_float() / other.as_float(), target)
 			}
 			NumberKind::Decimal => {
-				decimal_or_float(self, other, Decimal::checked_div, |a, b| a / b)
+				decimal_or_float(&self, &other, Decimal::checked_div, |a, b| a / b)
 			}
+			NumberKind::BigDecimal => big_or_float(&self, &other, big_div, |a, b| a / b),
 		}
 	}
 }
@@ -2244,7 +2623,7 @@ impl ops::Div for Number {
 impl<'b> ops::Div<&'b Number> for &Number {
 	type Output = Number;
 	fn div(self, other: &'b Number) -> Number {
-		(*self).div(*other)
+		self.clone().div(other.clone())
 	}
 }
 
@@ -2257,6 +2636,7 @@ impl Neg for Number {
 			Self::Int(n) => Number::Int(n.wrapping_neg()),
 			Self::Float(n) => Number::Float(-n),
 			Self::Decimal(n) => Number::Decimal(-n),
+			Self::BigDecimal(n) => Number::BigDecimal(Box::new(-*n)),
 			Self::I8(n) => Number::I8(n.wrapping_neg()),
 			Self::U8(n) => Number::U8(n.wrapping_neg()),
 			Self::I16(n) => Number::I16(n.wrapping_neg()),
@@ -2292,7 +2672,8 @@ impl Sum<Self> for Number {
 			| Self::U16(_)
 			| Self::I32(_)
 			| Self::U32(_)
-			| Self::U64(_) => first,
+			| Self::U64(_)
+			| Self::BigDecimal(_) => first,
 		};
 		iter.fold(seed, |a, b| a + b)
 	}
@@ -2303,13 +2684,13 @@ impl<'a> Sum<&'a Self> for Number {
 	where
 		I: Iterator<Item = &'a Self>,
 	{
-		let Some(&first) = iter.next() else {
+		let Some(first) = iter.next() else {
 			return Number::Int(0);
 		};
 		let seed = match first {
 			Self::Float(f) => Self::Float(f + 0.0),
 			Self::F32(f) => Self::F32(f + 0.0),
-			Self::F16(f) => Self::F16(f + half::f16::ZERO),
+			Self::F16(f) => Self::F16(*f + half::f16::ZERO),
 			Self::Int(_)
 			| Self::Decimal(_)
 			| Self::I8(_)
@@ -2318,7 +2699,8 @@ impl<'a> Sum<&'a Self> for Number {
 			| Self::U16(_)
 			| Self::I32(_)
 			| Self::U32(_)
-			| Self::U64(_) => first,
+			| Self::U64(_)
+			| Self::BigDecimal(_) => first.clone(),
 		};
 		iter.fold(seed, |a, b| &a + b)
 	}
@@ -2329,8 +2711,8 @@ fn mul_product(a: Number, b: Number) -> Number {
 		(Number::Int(v), Number::Int(w)) => match v.checked_mul(w) {
 			Some(p) => Number::Int(p),
 			None => decimal_or_float(
-				Number::Decimal(Decimal::from(v)),
-				Number::Decimal(Decimal::from(w)),
+				&Number::Decimal(Decimal::from(v)),
+				&Number::Decimal(Decimal::from(w)),
 				Decimal::checked_mul,
 				|x, y| x * y,
 			),
@@ -2356,10 +2738,10 @@ impl<'a> Product<&'a Self> for Number {
 	where
 		I: Iterator<Item = &'a Self>,
 	{
-		let Some(&first) = iter.next() else {
+		let Some(first) = iter.next() else {
 			return Number::Int(1);
 		};
-		iter.fold(first, |a, b| mul_product(a, *b))
+		iter.fold(first.clone(), |a, b| mul_product(a, b.clone()))
 	}
 }
 
@@ -2381,7 +2763,7 @@ impl Sort for Vec<Number> {
 impl ToFloat for Number {
 	#[inline]
 	fn to_float(&self) -> f64 {
-		Number::to_float(*self)
+		Number::to_float(self)
 	}
 }
 
@@ -2390,8 +2772,7 @@ impl Encode<()> for Number {
 		&self,
 		w: &mut storekey::Writer<W>,
 	) -> std::result::Result<(), storekey::EncodeError> {
-		let slice = self.as_decimal_buf();
-		w.write_slice(&slice)?;
+		w.write_slice(&self.as_decimal_buf())?;
 		let kind = self.number_kind();
 		Encode::<()>::encode(&kind, w)?;
 		Ok(())
@@ -2414,8 +2795,7 @@ impl Encode<IndexFormat> for Number {
 		&self,
 		w: &mut storekey::Writer<W>,
 	) -> std::result::Result<(), storekey::EncodeError> {
-		let slice = self.as_decimal_buf();
-		w.write_slice(&slice)
+		w.write_slice(&self.as_decimal_buf())
 	}
 }
 
@@ -2444,6 +2824,27 @@ impl<'de> BorrowDecode<'de, IndexIdFormat> for Number {
 	) -> std::result::Result<Self, storekey::DecodeError> {
 		BorrowDecode::<'de, IndexFormat>::borrow_decode(r)
 	}
+}
+
+/// A number in the form the key encoding spells it from.
+enum KeyForm<'a> {
+	Lex(LexDecimal),
+	Big(&'a BigDecimal),
+}
+
+/// The key encoding of the `bigdecimal` `v`: its coefficient's digits as written, trailing
+/// zeros included, with the scale of its leading digit. See [`Number::as_decimal_buf`].
+fn bigdecimal_buf(v: &BigDecimal) -> Vec<u8> {
+	if v.is_zero() {
+		return DecimalLexEncoder::encode(LexDecimal::ZERO);
+	}
+	let digits: Vec<u8> = v.coefficient_digits().bytes().map(|b| b - b'0').collect();
+	// The leading digit's power of ten. Both terms are far inside i64: a coefficient's digits
+	// and a scale are bounded by what memory holds.
+	let scale = (digits.len() as i64 - 1).saturating_sub(v.scale());
+	let mut out = Vec::with_capacity(digits.len() / 2 + 13);
+	DecimalLexEncoder::encode_finite(v.signum() < 0, &digits, scale, &mut out);
+	out
 }
 
 /// Conversion to `f64`. The implementations are marked `#[inline]` so that the
@@ -2586,7 +2987,10 @@ mod tests {
 
 	/// Whether a decoded number agrees with the value a key was written from.
 	fn agrees(original: LexDecimal, decoded: &Number, digits: u32) -> bool {
-		agree(original, decoded.as_lex_decimal(), digits)
+		let KeyForm::Lex(decoded) = decoded.key_form() else {
+			panic!("a decimal key decodes to no bigdecimal");
+		};
+		agree(original, decoded, digits)
 	}
 
 	#[test]
@@ -2635,9 +3039,9 @@ mod tests {
 	#[test]
 	fn test_sum_and_product_preserve_u64_kind() {
 		let nums = [Number::U64(2), Number::U64(3)];
-		assert_eq!(nums.into_iter().sum::<Number>(), Number::U64(5));
+		assert_eq!(nums.clone().into_iter().sum::<Number>(), Number::U64(5));
 		assert_eq!(nums.iter().sum::<Number>(), Number::U64(5));
-		assert_eq!(nums.into_iter().product::<Number>(), Number::U64(6));
+		assert_eq!(nums.clone().into_iter().product::<Number>(), Number::U64(6));
 		assert_eq!(nums.iter().product::<Number>(), Number::U64(6));
 	}
 
@@ -2717,15 +3121,15 @@ mod tests {
 			}
 		}
 
-		fn assert_partial_ord(x: Number, y: Number) {
+		fn assert_partial_ord(x: &Number, y: &Number) {
 			// PartialOrd requirements
-			assert_eq!(x == y, x.partial_cmp(&y) == Some(Ordering::Equal), "{x:?} {y:?}");
+			assert_eq!(x == y, x.partial_cmp(y) == Some(Ordering::Equal), "{x:?} {y:?}");
 
 			// Ord consistent with PartialOrd
-			assert_eq!(x.partial_cmp(&y), Some(x.cmp(&y)), "{x:?} {y:?}");
+			assert_eq!(x.partial_cmp(y), Some(x.cmp(y)), "{x:?} {y:?}");
 		}
 
-		fn assert_consistent(a: Number, b: Number, c: Number) {
+		fn assert_consistent(a: &Number, b: &Number, c: &Number) {
 			assert_partial_ord(a, b);
 			assert_partial_ord(b, c);
 			assert_partial_ord(c, a);
@@ -2752,9 +3156,9 @@ mod tests {
 		for _ in 0..100000 {
 			let base = random_number();
 			let a = random_permutation(base);
-			let b = random_permutation(a);
-			let c = random_permutation(b);
-			assert_consistent(a, b, c);
+			let b = random_permutation(a.clone());
+			let c = random_permutation(b.clone());
+			assert_consistent(&a, &b, &c);
 		}
 	}
 
@@ -2810,7 +3214,8 @@ mod tests {
 				| Number::U32(_)
 				| Number::U64(_)
 				| Number::F16(_)
-				| Number::F32(_)) => n.as_decimal_buf(),
+				| Number::F32(_)
+				| Number::BigDecimal(_)) => n.as_decimal_buf(),
 			}
 		}
 		let mut rng = rand::rng();
@@ -2843,7 +3248,7 @@ mod tests {
 			let (f, kf) = (Number::Float(f), key(Number::Float(f)));
 			for &d in &decimals {
 				let d = Number::Decimal(d);
-				assert_eq!(f.cmp(&d), kf.cmp(&key(d)), "{f:?} {d:?}");
+				assert_eq!(f.cmp(&d), kf.cmp(&key(d.clone())), "{f:?} {d:?}");
 			}
 		}
 	}
@@ -2856,7 +3261,7 @@ mod tests {
 			use std::hash::{BuildHasher, BuildHasherDefault};
 			BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default().hash_one(n)
 		}
-		fn kinds_of(n: Number) -> [Number; 3] {
+		fn kinds_of(n: &Number) -> [Number; 3] {
 			[Number::Int(n.as_int()), Number::Float(n.as_float()), Number::Decimal(n.to_decimal())]
 		}
 		/// `a` and `b` order as the key bytes of their normalised forms, and hash
@@ -2891,7 +3296,7 @@ mod tests {
 		// Each kind, and a decimal with trailing zeros that compares equal to it.
 		let keyed = |ns: &[Number]| -> Vec<(Number, Vec<u8>)> {
 			ns.iter()
-				.flat_map(|n| kinds_of(*n))
+				.flat_map(kinds_of)
 				.flat_map(|n| match n {
 					Number::Decimal(d) => {
 						let mut padded = d;
@@ -2908,10 +3313,11 @@ mod tests {
 					| Number::U32(_)
 					| Number::U64(_)
 					| Number::F16(_)
-					| Number::F32(_)) => vec![n],
+					| Number::F32(_)
+					| Number::BigDecimal(_)) => vec![n],
 				})
 				.map(|n| {
-					let key = match n {
+					let key = match &n {
 						Number::Decimal(d) => Number::Decimal(d.normalize()).as_decimal_buf(),
 						n @ (Number::Int(_)
 						| Number::Float(_)
@@ -2923,7 +3329,8 @@ mod tests {
 						| Number::U32(_)
 						| Number::U64(_)
 						| Number::F16(_)
-						| Number::F32(_)) => n.as_decimal_buf(),
+						| Number::F32(_)
+						| Number::BigDecimal(_)) => n.as_decimal_buf(),
 					};
 					(n, key)
 				})
@@ -2955,7 +3362,7 @@ mod tests {
 		for pair in keyed.chunks(2).filter(|c| c.len() == 2).chain(keyed.windows(2)) {
 			agree(&pair[0], &pair[1]);
 		}
-		keyed.sort_by_key(|a| a.0);
+		keyed.sort_by(|a, b| a.0.cmp(&b.0));
 		for pair in keyed.windows(2) {
 			agree(&pair[0], &pair[1]);
 		}
@@ -3042,7 +3449,8 @@ mod tests {
 			| Number::U32(_)
 			| Number::U64(_)
 			| Number::F16(_)
-			| Number::F32(_)) => {
+			| Number::F32(_)
+			| Number::BigDecimal(_)) => {
 				panic!("decoded as {other:?}, not the decimal {mantissa}e-{scale}")
 			}
 		}
@@ -3076,7 +3484,8 @@ mod tests {
 					| Number::U32(_)
 					| Number::U64(_)
 					| Number::F16(_)
-					| Number::F32(_)) => {
+					| Number::F32(_)
+					| Number::BigDecimal(_)) => {
 						panic!("{f:e} decoded as {other:?}, not a float")
 					}
 				}
@@ -3143,7 +3552,8 @@ mod tests {
 				| Number::U32(_)
 				| Number::U64(_)
 				| Number::F16(_)
-				| Number::F32(_)) => {
+				| Number::F32(_)
+				| Number::BigDecimal(_)) => {
 					panic!("{text} decoded as {other:?}, not a float")
 				}
 			}
@@ -3200,7 +3610,8 @@ mod tests {
 				| Number::U32(_)
 				| Number::U64(_)
 				| Number::F16(_)
-				| Number::F32(_) => panic!("{f:e} decoded as {decoded:?}"),
+				| Number::F32(_)
+				| Number::BigDecimal(_) => panic!("{f:e} decoded as {decoded:?}"),
 			}
 		}
 
@@ -3250,7 +3661,8 @@ mod tests {
 					| Number::U32(_)
 					| Number::U64(_)
 					| Number::F16(_)
-					| Number::F32(_)) => {
+					| Number::F32(_)
+					| Number::BigDecimal(_)) => {
 						panic!("{d} decoded as {other:?}")
 					}
 				}
@@ -3270,7 +3682,8 @@ mod tests {
 					| Number::U32(_)
 					| Number::U64(_)
 					| Number::F16(_)
-					| Number::F32(_)) => {
+					| Number::F32(_)
+					| Number::BigDecimal(_)) => {
 						panic!("{d} decoded as {other:?}, not a float")
 					}
 				}
@@ -3321,7 +3734,8 @@ mod tests {
 				| Number::U32(_)
 				| Number::U64(_)
 				| Number::F16(_)
-				| Number::F32(_)) => {
+				| Number::F32(_)
+				| Number::BigDecimal(_)) => {
 					panic!("{f:e} decoded as {other:?}, not the decimal {parsed}")
 				}
 			}
@@ -3383,7 +3797,8 @@ mod tests {
 					| Number::U32(_)
 					| Number::U64(_)
 					| Number::F16(_)
-					| Number::F32(_),
+					| Number::F32(_)
+					| Number::BigDecimal(_),
 					Number::Int(_)
 					| Number::Float(_)
 					| Number::Decimal(_)
@@ -3395,7 +3810,8 @@ mod tests {
 					| Number::U32(_)
 					| Number::U64(_)
 					| Number::F16(_)
-					| Number::F32(_),
+					| Number::F32(_)
+					| Number::BigDecimal(_),
 				) => false,
 			};
 			if same {
@@ -3783,21 +4199,39 @@ mod tests {
 			Number::F32(f32::MIN),
 		];
 		for x in unrepresentable {
-			assert!(dec_one.try_add(x).is_err(), "expected try_add error for {x:?}");
-			assert!(x.try_add(dec_one).is_err(), "expected try_add error for {x:?}");
-			assert!(dec_one.try_sub(x).is_err(), "expected try_sub error for {x:?}");
-			assert!(dec_one.try_mul(x).is_err(), "expected try_mul error for {x:?}");
-			assert!(dec_one.try_div(x).is_err(), "expected try_div error for {x:?}");
-			assert!(dec_one.try_pow(x).is_err(), "expected try_pow error for {x:?}");
+			assert!(
+				dec_one.clone().try_add(x.clone()).is_err(),
+				"expected try_add error for {x:?}"
+			);
+			assert!(
+				x.clone().try_add(dec_one.clone()).is_err(),
+				"expected try_add error for {x:?}"
+			);
+			assert!(
+				dec_one.clone().try_sub(x.clone()).is_err(),
+				"expected try_sub error for {x:?}"
+			);
+			assert!(
+				dec_one.clone().try_mul(x.clone()).is_err(),
+				"expected try_mul error for {x:?}"
+			);
+			assert!(
+				dec_one.clone().try_div(x.clone()).is_err(),
+				"expected try_div error for {x:?}"
+			);
+			assert!(
+				dec_one.clone().try_pow(x.clone()).is_err(),
+				"expected try_pow error for {x:?}"
+			);
 		}
 
 		// Infallible operators fall back to f64 arithmetic when Decimal conversion fails:
-		assert_eq!(dec_one + Number::F32(f32::INFINITY), Number::Float(f64::INFINITY));
+		assert_eq!(dec_one.clone() + Number::F32(f32::INFINITY), Number::Float(f64::INFINITY));
 		assert_eq!(
-			dec_one * Number::F16(half::f16::NEG_INFINITY),
+			dec_one.clone() * Number::F16(half::f16::NEG_INFINITY),
 			Number::Float(f64::NEG_INFINITY)
 		);
-		let Number::Float(nan) = dec_one + Number::F32(f32::NAN) else {
+		let Number::Float(nan) = dec_one.clone() + Number::F32(f32::NAN) else {
 			panic!("expected Number::Float(NaN)");
 		};
 		assert!(nan.is_nan());
@@ -3811,10 +4245,10 @@ mod tests {
 		let half = Number::Decimal("0.5".parse().unwrap());
 		let two = Number::Decimal(Decimal::from(2));
 
-		let res = half.lerp(min, max);
+		let res = half.clone().lerp(min.clone(), max.clone());
 		assert!(matches!(res, Number::Float(f) if f.is_finite()));
 
-		let res2 = two.lerp(Number::Decimal(Decimal::ZERO), max);
+		let res2 = two.lerp(Number::Decimal(Decimal::ZERO), max.clone());
 		assert!(matches!(res2, Number::Float(f) if f.is_finite()));
 
 		let res_angle = half.lerp_angle(min, max);
@@ -3824,19 +4258,358 @@ mod tests {
 	#[test]
 	fn float_decimal_non_finite_pow_zero_negative_and_product_overflow() {
 		let one_dec = Number::Decimal(Decimal::ONE);
-		assert!(matches!(Number::Float(f64::NAN) + one_dec, Number::Float(f) if f.is_nan()));
-		assert!(Number::Float(f64::NAN).try_add(one_dec).is_err());
-		assert_eq!(Number::Float(f64::INFINITY) + one_dec, Number::Float(f64::INFINITY));
-		assert!(Number::Float(f64::INFINITY).try_add(one_dec).is_err());
-		assert_eq!(Number::Float(1e30) + one_dec, Number::Float(1e30));
+		assert!(
+			matches!(Number::Float(f64::NAN) + one_dec.clone(), Number::Float(f) if f.is_nan())
+		);
+		assert!(Number::Float(f64::NAN).try_add(one_dec.clone()).is_err());
+		assert_eq!(Number::Float(f64::INFINITY) + one_dec.clone(), Number::Float(f64::INFINITY));
+		assert!(Number::Float(f64::INFINITY).try_add(one_dec.clone()).is_err());
+		assert_eq!(Number::Float(1e30) + one_dec.clone(), Number::Float(1e30));
 		assert!(Number::Float(1e30).try_add(one_dec).is_err());
 
 		let zero_dec = Number::Decimal(Decimal::ZERO);
-		assert!(zero_dec.try_pow(Number::Decimal(-Decimal::ONE)).is_err());
-		assert!(zero_dec.try_pow(Number::Int(-1)).is_err());
+		assert!(zero_dec.clone().try_pow(Number::Decimal(-Decimal::ONE)).is_err());
+		assert!(zero_dec.clone().try_pow(Number::Int(-1)).is_err());
 		assert!(zero_dec.try_pow(Number::Float(-1.0)).is_err());
 
 		let prod: Number = [Number::Int(i64::MAX), Number::Int(2)].into_iter().product();
 		assert_eq!(prod, Number::Decimal(Decimal::from(i64::MAX) * Decimal::from(2)));
+	}
+
+	#[test]
+	fn a_bigdecimal_power_is_bounded_by_its_positional_size() {
+		// One significant digit, but 1001 positions: the power would hold 145 million digits.
+		let wide = BigDecimal::from_digits(false, b"1", 1000).expect("in range");
+		let base = Number::BigDecimal(Box::new(wide));
+		assert!(base.clone().try_pow(Number::Int(145_455)).is_err());
+		let small = base.try_pow(Number::Int(2)).expect("within the bound");
+		let Number::BigDecimal(small) = small else {
+			panic!("a bigdecimal power is a bigdecimal");
+		};
+		assert_eq!(small.coefficient_digits().len(), 2001);
+	}
+}
+
+#[cfg(test)]
+mod bigdecimal_key_tests {
+	//! The key encoding of a `bigdecimal` among every other number kind. Every generator draws
+	//! from a fixed seed, so a failure reproduces.
+
+	use std::str::FromStr;
+
+	use rust_decimal::Decimal;
+	use surrealdb_types::BigDecimal;
+
+	use super::{Number, NumberKind};
+	use crate::expr::decimal::{DecimalLexEncoder, KeyDecimal};
+	use crate::val::IndexFormat;
+
+	struct Rng(u64);
+
+	impl Rng {
+		fn next(&mut self) -> u64 {
+			// xorshift64*
+			self.0 ^= self.0 >> 12;
+			self.0 ^= self.0 << 25;
+			self.0 ^= self.0 >> 27;
+			self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+		}
+
+		fn below(&mut self, n: u64) -> u64 {
+			self.next() % n
+		}
+	}
+
+	fn big(text: &str) -> BigDecimal {
+		BigDecimal::from_str(text).unwrap_or_else(|e| panic!("{text}: {e}"))
+	}
+
+	fn bignum(text: &str) -> Number {
+		Number::BigDecimal(Box::new(big(text)))
+	}
+
+	/// The positional text of `digits` at `scale`, negated when `negative`.
+	fn text(negative: bool, digits: &str, scale: usize) -> String {
+		let mut text = digits.to_owned();
+		if scale > 0 {
+			if text.len() <= scale {
+				text = format!("{}{text}", "0".repeat(scale + 1 - text.len()));
+			}
+			text.insert(text.len() - scale, '.');
+		}
+		if negative {
+			text.insert(0, '-');
+		}
+		text
+	}
+
+	/// A bigdecimal of 40 or 65 digits, or of 1 to 80, at a scale of 0 to 70, of either sign,
+	/// trailing zeros and zero included.
+	fn gen_big(rng: &mut Rng) -> BigDecimal {
+		let len = match rng.below(4) {
+			0 => 40,
+			1 => 65,
+			_ => 1 + rng.below(80) as usize,
+		};
+		let mut digits: String = (0..len).map(|_| char::from(b'0' + rng.below(10) as u8)).collect();
+		if rng.below(4) == 0 {
+			digits.push_str("000");
+		}
+		big(&text(rng.below(2) == 0, &digits, rng.below(71) as usize))
+	}
+
+	/// A number of a kind other than a bigdecimal whose key holds its exact value: an integer, a
+	/// decimal, or a float that is a short binary fraction.
+	fn gen_other(rng: &mut Rng) -> Number {
+		match rng.below(5) {
+			0 => Number::Int(rng.next() as i64 >> rng.below(64)),
+			1 => Number::U64(rng.next()),
+			2 => Number::Float(((rng.next() as i64) >> (11 + rng.below(53))) as f64 / 8.0),
+			_ => {
+				let mantissa = ((rng.next() as i64) >> rng.below(64)) as i128;
+				Number::Decimal(Decimal::from_i128_with_scale(mantissa, rng.below(20) as u32))
+			}
+		}
+	}
+
+	/// The key a normalised index writes for `n`: a decimal or bigdecimal without trailing zeros
+	/// after its point.
+	fn normalised_key(n: &Number) -> Vec<u8> {
+		match n {
+			Number::Decimal(d) => Number::Decimal(d.normalize()).as_decimal_buf(),
+			Number::BigDecimal(d) => Number::BigDecimal(Box::new(d.normalized())).as_decimal_buf(),
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => n.as_decimal_buf(),
+		}
+	}
+
+	/// A bigdecimal has the bytes of the `decimal`, `int` or float with its coefficient and
+	/// scale, so none of their bytes moves.
+	#[test]
+	fn a_bigdecimal_is_spelled_as_the_decimal_of_its_coefficient_and_scale() {
+		for text in [
+			"0",
+			"1",
+			"-1",
+			"1.5",
+			"1.50",
+			"-1.50",
+			"1500",
+			"0.001",
+			"-0.000100",
+			"12345.6789",
+			"79228162514264337593543950335",
+			"-7.9228162514264337593543950335",
+		] {
+			let decimal = Number::Decimal(Decimal::from_str(text).expect("a decimal"));
+			assert_eq!(bignum(text).as_decimal_buf(), decimal.as_decimal_buf(), "{text}");
+		}
+		for int in [0i64, 1, -1, 7, 1000, -1000, i64::MAX, i64::MIN] {
+			assert_eq!(
+				bignum(&int.to_string()).as_decimal_buf(),
+				Number::Int(int).as_decimal_buf(),
+				"{int}"
+			);
+		}
+		assert_eq!(bignum("2.5").as_decimal_buf(), Number::Float(2.5).as_decimal_buf());
+		assert_eq!(bignum("-1024").as_decimal_buf(), Number::Float(-1024.0).as_decimal_buf());
+	}
+
+	/// In a normalised index, equal values of every kind share one key, and the key order is the
+	/// numeric order, for bigdecimals of 40 and 65 digits mixed with ints, u64s, decimals and
+	/// floats, negatives and zero.
+	#[test]
+	fn bigdecimal_keys_order_numerically_among_every_kind() {
+		let mut rng = Rng(0x5EED_B16D_EC00_0001);
+		let mut numbers: Vec<Number> = vec![
+			bignum("0"),
+			bignum("-0.000"),
+			Number::Int(0),
+			Number::Float(-0.0),
+			Number::Decimal(Decimal::ZERO),
+			bignum("1.5"),
+			bignum("1.50"),
+			Number::Decimal(Decimal::new(150, 2)),
+			Number::Float(1.5),
+			bignum("1"),
+			Number::Int(1),
+			Number::Decimal(Decimal::new(100, 2)),
+			bignum(&"9".repeat(40)),
+			bignum(&format!("1{}", "0".repeat(39))),
+			bignum(&format!("-{}", "9".repeat(65))),
+			bignum(&format!("0.{}1", "0".repeat(60))),
+			bignum(&format!("-0.{}1", "0".repeat(60))),
+			Number::U64(u64::MAX),
+			bignum(&u64::MAX.to_string()),
+			bignum("18446744073709551616"),
+			Number::Int(i64::MIN),
+			bignum("-9223372036854775809"),
+		];
+		for _ in 0..2_000 {
+			numbers.push(Number::BigDecimal(Box::new(gen_big(&mut rng))));
+			numbers.push(gen_other(&mut rng));
+		}
+		// Values next to one another, so that kinds interleave.
+		for _ in 0..500 {
+			let other = gen_other(&mut rng);
+			let Some(b) = other.as_bigdecimal_cast() else {
+				continue;
+			};
+			let nudge = big(&format!("0.{}1", "0".repeat(rng.below(60) as usize)));
+			numbers.push(other);
+			numbers.push(Number::BigDecimal(Box::new(b.normalized())));
+			numbers.push(Number::BigDecimal(Box::new(b.checked_add(&nudge).expect("adds"))));
+			numbers.push(Number::BigDecimal(Box::new(b.checked_sub(&nudge).expect("subtracts"))));
+		}
+		numbers.sort();
+		let keys: Vec<Vec<u8>> = numbers.iter().map(normalised_key).collect();
+		for (pair, key) in numbers.windows(2).zip(keys.windows(2)) {
+			match pair[0].cmp(&pair[1]) {
+				std::cmp::Ordering::Less => assert!(
+					key[0] < key[1],
+					"{} < {} but their keys do not order so",
+					pair[0],
+					pair[1]
+				),
+				std::cmp::Ordering::Equal => {
+					assert_eq!(key[0], key[1], "{} == {} but their keys differ", pair[0], pair[1])
+				}
+				std::cmp::Ordering::Greater => panic!("sorted numbers out of order"),
+			}
+		}
+	}
+
+	/// Scales past the two-byte range take the escaped form, which orders above and below every
+	/// two-byte form of its sign.
+	#[test]
+	fn wide_scales_order_around_the_two_byte_range() {
+		let powers = [-280_000i64, -6_000, -5_379, -5_378, -1, 0, 1, 6_177, 6_178, 140_000];
+		let mut positives: Vec<BigDecimal> = powers
+			.iter()
+			.map(|p| BigDecimal::from_digits(false, b"7", *p).expect("in range"))
+			.collect();
+		positives.push(BigDecimal::from_digits(false, b"75", 140_000).expect("in range"));
+		let negatives: Vec<BigDecimal> = positives.iter().rev().map(|b| -b.clone()).collect();
+		let ordered: Vec<BigDecimal> = negatives.into_iter().chain(positives).collect();
+		for pair in ordered.windows(2) {
+			assert!(pair[0] < pair[1]);
+			let a = Number::BigDecimal(Box::new(pair[0].clone())).as_decimal_buf();
+			let b = Number::BigDecimal(Box::new(pair[1].clone())).as_decimal_buf();
+			assert!(a < b, "{a:02x?} !< {b:02x?}");
+		}
+		// The two-byte range spells every int, decimal and float, so the extremes of the floats
+		// sort inside the wide forms.
+		let tiny = BigDecimal::from_digits(false, b"1", -6_000).expect("in range");
+		let huge = BigDecimal::from_digits(false, b"1", 6_178).expect("in range");
+		let tiny = Number::BigDecimal(Box::new(tiny)).as_decimal_buf();
+		let huge = Number::BigDecimal(Box::new(huge)).as_decimal_buf();
+		assert!(tiny > Number::Int(0).as_decimal_buf());
+		assert!(tiny < Number::Float(f64::from_bits(1)).as_decimal_buf());
+		assert!(huge > Number::Float(f64::MAX).as_decimal_buf());
+		assert!(huge < Number::Float(f64::INFINITY).as_decimal_buf());
+	}
+
+	/// A key decodes back to the bigdecimal it was written from, scale included, under the
+	/// record-id format; under the index format a wide value decodes to the same value.
+	#[test]
+	fn bigdecimal_keys_round_trip() {
+		let mut rng = Rng(0x5EED_B16D_EC00_0002);
+		let mut values: Vec<BigDecimal> = (0..3_000).map(|_| gen_big(&mut rng)).collect();
+		for exponent in [-280_000i64, -5_379, 6_178, 140_000] {
+			values.push(BigDecimal::from_digits(true, b"123", exponent).expect("in range"));
+		}
+		for value in values {
+			let n = Number::BigDecimal(Box::new(value.clone()));
+			let buf = n.as_decimal_buf();
+			let back = Number::from_decimal_buf_kind(&buf, NumberKind::BigDecimal)
+				.unwrap_or_else(|e| panic!("{value}: {e}"));
+			let Number::BigDecimal(back) = back else {
+				panic!("{value} decodes to {back:?}");
+			};
+			assert_eq!(*back, value);
+			// Zero keeps no scale; every other value keeps the one it was written with.
+			if !value.is_zero() {
+				assert_eq!(back.scale(), value.scale(), "{value}");
+			}
+			assert_eq!(Number::BigDecimal(back).as_decimal_buf(), buf, "{value}");
+			let indexed = Number::from_decimal_buf(&buf).unwrap_or_else(|e| panic!("{value}: {e}"));
+			if matches!(DecimalLexEncoder::decode_key(&buf), Ok(KeyDecimal::Wide { .. })) {
+				assert_eq!(indexed, n, "{value}");
+			}
+			// Through storekey, as an index and a record id write it.
+			let key = storekey::encode_vec_format::<IndexFormat, _>(&n).expect("encodes");
+			storekey::decode_borrow_format::<IndexFormat, Number>(&key).expect("decodes");
+			let key = storekey::encode_vec(&n).expect("encodes");
+			let back: Number = storekey::decode_borrow(&key).expect("decodes");
+			if value.is_zero() {
+				assert_eq!(back, n, "{value}");
+			} else {
+				assert_eq!(back.to_string(), n.to_string(), "{value}");
+			}
+		}
+	}
+
+	/// Decoding never panics: on random bytes, and on every truncation and one-byte change of
+	/// valid keys of every form.
+	#[test]
+	fn decoding_arbitrary_key_bytes_never_panics() {
+		let mut rng = Rng(0x5EED_B16D_EC00_0003);
+		let decode_all = |bytes: &[u8]| {
+			let _ = DecimalLexEncoder::decode_key(bytes);
+			let _ = DecimalLexEncoder::decode(bytes);
+			let _ = Number::from_decimal_buf(bytes);
+			for kind in [NumberKind::BigDecimal, NumberKind::Int, NumberKind::Decimal] {
+				let _ = Number::from_decimal_buf_kind(bytes, kind);
+			}
+		};
+		for _ in 0..20_000 {
+			let len = rng.below(24) as usize;
+			let bytes: Vec<u8> = (0..len).map(|_| rng.next() as u8).collect();
+			decode_all(&bytes);
+		}
+		let mut valid: Vec<Vec<u8>> = (0..300)
+			.map(|_| Number::BigDecimal(Box::new(gen_big(&mut rng))).as_decimal_buf())
+			.collect();
+		for exponent in [-280_000i64, -5_379, 6_178, 20_000] {
+			for negative in [false, true] {
+				let b = BigDecimal::from_digits(negative, b"98765", exponent).expect("in range");
+				valid.push(Number::BigDecimal(Box::new(b)).as_decimal_buf());
+			}
+		}
+		// A long key is cut and changed at its head, its tail and 32 points through its body:
+		// decoding a key of thousands of bytes is slow, so every position of one would
+		// make the test quadratic.
+		for bytes in valid {
+			let len = bytes.len();
+			let stride = (len / 32).max(1);
+			let positions = (0..len).filter(|at| *at < 16 || len - at <= 16 || at % stride == 0);
+			for at in positions {
+				decode_all(&bytes[..at]);
+				for _ in 0..4 {
+					let mut mutant = bytes.clone();
+					mutant[at] = rng.next() as u8;
+					decode_all(&mutant);
+				}
+			}
+		}
+		// A wide ordinal that names a scale past what a bigdecimal holds is refused, as is one
+		// with a zero byte.
+		let mut beyond = vec![0xA0, 0xFF];
+		beyond.extend([0xFF; 8]);
+		beyond.extend([0x20, 0x00]);
+		assert!(Number::from_decimal_buf_kind(&beyond, NumberKind::BigDecimal).is_err());
+		let mut zero_byte = vec![0xA0, 0xFF, 0x00];
+		zero_byte.extend([0x01; 7]);
+		zero_byte.extend([0x20, 0x00]);
+		assert!(DecimalLexEncoder::decode_key(&zero_byte).is_err());
 	}
 }

@@ -424,7 +424,8 @@ struct SizedField {
 /// the engine has to be given here the family of types it is announced under when a row is listed
 /// with `*`: an integer under an integer type that holds its range (`BIGINT` when nothing
 /// describes the table, the declared width when the table's columns are known), a float of any
-/// width under `FLOAT` or `DOUBLE`, a decimal and a `u64` above `i64::MAX` under `DECIMAL`.
+/// width under `FLOAT` or `DOUBLE`, a decimal and a `u64` above `i64::MAX` under
+/// `DECIMAL`.
 fn sized_field(kind: NumberKind) -> SizedField {
 	let (surql_type, literal, shown, floor, ceil, value, listed_type) = match kind {
 		NumberKind::I8 => ("i8", "-5i8", "-5", "-5", "-5", -5.0, MYSQL_TYPE_LONGLONG),
@@ -461,13 +462,16 @@ fn sized_field(kind: NumberKind) -> SizedField {
 			"18446744073709551615",
 			"18446744073709551615",
 			1.8446744073709552e19,
-			MYSQL_TYPE_NEWDECIMAL,
+			MYSQL_TYPE_LONGLONG,
 		),
 		NumberKind::F16 => ("f16", "1.5f16", "1.5", "1", "2", 1.5, MYSQL_TYPE_DOUBLE),
 		NumberKind::F32 => ("f32", "0.1f32", "0.1", "0", "1", 0.1, MYSQL_TYPE_DOUBLE),
 		NumberKind::Float => ("float", "0.25f", "0.25", "0", "1", 0.25, MYSQL_TYPE_DOUBLE),
 		NumberKind::Decimal => {
 			("decimal", "3.25dec", "3.25", "3", "4", 3.25, MYSQL_TYPE_NEWDECIMAL)
+		}
+		NumberKind::BigDecimal => {
+			unimplemented!("the SurrealQL front end has no bigdecimal kind name or literal")
 		}
 	};
 	SizedField {
@@ -579,6 +583,29 @@ async fn numbers_of_any_two_kinds_are_sent() {
 				assert_number(&mut stream, &format!("SELECT {select} FROM rs"), value).await;
 			}
 		}
+	}
+	shutdown.cancel();
+}
+
+/// A `u64` field is announced as `BIGINT UNSIGNED`, which is `LONGLONG` with the `UNSIGNED` flag,
+/// and its maximum reads back exactly over both protocols.
+#[tokio::test]
+async fn a_u64_field_is_announced_as_unsigned_longlong_and_holds_its_maximum() {
+	let (addr, shutdown) = start_with_sized_fields().await;
+	let mut stream = connect(addr).await;
+	let mut names: Vec<String> = KINDS.iter().map(|kind| column(*kind)).collect();
+	names.push("id".to_string());
+	names.sort();
+	let position =
+		names.iter().position(|name| *name == column(NumberKind::U64)).expect("a column");
+	for (protocol, answer) in [
+		("text", text(&mut stream, "SELECT * FROM rs").await),
+		("binary", binary(&mut stream, "SELECT * FROM rs").await),
+	] {
+		assert_eq!(answer.error, None, "{protocol}");
+		assert_eq!(answer.types[position], MYSQL_TYPE_LONGLONG, "{protocol}");
+		assert!(answer.flags[position] & UNSIGNED_FLAG != 0, "{protocol}");
+		assert_eq!(answer.rows[0][position], "18446744073709551615", "{protocol}");
 	}
 	shutdown.cancel();
 }

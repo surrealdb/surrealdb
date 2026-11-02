@@ -30,6 +30,7 @@ async fn define_global_param() -> Result<()> {
 			buckets: {},
 			compatibility: 4,
 			configs: {},
+			enums: {},
 			extensions: {},
 			functions: {},
 			models: {},

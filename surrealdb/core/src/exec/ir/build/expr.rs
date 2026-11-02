@@ -545,6 +545,34 @@ fn bind_node(host: &mut dyn ExprHost, expr: &LogicalExpr) -> Result<Built, IrErr
 			op,
 			expr: operand,
 		} => match op {
+			// A cast to a named enum is judged against the labels the catalog holds, which only a
+			// function reaches: `<enum<name>> x` is `enum::cast('name', x)`.
+			PrefixOperator::Cast(crate::expr::Kind::Enum(crate::expr::EnumRef::Named(name))) => {
+				let call = LogicalExpr::Call(Box::new(crate::expr::logical::LogicalCall {
+					receiver: Function::Normal("enum::cast".to_owned()),
+					args: vec![
+						LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::String(
+							Strand::new(name.clone()),
+						)),
+						(**operand).clone(),
+					],
+				}));
+				bind_expr(host, &call)
+			}
+			// A cast to a type that holds a named enum beside other types judges the labels the
+			// same way, at whatever depth the enum stands.
+			PrefixOperator::Cast(kind) if kind.has_named_enum() => {
+				let call = LogicalExpr::Call(Box::new(crate::expr::logical::LogicalCall {
+					receiver: Function::Normal("enum::cast".to_owned()),
+					args: vec![
+						LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::String(
+							Strand::new(surrealdb_types::ToSql::to_sql(kind)),
+						)),
+						(**operand).clone(),
+					],
+				}));
+				bind_expr(host, &call)
+			}
 			PrefixOperator::Cast(kind) => {
 				let Built::Value(subject) = bind_expr(host, operand)? else {
 					return Ok(Built::Diverged);
@@ -1581,6 +1609,7 @@ fn literal_value(lit: &LogicalLiteral) -> Value {
 		LogicalLiteral::Float(x) => Value::Number(Number::Float(*x)),
 		LogicalLiteral::Integer(x) => Value::Number(Number::Int(*x)),
 		LogicalLiteral::Decimal(x) => Value::Number(Number::Decimal(*x)),
+		LogicalLiteral::BigDecimal(x) => Value::Number(Number::BigDecimal(x.clone())),
 		LogicalLiteral::I8(x) => Value::Number(Number::I8(*x)),
 		LogicalLiteral::U8(x) => Value::Number(Number::U8(*x)),
 		LogicalLiteral::I16(x) => Value::Number(Number::I16(*x)),
@@ -1595,6 +1624,10 @@ fn literal_value(lit: &LogicalLiteral) -> Value {
 		LogicalLiteral::Regex(x) => Value::Regex(x.clone()),
 		LogicalLiteral::Duration(x) => Value::Duration(*x),
 		LogicalLiteral::Datetime(x) => Value::Datetime(*x),
+		LogicalLiteral::Date(x) => Value::Date(*x),
+		LogicalLiteral::Time(x) => Value::Time(*x),
+		LogicalLiteral::Timestamp(x) => Value::Timestamp(*x),
+		LogicalLiteral::Interval(x) => Value::Interval(*x),
 		LogicalLiteral::Uuid(x) => Value::Uuid(*x),
 		LogicalLiteral::Geometry(x) => Value::Geometry(x.clone()),
 		LogicalLiteral::File(x) => Value::File(x.clone()),

@@ -53,7 +53,7 @@ impl SumAccumulator {
 	/// Fold `other`, a partial state over the same group, into this one.
 	pub(crate) fn absorb(&mut self, other: &Self) -> Result<()> {
 		self.rejected.merge_from(&other.rejected);
-		self.add(other.sum);
+		self.add(other.sum.clone());
 		Ok(())
 	}
 }
@@ -61,8 +61,12 @@ impl SumAccumulator {
 impl SumAccumulator {
 	/// Fold `n` into the total. A total leaving `i64` fails the group when it
 	/// is finalised: wrapping would answer with a number that is not the sum.
+	#[allow(
+		clippy::needless_pass_by_value,
+		reason = "Number is not Copy; this takes its operand by value like the arithmetic it feeds"
+	)]
 	fn add(&mut self, n: Number) {
-		match self.sum.try_add(n.widened()) {
+		match self.sum.clone().try_add(n.widened()) {
 			Ok(sum) => self.sum = sum,
 			Err(e) => self.rejected.fail(&e),
 		}
@@ -71,7 +75,7 @@ impl SumAccumulator {
 
 impl Accumulator for SumAccumulator {
 	fn save(&self) -> Option<Value> {
-		Some(Saving::default().number(self.sum).rejected(&self.rejected).done())
+		Some(Saving::default().number(self.sum.clone()).rejected(&self.rejected).done())
 	}
 
 	fn load(&mut self, state: Value) -> Result<()> {
@@ -108,7 +112,7 @@ impl Accumulator for SumAccumulator {
 
 	fn finalize(&self) -> Result<Value> {
 		self.rejected.check()?;
-		Ok(Value::Number(self.sum))
+		Ok(Value::Number(self.sum.clone()))
 	}
 
 	fn reset(&mut self) {
@@ -166,7 +170,7 @@ impl MeanAccumulator {
 	/// Fold `other`, a partial state over the same group, into this one.
 	pub(crate) fn absorb(&mut self, other: &Self) -> Result<()> {
 		self.rejected.merge_from(&other.rejected);
-		self.add(other.sum);
+		self.add(other.sum.clone());
 		self.count += other.count;
 		Ok(())
 	}
@@ -176,8 +180,12 @@ impl MeanAccumulator {
 	/// Fold `n` into the total, which stays exact: integers that leave `i64`
 	/// continue as a decimal. A total no decimal holds fails the group when it
 	/// is finalised.
+	#[allow(
+		clippy::needless_pass_by_value,
+		reason = "Number is not Copy; this takes its operand by value like the arithmetic it feeds"
+	)]
 	fn add(&mut self, n: Number) {
-		match self.sum.add_exact(n.widened()) {
+		match self.sum.clone().add_exact(n.widened()) {
 			Ok(sum) => self.sum = sum,
 			Err(e) => self.rejected.fail(&e),
 		}
@@ -186,7 +194,13 @@ impl MeanAccumulator {
 
 impl Accumulator for MeanAccumulator {
 	fn save(&self) -> Option<Value> {
-		Some(Saving::default().number(self.sum).int(self.count).rejected(&self.rejected).done())
+		Some(
+			Saving::default()
+				.number(self.sum.clone())
+				.int(self.count)
+				.rejected(&self.rejected)
+				.done(),
+		)
 	}
 
 	fn load(&mut self, state: Value) -> Result<()> {
@@ -229,6 +243,11 @@ impl Accumulator for MeanAccumulator {
 		if self.count == 0 {
 			// An empty group has no mean, so it finalises to NaN.
 			Ok(Value::Number(Number::Float(f64::NAN)))
+		} else if let Number::BigDecimal(sum) = &self.sum {
+			// A total that reached a bigdecimal has an exact mean, rounded half away from zero
+			// as a bigdecimal division is, as the scalar math::mean has.
+			let count = surrealdb_types::BigDecimal::from(self.count);
+			Ok(Value::Number(Number::BigDecimal(Box::new(sum.div_default(&count)?))))
 		} else {
 			let mean = self.sum.to_float() / self.count as f64;
 			Ok(Value::Number(Number::Float(mean)))
@@ -292,12 +311,12 @@ impl MinAccumulator {
 		self.rejected.merge_from(&other.rejected);
 		if let Some(other_min) = &other.min {
 			self.min = Some(match &self.min {
-				None => *other_min,
+				None => other_min.clone(),
 				Some(current) => {
 					if *other_min < *current {
-						*other_min
+						other_min.clone()
 					} else {
-						*current
+						current.clone()
 					}
 				}
 			});
@@ -307,7 +326,7 @@ impl MinAccumulator {
 
 impl Accumulator for MinAccumulator {
 	fn save(&self) -> Option<Value> {
-		Some(Saving::default().option_number(self.min).rejected(&self.rejected).done())
+		Some(Saving::default().option_number(self.min.clone()).rejected(&self.rejected).done())
 	}
 
 	fn load(&mut self, state: Value) -> Result<()> {
@@ -325,7 +344,7 @@ impl Accumulator for MinAccumulator {
 					if n < *current {
 						n
 					} else {
-						*current
+						current.clone()
 					}
 				}
 			});
@@ -343,7 +362,7 @@ impl Accumulator for MinAccumulator {
 						if n < *current {
 							n
 						} else {
-							*current
+							current.clone()
 						}
 					}
 				});
@@ -364,7 +383,7 @@ impl Accumulator for MinAccumulator {
 	fn finalize(&self) -> Result<Value> {
 		self.rejected.check()?;
 		match &self.min {
-			Some(n) => Ok(Value::Number(*n)),
+			Some(n) => Ok(Value::Number(n.clone())),
 			None => Ok(Value::Number(Number::Float(f64::INFINITY))),
 		}
 	}
@@ -425,12 +444,12 @@ impl MaxAccumulator {
 		self.rejected.merge_from(&other.rejected);
 		if let Some(other_max) = &other.max {
 			self.max = Some(match &self.max {
-				None => *other_max,
+				None => other_max.clone(),
 				Some(current) => {
 					if *other_max > *current {
-						*other_max
+						other_max.clone()
 					} else {
-						*current
+						current.clone()
 					}
 				}
 			});
@@ -440,7 +459,7 @@ impl MaxAccumulator {
 
 impl Accumulator for MaxAccumulator {
 	fn save(&self) -> Option<Value> {
-		Some(Saving::default().option_number(self.max).rejected(&self.rejected).done())
+		Some(Saving::default().option_number(self.max.clone()).rejected(&self.rejected).done())
 	}
 
 	fn load(&mut self, state: Value) -> Result<()> {
@@ -458,7 +477,7 @@ impl Accumulator for MaxAccumulator {
 					if n > *current {
 						n
 					} else {
-						*current
+						current.clone()
 					}
 				}
 			});
@@ -476,7 +495,7 @@ impl Accumulator for MaxAccumulator {
 						if n > *current {
 							n
 						} else {
-							*current
+							current.clone()
 						}
 					}
 				});
@@ -497,7 +516,7 @@ impl Accumulator for MaxAccumulator {
 	fn finalize(&self) -> Result<Value> {
 		self.rejected.check()?;
 		match &self.max {
-			Some(n) => Ok(Value::Number(*n)),
+			Some(n) => Ok(Value::Number(n.clone())),
 			None => Ok(Value::Number(Number::Float(f64::NEG_INFINITY))),
 		}
 	}
@@ -622,9 +641,9 @@ impl Accumulator for SpreadAccumulator {
 	fn save(&self) -> Option<Value> {
 		Some(
 			Saving::default()
-				.number(self.shift)
-				.number(self.sum)
-				.number(self.sum_of_squares)
+				.number(self.shift.clone())
+				.number(self.sum.clone())
+				.number(self.sum_of_squares.clone())
 				.int(self.count)
 				.rejected(&self.rejected)
 				.done(),
@@ -675,25 +694,27 @@ impl Accumulator for SpreadAccumulator {
 			return Ok(());
 		}
 		if self.count == 0 {
-			self.shift = other.shift;
-			self.sum = other.sum;
-			self.sum_of_squares = other.sum_of_squares;
+			self.shift = other.shift.clone();
+			self.sum = other.sum.clone();
+			self.sum_of_squares = other.sum_of_squares.clone();
 			self.count = other.count;
 			return Ok(());
 		}
 
 		// The two halves were shifted against different assumed means, so
 		// re-base `other` onto ours before adding.
+		let self_sum = self.sum.clone();
+		let self_sum_of_squares = self.sum_of_squares.clone();
 		let rebased = aggregation::shifted_rebase(
-			other.sum,
-			other.sum_of_squares,
+			other.sum.clone(),
+			other.sum_of_squares.clone(),
 			other.count,
-			other.shift,
-			self.shift,
+			other.shift.clone(),
+			self.shift.clone(),
 		)
 		.and_then(|(rebased_sum, rebased_sum_of_squares)| {
-			let next_sum = self.sum.try_add(rebased_sum)?;
-			let next_sum_of_squares = self.sum_of_squares.try_add(rebased_sum_of_squares)?;
+			let next_sum = self_sum.try_add(rebased_sum)?;
+			let next_sum_of_squares = self_sum_of_squares.try_add(rebased_sum_of_squares)?;
 			Ok((next_sum, next_sum_of_squares))
 		});
 		match rebased {
@@ -710,12 +731,16 @@ impl Accumulator for SpreadAccumulator {
 	fn finalize(&self) -> Result<Value> {
 		self.rejected.check()?;
 		let num = match self.spread {
-			Spread::Variance => {
-				aggregation::shifted_sample_variance(self.sum, self.sum_of_squares, self.count)
-			}
-			Spread::Deviation => {
-				aggregation::shifted_sample_deviation(self.sum, self.sum_of_squares, self.count)
-			}
+			Spread::Variance => aggregation::shifted_sample_variance(
+				self.sum.clone(),
+				self.sum_of_squares.clone(),
+				self.count,
+			),
+			Spread::Deviation => aggregation::shifted_sample_deviation(
+				self.sum.clone(),
+				self.sum_of_squares.clone(),
+				self.count,
+			),
 		};
 		Ok(Value::Number(num))
 	}
@@ -794,7 +819,7 @@ impl Accumulator for MedianAccumulator {
 			.downcast_ref::<MedianAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
 		self.rejected.merge_from(&other.rejected);
-		self.values.extend(other.values.iter().copied());
+		self.values.extend(other.values.iter().cloned());
 		Ok(())
 	}
 

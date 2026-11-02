@@ -250,7 +250,12 @@ fn checks_only(kind: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -273,7 +278,8 @@ fn checks_only(kind: &Kind) -> bool {
 		| Kind::Geometry(_)
 		| Kind::Function(..)
 		| Kind::Range
-		| Kind::File(_) => true,
+		| Kind::File(_)
+		| Kind::Enum(_) => true,
 	}
 }
 

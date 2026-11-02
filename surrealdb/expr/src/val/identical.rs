@@ -38,6 +38,7 @@ pub fn same_value(a: &Value, b: &Value) -> bool {
 			same_bound(&x.start, &y.start, same_value) && same_bound(&x.end, &y.end, same_value)
 		}
 		(Value::Geometry(x), Value::Geometry(y)) => same_geometry(x, y),
+		(Value::Interval(x), Value::Interval(y)) => x.identical(y),
 		_ => std::mem::discriminant(a) == std::mem::discriminant(b) && a == b,
 	}
 }
@@ -88,6 +89,9 @@ fn same_number(a: &Number, b: &Number) -> bool {
 		Number::Int(x) => matches!(b, Number::Int(y) if x == y),
 		Number::Float(x) => matches!(b, Number::Float(y) if x.to_bits() == y.to_bits()),
 		Number::Decimal(x) => matches!(b, Number::Decimal(y) if x.serialize() == y.serialize()),
+		Number::BigDecimal(x) => {
+			matches!(b, Number::BigDecimal(y) if x.scale() == y.scale() && x == y)
+		}
 		Number::I8(x) => matches!(b, Number::I8(y) if x == y),
 		Number::U8(x) => matches!(b, Number::U8(y) if x == y),
 		Number::I16(x) => matches!(b, Number::I16(y) if x == y),

@@ -81,6 +81,11 @@ impl ToPgQueryJson for Statement {
 			Self::CreateView(s) => s.to_pg_query_json(),
 			Self::CreateSchema(s) => s.to_pg_query_json(),
 			Self::CreateExtension(s) => s.to_pg_query_json(),
+			Self::CreateType(s) => s.to_pg_query_json(),
+			Self::AlterType(s) => s.to_pg_query_json(),
+			Self::CreateDomain(s) => s.to_pg_query_json(),
+			Self::AlterDomain(s) => s.to_pg_query_json(),
+			Self::CreateCompositeType(s) => s.to_pg_query_json(),
 			Self::AlterTable(s) => s.to_pg_query_json(),
 			Self::Prepare(s) => s.to_pg_query_json(),
 			Self::Execute(s) => s.to_pg_query_json(),
@@ -686,6 +691,15 @@ impl ToPgQueryJson for Expr {
 				expr,
 				..
 			} => expr.to_pg_query_json(),
+			// gram.y: c_expr: '(' a_expr ')' opt_indirection builds an A_Indirection.
+			Self::FieldSelect {
+				expr,
+				field,
+				..
+			} => pg_node(
+				"A_Indirection",
+				json!({ "arg": expr.to_pg_query_json(), "indirection": [pg_str(field)] }),
+			),
 			Self::IsBound {
 				..
 			}
@@ -1267,6 +1281,7 @@ impl ToPgQueryJson for DropStmt {
 			DropObjectType::Index => "OBJECT_INDEX",
 			DropObjectType::Schema => "OBJECT_SCHEMA",
 			DropObjectType::Type => "OBJECT_TYPE",
+			DropObjectType::Domain => "OBJECT_DOMAIN",
 		};
 		obj.insert("removeType".to_string(), json!(remove_type));
 		obj.insert("missing_ok".to_string(), json!(self.if_exists));
@@ -1469,6 +1484,179 @@ impl ToPgQueryJson for CreateExtensionStmt {
 				"options": options
 			}),
 		)
+	}
+}
+
+/// gram.y: DefineStmt, the `CREATE TYPE any_name AS ENUM_P '(' opt_enum_val_list ')'` action,
+/// which builds a `CreateEnumStmt` over the type's name and its labels.
+impl ToPgQueryJson for CreateTypeStmt {
+	fn to_pg_query_json(&self) -> Value {
+		let name: Vec<Value> = self.name.parts.iter().map(|p| pg_str(p)).collect();
+		let vals: Vec<Value> = self.labels.iter().map(|l| pg_str(l)).collect();
+		pg_node("CreateEnumStmt", json!({ "typeName": name, "vals": vals }))
+	}
+}
+
+/// gram.y: AlterEnumStmt, whose `ADD_P VALUE_P` actions build an `AlterEnumStmt` with a new value
+/// and an optional neighbour, and whose `RENAME VALUE_P` action builds one with an old and a new
+/// value.
+impl ToPgQueryJson for AlterTypeStmt {
+	fn to_pg_query_json(&self) -> Value {
+		let name: Vec<Value> = self.name.parts.iter().map(|p| pg_str(p)).collect();
+		let mut obj = Map::new();
+		obj.insert("typeName".to_string(), Value::Array(name));
+		match &self.action {
+			AlterTypeAction::AddValue {
+				if_not_exists,
+				value,
+				placement,
+			} => {
+				obj.insert("newVal".to_string(), json!(value));
+				obj.insert("skipIfNewValExists".to_string(), json!(if_not_exists));
+				match placement {
+					Some(EnumValuePlacement::Before(anchor)) => {
+						obj.insert("newValNeighbor".to_string(), json!(anchor));
+						obj.insert("newValIsAfter".to_string(), json!(false));
+					}
+					Some(EnumValuePlacement::After(anchor)) => {
+						obj.insert("newValNeighbor".to_string(), json!(anchor));
+						obj.insert("newValIsAfter".to_string(), json!(true));
+					}
+					None => {}
+				}
+			}
+			AlterTypeAction::RenameValue {
+				from,
+				to,
+			} => {
+				obj.insert("oldVal".to_string(), json!(from));
+				obj.insert("newVal".to_string(), json!(to));
+				obj.insert("skipIfNewValExists".to_string(), json!(false));
+			}
+		}
+		pg_node("AlterEnumStmt", Value::Object(obj))
+	}
+}
+
+/// gram.y: CreateDomainStmt. Its elements build `Constraint` nodes in declaration order.
+impl ToPgQueryJson for CreateDomainStmt {
+	fn to_pg_query_json(&self) -> Value {
+		let name: Vec<Value> = self.name.parts.iter().map(|p| pg_str(p)).collect();
+		let constraints: Vec<Value> =
+			self.constraints.iter().map(|c| c.to_pg_query_json()).collect();
+		pg_node(
+			"CreateDomainStmt",
+			json!({
+				"domainname": name,
+				"typeName": self.data_type.to_pg_query_json(),
+				"constraints": constraints
+			}),
+		)
+	}
+}
+
+/// gram.y: ColConstraint and ColConstraintElem, as they apply to a domain.
+impl ToPgQueryJson for DomainConstraint {
+	fn to_pg_query_json(&self) -> Value {
+		let mut obj = Map::new();
+		if let Some(name) = &self.name {
+			obj.insert("conname".to_string(), json!(name));
+		}
+		let contype = match &self.kind {
+			DomainConstraintKind::NotNull => "CONSTR_NOTNULL",
+			DomainConstraintKind::Null => "CONSTR_NULL",
+			DomainConstraintKind::Check(expr) => {
+				obj.insert("raw_expr".to_string(), expr.to_pg_query_json());
+				"CONSTR_CHECK"
+			}
+			DomainConstraintKind::Default(expr) => {
+				obj.insert("raw_expr".to_string(), expr.to_pg_query_json());
+				"CONSTR_DEFAULT"
+			}
+		};
+		obj.insert("contype".to_string(), json!(contype));
+		pg_node("Constraint", Value::Object(obj))
+	}
+}
+
+/// gram.y: DefineStmt with a parenthesised attribute list, which builds a `CompositeTypeStmt`
+/// whose column definitions carry a name and a type only.
+impl ToPgQueryJson for CreateCompositeTypeStmt {
+	fn to_pg_query_json(&self) -> Value {
+		let typevar = TableRef::Table {
+			name: self.name.clone(),
+			alias: None,
+			span: self.name.span,
+		}
+		.to_pg_query_json();
+		let coldeflist: Vec<Value> = self
+			.attributes
+			.iter()
+			.map(|a| {
+				pg_node(
+					"ColumnDef",
+					json!({
+						"colname": a.name,
+						"typeName": a.data_type.to_pg_query_json()
+					}),
+				)
+			})
+			.collect();
+		pg_node(
+			"CompositeTypeStmt",
+			json!({
+				"typevar": typevar,
+				"coldeflist": coldeflist
+			}),
+		)
+	}
+}
+
+/// gram.y: AlterDomainStmt. The subtype is `T` for SET and DROP DEFAULT, `O` for SET NOT NULL,
+/// `N` for DROP NOT NULL, `C` for ADD CONSTRAINT, `X` for DROP CONSTRAINT and `V` for VALIDATE
+/// CONSTRAINT.
+impl ToPgQueryJson for AlterDomainStmt {
+	fn to_pg_query_json(&self) -> Value {
+		let name: Vec<Value> = self.name.parts.iter().map(|p| pg_str(p)).collect();
+		let mut obj = Map::new();
+		obj.insert("typeName".to_string(), Value::Array(name));
+		let subtype = match &self.action {
+			AlterDomainAction::SetDefault(expr) => {
+				obj.insert("def".to_string(), expr.to_pg_query_json());
+				"T"
+			}
+			AlterDomainAction::DropDefault => "T",
+			AlterDomainAction::SetNotNull => "O",
+			AlterDomainAction::DropNotNull => "N",
+			AlterDomainAction::AddConstraint {
+				name,
+				check,
+			} => {
+				let constraint = DomainConstraint {
+					name: name.clone(),
+					kind: DomainConstraintKind::Check(check.clone()),
+					span: self.span,
+				};
+				obj.insert("def".to_string(), constraint.to_pg_query_json());
+				"C"
+			}
+			AlterDomainAction::DropConstraint {
+				name,
+				if_exists,
+			} => {
+				obj.insert("name".to_string(), json!(name));
+				obj.insert("missing_ok".to_string(), json!(if_exists));
+				"X"
+			}
+			AlterDomainAction::ValidateConstraint {
+				name,
+			} => {
+				obj.insert("name".to_string(), json!(name));
+				"V"
+			}
+		};
+		obj.insert("subtype".to_string(), json!(subtype));
+		pg_node("AlterDomainStmt", Value::Object(obj))
 	}
 }
 

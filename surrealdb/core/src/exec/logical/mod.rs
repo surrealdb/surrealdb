@@ -80,6 +80,7 @@
 
 pub(crate) mod constants;
 pub(crate) mod effects;
+mod enum_order;
 pub(crate) mod footprint;
 mod params;
 pub(crate) mod pipelines;

@@ -811,6 +811,7 @@ pub fn is_value_literal(expr: &LogicalExpr) -> bool {
 			| LogicalLiteral::Integer(_)
 			| LogicalLiteral::Float(_)
 			| LogicalLiteral::Decimal(_)
+			| LogicalLiteral::BigDecimal(_)
 			| LogicalLiteral::I8(_)
 			| LogicalLiteral::U8(_)
 			| LogicalLiteral::I16(_)
@@ -832,6 +833,10 @@ pub fn is_value_literal(expr: &LogicalExpr) -> bool {
 			| LogicalLiteral::File(_)
 			| LogicalLiteral::Uuid(_)
 			| LogicalLiteral::Datetime(_)
+			| LogicalLiteral::Date(_)
+			| LogicalLiteral::Time(_)
+			| LogicalLiteral::Timestamp(_)
+			| LogicalLiteral::Interval(_)
 			| LogicalLiteral::Duration(_)
 			| LogicalLiteral::UnboundedRange => false,
 		},
@@ -1009,6 +1014,7 @@ fn lower_literal(literal: surface::Literal) -> Lowered<LogicalExpr> {
 		surface::Literal::Float(x) => leaf(LogicalLiteral::Float(x)),
 		surface::Literal::Integer(x) => leaf(LogicalLiteral::Integer(x)),
 		surface::Literal::Decimal(x) => leaf(LogicalLiteral::Decimal(x)),
+		surface::Literal::BigDecimal(x) => leaf(LogicalLiteral::BigDecimal(x)),
 		surface::Literal::I8(x) => leaf(LogicalLiteral::I8(x)),
 		surface::Literal::U8(x) => leaf(LogicalLiteral::U8(x)),
 		surface::Literal::I16(x) => leaf(LogicalLiteral::I16(x)),
@@ -1021,6 +1027,10 @@ fn lower_literal(literal: surface::Literal) -> Lowered<LogicalExpr> {
 		surface::Literal::Duration(x) => leaf(LogicalLiteral::Duration(x)),
 		surface::Literal::String(x) => leaf(LogicalLiteral::String(x)),
 		surface::Literal::Datetime(x) => leaf(LogicalLiteral::Datetime(x)),
+		surface::Literal::Date(x) => leaf(LogicalLiteral::Date(x)),
+		surface::Literal::Time(x) => leaf(LogicalLiteral::Time(x)),
+		surface::Literal::Timestamp(x) => leaf(LogicalLiteral::Timestamp(x)),
+		surface::Literal::Interval(x) => leaf(LogicalLiteral::Interval(x)),
 		surface::Literal::Uuid(x) => leaf(LogicalLiteral::Uuid(x)),
 		surface::Literal::Regex(x) => leaf(LogicalLiteral::Regex(x)),
 		surface::Literal::Geometry(x) => leaf(LogicalLiteral::Geometry(x)),

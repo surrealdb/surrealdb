@@ -15,6 +15,7 @@ use crate::ir::{
 	BoundBinaryOp, BoundColumnRef, BoundExpr, BoundLiteral, BoundOrder, BoundOrderDirection,
 	BoundTarget, BoundUnaryOp,
 };
+use crate::lower::enum_rank::{extreme, is_label_set, label_set_literal, rank, scalar_enum};
 use crate::lower::id_key::{
 	equal, id_column, is_key_or_link, key_of, key_operand, key_read_as, lower_id_key, record_of,
 	record_of_operand_typed, record_or_value,
@@ -30,17 +31,68 @@ use crate::system_vars::{MYSQL_SERVER_VERSION, SystemVariable, mysql_system_vari
 
 /// The engine kind a cast to the SQL type produces, `Kind::Any` for a type the cast leaves as it
 /// is.
-pub(crate) fn cast_kind(target_type: &str) -> Kind {
+pub(crate) fn cast_kind(target_type: &str, dialect: SqlDialect) -> Kind {
+	// A type the binder resolved to an enum of the database, with one `[]` for each array level.
+	if let Some(spec) = target_type.strip_prefix("enum:") {
+		let mut name = spec;
+		let mut levels = 0;
+		while let Some(inner) = name.strip_suffix("[]") {
+			name = inner;
+			levels += 1;
+		}
+		let mut kind = Kind::Enum(surrealdb_expr::expr::EnumRef::Named(name.to_owned()));
+		for _ in 0..levels {
+			kind = Kind::Array(Box::new(kind), None);
+		}
+		return kind;
+	}
 	let clean_type = target_type.to_lowercase();
 	let base_type = clean_type.split('(').next().unwrap_or(&clean_type).trim();
 	match base_type {
-		"int" | "integer" | "int4" | "int8" | "int2" | "smallint" | "bigint" | "signed"
-		| "unsigned" => Kind::Int,
+		"int" | "integer" | "int4" | "int8" | "int2" | "smallint" | "bigint" | "signed" => {
+			Kind::Int
+		}
+		"unsigned" => Kind::U64,
 		"float" | "float8" | "float4" | "double" | "real" | "double precision" => Kind::Float,
-		"numeric" | "decimal" | "dec" => Kind::Decimal,
+		"numeric" | "decimal" | "dec" => {
+			// MySQL `DECIMAL` without a precision is `DECIMAL(10,0)`; PostgreSQL `numeric` without
+			// one holds any number of digits.
+			let precision = clean_type
+				.split_once('(')
+				.map(|(_, rest)| rest.split([',', ')']).next().unwrap_or("").trim());
+			let precision = match (precision, dialect) {
+				(Some(precision), _) => Some(precision),
+				(None, SqlDialect::MySql) => Some("10"),
+				(None, SqlDialect::Postgres) => None,
+			};
+			crate::lower::ddl::decimal_kind(precision)
+		}
+		"money" => Kind::Decimal,
+		// The catalog names a relation, a type or a function by its name, which stands for its
+		// OID: a cast to `oid` or a `reg*` type keeps its operand, so a name stays the name a
+		// client reads back and a number stays the OID it is.
+		"oid" | "regclass" | "regproc" | "regprocedure" | "regoper" | "regoperator" | "regtype"
+		| "regnamespace" | "regrole" | "regconfig" | "regdictionary" | "regcollation" => Kind::Any,
+		"xid" | "cid" => Kind::U32,
+		"xid8" | "pg_lsn" => Kind::U64,
 		"text" | "varchar" | "char" | "character varying" | "bpchar" | "string" => Kind::String,
 		"bool" | "boolean" => Kind::Bool,
-		"date" | "datetime" | "timestamp" | "timestamptz" => Kind::Datetime,
+		"date" => Kind::Date,
+		// MySQL `TIME` is a signed duration, which is an interval; PostgreSQL `TIME` and `TIMETZ`
+		// are a time of day.
+		"time" if dialect == SqlDialect::MySql => Kind::Interval,
+		"time" | "timetz" | "time without time zone" | "time with time zone" => Kind::Time,
+		"interval" => Kind::Interval,
+		// A PostgreSQL interval with a field qualifier, such as `interval day to second`.
+		base if dialect == SqlDialect::Postgres && base.starts_with("interval ") => Kind::Interval,
+		// MySQL `DATETIME` has no zone and `TIMESTAMP` is an instant, as PostgreSQL's
+		// `timestamp` and `timestamptz` are.
+		"datetime" | "timestamp" | "timestamp without time zone"
+			if dialect == SqlDialect::Postgres || base_type == "datetime" =>
+		{
+			Kind::Timestamp
+		}
+		"timestamp" | "timestamptz" | "timestamp with time zone" => Kind::Datetime,
 		_ => Kind::Any,
 	}
 }
@@ -53,6 +105,7 @@ pub fn lower_bound_expr(
 	match expr {
 		BoundExpr::Literal(lit) => match lit {
 			BoundLiteral::Integer(i) => Ok(LogicalExpr::Literal(LogicalLiteral::Integer(*i))),
+			BoundLiteral::Unsigned(u) => Ok(LogicalExpr::Literal(LogicalLiteral::U64(*u))),
 			BoundLiteral::Float(f) => Ok(LogicalExpr::Literal(LogicalLiteral::Float(*f))),
 			BoundLiteral::String(s) => {
 				Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(s.as_str()))))
@@ -812,6 +865,16 @@ pub fn lower_bound_expr(
 			}
 
 			let mapped_fn = func_def.internal_name.unwrap_or(func_def.name);
+			if matches!(func_def.name, "min" | "max")
+				&& let [arg] = args.as_slice()
+				&& let Some(reference) = scalar_enum(arg)
+			{
+				return Ok(extreme(
+					reference,
+					lower_bound_expr(arg, policy)?,
+					func_def.name == "max",
+				));
+			}
 			if func_def.name == "group_concat" && args.len() > 1 {
 				return Err(PlanError::UnsupportedExpression(
 					"GROUP_CONCAT over several expressions".into(),
@@ -1010,12 +1073,22 @@ pub fn lower_bound_expr(
 			low,
 			high,
 			negated,
-		} => Ok(sql_between(
-			lower_bound_expr(expr, policy)?,
-			lower_bound_expr(low, policy)?,
-			lower_bound_expr(high, policy)?,
-			*negated,
-		)),
+		} => {
+			let (value, low_bound, high_bound) = (
+				lower_bound_expr(expr, policy)?,
+				lower_bound_expr(low, policy)?,
+				lower_bound_expr(high, policy)?,
+			);
+			Ok(match scalar_enum(expr).or_else(|| scalar_enum(low)).or_else(|| scalar_enum(high)) {
+				Some(reference) => sql_between(
+					rank(reference, value),
+					rank(reference, low_bound),
+					rank(reference, high_bound),
+					*negated,
+				),
+				None => sql_between(value, low_bound, high_bound, *negated),
+			})
+		}
 		BoundExpr::InList {
 			expr,
 			list,
@@ -1059,7 +1132,51 @@ pub fn lower_bound_expr(
 			expr,
 			target_type,
 		} => {
+			if policy.dialect == SqlDialect::Postgres {
+				// An interval cast with a field qualifier or a precision is the cast to `interval`,
+				// truncated and rounded to the declared type.
+				if let Some(declared) = super::functions::interval_typmod(target_type) {
+					let plain = BoundExpr::Cast {
+						expr: expr.clone(),
+						target_type: "interval".to_owned(),
+					};
+					let lowered = lower_bound_expr(&plain, policy)?;
+					return Ok(super::functions::adjust_interval(lowered, &declared));
+				}
+				if let BoundExpr::Literal(BoundLiteral::String(text)) = expr.as_ref()
+					&& let Some(lowered) = super::family_cast::lower_text_cast(text, target_type)
+				{
+					return lowered;
+				}
+				if let Some(lowered) = super::family_cast::lower_cast_to_text(expr, target_type) {
+					return lowered;
+				}
+			}
 			let lowered = lower_bound_expr(expr, policy)?;
+			// The text form of an array of enum labels is read when the expression is lowered.
+			let lowered = if let BoundExpr::Literal(BoundLiteral::String(text)) = expr.as_ref()
+				&& target_type.starts_with("enum:")
+				&& target_type.ends_with("[]")
+			{
+				let items = parse_text_array_literal(text).ok_or_else(|| {
+					PlanError::InvalidTextRepresentation(format!(
+						"malformed array literal: \"{text}\""
+					))
+				})?;
+				LogicalExpr::Array(
+					items
+						.into_iter()
+						.map(|item| match item {
+							Some(label) => LogicalExpr::Literal(LogicalLiteral::String(
+								Strand::from(label.as_str()),
+							)),
+							None => LogicalExpr::Literal(LogicalLiteral::Null),
+						})
+						.collect(),
+				)
+			} else {
+				lowered
+			};
 			let clean_type = target_type.to_lowercase();
 			if clean_type == "regtype" {
 				return Ok(lower_regtype(lowered));
@@ -1069,6 +1186,9 @@ pub fn lower_bound_expr(
 			{
 				return lower_regtype_array_literal(text);
 			}
+			if let Some(array) = lower_multidim_array_cast(expr, target_type)? {
+				return Ok(array);
+			}
 			let base_type = clean_type.split('(').next().unwrap_or(&clean_type).trim();
 			if base_type == "vector" {
 				let dimensions = clean_type
@@ -1077,7 +1197,7 @@ pub fn lower_bound_expr(
 					.and_then(|count| count.trim().parse::<usize>().ok());
 				return super::vector_expr::lower_cast(lowered, dimensions);
 			}
-			let kind = cast_kind(target_type);
+			let kind = cast_kind(target_type, policy.dialect);
 			if matches!(kind, Kind::Any) {
 				return Ok(lowered);
 			}
@@ -1085,19 +1205,28 @@ pub fn lower_bound_expr(
 			{
 				return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
 			}
-			let lowered = if matches!(kind, Kind::Datetime) {
+			// An operand that is already a date, time, timestamp or interval needs no reading of
+			// its text.
+			let operand_is_temporal =
+				crate::lower::temporal::static_type(expr, policy.dialect).is_temporal();
+			let lowered = if matches!(kind, Kind::Datetime)
+				|| (matches!(kind, Kind::Date | Kind::Timestamp) && !operand_is_temporal)
+			{
 				crate::lower::functions::datetime_cast_operand(lowered)
 			} else {
 				lowered
 			};
+			let lowered = crate::lower::functions::timetz_cast_operand(&clean_type, lowered);
+			let lowered = if matches!(kind, Kind::Time) {
+				crate::lower::functions::time_of_timestamp_text(lowered)
+			} else {
+				lowered
+			};
 			if matches!(lowered, LogicalExpr::Literal(_)) {
-				return Ok(crate::lower::functions::truncated_to_date(
-					target_type,
-					LogicalExpr::Prefix {
-						op: PrefixOperator::Cast(kind),
-						expr: Box::new(lowered),
-					},
-				));
+				return Ok(LogicalExpr::Prefix {
+					op: PrefixOperator::Cast(kind),
+					expr: Box::new(lowered),
+				});
 			}
 			// A cast of NULL or NONE is NULL. The operand is evaluated once and the cast applies to
 			// it as `Current`, so chained casts grow linearly; `??` maps the NONE that `Optional`
@@ -1105,13 +1234,10 @@ pub fn lower_bound_expr(
 			Ok(LogicalExpr::Binary {
 				left: Box::new(LogicalExpr::Optional {
 					base: Box::new(lowered),
-					then: Box::new(crate::lower::functions::truncated_to_date(
-						target_type,
-						LogicalExpr::Prefix {
-							op: PrefixOperator::Cast(kind),
-							expr: Box::new(LogicalExpr::Current),
-						},
-					)),
+					then: Box::new(LogicalExpr::Prefix {
+						op: PrefixOperator::Cast(kind),
+						expr: Box::new(LogicalExpr::Current),
+					}),
 				}),
 				op: BinaryOperator::NullCoalescing,
 				right: Box::new(LogicalExpr::Literal(LogicalLiteral::Null)),
@@ -1508,12 +1634,40 @@ fn lower_operands(
 		}
 	}
 	let (mut l, mut r) = (lower_bound_expr(left, policy)?, lower_bound_expr(right, policy)?);
+	// A set of labels equals the text of its members, in any order.
+	if matches!(
+		op,
+		BoundBinaryOp::Equal
+			| BoundBinaryOp::NotEqual
+			| BoundBinaryOp::NullSafeEqual
+			| BoundBinaryOp::DistinctFrom
+	) {
+		if is_label_set(left)
+			&& let BoundExpr::Literal(BoundLiteral::String(text)) = right
+		{
+			r = label_set_literal(text);
+		} else if is_label_set(right)
+			&& let BoundExpr::Literal(BoundLiteral::String(text)) = left
+		{
+			l = label_set_literal(text);
+		}
+	}
 	if matches!(op, BoundBinaryOp::Equal | BoundBinaryOp::NotEqual) {
 		if let Some(truth) = pg_bool_spelling(right) {
 			r = bool_if_boolean(&l, truth, r);
 		} else if let Some(truth) = pg_bool_spelling(left) {
 			l = bool_if_boolean(&r, truth, l);
 		}
+	}
+	if matches!(
+		op,
+		BoundBinaryOp::LessThan
+			| BoundBinaryOp::LessThanEqual
+			| BoundBinaryOp::GreaterThan
+			| BoundBinaryOp::GreaterThanEqual
+	) && let Some(reference) = scalar_enum(left).or_else(|| scalar_enum(right))
+	{
+		return Ok((rank(reference, l), rank(reference, r)));
 	}
 	Ok((l, r))
 }
@@ -1633,6 +1787,11 @@ fn lower_binary_op(
 			lower_bound_expr(left, policy)?,
 			lower_bound_expr(right, policy)?,
 		));
+	}
+	if let Some((promoted_left, promoted_right)) =
+		super::temporal::promoted_operands(left, op, right, policy.dialect)
+	{
+		return lower_binary_op(&promoted_left, op, &promoted_right, policy);
 	}
 	let (l, r) = lower_operands(left, op, right, policy)?;
 
@@ -1924,6 +2083,14 @@ fn lower_json_op(
 	policy: &DialectPolicy,
 ) -> Result<LogicalExpr, PlanError> {
 	if op == BoundBinaryOp::JsonContains {
+		if is_range(left) && !is_range(right) {
+			// A range contains an element when the element lies between its bounds.
+			return Ok(LogicalExpr::Binary {
+				left: Box::new(lower_bound_expr(left, policy)?),
+				op: BinaryOperator::Contain,
+				right: Box::new(lower_bound_expr(right, policy)?),
+			});
+		}
 		return Err(PlanError::UnsupportedExpression("the @> containment operator".into()));
 	}
 	let Some(place) = lower_json_place(left, op, right, policy)? else {
@@ -1934,6 +2101,22 @@ fn lower_json_op(
 	} else {
 		json_text(place)
 	})
+}
+
+/// Whether `expr` is a range: a column declared as a range type, or a cast to one. A multirange
+/// is not a range.
+fn is_range(expr: &BoundExpr) -> bool {
+	if let BoundExpr::Column(col) = expr {
+		return matches!(col.declared_type, crate::SqlType::Range(_));
+	}
+	if let BoundExpr::Cast {
+		target_type,
+		..
+	} = expr
+	{
+		return matches!(crate::SqlType::from_name(target_type), crate::SqlType::Range(_));
+	}
+	false
 }
 
 /// `operand IS NULL`.
@@ -2091,7 +2274,7 @@ fn json_operand(op: BoundBinaryOp, operand: &BoundExpr) -> Result<JsonOperand, P
 			Ok(index) => Ok(JsonOperand::Element(i64::from(index))),
 			Err(_) => Err(undefined("bigint")),
 		},
-		BoundLiteral::Float(_) => Err(undefined("numeric")),
+		BoundLiteral::Unsigned(_) | BoundLiteral::Float(_) => Err(undefined("numeric")),
 		BoundLiteral::Boolean(_) => Err(undefined("boolean")),
 		BoundLiteral::String(_) | BoundLiteral::Null => Ok(JsonOperand::Dynamic),
 	}
@@ -2546,6 +2729,11 @@ pub fn lower_bound_order(
 		Some((col, _)) => lower_column_raw(col),
 		None => lower_bound_expr(&order.expr, policy)?,
 	};
+	// An enum column orders by the position of its labels in the declaration.
+	let value = match scalar_enum(&order.expr) {
+		Some(reference) => rank(reference, value),
+		None => value,
+	};
 	let direction = match order.direction {
 		BoundOrderDirection::Asc => true,
 		BoundOrderDirection::Desc => false,
@@ -2892,6 +3080,54 @@ pub(crate) fn regtype_oid(name: &str) -> Option<i64> {
 		.iter()
 		.find(|(_, typname, format)| *typname == name || *format == name)
 		.map(|(oid, ..)| *oid)
+}
+
+/// Lower a text literal cast to an array of two or more dimensions, `'{{1,2},{3,4}}'::int[][]`:
+/// the literal is parsed as a nested array and each element is cast to the element type, so a
+/// ragged literal is refused as malformed. A cast to one dimension, or of an operand that is not a
+/// text literal, is `None` and lowers as it always has.
+fn lower_multidim_array_cast(
+	expr: &BoundExpr,
+	target_type: &str,
+) -> Result<Option<LogicalExpr>, PlanError> {
+	let dimensions = target_type.matches("[]").count();
+	if dimensions < 2 || !target_type.ends_with("[]") {
+		return Ok(None);
+	}
+	let BoundExpr::Literal(BoundLiteral::String(text)) = expr else {
+		return Ok(None);
+	};
+	let element = target_type.trim_end_matches("[]").to_lowercase();
+	let kind = cast_kind(&element, SqlDialect::Postgres);
+	let items = crate::array_literal::parse_array_literal(text).ok_or_else(|| {
+		PlanError::InvalidTextRepresentation(format!("malformed array literal: \"{text}\""))
+	})?;
+	fn leaf(text: &str, kind: &Kind) -> LogicalExpr {
+		let string = LogicalExpr::Literal(LogicalLiteral::String(Strand::from(text)));
+		if matches!(kind, Kind::Any) {
+			string
+		} else {
+			LogicalExpr::Prefix {
+				op: PrefixOperator::Cast(kind.clone()),
+				expr: Box::new(string),
+			}
+		}
+	}
+	fn nested(items: Vec<crate::array_literal::ArrayElement>, kind: &Kind) -> LogicalExpr {
+		LogicalExpr::Array(
+			items
+				.into_iter()
+				.map(|item| match item {
+					crate::array_literal::ArrayElement::Null => {
+						LogicalExpr::Literal(LogicalLiteral::Null)
+					}
+					crate::array_literal::ArrayElement::Text(text) => leaf(&text, kind),
+					crate::array_literal::ArrayElement::Array(items) => nested(items, kind),
+				})
+				.collect(),
+		)
+	}
+	Ok(Some(nested(items, &kind)))
 }
 
 /// Lower the array literal `text` cast to `regtype[]`: the array of the oids of the types it

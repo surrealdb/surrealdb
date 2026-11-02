@@ -7,7 +7,9 @@
 use std::borrow::Cow;
 
 use surrealdb_parser_next::kw::Kw;
-use surrealdb_parser_next::lex::{Lexer, T};
+use surrealdb_parser_next::lex::{
+	Lexer, PREFIX_DATE, PREFIX_INTERVAL, PREFIX_TIME, PREFIX_TIMESTAMP, T,
+};
 use surrealdb_parser_next::{Diag, DiagKind};
 
 /// Words errors name as language, algorithm, distance and vector-type tokens
@@ -151,6 +153,10 @@ pub fn token_name(src: &str, at: u32) -> Cow<'static, str> {
 			b'd' => "a datetime",
 			b'b' => "a bytestring",
 			b'f' => "a file",
+			PREFIX_DATE => "a date",
+			PREFIX_TIME => "a time",
+			PREFIX_TIMESTAMP => "a timestamp",
+			PREFIX_INTERVAL => "an interval",
 			_ => "a strand",
 		},
 		T::Regex | T::Slash => "/",

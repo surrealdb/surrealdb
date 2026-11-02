@@ -23,6 +23,6 @@ CREATE TABLE days (id INT, at TIMESTAMP);
 
 INSERT INTO days (id, at) VALUES (1, CURRENT_DATE);
 
-UPDATE days SET at = CURRENT_DATE WHERE id = 1 RETURNING at = current_date AS returned;
+UPDATE days SET at = CURRENT_DATE WHERE id = 1 RETURNING at = CAST(current_date AS timestamp) AS returned;
 
-SELECT id, at = current_date AS today FROM days;
+SELECT id, at = CAST(current_date AS timestamp) AS today FROM days;

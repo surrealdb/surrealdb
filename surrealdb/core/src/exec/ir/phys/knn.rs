@@ -1340,7 +1340,7 @@ fn target_of(ir: &Ir, cx: &PhysCx<'_>, ranked: &Ranked) -> Result<Option<Target>
 					.iter()
 					.map(|value| {
 						if let Value::Number(number) = value {
-							Some(*number)
+							Some(number.clone())
 						} else {
 							None
 						}

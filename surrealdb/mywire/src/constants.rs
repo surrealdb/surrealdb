@@ -42,6 +42,8 @@ pub const DEFAULT_SERVER_CAPABILITIES: u32 = CLIENT_LONG_PASSWORD
 
 // Character sets
 pub const CHARSET_UTF8MB4_GENERAL_CI: u16 = 45;
+/// The `binary` character set, which a column of bytes (`BIT`, a spatial type) is announced with.
+pub const CHARSET_BINARY: u16 = 63;
 pub const CHARSET_UTF8MB4_0900_AI_CI: u16 = 255;
 
 // Status Flags

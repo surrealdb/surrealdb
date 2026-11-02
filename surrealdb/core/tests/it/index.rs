@@ -278,14 +278,14 @@ async fn multi_index_concurrent_test(
                 let Value::Number(count) = count else {
                     panic!("Invalid result format: {}", count.to_sql_pretty())
                 };
-                real_total_count += count.into_int()?;
+                real_total_count += count.clone().into_int()?;
             }
             info!("Real count: {real_total_count} - Index: count: {index_count} - Index status: {status} - Pending: {pending}");
             if index_count.into_int()? == real_total_count {
                 if status != "ready" {
                     panic!("Invalid index status: {}", status.to_sql_pretty())
                 }
-                if pending.into_int()? != 0 {
+                if pending.clone().into_int()? != 0 {
                     panic!("Invalid pending number: {}", pending.to_sql_pretty())
                 }
                 // Success.

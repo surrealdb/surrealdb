@@ -118,6 +118,50 @@ async fn outcome(ds: &Datastore, dialect: Dialect, text: &str) -> String {
 	cells.join("|")
 }
 
+/// An interval as PostgreSQL writes it in its default style: each non-zero year, month and day,
+/// then the time, with a `+` on a positive field after a negative one.
+fn interval_text(months: i32, days: i32, micros: i64) -> String {
+	let mut out = String::new();
+	let mut before = false;
+	for (value, unit) in [(months / 12, "year"), (months % 12, "mon"), (days, "day")] {
+		if value == 0 {
+			continue;
+		}
+		if !out.is_empty() {
+			out.push(' ');
+		}
+		if before && value > 0 {
+			out.push('+');
+		}
+		out.push_str(&format!(
+			"{value} {unit}{}",
+			if value == 1 {
+				""
+			} else {
+				"s"
+			}
+		));
+		before = value < 0;
+	}
+	if out.is_empty() || micros != 0 {
+		if !out.is_empty() {
+			out.push(' ');
+		}
+		if micros < 0 {
+			out.push('-');
+		} else if before {
+			out.push('+');
+		}
+		let abs = micros.unsigned_abs();
+		let secs = abs / 1_000_000;
+		out.push_str(&format!("{:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60));
+		if !abs.is_multiple_of(1_000_000) {
+			out.push_str(format!(".{:06}", abs % 1_000_000).trim_end_matches('0'));
+		}
+	}
+	out
+}
+
 fn render(dialect: Dialect, value: &Value) -> String {
 	match value {
 		Value::None | Value::Null => "NULL".to_owned(),
@@ -134,6 +178,17 @@ fn render(dialect: Dialect, value: &Value) -> String {
 		},
 		Value::String(s) => s.clone(),
 		Value::Datetime(d) => d.format("%Y-%m-%d %H:%M:%S").to_string(),
+		Value::Date(d) => d.to_string(),
+		Value::Time(t) => {
+			let shown = t.to_string();
+			if shown.contains('.') {
+				shown.trim_end_matches('0').to_owned()
+			} else {
+				shown
+			}
+		}
+		Value::Timestamp(t) => t.to_string().replacen('T', " ", 1),
+		Value::Interval(i) => interval_text(i.months(), i.days(), i.micros()),
 		Value::Array(items) => {
 			let items: Vec<String> = items.iter().map(|item| render(dialect, item)).collect();
 			format!("[{}]", items.join(","))
@@ -167,6 +222,10 @@ fn json(value: &Value) -> String {
 			object.iter().map(|(k, v)| format!("{k:?}:{}", json(v))).collect::<Vec<_>>().join(",")
 		),
 		Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Bytes(_)
 		| Value::Duration(_)
 		| Value::Uuid(_)

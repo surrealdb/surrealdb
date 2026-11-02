@@ -81,42 +81,7 @@ impl<'a> Parser<'a> {
 	fn parse_expr_bp_inner(&mut self, min_bp: u8, loop_depth: &mut u32) -> ParseResult<Expr> {
 		// Prefix / Prefix operator handling
 		let mut left = if let Some(prefix_bp) = prefix_binding_power(&self.peek().kind) {
-			let op_tok = self.bump()?;
-			let right = self.parse_expr_bp(prefix_bp)?;
-			let span = op_tok.span.merge(right.span());
-
-			let unary_op = if op_tok.kind == TokenKind::Keyword(Keyword::Not) {
-				UnaryOperator::Not
-			} else if op_tok.kind == TokenKind::Operator("+") {
-				UnaryOperator::Plus
-			} else if op_tok.kind == TokenKind::Operator("-") {
-				UnaryOperator::Minus
-			} else if op_tok.kind == TokenKind::Operator("~") {
-				UnaryOperator::BitNot
-			} else if let TokenKind::Operator(s) = &op_tok.kind {
-				UnaryOperator::Custom(s.to_string())
-			} else {
-				return Err(ParseError::new(
-					op_tok.span,
-					ErrorKind::InvalidExpression("invalid prefix operator"),
-				));
-			};
-
-			// gram.y: a_expr: '-' a_expr %prec UMINUS (doNegate) folds a minus into the numeric
-			// constant it applies to. The decimal 9223372036854775808 is a number beyond int8
-			// until it is negated, and then it is the integer `i64::MIN`.
-			if unary_op == UnaryOperator::Minus && self.is_int8_minimum_magnitude(&right) {
-				Expr::Literal {
-					lit: Literal::Integer(i64::MIN),
-					span,
-				}
-			} else {
-				Expr::UnaryOp {
-					op: unary_op,
-					expr: Box::new(right),
-					span,
-				}
-			}
+			self.parse_prefix_expr(prefix_bp)?
 		} else {
 			self.parse_primary_expr()?
 		};
@@ -130,302 +95,358 @@ impl<'a> Parser<'a> {
 			self.enter_recursion(self.peek().span)?;
 			*loop_depth += 1;
 
-			let negated = self.eat(&TokenKind::Keyword(Keyword::Not))?;
+			left = self.parse_infix_expr(left, r_bp)?;
+		}
 
-			let op_tok = self.peek().clone();
+		Ok(left)
+	}
 
-			// 1. Typecast `::`
-			if op_tok.kind == TokenKind::DoubleColon {
-				self.bump()?; // consume '::'
-				let data_type = self.parse_type_name()?;
-				let span = left.span().merge(data_type.span);
-				left = Expr::TypeCast {
-					expr: Box::new(left),
-					data_type,
-					span,
-				};
-				continue;
+	/// A prefix operator and its operand. Out of line so the frame of
+	/// [`Self::parse_expr_bp_inner`], which every level of a nested expression holds, does not
+	/// carry this one's temporaries.
+	///
+	/// gram.y: a_expr (`'+' a_expr`, `'-' a_expr`, `NOT a_expr`, `qual_Op a_expr`)
+	#[inline(never)]
+	fn parse_prefix_expr(&mut self, prefix_bp: u8) -> ParseResult<Expr> {
+		let op_tok = self.bump()?;
+		let right = self.parse_expr_bp(prefix_bp)?;
+		let span = op_tok.span.merge(right.span());
+
+		let unary_op = if op_tok.kind == TokenKind::Keyword(Keyword::Not) {
+			UnaryOperator::Not
+		} else if op_tok.kind == TokenKind::Operator("+") {
+			UnaryOperator::Plus
+		} else if op_tok.kind == TokenKind::Operator("-") {
+			UnaryOperator::Minus
+		} else if op_tok.kind == TokenKind::Operator("~") {
+			UnaryOperator::BitNot
+		} else if let TokenKind::Operator(s) = &op_tok.kind {
+			UnaryOperator::Custom(s.to_string())
+		} else {
+			return Err(ParseError::new(
+				op_tok.span,
+				ErrorKind::InvalidExpression("invalid prefix operator"),
+			));
+		};
+
+		// gram.y: a_expr: '-' a_expr %prec UMINUS (doNegate) folds a minus into the numeric
+		// constant it applies to. The decimal 9223372036854775808 is a number beyond int8
+		// until it is negated, and then it is the integer `i64::MIN`.
+		Ok(if unary_op == UnaryOperator::Minus && self.is_int8_minimum_magnitude(&right) {
+			Expr::Literal {
+				lit: Literal::Integer(i64::MIN),
+				span,
 			}
+		} else {
+			Expr::UnaryOp {
+				op: unary_op,
+				expr: Box::new(right),
+				span,
+			}
+		})
+	}
 
-			// 2. Subscript or Slice `[`
-			if op_tok.kind == TokenKind::LBracket {
-				self.bump()?; // consume '['
-				let (subscript, is_slice, upper) = if self.eat(&TokenKind::Colon)? {
-					// Slice without lower bound: `[:upper]`
+	/// The infix or postfix operator at the cursor applied to `left`, with `r_bp` the binding power
+	/// of its right operand. Out of line for the same reason as [`Self::parse_prefix_expr`].
+	///
+	/// gram.y: a_expr (binary, `IS`, `BETWEEN`, `IN`, `::`, subscript and `COLLATE` forms)
+	#[inline(never)]
+	fn parse_infix_expr(&mut self, mut left: Expr, r_bp: u8) -> ParseResult<Expr> {
+		let negated = self.eat(&TokenKind::Keyword(Keyword::Not))?;
+
+		let op_tok = self.peek().clone();
+
+		// 1. Typecast `::`
+		if op_tok.kind == TokenKind::DoubleColon {
+			self.bump()?; // consume '::'
+			let data_type = self.parse_type_name()?;
+			let span = left.span().merge(data_type.span);
+			left = Expr::TypeCast {
+				expr: Box::new(left),
+				data_type,
+				span,
+			};
+			return Ok(left);
+		}
+
+		// 2. Subscript or Slice `[`
+		if op_tok.kind == TokenKind::LBracket {
+			self.bump()?; // consume '['
+			let (subscript, is_slice, upper) = if self.eat(&TokenKind::Colon)? {
+				// Slice without lower bound: `[:upper]`
+				let upper = if self.peek().kind == TokenKind::RBracket {
+					None
+				} else {
+					Some(Box::new(self.parse_expr()?))
+				};
+				(None, true, upper)
+			} else {
+				let first = self.parse_expr()?;
+				if self.eat(&TokenKind::Colon)? {
+					// Slice with lower bound: `[lower:upper]` or `[lower:]`
 					let upper = if self.peek().kind == TokenKind::RBracket {
 						None
 					} else {
 						Some(Box::new(self.parse_expr()?))
 					};
-					(None, true, upper)
+					(Some(Box::new(first)), true, upper)
 				} else {
-					let first = self.parse_expr()?;
-					if self.eat(&TokenKind::Colon)? {
-						// Slice with lower bound: `[lower:upper]` or `[lower:]`
-						let upper = if self.peek().kind == TokenKind::RBracket {
-							None
-						} else {
-							Some(Box::new(self.parse_expr()?))
-						};
-						(Some(Box::new(first)), true, upper)
-					} else {
-						// Standard single subscript `[index]`
-						(Some(Box::new(first)), false, None)
-					}
-				};
-
-				let r_bracket = self.expect(&TokenKind::RBracket, "']'")?;
-				let span = left.span().merge(r_bracket.span);
-
-				left = if is_slice {
-					Expr::Slice {
-						expr: Box::new(left),
-						lower: subscript,
-						upper,
-						span,
-					}
-				} else if let Some(index) = subscript {
-					Expr::Subscript {
-						expr: Box::new(left),
-						index,
-						span,
-					}
-				} else {
-					return Err(ParseError::new(
-						span,
-						ErrorKind::InvalidExpression("empty array subscript"),
-					));
-				};
-				continue;
-			}
-
-			// 3. COLLATE
-			if op_tok.kind == TokenKind::Keyword(Keyword::Collate) {
-				self.bump()?; // consume 'COLLATE'
-				let collation = self.parse_qualified_name_with_labels()?;
-				let span = left.span().merge(collation.span);
-				left = Expr::Collate {
-					expr: Box::new(left),
-					collation,
-					span,
-				};
-				continue;
-			}
-
-			// 4. IS [NOT] NULL / TRUE / FALSE / UNKNOWN / DISTINCT FROM
-			if op_tok.kind == TokenKind::Keyword(Keyword::Is) {
-				self.bump()?; // consume 'IS'
-				let negated = self.eat(&TokenKind::Keyword(Keyword::Not))?;
-
-				if self.peek().kind == TokenKind::Keyword(Keyword::Null) {
-					let null_tok = self.bump()?;
-					let span = left.span().merge(null_tok.span);
-					left = Expr::IsNull {
-						expr: Box::new(left),
-						negated,
-						span,
-					};
-				} else if self.peek().kind == TokenKind::Keyword(Keyword::True) {
-					let true_tok = self.bump()?;
-					let span = left.span().merge(true_tok.span);
-					left = Expr::IsTrue {
-						expr: Box::new(left),
-						negated,
-						span,
-					};
-				} else if self.peek().kind == TokenKind::Keyword(Keyword::False) {
-					let false_tok = self.bump()?;
-					let span = left.span().merge(false_tok.span);
-					left = Expr::IsFalse {
-						expr: Box::new(left),
-						negated,
-						span,
-					};
-				} else if self.peek().kind == TokenKind::Keyword(Keyword::Unknown) {
-					let unk_tok = self.bump()?;
-					let span = left.span().merge(unk_tok.span);
-					left = Expr::IsUnknown {
-						expr: Box::new(left),
-						negated,
-						span,
-					};
-				} else if self.peek().kind == TokenKind::Keyword(Keyword::Distinct) {
-					self.bump()?; // consume 'DISTINCT'
-					self.expect(&TokenKind::Keyword(Keyword::From), "'FROM'")?;
-					let right = self.parse_expr_bp(r_bp)?;
-					let span = left.span().merge(right.span());
-					left = Expr::IsDistinctFrom {
-						left: Box::new(left),
-						right: Box::new(right),
-						negated,
-						span,
-					};
-				} else if self.peek().kind == TokenKind::Keyword(Keyword::Bound) {
-					let bound_tok = self.bump()?;
-					let span = left.span().merge(bound_tok.span);
-					left = Expr::IsBound {
-						expr: Box::new(left),
-						negated,
-						span,
-					};
-				} else {
-					return Err(ParseError::new(
-						self.peek().span,
-						ErrorKind::UnexpectedToken {
-							expected: "NULL, TRUE, FALSE, UNKNOWN, DISTINCT FROM, or BOUND",
-							found: self.peek().kind.to_string(),
-						},
-					));
+					// Standard single subscript `[index]`
+					(Some(Box::new(first)), false, None)
 				}
-				continue;
-			}
-
-			// 5. ISNULL / NOTNULL keywords
-			if op_tok.kind == TokenKind::Keyword(Keyword::Isnull) {
-				let tok = self.bump()?;
-				let span = left.span().merge(tok.span);
-				left = Expr::IsNull {
-					expr: Box::new(left),
-					negated: false,
-					span,
-				};
-				continue;
-			}
-			if op_tok.kind == TokenKind::Keyword(Keyword::Notnull) {
-				let tok = self.bump()?;
-				let span = left.span().merge(tok.span);
-				left = Expr::IsNull {
-					expr: Box::new(left),
-					negated: true,
-					span,
-				};
-				continue;
-			}
-
-			// 6. BETWEEN [SYMMETRIC] low AND high
-			if op_tok.kind == TokenKind::Keyword(Keyword::Between) {
-				self.bump()?; // consume 'BETWEEN'
-				let symmetric = self.eat(&TokenKind::Keyword(Keyword::Symmetric))?;
-				let low = self.parse_expr_bp(r_bp)?;
-				self.expect(&TokenKind::Keyword(Keyword::And), "'AND'")?;
-				let high = self.parse_expr_bp(r_bp)?;
-				let span = left.span().merge(high.span());
-				left = Expr::Between {
-					expr: Box::new(left),
-					low: Box::new(low),
-					high: Box::new(high),
-					negated,
-					symmetric,
-					span,
-				};
-				continue;
-			}
-
-			// 7. IN (list...) or IN (SELECT ...)
-			if op_tok.kind == TokenKind::Keyword(Keyword::In) {
-				self.bump()?; // consume 'IN'
-				self.expect(&TokenKind::LParen, "'('")?;
-				if matches!(
-					self.peek().kind,
-					TokenKind::Keyword(Keyword::Select | Keyword::With | Keyword::Values)
-				) {
-					let sub = self.parse_subquery_box()?;
-					let r_paren = self.expect(&TokenKind::RParen, "')'")?;
-					let span = left.span().merge(r_paren.span);
-					left = Expr::InSubquery {
-						expr: Box::new(left),
-						subquery: sub,
-						negated,
-						span,
-					};
-					continue;
-				}
-				let mut list = Vec::new();
-				while self.peek().kind != TokenKind::RParen {
-					list.push(self.parse_expr()?);
-					if !self.eat(&TokenKind::Comma)? {
-						break;
-					}
-				}
-				let r_paren = self.expect(&TokenKind::RParen, "')'")?;
-				let span = left.span().merge(r_paren.span);
-				left = Expr::InList {
-					expr: Box::new(left),
-					list,
-					negated,
-					span,
-				};
-				continue;
-			}
-
-			// 8. General Binary Operator
-			let schema_qualified = op_tok.kind == TokenKind::Keyword(Keyword::Operator);
-			self.bump()?; // consume operator
-			let binary_op = if schema_qualified {
-				// gram.y: qual_Op: OPERATOR '(' any_operator ')'; any_operator: all_Op | ColId '.'
-				// any_operator. The schema names nothing the operator does not already mean.
-				self.expect(&TokenKind::LParen, "'(' after OPERATOR")?;
-				while self.peek2()?.kind == TokenKind::Dot {
-					self.parse_ident()?;
-					self.expect(&TokenKind::Dot, "'.'")?;
-				}
-				let operator = self.bump()?;
-				let binary_op = token_to_binary_op(&operator.kind)?;
-				self.expect(&TokenKind::RParen, "')' closing OPERATOR")?;
-				binary_op
-			} else if op_tok.kind == TokenKind::Keyword(Keyword::Like) && negated {
-				BinaryOperator::NotLike
-			} else if op_tok.kind == TokenKind::Keyword(Keyword::Ilike) && negated {
-				BinaryOperator::NotILike
-			} else if op_tok.kind == TokenKind::Keyword(Keyword::Similar) && negated {
-				self.expect(&TokenKind::Keyword(Keyword::To), "'TO'")?;
-				BinaryOperator::NotSimilarTo
-			} else if op_tok.kind == TokenKind::Keyword(Keyword::Similar) && !negated {
-				self.expect(&TokenKind::Keyword(Keyword::To), "'TO'")?;
-				BinaryOperator::SimilarTo
-			} else {
-				token_to_binary_op(&op_tok.kind)?
 			};
-			let quantifier = if self.peek().kind == TokenKind::Keyword(Keyword::Any) {
-				Some(Quantifier::Any)
-			} else if self.peek().kind == TokenKind::Keyword(Keyword::Some) {
-				Some(Quantifier::Some)
-			} else if self.peek().kind == TokenKind::Keyword(Keyword::All) {
-				Some(Quantifier::All)
-			} else {
-				None
-			};
-			if let Some(quantifier) = quantifier {
-				self.bump()?; // consume ANY / SOME / ALL
-				self.expect(&TokenKind::LParen, "'(' after quantifier")?;
-				if !matches!(
-					self.peek().kind,
-					TokenKind::Keyword(Keyword::Select | Keyword::With | Keyword::Values)
-				) {
-					left = self.parse_quantified_array(left, binary_op, quantifier)?;
-					continue;
-				}
-				let sub = self.parse_subquery_box()?;
-				let r_paren = self.expect(&TokenKind::RParen, "')' closing quantified subquery")?;
-				let span = left.span().merge(r_paren.span);
-				left = Expr::Quantified {
+
+			let r_bracket = self.expect(&TokenKind::RBracket, "']'")?;
+			let span = left.span().merge(r_bracket.span);
+
+			left = if is_slice {
+				Expr::Slice {
 					expr: Box::new(left),
-					op: binary_op,
-					quantifier,
-					subquery: sub,
+					lower: subscript,
+					upper,
 					span,
-				};
-				continue;
-			}
-			let right = self.parse_expr_bp(r_bp)?;
-			let span = left.span().merge(right.span());
-			left = Expr::BinaryOp {
-				left: Box::new(left),
-				op: binary_op,
-				right: Box::new(right),
+				}
+			} else if let Some(index) = subscript {
+				Expr::Subscript {
+					expr: Box::new(left),
+					index,
+					span,
+				}
+			} else {
+				return Err(ParseError::new(
+					span,
+					ErrorKind::InvalidExpression("empty array subscript"),
+				));
+			};
+			return Ok(left);
+		}
+
+		// 3. COLLATE
+		if op_tok.kind == TokenKind::Keyword(Keyword::Collate) {
+			self.bump()?; // consume 'COLLATE'
+			let collation = self.parse_qualified_name_with_labels()?;
+			let span = left.span().merge(collation.span);
+			left = Expr::Collate {
+				expr: Box::new(left),
+				collation,
 				span,
 			};
+			return Ok(left);
 		}
+
+		// 4. IS [NOT] NULL / TRUE / FALSE / UNKNOWN / DISTINCT FROM
+		if op_tok.kind == TokenKind::Keyword(Keyword::Is) {
+			self.bump()?; // consume 'IS'
+			let negated = self.eat(&TokenKind::Keyword(Keyword::Not))?;
+
+			if self.peek().kind == TokenKind::Keyword(Keyword::Null) {
+				let null_tok = self.bump()?;
+				let span = left.span().merge(null_tok.span);
+				left = Expr::IsNull {
+					expr: Box::new(left),
+					negated,
+					span,
+				};
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::True) {
+				let true_tok = self.bump()?;
+				let span = left.span().merge(true_tok.span);
+				left = Expr::IsTrue {
+					expr: Box::new(left),
+					negated,
+					span,
+				};
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::False) {
+				let false_tok = self.bump()?;
+				let span = left.span().merge(false_tok.span);
+				left = Expr::IsFalse {
+					expr: Box::new(left),
+					negated,
+					span,
+				};
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Unknown) {
+				let unk_tok = self.bump()?;
+				let span = left.span().merge(unk_tok.span);
+				left = Expr::IsUnknown {
+					expr: Box::new(left),
+					negated,
+					span,
+				};
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Distinct) {
+				self.bump()?; // consume 'DISTINCT'
+				self.expect(&TokenKind::Keyword(Keyword::From), "'FROM'")?;
+				let right = self.parse_expr_bp(r_bp)?;
+				let span = left.span().merge(right.span());
+				left = Expr::IsDistinctFrom {
+					left: Box::new(left),
+					right: Box::new(right),
+					negated,
+					span,
+				};
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Bound) {
+				let bound_tok = self.bump()?;
+				let span = left.span().merge(bound_tok.span);
+				left = Expr::IsBound {
+					expr: Box::new(left),
+					negated,
+					span,
+				};
+			} else {
+				return Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::UnexpectedToken {
+						expected: "NULL, TRUE, FALSE, UNKNOWN, DISTINCT FROM, or BOUND",
+						found: self.peek().kind.to_string(),
+					},
+				));
+			}
+			return Ok(left);
+		}
+
+		// 5. ISNULL / NOTNULL keywords
+		if op_tok.kind == TokenKind::Keyword(Keyword::Isnull) {
+			let tok = self.bump()?;
+			let span = left.span().merge(tok.span);
+			left = Expr::IsNull {
+				expr: Box::new(left),
+				negated: false,
+				span,
+			};
+			return Ok(left);
+		}
+		if op_tok.kind == TokenKind::Keyword(Keyword::Notnull) {
+			let tok = self.bump()?;
+			let span = left.span().merge(tok.span);
+			left = Expr::IsNull {
+				expr: Box::new(left),
+				negated: true,
+				span,
+			};
+			return Ok(left);
+		}
+
+		// 6. BETWEEN [SYMMETRIC] low AND high
+		if op_tok.kind == TokenKind::Keyword(Keyword::Between) {
+			self.bump()?; // consume 'BETWEEN'
+			let symmetric = self.eat(&TokenKind::Keyword(Keyword::Symmetric))?;
+			let low = self.parse_expr_bp(r_bp)?;
+			self.expect(&TokenKind::Keyword(Keyword::And), "'AND'")?;
+			let high = self.parse_expr_bp(r_bp)?;
+			let span = left.span().merge(high.span());
+			left = Expr::Between {
+				expr: Box::new(left),
+				low: Box::new(low),
+				high: Box::new(high),
+				negated,
+				symmetric,
+				span,
+			};
+			return Ok(left);
+		}
+
+		// 7. IN (list...) or IN (SELECT ...)
+		if op_tok.kind == TokenKind::Keyword(Keyword::In) {
+			self.bump()?; // consume 'IN'
+			self.expect(&TokenKind::LParen, "'('")?;
+			if matches!(
+				self.peek().kind,
+				TokenKind::Keyword(Keyword::Select | Keyword::With | Keyword::Values)
+			) {
+				let sub = self.parse_subquery_box()?;
+				let r_paren = self.expect(&TokenKind::RParen, "')'")?;
+				let span = left.span().merge(r_paren.span);
+				left = Expr::InSubquery {
+					expr: Box::new(left),
+					subquery: sub,
+					negated,
+					span,
+				};
+				return Ok(left);
+			}
+			let mut list = Vec::new();
+			while self.peek().kind != TokenKind::RParen {
+				list.push(self.parse_expr()?);
+				if !self.eat(&TokenKind::Comma)? {
+					break;
+				}
+			}
+			let r_paren = self.expect(&TokenKind::RParen, "')'")?;
+			let span = left.span().merge(r_paren.span);
+			left = Expr::InList {
+				expr: Box::new(left),
+				list,
+				negated,
+				span,
+			};
+			return Ok(left);
+		}
+
+		// 8. General Binary Operator
+		let schema_qualified = op_tok.kind == TokenKind::Keyword(Keyword::Operator);
+		self.bump()?; // consume operator
+		let binary_op = if schema_qualified {
+			// gram.y: qual_Op: OPERATOR '(' any_operator ')'; any_operator: all_Op | ColId '.'
+			// any_operator. The schema names nothing the operator does not already mean.
+			self.expect(&TokenKind::LParen, "'(' after OPERATOR")?;
+			while self.peek2()?.kind == TokenKind::Dot {
+				self.parse_ident()?;
+				self.expect(&TokenKind::Dot, "'.'")?;
+			}
+			let operator = self.bump()?;
+			let binary_op = token_to_binary_op(&operator.kind)?;
+			self.expect(&TokenKind::RParen, "')' closing OPERATOR")?;
+			binary_op
+		} else if op_tok.kind == TokenKind::Keyword(Keyword::Like) && negated {
+			BinaryOperator::NotLike
+		} else if op_tok.kind == TokenKind::Keyword(Keyword::Ilike) && negated {
+			BinaryOperator::NotILike
+		} else if op_tok.kind == TokenKind::Keyword(Keyword::Similar) && negated {
+			self.expect(&TokenKind::Keyword(Keyword::To), "'TO'")?;
+			BinaryOperator::NotSimilarTo
+		} else if op_tok.kind == TokenKind::Keyword(Keyword::Similar) && !negated {
+			self.expect(&TokenKind::Keyword(Keyword::To), "'TO'")?;
+			BinaryOperator::SimilarTo
+		} else {
+			token_to_binary_op(&op_tok.kind)?
+		};
+		let quantifier = if self.peek().kind == TokenKind::Keyword(Keyword::Any) {
+			Some(Quantifier::Any)
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Some) {
+			Some(Quantifier::Some)
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::All) {
+			Some(Quantifier::All)
+		} else {
+			None
+		};
+		if let Some(quantifier) = quantifier {
+			self.bump()?; // consume ANY / SOME / ALL
+			self.expect(&TokenKind::LParen, "'(' after quantifier")?;
+			if !matches!(
+				self.peek().kind,
+				TokenKind::Keyword(Keyword::Select | Keyword::With | Keyword::Values)
+			) {
+				left = self.parse_quantified_array(left, binary_op, quantifier)?;
+				return Ok(left);
+			}
+			let sub = self.parse_subquery_box()?;
+			let r_paren = self.expect(&TokenKind::RParen, "')' closing quantified subquery")?;
+			let span = left.span().merge(r_paren.span);
+			left = Expr::Quantified {
+				expr: Box::new(left),
+				op: binary_op,
+				quantifier,
+				subquery: sub,
+				span,
+			};
+			return Ok(left);
+		}
+		let right = self.parse_expr_bp(r_bp)?;
+		let span = left.span().merge(right.span());
+		left = Expr::BinaryOp {
+			left: Box::new(left),
+			op: binary_op,
+			right: Box::new(right),
+			span,
+		};
 
 		Ok(left)
 	}
@@ -527,108 +548,15 @@ impl<'a> Parser<'a> {
 				span: tok.span,
 			})
 		} else if tok.kind == TokenKind::LParen {
-			let l_paren = self.bump()?;
-			if matches!(
-				self.peek().kind,
-				TokenKind::Keyword(Keyword::Select | Keyword::With | Keyword::Values)
-			) {
-				let sub = self.parse_subquery_box()?;
-				let r_paren = self.expect(&TokenKind::RParen, "')'")?;
-				let span = l_paren.span.merge(r_paren.span);
-				return Ok(Expr::Subquery {
-					subquery: sub,
-					span,
-				});
-			}
-			let first = self.parse_expr()?;
-
-			if self.eat(&TokenKind::Comma)? {
-				// Row constructor `(a, b, ...)`
-				let mut fields = vec![first];
-				while self.peek().kind != TokenKind::RParen {
-					fields.push(self.parse_expr()?);
-					if !self.eat(&TokenKind::Comma)? {
-						break;
-					}
-				}
-				let r_paren = self.expect(&TokenKind::RParen, "')'")?;
-				let span = l_paren.span.merge(r_paren.span);
-				Ok(Expr::Row {
-					fields,
-					span,
-				})
-			} else {
-				let r_paren = self.expect(&TokenKind::RParen, "')'")?;
-				let span = l_paren.span.merge(r_paren.span);
-				Ok(Expr::Grouping {
-					expr: Box::new(first),
-					span,
-				})
-			}
+			self.parse_paren_expr()
 		} else if tok.kind == TokenKind::Keyword(Keyword::Array) {
-			let arr_tok = self.bump()?;
-			if self.eat(&TokenKind::LParen)? {
-				let sub = self.parse_subquery_box()?;
-				let r_paren = self.expect(&TokenKind::RParen, "')' closing ARRAY subquery")?;
-				let span = arr_tok.span.merge(r_paren.span);
-				return Ok(Expr::ArraySubquery {
-					subquery: sub,
-					span,
-				});
-			}
-			self.expect(&TokenKind::LBracket, "'['")?;
-			let mut elements = Vec::new();
-			while self.peek().kind != TokenKind::RBracket {
-				elements.push(self.parse_expr()?);
-				if !self.eat(&TokenKind::Comma)? {
-					break;
-				}
-			}
-			let r_bracket = self.expect(&TokenKind::RBracket, "']'")?;
-			let span = arr_tok.span.merge(r_bracket.span);
-			Ok(Expr::ArrayConstructor {
-				elements,
-				span,
-			})
+			self.parse_array_expr()
 		} else if tok.kind == TokenKind::Keyword(Keyword::Exists) {
-			let exists_tok = self.bump()?;
-			self.expect(&TokenKind::LParen, "'(' after EXISTS")?;
-			let sub = self.parse_subquery_box()?;
-			let r_paren = self.expect(&TokenKind::RParen, "')' closing EXISTS subquery")?;
-			let span = exists_tok.span.merge(r_paren.span);
-			Ok(Expr::Exists {
-				subquery: sub,
-				span,
-			})
+			self.parse_exists_expr()
 		} else if tok.kind == TokenKind::Keyword(Keyword::Row) {
-			let row_tok = self.bump()?;
-			self.expect(&TokenKind::LParen, "'('")?;
-			let mut fields = Vec::new();
-			while self.peek().kind != TokenKind::RParen {
-				fields.push(self.parse_expr()?);
-				if !self.eat(&TokenKind::Comma)? {
-					break;
-				}
-			}
-			let r_paren = self.expect(&TokenKind::RParen, "')'")?;
-			let span = row_tok.span.merge(r_paren.span);
-			Ok(Expr::Row {
-				fields,
-				span,
-			})
+			self.parse_row_expr()
 		} else if tok.kind == TokenKind::Keyword(Keyword::Cast) {
-			let cast_tok = self.bump()?;
-			self.expect(&TokenKind::LParen, "'('")?;
-			let expr = self.parse_expr()?;
-			self.expect(&TokenKind::Keyword(Keyword::As), "'AS'")?;
-			let data_type = self.parse_type_name()?;
-			let r_paren = self.expect(&TokenKind::RParen, "')'")?;
-			let span = cast_tok.span.merge(r_paren.span);
-			Ok(Expr::TypeCast {
-				expr: Box::new(expr),
-				data_type,
-				span,
-			})
+			self.parse_cast_expr()
 		} else if let TokenKind::Keyword(
 			kw @ (Keyword::JsonObject
 			| Keyword::JsonArray
@@ -670,22 +598,7 @@ impl<'a> Parser<'a> {
 			| Keyword::SessionUser),
 		) = &tok.kind
 		{
-			let kw = *kw;
-			let kw_tok = self.bump()?;
-			let mut span = kw_tok.span;
-			if self.peek().kind == TokenKind::LParen {
-				self.bump()?;
-				let r_paren = self.expect(&TokenKind::RParen, "')'")?;
-				span = span.merge(r_paren.span);
-			}
-			Ok(Expr::FunctionCall {
-				name: QualifiedName::single(kw.as_str().to_ascii_lowercase(), kw_tok.span),
-				args: Vec::new(),
-				distinct: false,
-				filter: None,
-				over: None,
-				span,
-			})
+			self.parse_sql_value_function(*kw)
 		} else {
 			Err(ParseError::new(
 				tok.span,
@@ -695,6 +608,182 @@ impl<'a> Parser<'a> {
 				},
 			))
 		}
+	}
+
+	/// A parenthesised expression, a row constructor `(a, b)` or a scalar subquery. Out of line so
+	/// the frame of [`Self::parse_primary_expr`], which every level of a nested expression holds,
+	/// does not carry this one's temporaries.
+	///
+	/// gram.y: c_expr (`'(' a_expr ')'`, `select_with_parens`, `implicit_row`)
+	#[inline(never)]
+	fn parse_paren_expr(&mut self) -> ParseResult<Expr> {
+		let l_paren = self.bump()?;
+		if matches!(
+			self.peek().kind,
+			TokenKind::Keyword(Keyword::Select | Keyword::With | Keyword::Values)
+		) {
+			let sub = self.parse_subquery_box()?;
+			let r_paren = self.expect(&TokenKind::RParen, "')'")?;
+			let span = l_paren.span.merge(r_paren.span);
+			return Ok(Expr::Subquery {
+				subquery: sub,
+				span,
+			});
+		}
+		let first = self.parse_expr()?;
+
+		if self.eat(&TokenKind::Comma)? {
+			// Row constructor `(a, b, ...)`
+			let mut fields = vec![first];
+			while self.peek().kind != TokenKind::RParen {
+				fields.push(self.parse_expr()?);
+				if !self.eat(&TokenKind::Comma)? {
+					break;
+				}
+			}
+			let r_paren = self.expect(&TokenKind::RParen, "')'")?;
+			let span = l_paren.span.merge(r_paren.span);
+			Ok(Expr::Row {
+				fields,
+				span,
+			})
+		} else {
+			let r_paren = self.expect(&TokenKind::RParen, "')'")?;
+			let span = l_paren.span.merge(r_paren.span);
+			let mut expr = Expr::Grouping {
+				expr: Box::new(first),
+				span,
+			};
+			// gram.y: c_expr: '(' a_expr ')' opt_indirection, where `.name` selects a field of a
+			// composite value.
+			while self.eat(&TokenKind::Dot)? {
+				let (field, field_span) = self.parse_col_label()?;
+				let span = expr.span().merge(field_span);
+				expr = Expr::FieldSelect {
+					expr: Box::new(expr),
+					field,
+					span,
+				};
+			}
+			Ok(expr)
+		}
+	}
+
+	/// An `ARRAY[...]` constructor or an `ARRAY(subquery)`. Out of line so the frame of
+	/// [`Self::parse_primary_expr`], which every level of a nested expression holds, does not
+	/// carry this one's temporaries.
+	///
+	/// gram.y: c_expr (`ARRAY select_with_parens`, `ARRAY array_expr`)
+	#[inline(never)]
+	fn parse_array_expr(&mut self) -> ParseResult<Expr> {
+		let arr_tok = self.bump()?;
+		if self.eat(&TokenKind::LParen)? {
+			let sub = self.parse_subquery_box()?;
+			let r_paren = self.expect(&TokenKind::RParen, "')' closing ARRAY subquery")?;
+			let span = arr_tok.span.merge(r_paren.span);
+			return Ok(Expr::ArraySubquery {
+				subquery: sub,
+				span,
+			});
+		}
+		self.expect(&TokenKind::LBracket, "'['")?;
+		let mut elements = Vec::new();
+		while self.peek().kind != TokenKind::RBracket {
+			elements.push(self.parse_expr()?);
+			if !self.eat(&TokenKind::Comma)? {
+				break;
+			}
+		}
+		let r_bracket = self.expect(&TokenKind::RBracket, "']'")?;
+		let span = arr_tok.span.merge(r_bracket.span);
+		Ok(Expr::ArrayConstructor {
+			elements,
+			span,
+		})
+	}
+
+	/// An `EXISTS (subquery)` test. Out of line so the frame of [`Self::parse_primary_expr`], which
+	/// every level of a nested expression holds, does not carry this one's temporaries.
+	///
+	/// gram.y: c_expr (`EXISTS select_with_parens`)
+	#[inline(never)]
+	fn parse_exists_expr(&mut self) -> ParseResult<Expr> {
+		let exists_tok = self.bump()?;
+		self.expect(&TokenKind::LParen, "'(' after EXISTS")?;
+		let sub = self.parse_subquery_box()?;
+		let r_paren = self.expect(&TokenKind::RParen, "')' closing EXISTS subquery")?;
+		let span = exists_tok.span.merge(r_paren.span);
+		Ok(Expr::Exists {
+			subquery: sub,
+			span,
+		})
+	}
+
+	/// An explicit `ROW(...)` constructor. Out of line so the frame of
+	/// [`Self::parse_primary_expr`], which every level of a nested expression holds, does not
+	/// carry this one's temporaries.
+	///
+	/// gram.y: explicit_row
+	#[inline(never)]
+	fn parse_row_expr(&mut self) -> ParseResult<Expr> {
+		let row_tok = self.bump()?;
+		self.expect(&TokenKind::LParen, "'('")?;
+		let mut fields = Vec::new();
+		while self.peek().kind != TokenKind::RParen {
+			fields.push(self.parse_expr()?);
+			if !self.eat(&TokenKind::Comma)? {
+				break;
+			}
+		}
+		let r_paren = self.expect(&TokenKind::RParen, "')'")?;
+		let span = row_tok.span.merge(r_paren.span);
+		Ok(Expr::Row {
+			fields,
+			span,
+		})
+	}
+
+	/// A `CAST(expr AS type)`. Out of line so the frame of [`Self::parse_primary_expr`], which
+	/// every level of a nested expression holds, does not carry this one's temporaries.
+	///
+	/// gram.y: func_expr_common_subexpr (`CAST '(' a_expr AS Typename ')'`)
+	#[inline(never)]
+	fn parse_cast_expr(&mut self) -> ParseResult<Expr> {
+		let cast_tok = self.bump()?;
+		self.expect(&TokenKind::LParen, "'('")?;
+		let expr = self.parse_expr()?;
+		self.expect(&TokenKind::Keyword(Keyword::As), "'AS'")?;
+		let data_type = self.parse_type_name()?;
+		let r_paren = self.expect(&TokenKind::RParen, "')'")?;
+		let span = cast_tok.span.merge(r_paren.span);
+		Ok(Expr::TypeCast {
+			expr: Box::new(expr),
+			data_type,
+			span,
+		})
+	}
+
+	/// A SQL value function such as `CURRENT_DATE` or `CURRENT_USER`, as a call with no arguments.
+	/// Out of line for the same reason as [`Self::parse_paren_expr`].
+	///
+	/// gram.y: func_expr_common_subexpr (`CURRENT_DATE`, `CURRENT_USER`, ...)
+	#[inline(never)]
+	fn parse_sql_value_function(&mut self, kw: Keyword) -> ParseResult<Expr> {
+		let kw_tok = self.bump()?;
+		let mut span = kw_tok.span;
+		if self.peek().kind == TokenKind::LParen {
+			self.bump()?;
+			let r_paren = self.expect(&TokenKind::RParen, "')'")?;
+			span = span.merge(r_paren.span);
+		}
+		Ok(Expr::FunctionCall {
+			name: QualifiedName::single(kw.as_str().to_ascii_lowercase(), kw_tok.span),
+			args: Vec::new(),
+			distinct: false,
+			filter: None,
+			over: None,
+			span,
+		})
 	}
 
 	/// gram.y: columnref, func_application.
@@ -1099,13 +1188,19 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Parse a PostgreSQL data type name (e.g. `INTEGER`, `VARCHAR(255)`, `TEXT[]`).
+	///
+	/// gram.y: Typename, SimpleTypename (`ConstInterval opt_interval` and
+	/// `ConstInterval '(' Iconst ')'`)
 	pub fn parse_type_name(&mut self) -> ParseResult<TypeName> {
+		// Only the keyword `INTERVAL` takes a field qualifier: a quoted or schema-qualified
+		// `interval` is a GenericType, which does not.
+		let interval_keyword = self.peek().kind == TokenKind::Keyword(Keyword::Interval);
 		let mut name = self.parse_qualified_name()?;
 		let mut modifiers = Vec::new();
 		let mut array_bounds = Vec::new();
 		let mut end_span = name.span;
 
-		// Check for multi-word types like DOUBLE PRECISION or CHARACTER VARYING
+		// Check for multi-word types like DOUBLE PRECISION, CHARACTER VARYING or BIT VARYING
 		if let Some(last_mut) = name.parts.last_mut() {
 			if last_mut.eq_ignore_ascii_case("double")
 				&& let Some(tok_text) = self.peek().span.slice(self.src())
@@ -1115,7 +1210,8 @@ impl<'a> Parser<'a> {
 				end_span = end_span.merge(prec_tok.span);
 				name.span = end_span;
 				last_mut.push_str(" precision");
-			} else if last_mut.eq_ignore_ascii_case("character")
+			} else if (last_mut.eq_ignore_ascii_case("character")
+				|| last_mut.eq_ignore_ascii_case("bit"))
 				&& let Some(tok_text) = self.peek().span.slice(self.src())
 				&& tok_text.eq_ignore_ascii_case("varying")
 			{
@@ -1138,6 +1234,23 @@ impl<'a> Parser<'a> {
 			}
 			let r_paren = self.expect(&TokenKind::RParen, "')'")?;
 			end_span = end_span.merge(r_paren.span);
+		}
+
+		// `INTERVAL DAY TO SECOND(3)`: the field qualifier is part of the type's name, and the
+		// precision of `SECOND(p)` is the type's modifier, as the `p` of `INTERVAL(p)` is. The
+		// grammar has no qualifier after `INTERVAL(p)`.
+		if interval_keyword
+			&& name.parts.len() == 1
+			&& modifiers.is_empty()
+			&& let Some((fields, precision, fields_span)) = self.parse_opt_interval()?
+		{
+			end_span = end_span.merge(fields_span);
+			name.span = end_span;
+			if let Some(last) = name.parts.last_mut() {
+				last.push(' ');
+				last.push_str(fields);
+			}
+			modifiers.extend(precision);
 		}
 
 		// `TIMESTAMP(3) WITH TIME ZONE`, `TIME WITHOUT TIME ZONE`: the zone suffix follows the
@@ -1204,6 +1317,79 @@ impl<'a> Parser<'a> {
 			array_bounds,
 			span,
 		})
+	}
+
+	/// The field qualifier of an interval type, if one follows: its words in lower case, one of
+	/// [`crate::ast::expr::INTERVAL_FIELD_QUALIFIERS`], the precision written in `SECOND(p)`, and
+	/// its span. `None` when the next token starts no field.
+	///
+	/// gram.y: opt_interval, interval_second
+	fn parse_opt_interval(&mut self) -> ParseResult<Option<(&'static str, Option<String>, Span)>> {
+		let Some(first) = interval_field(&self.peek().kind) else {
+			return Ok(None);
+		};
+		let mut span = self.bump()?.span;
+		let fields = if self.peek().kind == TokenKind::Keyword(Keyword::To) {
+			let (expected, allowed): (&'static str, &[&'static str]) = match first {
+				"year" => ("MONTH", &["month"]),
+				"day" => ("HOUR, MINUTE or SECOND", &["hour", "minute", "second"]),
+				"hour" => ("MINUTE or SECOND", &["minute", "second"]),
+				"minute" => ("SECOND", &["second"]),
+				// `MONTH TO` and `SECOND TO` name no range.
+				_ => {
+					let tok = self.peek().clone();
+					return Err(ParseError::new(
+						tok.span,
+						ErrorKind::UnexpectedToken {
+							expected: "a type modifier or the end of the type",
+							found: tok.kind.to_string(),
+						},
+					));
+				}
+			};
+			self.bump()?;
+			let tok = self.peek().clone();
+			let last = interval_field(&tok.kind).filter(|field| allowed.contains(field));
+			let Some(last) = last else {
+				return Err(ParseError::new(
+					tok.span,
+					ErrorKind::UnexpectedToken {
+						expected,
+						found: tok.kind.to_string(),
+					},
+				));
+			};
+			span = span.merge(self.bump()?.span);
+			match (first, last) {
+				("year", _) => "year to month",
+				("day", "hour") => "day to hour",
+				("day", "minute") => "day to minute",
+				("day", _) => "day to second",
+				("hour", "minute") => "hour to minute",
+				("hour", _) => "hour to second",
+				_ => "minute to second",
+			}
+		} else {
+			first
+		};
+		// interval_second: SECOND_P '(' Iconst ')'
+		let mut precision = None;
+		if fields.ends_with("second") && self.eat(&TokenKind::LParen)? {
+			let tok = self.peek().clone();
+			let TokenKind::Integer(digits) = tok.kind else {
+				return Err(ParseError::new(
+					tok.span,
+					ErrorKind::UnexpectedToken {
+						expected: "integer",
+						found: tok.kind.to_string(),
+					},
+				));
+			};
+			self.bump()?;
+			precision = Some(digits.to_string());
+			span = span.merge(self.expect(&TokenKind::RParen, "')'")?.span);
+		}
+		Ok(Some((fields, precision, span)))
 	}
 
 	/// Parse items in an `ORDER BY` clause.
@@ -1511,4 +1697,23 @@ fn raw_integer_literal(s: &str) -> Option<Literal> {
 		Ok(value) => Some(Literal::Integer(value)),
 		Err(_) => clean.parse::<f64>().ok().filter(|value| value.is_finite()).map(Literal::Float),
 	}
+}
+
+/// The interval field a token names, in lower case.
+///
+/// gram.y: opt_interval (YEAR_P, MONTH_P, DAY_P, HOUR_P, MINUTE_P, SECOND_P)
+fn interval_field(kind: &TokenKind<'_>) -> Option<&'static str> {
+	let TokenKind::Keyword(keyword) = kind else {
+		return None;
+	};
+	[
+		(Keyword::Year, "year"),
+		(Keyword::Month, "month"),
+		(Keyword::Day, "day"),
+		(Keyword::Hour, "hour"),
+		(Keyword::Minute, "minute"),
+		(Keyword::Second, "second"),
+	]
+	.into_iter()
+	.find_map(|(field, words)| (field == *keyword).then_some(words))
 }

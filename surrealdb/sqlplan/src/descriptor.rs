@@ -4,6 +4,12 @@ use std::collections::HashMap;
 
 mod common_type;
 pub mod pgsql;
+#[cfg(test)]
+mod user_types_tests;
+
+use surrealdb_expr::expr::statements::define::SqlTypeDialect;
+use surrealdb_expr::expr::statements::define::declared_type::DeclaredSqlType;
+use surrealdb_expr::expr::statements::define::sql_types::range::shape as range_shape;
 
 use self::common_type::is_null_literal;
 use crate::catalog::BinderCatalog;
@@ -27,6 +33,10 @@ pub enum SqlType {
 	Float4,
 	Float8,
 	Numeric,
+	/// An unsigned 64-bit integer (`u64`, MySQL `BIGINT UNSIGNED`). PostgreSQL has no unsigned
+	/// integer, so a client of that wire reads it as `numeric`; a MySQL client reads it as
+	/// `BIGINT` with the `UNSIGNED` flag.
+	UInt8,
 	Text,
 	Bytea,
 	Date,
@@ -56,6 +66,78 @@ pub enum SqlType {
 	/// A `vector(n)` of the pgvector extension: a fixed-length array of floats with its own wire
 	/// type and text form (`[1,2,3]`).
 	Vector,
+	/// PostgreSQL `money`: a decimal of two fractional digits, printed with a currency symbol.
+	Money,
+	/// PostgreSQL `pg_lsn`: a `u64` printed as two hexadecimal halves.
+	PgLsn,
+	/// PostgreSQL `macaddr8`, held as its canonical text.
+	MacAddr8,
+	/// PostgreSQL `bit(n)`, held as a string of `0` and `1`.
+	Bit,
+	/// PostgreSQL `bit varying(n)`, held as a string of `0` and `1`.
+	Varbit,
+	/// PostgreSQL `point`, held as a point geometry.
+	Point,
+	/// PostgreSQL `lseg`, held as a line of two points.
+	Lseg,
+	/// PostgreSQL `path`, held as a line (open) or a polygon (closed).
+	Path,
+	/// PostgreSQL `box`, held as the polygon ring of the box.
+	PgBox,
+	/// PostgreSQL `polygon`, held as a polygon.
+	Polygon,
+	/// PostgreSQL `line`, held as an object `{a, b, c}`.
+	Line,
+	/// PostgreSQL `circle`, held as an object `{x, y, r}`.
+	Circle,
+	/// A PostgreSQL range of the element kind, held as a range.
+	Range(RangeElement),
+	/// A PostgreSQL multirange of the element kind, held as an array of ranges.
+	Multirange(RangeElement),
+	/// MySQL `YEAR`, held as a `u16`. A client of the PostgreSQL wire reads it as `integer`.
+	Year,
+	/// MySQL `BIT(n)` of `n` bits, held as a `u64`. A client of the PostgreSQL wire reads it as
+	/// `numeric`.
+	MySqlBit(u8),
+	/// A MySQL spatial column with its SRID, held as a geometry. A client of the PostgreSQL wire
+	/// reads it as `json`.
+	Geometry(u32),
+}
+
+pub use surrealdb_expr::expr::statements::define::sql_types::range::Element as RangeElement;
+
+/// The `pg_type` OIDs of a range of the element kind, of its multirange, and of an array of each.
+fn range_oids(element: RangeElement) -> (i32, i32, i32, i32) {
+	match element {
+		RangeElement::Int4 => (3904, 4451, 3905, 6150),
+		RangeElement::Numeric => (3906, 4532, 3907, 6151),
+		RangeElement::Timestamp => (3908, 4533, 3909, 6152),
+		RangeElement::Timestamptz => (3910, 4534, 3911, 6153),
+		RangeElement::Date => (3912, 4535, 3913, 6155),
+		RangeElement::Int8 => (3926, 4536, 3927, 6157),
+	}
+}
+
+/// Every range element kind.
+const RANGE_ELEMENTS: [RangeElement; 6] = [
+	RangeElement::Int4,
+	RangeElement::Numeric,
+	RangeElement::Timestamp,
+	RangeElement::Timestamptz,
+	RangeElement::Date,
+	RangeElement::Int8,
+];
+
+/// The PostgreSQL name prefix of a range of the element kind: `int4` of `int4range`.
+fn range_prefix(element: RangeElement) -> &'static str {
+	match element {
+		RangeElement::Int4 => "int4",
+		RangeElement::Int8 => "int8",
+		RangeElement::Numeric => "num",
+		RangeElement::Timestamp => "ts",
+		RangeElement::Timestamptz => "tstz",
+		RangeElement::Date => "date",
+	}
 }
 
 /// The wire OID of the `vector` type and of an array of it. PostgreSQL assigns an extension's type
@@ -65,7 +147,153 @@ pub const VECTOR_OID: i32 = 16400;
 /// The wire OID of an array of `vector`.
 pub const VECTOR_ARRAY_OID: i32 = 16401;
 
+/// The first OID a user-defined enum type takes: a type's OID is this plus its database-scoped id.
+pub const ENUM_TYPE_OID_BASE: u32 = 1 << 21;
+/// The distance from the OID of an enum type to the OID of an array of it, which keeps the array
+/// types clear of the enum types and stable as enums are added. The engine draws no enum id at or
+/// past it (`EnumId::LIMIT` in the catalog), so the two ranges never meet.
+pub const ENUM_ARRAY_OID_OFFSET: u32 = 1 << 20;
+
+/// The `pg_type` OID of the enum with database-scoped id `id`.
+pub fn enum_type_oid(id: u32) -> u32 {
+	ENUM_TYPE_OID_BASE + id
+}
+
+/// The `pg_type` OID of an array of the enum with database-scoped id `id`.
+pub fn enum_array_type_oid(id: u32) -> u32 {
+	ENUM_TYPE_OID_BASE + ENUM_ARRAY_OID_OFFSET + id
+}
+
+/// The first `pg_enum` OID, above every type OID.
+pub const ENUM_LABEL_OID_BASE: u32 = 3_000_000_000;
+/// The label identities of one enum are below this (`ENUM_LABEL_IDENT_LIMIT` in the catalog), so
+/// each enum's labels take a block of this many OIDs.
+pub const ENUM_LABEL_OID_STRIDE: u32 = 1 << 10;
+
+/// The `pg_enum` OID of the label of enum `id` with identity `ident`: the enum's block of
+/// [`ENUM_LABEL_OID_STRIDE`] OIDs, at the label's identity. Enum ids are below
+/// [`ENUM_ARRAY_OID_OFFSET`] and identities below the stride, so every label of every enum takes a
+/// distinct OID, below the 32-bit limit. It is stable through a rename of the label and a
+/// re-spacing of the enum's sort keys, which leave its identity alone.
+pub fn enum_label_oid(id: u32, ident: u32) -> u32 {
+	ENUM_LABEL_OID_BASE + id * ENUM_LABEL_OID_STRIDE + ident
+}
+
+/// The first `pg_type` OID a user-defined domain takes. Its range ends at
+/// [`COMPOSITE_TYPE_OID_BASE`], and no domain is an array, so a domain has no array OID.
+pub const DOMAIN_TYPE_OID_BASE: u32 = 1 << 30;
+/// The first `pg_type` OID a user-defined composite type takes.
+pub const COMPOSITE_TYPE_OID_BASE: u32 = 5 << 28;
+/// The first `pg_class` OID of the relation that a composite type names through `typrelid`. It is
+/// distinct from every type OID, as PostgreSQL's composite relations are.
+pub const COMPOSITE_RELATION_OID_BASE: u32 = 7 << 28;
+/// The bound of the id space of user-defined domains and composite types. An id at or above it
+/// would carry an OID into the next range, so the catalog never allocates one.
+pub const USER_TYPE_ID_LIMIT: u32 = 1 << 28;
+
+/// The `pg_type` OID of the domain with database-scoped id `id`.
+pub fn domain_type_oid(id: u32) -> u32 {
+	DOMAIN_TYPE_OID_BASE + id
+}
+
+/// The `pg_type` OID of the composite type with database-scoped id `id`.
+pub fn composite_type_oid(id: u32) -> u32 {
+	COMPOSITE_TYPE_OID_BASE + id
+}
+
+/// The `pg_class` OID of the relation of the composite type with database-scoped id `id`.
+pub fn composite_relation_oid(id: u32) -> u32 {
+	COMPOSITE_RELATION_OID_BASE + id
+}
+
 impl SqlType {
+	/// Whether the type is a date, a time of day, a timestamp or an interval.
+	pub fn is_temporal(self) -> bool {
+		matches!(
+			self,
+			Self::Date
+				| Self::Time | Self::Timetz
+				| Self::Timestamp
+				| Self::TimestampTz
+				| Self::Interval
+		)
+	}
+
+	/// The type of `left op right` where either operand is a date, time, timestamp or interval,
+	/// by PostgreSQL's operator table, or `None` where neither is. An operand of unknown or text
+	/// type beside a date, time or timestamp is an interval, which is what a quoted literal
+	/// resolves to there.
+	pub(crate) fn temporal_arithmetic(left: Self, op: BoundBinaryOp, right: Self) -> Option<Self> {
+		let is_number = |ty: Self| {
+			matches!(
+				ty,
+				Self::Int2 | Self::Int4 | Self::Int8 | Self::Numeric | Self::Float4 | Self::Float8
+			)
+		};
+		let untyped = |ty: Self| matches!(ty, Self::Unknown | Self::Text);
+		let as_time = |ty: Self| {
+			if ty == Self::Timetz {
+				Self::Time
+			} else {
+				ty
+			}
+		};
+		if !left.is_temporal() && !right.is_temporal() {
+			return None;
+		}
+		let (mut l, mut r) = (as_time(left), as_time(right));
+		if matches!(op, BoundBinaryOp::Add | BoundBinaryOp::Subtract) {
+			if untyped(l) && r.is_temporal() {
+				l = Self::Interval;
+			}
+			if untyped(r) && l.is_temporal() {
+				r = Self::Interval;
+			}
+		}
+		let instant = |ty: Self| matches!(ty, Self::Date | Self::Timestamp | Self::TimestampTz);
+		if op == BoundBinaryOp::Add {
+			Some(match (l, r) {
+				(Self::Date, n) | (n, Self::Date) if is_number(n) => Self::Date,
+				(Self::Date, Self::Time) | (Self::Time, Self::Date) => Self::Timestamp,
+				(Self::Date, Self::Interval) | (Self::Interval, Self::Date) => Self::Timestamp,
+				(Self::Time, Self::Interval) | (Self::Interval, Self::Time) => Self::Time,
+				(Self::Timestamp, Self::Interval) | (Self::Interval, Self::Timestamp) => {
+					Self::Timestamp
+				}
+				(Self::TimestampTz, Self::Interval) | (Self::Interval, Self::TimestampTz) => {
+					Self::TimestampTz
+				}
+				(Self::Interval, Self::Interval) => Self::Interval,
+				_ => return None,
+			})
+		} else if op == BoundBinaryOp::Subtract {
+			Some(match (l, r) {
+				(Self::Date, n) if is_number(n) => Self::Date,
+				(Self::Date, Self::Date) => Self::Int4,
+				(Self::Date, Self::Interval) => Self::Timestamp,
+				(Self::Time, Self::Interval) => Self::Time,
+				(Self::Time, Self::Time) => Self::Interval,
+				(Self::Timestamp, Self::Interval) => Self::Timestamp,
+				(Self::TimestampTz, Self::Interval) => Self::TimestampTz,
+				(Self::Interval, Self::Interval) => Self::Interval,
+				(a, b) if instant(a) && instant(b) => Self::Interval,
+				_ => return None,
+			})
+		} else if op == BoundBinaryOp::Multiply {
+			match (l, r) {
+				(Self::Interval, n) | (n, Self::Interval) if is_number(n) => Some(Self::Interval),
+				_ => None,
+			}
+		} else if op == BoundBinaryOp::Divide {
+			match (l, r) {
+				(Self::Interval, n) if is_number(n) => Some(Self::Interval),
+				_ => None,
+			}
+		} else {
+			None
+		}
+	}
+
 	/// A scalar PostgreSQL OID that this descriptor can represent exactly.
 	pub fn from_pg_oid(oid: i32) -> Option<Self> {
 		match oid {
@@ -99,7 +327,28 @@ impl SqlType {
 			30 => Some(Self::OidVector),
 			2950 => Some(Self::Uuid),
 			VECTOR_OID => Some(Self::Vector),
-			_ => None,
+			790 => Some(Self::Money),
+			3220 => Some(Self::PgLsn),
+			774 => Some(Self::MacAddr8),
+			1560 => Some(Self::Bit),
+			1562 => Some(Self::Varbit),
+			600 => Some(Self::Point),
+			601 => Some(Self::Lseg),
+			602 => Some(Self::Path),
+			603 => Some(Self::PgBox),
+			604 => Some(Self::Polygon),
+			628 => Some(Self::Line),
+			718 => Some(Self::Circle),
+			_ => RANGE_ELEMENTS.into_iter().find_map(|element| {
+				let (range, multirange, _, _) = range_oids(element);
+				if oid == range {
+					Some(Self::Range(element))
+				} else if oid == multirange {
+					Some(Self::Multirange(element))
+				} else {
+					None
+				}
+			}),
 		}
 	}
 
@@ -130,7 +379,7 @@ impl SqlType {
 			Self::TimestampTz => 1184,
 			Self::Interval => 1186,
 			Self::Timetz => 1266,
-			Self::Numeric => 1700,
+			Self::Numeric | Self::UInt8 => 1700,
 			Self::Regclass => 2205,
 			Self::Record => 2249,
 			Self::Int2Vector => 22,
@@ -138,6 +387,23 @@ impl SqlType {
 			Self::Vector => VECTOR_OID,
 			Self::Array(elem) => elem.pg_array_oid(),
 			Self::Uuid => 2950,
+			Self::Money => 790,
+			Self::PgLsn => 3220,
+			Self::MacAddr8 => 774,
+			Self::Bit => 1560,
+			Self::Varbit => 1562,
+			Self::Point => 600,
+			Self::Lseg => 601,
+			Self::Path => 602,
+			Self::PgBox => 603,
+			Self::Polygon => 604,
+			Self::Line => 628,
+			Self::Circle => 718,
+			Self::Range(element) => range_oids(*element).0,
+			Self::Multirange(element) => range_oids(*element).1,
+			Self::Year => 23,
+			Self::MySqlBit(_) => 1700,
+			Self::Geometry(_) => 114,
 		}
 	}
 
@@ -166,7 +432,7 @@ impl SqlType {
 			Self::Time => 1183,
 			Self::TimestampTz => 1185,
 			Self::Interval => 1187,
-			Self::Numeric => 1231,
+			Self::Numeric | Self::UInt8 => 1231,
 			Self::Timetz => 1270,
 			Self::Json => 199,
 			Self::Uuid => 2951,
@@ -175,13 +441,35 @@ impl SqlType {
 			Self::Int2Vector => 1006,
 			Self::OidVector => 1013,
 			Self::Vector => VECTOR_ARRAY_OID,
-			Self::Unknown | Self::Array(_) => 2277,
+			Self::Money => 791,
+			Self::PgLsn => 3221,
+			Self::MacAddr8 => 775,
+			Self::Bit => 1561,
+			Self::Varbit => 1563,
+			Self::Point => 1017,
+			Self::Lseg => 1018,
+			Self::Path => 1019,
+			Self::PgBox => 1020,
+			Self::Polygon => 1027,
+			Self::Line => 629,
+			Self::Circle => 719,
+			Self::Range(element) => range_oids(element).2,
+			Self::Multirange(element) => range_oids(element).3,
+			Self::Year => 1007,
+			Self::MySqlBit(_) => 1231,
+			Self::Geometry(_) => 199,
+			// PostgreSQL gives every dimension of an array the OID of its scalar's array type.
+			Self::Array(inner) => inner.pg_array_oid(),
+			Self::Unknown => 2277,
 		}
 	}
 
-	/// A one-dimensional array of `elem`, or `None` when `elem` is unknown or itself an array.
+	/// A one-dimensional array of `elem`, or `None` when `elem` is unknown or a vector-like type
+	/// with no array type. An array of a scalar is a two-dimensional array of that scalar, and
+	/// deeper nesting is `None`.
 	pub fn array_of(elem: Self) -> Option<Self> {
 		let elem: &'static Self = match elem {
+			Self::Array(inner) => return array_of_array(inner),
 			Self::Bool => &Self::Bool,
 			Self::Int2 => &Self::Int2,
 			Self::Int4 => &Self::Int4,
@@ -189,6 +477,7 @@ impl SqlType {
 			Self::Float4 => &Self::Float4,
 			Self::Float8 => &Self::Float8,
 			Self::Numeric => &Self::Numeric,
+			Self::UInt8 => &Self::UInt8,
 			Self::Text => &Self::Text,
 			Self::Bytea => &Self::Bytea,
 			Self::Date => &Self::Date,
@@ -210,7 +499,41 @@ impl SqlType {
 			Self::Regclass => &Self::Regclass,
 			Self::Record => &Self::Record,
 			Self::Vector => &Self::Vector,
-			Self::Unknown | Self::Array(_) | Self::Int2Vector | Self::OidVector => return None,
+			Self::Money => &Self::Money,
+			Self::PgLsn => &Self::PgLsn,
+			Self::MacAddr8 => &Self::MacAddr8,
+			Self::Bit => &Self::Bit,
+			Self::Varbit => &Self::Varbit,
+			Self::Point => &Self::Point,
+			Self::Lseg => &Self::Lseg,
+			Self::Path => &Self::Path,
+			Self::PgBox => &Self::PgBox,
+			Self::Polygon => &Self::Polygon,
+			Self::Line => &Self::Line,
+			Self::Circle => &Self::Circle,
+			Self::Range(element) => match element {
+				RangeElement::Int4 => &Self::Range(RangeElement::Int4),
+				RangeElement::Int8 => &Self::Range(RangeElement::Int8),
+				RangeElement::Numeric => &Self::Range(RangeElement::Numeric),
+				RangeElement::Timestamp => &Self::Range(RangeElement::Timestamp),
+				RangeElement::Timestamptz => &Self::Range(RangeElement::Timestamptz),
+				RangeElement::Date => &Self::Range(RangeElement::Date),
+			},
+			Self::Multirange(element) => match element {
+				RangeElement::Int4 => &Self::Multirange(RangeElement::Int4),
+				RangeElement::Int8 => &Self::Multirange(RangeElement::Int8),
+				RangeElement::Numeric => &Self::Multirange(RangeElement::Numeric),
+				RangeElement::Timestamp => &Self::Multirange(RangeElement::Timestamp),
+				RangeElement::Timestamptz => &Self::Multirange(RangeElement::Timestamptz),
+				RangeElement::Date => &Self::Multirange(RangeElement::Date),
+			},
+			Self::Year => &Self::Year,
+			// MySQL has no array of a bit string or of a geometry.
+			Self::Unknown
+			| Self::Int2Vector
+			| Self::OidVector
+			| Self::MySqlBit(_)
+			| Self::Geometry(_) => return None,
 		};
 		Some(Self::Array(elem))
 	}
@@ -224,10 +547,23 @@ impl SqlType {
 			Self::MacAddr => 6,
 			Self::Int8 | Self::Float8 | Self::Timestamp | Self::TimestampTz | Self::Time => 8,
 			Self::Timetz => 12,
-			Self::Interval | Self::Uuid => 16,
+			Self::Interval | Self::Uuid | Self::Point => 16,
 			Self::Name => 64,
-			Self::Unknown
+			Self::Money | Self::PgLsn | Self::MacAddr8 => 8,
+			Self::Line | Self::Circle => 24,
+			Self::Lseg | Self::PgBox => 32,
+			Self::Year => 4,
+			Self::Bit
+			| Self::Varbit
+			| Self::Path
+			| Self::Polygon
+			| Self::Range(_)
+			| Self::Multirange(_)
+			| Self::MySqlBit(_)
+			| Self::Geometry(_)
+			| Self::Unknown
 			| Self::Numeric
+			| Self::UInt8
 			| Self::Text
 			| Self::Varchar
 			| Self::Bpchar
@@ -243,6 +579,11 @@ impl SqlType {
 		}
 	}
 
+	/// Whether a MySQL column of this type is announced with the `UNSIGNED` flag.
+	pub fn mysql_unsigned(&self) -> bool {
+		matches!(self, Self::UInt8 | Self::PgLsn | Self::MySqlBit(_) | Self::Year)
+	}
+
 	/// MySQL wire field type.
 	pub fn to_mysql_type(&self) -> u8 {
 		match self {
@@ -254,6 +595,7 @@ impl SqlType {
 			Self::Float4 => 0x04,                            // MYSQL_TYPE_FLOAT
 			Self::Float8 => 0x05,                            // MYSQL_TYPE_DOUBLE
 			Self::Numeric => 0xf6,                           // MYSQL_TYPE_NEWDECIMAL
+			Self::UInt8 => 0x08,                             // MYSQL_TYPE_LONGLONG, UNSIGNED
 			Self::Text
 			| Self::Name
 			| Self::Varchar
@@ -261,14 +603,31 @@ impl SqlType {
 			| Self::Char
 			| Self::Inet
 			| Self::Cidr
-			| Self::MacAddr => 0xfd, // MYSQL_TYPE_VAR_STRING
+			| Self::MacAddr
+			| Self::MacAddr8
+			| Self::Bit
+			| Self::Varbit
+			| Self::Range(_)
+			| Self::Multirange(_) => 0xfd, // MYSQL_TYPE_VAR_STRING
 			Self::Bytea => 0xfc,                             // MYSQL_TYPE_BLOB
 			Self::Date => 0x0a,                              // MYSQL_TYPE_DATE
-			Self::Time | Self::Timetz => 0x0b,               // MYSQL_TYPE_TIME
-			Self::Timestamp | Self::TimestampTz => 0x07,     // MYSQL_TYPE_TIMESTAMP
-			Self::Interval => 0xfd,                          // MYSQL_TYPE_VAR_STRING
+			Self::Time | Self::Timetz | Self::Interval => 0x0b, // MYSQL_TYPE_TIME
+			Self::Timestamp => 0x0c,                         // MYSQL_TYPE_DATETIME
+			Self::TimestampTz => 0x07,                       // MYSQL_TYPE_TIMESTAMP
 			Self::Uuid => 0xfd,                              // MYSQL_TYPE_VAR_STRING
+			Self::Money => 0xf6,                             // MYSQL_TYPE_NEWDECIMAL
+			Self::PgLsn => 0x08,                             // MYSQL_TYPE_LONGLONG, UNSIGNED
+			Self::Year => 0x0d,                              // MYSQL_TYPE_YEAR
+			Self::MySqlBit(_) => 0x10,                       // MYSQL_TYPE_BIT
+			Self::Point
+			| Self::Lseg
+			| Self::Path
+			| Self::PgBox
+			| Self::Polygon
+			| Self::Geometry(_) => 0xff, // MYSQL_TYPE_GEOMETRY
 			Self::Json
+			| Self::Line
+			| Self::Circle
 			| Self::Array(_)
 			| Self::Vector
 			| Self::Int2Vector
@@ -278,19 +637,28 @@ impl SqlType {
 	}
 
 	/// The name `information_schema.columns.data_type` gives this type, which
-	/// [`Self::from_name`] reads back as the same type. An array is its element's name followed
-	/// by `[]`. [`Self::Unknown`] has no name.
+	/// [`Self::from_name`] reads back as the same type, except [`Self::UInt8`], which has the name
+	/// of `numeric` because PostgreSQL has no unsigned integer. An array is its element's name
+	/// followed by `[]`, and an array of arrays is named as the one-dimensional array of its
+	/// scalar, since PostgreSQL names every dimension alike. [`Self::Unknown`] has no name.
 	pub fn name(&self) -> Option<String> {
 		let name = match self {
 			Self::Unknown => return None,
-			Self::Array(elem) => return elem.name().map(|elem| format!("{elem}[]")),
+			Self::Array(elem) => {
+				let scalar = if let Self::Array(inner) = **elem {
+					*inner
+				} else {
+					**elem
+				};
+				return scalar.name().map(|name| format!("{name}[]"));
+			}
 			Self::Bool => "boolean",
 			Self::Int2 => "smallint",
 			Self::Int4 => "integer",
 			Self::Int8 => "bigint",
 			Self::Float4 => "real",
 			Self::Float8 => "double precision",
-			Self::Numeric => "numeric",
+			Self::Numeric | Self::UInt8 => "numeric",
 			Self::Text => "text",
 			Self::Bytea => "bytea",
 			Self::Date => "date",
@@ -314,6 +682,25 @@ impl SqlType {
 			Self::Int2Vector => "int2vector",
 			Self::OidVector => "oidvector",
 			Self::Vector => "vector",
+			Self::Money => "money",
+			Self::PgLsn => "pg_lsn",
+			Self::MacAddr8 => "macaddr8",
+			Self::Bit => "bit",
+			Self::Varbit => "bit varying",
+			Self::Point => "point",
+			Self::Lseg => "lseg",
+			Self::Path => "path",
+			Self::PgBox => "box",
+			Self::Polygon => "polygon",
+			Self::Line => "line",
+			Self::Circle => "circle",
+			Self::Range(element) => return Some(format!("{}range", range_prefix(*element))),
+			Self::Multirange(element) => {
+				return Some(format!("{}multirange", range_prefix(*element)));
+			}
+			Self::Year => "integer",
+			Self::MySqlBit(_) => "numeric",
+			Self::Geometry(_) => "jsonb",
 		};
 		Some(name.to_owned())
 	}
@@ -324,14 +711,21 @@ impl SqlType {
 	pub fn udt_name(&self) -> Option<String> {
 		let name = match self {
 			Self::Unknown => return None,
-			Self::Array(elem) => return elem.udt_name().map(|elem| format!("_{elem}")),
+			Self::Array(elem) => {
+				let scalar = if let Self::Array(inner) = **elem {
+					*inner
+				} else {
+					**elem
+				};
+				return scalar.udt_name().map(|name| format!("_{name}"));
+			}
 			Self::Bool => "bool",
 			Self::Int2 => "int2",
 			Self::Int4 => "int4",
 			Self::Int8 => "int8",
 			Self::Float4 => "float4",
 			Self::Float8 => "float8",
-			Self::Numeric => "numeric",
+			Self::Numeric | Self::UInt8 => "numeric",
 			Self::Text => "text",
 			Self::Bytea => "bytea",
 			Self::Date => "date",
@@ -355,6 +749,25 @@ impl SqlType {
 			Self::Int2Vector => "int2vector",
 			Self::OidVector => "oidvector",
 			Self::Vector => "vector",
+			Self::Money => "money",
+			Self::PgLsn => "pg_lsn",
+			Self::MacAddr8 => "macaddr8",
+			Self::Bit => "bit",
+			Self::Varbit => "varbit",
+			Self::Point => "point",
+			Self::Lseg => "lseg",
+			Self::Path => "path",
+			Self::PgBox => "box",
+			Self::Polygon => "polygon",
+			Self::Line => "line",
+			Self::Circle => "circle",
+			Self::Range(element) => return Some(format!("{}range", range_prefix(*element))),
+			Self::Multirange(element) => {
+				return Some(format!("{}multirange", range_prefix(*element)));
+			}
+			Self::Year => "int4",
+			Self::MySqlBit(_) => "numeric",
+			Self::Geometry(_) => "jsonb",
 		};
 		Some(name.to_owned())
 	}
@@ -370,6 +783,19 @@ impl SqlType {
 		};
 		if let Some(elem) = lower.strip_suffix("[]") {
 			return Self::array_of(Self::from_name(elem)).unwrap_or(Self::Unknown);
+		}
+		// `numeric(40,10)` is a numeric: its precision and scale do not change how it travels.
+		let lower = match lower.split_once('(') {
+			Some((base, _)) if matches!(base.trim(), "numeric" | "decimal" | "dec") => {
+				base.trim().to_string()
+			}
+			Some(_) | None => lower,
+		};
+		// `interval day to second(3)` and `interval(2)` are intervals: the field qualifier and
+		// the precision bound the value, not how it travels.
+		let base = lower.split('(').next().unwrap_or_default().trim();
+		if base == "interval" || base.strip_prefix("interval ").is_some_and(|f| !f.is_empty()) {
+			return Self::Interval;
 		}
 		match lower.as_str() {
 			"bool" | "boolean" => Self::Bool,
@@ -403,8 +829,86 @@ impl SqlType {
 			"int2vector" => Self::Int2Vector,
 			"oidvector" => Self::OidVector,
 			"vector" => Self::Vector,
-			_ => Self::Unknown,
+			"money" => Self::Money,
+			"pg_lsn" => Self::PgLsn,
+			"macaddr8" => Self::MacAddr8,
+			"bit" => Self::Bit,
+			"bit varying" | "varbit" => Self::Varbit,
+			"point" => Self::Point,
+			"lseg" => Self::Lseg,
+			"path" => Self::Path,
+			"box" => Self::PgBox,
+			"polygon" => Self::Polygon,
+			"line" => Self::Line,
+			"circle" => Self::Circle,
+			other => match range_shape(other) {
+				Some((element, false)) => Self::Range(element),
+				Some((element, true)) => Self::Multirange(element),
+				None => Self::Unknown,
+			},
 		}
+	}
+
+	/// The wire type a declared SQL type names where the field's kind alone does not say it: the
+	/// PostgreSQL network, bit-string, `money`, `pg_lsn`, geometric, and range types, and MySQL
+	/// `YEAR`, `BIT(n)`, and the spatial types. An array of a PostgreSQL one is an array of it.
+	/// `None` for every other declared type, whose wire type follows from the kind.
+	pub fn of_declared(declared: &DeclaredSqlType) -> Option<Self> {
+		let scalar = match declared.dialect() {
+			SqlTypeDialect::PostgreSql => match declared.base() {
+				"inet" => Self::Inet,
+				"cidr" => Self::Cidr,
+				"macaddr" => Self::MacAddr,
+				"macaddr8" => Self::MacAddr8,
+				"bit" => Self::Bit,
+				"bit varying" | "varbit" => Self::Varbit,
+				"money" => Self::Money,
+				"pg_lsn" => Self::PgLsn,
+				"point" => Self::Point,
+				"lseg" => Self::Lseg,
+				"path" => Self::Path,
+				"box" => Self::PgBox,
+				"polygon" => Self::Polygon,
+				"line" => Self::Line,
+				"circle" => Self::Circle,
+				other => match range_shape(other)? {
+					(element, false) => Self::Range(element),
+					(element, true) => Self::Multirange(element),
+				},
+			},
+			SqlTypeDialect::MySql => {
+				if !declared.array_dimensions().is_empty() {
+					return None;
+				}
+				let mut words = declared.base().split(' ');
+				match words.next()? {
+					"year" => Self::Year,
+					"bit" => {
+						let width = match declared.modifiers().first() {
+							Some(width) => width.parse::<u8>().ok()?,
+							None => 1,
+						};
+						Self::MySqlBit(width)
+					}
+					"geometry" | "point" | "linestring" | "polygon" | "multipoint"
+					| "multilinestring" | "multipolygon" | "geometrycollection"
+					| "geomcollection" => {
+						let srid = match (words.next(), words.next()) {
+							(Some("srid"), Some(srid)) => srid.parse::<u32>().ok()?,
+							_ => 0,
+						};
+						Self::Geometry(srid)
+					}
+					_ => return None,
+				}
+			}
+			SqlTypeDialect::DynamoDb => return None,
+		};
+		let mut ty = scalar;
+		for _ in declared.array_dimensions() {
+			ty = Self::array_of(ty)?;
+		}
+		Some(ty)
 	}
 }
 
@@ -429,6 +933,37 @@ pub struct ResultColumn {
 	/// Whether the column is a `*` or `t.*` whose columns are known only from the rows that come
 	/// back, as opposed to a column that merely has the name `*`.
 	pub dynamic: bool,
+	/// The enum whose labels the column holds, when the column reads a column declared as one (or
+	/// as a set or an array of one). The wire types such a column by it rather than by its values.
+	pub enum_type: Option<ResultEnum>,
+	/// The composite type whose values the column holds, when the column reads a column declared
+	/// as one. The wire types such a column by its fields.
+	pub composite: Option<ResultComposite>,
+	/// The SQL type the column is declared with, when the column reads a base-table column
+	/// declared with one (`SQL TYPE`). The wire reports the column as that type, or as the
+	/// nearest type of its own dialect, in place of [`Self::ty`].
+	pub declared: Option<crate::declared_type::DeclaredSqlType>,
+}
+
+/// The composite type a result column holds the values of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultComposite {
+	/// The database-scoped id of the type, which its wire type is allocated from.
+	pub id: u32,
+	/// The fields in declaration order, each with the SQL type its values travel as.
+	pub fields: Vec<(String, SqlType)>,
+}
+
+/// The enum a result column holds the labels of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultEnum {
+	/// The database-scoped id of a named enum, which its wire type is allocated from. `None` for
+	/// an enum declared inline in a column, which has no type of its own.
+	pub id: Option<u32>,
+	/// The enum's labels in declaration order.
+	pub labels: Vec<String>,
+	/// Whether a value holds one label, a set of them or a list.
+	pub shape: crate::catalog::EnumShape,
 }
 
 /// Descriptor of a query result set produced at plan time.
@@ -436,6 +971,68 @@ pub struct ResultColumn {
 pub struct ResultDescriptor {
 	/// Ordered projected columns.
 	pub columns: Vec<ResultColumn>,
+}
+
+/// The two-dimensional array of the scalar `inner`, or `None` when `inner` is not a scalar that
+/// has an array type. [`SqlType::array_of`] is the only caller; each scalar is listed so that its
+/// array is a constant and can be borrowed for `'static`.
+fn array_of_array(inner: &SqlType) -> Option<SqlType> {
+	let elem: &'static SqlType = match *inner {
+		SqlType::Bool => &SqlType::Array(&SqlType::Bool),
+		SqlType::Int2 => &SqlType::Array(&SqlType::Int2),
+		SqlType::Int4 => &SqlType::Array(&SqlType::Int4),
+		SqlType::Int8 => &SqlType::Array(&SqlType::Int8),
+		SqlType::Float4 => &SqlType::Array(&SqlType::Float4),
+		SqlType::Float8 => &SqlType::Array(&SqlType::Float8),
+		SqlType::Numeric => &SqlType::Array(&SqlType::Numeric),
+		SqlType::UInt8 => &SqlType::Array(&SqlType::UInt8),
+		SqlType::Text => &SqlType::Array(&SqlType::Text),
+		SqlType::Bytea => &SqlType::Array(&SqlType::Bytea),
+		SqlType::Date => &SqlType::Array(&SqlType::Date),
+		SqlType::Time => &SqlType::Array(&SqlType::Time),
+		SqlType::Timestamp => &SqlType::Array(&SqlType::Timestamp),
+		SqlType::TimestampTz => &SqlType::Array(&SqlType::TimestampTz),
+		SqlType::Interval => &SqlType::Array(&SqlType::Interval),
+		SqlType::Json => &SqlType::Array(&SqlType::Json),
+		SqlType::Uuid => &SqlType::Array(&SqlType::Uuid),
+		SqlType::Char => &SqlType::Array(&SqlType::Char),
+		SqlType::Name => &SqlType::Array(&SqlType::Name),
+		SqlType::Varchar => &SqlType::Array(&SqlType::Varchar),
+		SqlType::Bpchar => &SqlType::Array(&SqlType::Bpchar),
+		SqlType::Timetz => &SqlType::Array(&SqlType::Timetz),
+		SqlType::Inet => &SqlType::Array(&SqlType::Inet),
+		SqlType::Cidr => &SqlType::Array(&SqlType::Cidr),
+		SqlType::MacAddr => &SqlType::Array(&SqlType::MacAddr),
+		SqlType::Oid => &SqlType::Array(&SqlType::Oid),
+		SqlType::Regclass => &SqlType::Array(&SqlType::Regclass),
+		SqlType::Record => &SqlType::Array(&SqlType::Record),
+		SqlType::Vector => &SqlType::Array(&SqlType::Vector),
+		// No two-dimensional array of these is declared.
+		SqlType::Unknown
+		| SqlType::Array(_)
+		| SqlType::Int2Vector
+		| SqlType::OidVector
+		| SqlType::Money
+		| SqlType::PgLsn
+		| SqlType::MacAddr8
+		| SqlType::Bit
+		| SqlType::Varbit
+		| SqlType::Point
+		| SqlType::Lseg
+		| SqlType::Path
+		| SqlType::PgBox
+		| SqlType::Polygon
+		| SqlType::Line
+		| SqlType::Circle
+		| SqlType::Range(_)
+		| SqlType::Multirange(_)
+		| SqlType::Year
+		| SqlType::MySqlBit(_)
+		| SqlType::Geometry(_) => {
+			return None;
+		}
+	};
+	Some(SqlType::Array(elem))
 }
 
 impl ResultDescriptor {
@@ -452,6 +1049,10 @@ impl ResultDescriptor {
 pub struct ParameterDescriptor {
 	/// Types for parameters 1..N.
 	pub param_types: Vec<SqlType>,
+	/// For parameters 1..N, the id of the enum type whose column the parameter is compared with
+	/// or assigned to, which gives the parameter that type on the wire. Empty when no parameter
+	/// has one.
+	pub enum_params: Vec<Option<u32>>,
 }
 
 /// Descriptor of a prepared statement before execution.
@@ -499,6 +1100,26 @@ impl BoundSelect {
 			.collect()
 	}
 
+	/// The SQL types the columns a `*` or `t.*` projection stands for are declared with, by
+	/// column name, when the query reads a single base table: see [`Self::wildcard_column_types`].
+	pub fn wildcard_declared_sql_types(
+		&self,
+		catalog: &dyn BinderCatalog,
+	) -> std::collections::HashMap<String, crate::declared_type::DeclaredSqlType> {
+		let Some(BoundTableSource::Table {
+			schema,
+			name,
+			..
+		}) = &self.from
+		else {
+			return std::collections::HashMap::new();
+		};
+		if !self.has_dynamic_columns() || self.set_op.is_some() {
+			return std::collections::HashMap::new();
+		}
+		catalog.declared_sql_types(schema.as_deref(), name).into_iter().collect()
+	}
+
 	/// The result descriptor, or `None` when the columns are not known before
 	/// the statement runs (see [`Self::has_dynamic_columns`]). A caller holding
 	/// `None` shapes the result from its rows.
@@ -532,6 +1153,9 @@ impl BoundSelect {
 					original_column: None,
 					key,
 					dynamic: true,
+					enum_type: None,
+					composite: None,
+					declared: None,
 				});
 				continue;
 			}
@@ -551,6 +1175,11 @@ impl BoundSelect {
 						name,
 						..
 					} => (name.clone(), None, None),
+					// A field of a composite value, `(c).f`, is named by the field.
+					BoundExpr::Access {
+						field,
+						..
+					} => (field.clone(), None, None),
 					BoundExpr::UserVar(name) => (format!("@{name}"), None, None),
 					BoundExpr::SystemVar {
 						name,
@@ -565,9 +1194,6 @@ impl BoundSelect {
 						None,
 					),
 					BoundExpr::Literal(_)
-					| BoundExpr::Access {
-						..
-					}
 					| BoundExpr::Param {
 						..
 					}
@@ -628,6 +1254,55 @@ impl BoundSelect {
 				original_column: orig_col,
 				key,
 				dynamic,
+				enum_type: self.result_enum(&target.expr, catalog),
+				composite: self.result_composite(&target.expr, catalog),
+				declared: match &target.expr {
+					BoundExpr::Column(col) => col.declared_sql.as_deref().cloned(),
+					BoundExpr::Literal(_)
+					| BoundExpr::Access {
+						..
+					}
+					| BoundExpr::Param {
+						..
+					}
+					| BoundExpr::Binary {
+						..
+					}
+					| BoundExpr::Unary {
+						..
+					}
+					| BoundExpr::FunctionCall {
+						..
+					}
+					| BoundExpr::Case {
+						..
+					}
+					| BoundExpr::Between {
+						..
+					}
+					| BoundExpr::InList {
+						..
+					}
+					| BoundExpr::IsNull {
+						..
+					}
+					| BoundExpr::Cast {
+						..
+					}
+					| BoundExpr::ScalarSubquery(_)
+					| BoundExpr::Exists(_)
+					| BoundExpr::InSubquery {
+						..
+					}
+					| BoundExpr::ArraySubquery(_)
+					| BoundExpr::WindowFunction {
+						..
+					}
+					| BoundExpr::UserVar(_)
+					| BoundExpr::SystemVar {
+						..
+					} => None,
+				},
 			});
 		}
 		ResultDescriptor {
@@ -635,11 +1310,135 @@ impl BoundSelect {
 		}
 	}
 
+	/// The enum an expression holds the labels of: a column declared as one, or the `MIN` or
+	/// `MAX` of such a column.
+	fn result_enum(&self, expr: &BoundExpr, catalog: &dyn BinderCatalog) -> Option<ResultEnum> {
+		let held = match expr {
+			BoundExpr::Column(col) => col.enum_column.as_ref(),
+			BoundExpr::Cast {
+				target_type,
+				..
+			} if target_type.starts_with("enum:") => {
+				let spec = &target_type["enum:".len()..];
+				let (name, array) = match spec.strip_suffix("[]") {
+					Some(name) => (name, true),
+					None => (spec, false),
+				};
+				let definition = catalog.enum_type(name)?;
+				return Some(ResultEnum {
+					id: Some(definition.id),
+					labels: definition.labels.into_iter().map(|l| l.label).collect(),
+					shape: if array {
+						crate::catalog::EnumShape::Array
+					} else {
+						crate::catalog::EnumShape::Scalar
+					},
+				});
+			}
+			BoundExpr::FunctionCall {
+				name,
+				args,
+				..
+			} if matches!(name.as_str(), "min" | "max") => match args.as_slice() {
+				[BoundExpr::Column(col)] => col
+					.enum_column
+					.as_ref()
+					.filter(|held| held.shape == crate::catalog::EnumShape::Scalar),
+				_ => None,
+			},
+			BoundExpr::Literal(_)
+			| BoundExpr::Access {
+				..
+			}
+			| BoundExpr::Param {
+				..
+			}
+			| BoundExpr::Binary {
+				..
+			}
+			| BoundExpr::Unary {
+				..
+			}
+			| BoundExpr::FunctionCall {
+				..
+			}
+			| BoundExpr::Case {
+				..
+			}
+			| BoundExpr::Between {
+				..
+			}
+			| BoundExpr::InList {
+				..
+			}
+			| BoundExpr::IsNull {
+				..
+			}
+			| BoundExpr::Cast {
+				..
+			}
+			| BoundExpr::ScalarSubquery(_)
+			| BoundExpr::Exists(_)
+			| BoundExpr::InSubquery {
+				..
+			}
+			| BoundExpr::ArraySubquery(_)
+			| BoundExpr::WindowFunction {
+				..
+			}
+			| BoundExpr::UserVar(_)
+			| BoundExpr::SystemVar {
+				..
+			} => None,
+		}?;
+		match &held.reference {
+			surrealdb_expr::expr::EnumRef::Named(name) => {
+				let definition = catalog.enum_type(name)?;
+				Some(ResultEnum {
+					id: Some(definition.id),
+					labels: definition.labels.into_iter().map(|l| l.label).collect(),
+					shape: held.shape,
+				})
+			}
+			surrealdb_expr::expr::EnumRef::Inline(labels) => Some(ResultEnum {
+				id: None,
+				labels: labels.clone(),
+				shape: held.shape,
+			}),
+		}
+	}
+
+	/// The composite type an expression holds the values of: a column declared as one.
+	fn result_composite(
+		&self,
+		expr: &BoundExpr,
+		catalog: &dyn BinderCatalog,
+	) -> Option<ResultComposite> {
+		let BoundExpr::Column(col) = expr else {
+			return None;
+		};
+		let definition = catalog.composite_type(col.composite.as_deref()?)?;
+		Some(ResultComposite {
+			id: definition.id,
+			fields: definition
+				.fields
+				.iter()
+				.map(|(field, kind)| {
+					let name =
+						crate::catalog::kind_type_name(kind).unwrap_or_else(|| "text".to_owned());
+					(field.clone(), SqlType::from_name(&name))
+				})
+				.collect(),
+		})
+	}
+
 	/// Infer the SQL type of an expression in the context of this SELECT.
 	pub fn infer_expr_type(&self, expr: &BoundExpr, catalog: &dyn BinderCatalog) -> SqlType {
 		match expr {
 			BoundExpr::Literal(lit) => match lit {
 				BoundLiteral::Integer(_) => SqlType::Int8,
+				// An exact unsigned 64-bit value is announced as such, not as `numeric`.
+				BoundLiteral::Unsigned(_) => SqlType::UInt8,
 				BoundLiteral::Float(_) => SqlType::Float8,
 				BoundLiteral::String(_) => SqlType::Text,
 				BoundLiteral::Boolean(_) => SqlType::Bool,
@@ -698,13 +1497,18 @@ impl BoundSelect {
 				| BoundBinaryOp::Remainder => {
 					let lt = self.infer_expr_type(left, catalog);
 					let rt = self.infer_expr_type(right, catalog);
+					if let Some(temporal) = SqlType::temporal_arithmetic(lt, *op, rt) {
+						return temporal;
+					}
 					if lt == SqlType::Float8
 						|| rt == SqlType::Float8
 						|| lt == SqlType::Float4
 						|| rt == SqlType::Float4
 					{
 						SqlType::Float8
-					} else if lt == SqlType::Numeric || rt == SqlType::Numeric {
+					} else if matches!(lt, SqlType::Numeric | SqlType::UInt8)
+						|| matches!(rt, SqlType::Numeric | SqlType::UInt8)
+					{
 						SqlType::Numeric
 					} else if lt == SqlType::Int8 || rt == SqlType::Int8 {
 						SqlType::Int8
@@ -863,8 +1667,139 @@ impl BoundSelect {
 			param_types.push(param_map.get(&idx).copied().unwrap_or(SqlType::Unknown));
 		}
 
+		let mut enum_params = HashMap::new();
+		for expr in self
+			.where_clause
+			.iter()
+			.chain(self.having.iter())
+			.chain(self.targets.iter().map(|target| &target.expr))
+		{
+			Self::collect_enum_params(expr, catalog, &mut enum_params);
+		}
 		ParameterDescriptor {
+			enum_params: Self::enum_param_slots(&enum_params, param_types.len()),
 			param_types,
+		}
+	}
+
+	/// The enum parameters `enum_params` holds as one slot per parameter of `count`.
+	pub(crate) fn enum_param_slots(
+		enum_params: &HashMap<usize, u32>,
+		count: usize,
+	) -> Vec<Option<u32>> {
+		if enum_params.is_empty() {
+			return Vec::new();
+		}
+		(1..=count).map(|index| enum_params.get(&index).copied()).collect()
+	}
+
+	/// Notes the parameters that `expr` compares with, or assigns to, a column holding one enum
+	/// label, by the id of the enum's type.
+	pub(crate) fn collect_enum_params(
+		expr: &BoundExpr,
+		catalog: &dyn BinderCatalog,
+		out: &mut HashMap<usize, u32>,
+	) {
+		let enum_id = |expr: &BoundExpr| -> Option<u32> {
+			let reference = crate::lower::enum_rank::scalar_enum(expr)?;
+			match reference {
+				surrealdb_expr::expr::EnumRef::Named(name) => {
+					catalog.enum_type(name).map(|definition| definition.id)
+				}
+				surrealdb_expr::expr::EnumRef::Inline(_) => None,
+			}
+		};
+		match expr {
+			BoundExpr::Binary {
+				left,
+				right,
+				..
+			} => {
+				for (param, other) in [(&**left, &**right), (&**right, &**left)] {
+					if let BoundExpr::Param {
+						index,
+						..
+					} = param && let Some(id) = enum_id(other)
+					{
+						out.insert(*index, id);
+					}
+				}
+				Self::collect_enum_params(left, catalog, out);
+				Self::collect_enum_params(right, catalog, out);
+			}
+			BoundExpr::Unary {
+				expr,
+				..
+			}
+			| BoundExpr::IsNull {
+				expr,
+				..
+			} => Self::collect_enum_params(expr, catalog, out),
+			BoundExpr::InList {
+				expr,
+				list,
+				..
+			} => {
+				if let Some(id) = enum_id(expr) {
+					for item in list {
+						if let BoundExpr::Param {
+							index,
+							..
+						} = item
+						{
+							out.insert(*index, id);
+						}
+					}
+				}
+			}
+			BoundExpr::Between {
+				expr,
+				low,
+				high,
+				..
+			} => {
+				if let Some(id) = enum_id(expr) {
+					for bound in [low, high] {
+						if let BoundExpr::Param {
+							index,
+							..
+						} = &**bound
+						{
+							out.insert(*index, id);
+						}
+					}
+				}
+			}
+			BoundExpr::Literal(_)
+			| BoundExpr::Column(_)
+			| BoundExpr::Access {
+				..
+			}
+			| BoundExpr::Param {
+				..
+			}
+			| BoundExpr::FunctionCall {
+				..
+			}
+			| BoundExpr::Case {
+				..
+			}
+			| BoundExpr::Cast {
+				..
+			}
+			| BoundExpr::ScalarSubquery(_)
+			| BoundExpr::Exists(_)
+			| BoundExpr::InSubquery {
+				..
+			}
+			| BoundExpr::ArraySubquery(_)
+			| BoundExpr::WindowFunction {
+				..
+			}
+			| BoundExpr::UserVar(_)
+			| BoundExpr::SystemVar {
+				..
+			} => {}
 		}
 	}
 

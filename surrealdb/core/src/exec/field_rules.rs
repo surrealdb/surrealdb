@@ -235,7 +235,12 @@ impl Step {
 			| Kind::Bool
 			| Kind::Bytes
 			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
 			| Kind::Decimal
+			| Kind::BigDecimal
 			| Kind::Duration
 			| Kind::Float
 			| Kind::Int
@@ -259,7 +264,8 @@ impl Step {
 			| Kind::Function(..)
 			| Kind::Range
 			| Kind::Literal(_)
-			| Kind::File(_) => false,
+			| Kind::File(_)
+			| Kind::Enum(_) => false,
 		};
 		let held = match kind {
 			Some(Kind::Either(kinds)) => {
@@ -343,7 +349,12 @@ fn holds_elements_no_collection_describes(kind: &Kind) -> bool {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
@@ -365,7 +376,8 @@ fn holds_elements_no_collection_describes(kind: &Kind) -> bool {
 		| Kind::Geometry(_)
 		| Kind::Function(..)
 		| Kind::Range
-		| Kind::File(_) => false,
+		| Kind::File(_)
+		| Kind::Enum(_) => false,
 	}
 }
 
@@ -697,7 +709,12 @@ pub(crate) fn define_field_statement_validate_reference_options(
 				| Kind::Bool
 				| Kind::Bytes
 				| Kind::Datetime
+				| Kind::Date
+				| Kind::Time
+				| Kind::Timestamp
+				| Kind::Interval
 				| Kind::Decimal
+				| Kind::BigDecimal
 				| Kind::Duration
 				| Kind::Float
 				| Kind::Int
@@ -721,7 +738,8 @@ pub(crate) fn define_field_statement_validate_reference_options(
 				| Kind::Function(..)
 				| Kind::Range
 				| Kind::Literal(_)
-				| Kind::File(_) => false,
+				| Kind::File(_)
+				| Kind::Enum(_) => false,
 			}
 		}
 

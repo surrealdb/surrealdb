@@ -31,6 +31,9 @@ pub struct BoundSelect {
 	pub for_update: bool,
 	/// User-defined tables discovered from catalog (for system catalog introspection).
 	pub user_tables: Vec<crate::catalog::TableSchema>,
+	/// User-defined types discovered from the catalog, for `pg_type`, `pg_enum` and the other
+	/// catalog views that list them.
+	pub user_types: crate::catalog::UserTypes,
 	/// The database the statement runs in, which the catalog views name as their catalog.
 	pub database: Option<String>,
 	/// The HNSW indexes over the table the select reads, when it reads one table.
@@ -219,6 +222,20 @@ pub struct BoundColumnRef {
 	/// stored value is the link; comparisons with a key name the record of this table. Base-table
 	/// `id`, system catalog columns and computed expressions do not carry this provenance.
 	pub link_table: Option<String>,
+	/// The enum whose labels this column holds.
+	///
+	/// Set for a base-table field declared as an enum, or a set or an array of one, and retained
+	/// through direct projections and unambiguous wildcards of derived relations and CTEs as
+	/// `link_table` is. A comparison, an ordering or a `MIN` and `MAX` over a column that holds
+	/// one label follows the enum's declaration order rather than the labels' spelling, and the
+	/// result descriptor names the enum for the wire.
+	pub enum_column: Option<Box<crate::catalog::EnumColumn>>,
+	/// The user-defined composite type the column is declared with, by name, when it is one. The
+	/// result descriptor names the type for the wire, which types the column by its fields.
+	pub composite: Option<String>,
+	/// The SQL type a base-table column is declared with (`SQL TYPE`), which the result
+	/// descriptor reports for the wire in place of the type `declared_type` names.
+	pub declared_sql: Option<Box<crate::declared_type::DeclaredSqlType>>,
 	/// Whether the reference reads an output column of an aggregation, from a clause that is
 	/// evaluated over the rows the aggregation produced (`HAVING`, an `ORDER BY` expression).
 	///
@@ -266,6 +283,8 @@ impl BoundColumnRef {
 			&& self.id_table == other.id_table
 			&& self.key_read == other.key_read
 			&& self.link_table == other.link_table
+			&& self.enum_column == other.enum_column
+			&& self.composite == other.composite
 			&& self.aggregate_output == other.aggregate_output
 	}
 }
@@ -387,6 +406,8 @@ impl BoundExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BoundLiteral {
 	Integer(i64),
+	/// An integer above `i64::MAX` that fits 64 unsigned bits.
+	Unsigned(u64),
 	Float(f64),
 	String(String),
 	Boolean(bool),

@@ -157,6 +157,7 @@ fn literal_kind(value: &Value) -> Option<Kind> {
 		Value::Number(Number::Int(_)) => Some(Kind::Int),
 		Value::Number(Number::Float(_)) => Some(Kind::Float),
 		Value::Number(Number::Decimal(_)) => Some(Kind::Decimal),
+		Value::Number(Number::BigDecimal(_)) => Some(Kind::BigDecimal),
 		Value::Number(Number::I8(_)) => Some(Kind::I8),
 		Value::Number(Number::U8(_)) => Some(Kind::U8),
 		Value::Number(Number::I16(_)) => Some(Kind::I16),
@@ -170,6 +171,10 @@ fn literal_kind(value: &Value) -> Option<Kind> {
 		Value::Bytes(_) => Some(Kind::Bytes),
 		Value::Duration(_) => Some(Kind::Duration),
 		Value::Datetime(_) => Some(Kind::Datetime),
+		Value::Date(_) => Some(Kind::Date),
+		Value::Time(_) => Some(Kind::Time),
+		Value::Timestamp(_) => Some(Kind::Timestamp),
+		Value::Interval(_) => Some(Kind::Interval),
 		Value::Uuid(_) => Some(Kind::Uuid),
 		Value::Regex(_) => Some(Kind::Regex),
 		Value::Array(_)
@@ -279,6 +284,12 @@ mod tests {
 			(Value::from(1_i64), Kind::Int),
 			(Value::Number(Number::Float(1.5)), Kind::Float),
 			(Value::Number(Number::Decimal(Decimal::ONE)), Kind::Decimal),
+			(
+				Value::Number(Number::BigDecimal(Box::new(surrealdb_types::BigDecimal::from(
+					1_i64,
+				)))),
+				Kind::BigDecimal,
+			),
 			(Value::String(Strand::new("a")), Kind::String),
 			(Value::Bytes(vec![1_u8].into()), Kind::Bytes),
 			(Value::Duration(Duration::new(1, 0)), Kind::Duration),

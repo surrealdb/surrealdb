@@ -108,6 +108,7 @@ fn written_index(value: &Value) -> Option<Part> {
 		Number::Int(int) => Literal::Integer(*int),
 		Number::Float(float) => Literal::Float(*float),
 		Number::Decimal(decimal) => Literal::Decimal(*decimal),
+		Number::BigDecimal(decimal) => Literal::BigDecimal(decimal.clone()),
 		Number::I8(v) => Literal::I8(*v),
 		Number::U8(v) => Literal::U8(*v),
 		Number::I16(v) => Literal::I16(*v),

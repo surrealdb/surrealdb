@@ -1194,6 +1194,12 @@ fn define_extras(object: &DefineObject) -> EffectSet {
 		| DefineObject::Bucket {
 			..
 		}
+		| DefineObject::Enum {
+			..
+		}
+		| DefineObject::UserType {
+			..
+		}
 		| DefineObject::Sequence {
 			..
 		} => EffectSet::PURE,
@@ -1246,6 +1252,12 @@ fn remove_extras(object: &RemoveObject) -> EffectSet {
 		| RemoveObject::Bucket {
 			..
 		}
+		| RemoveObject::Enum {
+			..
+		}
+		| RemoveObject::UserType {
+			..
+		}
 		| RemoveObject::Sequence {
 			..
 		}
@@ -1289,6 +1301,9 @@ fn alter_extras(object: &AlterObject) -> EffectSet {
 			..
 		}
 		| AlterObject::Bucket {
+			..
+		}
+		| AlterObject::Enum {
 			..
 		}
 		| AlterObject::Config {
@@ -1413,6 +1428,9 @@ fn define_slots(object: &DefineObject, slots: &mut Slots) {
 			..
 		}
 		| DefineObject::User(..)
+		| DefineObject::UserType {
+			..
+		}
 		| DefineObject::Sequence {
 			..
 		} => {}
@@ -1433,6 +1451,10 @@ fn define_slots(object: &DefineObject, slots: &mut Slots) {
 			..
 		}
 		| DefineObject::Bucket {
+			permissions,
+			..
+		}
+		| DefineObject::Enum {
 			permissions,
 			..
 		} => permission_slot(slots, *permissions),
@@ -1553,6 +1575,9 @@ fn alter_slots(object: &AlterObject, slots: &mut Slots) {
 			..
 		}
 		| AlterObject::Analyzer {
+			..
+		}
+		| AlterObject::Enum {
 			..
 		}
 		| AlterObject::User(..) => {}

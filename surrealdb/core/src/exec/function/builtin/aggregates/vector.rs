@@ -84,7 +84,7 @@ impl VectorSumAccumulator {
 		{
 			for (t, v) in total.iter_mut().zip(array.iter()) {
 				if let Value::Number(n) = v {
-					*t = *t + *n;
+					*t = t.clone() + n.clone();
 				}
 			}
 			return true;
@@ -203,7 +203,7 @@ impl Accumulator for VectorSumAccumulator {
 			// No vector was seen, so there is no dimension to return a zero
 			// vector for.
 			None => Ok(Value::None),
-			Some(total) => Ok(total.iter().copied().map(Value::from).collect::<Vec<_>>().into()),
+			Some(total) => Ok(total.iter().cloned().map(Value::from).collect::<Vec<_>>().into()),
 		}
 	}
 

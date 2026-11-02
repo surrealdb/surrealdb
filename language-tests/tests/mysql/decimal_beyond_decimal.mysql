@@ -1,0 +1,46 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A DECIMAL above 28 digits is a bigdecimal column: DECIMAL(65,30) values round-trip exactly, are rounded half away from zero to the declared scale, and a value beyond the precision is refused"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ amount: 12345678901234567890123456789012345.123456789012345678901234567890bigdec, id: 1, plain: 42dec, small: 1.26dec }]"
+
+[[test.results]]
+value = "[{ amount: -12345678901234567890123456789012345.123456789012345678901234567891bigdec, id: 2, plain: 7dec, small: -1.26dec }]"
+
+[[test.results]]
+value = "[{ amount: 1.500000000000000000000000000000bigdec, id: 3, plain: 0dec, small: 0.00dec }]"
+
+[[test.results]]
+value = "[{ amount: 12345678901234567890123456789012345.123456789012345678901234567890bigdec, id: 1, plain: 42dec, small: 1.26dec }, { amount: -12345678901234567890123456789012345.123456789012345678901234567891bigdec, id: 2, plain: 7dec, small: -1.26dec }, { amount: 1.500000000000000000000000000000bigdec, id: 3, plain: 0dec, small: 0.00dec }]"
+
+[[test.results]]
+value = "[{ id: 1 }]"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 3 }, { id: 2 }]"
+
+[[test.results]]
+error = "Out of range value for column 'amount' at row 1 (field `amount` of `ledger:4`, SQL TYPE decimal(65,30))"
+
+[[test.results]]
+value = "[{ narrow: 1.5dec, wide: 1.5bigdec }]"
+
+*/
+
+CREATE TABLE ledger (id INT PRIMARY KEY, amount DECIMAL(65,30), plain DECIMAL, small DECIMAL(10,2));
+INSERT INTO ledger (id, amount, plain, small) VALUES (1, CAST('12345678901234567890123456789012345.123456789012345678901234567890' AS DECIMAL(65,30)), 42, 1.255);
+INSERT INTO ledger (id, amount, plain, small) VALUES (2, CAST('-12345678901234567890123456789012345.1234567890123456789012345678905' AS DECIMAL(65,30)), 7, -1.255);
+INSERT INTO ledger (id, amount, plain, small) VALUES (3, 1.5, 0, 0);
+SELECT id, amount, plain, small FROM ledger ORDER BY id;
+SELECT id FROM ledger WHERE amount > CAST('12345678901234567890123456789012345' AS DECIMAL(65,30)) ORDER BY id;
+SELECT id FROM ledger ORDER BY amount DESC;
+INSERT INTO ledger (id, amount) VALUES (4, CAST('100000000000000000000000000000000000' AS DECIMAL(65,30)));
+SELECT CAST('1.5' AS DECIMAL(65,30)) AS wide, CAST('1.5' AS DECIMAL(10,2)) AS narrow;

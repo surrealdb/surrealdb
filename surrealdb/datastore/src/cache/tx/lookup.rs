@@ -38,6 +38,10 @@ pub enum Lookup<'a> {
 	Azs(NamespaceId, DatabaseId),
 	/// A cache key for buckets (on a database)
 	Bus(NamespaceId, DatabaseId),
+	/// A cache key for enums (on a database)
+	Ens(NamespaceId, DatabaseId),
+	/// A cache key for domains and composite types (on a database)
+	Tys(NamespaceId, DatabaseId),
 	/// A cache key for functions (on a database)
 	Fcs(NamespaceId, DatabaseId),
 	/// A cache key for modules (on a database)
@@ -112,6 +116,10 @@ pub enum Lookup<'a> {
 	Az(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a bucket (on a database)
 	Bu(NamespaceId, DatabaseId, &'a str),
+	/// A cache key for an enum (on a database)
+	En(NamespaceId, DatabaseId, &'a str),
+	/// A cache key for a domain or composite type (on a database)
+	Ty(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for root buckets
 	RootBus,
 	/// A cache key for a bucket (on the root)
@@ -166,6 +174,8 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Aps(la, lb), Key::Aps(ka, kb)) => la == ka && lb == kb,
 			(Self::Azs(la, lb), Key::Azs(ka, kb)) => la == ka && lb == kb,
 			(Self::Bus(la, lb), Key::Bus(ka, kb)) => la == ka && lb == kb,
+			(Self::Ens(la, lb), Key::Ens(ka, kb)) => la == ka && lb == kb,
+			(Self::Tys(la, lb), Key::Tys(ka, kb)) => la == ka && lb == kb,
 			(Self::Fcs(la, lb), Key::Fcs(ka, kb)) => la == ka && lb == kb,
 			(Self::Mds(la, lb), Key::Mds(ka, kb)) => la == ka && lb == kb,
 			(Self::Mls(la, lb), Key::Mls(ka, kb)) => la == ka && lb == kb,
@@ -201,6 +211,8 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Ap(la, lb, lc), Key::Ap(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Az(la, lb, lc), Key::Az(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Bu(la, lb, lc), Key::Bu(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::En(la, lb, lc), Key::En(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::Ty(la, lb, lc), Key::Ty(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::RootBus, Key::RootBus) => true,
 			(Self::RootBu(la), Key::RootBu(ka)) => la == ka,
 			(Self::NsBus(la), Key::NsBus(ka)) => la == ka,
@@ -263,6 +275,16 @@ mod tests {
 	#[case(
 		Lookup::Bus(NamespaceId(1), DatabaseId(1)),
 		Key::Bus(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Ens(NamespaceId(1), DatabaseId(1)),
+		Key::Ens(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Tys(NamespaceId(1), DatabaseId(1)),
+		Key::Tys(NamespaceId(1), DatabaseId(1)),
 		true
 	)]
 	#[case(
@@ -338,6 +360,8 @@ mod tests {
 	#[case(Lookup::Ap(NamespaceId(1), DatabaseId(1), "test"), Key::Ap(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Az(NamespaceId(1), DatabaseId(1), "test"), Key::Az(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Bu(NamespaceId(1), DatabaseId(1), "test"), Key::Bu(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::En(NamespaceId(1), DatabaseId(1), "test"), Key::En(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Ty(NamespaceId(1), DatabaseId(1), "test"), Key::Ty(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::RootBus, Key::RootBus, true)]
 	#[case(Lookup::RootBu("test"), Key::RootBu("test".to_string()), true)]
 	#[case(Lookup::NsBus(NamespaceId(1)), Key::NsBus(NamespaceId(1)), true)]

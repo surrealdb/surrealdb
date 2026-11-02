@@ -119,6 +119,7 @@ pub(crate) fn kind_admits(class: KindClass, kind: &Kind) -> bool {
 		Kind::Int => matches!(class, KindClass::Int | KindClass::Number),
 		Kind::Float
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Number
 		| Kind::I8
 		| Kind::U8
@@ -138,6 +139,10 @@ pub(crate) fn kind_admits(class: KindClass, kind: &Kind) -> bool {
 		| Kind::Null
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Duration
 		| Kind::Uuid
 		| Kind::Regex
@@ -149,6 +154,7 @@ pub(crate) fn kind_admits(class: KindClass, kind: &Kind) -> bool {
 		| Kind::Range
 		| Kind::Literal(_)
 		| Kind::File(_) => false,
+		Kind::Enum(_) => class == KindClass::String,
 	}
 }
 

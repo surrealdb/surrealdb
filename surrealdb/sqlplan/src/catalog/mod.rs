@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use surrealdb_expr::expr::{Expr, Kind};
+use surrealdb_expr::expr::{EnumRef, Expr, Kind};
+
+use crate::declared_type::DeclaredSqlType;
 
 /// Information about a single column in a table schema.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +20,17 @@ pub struct ColumnInfo {
 	/// The sequence that numbers the column when a write gives it no value, as `pg_sequences`
 	/// lists it.
 	pub sequence: Option<String>,
+	/// The enum whose labels the column holds, or a set or an array of them, which the system
+	/// views name as the column's type.
+	pub enum_held: Option<EnumColumn>,
+	/// The user-defined domain the column is declared with. `data_type` then names the base type
+	/// of the domain, which is the type a client sees for the column.
+	pub domain: Option<String>,
+	/// The user-defined composite type the column is declared with, when it is one.
+	pub composite: Option<String>,
+	/// The SQL type the column is declared with (`SQL TYPE`), which the system views report in
+	/// place of the type its kind maps to.
+	pub declared: Option<DeclaredSqlType>,
 }
 
 impl ColumnInfo {
@@ -28,7 +41,35 @@ impl ColumnInfo {
 			data_type: None,
 			is_nullable: true,
 			sequence: None,
+			enum_held: None,
+			domain: None,
+			composite: None,
+			declared: None,
 		}
+	}
+
+	/// This column, declared with the SQL type `declared`.
+	pub fn with_declared(mut self, declared: DeclaredSqlType) -> Self {
+		self.declared = Some(declared);
+		self
+	}
+
+	/// This column, declared with the user-defined domain `name`.
+	pub fn with_domain(mut self, name: impl Into<String>) -> Self {
+		self.domain = Some(name.into());
+		self
+	}
+
+	/// This column, declared with the user-defined composite type `name`.
+	pub fn with_composite(mut self, name: impl Into<String>) -> Self {
+		self.composite = Some(name.into());
+		self
+	}
+
+	/// This column, holding the labels of the enum `held`.
+	pub fn with_enum(mut self, held: EnumColumn) -> Self {
+		self.enum_held = Some(held);
+		self
 	}
 
 	pub fn with_sequence(mut self, sequence: impl Into<String>) -> Self {
@@ -242,7 +283,12 @@ pub fn link_target(kind: &Kind) -> Option<&str> {
 		| Kind::Bool
 		| Kind::Bytes
 		| Kind::Datetime
+		| Kind::Date
+		| Kind::Time
+		| Kind::Timestamp
+		| Kind::Interval
 		| Kind::Decimal
+		| Kind::BigDecimal
 		| Kind::Duration
 		| Kind::Float
 		| Kind::F16
@@ -267,7 +313,8 @@ pub fn link_target(kind: &Kind) -> Option<&str> {
 		| Kind::Function(..)
 		| Kind::Range
 		| Kind::Literal(_)
-		| Kind::File(_) => None,
+		| Kind::File(_)
+		| Kind::Enum(_) => None,
 	}
 }
 
@@ -279,7 +326,11 @@ pub(crate) fn kind_type_name(kind: &Kind) -> Option<String> {
 		Kind::Bool => "boolean",
 		Kind::Bytes => "bytea",
 		Kind::Datetime => "timestamp with time zone",
-		Kind::Decimal | Kind::U64 => "numeric",
+		Kind::Date => "date",
+		Kind::Time => "time without time zone",
+		Kind::Timestamp => "timestamp without time zone",
+		Kind::Interval => "interval",
+		Kind::Decimal | Kind::BigDecimal | Kind::U64 => "numeric",
 		Kind::Duration => "interval",
 		Kind::Float => "double precision",
 		Kind::F16 | Kind::F32 => "real",
@@ -289,7 +340,16 @@ pub(crate) fn kind_type_name(kind: &Kind) -> Option<String> {
 		Kind::String => "text",
 		Kind::Uuid => "uuid",
 		Kind::Object => "jsonb",
-		Kind::Array(element, _) => return kind_type_name(element).map(|name| format!("{name}[]")),
+		Kind::Enum(EnumRef::Named(_)) => "USER-DEFINED",
+		Kind::Enum(EnumRef::Inline(_)) => "enum",
+		// Every dimension of an array is named alike, as PostgreSQL names them.
+		Kind::Array(element, _) => {
+			let mut scalar = element.as_ref();
+			while let Kind::Array(inner, _) = scalar {
+				scalar = inner.as_ref();
+			}
+			return kind_type_name(scalar).map(|name| format!("{name}[]"));
+		}
 		Kind::Either(kinds) => {
 			let mut names = kinds
 				.iter()
@@ -324,6 +384,277 @@ pub fn kind_admits_none(kind: &Kind) -> bool {
 	}
 }
 
+/// How a column holds the labels of an enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EnumShape {
+	/// One label (`enum<..>`, optionally `NONE`).
+	Scalar,
+	/// A set of labels (`set<enum<..>>`), which MySQL `SET` columns are.
+	Set,
+	/// A list of labels (`array<enum<..>>`).
+	Array,
+}
+
+/// A column that holds the labels of an enum, as its declared kind says.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EnumColumn {
+	/// The enum the labels belong to.
+	pub reference: EnumRef,
+	/// Whether the column holds one label, a set of them or a list.
+	pub shape: EnumShape,
+}
+
+impl EnumColumn {
+	/// The enum a field of `kind` holds labels of: the enum itself, a set or an array of it, any
+	/// of them besides `NONE` and `NULL`. `None` for every other kind, including a union of
+	/// several enums.
+	pub fn of_kind(kind: &Kind) -> Option<Self> {
+		match kind {
+			Kind::Enum(reference) => Some(Self {
+				reference: reference.clone(),
+				shape: EnumShape::Scalar,
+			}),
+			Kind::Set(element, _) | Kind::Array(element, _) => {
+				let shape = if matches!(kind, Kind::Set(..)) {
+					EnumShape::Set
+				} else {
+					EnumShape::Array
+				};
+				if let Kind::Enum(reference) = &**element {
+					Some(Self {
+						reference: reference.clone(),
+						shape,
+					})
+				} else {
+					None
+				}
+			}
+			Kind::Either(kinds) => {
+				let mut found = None;
+				for kind in kinds {
+					if matches!(kind, Kind::None | Kind::Null) {
+						continue;
+					}
+					if found.is_some() {
+						return None;
+					}
+					found = Some(Self::of_kind(kind)?);
+				}
+				found
+			}
+			Kind::Any
+			| Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
+			| Kind::Decimal
+			| Kind::BigDecimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::F16
+			| Kind::F32
+			| Kind::Int
+			| Kind::I8
+			| Kind::I16
+			| Kind::I32
+			| Kind::U8
+			| Kind::U16
+			| Kind::U32
+			| Kind::U64
+			| Kind::Number
+			| Kind::Object
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Record(_)
+			| Kind::Geometry(_)
+			| Kind::Function(..)
+			| Kind::Range
+			| Kind::Literal(_)
+			| Kind::File(_) => None,
+		}
+	}
+}
+
+/// A user-defined enum type: its name, its database-scoped identity, and its labels with the sort
+/// key that places each in declaration order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumType {
+	/// The type's name.
+	pub name: String,
+	/// The id the type's OID is allocated from.
+	pub id: u32,
+	/// The labels in declaration order.
+	pub labels: Vec<EnumTypeLabel>,
+}
+
+/// A label of an [`EnumType`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumTypeLabel {
+	/// The label's text.
+	pub label: String,
+	/// The sort key that places it in declaration order; a re-spacing rewrites it.
+	pub order: u64,
+	/// The identity the label keeps through a rename or a re-spacing, which its `pg_enum` OID is
+	/// derived from. Labels declared together take 1, 2, ...; an added label takes one past the
+	/// greatest, as the catalog does.
+	pub ident: u32,
+}
+
+impl EnumType {
+	/// The gap between the sort keys of labels declared together.
+	const ORDER_STRIDE: u64 = 1 << 32;
+
+	/// An enum of `labels`, declared together, with the id `id`.
+	pub fn declared(name: &str, id: u32, labels: &[String]) -> Self {
+		Self {
+			name: name.to_owned(),
+			id,
+			labels: labels
+				.iter()
+				.zip(1..)
+				.map(|(label, ident)| EnumTypeLabel {
+					label: label.clone(),
+					order: u64::from(ident) * Self::ORDER_STRIDE,
+					ident,
+				})
+				.collect(),
+		}
+	}
+
+	/// Places `label` before or after `anchor` (last when there is none), taking the midpoint of
+	/// its neighbours' sort keys, as the catalog does. Does nothing for a label the enum holds or
+	/// an anchor it does not.
+	pub fn add_label(&mut self, label: &str, anchor: Option<(&str, bool)>) {
+		if self.labels.iter().any(|l| l.label == label) {
+			return;
+		}
+		let index = match anchor {
+			None => self.labels.len(),
+			Some((anchor, after)) => match self.labels.iter().position(|l| l.label == anchor) {
+				Some(at) => at + usize::from(after),
+				None => return,
+			},
+		};
+		let ident = self.labels.iter().map(|l| l.ident).max().unwrap_or(0).saturating_add(1);
+		let below = index.checked_sub(1).map(|i| self.labels[i].order).unwrap_or(0);
+		let order = match self.labels.get(index) {
+			Some(above) if above.order - below >= 2 => below + (above.order - below) / 2,
+			Some(_) => {
+				for (position, existing) in self.labels.iter_mut().enumerate() {
+					existing.order = (position as u64 + 1) * Self::ORDER_STRIDE;
+				}
+				let below = index.checked_sub(1).map(|i| self.labels[i].order).unwrap_or(0);
+				match self.labels.get(index) {
+					Some(above) => below + (above.order - below) / 2,
+					None => below + Self::ORDER_STRIDE,
+				}
+			}
+			None => below + Self::ORDER_STRIDE,
+		};
+		self.labels.insert(
+			index,
+			EnumTypeLabel {
+				label: label.to_owned(),
+				order,
+				ident,
+			},
+		);
+	}
+
+	/// Renames `from` to `to`, keeping its place and its identity.
+	pub fn rename_label(&mut self, from: &str, to: &str) {
+		if self.labels.iter().any(|l| l.label == to) {
+			return;
+		}
+		if let Some(existing) = self.labels.iter_mut().find(|l| l.label == from) {
+			to.clone_into(&mut existing.label);
+		}
+	}
+}
+
+/// A user-defined domain: a base type with the `NOT NULL` and `DEFAULT` a column of the domain
+/// takes, and the checks every value it holds must pass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DomainType {
+	/// The domain's name.
+	pub name: String,
+	/// The id the type's OID is allocated from, below [`crate::descriptor::USER_TYPE_ID_LIMIT`].
+	pub id: u32,
+	/// The kind of the base type. A column of the domain holds values of this kind.
+	pub base: Kind,
+	/// The base type as the domain declares it, in the canonical text of a PostgreSQL declared
+	/// type.
+	pub base_type: String,
+	/// Whether a column of the domain refuses NULL.
+	pub not_null: bool,
+	/// The value a column of the domain takes when a write names none.
+	pub default: Option<Expr>,
+	/// The checks, in declaration order. Each reads the value under test as `$value`.
+	pub checks: Vec<DomainCheck>,
+}
+
+/// One `CHECK` of a domain, with the name given by `CONSTRAINT`, when one was.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DomainCheck {
+	/// The constraint name, when declared.
+	pub name: Option<String>,
+	/// The check, as a SurrealQL expression over `$value`. It holds when it evaluates to true.
+	pub check: Expr,
+}
+
+/// A column declared with a domain, as `ALTER DOMAIN` restates it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DomainColumn {
+	/// The table the column belongs to.
+	pub table: String,
+	/// The column.
+	pub column: String,
+	/// Whether the column refuses NULL by its own `NOT NULL`, whatever the domain says.
+	pub not_null: bool,
+	/// The column's `DEFAULT`, which is the domain's when the column names none of its own.
+	pub default: Option<Expr>,
+}
+
+/// A user-defined composite type: its attributes in declaration order, each with its kind.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompositeType {
+	/// The type's name.
+	pub name: String,
+	/// The id the type's OIDs are allocated from, below [`crate::descriptor::USER_TYPE_ID_LIMIT`].
+	pub id: u32,
+	/// The attributes in declaration order, with the kind each holds.
+	pub fields: Vec<(String, Kind)>,
+}
+
+/// The user-defined types that the catalog views list: enums, domains and composite types.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UserTypes {
+	/// The enum types, with the sort key of each label.
+	pub enums: Vec<EnumType>,
+	/// The domains.
+	pub domains: Vec<DomainType>,
+	/// The composite types.
+	pub composites: Vec<CompositeType>,
+}
+
+impl UserTypes {
+	/// Every user-defined type `catalog` describes.
+	pub fn of_catalog(catalog: &dyn BinderCatalog) -> Self {
+		Self {
+			enums: catalog.enum_types(),
+			domains: catalog.domain_types(),
+			composites: catalog.composite_types(),
+		}
+	}
+}
+
 /// Whether a column of `kind` can hold `NULL`: its type is `any`, `null`, or has a member that is.
 pub fn kind_admits_null(kind: &Kind) -> bool {
 	if let Kind::Either(kinds) = kind {
@@ -337,6 +668,42 @@ pub fn kind_admits_null(kind: &Kind) -> bool {
 pub trait BinderCatalog: Send + Sync {
 	/// Look up a table schema by optional namespace and table name.
 	fn get_table(&self, schema: Option<&str>, name: &str) -> Option<TableSchema>;
+
+	/// The user-defined enum type `name`, for a column declared with it.
+	fn enum_type(&self, _name: &str) -> Option<EnumType> {
+		None
+	}
+
+	/// Every user-defined enum type, for the system views that list them.
+	fn enum_types(&self) -> Vec<EnumType> {
+		Vec::new()
+	}
+
+	/// The user-defined domain `name`, for a column declared with it.
+	fn domain_type(&self, _name: &str) -> Option<DomainType> {
+		None
+	}
+
+	/// The user-defined composite type `name`, for a column declared with it.
+	fn composite_type(&self, _name: &str) -> Option<CompositeType> {
+		None
+	}
+
+	/// Every user-defined domain, for the system views that list them.
+	fn domain_types(&self) -> Vec<DomainType> {
+		Vec::new()
+	}
+
+	/// The columns declared with the domain `name`, in no particular order, for `ALTER DOMAIN` to
+	/// restate the field definition of each.
+	fn domain_columns(&self, _name: &str) -> Vec<DomainColumn> {
+		Vec::new()
+	}
+
+	/// Every user-defined composite type, for the system views that list them.
+	fn composite_types(&self) -> Vec<CompositeType> {
+		Vec::new()
+	}
 
 	/// Check if a table exists.
 	fn table_exists(&self, schema: Option<&str>, name: &str) -> bool {
@@ -369,6 +736,38 @@ pub trait BinderCatalog: Send + Sync {
 		_table: &str,
 	) -> Vec<(String, crate::SqlType)> {
 		Vec::new()
+	}
+
+	/// The SQL type column `column` of table `table` is declared with (`SQL TYPE`), which the wire
+	/// reports for the column in place of the type its kind maps to. `None` for a column declared
+	/// without one, and for a table or column the catalog does not describe. Answered from the
+	/// column's description in [`BinderCatalog::get_table`] by default.
+	fn column_sql_type(
+		&self,
+		schema: Option<&str>,
+		table: &str,
+		column: &str,
+	) -> Option<DeclaredSqlType> {
+		self.get_table(schema, table)
+			.and_then(|table| table.find_column(column, false).and_then(|c| c.declared.clone()))
+	}
+
+	/// Every column of `table` declared with a SQL type, in no particular order. As for
+	/// [`BinderCatalog::declared_column_types`], this is not the table's column list.
+	fn declared_sql_types(
+		&self,
+		schema: Option<&str>,
+		table: &str,
+	) -> Vec<(String, DeclaredSqlType)> {
+		self.get_table(schema, table)
+			.map(|table| {
+				table
+					.columns
+					.into_iter()
+					.filter_map(|column| column.declared.map(|declared| (column.name, declared)))
+					.collect()
+			})
+			.unwrap_or_default()
 	}
 
 	/// The declared type of column `column` of table `table` when a text value written to it is
@@ -425,6 +824,27 @@ pub trait BinderCatalog: Send + Sync {
 	/// does not refuses `NULL`. `false` where the catalog does not say.
 	fn link_admits_none(&self, _schema: Option<&str>, _table: &str, _column: &str) -> bool {
 		false
+	}
+
+	/// The enum that column `column` of table `table` holds labels of, when its declared type is
+	/// an enum, or a set or an array of one. `None` for every other column and for a table or a
+	/// column the catalog does not describe. The names are compared exactly, as for
+	/// [`BinderCatalog::link_table`].
+	fn column_enum(
+		&self,
+		_schema: Option<&str>,
+		_table: &str,
+		_column: &str,
+	) -> Option<EnumColumn> {
+		None
+	}
+
+	/// The user-defined composite type that column `column` of table `table` is declared with, by
+	/// name, when it is one. Answered from the column's description in [`BinderCatalog::get_table`]
+	/// by default.
+	fn column_composite(&self, schema: Option<&str>, table: &str, column: &str) -> Option<String> {
+		self.get_table(schema, table)
+			.and_then(|table| table.find_column(column, false).and_then(|c| c.composite.clone()))
 	}
 
 	/// The columns of table `table` that hold NULL in a row written without a value for them: the
@@ -532,9 +952,53 @@ pub struct MemoryCatalog {
 	write_types: HashMap<(String, String), crate::SqlType>,
 	/// The HNSW indexes, by table, as the column each covers and its metric.
 	hnsw: HashMap<String, Vec<(String, crate::vector::VectorMetric)>>,
+	/// The user-defined enum types.
+	enums: Vec<EnumType>,
+	/// The columns that hold enum labels, by (table, column).
+	enum_columns: HashMap<(String, String), EnumColumn>,
+	/// The user-defined domains.
+	domains: Vec<DomainType>,
+	/// The user-defined composite types.
+	composites: Vec<CompositeType>,
+	/// The SQL types columns are declared with, by (table, column).
+	sql_types: HashMap<(String, String), DeclaredSqlType>,
+	/// The columns declared with a domain.
+	domain_columns: Vec<(String, DomainColumn)>,
 }
 
 impl MemoryCatalog {
+	/// Declare that column `column` of table `table` holds the labels of an enum; see
+	/// [`BinderCatalog::column_enum`].
+	pub fn with_enum_column(mut self, table: &str, column: &str, held: EnumColumn) -> Self {
+		self.enum_columns.insert((table.to_owned(), column.to_owned()), held);
+		self
+	}
+
+	/// This catalog with the user-defined enum types `enums`.
+	pub fn with_enums(mut self, enums: Vec<EnumType>) -> Self {
+		self.enums = enums;
+		self
+	}
+
+	/// This catalog with the user-defined domains `domains`.
+	pub fn with_domains(mut self, domains: Vec<DomainType>) -> Self {
+		self.domains = domains;
+		self
+	}
+
+	/// This catalog with the user-defined composite types `composites`.
+	pub fn with_composites(mut self, composites: Vec<CompositeType>) -> Self {
+		self.composites = composites;
+		self
+	}
+
+	/// This catalog with `columns`, each declared with the domain it is paired with; see
+	/// [`BinderCatalog::domain_columns`].
+	pub fn with_domain_columns(mut self, columns: Vec<(String, DomainColumn)>) -> Self {
+		self.domain_columns = columns;
+		self
+	}
+
 	pub fn new() -> Self {
 		Self {
 			tables: HashMap::new(),
@@ -549,7 +1013,31 @@ impl MemoryCatalog {
 			vectors: HashMap::new(),
 			write_types: HashMap::new(),
 			hnsw: HashMap::new(),
+			enums: Vec::new(),
+			enum_columns: HashMap::new(),
+			domains: Vec::new(),
+			composites: Vec::new(),
+			sql_types: HashMap::new(),
+			domain_columns: Vec::new(),
 		}
+	}
+
+	/// Declare that column `column` of table `table` is declared with the SQL type `declared`; see
+	/// [`BinderCatalog::column_sql_type`].
+	pub fn with_sql_type(mut self, table: &str, column: &str, declared: DeclaredSqlType) -> Self {
+		self.add_sql_type(table, column, declared);
+		self
+	}
+
+	/// Declare a column's SQL type, as [`Self::with_sql_type`] does.
+	pub fn add_sql_type(
+		&mut self,
+		table: &str,
+		column: &str,
+		declared: DeclaredSqlType,
+	) -> &mut Self {
+		self.sql_types.insert((table.to_owned(), column.to_owned()), declared);
+		self
 	}
 
 	/// Describe the vector columns that `other` does, besides what this catalog describes.
@@ -726,6 +1214,38 @@ impl BinderCatalog for MemoryCatalog {
 		self.current_db.as_deref()
 	}
 
+	fn enum_type(&self, name: &str) -> Option<EnumType> {
+		self.enums.iter().find(|e| e.name == name).cloned()
+	}
+
+	fn enum_types(&self) -> Vec<EnumType> {
+		self.enums.clone()
+	}
+
+	fn domain_type(&self, name: &str) -> Option<DomainType> {
+		self.domains.iter().find(|d| d.name == name).cloned()
+	}
+
+	fn composite_type(&self, name: &str) -> Option<CompositeType> {
+		self.composites.iter().find(|c| c.name == name).cloned()
+	}
+
+	fn domain_types(&self) -> Vec<DomainType> {
+		self.domains.clone()
+	}
+
+	fn composite_types(&self) -> Vec<CompositeType> {
+		self.composites.clone()
+	}
+
+	fn domain_columns(&self, name: &str) -> Vec<DomainColumn> {
+		self.domain_columns
+			.iter()
+			.filter(|(domain, _)| domain == name)
+			.map(|(_, column)| column.clone())
+			.collect()
+	}
+
 	fn all_tables(&self) -> Vec<TableSchema> {
 		let mut seen =
 			std::collections::HashSet::with_capacity(self.tables.len() + self.listed.len());
@@ -789,6 +1309,13 @@ impl BinderCatalog for MemoryCatalog {
 		self.nullable_links.contains(&(table.to_owned(), column.to_owned()))
 	}
 
+	fn column_enum(&self, schema: Option<&str>, table: &str, column: &str) -> Option<EnumColumn> {
+		if schema.is_some_and(|schema| schema != "public") {
+			return None;
+		}
+		self.enum_columns.get(&(table.to_owned(), column.to_owned())).cloned()
+	}
+
 	fn null_columns(&self, _schema: Option<&str>, table: &str) -> Vec<String> {
 		self.null_columns.get(table).cloned().unwrap_or_default()
 	}
@@ -814,6 +1341,42 @@ impl BinderCatalog for MemoryCatalog {
 			.filter(|((name, _), _)| name == table)
 			.map(|((_, column), ty)| (column.clone(), *ty))
 			.collect()
+	}
+
+	fn column_sql_type(
+		&self,
+		schema: Option<&str>,
+		table: &str,
+		column: &str,
+	) -> Option<DeclaredSqlType> {
+		if let Some(declared) = self.sql_types.get(&(table.to_owned(), column.to_owned())) {
+			return Some(declared.clone());
+		}
+		self.get_table(schema, table)
+			.and_then(|table| table.find_column(column, false).and_then(|c| c.declared.clone()))
+	}
+
+	fn declared_sql_types(
+		&self,
+		schema: Option<&str>,
+		table: &str,
+	) -> Vec<(String, DeclaredSqlType)> {
+		let mut declared: Vec<(String, DeclaredSqlType)> = self
+			.sql_types
+			.iter()
+			.filter(|((name, _), _)| name == table)
+			.map(|((_, column), declared)| (column.clone(), declared.clone()))
+			.collect();
+		if let Some(table) = self.get_table(schema, table) {
+			for column in table.columns {
+				if let Some(sql_type) = column.declared
+					&& !declared.iter().any(|(name, _)| *name == column.name)
+				{
+					declared.push((column.name, sql_type));
+				}
+			}
+		}
+		declared
 	}
 
 	fn vector_dimension(&self, _schema: Option<&str>, table: &str, column: &str) -> Option<usize> {

@@ -18,6 +18,9 @@ impl ToFlatbuffers for Value {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
+			Self::Date(_) | Self::Time(_) | Self::Timestamp(_) | Self::Interval(_) => {
+				return self.degrade_temporal().to_fb(builder);
+			}
 			Self::None => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::NONE,
 				value: None,
@@ -45,6 +48,18 @@ impl ToFlatbuffers for Value {
 				crate::Wide::Decimal(d) => proto_fb::ValueArgs {
 					value_type: proto_fb::ValueType::Decimal,
 					value: Some(d.to_fb(builder)?.as_union_value()),
+				},
+				// A bigdecimal that fits a decimal exactly travels as one. Any other value
+				// travels as its text, since the wire has no arbitrary-precision decimal.
+				crate::Wide::BigDecimal(b) => match Decimal::try_from(b) {
+					Ok(d) => proto_fb::ValueArgs {
+						value_type: proto_fb::ValueType::Decimal,
+						value: Some(d.to_fb(builder)?.as_union_value()),
+					},
+					Err(_) => proto_fb::ValueArgs {
+						value_type: proto_fb::ValueType::String,
+						value: Some(b.to_string().to_fb(builder)?.as_union_value()),
+					},
 				},
 			},
 			Self::String(s) => proto_fb::ValueArgs {

@@ -82,7 +82,7 @@ pub fn unescape_with(body: &str, out: &mut String, json: bool) -> bool {
 /// The body of a quoted token: strips a string prefix and the quotes, a
 /// pair of backticks, or `⟨` `⟩`.
 pub fn strip_delims(text: &str) -> &str {
-	let t = text.trim_start_matches(['r', 'u', 'd', 'b', 'f', 's']);
+	let t = text.trim_start_matches(|c: char| c.is_ascii_lowercase());
 	if let Some(inner) = t.strip_prefix('⟨') {
 		return inner.strip_suffix('⟩').unwrap_or(inner);
 	}
@@ -102,7 +102,7 @@ pub fn escape_error(token: &str, json: bool) -> Option<(u32, u32, &'static str, 
 	// Skip a string prefix and the opening delimiter.
 	let mut i = match b.first() {
 		Some(b'`') | Some(b'"') | Some(b'\'') => 1,
-		Some(b's' | b'r' | b'u' | b'f' | b'd' | b'b') => 2,
+		Some(b'a'..=b'z') => crate::lex::string_prefix_len(token) + 1,
 		// `⟨`
 		Some(0xE2) => 3,
 		_ => return None,

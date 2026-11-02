@@ -43,6 +43,17 @@ pub(crate) fn inlinable_body<'d>(
 	{
 		return None;
 	}
+	// A named enum in a signature is judged against the catalog where the call binds its arguments
+	// and returns its value, which a body standing in the caller never does.
+	if definition
+		.args
+		.iter()
+		.map(|(_, kind)| kind)
+		.chain(definition.returns.as_ref())
+		.any(Kind::has_named_enum)
+	{
+		return None;
+	}
 	let expr = return_expr(definition.logical_body().ok()?)?;
 	body_is_inlinable(expr, &definition.args, registry).then_some(expr)
 }

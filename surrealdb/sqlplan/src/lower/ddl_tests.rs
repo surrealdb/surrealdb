@@ -3,7 +3,7 @@
 #![allow(clippy::wildcard_enum_match_arm)]
 
 use surrealdb_expr::expr::reference::ReferenceDeleteStrategy;
-use surrealdb_expr::expr::statements::define::{DefineKind, DefineStatement};
+use surrealdb_expr::expr::statements::define::{DefineDefault, DefineKind, DefineStatement};
 use surrealdb_expr::expr::statements::remove::RemoveStatement;
 use surrealdb_expr::expr::{Expr, Kind};
 use surrealdb_types::ToSql;
@@ -51,18 +51,19 @@ fn test_pgsql_type_map() {
 		assert_eq!(map_pgsql_type(&ct.columns[3].data_type), Kind::I32);
 		assert_eq!(map_pgsql_type(&ct.columns[4].data_type), Kind::F32);
 		assert_eq!(map_pgsql_type(&ct.columns[5].data_type), Kind::Float);
-		assert_eq!(map_pgsql_type(&ct.columns[6].data_type), Kind::Decimal);
+		// A `numeric` without a precision holds any number of digits.
+		assert_eq!(map_pgsql_type(&ct.columns[6].data_type), Kind::BigDecimal);
 		assert_eq!(map_pgsql_type(&ct.columns[7].data_type), Kind::String);
 		assert_eq!(map_pgsql_type(&ct.columns[8].data_type), Kind::String);
 		assert_eq!(map_pgsql_type(&ct.columns[9].data_type), Kind::String);
 		assert_eq!(map_pgsql_type(&ct.columns[10].data_type), Kind::Bool);
-		assert_eq!(map_pgsql_type(&ct.columns[11].data_type), Kind::Datetime);
-		assert_eq!(map_pgsql_type(&ct.columns[12].data_type), Kind::Datetime);
-		assert_eq!(map_pgsql_type(&ct.columns[13].data_type), Kind::Datetime);
+		assert_eq!(map_pgsql_type(&ct.columns[11].data_type), Kind::Date);
+		assert_eq!(map_pgsql_type(&ct.columns[12].data_type), Kind::Time);
+		assert_eq!(map_pgsql_type(&ct.columns[13].data_type), Kind::Timestamp);
 		assert_eq!(map_pgsql_type(&ct.columns[14].data_type), Kind::Datetime);
 		assert_eq!(map_pgsql_type(&ct.columns[15].data_type), Kind::Uuid);
-		assert_eq!(map_pgsql_type(&ct.columns[16].data_type), Kind::Object);
-		assert_eq!(map_pgsql_type(&ct.columns[17].data_type), Kind::Object);
+		assert_eq!(map_pgsql_type(&ct.columns[16].data_type), Kind::Any);
+		assert_eq!(map_pgsql_type(&ct.columns[17].data_type), Kind::Any);
 		assert_eq!(map_pgsql_type(&ct.columns[18].data_type), Kind::Bytes);
 		assert_eq!(
 			map_pgsql_type(&ct.columns[19].data_type),
@@ -82,6 +83,8 @@ fn test_mysql_type_map() {
 	assert_eq!(map_mysql_type("int"), Kind::I32);
 	assert_eq!(map_mysql_type("integer"), Kind::I32);
 	assert_eq!(map_mysql_type("int(10) UNSIGNED"), Kind::U32);
+	assert_eq!(map_mysql_type("tinyint(3) ZEROFILL"), Kind::U8);
+	assert_eq!(map_mysql_type("int zerofill"), Kind::U32);
 	assert_eq!(map_mysql_type("tinyint(1)"), Kind::I8);
 	assert_eq!(map_mysql_type("tinyint UNSIGNED"), Kind::U8);
 	assert_eq!(map_mysql_type("smallint"), Kind::I16);
@@ -89,7 +92,7 @@ fn test_mysql_type_map() {
 	assert_eq!(map_mysql_type("mediumint"), Kind::I32);
 	assert_eq!(map_mysql_type("mediumint UNSIGNED"), Kind::U32);
 	assert_eq!(map_mysql_type("bigint"), Kind::Int);
-	assert_eq!(map_mysql_type("bigint unsigned"), Kind::Int);
+	assert_eq!(map_mysql_type("bigint unsigned"), Kind::U64);
 	assert_eq!(map_mysql_type("float"), Kind::F32);
 	assert_eq!(map_mysql_type("float(24)"), Kind::F32);
 	assert_eq!(map_mysql_type("float(25)"), Kind::Float);
@@ -98,20 +101,144 @@ fn test_mysql_type_map() {
 	assert_eq!(map_mysql_type("double"), Kind::Float);
 	assert_eq!(map_mysql_type("double precision"), Kind::Float);
 	assert_eq!(map_mysql_type("decimal(10,2)"), Kind::Decimal);
+	assert_eq!(map_mysql_type("decimal"), Kind::Decimal);
+	assert_eq!(map_mysql_type("DECIMAL(28,10)"), Kind::Decimal);
+	assert_eq!(map_mysql_type("DECIMAL(29,10)"), Kind::BigDecimal);
+	assert_eq!(map_mysql_type("decimal(65,30)"), Kind::BigDecimal);
+	assert_eq!(map_mysql_type("numeric(40)"), Kind::BigDecimal);
+	assert_eq!(map_mysql_type("fixed(65,0) unsigned"), Kind::BigDecimal);
 	assert_eq!(map_mysql_type("varchar(100)"), Kind::String);
 	assert_eq!(map_mysql_type("char(2)"), Kind::String);
 	assert_eq!(map_mysql_type("text"), Kind::String);
 	assert_eq!(map_mysql_type("longtext"), Kind::String);
 	assert_eq!(map_mysql_type("bool"), Kind::Bool);
 	assert_eq!(map_mysql_type("boolean"), Kind::Bool);
-	assert_eq!(map_mysql_type("date"), Kind::Datetime);
-	assert_eq!(map_mysql_type("datetime"), Kind::Datetime);
+	assert_eq!(map_mysql_type("date"), Kind::Date);
+	assert_eq!(map_mysql_type("time"), Kind::Interval);
+	assert_eq!(map_mysql_type("time(3)"), Kind::Interval);
+	assert_eq!(map_mysql_type("datetime"), Kind::Timestamp);
+	assert_eq!(map_mysql_type("datetime(6)"), Kind::Timestamp);
 	assert_eq!(map_mysql_type("timestamp"), Kind::Datetime);
-	assert_eq!(map_mysql_type("json"), Kind::Object);
+	assert_eq!(map_mysql_type("year"), Kind::Either(vec![Kind::U16, Kind::String]));
+	assert_eq!(map_mysql_type("json"), Kind::Any);
 	assert_eq!(map_mysql_type("blob"), Kind::Bytes);
-	assert_eq!(map_mysql_type("bit(8)"), Kind::Bytes);
-	assert_eq!(map_mysql_type("enum('a','b')"), Kind::String);
-	assert_eq!(map_mysql_type("set('x','y')"), Kind::String);
+	assert_eq!(map_mysql_type("bit(8)"), Kind::U64);
+	assert_eq!(map_mysql_type("bit"), Kind::U64);
+	assert_eq!(map_mysql_type("bit(64)"), Kind::U64);
+	assert_eq!(map_mysql_type("enum"), Kind::String);
+	assert_eq!(map_mysql_type("set()"), Kind::String);
+}
+
+#[test]
+fn test_mysql_type_map_unsigned_bigint_serial_and_aliases() {
+	assert_eq!(map_mysql_type("bigint UNSIGNED"), Kind::U64);
+	assert_eq!(map_mysql_type("BIGINT(20) unsigned"), Kind::U64);
+	assert_eq!(map_mysql_type("int8 unsigned"), Kind::U64);
+	assert_eq!(map_mysql_type("bigint"), Kind::Int);
+	assert_eq!(map_mysql_type("int8"), Kind::Int);
+	assert_eq!(map_mysql_type("serial"), Kind::U64);
+	assert_eq!(map_mysql_type("int1"), Kind::I8);
+	assert_eq!(map_mysql_type("int1 unsigned"), Kind::U8);
+	assert_eq!(map_mysql_type("int2"), Kind::I16);
+	assert_eq!(map_mysql_type("int3"), Kind::I32);
+	assert_eq!(map_mysql_type("int3 unsigned"), Kind::U32);
+	assert_eq!(map_mysql_type("int4"), Kind::I32);
+	assert_eq!(map_mysql_type("middleint"), Kind::I32);
+	assert_eq!(map_mysql_type("middleint unsigned"), Kind::U32);
+	assert_eq!(map_mysql_type("float4"), Kind::F32);
+	assert_eq!(map_mysql_type("float8"), Kind::Float);
+	assert_eq!(map_mysql_type("double precision"), Kind::Float);
+}
+
+#[test]
+fn test_mysql_type_map_string_and_binary_aliases() {
+	assert_eq!(map_mysql_type("nchar(5)"), Kind::String);
+	assert_eq!(map_mysql_type("NVARCHAR(5)"), Kind::String);
+	assert_eq!(map_mysql_type("national char(5)"), Kind::String);
+	assert_eq!(map_mysql_type("NATIONAL VARCHAR(5)"), Kind::String);
+	assert_eq!(map_mysql_type("national character varying(5)"), Kind::String);
+	assert_eq!(map_mysql_type("character varying(5)"), Kind::String);
+	assert_eq!(map_mysql_type("long"), Kind::String);
+	assert_eq!(map_mysql_type("long varchar"), Kind::String);
+	assert_eq!(map_mysql_type("long varbinary"), Kind::Bytes);
+}
+
+#[test]
+fn test_mysql_type_map_vector() {
+	assert_eq!(map_mysql_type("vector(768)"), Kind::Array(Box::new(Kind::Float), Some(768)));
+	assert_eq!(map_mysql_type("VECTOR(3)"), Kind::Array(Box::new(Kind::Float), Some(3)));
+	assert_eq!(map_mysql_type("vector(0)"), Kind::Array(Box::new(Kind::Float), None));
+}
+
+#[test]
+fn test_pgsql_text_shaped_types_map_to_string() {
+	let stmt = surrealdb_pgsql::parse_statement(
+		"CREATE TABLE t (
+		a INET,
+		b CIDR,
+		c MACADDR,
+		d MACADDR8,
+		e BIT(8),
+		f BIT VARYING(4),
+		g VARBIT,
+		h XML,
+		i TSVECTOR,
+		j TSQUERY,
+		k JSONPATH,
+		l TID,
+		m PG_SNAPSHOT,
+		n TXID_SNAPSHOT
+	);",
+	)
+	.expect("parse pgsql");
+	let surrealdb_pgsql::ast::stmt::Statement::CreateTable(ct) = stmt else {
+		panic!("Expected CreateTable");
+	};
+	for column in &ct.columns {
+		assert_eq!(map_pgsql_type(&column.data_type), Kind::String, "{}", column.name);
+	}
+}
+
+#[test]
+fn test_pgsql_text_type_names_map_to_string() {
+	let stmt = surrealdb_pgsql::parse_statement(
+		"CREATE TABLE t (a name, b \"char\", c citext, d VARCHAR(10));",
+	)
+	.expect("parse pgsql");
+	let surrealdb_pgsql::ast::stmt::Statement::CreateTable(ct) = stmt else {
+		panic!("Expected CreateTable");
+	};
+	for column in &ct.columns {
+		assert_eq!(map_pgsql_type(&column.data_type), Kind::String);
+	}
+}
+
+#[test]
+fn test_lower_mysql_serial_column_is_unsigned_unique_and_sequenced() {
+	let stmt = surrealdb_mysql::parse_statement("CREATE TABLE orders (id SERIAL, note TEXT);")
+		.expect("parse");
+
+	let exprs = lower_mysql_ddl_definitions(&stmt).expect("lower");
+	// 1 DefineTable + 1 DefineSequence (id) + 2 DefineField + 1 DefineIndex (id UNIQUE)
+	assert_eq!(exprs.len(), 5);
+
+	let id_field = exprs.iter().find_map(|expr| match expr {
+		Expr::Define(d) => match &**d {
+			DefineStatement::Field(f) if f.name.to_sql() == "id" => Some(f),
+			_ => None,
+		},
+		_ => None,
+	});
+	let id_field = id_field.expect("a field definition for id");
+	// The record id key is a signed 64-bit integer; the declared SQL type keeps the unsigned type.
+	assert_eq!(id_field.field_kind, Some(Kind::Int));
+	let sql_type = id_field.sql_type.as_ref().expect("a declared SQL type");
+	assert!(sql_type.text.to_ascii_lowercase().contains("serial"), "{}", sql_type.text);
+	assert!(id_field.assert.is_some(), "SERIAL is NOT NULL");
+	assert!(
+		!matches!(id_field.default, DefineDefault::None),
+		"SERIAL is AUTO_INCREMENT, so the column has a sequence default"
+	);
 }
 
 #[test]
@@ -940,6 +1067,8 @@ fn field_flexibility(exprs: &[Expr]) -> Vec<(String, bool)> {
 				| DefineStatement::Api(_)
 				| DefineStatement::Bucket(_)
 				| DefineStatement::Sequence(_)
+				| DefineStatement::Enum(_)
+				| DefineStatement::UserType(_)
 				| DefineStatement::Module(_) => None,
 			},
 			Expr::Literal(_)
@@ -987,7 +1116,7 @@ fn field_flexibility(exprs: &[Expr]) -> Vec<(String, bool)> {
 }
 
 #[test]
-fn json_columns_of_a_created_table_are_flexible() {
+fn json_columns_of_a_created_table_hold_any_json_value_and_are_not_flexible() {
 	let stmt = surrealdb_pgsql::parse_statement(
 		"CREATE TABLE docs (id INT PRIMARY KEY, a JSONB NOT NULL, b JSON, c JSONB[], d TEXT, e TEXT[]);",
 	)
@@ -996,9 +1125,9 @@ fn json_columns_of_a_created_table_are_flexible() {
 		field_flexibility(&lower_pgsql_ddl_definitions(&stmt).expect("lower")),
 		[
 			("id".to_string(), false),
-			("a".to_string(), true),
-			("b".to_string(), true),
-			("c".to_string(), true),
+			("a".to_string(), false),
+			("b".to_string(), false),
+			("c".to_string(), false),
 			("d".to_string(), false),
 			("e".to_string(), false),
 		]
@@ -1008,11 +1137,102 @@ fn json_columns_of_a_created_table_are_flexible() {
 			.expect("parse");
 	assert_eq!(
 		field_flexibility(&lower_mysql_ddl_definitions(&stmt).expect("lower")),
-		[("id".to_string(), false), ("a".to_string(), true), ("b".to_string(), false)]
+		[("id".to_string(), false), ("a".to_string(), false), ("b".to_string(), false)]
 	);
 }
 
 /// The SurrealQL of every statement `exprs` holds.
+/// The name and declared `SQL TYPE` text of every field the statement defines, in order.
+fn declared_sql_types(exprs: &[Expr]) -> Vec<(String, Option<String>)> {
+	exprs
+		.iter()
+		.filter_map(|expr| {
+			let Expr::Define(define) = expr else {
+				return None;
+			};
+			let DefineStatement::Field(field) = &**define else {
+				return None;
+			};
+			Some((field.name.to_sql(), field.sql_type.as_ref().map(|t| t.text.clone())))
+		})
+		.collect()
+}
+
+fn declared(name: &str, text: &str) -> (String, Option<String>) {
+	(name.to_string(), Some(text.to_string()))
+}
+
+#[test]
+fn pgsql_columns_carry_their_canonical_declared_type() {
+	let create = surrealdb_pgsql::parse_statement(
+		"CREATE TABLE t (
+			a INT,
+			b VARCHAR(255),
+			c NUMERIC(10, 2),
+			d TIMESTAMP(3) WITH TIME ZONE,
+			e INT[][],
+			f CHARACTER VARYING(7)
+		);",
+	)
+	.expect("parse");
+	let exprs = lower_pgsql_ddl_definitions(&create).expect("lower");
+	assert_eq!(
+		declared_sql_types(&exprs),
+		vec![
+			declared("a", "int"),
+			declared("b", "varchar(255)"),
+			declared("c", "numeric(10,2)"),
+			declared("d", "timestamp(3) with time zone"),
+			declared("e", "int[][]"),
+			declared("f", "character varying(7)"),
+		]
+	);
+
+	let add = surrealdb_pgsql::parse_statement("ALTER TABLE t ADD COLUMN g NUMERIC(5,1);")
+		.expect("parse");
+	let exprs = lower_pgsql_ddl_definitions(&add).expect("lower");
+	assert_eq!(declared_sql_types(&exprs), vec![declared("g", "numeric(5,1)")]);
+
+	let retype = surrealdb_pgsql::parse_statement("ALTER TABLE t ALTER COLUMN b TYPE VARCHAR(40);")
+		.expect("parse");
+	let exprs = lower_pgsql_ddl_definitions(&retype).expect("lower");
+	assert_eq!(declared_sql_types(&exprs), vec![declared("b", "varchar(40)")]);
+}
+
+#[test]
+fn mysql_columns_carry_their_canonical_declared_type() {
+	let create = surrealdb_mysql::parse_statement(
+		"CREATE TABLE m (
+			a VARCHAR(20),
+			b INT UNSIGNED,
+			c DECIMAL(10,2),
+			d ENUM('x,y', 'z')
+		);",
+	)
+	.expect("parse");
+	let exprs = lower_mysql_ddl_definitions(&create).expect("lower");
+	assert_eq!(
+		declared_sql_types(&exprs),
+		vec![
+			declared("a", "varchar(20)"),
+			declared("b", "int unsigned"),
+			declared("c", "decimal(10,2)"),
+			declared("d", "enum('x,y','z')"),
+		]
+	);
+
+	let modify = surrealdb_mysql::parse_statement("ALTER TABLE m MODIFY COLUMN a VARCHAR(30);")
+		.expect("parse");
+	let exprs = lower_mysql_ddl_definitions(&modify).expect("lower");
+	assert_eq!(declared_sql_types(&exprs), vec![declared("a", "varchar(30)")]);
+}
+
+#[test]
+fn a_declared_type_that_cannot_be_spelt_is_refused() {
+	assert!(super::ddl::mysql_declared_type("varchar(").is_err());
+	assert!(super::ddl::mysql_declared_type("   ").is_err());
+}
+
 fn statements_sql(exprs: &[Expr]) -> Vec<String> {
 	exprs.iter().map(|expr| expr.to_sql()).collect()
 }
@@ -1667,7 +1887,7 @@ fn test_pgsql_time_zone_suffix_names_the_type() {
 		panic!("Expected CreateTable");
 	};
 	assert_eq!(map_pgsql_type(&ct.columns[0].data_type), Kind::Datetime);
-	assert_eq!(map_pgsql_type(&ct.columns[1].data_type), Kind::Datetime);
+	assert_eq!(map_pgsql_type(&ct.columns[1].data_type), Kind::Time);
 	assert_eq!(
 		map_pgsql_type(&ct.columns[2].data_type),
 		Kind::Array(Box::new(Kind::Datetime), None)
@@ -1675,6 +1895,34 @@ fn test_pgsql_time_zone_suffix_names_the_type() {
 	assert!(
 		surrealdb_pgsql::parse_statement("CREATE TABLE t (a TIMESTAMP WITH TIMEZONE)").is_err()
 	);
+}
+
+#[test]
+fn test_pgsql_temporal_type_map() {
+	let kind_of = |ty: &str| -> Kind {
+		let stmt = surrealdb_pgsql::parse_statement(&format!("CREATE TABLE t (a {ty})"))
+			.expect("parse pgsql");
+		let surrealdb_pgsql::ast::stmt::Statement::CreateTable(ct) = stmt else {
+			panic!("Expected CreateTable");
+		};
+		map_pgsql_type(&ct.columns[0].data_type)
+	};
+	for (ty, want) in [
+		("date", Kind::Date),
+		("time", Kind::Time),
+		("time without time zone", Kind::Time),
+		("timetz", Kind::Time),
+		("time with time zone", Kind::Time),
+		("timestamp", Kind::Timestamp),
+		("timestamp without time zone", Kind::Timestamp),
+		("timestamp(3)", Kind::Timestamp),
+		("timestamptz", Kind::Datetime),
+		("timestamp with time zone", Kind::Datetime),
+		("interval", Kind::Interval),
+		("interval[]", Kind::Array(Box::new(Kind::Interval), None)),
+	] {
+		assert_eq!(kind_of(ty), want, "{ty}");
+	}
 }
 
 #[test]
@@ -1716,6 +1964,27 @@ fn test_pgsql_sized_type_map() {
 }
 
 #[test]
+fn test_pgsql_multidimensional_array_map() {
+	let kind_of = |ty: &str| -> Kind {
+		let stmt = surrealdb_pgsql::parse_statement(&format!("CREATE TABLE t (a {ty})"))
+			.expect("parse pgsql");
+		let surrealdb_pgsql::ast::stmt::Statement::CreateTable(ct) = stmt else {
+			panic!("Expected CreateTable");
+		};
+		map_pgsql_type(&ct.columns[0].data_type)
+	};
+	let array = |kind: Kind| Kind::Array(Box::new(kind), None);
+	// One array level per dimension, and a bound in the brackets does not change the kind.
+	assert_eq!(kind_of("int[][]"), array(array(Kind::I32)));
+	assert_eq!(kind_of("int[3][]"), array(array(Kind::I32)));
+	assert_eq!(kind_of("int[2][3][]"), array(array(array(Kind::I32))));
+	assert_eq!(kind_of("text[][]"), array(array(Kind::String)));
+	assert_eq!(kind_of("int[]"), array(Kind::I32));
+	assert_eq!(kind_of("int[3]"), array(Kind::I32));
+	assert_eq!(kind_of("int"), Kind::I32);
+}
+
+#[test]
 fn a_column_with_two_foreign_keys_is_refused() {
 	for sql in [
 		"CREATE TABLE t (id INT PRIMARY KEY, x INT REFERENCES a(id), FOREIGN KEY (x) REFERENCES b(id))",
@@ -1725,6 +1994,572 @@ fn a_column_with_two_foreign_keys_is_refused() {
 		let err = lower_pgsql_ddl_definitions(&stmt).unwrap_err();
 		assert_eq!(err.pg_sqlstate(), "0A000", "{sql}: {err}");
 	}
+}
+
+#[test]
+fn lowers_enum_type_statements() {
+	use surrealdb_expr::expr::statements::AlterStatement;
+	use surrealdb_expr::expr::statements::alter::{AlterEnumAction, EnumPosition};
+
+	let create =
+		surrealdb_pgsql::parse_statement("CREATE TYPE mood AS ENUM ('sad', 'ok')").expect("parse");
+	let exprs = lower_pgsql_ddl_definitions(&create).expect("lower create type");
+	let [Expr::Define(define)] = exprs.as_slice() else {
+		panic!("expected one definition, got {exprs:?}");
+	};
+	let DefineStatement::Enum(define) = &**define else {
+		panic!("expected DEFINE ENUM");
+	};
+	assert_eq!(define.name.as_str(), "mood");
+	assert_eq!(define.labels, ["sad", "ok"]);
+
+	let alter = surrealdb_pgsql::parse_statement("ALTER TYPE mood ADD VALUE 'meh' BEFORE 'ok'")
+		.expect("parse");
+	let exprs = lower_pgsql_ddl_definitions(&alter).expect("lower alter type");
+	let [Expr::Alter(alter)] = exprs.as_slice() else {
+		panic!("expected one alteration, got {exprs:?}");
+	};
+	let AlterStatement::Enum(alter) = &**alter else {
+		panic!("expected ALTER ENUM");
+	};
+	assert_eq!(
+		alter.actions,
+		[AlterEnumAction::AddValue {
+			value: "meh".to_owned(),
+			position: Some(EnumPosition::Before("ok".to_owned())),
+			if_not_exists: false,
+		}]
+	);
+
+	let drop = surrealdb_pgsql::parse_statement("DROP TYPE IF EXISTS mood").expect("parse");
+	let exprs = lower_pgsql_ddl_definitions(&drop).expect("lower drop type");
+	assert!(matches!(
+		exprs.as_slice(),
+		[Expr::Remove(r)] if matches!(&**r, RemoveStatement::Enum(e) if e.if_exists)
+	));
+}
+
+/// The user type a lowering defines, from its only definition.
+fn defined_user_type(
+	exprs: &[Expr],
+) -> &surrealdb_expr::expr::statements::define::DefineUserTypeStatement {
+	exprs
+		.iter()
+		.find_map(|expr| match expr {
+			Expr::Define(define) => match &**define {
+				DefineStatement::UserType(ty) => Some(ty),
+				_ => None,
+			},
+			_ => None,
+		})
+		.unwrap_or_else(|| panic!("no user type defined in {exprs:?}"))
+}
+
+#[test]
+fn lowers_create_domain_to_a_user_type_definition() {
+	use surrealdb_expr::expr::statements::define::UserTypeBody;
+
+	let stmt = surrealdb_pgsql::parse_statement(
+		"CREATE DOMAIN posint AS integer NOT NULL DEFAULT 1 CHECK (value > 0) CONSTRAINT small CHECK (VALUE < 100) CHECK (value <> 7)",
+	)
+	.expect("parse");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
+	let ty = defined_user_type(&exprs);
+	assert_eq!(ty.name.as_str(), "posint");
+	assert_eq!(ty.kind, DefineKind::Default);
+	let UserTypeBody::Domain(domain) = &ty.body else {
+		panic!("not a domain: {ty:?}");
+	};
+	assert_eq!(domain.base, Kind::I32);
+	assert!(domain.not_null);
+	assert_eq!(domain.default, Some(Expr::Literal(surrealdb_expr::expr::Literal::Integer(1))));
+	let names: Vec<_> = domain.checks.iter().map(|c| c.name.as_deref()).collect();
+	// A check declared with no name takes PostgreSQL's `<domain>_check`, numbered once taken.
+	assert_eq!(names, [Some("posint_check"), Some("small"), Some("posint_check1")]);
+	assert!(domain.checks[1].check.to_sql().contains("$value < 100"));
+}
+
+#[test]
+fn refuses_a_domain_over_a_user_type_and_a_composite_attribute_of_a_domain() {
+	let catalog = crate::catalog::MemoryCatalog::new().with_domains(vec![posint_domain()]);
+	for (sql, code) in [
+		("CREATE DOMAIN d AS posint", "0A000"),
+		("CREATE TYPE pair AS (a posint, b text)", "0A000"),
+		("CREATE TYPE pair AS (a int, a text)", "42701"),
+		("DROP DOMAIN posint CASCADE", "0A000"),
+	] {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		let err = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), code, "{sql}: {err}");
+	}
+}
+
+#[test]
+fn lowers_create_type_of_a_composite_to_nullable_attributes() {
+	use surrealdb_expr::expr::statements::define::UserTypeBody;
+
+	let stmt = surrealdb_pgsql::parse_statement("CREATE TYPE address AS (street text, zip int)")
+		.expect("parse");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
+	let ty = defined_user_type(&exprs);
+	let UserTypeBody::Composite(composite) = &ty.body else {
+		panic!("not a composite: {ty:?}");
+	};
+	let fields: Vec<_> =
+		composite.fields.iter().map(|f| (f.name.as_str(), f.kind.clone())).collect();
+	assert_eq!(
+		fields,
+		[
+			("street", Kind::either(vec![Kind::None, Kind::Null, Kind::String])),
+			("zip", Kind::either(vec![Kind::None, Kind::Null, Kind::I32])),
+		]
+	);
+}
+
+#[test]
+fn alter_domain_restates_the_columns_of_the_domain() {
+	use surrealdb_expr::expr::statements::AlterStatement;
+	use surrealdb_expr::expr::statements::alter::{AlterDefault, AlterKind};
+	use surrealdb_expr::expr::statements::define::UserTypeBody;
+
+	let nullable = crate::catalog::DomainType {
+		not_null: false,
+		..posint_domain()
+	};
+	let one = Expr::Literal(surrealdb_expr::expr::Literal::Integer(1));
+	// `a` took the domain's default, so holds it as inherited; `b` has its own, and `c` has its own
+	// equal to the domain's.
+	let inherited = Expr::Block(Box::new(surrealdb_expr::expr::Block(vec![one.clone()])));
+	let catalog = crate::catalog::MemoryCatalog::new()
+		.with_domains(vec![nullable])
+		.with_domain_columns(vec![
+			(
+				"posint".to_owned(),
+				crate::catalog::DomainColumn {
+					table: "t".to_owned(),
+					column: "a".to_owned(),
+					not_null: false,
+					default: Some(inherited),
+				},
+			),
+			(
+				"posint".to_owned(),
+				crate::catalog::DomainColumn {
+					table: "t".to_owned(),
+					column: "b".to_owned(),
+					not_null: true,
+					default: Some(Expr::Literal(surrealdb_expr::expr::Literal::Integer(9))),
+				},
+			),
+			(
+				"posint".to_owned(),
+				crate::catalog::DomainColumn {
+					table: "t".to_owned(),
+					column: "c".to_owned(),
+					not_null: false,
+					default: Some(one),
+				},
+			),
+		]);
+	let lower = |sql: &str| {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog)
+	};
+	let alters =
+		|exprs: &[Expr]| -> Vec<surrealdb_expr::expr::statements::alter::AlterFieldStatement> {
+			exprs
+				.iter()
+				.filter_map(|expr| match expr {
+					Expr::Alter(alter) => match &**alter {
+						AlterStatement::Field(field) => Some((**field).clone()),
+						_ => None,
+					},
+					_ => None,
+				})
+				.collect()
+		};
+
+	// A new check overwrites the definition and joins the assertion of every column, behind the
+	// column's own NOT NULL.
+	let exprs =
+		lower("ALTER DOMAIN posint ADD CONSTRAINT not_seven CHECK (VALUE <> 7)").expect("lower");
+	let ty = defined_user_type(&exprs);
+	assert_eq!(ty.kind, DefineKind::Overwrite);
+	let UserTypeBody::Domain(domain) = &ty.body else {
+		panic!("not a domain");
+	};
+	assert_eq!(domain.checks.len(), 2);
+	let fields = alters(&exprs);
+	assert_eq!(fields.len(), 3);
+	let AlterKind::Set(a_assert) = &fields[0].assert else {
+		panic!("assertion of a kept: {:?}", fields[0].assert);
+	};
+	assert!(!a_assert.to_sql().contains("!= NONE"), "{}", a_assert.to_sql());
+	let AlterKind::Set(b_assert) = &fields[1].assert else {
+		panic!("assertion of b kept: {:?}", fields[1].assert);
+	};
+	assert!(b_assert.to_sql().starts_with("$value != NONE"), "{}", b_assert.to_sql());
+
+	// A new default reaches the column that took the domain's, not the ones with their own, even
+	// one equal to the domain's.
+	let exprs = lower("ALTER DOMAIN posint SET DEFAULT 3").expect("lower");
+	let fields = alters(&exprs);
+	assert_eq!(fields.len(), 1);
+	assert_eq!(fields[0].name.to_sql(), "a");
+	assert_eq!(
+		fields[0].default,
+		AlterDefault::Set(Expr::Block(Box::new(surrealdb_expr::expr::Block(vec![Expr::Literal(
+			surrealdb_expr::expr::Literal::Integer(3)
+		)]))))
+	);
+
+	// NOT NULL joins the assertion of every column, and leaves the kind as it is.
+	let exprs = lower("ALTER DOMAIN posint SET NOT NULL").expect("lower");
+	let fields = alters(&exprs);
+	assert_eq!(fields.len(), 3);
+	assert_eq!(fields[0].kind, AlterKind::None);
+	let AlterKind::Set(a_assert) = &fields[0].assert else {
+		panic!("assertion of a kept: {:?}", fields[0].assert);
+	};
+	assert!(a_assert.to_sql().contains("does not allow null values"), "{}", a_assert.to_sql());
+
+	// Errors are PostgreSQL's.
+	for (sql, code) in [
+		("ALTER DOMAIN nope SET NOT NULL", "42704"),
+		("ALTER DOMAIN posint DROP CONSTRAINT nope", "42704"),
+		("ALTER DOMAIN posint ADD CONSTRAINT positive CHECK (VALUE > 1)", "42710"),
+	] {
+		let err = lower(sql).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), code, "{sql}: {err}");
+	}
+	assert!(lower("ALTER DOMAIN posint DROP CONSTRAINT IF EXISTS nope").expect("lower").is_empty());
+}
+
+#[test]
+fn drop_domain_removes_the_user_type() {
+	use surrealdb_expr::expr::statements::define::UserTypeKind;
+
+	let stmt = surrealdb_pgsql::parse_statement("DROP DOMAIN IF EXISTS posint").expect("parse");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
+	assert!(matches!(
+		exprs.as_slice(),
+		[Expr::Remove(r)] if matches!(&**r, RemoveStatement::UserType(t)
+			if t.if_exists && t.type_kind == UserTypeKind::Domain && t.name.as_str() == "posint")
+	));
+}
+
+#[test]
+fn a_column_of_an_enum_type_is_an_enum_kind() {
+	use surrealdb_expr::expr::EnumRef;
+
+	let catalog = crate::MemoryCatalog::new().with_enums(vec![crate::EnumType::declared(
+		"mood",
+		0,
+		&["sad".to_owned(), "ok".to_owned()],
+	)]);
+	let create = surrealdb_pgsql::parse_statement("CREATE TABLE p (id int, m mood NOT NULL)")
+		.expect("parse");
+	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&create, &catalog).expect("lower");
+	let kind = exprs.iter().find_map(|expr| match expr {
+		Expr::Define(define) => match &**define {
+			DefineStatement::Field(field) if field.name.to_sql() == "m" => field.field_kind.clone(),
+			_ => None,
+		},
+		_ => None,
+	});
+	assert_eq!(kind, Some(Kind::Enum(EnumRef::Named("mood".to_owned()))));
+}
+
+#[test]
+fn a_column_of_a_multidimensional_enum_array_holds_the_enum_at_every_level() {
+	use surrealdb_expr::expr::EnumRef;
+
+	let catalog = crate::MemoryCatalog::new().with_enums(vec![crate::EnumType::declared(
+		"mood",
+		0,
+		&["sad".to_owned(), "ok".to_owned()],
+	)]);
+	let create =
+		surrealdb_pgsql::parse_statement("CREATE TABLE p (id int, m mood[][])").expect("parse");
+	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&create, &catalog).expect("lower");
+	let kind = exprs.iter().find_map(|expr| match expr {
+		Expr::Define(define) => match &**define {
+			DefineStatement::Field(field) if field.name.to_sql() == "m" => field.field_kind.clone(),
+			_ => None,
+		},
+		_ => None,
+	});
+	let element = Kind::Enum(EnumRef::Named("mood".to_owned()));
+	let nested = Kind::Array(Box::new(Kind::Array(Box::new(element), None)), None);
+	let Some(Kind::Either(members)) = kind else {
+		panic!("expected an optional kind, found {kind:?}");
+	};
+	assert!(members.contains(&nested), "{members:?}");
+}
+
+#[test]
+fn mysql_enum_and_set_columns_keep_their_members() {
+	use surrealdb_expr::expr::EnumRef;
+
+	let labels = vec!["a".to_owned(), "it's".to_owned()];
+	assert_eq!(map_mysql_type("enum('a', 'it''s')"), Kind::Enum(EnumRef::Inline(labels.clone())));
+	assert_eq!(
+		map_mysql_type("set('a', 'it''s')"),
+		Kind::Set(Box::new(Kind::Enum(EnumRef::Inline(labels))), None)
+	);
+	let members = (0..65).map(|i| format!("'m{i}'")).collect::<Vec<_>>().join(", ");
+	assert!(super::ddl::check_mysql_set_limit(&format!("set({members})")).is_err());
+	assert!(super::ddl::check_mysql_set_limit("set('a', 'b')").is_ok());
+}
+
+/// The field definition `name` in `exprs`, the statements a lowering runs.
+fn field_named<'a>(
+	exprs: &'a [Expr],
+	name: &str,
+) -> &'a surrealdb_expr::expr::statements::define::DefineFieldStatement {
+	exprs
+		.iter()
+		.find_map(|expr| match expr {
+			Expr::Define(define) => match &**define {
+				DefineStatement::Field(field) if field.name.to_sql() == name => Some(&**field),
+				_ => None,
+			},
+			_ => None,
+		})
+		.unwrap_or_else(|| panic!("no field {name} in {exprs:?}"))
+}
+
+/// The domain `posint`: an integer that refuses NULL, defaults to 1, and must be positive.
+fn posint_domain() -> crate::catalog::DomainType {
+	crate::catalog::DomainType {
+		name: "posint".to_owned(),
+		id: 1,
+		base: Kind::I32,
+		base_type: "integer".to_owned(),
+		not_null: true,
+		default: Some(Expr::Literal(surrealdb_expr::expr::Literal::Integer(1))),
+		checks: vec![crate::catalog::DomainCheck {
+			name: Some("positive".to_owned()),
+			check: super::ddl::lower_pgsql_domain_check(
+				&surrealdb_pgsql::parse_expr("VALUE > 0").expect("parse"),
+			)
+			.expect("lower"),
+		}],
+	}
+}
+
+/// The assertion a domain CHECK lowers to in a field: it holds unless the check is false.
+fn passes(check: Expr) -> Expr {
+	Expr::Binary {
+		left: Box::new(check),
+		op: surrealdb_expr::expr::operator::BinaryOperator::NotEqual,
+		right: Box::new(Expr::Literal(surrealdb_expr::expr::Literal::Bool(false))),
+	}
+}
+
+#[test]
+fn lowers_a_domain_check_over_the_bound_value() {
+	let check = super::ddl::lower_pgsql_domain_check(
+		&surrealdb_pgsql::parse_expr("value > 0").expect("parse"),
+	)
+	.expect("lower");
+	assert!(check.to_sql().contains("$value > 0"), "{}", check.to_sql());
+}
+
+#[test]
+fn lowers_a_domain_column_to_its_base_kind_with_the_domain_constraints() {
+	let catalog = crate::catalog::MemoryCatalog::new().with_domains(vec![posint_domain()]);
+	let stmt = surrealdb_pgsql::parse_statement(
+		"CREATE TABLE t (id INT PRIMARY KEY, n posint, m posint DEFAULT 5)",
+	)
+	.expect("parse");
+	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
+	let domain = posint_domain();
+	let assertion = Expr::Binary {
+		left: Box::new(super::ddl::domain_not_null_assertion("posint")),
+		op: surrealdb_expr::expr::operator::BinaryOperator::And,
+		right: Box::new(passes(domain.checks[0].check.clone())),
+	};
+
+	// The domain's NOT NULL and its CHECK are the assertion, and the column admits NULL by its
+	// kind. The domain's DEFAULT fills the column that names none.
+	let one = Expr::Literal(surrealdb_expr::expr::Literal::Integer(1));
+	let n = field_named(&exprs, "n");
+	assert_eq!(n.field_kind, Some(Kind::either(vec![Kind::None, Kind::Null, Kind::I32])));
+	assert_eq!(n.assert, Some(assertion.clone()));
+	assert_eq!(
+		n.default,
+		DefineDefault::Set(Expr::Block(Box::new(surrealdb_expr::expr::Block(vec![one]))))
+	);
+
+	// A column's own DEFAULT wins over the domain's.
+	let m = field_named(&exprs, "m");
+	let five = Expr::Literal(surrealdb_expr::expr::Literal::Integer(5));
+	assert_eq!(m.default, DefineDefault::Set(five));
+	assert_eq!(m.assert, Some(assertion));
+}
+
+#[test]
+fn lowers_a_nullable_domain_column_and_an_added_domain_column() {
+	let catalog =
+		crate::catalog::MemoryCatalog::new().with_domains(vec![crate::catalog::DomainType {
+			not_null: false,
+			default: None,
+			..posint_domain()
+		}]);
+	let check = passes(posint_domain().checks[0].check.clone());
+	let stmt = surrealdb_pgsql::parse_statement("CREATE TABLE t (id INT PRIMARY KEY, n posint)")
+		.expect("parse");
+	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
+
+	// Without NOT NULL the column admits NONE and NULL, and only the CHECK asserts its value.
+	let n = field_named(&exprs, "n");
+	assert_eq!(n.field_kind, Some(Kind::either(vec![Kind::None, Kind::Null, Kind::I32])));
+	assert_eq!(n.assert, Some(check.clone()));
+	// A column of a domain with no default defaults to NULL, which the assertion judges.
+	assert_eq!(
+		n.default,
+		DefineDefault::Set(Expr::Block(Box::new(surrealdb_expr::expr::Block(vec![
+			Expr::Literal(surrealdb_expr::expr::Literal::Null)
+		]))))
+	);
+
+	// ALTER TABLE ADD COLUMN takes the same constraints.
+	let stmt = surrealdb_pgsql::parse_statement("ALTER TABLE t ADD COLUMN k posint NOT NULL")
+		.expect("parse");
+	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
+	let k = field_named(&exprs, "k");
+	assert_eq!(k.field_kind, Some(Kind::I32));
+	assert_eq!(
+		k.assert,
+		Some(Expr::Binary {
+			left: Box::new(super::ddl::not_null_assertion()),
+			op: surrealdb_expr::expr::operator::BinaryOperator::And,
+			right: Box::new(check),
+		})
+	);
+}
+
+#[test]
+fn lowers_a_composite_column_to_an_object_of_its_fields() {
+	use std::collections::BTreeMap;
+
+	use surrealdb_expr::expr::KindLiteral;
+	use surrealdb_strand::Strand;
+
+	let catalog =
+		crate::catalog::MemoryCatalog::new().with_composites(vec![crate::catalog::CompositeType {
+			name: "address".to_owned(),
+			id: 1,
+			fields: vec![("street".to_owned(), Kind::String), ("zip".to_owned(), Kind::I32)],
+		}]);
+	let stmt =
+		surrealdb_pgsql::parse_statement("CREATE TABLE t (id INT PRIMARY KEY, a address NOT NULL)")
+			.expect("parse");
+	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
+	let object = Kind::Literal(KindLiteral::Object(BTreeMap::from([
+		(Strand::from("street"), Kind::String),
+		(Strand::from("zip"), Kind::I32),
+	])));
+	let a = field_named(&exprs, "a");
+	assert_eq!(a.field_kind, Some(object));
+	assert_eq!(a.assert, Some(super::ddl::not_null_assertion()));
+}
+
+#[test]
+fn refuses_domain_arrays_foreign_keys_and_type_changes_it_cannot_state() {
+	let catalog = crate::catalog::MemoryCatalog::new().with_domains(vec![posint_domain()]);
+	for sql in [
+		"CREATE TABLE t (id INT PRIMARY KEY, n posint[])",
+		"CREATE TABLE t (id INT PRIMARY KEY, n posint REFERENCES u(id))",
+		"ALTER TABLE t ADD COLUMN n posint[]",
+		"ALTER TABLE t ALTER COLUMN n TYPE posint",
+	] {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		let err = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{sql}: {err}");
+	}
+}
+
+#[test]
+fn drop_type_of_a_composite_is_not_an_enum_removal() {
+	let catalog =
+		crate::catalog::MemoryCatalog::new().with_composites(vec![crate::catalog::CompositeType {
+			name: "address".to_owned(),
+			id: 1,
+			fields: vec![("street".to_owned(), Kind::String)],
+		}]);
+	use surrealdb_expr::expr::statements::define::UserTypeKind;
+
+	let stmt = surrealdb_pgsql::parse_statement("DROP TYPE address").expect("parse");
+	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
+	assert!(matches!(
+		exprs.as_slice(),
+		[Expr::Remove(r)] if matches!(&**r, RemoveStatement::UserType(t)
+			if t.type_kind == UserTypeKind::Composite)
+	));
+
+	// A name that is no composite type still lowers to the enum removal it always did.
+	let stmt = surrealdb_pgsql::parse_statement("DROP TYPE mood").expect("parse");
+	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
+	assert!(matches!(
+		exprs.as_slice(),
+		[Expr::Remove(r)] if matches!(&**r, RemoveStatement::Enum(_))
+	));
+}
+
+#[test]
+fn test_pgsql_number_shaped_type_map() {
+	let kind_of = |type_name: &str| -> Kind {
+		let sql = format!("CREATE TABLE t (c {type_name})");
+		let stmt = surrealdb_pgsql::parse_statement(&sql).expect("parse pgsql");
+		let surrealdb_pgsql::ast::stmt::Statement::CreateTable(ct) = stmt else {
+			panic!("expected CREATE TABLE for {type_name}");
+		};
+		map_pgsql_type(&ct.columns[0].data_type)
+	};
+	assert_eq!(kind_of("money"), Kind::Decimal);
+	assert_eq!(kind_of("numeric"), Kind::BigDecimal);
+	assert_eq!(kind_of("numeric(28)"), Kind::Decimal);
+	assert_eq!(kind_of("numeric(28,28)"), Kind::Decimal);
+	assert_eq!(kind_of("numeric(29,2)"), Kind::BigDecimal);
+	assert_eq!(kind_of("decimal(40,10)"), Kind::BigDecimal);
+	assert_eq!(kind_of("numeric(40,10)[]"), Kind::Array(Box::new(Kind::BigDecimal), None));
+	for name in [
+		"oid",
+		"regclass",
+		"regproc",
+		"regprocedure",
+		"regoper",
+		"regoperator",
+		"regtype",
+		"regnamespace",
+		"regrole",
+		"regconfig",
+		"regdictionary",
+		"regcollation",
+		"xid",
+		"cid",
+	] {
+		assert_eq!(kind_of(name), Kind::U32, "{name}");
+	}
+	assert_eq!(kind_of("xid8"), Kind::U64);
+	assert_eq!(kind_of("pg_lsn"), Kind::U64);
+}
+
+#[test]
+fn test_lower_mysql_serial_column_other_than_the_key_is_u64() {
+	let stmt =
+		surrealdb_mysql::parse_statement("CREATE TABLE orders (id INT, n SERIAL);").expect("parse");
+	let exprs = lower_mysql_ddl_definitions(&stmt).expect("lower");
+	let n_field = exprs.iter().find_map(|expr| match expr {
+		Expr::Define(d) => match &**d {
+			DefineStatement::Field(f) if f.name.to_sql() == "n" => Some(f),
+			_ => None,
+		},
+		_ => None,
+	});
+	assert_eq!(n_field.expect("a field definition for n").field_kind, Some(Kind::U64));
 }
 
 mod drop_schema {

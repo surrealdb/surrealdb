@@ -315,3 +315,65 @@ async fn a_table_that_does_not_declare_all_its_columns_reads_any_name() {
 	assert_eq!(reply.rows.len(), 1);
 	shutdown.cancel();
 }
+
+/// The `(name, type, length, flags, decimals)` of a column definition packet.
+fn column_definition(definition: &[u8]) -> (String, u8, u32, u16, u8) {
+	let mut off = 0;
+	for _ in 0..4 {
+		lenenc(definition, &mut off);
+	}
+	let name = String::from_utf8_lossy(&lenenc(definition, &mut off)).into_owned();
+	lenenc(definition, &mut off);
+	off += 1 + 2;
+	let length = u32::from_le_bytes(definition[off..off + 4].try_into().expect("a length"));
+	off += 4;
+	let ty = definition[off];
+	let flags = u16::from_le_bytes([definition[off + 1], definition[off + 2]]);
+	(name, ty, length, flags, definition[off + 3])
+}
+
+#[tokio::test]
+async fn a_declared_column_is_defined_by_its_mysql_type_and_its_values_by_that_type() {
+	let (addr, shutdown) = start(
+		"DEFINE TABLE ytypes SCHEMAFULL; \
+		 DEFINE FIELD y ON ytypes TYPE int SQL TYPE MYSQL 'YEAR'; \
+		 DEFINE FIELD b ON ytypes TYPE int SQL TYPE MYSQL 'BIT(8)'; \
+		 DEFINE FIELD d ON ytypes TYPE decimal SQL TYPE MYSQL 'DECIMAL(10,2)'; \
+		 DEFINE FIELD dt ON ytypes TYPE datetime SQL TYPE MYSQL 'DATETIME(3)'; \
+		 DEFINE FIELD v ON ytypes TYPE string SQL TYPE POSTGRESQL 'varchar(20)'; \
+		 CREATE ytypes:1 SET y = 2026, b = 165, d = 12.5dec, dt = d'2026-10-30T12:00:00.5Z', \
+		 v = 'ab';",
+	)
+	.await;
+	let mut stream = connect(addr).await;
+	let mut command = vec![COM_QUERY];
+	command.extend_from_slice(b"SELECT y, b, d, dt, v FROM ytypes");
+	write_packet(&mut stream, 0, &command).await;
+	let first = read_packet(&mut stream).await;
+	assert_eq!(first[0], 5, "{first:?}");
+	let mut columns = Vec::new();
+	for _ in 0..5 {
+		columns.push(column_definition(&read_packet(&mut stream).await));
+	}
+	assert!(is_eof(&read_packet(&mut stream).await));
+	let row = read_packet(&mut stream).await;
+	assert!(is_eof(&read_packet(&mut stream).await));
+
+	let year_flags = UNSIGNED_FLAG | ZEROFILL_FLAG;
+	assert_eq!(columns[0], ("y".to_owned(), MYSQL_TYPE_YEAR, 4, year_flags, 0));
+	assert_eq!(columns[1], ("b".to_owned(), MYSQL_TYPE_BIT, 8, UNSIGNED_FLAG, 0));
+	assert_eq!(columns[2], ("d".to_owned(), MYSQL_TYPE_NEWDECIMAL, 12, 0, 2));
+	assert_eq!(columns[3], ("dt".to_owned(), MYSQL_TYPE_DATETIME, 23, 0, 3));
+	// A PostgreSQL declaration reads as the nearest MySQL type, four bytes per character.
+	assert_eq!(columns[4], ("v".to_owned(), MYSQL_TYPE_VAR_STRING, 80, 0, 0));
+
+	let mut off = 0;
+	let cells: Vec<Vec<u8>> = (0..5).map(|_| lenenc(&row, &mut off)).collect();
+	assert_eq!(cells[0], b"2026");
+	// A BIT(8) value is its one byte.
+	assert_eq!(cells[1], [0xa5]);
+	assert_eq!(cells[2], b"12.50");
+	assert_eq!(cells[3], b"2026-10-30 12:00:00.500");
+	assert_eq!(cells[4], b"ab");
+	shutdown.cancel();
+}

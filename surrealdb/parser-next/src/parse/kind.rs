@@ -484,14 +484,48 @@ impl<'a, 's> Parser<'a, 's> {
 					s if s.eq_ignore_ascii_case("f16") => k::F16,
 					s if s.eq_ignore_ascii_case("f32") => k::F32,
 					s if s.eq_ignore_ascii_case("f64") => k::FLOAT,
+					s if s.eq_ignore_ascii_case("bigdecimal") => k::BIGDECIMAL,
+					s if s.eq_ignore_ascii_case("date") => k::DATE,
+					s if s.eq_ignore_ascii_case("time") => k::TIME,
+					s if s.eq_ignore_ascii_case("timestamp") => k::TIMESTAMP,
+					s if s.eq_ignore_ascii_case("interval") => k::INTERVAL,
+					s if s.eq_ignore_ascii_case("enum") => k::ENUM,
 					_ => return Err(self.unexpected("a kind name")),
 				}
 			}
 		} else {
 			return Err(self.unexpected("a kind name"));
 		};
+		if code == k::ENUM {
+			return self.enum_kind(t).map(Some);
+		}
 		self.bump();
 		Ok(Some(self.leaf(Tag::Kind, code, t)))
+	}
+
+	/// `enum<name>` or `enum<'a', 'b'>` at the `enum` token `t`.
+	fn enum_kind(&mut self, t: Tok) -> R<NodeId> {
+		self.bump();
+		let open = self.tok;
+		self.expect(T::Lt, "<")?;
+		let mark = self.vals.len() as u32;
+		let inline = self.tok.kind == T::Str;
+		loop {
+			let item = if inline {
+				self.string_lit()?
+			} else {
+				let n = self.ident()?;
+				self.leaf(Tag::Name, 0, n)
+			};
+			self.vals.push(item);
+			if inline && self.eat(T::Comma) {
+				continue;
+			}
+			break;
+		}
+		self.close(T::Gt, open.start)?;
+		let list = self.list_from(mark).0;
+		self.node(Tag::Kind, k::ENUM, list, inline as u32, t.start, 1)
 	}
 }
 

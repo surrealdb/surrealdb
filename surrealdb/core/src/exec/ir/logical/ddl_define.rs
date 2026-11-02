@@ -106,6 +106,8 @@ const API_HOLES: &[TemplateHole] = &[
 	TemplateHole::Other("middleware"),
 	TemplateHole::AuthLimit,
 ];
+const ENUM_HOLES: &[TemplateHole] = &[TemplateHole::Other("id"), TemplateHole::Comment];
+const USER_TYPE_HOLES: &[TemplateHole] = &[TemplateHole::Other("id")];
 const BUCKET_HOLES: &[TemplateHole] = &[
 	TemplateHole::Name,
 	TemplateHole::Other("backend"),
@@ -139,6 +141,8 @@ pub(crate) fn template_holes(form: DdlForm) -> Option<&'static [TemplateHole]> {
 		DdlForm::DefineApi => API_HOLES,
 		DdlForm::DefineBucket => BUCKET_HOLES,
 		DdlForm::DefineSequence => SEQUENCE_HOLES,
+		DdlForm::DefineEnum => ENUM_HOLES,
+		DdlForm::DefineUserType => USER_TYPE_HOLES,
 		DdlForm::RemoveNamespace
 		| DdlForm::RemoveDatabase
 		| DdlForm::RemoveFunction
@@ -156,6 +160,9 @@ pub(crate) fn template_holes(form: DdlForm) -> Option<&'static [TemplateHole]> {
 		| DdlForm::RemoveSequence
 		| DdlForm::RemoveModule
 		| DdlForm::RemoveConfig
+		| DdlForm::RemoveEnum
+		| DdlForm::RemoveUserType
+		| DdlForm::AlterEnum
 		| DdlForm::AlterSystem
 		| DdlForm::AlterNamespace
 		| DdlForm::AlterDatabase
@@ -522,6 +529,7 @@ pub(super) fn plan_define<'e>(
 					graphql_alias: stmt.graphql_alias.clone(),
 					graphql_deprecated: stmt.graphql_deprecated.clone(),
 					migrate: stmt.migrate.clone().map(Box::new),
+					sql_type: stmt.sql_type.clone(),
 				})),
 				template(
 					"StoredFieldDefinition",
@@ -884,6 +892,87 @@ pub(super) fn plan_define<'e>(
 				None,
 			)
 		}
+		DefineStatement::Enum(stmt) => {
+			let comment = s.comment(&stmt.comment)?;
+			let permissions = s.permission(&stmt.permissions)?;
+			let definition = crate::catalog::EnumDefinition {
+				id: crate::catalog::EnumId(0),
+				name: stmt.name.clone(),
+				labels: stmt
+					.labels
+					.iter()
+					.zip(crate::catalog::EnumDefinition::initial_orders(stmt.labels.len()))
+					.zip(1..)
+					.map(|((label, order), ident)| crate::catalog::EnumLabel {
+						label: label.clone(),
+						order,
+						ident,
+					})
+					.collect(),
+				permissions: stmt.permissions.clone(),
+				comment: comment_text(&stmt.comment),
+			};
+			let too_many = stmt.labels.len() >= crate::catalog::ENUM_LABEL_IDENT_LIMIT as usize;
+			let refusal = if too_many {
+				Some(crate::exec::vm::payload::Refusal::InvalidStatement {
+					message: format!(
+						"The enum '{}' lists {} labels; an enum holds at most {}",
+						stmt.name,
+						stmt.labels.len(),
+						crate::catalog::ENUM_LABEL_IDENT_LIMIT - 1
+					),
+				})
+			} else {
+				stmt.labels
+					.iter()
+					.enumerate()
+					.find(|(i, label)| stmt.labels[..*i].contains(label))
+					.map(|(_, label)| crate::exec::vm::payload::Refusal::InvalidStatement {
+						message: format!(
+							"The enum '{}' lists the label '{label}' more than once",
+							stmt.name
+						),
+					})
+			};
+			(
+				DdlForm::DefineEnum,
+				(EDIT, ResourceKind::Parameter, Base::Db),
+				DefineObject::Enum {
+					name: stmt.name.clone(),
+					labels: stmt.labels.clone().into_boxed_slice(),
+					comment,
+					permissions,
+				},
+				template(
+					"StoredEnumDefinition",
+					stored_value(codec, &definition.to_stored(), "StoredEnumDefinition")?,
+					ENUM_HOLES,
+				),
+				stmt.kind.clone(),
+				refusal,
+			)
+		}
+		DefineStatement::UserType(stmt) => {
+			let definition = crate::catalog::UserTypeDefinition {
+				id: crate::catalog::UserTypeId(0),
+				name: stmt.name.clone(),
+				body: stmt.body.clone(),
+			};
+			(
+				DdlForm::DefineUserType,
+				(EDIT, ResourceKind::Parameter, Base::Db),
+				DefineObject::UserType {
+					name: stmt.name.clone(),
+				},
+				template(
+					"StoredUserTypeDefinition",
+					stored_value(codec, &definition.to_stored(), "StoredUserTypeDefinition")?,
+					USER_TYPE_HOLES,
+				),
+				stmt.kind.clone(),
+				None,
+			)
+		}
 		DefineStatement::Sequence(stmt) => {
 			let name = s.name(DdlOperand::Name, &stmt.name)?;
 			let timeout = s.duration(DdlOperand::Timeout, &stmt.timeout)?;
@@ -1005,6 +1094,7 @@ fn field_template(
 		reference: stmt.reference.clone(),
 		graphql_alias: stmt.graphql_alias.clone(),
 		graphql_deprecated: stmt.graphql_deprecated.clone(),
+		sql_type: stmt.sql_type.clone(),
 		..Default::default()
 	};
 	// The type and the names of the record id components it carries are set together, so the

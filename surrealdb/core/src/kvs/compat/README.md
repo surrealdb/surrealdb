@@ -21,6 +21,9 @@ compat/
 ├── durable_session.rs  # FROZEN rev-1 and rev-2 bytes for a type no released snapshot holds
 ├── ann_pending.rs      # FROZEN rev-1 bytes for the two ANN pending values
 └── stored_record.rs    # FROZEN stored-value bytes for records
+└── temporal_keys.rs    # FROZEN storekey key bytes of date, time, timestamp and interval
+└── bigdecimal_stored.rs # FROZEN stored-value bytes of the BIGDECIMAL tag
+└── bigdecimal_keys.rs  # FROZEN storekey key bytes of a bigdecimal
 ```
 
 ### Types outside the snapshot machinery

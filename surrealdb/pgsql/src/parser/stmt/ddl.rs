@@ -1,14 +1,18 @@
 //! PostgreSQL DDL statements parser (`CREATE TABLE`, `CREATE INDEX`, `CREATE VIEW`, `CREATE
-//! SCHEMA`, `CREATE EXTENSION`, `ALTER TABLE`, `DROP`).
+//! SCHEMA`, `CREATE EXTENSION`, `CREATE TYPE`, `CREATE DOMAIN`, `ALTER TABLE`, `ALTER TYPE`,
+//! `ALTER DOMAIN`, `DROP`).
 //!
-//! gram.y: CreateStmt, IndexStmt, ViewStmt, CreateSchemaStmt, CreateExtensionStmt, AlterTableStmt,
-//! DropStmt
+//! gram.y: CreateStmt, IndexStmt, ViewStmt, CreateSchemaStmt, CreateExtensionStmt, DefineStmt,
+//! CreateDomainStmt, AlterTableStmt, AlterEnumStmt, AlterDomainStmt, DropStmt
 
-use crate::ast::expr::{NullsOrder, OrderDirection};
+use crate::ast::expr::{Expr, NullsOrder, OrderDirection, QualifiedName};
 use crate::ast::stmt::{
-	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CreateExtensionStmt,
-	CreateIndexStmt, CreateSchemaStmt, CreateTableStmt, CreateViewStmt, DropObjectType, DropStmt,
-	IndexElem, ReferentialAction, RelOption, Statement, TableConstraint,
+	AlterDomainAction, AlterDomainStmt, AlterTableAction, AlterTableStmt, AlterTypeAction,
+	AlterTypeStmt, ColumnConstraint, ColumnDef, CompositeAttribute, CreateCompositeTypeStmt,
+	CreateDomainStmt, CreateExtensionStmt, CreateIndexStmt, CreateSchemaStmt, CreateTableStmt,
+	CreateTypeStmt, CreateViewStmt, DomainConstraint, DomainConstraintKind, DropObjectType,
+	DropStmt, EnumValuePlacement, IndexElem, ReferentialAction, RelOption, Statement,
+	TableConstraint,
 };
 use crate::error::{ErrorKind, ParseError, ParseResult};
 use crate::lexer::keyword::Keyword;
@@ -62,6 +66,16 @@ impl<'a> Parser<'a> {
 		if self.peek().kind == TokenKind::Keyword(Keyword::Extension) {
 			let s = self.parse_create_extension_stmt_tail(create_tok.span)?;
 			return Ok(Statement::CreateExtension(s));
+		}
+
+		if matches!(&self.peek().kind, TokenKind::Ident(word) if word.eq_ignore_ascii_case("domain"))
+		{
+			let s = self.parse_create_domain_stmt_tail(create_tok.span)?;
+			return Ok(Statement::CreateDomain(Box::new(s)));
+		}
+
+		if self.peek().kind == TokenKind::Keyword(Keyword::Type) {
+			return self.parse_create_type_stmt_tail(create_tok.span);
 		}
 
 		if self.peek().kind == TokenKind::Keyword(Keyword::Property) {
@@ -407,6 +421,326 @@ impl<'a> Parser<'a> {
 			version,
 			cascade,
 			span,
+		})
+	}
+
+	/// Parse the rest of `CREATE TYPE name AS ENUM ('a', ...)` or `CREATE TYPE name AS (attr
+	/// type, ...)` after `CREATE`.
+	///
+	/// gram.y: DefineStmt (CREATE TYPE_P any_name AS ENUM_P '(' opt_enum_val_list ')'), and
+	/// DefineStmt (CREATE TYPE_P any_name AS '(' OptTableFuncElementList ')')
+	fn parse_create_type_stmt_tail(&mut self, start_span: Span) -> ParseResult<Statement> {
+		self.expect(&TokenKind::Keyword(Keyword::Type), "'TYPE'")?;
+		let name = self.parse_qualified_name()?;
+		self.expect(&TokenKind::Keyword(Keyword::As), "'AS'")?;
+		if self.peek().kind == TokenKind::LParen {
+			return self.parse_create_composite_type_body(name, start_span);
+		}
+		self.expect(&TokenKind::Keyword(Keyword::Enum), "'ENUM'")?;
+		self.expect(&TokenKind::LParen, "'('")?;
+		let mut labels = Vec::new();
+		let mut span = start_span;
+		if self.peek().kind != TokenKind::RParen {
+			loop {
+				let (label, label_span) = self.parse_string_constant()?;
+				labels.push(label);
+				span = span.merge(label_span);
+				if !self.eat(&TokenKind::Comma)? {
+					break;
+				}
+			}
+		}
+		let close = self.expect(&TokenKind::RParen, "')'")?;
+		Ok(Statement::CreateType(Box::new(CreateTypeStmt {
+			name,
+			labels,
+			span: span.merge(close.span),
+		})))
+	}
+
+	/// Parse the parenthesised attribute list of `CREATE TYPE name AS (attr type, ...)`.
+	/// An attribute is a column name and a type; constraints are not part of the grammar.
+	///
+	/// gram.y: DefineStmt (CREATE TYPE_P any_name AS '(' OptTableFuncElementList ')'),
+	/// TableFuncElement
+	fn parse_create_composite_type_body(
+		&mut self,
+		name: QualifiedName,
+		start_span: Span,
+	) -> ParseResult<Statement> {
+		self.expect(&TokenKind::LParen, "'('")?;
+		let mut attributes = Vec::new();
+		if self.peek().kind != TokenKind::RParen {
+			loop {
+				let (attr_name, attr_span) = self.parse_ident()?;
+				let data_type = self.parse_type_name()?;
+				let span = attr_span.merge(data_type.span);
+				attributes.push(CompositeAttribute {
+					name: attr_name,
+					data_type,
+					span,
+				});
+				if !self.eat(&TokenKind::Comma)? {
+					break;
+				}
+			}
+		}
+		let close = self.expect(&TokenKind::RParen, "')'")?;
+		Ok(Statement::CreateCompositeType(Box::new(CreateCompositeTypeStmt {
+			name,
+			attributes,
+			span: start_span.merge(close.span),
+		})))
+	}
+
+	/// Parse a parenthesised CHECK expression `(expr)` and return it with the span of the closing
+	/// parenthesis.
+	///
+	/// gram.y: ColConstraintElem (CHECK '(' a_expr ')')
+	fn parse_check_expr(&mut self) -> ParseResult<(Expr, Span)> {
+		self.expect(&TokenKind::LParen, "'('")?;
+		let expr = self.parse_expr()?;
+		let close = self.expect(&TokenKind::RParen, "')'")?;
+		Ok((expr, close.span))
+	}
+
+	/// Parse the rest of `CREATE DOMAIN name [AS] type [DEFAULT expr] [constraint ...]` after
+	/// `CREATE`. The caller has checked that the next word is `DOMAIN`, which is not a keyword.
+	///
+	/// gram.y: CreateDomainStmt, ColQualList, ColConstraint
+	fn parse_create_domain_stmt_tail(&mut self, start_span: Span) -> ParseResult<CreateDomainStmt> {
+		self.bump()?;
+		let name = self.parse_qualified_name()?;
+		self.eat(&TokenKind::Keyword(Keyword::As))?;
+		let data_type = self.parse_type_name()?;
+		let mut span = start_span.merge(data_type.span);
+		let mut has_default = false;
+		let mut constraints = Vec::new();
+		loop {
+			let element_start = self.peek().span;
+			let constraint_name = if self.eat(&TokenKind::Keyword(Keyword::Constraint))? {
+				Some(self.parse_ident()?.0)
+			} else {
+				None
+			};
+			if self.eat(&TokenKind::Keyword(Keyword::Not))? {
+				let null = self.expect(&TokenKind::Keyword(Keyword::Null), "'NULL'")?;
+				span = span.merge(null.span);
+				constraints.push(DomainConstraint {
+					name: constraint_name,
+					kind: DomainConstraintKind::NotNull,
+					span: element_start.merge(null.span),
+				});
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Null) {
+				let null = self.bump()?;
+				span = span.merge(null.span);
+				constraints.push(DomainConstraint {
+					name: constraint_name,
+					kind: DomainConstraintKind::Null,
+					span: element_start.merge(null.span),
+				});
+			} else if self.eat(&TokenKind::Keyword(Keyword::Check))? {
+				let (check, close) = self.parse_check_expr()?;
+				span = span.merge(close);
+				constraints.push(DomainConstraint {
+					name: constraint_name,
+					kind: DomainConstraintKind::Check(check),
+					span: element_start.merge(close),
+				});
+			} else if constraint_name.is_none()
+				&& self.peek().kind == TokenKind::Keyword(Keyword::Default)
+			{
+				let default_tok = self.bump()?;
+				if has_default {
+					return Err(ParseError::new(
+						default_tok.span,
+						ErrorKind::UnexpectedToken {
+							expected: "at most one DEFAULT",
+							found: "DEFAULT".to_string(),
+						},
+					));
+				}
+				has_default = true;
+				let expr = self.parse_expr()?;
+				let element_span = default_tok.span.merge(expr.span());
+				span = span.merge(element_span);
+				constraints.push(DomainConstraint {
+					name: None,
+					kind: DomainConstraintKind::Default(expr),
+					span: element_span,
+				});
+			} else if constraint_name.is_some() {
+				return Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::UnexpectedToken {
+						expected: "NOT NULL, NULL or CHECK after CONSTRAINT name",
+						found: self.peek().kind.to_string(),
+					},
+				));
+			} else {
+				break;
+			}
+		}
+		Ok(CreateDomainStmt {
+			name,
+			data_type,
+			constraints,
+			span,
+		})
+	}
+
+	/// Parse `ALTER DOMAIN name` and the one action that follows it: `SET DEFAULT`, `DROP
+	/// DEFAULT`, `SET NOT NULL`, `DROP NOT NULL`, `ADD [CONSTRAINT name] CHECK (expr)`, `DROP
+	/// CONSTRAINT [IF EXISTS] name`, or `VALIDATE CONSTRAINT name`.
+	///
+	/// gram.y: AlterDomainStmt, alter_column_default, DomainConstraint
+	pub fn parse_alter_domain_stmt(&mut self) -> ParseResult<AlterDomainStmt> {
+		let alter_tok = self.expect(&TokenKind::Keyword(Keyword::Alter), "'ALTER'")?;
+		self.bump()?;
+		let name = self.parse_qualified_name()?;
+		let (action, end) = if self.eat(&TokenKind::Keyword(Keyword::Set))? {
+			if self.peek().kind == TokenKind::Keyword(Keyword::Default) {
+				self.bump()?;
+				let expr = self.parse_expr()?;
+				let end = expr.span();
+				(AlterDomainAction::SetDefault(expr), end)
+			} else {
+				self.expect(&TokenKind::Keyword(Keyword::Not), "'NOT'")?;
+				let null = self.expect(&TokenKind::Keyword(Keyword::Null), "'NULL'")?;
+				(AlterDomainAction::SetNotNull, null.span)
+			}
+		} else if self.eat(&TokenKind::Keyword(Keyword::Drop))? {
+			if self.peek().kind == TokenKind::Keyword(Keyword::Default) {
+				let tok = self.bump()?;
+				(AlterDomainAction::DropDefault, tok.span)
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Not) {
+				self.bump()?;
+				let null = self.expect(&TokenKind::Keyword(Keyword::Null), "'NULL'")?;
+				(AlterDomainAction::DropNotNull, null.span)
+			} else {
+				self.expect(&TokenKind::Keyword(Keyword::Constraint), "'CONSTRAINT'")?;
+				let if_exists = if self.eat(&TokenKind::Keyword(Keyword::If))? {
+					self.expect(&TokenKind::Keyword(Keyword::Exists), "'EXISTS'")?;
+					true
+				} else {
+					false
+				};
+				let (constraint, mut end) = self.parse_ident()?;
+				if matches!(
+					self.peek().kind,
+					TokenKind::Keyword(Keyword::Cascade | Keyword::Restrict)
+				) {
+					end = self.bump()?.span;
+				}
+				(
+					AlterDomainAction::DropConstraint {
+						name: constraint,
+						if_exists,
+					},
+					end,
+				)
+			}
+		} else if self.eat(&TokenKind::Keyword(Keyword::Add))? {
+			let constraint_name = if self.eat(&TokenKind::Keyword(Keyword::Constraint))? {
+				Some(self.parse_ident()?.0)
+			} else {
+				None
+			};
+			self.expect(&TokenKind::Keyword(Keyword::Check), "'CHECK'")?;
+			let (check, close) = self.parse_check_expr()?;
+			(
+				AlterDomainAction::AddConstraint {
+					name: constraint_name,
+					check,
+				},
+				close,
+			)
+		} else if self.eat(&TokenKind::Keyword(Keyword::Validate))? {
+			self.expect(&TokenKind::Keyword(Keyword::Constraint), "'CONSTRAINT'")?;
+			let (constraint, end) = self.parse_ident()?;
+			(
+				AlterDomainAction::ValidateConstraint {
+					name: constraint,
+				},
+				end,
+			)
+		} else {
+			return Err(ParseError::new(
+				self.peek().span,
+				ErrorKind::UnexpectedToken {
+					expected: "SET, DROP, ADD or VALIDATE",
+					found: self.peek().kind.to_string(),
+				},
+			));
+		};
+		Ok(AlterDomainStmt {
+			name,
+			action,
+			span: alter_tok.span.merge(end),
+		})
+	}
+
+	/// Parse `ALTER TYPE name ADD VALUE ...` or `ALTER TYPE name RENAME VALUE ...`.
+	///
+	/// gram.y: AlterEnumStmt
+	pub fn parse_alter_type_stmt(&mut self) -> ParseResult<AlterTypeStmt> {
+		let alter_tok = self.expect(&TokenKind::Keyword(Keyword::Alter), "'ALTER'")?;
+		self.expect(&TokenKind::Keyword(Keyword::Type), "'TYPE'")?;
+		let name = self.parse_qualified_name()?;
+		let (action, end) = if self.eat(&TokenKind::Keyword(Keyword::Add))? {
+			self.expect(&TokenKind::Keyword(Keyword::Value), "'VALUE'")?;
+			let if_not_exists = if self.eat(&TokenKind::Keyword(Keyword::If))? {
+				self.expect(&TokenKind::Keyword(Keyword::Not), "'NOT'")?;
+				self.expect(&TokenKind::Keyword(Keyword::Exists), "'EXISTS'")?;
+				true
+			} else {
+				false
+			};
+			let (value, mut end) = self.parse_string_constant()?;
+			let placement = if self.eat(&TokenKind::Keyword(Keyword::Before))? {
+				let (anchor, anchor_span) = self.parse_string_constant()?;
+				end = anchor_span;
+				Some(EnumValuePlacement::Before(anchor))
+			} else if self.eat(&TokenKind::Keyword(Keyword::After))? {
+				let (anchor, anchor_span) = self.parse_string_constant()?;
+				end = anchor_span;
+				Some(EnumValuePlacement::After(anchor))
+			} else {
+				None
+			};
+			(
+				AlterTypeAction::AddValue {
+					if_not_exists,
+					value,
+					placement,
+				},
+				end,
+			)
+		} else if self.eat(&TokenKind::Keyword(Keyword::Rename))? {
+			self.expect(&TokenKind::Keyword(Keyword::Value), "'VALUE'")?;
+			let (from, _) = self.parse_string_constant()?;
+			self.expect(&TokenKind::Keyword(Keyword::To), "'TO'")?;
+			let (to, end) = self.parse_string_constant()?;
+			(
+				AlterTypeAction::RenameValue {
+					from,
+					to,
+				},
+				end,
+			)
+		} else {
+			return Err(ParseError::new(
+				self.peek().span,
+				ErrorKind::UnexpectedToken {
+					expected: "ADD VALUE or RENAME VALUE",
+					found: self.peek().kind.to_string(),
+				},
+			));
+		};
+		Ok(AlterTypeStmt {
+			name,
+			action,
+			span: alter_tok.span.merge(end),
 		})
 	}
 
@@ -769,11 +1103,15 @@ impl<'a> Parser<'a> {
 		} else if self.peek().kind == TokenKind::Keyword(Keyword::Type) {
 			self.bump()?;
 			DropObjectType::Type
+		} else if matches!(&self.peek().kind, TokenKind::Ident(word) if word.eq_ignore_ascii_case("domain"))
+		{
+			self.bump()?;
+			DropObjectType::Domain
 		} else {
 			return Err(ParseError::new(
 				self.peek().span,
 				ErrorKind::UnexpectedToken {
-					expected: "TABLE, INDEX, VIEW, SCHEMA, TYPE, or PROPERTY GRAPH",
+					expected: "TABLE, INDEX, VIEW, SCHEMA, TYPE, DOMAIN, or PROPERTY GRAPH",
 					found: self.peek().kind.to_string(),
 				},
 			));

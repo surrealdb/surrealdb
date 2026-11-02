@@ -22,6 +22,7 @@ use crate::catalog::{
 use crate::doc::{FieldEvalOrder, NsDbCtx, NsDbTbMutCtx};
 use crate::exec::ExecutionContext;
 use crate::expr::computed_deps::ComputedDeps;
+use crate::expr::statements::define::declared_type::{DeclaredSqlType, DeclaredTypeError};
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::kvs::{LiveQueryEngine, Transaction};
 use crate::val::TableName;
@@ -263,6 +264,9 @@ pub(crate) fn id_subfield_indexes(fields: &[FieldDefinition]) -> Arc<[usize]> {
 		.collect()
 }
 
+/// A declared SQL type as the write path reads it: the parse of its text, or the reason it fails.
+type DeclaredTypeResult = Result<DeclaredSqlType, DeclaredTypeError>;
+
 /// Resolved once per statement per table, shared by every record.
 #[derive(Debug)]
 pub(crate) struct WriteCtx {
@@ -283,6 +287,10 @@ pub(crate) struct WriteCtx {
 	///
 	/// [`Idiom::to_raw_string`]: crate::expr::idiom::Idiom::to_raw_string
 	pub(crate) field_names: Arc<OnceLock<Box<[String]>>>,
+	/// The declared SQL type of each of `fields`, parsed the first time a record of the statement
+	/// writes a field that declares one, and read by every later record. `None` for a field that
+	/// declares no type. Shared with every context [`Self::rebound`] from this one.
+	declared_types: Arc<OnceLock<Box<[Option<DeclaredTypeResult>]>>>,
 	/// The event bodies this write triggers.
 	pub(crate) events: Arc<[EventDefinition]>,
 	/// The foreign materialised views this write maintains.
@@ -370,6 +378,16 @@ pub(crate) struct WriteCtx {
 }
 
 impl WriteCtx {
+	/// The declared SQL type of each of `fields`, in the same order, parsed once per statement.
+	pub(crate) fn declared_types(&self) -> &[Option<DeclaredTypeResult>] {
+		self.declared_types.get_or_init(|| {
+			self.fields
+				.iter()
+				.map(|fd| fd.sql_type.as_ref().map(DeclaredSqlType::from_sql_type))
+				.collect()
+		})
+	}
+
 	/// Resolve the write context for one table.
 	///
 	/// Reads the per-table definitions a write needs: fields, events, foreign
@@ -515,6 +533,7 @@ impl WriteCtx {
 			table: catalog.tb,
 			fields: catalog.fields,
 			field_names: Arc::new(OnceLock::new()),
+			declared_types: Arc::new(OnceLock::new()),
 			events: catalog.events,
 			views: catalog.tables,
 			views_observe,
@@ -549,6 +568,7 @@ impl WriteCtx {
 			table: Arc::clone(&self.table),
 			fields: Arc::clone(&self.fields),
 			field_names: Arc::clone(&self.field_names),
+			declared_types: Arc::clone(&self.declared_types),
 			events: Arc::clone(&self.events),
 			views: Arc::clone(&self.views),
 			views_observe: self.views_observe,

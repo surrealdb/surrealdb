@@ -34,6 +34,8 @@ use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
+use crate::expr::statements::define::declared_type::TypeViolation;
+use crate::expr::statements::define::sql_types;
 use crate::iam::Action;
 use crate::val::{Array, RecordId, Set, TableName, Value};
 
@@ -156,8 +158,12 @@ pub(in crate::exec::vm) enum SchemaInstr {
 	JumpIfPlaceNone {
 		target: Label,
 	},
-	/// Coerce the place's value to the field's `TYPE`.
-	Coerce,
+	/// Coerce the place's value to the field's `TYPE`, and, when `sql_type` is set, hold the
+	/// coerced value to the field's declared SQL type. A field's last coercion sets it, so the
+	/// declared type judges the value the field stores exactly once, after any `VALUE`.
+	Coerce {
+		sql_type: bool,
+	},
 	/// The field's `VALUE`, evaluated by host pipeline
 	/// [`Program::host_code`]`[pipeline]`: its answer is the place's value.
 	Value {
@@ -234,7 +240,9 @@ impl SchemaInstr {
 			| SchemaInstr::Default {
 				..
 			}
-			| SchemaInstr::Coerce
+			| SchemaInstr::Coerce {
+				..
+			}
 			| SchemaInstr::Value {
 				..
 			}
@@ -359,6 +367,53 @@ fn clause_frame(frame: &ExecutionContext, place: &Place, value: &Value) -> Execu
 
 fn fail(error: impl std::error::Error + Send + Sync + 'static) -> ControlFlow {
 	ControlFlow::Err(anyhow::Error::new(error))
+}
+
+/// Holds `val`, a value of field `index` already coerced to the field's kind, to the field's
+/// declared SQL type, if it declares one. The outer error is a declared type that does not parse,
+/// which the stored definition should not hold. The inner error is the violation with the text
+/// of the declared type.
+fn check_sql_type(
+	ctx: &WriteCtx,
+	index: usize,
+	val: Value,
+) -> Result<Result<Value, (TypeViolation, String)>, ControlFlow> {
+	let Some(declared) = ctx.declared_types().get(index).and_then(Option::as_ref) else {
+		return Ok(Ok(val));
+	};
+	let declared = match declared {
+		Ok(declared) => declared,
+		Err(error) => return Err(internal(&format!("invalid declared SQL type: {error}"))),
+	};
+	let column = ctx.fields[index].name.to_raw_string();
+	Ok(sql_types::validate(declared, val, &column)
+		.map_err(|violation| (violation, declared.canonical_text())))
+}
+
+/// Reads `val` as the text of field `index`'s declared SQL type when it is a string and the
+/// type has a text form of its own (`money`, `pg_lsn`, the geometric types, the ranges), as
+/// PostgreSQL reads an untyped literal assigned to a column. Any other value, and a string for a
+/// field whose declared type is stored as text, is returned unchanged. The errors are those of
+/// [`check_sql_type`].
+fn read_sql_text(
+	ctx: &WriteCtx,
+	index: usize,
+	val: Value,
+) -> Result<Result<Value, (TypeViolation, String)>, ControlFlow> {
+	let Value::String(text) = &val else {
+		return Ok(Ok(val));
+	};
+	let Some(declared) = ctx.declared_types().get(index).and_then(Option::as_ref) else {
+		return Ok(Ok(val));
+	};
+	let declared = match declared {
+		Ok(declared) => declared,
+		Err(error) => return Err(internal(&format!("invalid declared SQL type: {error}"))),
+	};
+	match sql_types::text_form::read(declared, text.as_str()) {
+		None => Ok(Ok(val)),
+		Some(read) => Ok(read.map_err(|violation| (violation, declared.canonical_text()))),
+	}
 }
 
 fn write_state(state: &mut State) -> Result<&mut WriteState, ControlFlow> {
@@ -552,6 +607,10 @@ fn restore_place(current: &mut Value, initial: &Value, path: &[Part], val: Value
 				| Value::String(_)
 				| Value::Duration(_)
 				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
 				| Value::Uuid(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
@@ -715,7 +774,7 @@ pub(super) async fn step(
 				let write = write_state(state)?;
 				let ctx = write.in_flight()?.1;
 				// A write that maintains a `MATERIALIZE INTO` list may change its `READONLY`
-				// destination.
+				// destination, and the rewrite of a renamed enum's labels any `READONLY` field.
 				let maintaining = crate::exec::materialize::is_marked(ctx.exec());
 				let schema = record(write)?;
 				let creating = schema.creating;
@@ -828,7 +887,12 @@ pub(super) async fn step(
 		SchemaInstr::Default {
 			pipeline,
 		} => {
-			let schema = record(write_state(state)?)?;
+			let write = write_state(state)?;
+			// The rewrite of a renamed enum's labels derives nothing a field clause derives.
+			if crate::exec::vm::schema_host::is_relabel(write.in_flight()?.1.exec()) {
+				return Ok(next);
+			}
+			let schema = record(write)?;
 			let creating = schema.creating;
 			// A field that declares no `DEFAULT` is defaulted by its static
 			// `VALUE`, and an effect that body reaches is the `VALUE` clause's.
@@ -856,24 +920,73 @@ pub(super) async fn step(
 				next
 			})
 		}
-		SchemaInstr::Coerce => {
+		SchemaInstr::Coerce {
+			sql_type,
+		} => {
 			let write = write_state(state)?;
-			let (exec, table) = {
-				let ctx = write.in_flight()?.1;
-				(ctx.exec().clone(), Arc::clone(&ctx.table))
-			};
+			let ctx = write.in_flight()?.1;
+			let (exec, table) = (ctx.exec().clone(), Arc::clone(&ctx.table));
 			let schema = record(write)?;
 			let fields = Arc::clone(&schema.fields);
 			let index = schema.cursor()?.index;
 			let fd = &fields[index];
 			// The `id` field's kind is enforced where the record id is derived.
-			let (Some(kind), false) = (fd.field_kind.as_ref(), fd.name.is_id()) else {
+			if fd.name.is_id() {
 				return Ok(next);
-			};
+			}
 			let place = schema.place()?;
 			let val = std::mem::take(&mut place.val);
-			match val.coerce_to_kind(kind) {
-				Ok(val) => place.val = val,
+			// A string written to a field whose declared SQL type has a text form of its own is
+			// that type's text, read before the kind is enforced.
+			let val = match read_sql_text(&ctx, index, val)? {
+				Ok(val) => val,
+				Err((violation, sql_type)) => {
+					return Err(fail(DocError::FieldSqlType {
+						record: schema.rid.to_sql(),
+						field_name: fd.name.to_sql(),
+						sql_type,
+						message: violation.message,
+					}));
+				}
+			};
+			let coerced = match fd.field_kind.as_ref() {
+				None => Ok(val),
+				Some(kind) => {
+					let named_enums = kind.has_named_enum();
+					match val.coerce_to_kind(kind) {
+						Ok(val) if named_enums => {
+							match crate::exec::vm::schema_host::check_named_enums(
+								&exec.txn(),
+								table.namespace_id,
+								table.database_id,
+								kind,
+								&val,
+							)
+							.await
+							{
+								Ok(()) => Ok(val),
+								Err(error) => Err(error),
+							}
+						}
+						other => other,
+					}
+				}
+			};
+			match coerced {
+				Ok(val) if !*sql_type => place.val = val,
+				Ok(val) => match check_sql_type(&ctx, index, val)? {
+					Ok(val) => place.val = val,
+					// The declared type's reason and text name the refusal; the value is not
+					// quoted.
+					Err((violation, sql_type)) => {
+						return Err(fail(DocError::FieldSqlType {
+							record: schema.rid.to_sql(),
+							field_name: fd.name.to_sql(),
+							sql_type,
+							message: violation.message,
+						}));
+					}
+				},
 				// The record and field are rendered only for the error.
 				Err(e) => {
 					let record = schema.rid.to_sql();
@@ -895,6 +1008,10 @@ pub(super) async fn step(
 		SchemaInstr::Value {
 			pipeline,
 		} => {
+			let write = write_state(state)?;
+			if crate::exec::vm::schema_host::is_relabel(write.in_flight()?.1.exec()) {
+				return Ok(next);
+			}
 			let value =
 				place_clause(program, *pipeline, state, None, NoWriteFrame::FieldValue).await?;
 			record(write_state(state)?)?.place()?.val = value;

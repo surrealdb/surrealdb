@@ -40,6 +40,8 @@ pub enum TokenKind {
 		value: f64,
 		int8_minimum_magnitude: bool,
 	},
+	/// A decimal integer literal above `i64::MAX` that fits 64 unsigned bits, held exactly.
+	UnsignedIntLiteral(u64),
 	FloatLiteral(f64),
 	StringLiteral(String),
 	HexLiteral(Vec<u8>),
@@ -109,6 +111,7 @@ impl std::fmt::Display for TokenKind {
 				value,
 				..
 			} => write!(f, "{value}"),
+			Self::UnsignedIntLiteral(n) => write!(f, "{n}"),
 			Self::FloatLiteral(fl) => write!(f, "{fl}"),
 			Self::StringLiteral(s) => write!(f, "'{s}'"),
 			Self::HexLiteral(_) => write!(f, "HEX_LITERAL"),

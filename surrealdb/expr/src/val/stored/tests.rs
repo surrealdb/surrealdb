@@ -10,8 +10,9 @@ use surrealdb_strand::Strand;
 use super::tag::*;
 use super::*;
 use crate::val::{
-	Array, Bytes, Datetime, Duration, File, Geometry, MAX_VALUE_DEPTH, Number, Object, Range,
-	RecordId, RecordIdKey, RecordIdKeyRange, Regex, Set, TableName, Uuid, Value, check_value_depth,
+	Array, Bytes, Date, Datetime, Duration, File, Geometry, Interval, MAX_VALUE_DEPTH, Number,
+	Object, Range, RecordId, RecordIdKey, RecordIdKeyRange, Regex, Set, TableName, Time, Timestamp,
+	Uuid, Value, check_value_depth,
 };
 
 // ---------------------------------------------------------------------------
@@ -90,6 +91,7 @@ fn identical(a: &Value, b: &Value) -> bool {
 		}
 		(Value::Object(a), Value::Object(b)) => same_object(a, b),
 		(Value::Geometry(a), Value::Geometry(b)) => same_geometry(a, b),
+		(Value::Interval(a), Value::Interval(b)) => a.identical(b),
 		(Value::RecordId(a), Value::RecordId(b)) => same_record_id(a, b),
 		(Value::Range(a), Value::Range(b)) => {
 			same_bound(&a.start, &b.start, identical) && same_bound(&a.end, &b.end, identical)
@@ -109,6 +111,7 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			Number::Int(b) => a == b,
 			Number::Float(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::I16(_)
@@ -123,6 +126,7 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			Number::Float(b) => a.to_bits() == b.to_bits(),
 			Number::Int(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::I16(_)
@@ -133,11 +137,13 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			| Number::F16(_)
 			| Number::F32(_) => false,
 		},
+		Number::BigDecimal(a) => matches!(b, Number::BigDecimal(b) if a == b),
 		Number::Decimal(a) => match b {
 			// The serialized form holds the sign and scale as well as the mantissa.
 			Number::Decimal(b) => a.serialize() == b.serialize(),
 			Number::Int(_)
 			| Number::Float(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::I16(_)
@@ -153,6 +159,7 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			Number::Int(_)
 			| Number::Float(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::U8(_)
 			| Number::I16(_)
 			| Number::U16(_)
@@ -167,6 +174,7 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			Number::Int(_)
 			| Number::Float(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::I16(_)
 			| Number::U16(_)
@@ -181,6 +189,7 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			Number::Int(_)
 			| Number::Float(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::U16(_)
@@ -195,6 +204,7 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			Number::Int(_)
 			| Number::Float(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::I16(_)
@@ -209,6 +219,7 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			Number::Int(_)
 			| Number::Float(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::I16(_)
@@ -223,6 +234,7 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			Number::Int(_)
 			| Number::Float(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::I16(_)
@@ -237,6 +249,7 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			Number::Int(_)
 			| Number::Float(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::I16(_)
@@ -251,6 +264,7 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			Number::Int(_)
 			| Number::Float(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::I16(_)
@@ -265,6 +279,7 @@ fn same_number(a: &Number, b: &Number) -> bool {
 			Number::Int(_)
 			| Number::Float(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::I16(_)
@@ -336,6 +351,10 @@ fn holds(v: &Value, f: &impl Fn(&Value) -> bool) -> bool {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Geometry(_)
 		| Value::Bytes(_)
@@ -387,6 +406,7 @@ fn read_in_place(r: ValueRef<'_>, v: &Value, canonical: bool) {
 			Number::U64(_)
 			| Number::Float(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::F16(_)
 			| Number::F32(_) => None,
 		},
@@ -396,6 +416,10 @@ fn read_in_place(r: ValueRef<'_>, v: &Value, canonical: bool) {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Array(_)
 		| Value::Set(_)
@@ -417,6 +441,7 @@ fn read_in_place(r: ValueRef<'_>, v: &Value, canonical: bool) {
 			Number::F32(f) => Some((*f as f64).to_bits()),
 			Number::Int(_)
 			| Number::Decimal(_)
+			| Number::BigDecimal(_)
 			| Number::I8(_)
 			| Number::U8(_)
 			| Number::I16(_)
@@ -431,6 +456,10 @@ fn read_in_place(r: ValueRef<'_>, v: &Value, canonical: bool) {
 		| Value::String(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Array(_)
 		| Value::Set(_)
@@ -688,6 +717,7 @@ fn kind(v: &Value) -> Kind {
 			Number::Int(_) => Kind::Int,
 			Number::Float(_) => Kind::Float,
 			Number::Decimal(_) => Kind::Decimal,
+			Number::BigDecimal(_) => Kind::BigDecimal,
 			Number::I8(_) => Kind::I8,
 			Number::U8(_) => Kind::U8,
 			Number::I16(_) => Kind::I16,
@@ -701,6 +731,10 @@ fn kind(v: &Value) -> Kind {
 		Value::String(_) => Kind::String,
 		Value::Duration(_) => Kind::Duration,
 		Value::Datetime(_) => Kind::Datetime,
+		Value::Date(_) => Kind::Date,
+		Value::Time(_) => Kind::Time,
+		Value::Timestamp(_) => Kind::Timestamp,
+		Value::Interval(_) => Kind::Interval,
 		Value::Uuid(_) => Kind::Uuid,
 		Value::Bytes(_) => Kind::Bytes,
 		Value::Table(_) => Kind::Table,
@@ -1652,7 +1686,7 @@ fn a_value_whose_tag_is_the_whole_value_has_no_payload() {
 fn every_tag_has_a_kind() {
 	for t in 0..=0xFFu8 {
 		let k = Kind::of(t);
-		let known = t <= I64_ARRAY || (I8..=F32).contains(&t) || (0x80..=0xFE).contains(&t);
+		let known = t <= I64_ARRAY || (I8..=BIGDECIMAL).contains(&t) || (0x80..=0xFE).contains(&t);
 		assert_eq!(k != Kind::Unknown, known, "{t:#04x}");
 	}
 }
@@ -1679,6 +1713,143 @@ fn sized_numbers_decode_wider_and_refuse_malformed() {
 	assert!(decode(&[F16, 0x00, 0x00, 0x00]).is_err());
 	assert!(decode(&[F32, 0x00, 0x00, 0x00]).is_err());
 	assert!(decode(&[F32, 0x00, 0x00, 0x00, 0x00, 0x00]).is_err());
+}
+
+fn bigdecimal(s: &str) -> Value {
+	Value::Number(Number::BigDecimal(Box::new(surrealdb_types::BigDecimal::from_str(s).unwrap())))
+}
+
+#[test]
+fn bigdecimals_round_trip_with_their_canonical_bytes() {
+	assert_eq!(round_trip(&bigdecimal("0")), [BIGDECIMAL, 0x00, 0x00]);
+	assert_eq!(round_trip(&bigdecimal("0.000")), [BIGDECIMAL, 0x00, 0x03]);
+	assert_eq!(round_trip(&bigdecimal("1.50")), [BIGDECIMAL, 0x00, 0x02, 0x96]);
+	assert_eq!(round_trip(&bigdecimal("-0.5")), [BIGDECIMAL, 0x01, 0x01, 0x05]);
+	// A scale past one varint byte: 200 is 0xC8 0x01.
+	assert_eq!(round_trip(&bigdecimal("1e-200")), [BIGDECIMAL, 0x00, 0xC8, 0x01, 0x01]);
+	for s in [
+		"79228162514264337593543950335",
+		"-7.9228162514264337593543950335",
+		"123456789012345678901234567890123456789012345678901234567890123456789",
+		"-99999999999999999999999999999999999999999999999999999999999999999999.5",
+		"1.5e-20000",
+		"-2e300",
+	] {
+		round_trip(&bigdecimal(s));
+	}
+}
+
+#[test]
+fn bigdecimals_refuse_malformed_bytes() {
+	let refused = |b: &[u8]| decode(b).is_err();
+	assert!(matches!(decode(&[BIGDECIMAL]), Err(Error::Truncated)));
+	assert!(matches!(decode(&[BIGDECIMAL, 0x00]), Err(Error::Truncated)));
+	assert!(matches!(decode(&[BIGDECIMAL, 0x00, 0x80]), Err(Error::Truncated)));
+	// A sign other than 0 or 1.
+	assert!(refused(&[BIGDECIMAL, 0x02, 0x00, 0x05]));
+	// A negative zero.
+	assert!(refused(&[BIGDECIMAL, 0x01, 0x00]));
+	// A scale written with an overlong varint.
+	assert!(refused(&[BIGDECIMAL, 0x00, 0x80, 0x00]));
+	// A magnitude that ends in a zero byte.
+	assert!(refused(&[BIGDECIMAL, 0x00, 0x00, 0x05, 0x00]));
+	// A scale past the largest scale.
+	let mut buf = [0u8; varint::MAX_LEN];
+	let too_large = varint::write_u64(1 << 40, &mut buf).to_vec();
+	let mut b = vec![BIGDECIMAL, 0x00];
+	b.extend_from_slice(&too_large);
+	b.push(0x05);
+	assert!(refused(&b));
+}
+
+#[test]
+fn bigdecimal_payloads_never_panic() {
+	let mut state = seed(0xB16_DEC1_0000_0001);
+	let mut next = move || {
+		state ^= state << 13;
+		state ^= state >> 7;
+		state ^= state << 17;
+		state
+	};
+	for _ in 0..cases(20_000) {
+		let len = (next() % 48) as usize;
+		let mut bytes = vec![BIGDECIMAL];
+		bytes.extend((0..len).map(|_| next() as u8));
+		if let Ok(v) = decode(&bytes) {
+			let back = encode(&v).expect("a decoded bigdecimal encodes");
+			assert_eq!(back, bytes, "{bytes:02x?} decodes to {v:?} but re-encodes differently");
+		}
+	}
+}
+
+#[test]
+fn temporal_values_round_trip_with_their_canonical_bytes() {
+	let cases: Vec<(Value, Vec<u8>)> = vec![
+		(Value::Date(Date(0)), vec![DATE, 0x00]),
+		(Value::Date(Date(-1)), vec![DATE, 0xFF]),
+		(Value::Date(Date(1_000)), vec![DATE, 0xE8, 0x03]),
+		(Value::Date(Date::from(chrono::NaiveDate::MIN)), {
+			let d = Date::from(chrono::NaiveDate::MIN);
+			[&[DATE][..], &d.0.to_le_bytes()].concat()
+		}),
+		(Value::Time(Time(0)), vec![TIME, 0x00]),
+		(Value::Time(Time(255)), vec![TIME, 0xFF]),
+		(Value::Time(Time(Time::NANOS_PER_DAY)), {
+			let n = Time::NANOS_PER_DAY.to_le_bytes();
+			[&[TIME][..], &n[..6]].concat()
+		}),
+		(
+			Value::Timestamp(Timestamp {
+				secs: 1,
+				nanos: 5,
+			}),
+			[&[TIMESTAMP][..], &1_000_000_005i64.to_le_bytes()].concat(),
+		),
+		(Value::Timestamp(Timestamp::from(chrono::NaiveDateTime::MIN)), {
+			let t = Timestamp::from(chrono::NaiveDateTime::MIN);
+			[&[TIMESTAMP][..], &t.secs.to_le_bytes(), &t.nanos.to_le_bytes()].concat()
+		}),
+		(
+			Value::Interval(Interval::new(1, -2, 3)),
+			[&[INTERVAL][..], &1i32.to_le_bytes(), &(-2i32).to_le_bytes(), &3i64.to_le_bytes()]
+				.concat(),
+		),
+	];
+	for (v, bytes) in cases {
+		assert_eq!(round_trip(&v), bytes, "{v:?}");
+	}
+	let thirty = Value::Interval(Interval::new(0, 30, 0));
+	let month = Value::Interval(Interval::new(1, 0, 0));
+	assert_eq!(thirty, month);
+	assert_ne!(encode(&thirty).unwrap(), encode(&month).unwrap());
+	for t in [DATE, TIME, TIMESTAMP, INTERVAL] {
+		assert_ne!(Kind::of(t), Kind::Unknown, "{t:#04x}");
+	}
+	assert_eq!(Kind::of(DATE), Kind::Date);
+	assert_eq!(Kind::of(INTERVAL), Kind::Interval);
+	assert_eq!(Kind::of(BIGDECIMAL), Kind::BigDecimal);
+}
+
+#[test]
+fn temporal_values_refuse_malformed_and_out_of_range_bytes() {
+	assert_eq!(decode(&[DATE, 0x00, 0x00, 0x00, 0x00]).unwrap(), Value::Date(Date(0)));
+	assert_eq!(decode(&[TIME, 0, 0, 0, 0, 0, 0, 0, 0]).unwrap(), Value::Time(Time(0)));
+	let cases: Vec<(&str, Vec<u8>)> = vec![
+		("a date of no bytes", vec![DATE]),
+		("a date of five bytes", vec![DATE, 0, 0, 0, 0, 0]),
+		("a date out of range", [&[DATE][..], &i32::MAX.to_le_bytes()].concat()),
+		("a time of no bytes", vec![TIME]),
+		("a time of nine bytes", vec![TIME, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+		("a time past 24 hours", [&[TIME][..], &(Time::NANOS_PER_DAY + 1).to_le_bytes()].concat()),
+		("a timestamp of seven bytes", vec![TIMESTAMP, 0, 0, 0, 0, 0, 0, 0]),
+		("a timestamp out of range", [&[TIMESTAMP][..], &i64::MAX.to_le_bytes(), &[0; 4]].concat()),
+		("an interval of fifteen bytes", [&[INTERVAL][..], &[0; 15]].concat()),
+		("an interval of seventeen bytes", [&[INTERVAL][..], &[0; 17]].concat()),
+	];
+	for (what, bytes) in cases {
+		assert!(decode(&bytes).is_err(), "{what} decodes");
+		assert!(validate(&bytes).is_err(), "{what} validates");
+	}
 }
 
 // ---------------------------------------------------------------------------

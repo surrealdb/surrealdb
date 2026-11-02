@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use surrealdb_types_derive::write_sql;
 
 use crate::utils::display::format_seperated;
+use crate::utils::escape::QuoteStr;
 use crate::{self as surrealdb_types, SqlFormat, Table, ToSql};
 
 /// The kind of a SurrealDB value.
@@ -28,6 +29,14 @@ pub enum Kind {
 	Bytes,
 	/// Datetime type.
 	Datetime,
+	/// Calendar date type, without a time zone.
+	Date,
+	/// Time of day type, without a date or time zone.
+	Time,
+	/// Date and time of day type, without a time zone.
+	Timestamp,
+	/// Calendar-aware interval type of months, days, and microseconds.
+	Interval,
 	/// Decimal type.
 	Decimal,
 	/// Duration type.
@@ -94,6 +103,49 @@ pub enum Kind {
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<String>),
+	/// An enum type: a string constrained to an ordered, named set of labels.
+	Enum(EnumRef),
+	/// Arbitrary-precision decimal type, with no bound on digits or scale.
+	BigDecimal,
+}
+
+/// What an enum kind names: a catalog enum, or its labels inline.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum EnumRef {
+	/// An enum declared by `DEFINE ENUM`, by name.
+	Named(String),
+	/// A column-scoped enum, its labels in declaration order.
+	Inline(Vec<String>),
+}
+
+impl EnumRef {
+	/// The labels of an inline enum, in declaration order.
+	pub fn inline_labels(&self) -> Option<&[String]> {
+		match self {
+			EnumRef::Named(_) => None,
+			EnumRef::Inline(labels) => Some(labels),
+		}
+	}
+}
+
+impl ToSql for EnumRef {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("enum<");
+		match self {
+			EnumRef::Named(name) => {
+				write_sql!(f, fmt, "{}", crate::utils::escape::EscapeSqonIdent(name));
+			}
+			EnumRef::Inline(labels) => {
+				for (i, label) in labels.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					write_sql!(f, fmt, "{}", QuoteStr(label));
+				}
+			}
+		}
+		f.push('>');
+	}
 }
 
 impl Kind {
@@ -143,11 +195,13 @@ impl Kind {
 		Kind::F32,
 	];
 
-	/// All numeric kinds (`int`, `float`, `decimal`, `number`, and all [`Self::SIZED`] kinds).
-	pub const NUMERIC: [Kind; 13] = [
+	/// All numeric kinds (`int`, `float`, `decimal`, `bigdecimal`, `number`, and all
+	/// [`Self::SIZED`] kinds).
+	pub const NUMERIC: [Kind; 14] = [
 		Kind::Int,
 		Kind::Float,
 		Kind::Decimal,
+		Kind::BigDecimal,
 		Kind::Number,
 		Kind::I8,
 		Kind::U8,
@@ -172,10 +226,10 @@ impl Kind {
 		)
 	}
 
-	/// Returns `true` if this kind admits only numbers (`int`, `float`, `decimal`, `number`, or a
-	/// sized numeric kind).
+	/// Returns `true` if this kind admits only numbers (`int`, `float`, `decimal`, `bigdecimal`,
+	/// `number`, or a sized numeric kind).
 	pub const fn is_numeric(&self) -> bool {
-		matches!(self, Kind::Int | Kind::Float | Kind::Decimal | Kind::Number)
+		matches!(self, Kind::Int | Kind::Float | Kind::Decimal | Kind::BigDecimal | Kind::Number)
 			|| self.is_sized_number()
 	}
 }
@@ -189,7 +243,12 @@ impl ToSql for Kind {
 			Kind::Bool => f.push_str("bool"),
 			Kind::Bytes => f.push_str("bytes"),
 			Kind::Datetime => f.push_str("datetime"),
+			Kind::Date => f.push_str("date"),
+			Kind::Time => f.push_str("time"),
+			Kind::Timestamp => f.push_str("timestamp"),
+			Kind::Interval => f.push_str("interval"),
 			Kind::Decimal => f.push_str("decimal"),
+			Kind::BigDecimal => f.push_str("bigdecimal"),
 			Kind::Duration => f.push_str("duration"),
 			Kind::F16 => f.push_str("f16"),
 			Kind::F32 => f.push_str("f32"),
@@ -247,6 +306,7 @@ impl ToSql for Kind {
 					write_sql!(f, fmt, "file<{}>", format_seperated(bucket, " | "))
 				}
 			}
+			Kind::Enum(reference) => reference.fmt_sql(f, fmt),
 		}
 	}
 }

@@ -174,7 +174,7 @@ mod read_ahead;
 mod row;
 pub(in crate::exec) mod row_packed;
 mod scalar;
-mod schema_host;
+pub(crate) mod schema_host;
 mod services;
 mod sort;
 pub(crate) mod speculate;

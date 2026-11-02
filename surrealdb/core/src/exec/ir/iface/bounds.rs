@@ -53,9 +53,14 @@ fn spend(left: &mut usize, bytes: usize) -> bool {
 fn fits(value: &Value, left: &mut usize) -> bool {
 	match value {
 		Value::None | Value::Null | Value::Bool(_) => spend(left, 1),
-		Value::Number(_) | Value::Duration(_) | Value::Datetime(_) | Value::Uuid(_) => {
-			spend(left, 16)
-		}
+		Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
+		| Value::Uuid(_) => spend(left, 16),
 		Value::String(s) => spend(left, s.len()),
 		Value::Bytes(b) => spend(left, b.len()),
 		Value::Array(items) => spend(left, 1) && items.iter().all(|item| fits(item, left)),

@@ -26,7 +26,11 @@ const OID_INT4: i32 = 23;
 const OID_TEXT: i32 = 25;
 const OID_FLOAT4: i32 = 700;
 const OID_FLOAT8: i32 = 701;
+const OID_DATE: i32 = 1082;
+const OID_TIME: i32 = 1083;
+const OID_TIMESTAMP: i32 = 1114;
 const OID_TIMESTAMPTZ: i32 = 1184;
+const OID_INTERVAL: i32 = 1186;
 const OID_NUMERIC: i32 = 1700;
 
 async fn start() -> (std::net::SocketAddr, CancellationToken) {
@@ -265,6 +269,17 @@ fn numeric_text(bytes: &[u8]) -> String {
 	}
 }
 
+/// `HH:MM:SS` and the fraction of a second with its trailing zeros trimmed, for a count of
+/// microseconds since midnight.
+fn clock_text(micros: i64) -> String {
+	let (secs, fraction) = (micros / 1_000_000, micros % 1_000_000);
+	let mut out = format!("{:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60);
+	if fraction != 0 {
+		out.push_str(format!(".{fraction:06}").trim_end_matches('0'));
+	}
+	out
+}
+
 /// A cell as the text a client shows for it, decoded from the format and the type the server
 /// announced.
 fn shown(column: &Column, cell: &Option<Vec<u8>>) -> String {
@@ -284,6 +299,21 @@ fn shown(column: &Column, cell: &Option<Vec<u8>>) -> String {
 		OID_NUMERIC => numeric_text(bytes),
 		OID_TEXT => String::from_utf8_lossy(bytes).into_owned(),
 		OID_TIMESTAMPTZ => format!("timestamptz:{}", bytes.len()),
+		OID_DATE => {
+			let days = i32::from_be_bytes(bytes.as_slice().try_into().expect("4 bytes"));
+			let epoch = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).expect("an epoch");
+			(epoch + chrono::TimeDelta::days(i64::from(days))).format("%Y-%m-%d").to_string()
+		}
+		OID_TIME => {
+			let micros = i64::from_be_bytes(bytes.as_slice().try_into().expect("8 bytes"));
+			clock_text(micros)
+		}
+		OID_TIMESTAMP => {
+			let micros = i64::from_be_bytes(bytes.as_slice().try_into().expect("8 bytes"));
+			let epoch = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).expect("an epoch");
+			let day = epoch + chrono::TimeDelta::days(micros.div_euclid(86_400_000_000));
+			format!("{} {}", day.format("%Y-%m-%d"), clock_text(micros.rem_euclid(86_400_000_000)))
+		}
 		other => panic!("a binary cell of type {other} has no reader here"),
 	}
 }
@@ -515,6 +545,9 @@ fn sized_field(kind: NumberKind) -> SizedField {
 		NumberKind::F32 => ("f32", "0.1f32", OID_FLOAT4, "0.1", "0", "1", 0.1),
 		NumberKind::Float => ("float", "0.25f", OID_FLOAT8, "0.25", "0", "1", 0.25),
 		NumberKind::Decimal => ("decimal", "3.25dec", OID_NUMERIC, "3.25", "3", "4", 3.25),
+		NumberKind::BigDecimal => {
+			unimplemented!("the SurrealQL front end has no bigdecimal kind name or literal")
+		}
 	};
 	SizedField {
 		surql_type,
@@ -662,6 +695,82 @@ async fn numbers_of_any_two_kinds_are_announced_as_the_later_of_their_types() {
 				assert!(cells.iter().all(|cell| same(cell, &cells[0])), "{sql}: {cells:?}");
 			}
 		}
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn a_date_time_or_timestamp_is_announced_as_its_own_type() {
+	let (addr, shutdown) = start().await;
+	let mut stream = connect(addr).await;
+	for (sql, oid, rows) in [
+		("SELECT CAST('2026-10-27' AS date)", OID_DATE, ["2026-10-27"]),
+		("SELECT CAST('2026-10-27 12:30:00' AS date)", OID_DATE, ["2026-10-27"]),
+		("SELECT make_date(2026, 10, 27)", OID_DATE, ["2026-10-27"]),
+		("SELECT CAST('2026-10-27' AS date) + 3", OID_DATE, ["2026-10-30"]),
+		("SELECT current_date - current_date", OID_INT4, ["0"]),
+		("SELECT CAST('12:30:00.5' AS time)", OID_TIME, ["12:30:00.5"]),
+		("SELECT make_time(1, 2, 3)", OID_TIME, ["01:02:03"]),
+		("SELECT CAST('2026-10-27 12:30:00' AS timestamp)", OID_TIMESTAMP, ["2026-10-27 12:30:00"]),
+		(
+			"SELECT CAST('1999-12-31 23:59:59.25' AS timestamp)",
+			OID_TIMESTAMP,
+			["1999-12-31 23:59:59.25"],
+		),
+		(
+			"SELECT CAST('2026-10-27' AS date) + CAST('01:00:00' AS time)",
+			OID_TIMESTAMP,
+			["2026-10-27 01:00:00"],
+		),
+		(
+			"SELECT date_trunc('day', CAST('2026-10-27 12:30:00' AS timestamp))",
+			OID_TIMESTAMP,
+			["2026-10-27 00:00:00"],
+		),
+	] {
+		assert_answer(&mut stream, sql, oid, &rows).await;
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn an_interval_is_announced_as_an_interval_with_its_months_days_and_negatives() {
+	let (addr, shutdown) = start().await;
+	let mut stream = connect(addr).await;
+	for (sql, text, binary) in [
+		(
+			"SELECT CAST('1 year 2 mons 3 days 04:05:06.5' AS interval)",
+			"1 year 2 mons 3 days 04:05:06.5",
+			(14i32, 3i32, 14_706_500_000i64),
+		),
+		(
+			"SELECT CAST('-1 days -02:00:00' AS interval)",
+			"-1 days -02:00:00",
+			(0, -1, -7_200_000_000),
+		),
+		(
+			"SELECT age(CAST('2026-10-27' AS timestamp), CAST('2020-02-29' AS timestamp))",
+			"6 years 7 mons 27 days",
+			(79, 27, 0),
+		),
+	] {
+		let simple = simple(&mut stream, sql).await;
+		assert_eq!(simple.error, None, "{sql}");
+		assert_eq!(
+			simple.columns.iter().map(|c| c.oid).collect::<Vec<_>>(),
+			[OID_INTERVAL],
+			"{sql}"
+		);
+		assert_eq!(shown(&simple.columns[0], &simple.rows[0][0]), text, "{sql}");
+		let binary_answer = extended(&mut stream, sql, 1).await;
+		assert_eq!(binary_answer.error, None, "{sql}");
+		let cell = binary_answer.rows[0][0].clone().expect("a cell");
+		let (months, days, micros) = binary;
+		let mut want = Vec::new();
+		want.extend_from_slice(&micros.to_be_bytes());
+		want.extend_from_slice(&days.to_be_bytes());
+		want.extend_from_slice(&months.to_be_bytes());
+		assert_eq!(cell, want, "{sql}");
 	}
 	shutdown.cancel();
 }

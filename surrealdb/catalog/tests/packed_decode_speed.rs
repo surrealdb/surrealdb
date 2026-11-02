@@ -56,7 +56,7 @@ impl Layout {
 				self.bool_bits += 1;
 				Location::Bit(self.bool_bits - 1)
 			}
-			PhysicalKind::String | PhysicalKind::Value => {
+			PhysicalKind::String | PhysicalKind::BigDecimal | PhysicalKind::Value => {
 				self.vars += 1;
 				Location::Var(self.vars - 1)
 			}

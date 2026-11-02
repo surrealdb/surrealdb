@@ -15,19 +15,22 @@ use crate::expr::statements::access::{
 use crate::expr::statements::alter::{
 	AlterAccessStatement, AlterAnalyzerStatement, AlterApiClause, AlterApiStatement,
 	AlterBucketStatement, AlterConfigStatement, AlterDatabaseStatement, AlterDefault,
-	AlterEventStatement, AlterFieldStatement, AlterFunctionStatement, AlterIndexStatement,
-	AlterKind, AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement,
-	AlterSequenceStatement, AlterSystemStatement, AlterTableStatement, AlterUserStatement,
+	AlterEnumStatement, AlterEventStatement, AlterFieldStatement, AlterFunctionStatement,
+	AlterIndexStatement, AlterKind, AlterModuleStatement, AlterNamespaceStatement,
+	AlterParamStatement, AlterSequenceStatement, AlterSystemStatement, AlterTableStatement,
+	AlterUserStatement,
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
 use crate::expr::statements::define::config::defaults::DefaultConfig;
 use crate::expr::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineSequenceStatement,
+	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineEnumStatement,
+	DefineSequenceStatement, DefineUserTypeStatement, UserTypeBody,
 };
 use crate::expr::statements::rebuild::RebuildStatement;
 use crate::expr::statements::remove::{
-	RemoveApiStatement, RemoveBucketStatement, RemoveSequenceStatement,
+	RemoveApiStatement, RemoveBucketStatement, RemoveEnumStatement, RemoveSequenceStatement,
+	RemoveUserTypeStatement,
 };
 use crate::expr::statements::{
 	AccessStatement, AlterStatement, CreateStatement, DefineAccessStatement,
@@ -315,6 +318,7 @@ implement_visitor! {
 			Literal::Float(_) |
 			Literal::Integer(_) |
 			Literal::Decimal(_) |
+			Literal::BigDecimal(_) |
 			Literal::I8(_) |
 			Literal::U8(_) |
 			Literal::I16(_) |
@@ -327,7 +331,7 @@ implement_visitor! {
 			Literal::String(_) |
 			Literal::Bytes(_) |
 			Literal::Regex(_) |
-			Literal::Datetime(_) |
+			Literal::Datetime(_) | Literal::Date(_) | Literal::Time(_) | Literal::Timestamp(_) | Literal::Interval(_) |
 			Literal::Duration(_) |
 			Literal::Uuid(_) |
 			Literal::File(_) |
@@ -367,6 +371,7 @@ implement_visitor! {
 			AlterStatement::Field(a) => { this.visit_alter_field(a)?; },
 			AlterStatement::Param(a) => { this.visit_alter_param(a)?; },
 			AlterStatement::Bucket(a) => { this.visit_alter_bucket(a)?; },
+			AlterStatement::Enum(a) => { this.visit_alter_enum(a)?; },
 			AlterStatement::Config(a) => { this.visit_alter_config(a)?; },
 			AlterStatement::Analyzer(a) => { this.visit_alter_analyzer(a)?; },
 			AlterStatement::Function(a) => { this.visit_alter_function(a)?; },
@@ -486,6 +491,11 @@ implement_visitor! {
 		if let Some(ref p) = a.permissions {
 			this.visit_permission(p)?;
 		}
+		Ok(())
+	}
+
+	fn visit_alter_enum(this, a: &AlterEnumStatement){
+		let _ = a;
 		Ok(())
 	}
 
@@ -698,6 +708,12 @@ implement_visitor! {
 			RemoveStatement::Bucket(r) => {
 				this.visit_remove_bucket(r)?;
 			},
+			RemoveStatement::Enum(r) => {
+				this.visit_remove_enum(r)?;
+			},
+			RemoveStatement::UserType(r) => {
+				this.visit_remove_user_type(r)?;
+			},
 			RemoveStatement::Sequence(r) => {
 				this.visit_remove_sequence(r)?;
 			},
@@ -780,6 +796,16 @@ implement_visitor! {
 
 	fn visit_remove_api(this, r: &RemoveApiStatement){
 		this.visit_expr(&r.name)?;
+		Ok(())
+	}
+
+	fn visit_remove_enum(this, r: &RemoveEnumStatement){
+		let _ = r;
+		Ok(())
+	}
+
+	fn visit_remove_user_type(this, r: &RemoveUserTypeStatement){
+		let _ = r;
 		Ok(())
 	}
 
@@ -937,6 +963,12 @@ implement_visitor! {
 			DefineStatement::Bucket(d) => {
 				this.visit_define_bucket(d)?;
 			},
+			DefineStatement::Enum(d) => {
+				this.visit_define_enum(d)?;
+			},
+			DefineStatement::UserType(d) => {
+				this.visit_define_user_type(d)?;
+			},
 			DefineStatement::Sequence(d) => {
 				this.visit_define_sequence(d)?;
 			},
@@ -952,6 +984,32 @@ implement_visitor! {
 		this.visit_expr(&d.batch)?;
 		this.visit_expr(&d.start)?;
 		this.visit_expr(&d.timeout)?;
+		Ok(())
+	}
+
+	fn visit_define_enum(this, d: &DefineEnumStatement) {
+		this.visit_permission(&d.permissions)?;
+		this.visit_expr(&d.comment)?;
+		Ok(())
+	}
+
+	fn visit_define_user_type(this, d: &DefineUserTypeStatement) {
+		match &d.body {
+			UserTypeBody::Domain(domain) => {
+				this.visit_kind(&domain.base)?;
+				if let Some(default) = &domain.default {
+					this.visit_expr(default)?;
+				}
+				for check in &domain.checks {
+					this.visit_expr(&check.check)?;
+				}
+			}
+			UserTypeBody::Composite(composite) => {
+				for field in &composite.fields {
+					this.visit_kind(&field.kind)?;
+				}
+			}
+		}
 		Ok(())
 	}
 
@@ -1410,8 +1468,9 @@ implement_visitor! {
 				Kind::Null |
 				Kind::Bool |
 				Kind::Bytes |
-				Kind::Datetime |
+				Kind::Datetime | Kind::Date | Kind::Time | Kind::Timestamp | Kind::Interval |
 				Kind::Decimal |
+				Kind::BigDecimal |
 				Kind::Duration |
 				Kind::Float |
 				Kind::Int |
@@ -1433,7 +1492,7 @@ implement_visitor! {
 				Kind::Record(_) |
 				Kind::Geometry(_) |
 				Kind::Table(_) |
-				Kind::File(_) => {}
+				Kind::File(_) | Kind::Enum(_) => {}
 			Kind::Either(kinds) => {
 				for k in kinds.iter() {
 					this.visit_kind(k)?;
@@ -1895,6 +1954,7 @@ implement_visitor_mut! {
 			Literal::Float(_) |
 			Literal::Integer(_) |
 			Literal::Decimal(_) |
+			Literal::BigDecimal(_) |
 			Literal::I8(_) |
 			Literal::U8(_) |
 			Literal::I16(_) |
@@ -1907,7 +1967,7 @@ implement_visitor_mut! {
 			Literal::String(_) |
 			Literal::Bytes(_) |
 			Literal::Regex(_) |
-			Literal::Datetime(_) |
+			Literal::Datetime(_) | Literal::Date(_) | Literal::Time(_) | Literal::Timestamp(_) | Literal::Interval(_) |
 			Literal::Duration(_) |
 			Literal::Uuid(_) |
 			Literal::File(_) |
@@ -1947,6 +2007,7 @@ implement_visitor_mut! {
 			AlterStatement::Field(a) => { this.visit_mut_alter_field(a)?; },
 			AlterStatement::Param(a) => { this.visit_mut_alter_param(a)?; },
 			AlterStatement::Bucket(a) => { this.visit_mut_alter_bucket(a)?; },
+			AlterStatement::Enum(a) => { this.visit_mut_alter_enum(a)?; },
 			AlterStatement::Config(a) => { this.visit_mut_alter_config(a)?; },
 			AlterStatement::Analyzer(a) => { this.visit_mut_alter_analyzer(a)?; },
 			AlterStatement::Function(a) => { this.visit_mut_alter_function(a)?; },
@@ -2058,6 +2119,11 @@ implement_visitor_mut! {
 		if let Some(ref mut p) = a.permissions {
 			this.visit_mut_permission(p)?;
 		}
+		Ok(())
+	}
+
+	fn visit_mut_alter_enum(this, a: &mut AlterEnumStatement){
+		let _ = a;
 		Ok(())
 	}
 
@@ -2278,6 +2344,12 @@ implement_visitor_mut! {
 			RemoveStatement::Bucket(r) => {
 				this.visit_mut_remove_bucket(r)?;
 			},
+			RemoveStatement::Enum(r) => {
+				this.visit_mut_remove_enum(r)?;
+			},
+			RemoveStatement::UserType(r) => {
+				this.visit_mut_remove_user_type(r)?;
+			},
 			RemoveStatement::Sequence(r) => {
 				this.visit_mut_remove_sequence(r)?;
 			},
@@ -2360,6 +2432,16 @@ implement_visitor_mut! {
 
 	fn visit_mut_remove_api(this, r: &mut RemoveApiStatement){
 		this.visit_mut_expr(&mut r.name)?;
+		Ok(())
+	}
+
+	fn visit_mut_remove_enum(this, r: &mut RemoveEnumStatement){
+		let _ = r;
+		Ok(())
+	}
+
+	fn visit_mut_remove_user_type(this, r: &mut RemoveUserTypeStatement){
+		let _ = r;
 		Ok(())
 	}
 
@@ -2517,6 +2599,12 @@ implement_visitor_mut! {
 			DefineStatement::Bucket(d) => {
 				this.visit_mut_define_bucket(d)?;
 			},
+			DefineStatement::Enum(d) => {
+				this.visit_mut_define_enum(d)?;
+			},
+			DefineStatement::UserType(d) => {
+				this.visit_mut_define_user_type(d)?;
+			},
 			DefineStatement::Sequence(d) => {
 				this.visit_mut_define_sequence(d)?;
 			},
@@ -2533,6 +2621,32 @@ implement_visitor_mut! {
 		this.visit_mut_expr(&mut d.start)?;
 
 		this.visit_mut_expr(&mut d.timeout)?;
+		Ok(())
+	}
+
+	fn visit_mut_define_enum(this, d: &mut DefineEnumStatement) {
+		this.visit_mut_permission(&mut d.permissions)?;
+		this.visit_mut_expr(&mut d.comment)?;
+		Ok(())
+	}
+
+	fn visit_mut_define_user_type(this, d: &mut DefineUserTypeStatement) {
+		match &mut d.body {
+			UserTypeBody::Domain(domain) => {
+				this.visit_mut_kind(&mut domain.base)?;
+				if let Some(default) = &mut domain.default {
+					this.visit_mut_expr(default)?;
+				}
+				for check in &mut domain.checks {
+					this.visit_mut_expr(&mut check.check)?;
+				}
+			}
+			UserTypeBody::Composite(composite) => {
+				for field in &mut composite.fields {
+					this.visit_mut_kind(&mut field.kind)?;
+				}
+			}
+		}
 		Ok(())
 	}
 
@@ -2996,8 +3110,9 @@ implement_visitor_mut! {
 				Kind::Null |
 				Kind::Bool |
 				Kind::Bytes |
-				Kind::Datetime |
+				Kind::Datetime | Kind::Date | Kind::Time | Kind::Timestamp | Kind::Interval |
 				Kind::Decimal |
+				Kind::BigDecimal |
 				Kind::Duration |
 				Kind::Float |
 				Kind::Int |
@@ -3019,7 +3134,7 @@ implement_visitor_mut! {
 				Kind::Record(_) |
 				Kind::Geometry(_) |
 				Kind::Table(_) |
-				Kind::File(_) => {}
+				Kind::File(_) | Kind::Enum(_) => {}
 			Kind::Either(kinds) => {
 				for k in kinds.iter_mut() {
 					this.visit_mut_kind(k)?;

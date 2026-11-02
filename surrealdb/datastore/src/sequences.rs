@@ -33,9 +33,10 @@ use rand::Rng;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_catalog::providers::{
-	CancellationProbe, DatabaseProvider, NamespaceProvider, TableProvider,
+	CancellationProbe, DatabaseProvider, EnumProvider, NamespaceProvider, TableProvider,
+	UserTypeProvider,
 };
-use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId, SequenceDefinition, TableId};
+use surrealdb_catalog::{DatabaseId, EnumId, IndexId, NamespaceId, SequenceDefinition, TableId};
 use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_kvs::key::{KVKey, KVKeyDecode, TypedRange};
 use surrealdb_strand::TableName;
@@ -46,9 +47,10 @@ use web_time::Instant;
 use crate::factory::TransactionFactory;
 use crate::key::schema::{
 	DbIdBatchKey, DbIdBatchPrefix, DbIdStateKey, DocIdBatchKey, DocIdBatchPrefix, DocIdStateKey,
-	FtDocBatchKey, FtDocBatchPrefix, FtDocStateKey, IndexIdBatchKey, IndexIdBatchPrefix,
-	IndexIdStateKey, NsIdBatchKey, NsIdBatchPrefix, NsIdStateKey, SeqBatchKey, SeqBatchPrefix,
-	SeqStateKey, SeqStatePrefix, SequenceKey, TbIdBatchKey, TbIdBatchPrefix, TbIdStateKey,
+	EnIdBatchKey, EnIdBatchPrefix, EnIdStateKey, FtDocBatchKey, FtDocBatchPrefix, FtDocStateKey,
+	IndexIdBatchKey, IndexIdBatchPrefix, IndexIdStateKey, NsIdBatchKey, NsIdBatchPrefix,
+	NsIdStateKey, SeqBatchKey, SeqBatchPrefix, SeqStateKey, SeqStatePrefix, SequenceKey,
+	TbIdBatchKey, TbIdBatchPrefix, TbIdStateKey,
 };
 use crate::out_of_line::OutOfLine;
 use crate::tx::{ProvisionalDraw, ProvisionalSequence};
@@ -394,6 +396,8 @@ pub enum CatalogSequence {
 	Tables(NamespaceId, DatabaseId),
 	/// The index ids of a table.
 	Indexes(NamespaceId, DatabaseId, TableName),
+	/// The enum ids of a database.
+	Enums(NamespaceId, DatabaseId),
 }
 
 /// The catalog ids this node holds outside its sequences' cursors.
@@ -427,6 +431,8 @@ enum SequenceDomain {
 	DatabasesIds(NamespaceId),
 	/// A sequence generating IDs for tables
 	TablesIds(NamespaceId, DatabaseId),
+	/// A sequence generating IDs for enums
+	EnumIds(NamespaceId, DatabaseId),
 	/// A sequence generating IDs for indexes
 	IndexIds(NamespaceId, DatabaseId, TableName),
 	/// The private full-text doc-ID allocator used by pre-format-1 indexes.
@@ -452,6 +458,10 @@ impl SequenceDomain {
 
 	pub fn new_table_ids(ns: NamespaceId, db: DatabaseId) -> Self {
 		Self::TablesIds(ns, db)
+	}
+
+	pub fn new_enum_ids(ns: NamespaceId, db: DatabaseId) -> Self {
+		Self::EnumIds(ns, db)
 	}
 
 	pub fn new_index_ids(ns: NamespaceId, db: DatabaseId, tb: TableName) -> Self {
@@ -484,6 +494,11 @@ impl SequenceDomain {
 			}
 			.range(),
 			Self::TablesIds(ns, db) => TbIdBatchPrefix {
+				ns: *ns,
+				db: *db,
+			}
+			.range(),
+			Self::EnumIds(ns, db) => EnIdBatchPrefix {
 				ns: *ns,
 				db: *db,
 			}
@@ -552,6 +567,11 @@ impl SequenceDomain {
 				db: *db,
 				start,
 			}),
+			Self::EnumIds(ns, db) => SequenceBatchKey::Enums(EnIdBatchKey {
+				ns: *ns,
+				db: *db,
+				start,
+			}),
 			Self::IndexIds(ns, db, tb) => SequenceBatchKey::Indexes(IndexIdBatchKey {
 				ns: *ns,
 				db: *db,
@@ -579,6 +599,7 @@ impl SequenceDomain {
 			Self::NameSpacesIds => SequenceBatchKey::Namespaces(NsIdBatchKey::decode_key(bytes)?),
 			Self::DatabasesIds(..) => SequenceBatchKey::Databases(DbIdBatchKey::decode_key(bytes)?),
 			Self::TablesIds(..) => SequenceBatchKey::Tables(TbIdBatchKey::decode_key(bytes)?),
+			Self::EnumIds(..) => SequenceBatchKey::Enums(EnIdBatchKey::decode_key(bytes)?),
 			Self::IndexIds(..) => SequenceBatchKey::Indexes(IndexIdBatchKey::decode_key(bytes)?),
 			Self::LegacyFullTextDocIds(..) => {
 				SequenceBatchKey::LegacyFullTextDocIds(FtDocBatchKey::decode_key(bytes)?)
@@ -614,6 +635,11 @@ impl SequenceDomain {
 				db: *db,
 				nid,
 			}),
+			Self::EnumIds(ns, db) => SequenceStateKey::Enums(EnIdStateKey {
+				ns: *ns,
+				db: *db,
+				nid,
+			}),
 			Self::IndexIds(ns, db, tb) => SequenceStateKey::Indexes(IndexIdStateKey {
 				ns: *ns,
 				db: *db,
@@ -642,6 +668,7 @@ enum SequenceBatchKey<'a> {
 	Namespaces(NsIdBatchKey),
 	Databases(DbIdBatchKey),
 	Tables(TbIdBatchKey),
+	Enums(EnIdBatchKey),
 	Indexes(IndexIdBatchKey<'a>),
 	LegacyFullTextDocIds(FtDocBatchKey<'a>),
 }
@@ -659,6 +686,7 @@ impl SequenceBatchKey<'_> {
 			Self::Namespaces(k) => k.start,
 			Self::Databases(k) => k.start,
 			Self::Tables(k) => k.start,
+			Self::Enums(k) => k.start,
 			Self::Indexes(k) => k.start,
 			Self::LegacyFullTextDocIds(k) => k.start,
 		}
@@ -675,6 +703,7 @@ impl KVKey for SequenceBatchKey<'_> {
 			Self::Namespaces(k) => k.encode_buffer(buffer),
 			Self::Databases(k) => k.encode_buffer(buffer),
 			Self::Tables(k) => k.encode_buffer(buffer),
+			Self::Enums(k) => k.encode_buffer(buffer),
 			Self::Indexes(k) => k.encode_buffer(buffer),
 			Self::LegacyFullTextDocIds(k) => k.encode_buffer(buffer),
 		}
@@ -692,6 +721,7 @@ enum SequenceStateKey<'a> {
 	Namespaces(NsIdStateKey),
 	Databases(DbIdStateKey),
 	Tables(TbIdStateKey),
+	Enums(EnIdStateKey),
 	Indexes(IndexIdStateKey<'a>),
 	LegacyFullTextDocIds(FtDocStateKey<'a>),
 }
@@ -706,6 +736,7 @@ impl KVKey for SequenceStateKey<'_> {
 			Self::Namespaces(k) => k.encode_buffer(buffer),
 			Self::Databases(k) => k.encode_buffer(buffer),
 			Self::Tables(k) => k.encode_buffer(buffer),
+			Self::Enums(k) => k.encode_buffer(buffer),
 			Self::Indexes(k) => k.encode_buffer(buffer),
 			Self::LegacyFullTextDocIds(k) => k.encode_buffer(buffer),
 		}
@@ -813,6 +844,7 @@ impl Sequences {
 			CatalogSequence::Indexes(ns, db, tb) => {
 				self.next_index_id(ctx, *ns, *db, tb.clone()).await?.0
 			}
+			CatalogSequence::Enums(ns, db) => self.next_enum_id(ctx, *ns, *db).await?.0,
 		})
 	}
 
@@ -1100,6 +1132,21 @@ impl Sequences {
 		let domain = Arc::new(SequenceDomain::new_table_ids(ns, db));
 		let id = self.next_val(ctx, domain, 0, 100, None).await?;
 		Ok(TableId(id as u32))
+	}
+
+	/// A new unique enum ID for the given database
+	pub async fn next_enum_id(
+		&self,
+		ctx: Option<&dyn CancellationProbe>,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<EnumId> {
+		if let Some(id) = self.take_released(&CatalogSequence::Enums(ns, db)) {
+			return Ok(EnumId(id));
+		}
+		let domain = Arc::new(SequenceDomain::new_enum_ids(ns, db));
+		let id = self.next_val(ctx, domain, 0, 100, None).await?;
+		Ok(EnumId(id as u32))
 	}
 
 	/// Generates the next index ID within a table.
@@ -1572,6 +1619,7 @@ impl Sequence {
 			| SequenceDomain::NameSpacesIds
 			| SequenceDomain::DatabasesIds(_)
 			| SequenceDomain::TablesIds(..)
+			| SequenceDomain::EnumIds(..)
 			| SequenceDomain::IndexIds(..)
 			| SequenceDomain::LegacyFullTextDocIds(..) => (start, batch, timeout, None),
 		};
@@ -1642,6 +1690,15 @@ impl Sequence {
 			SequenceDomain::TablesIds(ns, db) => {
 				for tb in tx.all_tb(*ns, *db, None).await?.iter() {
 					seeded = seeded.max(tb.table_id.0 as i64 + 1);
+				}
+			}
+			SequenceDomain::EnumIds(ns, db) => {
+				for en in tx.all_db_enums(*ns, *db, None).await?.iter() {
+					seeded = seeded.max(en.id.0 as i64 + 1);
+				}
+				// Domains and composite types draw their ids from the same sequence.
+				for ty in tx.all_db_user_types(*ns, *db, None).await?.iter() {
+					seeded = seeded.max(ty.id.0 as i64 + 1);
 				}
 			}
 			SequenceDomain::IndexIds(ns, db, tb) => {
@@ -2227,6 +2284,11 @@ mod tests {
 				SequenceDomain::TablesIds(ns, db),
 				&b"/*\0\0\0\x01*\0\0\0\x02!th"[..],
 				&b"/*\0\0\0\x01*\0\0\0\x02!ti"[..],
+			),
+			(
+				SequenceDomain::EnumIds(ns, db),
+				&b"/*\0\0\0\x01*\0\0\0\x02!eb"[..],
+				&b"/*\0\0\0\x01*\0\0\0\x02!es"[..],
 			),
 			(
 				SequenceDomain::IndexIds(ns, db, tb),

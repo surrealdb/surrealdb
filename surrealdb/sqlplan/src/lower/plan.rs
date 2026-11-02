@@ -324,6 +324,9 @@ fn replace_set_returning<'a>(
 			correlation_depth: 0,
 			id_table: None,
 			link_table: None,
+			enum_column: None,
+			composite: None,
+			declared_sql: None,
 			aggregate_output: false,
 			key_read: crate::ir::KeyRead::None,
 			also_in: Vec::new(),
@@ -608,6 +611,7 @@ fn lower_bound_select_internal(
 				&mut join_counter,
 				policy,
 				&select.user_tables,
+				&select.user_types,
 				select.database.as_deref().unwrap_or("test"),
 			)?
 		}
@@ -1313,6 +1317,9 @@ fn output_column(name: &str) -> BoundExpr {
 		correlation_depth: 0,
 		id_table: None,
 		link_table: None,
+		enum_column: None,
+		composite: None,
+		declared_sql: None,
 		aggregate_output: false,
 		key_read: crate::ir::KeyRead::None,
 		also_in: Vec::new(),
@@ -1685,6 +1692,21 @@ fn rewrite_aggregates_to_columns(
 				correlation_depth: 0,
 				id_table: id_column(agg).filter(|_| keep_id).map(|(_, table)| table.to_string()),
 				link_table: link_column(agg).map(|(_, table)| table.to_string()),
+				enum_column: if let BoundExpr::Column(col) = agg {
+					col.enum_column.clone()
+				} else {
+					None
+				},
+				composite: if let BoundExpr::Column(col) = agg {
+					col.composite.clone()
+				} else {
+					None
+				},
+				declared_sql: if let BoundExpr::Column(col) = agg {
+					col.declared_sql.clone()
+				} else {
+					None
+				},
 				aggregate_output: keep_id,
 				key_read: crate::ir::KeyRead::None,
 				also_in: Vec::new(),
@@ -1865,6 +1887,7 @@ fn lower_table_source(
 	join_counter: &mut usize,
 	policy: &DialectPolicy,
 	user_tables: &[crate::catalog::TableSchema],
+	user_types: &crate::catalog::UserTypes,
 	database: &str,
 ) -> Result<LogicalOp, PlanError> {
 	match source {
@@ -1878,11 +1901,13 @@ fn lower_table_source(
 			schema,
 			..
 		} => {
-			if let Some(rows) = crate::catalog::system::get_system_table_rows(
+			if let Some(rows) = crate::catalog::system::get_system_table_rows_in(
 				schema.as_deref(),
 				name,
 				user_tables,
+				user_types,
 				database,
+				policy.dialect,
 			) {
 				return Ok(LogicalOp::Values(LogicalValues {
 					expr: LogicalExpr::Array(rows),
@@ -1933,6 +1958,7 @@ fn lower_table_source(
 					join_counter,
 					policy,
 					user_tables,
+					user_types,
 					database,
 				)?;
 				let alias_idx = *join_counter;
@@ -1949,10 +1975,24 @@ fn lower_table_source(
 					)),
 				};
 			}
-			let left_op =
-				lower_table_source(left, for_update, join_counter, policy, user_tables, database)?;
-			let right_op =
-				lower_table_source(right, for_update, join_counter, policy, user_tables, database)?;
+			let left_op = lower_table_source(
+				left,
+				for_update,
+				join_counter,
+				policy,
+				user_tables,
+				user_types,
+				database,
+			)?;
+			let right_op = lower_table_source(
+				right,
+				for_update,
+				join_counter,
+				policy,
+				user_tables,
+				user_types,
+				database,
+			)?;
 
 			let kind = match join_type {
 				BoundJoinType::Inner | BoundJoinType::Cross => JoinKind::Inner,

@@ -39,6 +39,10 @@ pub enum ValueKind {
 	Bytes,
 	Duration,
 	Datetime,
+	Date,
+	Time,
+	Timestamp,
+	Interval,
 	Number,
 	Geometry,
 	Record,
@@ -65,6 +69,10 @@ impl ValueKind {
 			Value::Bytes(_) => Some(ValueKind::Bytes),
 			Value::Duration(_) => Some(ValueKind::Duration),
 			Value::Datetime(_) => Some(ValueKind::Datetime),
+			Value::Date(_) => Some(ValueKind::Date),
+			Value::Time(_) => Some(ValueKind::Time),
+			Value::Timestamp(_) => Some(ValueKind::Timestamp),
+			Value::Interval(_) => Some(ValueKind::Interval),
 			Value::Number(_) => Some(ValueKind::Number),
 			Value::Geometry(_) => Some(ValueKind::Geometry),
 			Value::RecordId(_) => Some(ValueKind::Record),
@@ -254,6 +262,10 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_generic("to_array", get(funcs, "type::array"));
 	m.register_generic("to_bool", get(funcs, "type::bool"));
 	m.register_generic("to_bytes", get(funcs, "type::bytes"));
+	m.register_generic("to_date", get(funcs, "type::date"));
+	m.register_generic("to_time", get(funcs, "type::time"));
+	m.register_generic("to_timestamp", get(funcs, "type::timestamp"));
+	m.register_generic("to_interval", get(funcs, "type::interval"));
 	m.register_generic("to_datetime", get(funcs, "type::datetime"));
 	m.register_generic("to_decimal", get(funcs, "type::decimal"));
 	m.register_generic("to_duration", get(funcs, "type::duration"));
@@ -278,6 +290,10 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_generic("is_bool", get(funcs, "type::is_bool"));
 	m.register_generic("is_bytes", get(funcs, "type::is_bytes"));
 	m.register_generic("is_collection", get(funcs, "type::is_collection"));
+	m.register_generic("is_date", get(funcs, "type::is_date"));
+	m.register_generic("is_time", get(funcs, "type::is_time"));
+	m.register_generic("is_timestamp", get(funcs, "type::is_timestamp"));
+	m.register_generic("is_interval", get(funcs, "type::is_interval"));
 	m.register_generic("is_datetime", get(funcs, "type::is_datetime"));
 	m.register_generic("is_decimal", get(funcs, "type::is_decimal"));
 	m.register_generic("is_duration", get(funcs, "type::is_duration"));
@@ -704,6 +720,77 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_typed("set_minute", ValueKind::Datetime, get(funcs, "time::set_minute"));
 	m.register_typed("set_second", ValueKind::Datetime, get(funcs, "time::set_second"));
 	m.register_typed("set_nanosecond", ValueKind::Datetime, get(funcs, "time::set_nanosecond"));
+	m.register_typed("extract", ValueKind::Datetime, get(funcs, "time::extract"));
+	m.register_typed("trunc", ValueKind::Datetime, get(funcs, "time::trunc"));
+	m.register_typed("age", ValueKind::Datetime, get(funcs, "time::age"));
+	m.register_typed("day", ValueKind::Date, get(funcs, "time::day"));
+	m.register_typed("format", ValueKind::Date, get(funcs, "time::format"));
+	m.register_typed("group", ValueKind::Date, get(funcs, "time::group"));
+	m.register_typed("is_leap_year", ValueKind::Date, get(funcs, "time::is_leap_year"));
+	m.register_typed("month", ValueKind::Date, get(funcs, "time::month"));
+	m.register_typed("round", ValueKind::Date, get(funcs, "time::round"));
+	m.register_typed("wday", ValueKind::Date, get(funcs, "time::wday"));
+	m.register_typed("week", ValueKind::Date, get(funcs, "time::week"));
+	m.register_typed("yday", ValueKind::Date, get(funcs, "time::yday"));
+	m.register_typed("year", ValueKind::Date, get(funcs, "time::year"));
+	m.register_typed("ceil", ValueKind::Date, get(funcs, "time::ceil"));
+	m.register_typed("floor", ValueKind::Date, get(funcs, "time::floor"));
+	m.register_typed("set_year", ValueKind::Date, get(funcs, "time::set_year"));
+	m.register_typed("set_month", ValueKind::Date, get(funcs, "time::set_month"));
+	m.register_typed("set_day", ValueKind::Date, get(funcs, "time::set_day"));
+	m.register_typed("extract", ValueKind::Date, get(funcs, "time::extract"));
+	m.register_typed("trunc", ValueKind::Date, get(funcs, "time::trunc"));
+	m.register_typed("age", ValueKind::Date, get(funcs, "time::age"));
+	m.register_typed("day", ValueKind::Timestamp, get(funcs, "time::day"));
+	m.register_typed("format", ValueKind::Timestamp, get(funcs, "time::format"));
+	m.register_typed("group", ValueKind::Timestamp, get(funcs, "time::group"));
+	m.register_typed("is_leap_year", ValueKind::Timestamp, get(funcs, "time::is_leap_year"));
+	m.register_typed("month", ValueKind::Timestamp, get(funcs, "time::month"));
+	m.register_typed("round", ValueKind::Timestamp, get(funcs, "time::round"));
+	m.register_typed("wday", ValueKind::Timestamp, get(funcs, "time::wday"));
+	m.register_typed("week", ValueKind::Timestamp, get(funcs, "time::week"));
+	m.register_typed("yday", ValueKind::Timestamp, get(funcs, "time::yday"));
+	m.register_typed("year", ValueKind::Timestamp, get(funcs, "time::year"));
+	m.register_typed("ceil", ValueKind::Timestamp, get(funcs, "time::ceil"));
+	m.register_typed("floor", ValueKind::Timestamp, get(funcs, "time::floor"));
+	m.register_typed("set_year", ValueKind::Timestamp, get(funcs, "time::set_year"));
+	m.register_typed("set_month", ValueKind::Timestamp, get(funcs, "time::set_month"));
+	m.register_typed("set_day", ValueKind::Timestamp, get(funcs, "time::set_day"));
+	m.register_typed("extract", ValueKind::Timestamp, get(funcs, "time::extract"));
+	m.register_typed("trunc", ValueKind::Timestamp, get(funcs, "time::trunc"));
+	m.register_typed("age", ValueKind::Timestamp, get(funcs, "time::age"));
+	m.register_typed("set_hour", ValueKind::Timestamp, get(funcs, "time::set_hour"));
+	m.register_typed("set_minute", ValueKind::Timestamp, get(funcs, "time::set_minute"));
+	m.register_typed("set_second", ValueKind::Timestamp, get(funcs, "time::set_second"));
+	m.register_typed("set_nanosecond", ValueKind::Timestamp, get(funcs, "time::set_nanosecond"));
+	m.register_typed("hour", ValueKind::Time, get(funcs, "time::hour"));
+	m.register_typed("minute", ValueKind::Time, get(funcs, "time::minute"));
+	m.register_typed("second", ValueKind::Time, get(funcs, "time::second"));
+	m.register_typed("nano", ValueKind::Time, get(funcs, "time::nano"));
+	m.register_typed("micros", ValueKind::Time, get(funcs, "time::micros"));
+	m.register_typed("millis", ValueKind::Time, get(funcs, "time::millis"));
+	m.register_typed("trunc", ValueKind::Time, get(funcs, "time::trunc"));
+	m.register_typed("extract", ValueKind::Time, get(funcs, "time::extract"));
+	m.register_typed("hour", ValueKind::Timestamp, get(funcs, "time::hour"));
+	m.register_typed("minute", ValueKind::Timestamp, get(funcs, "time::minute"));
+	m.register_typed("second", ValueKind::Timestamp, get(funcs, "time::second"));
+	m.register_typed("nano", ValueKind::Timestamp, get(funcs, "time::nano"));
+	m.register_typed("micros", ValueKind::Timestamp, get(funcs, "time::micros"));
+	m.register_typed("millis", ValueKind::Timestamp, get(funcs, "time::millis"));
+	m.register_typed("years", ValueKind::Interval, get(funcs, "interval::years"));
+	m.register_typed("months", ValueKind::Interval, get(funcs, "interval::months"));
+	m.register_typed("days", ValueKind::Interval, get(funcs, "interval::days"));
+	m.register_typed("hours", ValueKind::Interval, get(funcs, "interval::hours"));
+	m.register_typed("mins", ValueKind::Interval, get(funcs, "interval::mins"));
+	m.register_typed("secs", ValueKind::Interval, get(funcs, "interval::secs"));
+	m.register_typed("micros", ValueKind::Interval, get(funcs, "interval::micros"));
+	m.register_typed("justify_hours", ValueKind::Interval, get(funcs, "interval::justify_hours"));
+	m.register_typed("justify_days", ValueKind::Interval, get(funcs, "interval::justify_days"));
+	m.register_typed(
+		"justify_interval",
+		ValueKind::Interval,
+		get(funcs, "interval::justify_interval"),
+	);
 
 	// =====================================================================
 	// File methods

@@ -940,7 +940,7 @@ impl Vector {
 	}
 
 	pub(crate) fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self> {
-		Self::try_from_numbers(t, v.iter().copied())
+		Self::try_from_numbers(t, v.iter().cloned())
 	}
 
 	/// Converts a sequence of numbers into a vector of type `t`.

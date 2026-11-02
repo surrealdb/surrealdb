@@ -282,7 +282,8 @@ pub(crate) fn settle_record_id(
 		if kind.is_some()
 			&& let Some(existing) = row.id.take()
 		{
-			row.id = Some(coerce_id_key(existing, kind, ctx.key.as_deref())?);
+			let id = coerce_id_key(existing, kind, ctx.key.as_deref())?;
+			row.id = Some(check_id_sql_type(id, ctx)?);
 		}
 		if let Some(id) = &row.id {
 			check_id_subfields(id, &ctx.fields, &ctx.id_subfields)?;
@@ -364,6 +365,7 @@ pub(crate) fn finish_record_id(
 		}));
 	}
 	let id = coerce_id_key(id, id_kind(ctx), ctx.key.as_deref())?;
+	let id = check_id_sql_type(id, ctx)?;
 	check_id_subfields(&id, &ctx.fields, &ctx.id_subfields)?;
 	row.id = Some(id);
 	Ok(())
@@ -670,6 +672,36 @@ fn coerce_whole_key(id: RecordId, kind: &Kind) -> Result<RecordId, ControlFlow> 
 			record: id.to_sql(),
 			field_name: "id".to_string(),
 			error: Box::new(error),
+		})),
+	}
+}
+
+/// Hold the key of `id`, already coerced to the `id` field's kind, to the field's declared SQL
+/// type, if it declares one: a key the type refuses fails the write, and a key the type
+/// canonicalises (a rounded `numeric`, trimmed spaces) is the key the record is written under.
+/// The field schema stage never visits `id`, so this is where its declared type applies.
+fn check_id_sql_type(id: RecordId, ctx: &WriteCtx) -> Result<RecordId, ControlFlow> {
+	let Some(index) = ctx.id_field else {
+		return Ok(id);
+	};
+	let Some(declared) = ctx.declared_types().get(index).and_then(Option::as_ref) else {
+		return Ok(id);
+	};
+	let declared = match declared {
+		Ok(declared) => declared,
+		Err(error) => {
+			return Err(ControlFlow::Err(anyhow::anyhow!("invalid declared SQL type: {error}")));
+		}
+	};
+	let key = id.key.clone().into_value();
+	match crate::expr::statements::define::sql_types::validate(declared, key.clone(), "id") {
+		Ok(stored) if stored == key => Ok(id),
+		Ok(stored) => stored.generate(id.table, false).map_err(ControlFlow::Err),
+		Err(violation) => Err(fail(DocError::FieldSqlType {
+			record: id.to_sql(),
+			field_name: "id".to_string(),
+			sql_type: declared.canonical_text(),
+			message: violation.message,
 		})),
 	}
 }
@@ -1522,6 +1554,10 @@ mod tests {
 				| other @ Value::String(_)
 				| other @ Value::Duration(_)
 				| other @ Value::Datetime(_)
+				| other @ Value::Date(_)
+				| other @ Value::Time(_)
+				| other @ Value::Timestamp(_)
+				| other @ Value::Interval(_)
 				| other @ Value::Uuid(_)
 				| other @ Value::Array(_)
 				| other @ Value::Set(_)
