@@ -428,6 +428,17 @@ impl Lowerer<'_> {
 		})
 	}
 
+	/// The value of the `FOR` the `phys.pipeline` `data` wraps in value position, run as the unit
+	/// the pipeline's region is, in the frame being lowered. A `RETURN` its body signals is taken
+	/// as a statement held in an expression takes one ([`Lowerer::subquery_region`]), and its
+	/// expressions are evaluated against the row of the statement that holds it.
+	pub(super) fn value_for(&mut self, data: &OpData) -> Result<Operand, IrError> {
+		let region = region_at(data, 0, 1)?;
+		self.refuse_in_fold("ir_lower::fold: a FOR in value position")?;
+		self.require_frame(data)?;
+		self.run_unit(region, true, |lowerer, dst, resume| lowerer.own_catch(dst, resume))
+	}
+
 	/// Runs the region `region` as a unit of its own in the frame being lowered, and answers the
 	/// register that holds its value. `catch` names where a `RETURN` the unit signals is taken,
 	/// from the instruction's destination and the label it resumes at.

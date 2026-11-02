@@ -70,7 +70,7 @@ use super::super::program::{
 	is_permission_frame, unit_input_name,
 };
 use super::block::Groups;
-use super::closure::wrapped_value_loop;
+use super::closure::{wrapped_value_loop, wraps_value_for};
 use super::ddl::{Reservations, schema_op};
 use super::emit::{BoundSlot, Emitter};
 use super::explain_hook::Explained;
@@ -1669,10 +1669,15 @@ impl<'a> Lowerer<'a> {
 				return self.subquery(data, &crate::exec::ir::expr::ops::NestedStrategy::Apply);
 			}
 			// The physical phase wraps every value loop that may fan out in a pipeline of its own
-			// (`phys::pipeline::build`); the loop is lowered in place, as its own instructions.
+			// (`phys::pipeline::build`); the loop is lowered in place, as its own instructions. A
+			// `FOR` in value position is a statement, which runs as the unit its pipeline's region
+			// is, where code built beside a statement's list reads it afresh.
 			OpKind::Phys(PhysOp::Pipeline(_)) => {
 				let ir = self.ir;
 				let Some(looped) = wrapped_value_loop(ir, data)? else {
+					if wraps_value_for(ir, data)? {
+						return self.value_for(data);
+					}
 					return not_yet("ir_lower::expr: an op outside the expr dialect");
 				};
 				let loop_data = ir.op(looped).ok_or(IrError::Stale("ir_lower::expr: op"))?;

@@ -366,15 +366,9 @@ fn free_names(ir: &Ir, body: RegionId, captured: &[String]) -> Vec<String> {
 /// pipeline's placement states: the iterations, their order and the value are those of the loop
 /// alone, and no instruction reads the placement of a value loop.
 pub(super) fn wrapped_value_loop(ir: &Ir, data: &OpData) -> Result<Option<OpId>, IrError> {
-	let [region] = data.regions.as_slice() else {
+	let Some((looped, loop_data)) = wrapped_loop(ir, data)? else {
 		return Ok(None);
 	};
-	let inner: Vec<OpId> = ops_in(ir, *region).collect();
-	let [looped, ended] = inner[..] else {
-		return Ok(None);
-	};
-	let loop_data = ir.op(looped).ok_or(IrError::Stale("ir_lower::closure: op"))?;
-	let ended = ir.op(ended).ok_or(IrError::Stale("ir_lower::closure: op"))?;
 	let value_kind = match &loop_data.kind {
 		OpKind::Phys(PhysOp::Loop {
 			kind,
@@ -389,10 +383,47 @@ pub(super) fn wrapped_value_loop(ir: &Ir, data: &OpData) -> Result<Option<OpId>,
 		},
 		OpKind::Phys(_) | OpKind::Expr(_) | OpKind::Logical(_) => false,
 	};
+	Ok(value_kind.then_some(looped))
+}
+
+/// Whether the `phys.pipeline` `data` wraps a `FOR` written in value position: its one region
+/// holds exactly that loop and the `phys.yield` of the loop's result.
+pub(super) fn wraps_value_for(ir: &Ir, data: &OpData) -> Result<bool, IrError> {
+	let Some((_, loop_data)) = wrapped_loop(ir, data)? else {
+		return Ok(false);
+	};
+	Ok(matches!(
+		loop_data.kind,
+		OpKind::Phys(PhysOp::Loop {
+			kind: LoopKind::For,
+			value: true,
+			..
+		})
+	))
+}
+
+/// The loop the `phys.pipeline` `data` wraps, of any kind, where its one region holds exactly an
+/// op of one result and the `phys.yield` of that result.
+fn wrapped_loop<'ir>(ir: &'ir Ir, data: &OpData) -> Result<Option<(OpId, &'ir OpData)>, IrError> {
+	let [region] = data.regions.as_slice() else {
+		return Ok(None);
+	};
+	let mut inner = ops_in(ir, *region);
+	let Some(looped) = inner.next() else {
+		return Ok(None);
+	};
+	let Some(ended) = inner.next() else {
+		return Ok(None);
+	};
+	if inner.next().is_some() {
+		return Ok(None);
+	}
+	let loop_data = ir.op(looped).ok_or(IrError::Stale("ir_lower::closure: op"))?;
+	let ended = ir.op(ended).ok_or(IrError::Stale("ir_lower::closure: op"))?;
 	let yields_loop = matches!(ended.kind, OpKind::Phys(PhysOp::Yield))
 		&& ended.operands.as_slice() == loop_data.results.as_slice()
 		&& loop_data.results.len() == 1;
-	Ok((value_kind && yields_loop).then_some(looped))
+	Ok(yields_loop.then_some((looped, loop_data)))
 }
 
 #[cfg(test)]
@@ -771,6 +802,69 @@ mod tests {
 				what: "ir_lower::expr: an op outside the expr dialect"
 			})
 		));
+	}
+
+	#[test]
+	fn a_wrapped_for_in_value_position_runs_as_the_unit_of_its_pipeline() {
+		let mut b = Builder::new();
+		let xs = param(&mut b, "xs");
+		let for_loop = PhysOp::Loop {
+			kind: LoopKind::For,
+			first: false,
+			batch: Batch {
+				max_iterations: 1,
+				max_bytes: 1,
+			},
+			unroll: 1,
+			value: true,
+			step: None,
+		};
+		let looped = b.add_phys_value(for_loop, &[xs]);
+		b.open_with(
+			looped,
+			RegionKind::ValueFor,
+			&[TypeKnowledge::Unknown, TypeKnowledge::Unknown],
+			|b, _| {
+				b.add_phys(PhysOp::Yield, &[]);
+			},
+		);
+		let result = b.result_of(looped);
+		b.add_phys(PhysOp::Eval, &[result]);
+		assert_eq!(wrap_loops(&mut b), 1);
+		let wrapped = pipeline_result(&b.ir);
+		let crate::exec::ir::core::value::ValueDef::OpResult {
+			op: pipeline,
+			..
+		} = b.ir.value(wrapped).expect("the pipeline's value").def
+		else {
+			panic!("the pipeline defines its value");
+		};
+		let region = b.ir.op(pipeline).expect("the pipeline").regions[0];
+
+		let mut cx = crate::exec::vm::ir_lower::units::LowerCx::detached();
+		let mut em = Emitter::new();
+		let mut lowerer = Lowerer::in_context(&mut em, &b.ir, &mut cx);
+		lowerer.value(wrapped).expect("the FOR lowers");
+		em.emit(Instr::EndRow);
+		let pipeline = em.finish_pipeline(Source::Once).expect("the pipeline ends");
+		assert_eq!(
+			pipeline.code.iter().filter(|i| matches!(i, Instr::Subquery { .. })).count(),
+			1,
+			"the FOR runs as one unit"
+		);
+		let needed = cx.take_needed();
+		assert!(
+			matches!(
+				needed.as_slice(),
+				[crate::exec::vm::ir_lower::units::Needed {
+					request: crate::exec::vm::ir_lower::units::UnitRequest::Subquery {
+						region: asked,
+					},
+					..
+				}] if *asked == region
+			),
+			"the unit is the pipeline's region: {needed:?}"
+		);
 	}
 
 	/// `callee(args)`: the check that the callee is a closure, then the invocation. Answers the
