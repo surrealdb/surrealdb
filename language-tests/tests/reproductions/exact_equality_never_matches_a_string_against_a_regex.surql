@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["regex"]
 reason = "`==` compares a regex with a string as two different kinds of value, so a string is never exactly equal to a regex, whatever the regex matches; `=` matches the string against the regex instead. A scan filter negating `v == /^a/` therefore keeps a row holding the string 'abc' — on its own, reversed, and fused with a second comparison into one scan of the row. The closure in each projection keeps the scan body out of the storage cursor, which makes the scan judge each record's stored bytes with the pre-decode filter before decoding it."
 
 [[test.results]]

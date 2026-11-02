@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["scripting"]
 reason = """
 An UPSERT on a table whose create attempt fails before a record id exists — an
 id the `id` field's declared kind rejects — has no record to fall back to

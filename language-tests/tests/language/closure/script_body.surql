@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = """
 A closure whose body calls an embedded script runs it with the closure's
 arguments, called directly, handed to a builtin, and invoked from a later

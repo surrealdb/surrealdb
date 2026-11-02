@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A DEFINE INDEX without CONCURRENTLY builds from the table as last committed. Built in a transaction that had written records of the table, it missed those records and kept entries for the values they gave up, which a UNIQUE index then refused to every other record. Such a definition is refused, whether the transaction created the table's records, changed them or deleted them, and whether a statement or an embedded script defines the index; the transaction keeps nothing it wrote, and once the writes are committed the same definition indexes them."
 
 [[test.results]]

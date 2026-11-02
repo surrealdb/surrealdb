@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A statement that runs an embedded script inlines no function body: each call reads the definition the transaction holds when it is made, and a function unit that inlined another function is not served once that function is redefined or removed."
 
 [[test.results]]

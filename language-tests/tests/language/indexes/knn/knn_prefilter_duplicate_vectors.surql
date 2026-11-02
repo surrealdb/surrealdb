@@ -2,6 +2,7 @@
 [env]
 
 [test]
+requires = ["diskann"]
 reason = "Pre-filtered vector search (#548), duplicate vectors: identical vectors share one graph element carrying several doc-IDs. Element admission needs only one allowed doc, but result materialization gates per doc — a sibling doc outside the allow-list must neither surface nor consume a top-K slot. Covered for both HNSW and DiskANN (whose admission is per-doc by construction)."
 issue = 548
 

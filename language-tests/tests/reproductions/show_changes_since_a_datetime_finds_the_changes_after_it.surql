@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["changefeed"]
 reason = """
 	`SHOW CHANGES ... SINCE <datetime>` reads the change sets committed at or
 	after that instant, on every storage engine.

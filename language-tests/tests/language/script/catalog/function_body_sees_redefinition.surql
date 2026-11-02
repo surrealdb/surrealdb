@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A function body and a transaction both reach a function an embedded script redefines: a call made after the redefinition runs the new body."
 
 [[test.results]]

@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A SELECT loads its table's fields when it starts: a computed field an embedded script defines while it runs is computed for none of its rows, and for every row of the next statement."
 
 [[test.results]]

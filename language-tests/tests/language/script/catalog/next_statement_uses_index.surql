@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "An index, and a unique index, an embedded script defines serve and constrain the statements after the call."
 
 [[test.results]]

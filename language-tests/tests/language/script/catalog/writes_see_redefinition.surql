@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A write calls each user-defined function as the catalog stands at the call: a function an embedded script redefines earlier in the same row is called with its new body, in a SET and in a statement nested in it."
 
 [[test.results]]

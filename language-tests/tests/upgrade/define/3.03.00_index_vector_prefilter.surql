@@ -3,6 +3,7 @@
 imports = ["upgrade/define/3.03.00_index_vector_prefilter_import.surql"]
 
 [test]
+requires = ["diskann"]
 upgrade = true
 introduced = ">=3.3.0"
 reason = """

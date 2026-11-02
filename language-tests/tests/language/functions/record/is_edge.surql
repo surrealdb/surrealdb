@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "Test the record::is_edge function to check if records are edges"
 
 [[test.results]]

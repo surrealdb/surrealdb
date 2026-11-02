@@ -13,6 +13,7 @@ use surrealdb_rpc::capabilities::{
 use surrealdb_types::{Object, RecordId, ToSql, Value};
 
 use crate::cli::{Backend, RunMode};
+use crate::tests::feature::Feature;
 
 fn bool_or_f<T>() -> BoolOr<T> {
 	BoolOr::Bool(false)
@@ -415,6 +416,11 @@ pub struct TestDetails {
 	#[serde(default)]
 	pub wip: bool,
 
+	/// Engine features the test cannot pass without. A run started with `--without <feature>`
+	/// reports the test as skipped. See [`crate::tests::feature`].
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub requires: Vec<Feature>,
+
 	#[serde(default)]
 	pub upgrade: bool,
 
@@ -486,6 +492,7 @@ impl Default for TestDetails {
 			run: true,
 			issue: Default::default(),
 			wip: false,
+			requires: Default::default(),
 			upgrade: Default::default(),
 			migration: Default::default(),
 			modes: Default::default(),

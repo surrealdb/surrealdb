@@ -1,6 +1,7 @@
 /**
 [test]
 
+requires = ["scripting"]
 [[test.results]]
 value = "(1f, 2f)"
 

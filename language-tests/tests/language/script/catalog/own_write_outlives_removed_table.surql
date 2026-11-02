@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A write whose table an embedded script removes while it runs writes every row it was given, and the table is gone after it."
 
 [[test.results]]

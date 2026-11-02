@@ -86,6 +86,13 @@ rules.
 namespaces and removes root configs, so point it only at an instance nobody else
 is using.
 
+### Tagging tests by engine feature
+
+A test that cannot pass without scripting, GraphQL, DiskANN, change feeds or the regex value
+type declares it with `[test] requires = ["scripting"]`, so a run against an engine without
+the feature (`--without scripting`) skips it instead of failing it. Tag the test whenever it
+depends on one of them. `README.md > Features a run can be without` has the list and the rules.
+
 ### Naming and companions
 
 Reproductions are flat in `tests/reproductions/`, named for the behaviour they

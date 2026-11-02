@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "Inside one transaction, a field an embedded script defines is applied by every statement after the call, and the transaction commits it."
 
 [[test.results]]

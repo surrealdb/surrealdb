@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A SELECT nested in a SELECT's projection is planned with the statement: a computed field an embedded script removes while the statement runs is still computed by the nested SELECT."
 
 [[test.results]]

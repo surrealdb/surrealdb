@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A field an embedded script defines through a closure, or a function a closure calls, is applied by the statements after the call."
 
 [[test.results]]

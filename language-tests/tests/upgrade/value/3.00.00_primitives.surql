@@ -3,6 +3,7 @@
 imports = ["upgrade/value/3.00.00_primitives_import.surql"]
 
 [test]
+requires = ["regex"]
 upgrade = true
 
 [[test.results]]

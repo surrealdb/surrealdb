@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = """
 A function whose script queries it again, eight at a time, recurses until the
 computation-depth budget runs out, and the error nests once per level that

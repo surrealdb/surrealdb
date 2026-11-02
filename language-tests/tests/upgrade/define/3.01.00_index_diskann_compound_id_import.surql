@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["diskann"]
 introduced = ">=3.1.0-beta.3"
 reason = "Setup for 3.01.00_index_diskann_compound_id.surql: a DiskANN index built by the older binary, holding a record id that carries a number."
 

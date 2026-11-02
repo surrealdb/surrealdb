@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A SELECT nested in a write's SET is planned when it runs: a computed field an embedded script defines earlier in the row is computed by it, and a REMOVE FIELD before the statement leaves it uncomputed."
 
 [[test.results]]

@@ -157,6 +157,41 @@ the SurrealQL RPC this harness connects over. The embedded-only
 retained-key/tombstone leak check is also skipped (no raw KV access over the
 API).
 
+## Features a run can be without
+
+A test names the engine features it cannot pass without in `[test] requires`:
+
+```toml
+[test]
+requires = ["scripting"]
+```
+
+`--without <features>` (comma-separated, repeatable) reports every test that requires any
+of them as **skipped**, with the missing feature as the reason, on embedded and remote runs
+alike. A skipped test stays in the counts, so a run without a feature reads as partly
+unsupported rather than smaller. Imports count: a test importing a file that requires a
+feature requires it too, and a `.graphql` file requires `graphql` without saying so.
+
+```bash
+cargo run run --without graphql,scripting,diskann,changefeed,regex
+```
+
+| Feature | A test requires it when it uses |
+|---|---|
+| `scripting` | embedded JavaScript functions, Surrealism modules |
+| `graphql` | the GraphQL endpoint (`.graphql` files require it implicitly) |
+| `diskann` | `DEFINE INDEX .. DISKANN` |
+| `changefeed` | `CHANGEFEED` on a table or database, `SHOW CHANGES` |
+| `regex` | the regex value type, as a result, a parameter or a literal |
+
+The set is closed: an unknown name in a test or on the command line fails the load, so a
+typo cannot become a tag that matches nothing. Adding a feature means adding it to
+`Feature` in `src/tests/feature.rs` and to this table.
+
+Tag a test that depends on a feature even where the feature is available: the tag costs an
+embedded run nothing and is what lets a run against a server without it skip the test
+instead of failing it.
+
 ## GraphQL tests
 
 Besides `.surql` files the test directory can also contain `.graphql` files.

@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["scripting"]
 reason = """
 A script that catches a failing `surrealdb.query` goes on in the same
 transaction, and the failed call leaves none of what it changed behind,

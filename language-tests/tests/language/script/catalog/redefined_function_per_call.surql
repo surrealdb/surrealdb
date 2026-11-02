@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A function whose body an embedded script redefines is called with the new body by each later call: later in the same row, in later rows, in a function body and in a FOR body."
 
 [[test.results]]

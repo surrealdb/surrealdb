@@ -1,5 +1,6 @@
 pub mod case;
 pub mod cmp;
+pub mod feature;
 pub mod report;
 pub mod run;
 pub mod schema;

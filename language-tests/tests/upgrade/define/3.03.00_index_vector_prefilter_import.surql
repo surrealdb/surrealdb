@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["diskann"]
 introduced = ">=3.3.0"
 
 [[test.results]]

@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["scripting"]
 reason = """
 A script can catch a rejected `surrealdb.query`, or a rejected builtin that
 writes such as `eval::surql`, and go on in the same transaction, which commits.

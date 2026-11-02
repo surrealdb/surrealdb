@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["diskann"]
 issue = 7602
 reason = "Public issue surrealdb/surrealdb#7602: a one-shot DiskANN I8 build grew memory until the process was OOM-killed under a systemd memory limit. The growth was the RocksDB block cache, sized from the host's memory because a limit set on the process's own cgroup below the hierarchy root was not read; the DiskANN build's own memory stays flat as the vector count grows. Memory limits cannot be set from a language test: the cgroup reading is pinned by the unit tests in surrealdb/common/src/sys.rs. This pins the build shape of the report, a DISKANN I8 COSINE index defined over existing rows, which builds and answers KNN."
 

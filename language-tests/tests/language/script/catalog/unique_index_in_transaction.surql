@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = """
 A unique index an embedded script defines inside a transaction refuses,
 where it is written, a value a committed row holds, which fails the

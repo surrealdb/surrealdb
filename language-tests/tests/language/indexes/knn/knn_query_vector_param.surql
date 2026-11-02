@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["diskann"]
 reason = "A KNN query vector bound as a parameter is planned from the parameter's value, as a literal vector is: through an HNSW and a DiskANN index, by brute force, from a DEFINE PARAM, as integers, and when the same parameter is also read elsewhere in the condition; and a name a function, closure, FOR or block LET binds is that binding's value, not the statement parameter it shadows. An ANN search whose vector a closure or a FOR binds is in knn_index_query_vector_bound_per_call.surql."
 
 [[test.results]]

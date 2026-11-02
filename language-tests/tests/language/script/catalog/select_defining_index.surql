@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "An index an embedded script defines while a SELECT runs changes none of the SELECT's rows, and serves the statements after it."
 
 [[test.results]]

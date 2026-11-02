@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["diskann"]
 reason = "Public issue surrealdb/surrealdb#7575: `surreal export` writes a table's `DEFINE INDEX … DISKANN` ahead of its data, and on import an `INSERT` could fail with a retryable write conflict against background index compaction: the compactor stepped the shard's `!dy` pending-state guard that the `INSERT` had read or written. On a store the datastore is the sole writer of, the writing transaction never touches the guard; its commit arms the guard in a transaction of its own, under a fence the compactor's guard steps also take. This pins the export-ordered shape end to end: every batch lands and KNN reaches the rows. The block at the end pins what the writing transaction sees before its commit arms the guard: its own pending row in a KNN query, and `compacting` reported for it. The interleaving itself is pinned by the DiskANN unit tests in `surrealdb-idx`."
 issue = 7575
 

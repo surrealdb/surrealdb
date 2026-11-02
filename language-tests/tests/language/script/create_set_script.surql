@@ -1,6 +1,7 @@
 /**
 [test]
 
+requires = ["scripting"]
 [[test.results]]
 value = '''[{ bio: 'Line 1\nLine 2', id: person:test, scores: [66f, 84f, 73f] }]'''
 

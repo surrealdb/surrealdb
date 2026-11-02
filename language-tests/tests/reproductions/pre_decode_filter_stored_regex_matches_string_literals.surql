@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["regex"]
 reason = "A stored regex equals every string it matches, so a scan filter comparing it with string literals keeps the row: through IN, a fused `=` chain, CONTAINSANY and CONTAINSALL, and through a negated NOT IN or CONTAINSNONE. The closure in each projection keeps the scan body out of the storage cursor, which makes the scan judge each record's stored bytes with the pre-decode filter before decoding it."
 
 [[test.results]]

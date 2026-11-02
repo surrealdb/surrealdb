@@ -5,6 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
+requires = ["scripting"]
 reason = """
 A range passed into a scripting function arrives as a `Range` instance, not `undefined`: `start` and `end` hold the bounds (`undefined` when a side is unbounded), `startInclusive` and `endInclusive` say whether each is part of the range, and `toString` renders the SurrealQL range. Returning the instance, or one built with `new Range(start, end)`, yields the range again.
 """

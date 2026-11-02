@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A field, an event and a table an embedded script removes or defines are seen by the statements after the call."
 
 [[test.results]]

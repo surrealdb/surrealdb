@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A parameter an embedded script redefines is read as the catalog stands where it is read: by later rows of the same statement, and by later statements of a function body."
 
 [[test.results]]

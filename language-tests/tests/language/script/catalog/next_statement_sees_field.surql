@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A field an embedded script defines through surrealdb.query() is applied by the statements after the call, in later auto-commit transactions."
 
 [[test.results]]

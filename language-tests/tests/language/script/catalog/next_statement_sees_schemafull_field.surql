@@ -3,6 +3,7 @@
 compatibility = 3
 
 [test]
+requires = ["scripting"]
 reason = "A schemafull table's field an embedded script defines or overwrites types the writes after the call."
 
 [[test.results]]

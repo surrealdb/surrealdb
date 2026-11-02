@@ -3,6 +3,7 @@
 imports = ["upgrade/define/3.00.00_changefeed_import.surql"]
 
 [test]
+requires = ["changefeed"]
 upgrade = true
 reason = "CHANGEFEED metadata survives upgrade AND the Cf key family (change-feed entries) written by the from-version is readable by the to-version via SHOW CHANGES"
 

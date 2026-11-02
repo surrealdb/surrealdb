@@ -5,6 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
+requires = ["diskann"]
 reason = "A KNN search picks its k nearest among the records every conjunct of the WHERE admits, including conjuncts the index analysis cannot read: a function call, a method, an element access"
 
 [[test.results]]

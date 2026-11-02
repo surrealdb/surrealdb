@@ -1,6 +1,7 @@
 /**
 [test]
 
+requires = ["scripting"]
 [[test.results]]
 value = "[{ created_at: d'1995-12-17T03:24:00Z', id: article:test, identifier: u'03412258-988f-47cd-82db-549902cdaffe', manager: user:joanna, next_signin: 1w2d6h, organisation: organisation:{ alias: 'acme', name: 'Acme Inc' } }]"
 

@@ -5,6 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
+requires = ["changefeed"]
 reason = """
 `DEFINE TABLE OVERWRITE … AS SELECT` empties the view table before it fills it
 again, and the views that read it stay registered on it: `INFO FOR TABLE` still

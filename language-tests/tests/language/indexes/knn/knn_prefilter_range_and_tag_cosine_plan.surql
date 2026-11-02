@@ -3,6 +3,7 @@
 timeout = 120000
 
 [test]
+requires = ["diskann"]
 reason = "The plans behind knn_prefilter_range_and_tag_cosine.surql, on the same rows: a one-sided range and a string-tag equality on typed, b-tree-indexed columns become a BitmapIndexScan allow-list under the KnnScan, on the exact tier at 1% / 10% / 'published' (<= 2000 rows) and the graph tier at 67%; the same predicates on the schemaless twin columns stay a per-candidate KnnScan predicate. Without this, a pre-filter that silently stopped engaging would leave the companion comparing two slower paths."
 
 [[test.results]]

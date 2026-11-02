@@ -3,6 +3,7 @@
 imports = ["upgrade/define/3.01.00_index_diskann_pending_import.surql"]
 
 [test]
+requires = ["diskann"]
 upgrade = true
 reason = """
 Records an older binary wrote into a DiskANN index after defining it wait in a

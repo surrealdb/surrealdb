@@ -5,6 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
+requires = ["diskann"]
 reason = "Writes keep every kind of index of a table in line with its records: B-tree, unique, count with and without a guard, full-text, HNSW, DiskANN and spatial"
 
 [[test.results]]

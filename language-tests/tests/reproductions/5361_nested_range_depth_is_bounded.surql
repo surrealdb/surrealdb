@@ -5,6 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
+requires = ["scripting"]
 reason = "A script that nests ranges inside ranges, with no array or object between the levels, is refused at the value depth limit like any other nested value, rather than overflowing the host stack."
 issue = 5361
 

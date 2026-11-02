@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["changefeed"]
 reason = """
 A failed INSERT row is rolled back to the save point it opened, and that
 rollback has to reach the transaction's buffered changefeed entries as well as

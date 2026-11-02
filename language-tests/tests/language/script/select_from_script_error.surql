@@ -1,6 +1,7 @@
 /**
 [test]
 
+requires = ["scripting"]
 [[test.results]]
 error = """
 Problem with embedded script function. An exception occurred: error

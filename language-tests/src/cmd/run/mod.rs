@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt::Write;
 use std::io::IsTerminal;
 use std::panic::AssertUnwindSafe;
@@ -24,6 +25,7 @@ use crate::cmd::run::provisioner::CanReuse;
 use crate::format::{IndentFormatter, Progress, ansi};
 use crate::runner::Schedular;
 use crate::tests::case::Dialect;
+use crate::tests::feature::{self, Feature};
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
 use crate::tests::run::{CaseImports, RunConfig};
 use crate::tests::schema::ENV_DEFAULT_TIMEOUT;
@@ -76,6 +78,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let backend = *matches.get_one::<Backend>("backend").unwrap();
 	let mode = *matches.get_one::<RunMode>("mode").unwrap();
 	let unordered_rows = matches.get_flag("unordered-rows");
+	let without: BTreeSet<Feature> =
+		matches.get_many::<Feature>("without").map(|f| f.copied().collect()).unwrap_or_default();
 
 	#[cfg(not(feature = "internal-fragments"))]
 	if mode == RunMode::Fragments {
@@ -298,12 +302,15 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 				.get_one::<String>("password")
 				.cloned()
 				.unwrap_or_else(|| "root".to_string());
-			run_remote_jobs(runs, num_jobs, endpoint, user, pass, color).await?
+			run_remote_jobs(runs, num_jobs, endpoint, user, pass, &without, color).await?
 		}
 		#[cfg(not(feature = "remote"))]
 		Some(_) => unreachable!("--endpoint without the remote feature is rejected above"),
 		// An embedded run opens its own datastores and leaves nothing to clean up.
-		None => (run_embedded_jobs(runs, num_jobs, backend, config, color).await?, None::<String>),
+		None => (
+			run_embedded_jobs(runs, num_jobs, backend, config, &without, color).await?,
+			None::<String>,
+		),
 	};
 
 	let graded = finish(
@@ -336,6 +343,7 @@ async fn run_embedded_jobs(
 	num_jobs: u32,
 	backend: Backend,
 	config: Vec<(String, String)>,
+	without: &BTreeSet<Feature>,
 	color: ColorMode,
 ) -> Result<Vec<TestReport>> {
 	println!(" Running with {num_jobs} jobs");
@@ -355,7 +363,11 @@ async fn run_embedded_jobs(
 	// spawn all tests -- one task per test.
 	for run in runs {
 		progress.start_item(run.id, &run.name()).unwrap();
-		schedule_run(run, &mut schedular, &mut provisioner, report_send.clone()).await;
+		if let Some(reason) = feature::unavailable(&run.case, without) {
+			report_send.send(TestReport::skipped(run, reason)).expect("Channel closed too early");
+		} else {
+			schedule_run(run, &mut schedular, &mut provisioner, report_send.clone()).await;
+		}
 
 		// Handle possible done reports.
 		while let Ok(report) = report_recv.try_recv() {
@@ -806,8 +818,20 @@ async fn run_remote_jobs(
 	endpoint: String,
 	user: String,
 	pass: String,
+	without: &BTreeSet<Feature>,
 	color: ColorMode,
 ) -> Result<(Vec<TestReport>, Option<String>)> {
+	// Tests this run is without a feature for never reach the endpoint, so the checks below,
+	// which guard what a test does to it, have nothing to say about them.
+	let mut unavailable = Vec::new();
+	let mut available = Vec::new();
+	for run in runs {
+		match feature::unavailable(&run.case, without) {
+			Some(reason) => unavailable.push((run, reason)),
+			None => available.push(run),
+		}
+	}
+	let runs = available;
 	// Tests run concurrently against the one endpoint, each in a namespace of its
 	// own named from this prefix. The prefix identifies the run as well as
 	// separating it: every namespace a run creates carries it, so a leak check can
@@ -1050,7 +1074,14 @@ async fn run_remote_jobs(
 	);
 
 	let mut reports = Vec::new();
-	let mut progress = Progress::from_stderr(runs.len(), color);
+	let mut progress = Progress::from_stderr(runs.len() + unavailable.len(), color);
+
+	for (run, reason) in unavailable {
+		progress.start_item(run.id, &run.name())?;
+		let report = TestReport::skipped(run, reason);
+		progress.finish_item(report.id, report.grade())?;
+		reports.push(report);
+	}
 
 	for run in runs {
 		progress.start_item(run.id, &run.name()).unwrap();

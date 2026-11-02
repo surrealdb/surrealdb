@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["scripting"]
 reason = """
 A script's `surrealdb.query` calls run one at a time, each after the one the
 script started before it, however many are queued and whichever finishes

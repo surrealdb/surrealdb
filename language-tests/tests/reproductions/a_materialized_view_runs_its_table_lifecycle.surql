@@ -5,6 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
+requires = ["changefeed"]
 reason = "A plain `DEFINE TABLE … AS SELECT` (no GROUP) wrote its row with `tx.set_record` and stopped there, running none of the view table's own lifecycle: no events, no live queries, no change feed, no second-order views and no index maintenance. Its own `DEFINE TABLE` backfill did call `run_triggers`, so a view table was maintained once at definition and never again. The grouped case was fixed earlier (see codex_e72dc843); this pins the same contract for the ungrouped one."
 
 [[test.results]]

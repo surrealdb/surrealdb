@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "bench")]
 use surrealdb_types::SurrealValue;
 
+use crate::tests::feature::Feature;
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ResultsMode {
 	Default,
@@ -326,6 +328,15 @@ pub fn parse() -> ArgMatches {
 			)
 			.arg(
 				arg!(--"defined" "Skips files that have no test config.")
+			)
+			.arg(
+				Arg::new("without")
+					.long("without")
+					.value_name("FEATURES")
+					.action(ArgAction::Append)
+					.value_delimiter(',')
+					.value_parser(EnumValueParser::<Feature>::new())
+					.help("Report tests that require any of these engine features as skipped, e.g. `--without graphql,scripting`")
 			)
 			.arg(
 				arg!(--"report-declines" <FILE> "Write every statement the engine declined to run to FILE as JSON lines, and print their count. Grading is unchanged.")

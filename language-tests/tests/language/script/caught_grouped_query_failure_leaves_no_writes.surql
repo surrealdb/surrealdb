@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["scripting"]
 reason = """
 A grouped query whose aggregate argument runs a nested statement that writes
 and then fails is a failing query, as it is ungrouped, not one that answers

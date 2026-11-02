@@ -684,8 +684,7 @@ impl TestReport {
 	}
 
 	/// Builds a report for a test that was skipped without running (e.g. it uses
-	/// a feature the remote executor can't reproduce).
-	#[cfg_attr(not(feature = "remote"), allow(dead_code))]
+	/// a feature the remote executor can't reproduce, or the run is without).
 	pub fn skipped<T: RunConfig>(run: TestRun<T>, reason: impl Into<String>) -> Self {
 		TestReport {
 			id: run.id,

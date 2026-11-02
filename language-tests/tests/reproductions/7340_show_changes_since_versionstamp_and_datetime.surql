@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["changefeed"]
 reason = "A changefeed read by versionstamp or by a datetime after its creation returns the writes made since (issues 7340 and 7433)"
 issue = 7340
 

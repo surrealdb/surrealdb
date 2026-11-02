@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["diskann"]
 reason = """
 The plans behind `knn_block_let_query_vector.surql`: a KNN whose query vector
 is only known when the statement runs is served by a `KnnScan` on the ANN

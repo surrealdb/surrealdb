@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A function body that defines a field through an embedded script and then writes applies the field; called again it fails on the record it wrote."
 
 [[test.results]]

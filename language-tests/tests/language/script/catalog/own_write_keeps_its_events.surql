@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A write loads its table's events when it starts: an event an embedded script defines while it runs fires for none of its rows, and for every row of the next write."
 
 [[test.results]]

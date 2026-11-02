@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A FOR body and a write nested in a write each apply a field an embedded script defines before them."
 
 [[test.results]]

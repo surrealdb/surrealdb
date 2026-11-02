@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["diskann"]
 reason = """
 A KNN whose query vector is only known when the statement runs — a parameter
 bound by a `LET` of the same block, a `FOR` loop variable, an array with a

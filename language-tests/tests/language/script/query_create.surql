@@ -1,6 +1,7 @@
 /**
 [test]
 
+requires = ["scripting"]
 [[test.results]]
 value = "{ id: article:test, issue_number: 3f, name: 'The daily news' }"
 

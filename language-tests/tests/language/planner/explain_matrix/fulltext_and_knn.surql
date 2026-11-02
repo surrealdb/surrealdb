@@ -2,6 +2,7 @@
 [env]
 
 [test]
+requires = ["diskann"]
 reason = """
 EXPLAIN / row matrix for the two index kinds with their own operators:
 FULLTEXT (`FullTextScan`, reached by `@@`) and the vector kinds HNSW and

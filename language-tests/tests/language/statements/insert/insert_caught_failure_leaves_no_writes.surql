@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["scripting"]
 reason = """
 A plain INSERT (no IGNORE, no ON DUPLICATE KEY UPDATE) does not always fail
 its transaction: a `DEFINE API` handler turns the error into a 500 response,

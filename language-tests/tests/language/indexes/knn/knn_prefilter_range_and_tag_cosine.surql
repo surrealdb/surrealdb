@@ -3,6 +3,7 @@
 timeout = 120000
 
 [test]
+requires = ["diskann"]
 reason = "Filtered KNN in the shape crud-bench sends — cosine, the predicate AND-ed after `<|k,ef|>`, no ORDER BY — with a one-sided range (`number_idx <= N`) and a string-tag equality (`status_idx = 'published'`) on typed, b-tree-indexed columns, so both reach the KNN pre-filter. Each ANN result is checked against crud-bench's brute-force reference (cosine similarity aliased and sorted DESC). On the exact tier (allow-list <= 2000 rows) the pre-filter scores the matching rows exactly, so the ANN ids must equal the brute-force ids; on the graph tier the walk is approximate, so it must return k matching rows, at least 7 of which are in the reference: the HNSW graph is built unseeded here, so a bound below k leaves room for a graph that differs from run to run. The schemaless twin columns (`number`, `status`) have no index and are tested per candidate; that path may return fewer than k rows, so it asserts that no non-matching row comes back, and, for the 33% tag, where about a third of the candidates match, that some rows do."
 
 [[test.results]]

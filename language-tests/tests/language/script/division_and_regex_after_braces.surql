@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A `/` after an object literal's `}` divides; after a block's `}` it can start a regex literal"
 
 [[test.results]]

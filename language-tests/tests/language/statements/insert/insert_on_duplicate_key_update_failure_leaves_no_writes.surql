@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["scripting"]
 reason = """
 When the update an `ON DUPLICATE KEY UPDATE` falls back to fails part-way, it
 must leave none of its writes behind, even where the statement's error does

@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["diskann"]
 reason = "DISKANN measures TYPE I8 and U8 vectors with kernels that accumulate in i32, which a vector longer than 33025 components (255² = 65025 per component) can overflow. Those types are refused past that DIMENSION, CONCURRENTLY or not, before the definition commits; floating-point types are not limited by it."
 
 [[test.results]]

@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["diskann"]
 introduced = ">=3.1.0-beta.3"
 reason = "Setup for 3.01.00_index_diskann_pending.surql: records the older binary writes into a DiskANN index after defining it, which it leaves pending until a compaction folds them into the graph."
 

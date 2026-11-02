@@ -2,6 +2,7 @@
 [env]
 
 [test]
+requires = ["diskann"]
 reason = "DiskANN KNN query with an additional WHERE condition. The residual non-KNN predicate is pushed into the ANN search and rejects non-matching candidates during traversal, so the two nearest `flag = true` points are returned (not the two nearest overall). EXPLAIN surfaces the pushed-down filter as a `predicate` on the KnnScan line. DiskANN twin of hnsw_knn_with_condition_new_executor.surql."
 
 [[test.results]]

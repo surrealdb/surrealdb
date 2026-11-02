@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "Every kind of write nested in a SELECT is planned when it runs: a field an embedded script defines earlier in the statement applies to the records each writes."
 
 [[test.results]]

@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "Test basic embedded JavaScript function execution"
 
 [[test.results]]

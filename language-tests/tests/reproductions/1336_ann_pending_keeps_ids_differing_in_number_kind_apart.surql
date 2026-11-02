@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["diskann"]
 issue = 1336
 reason = """
 Records whose ids differ only in a nested number's kind (`pt:[1]` and

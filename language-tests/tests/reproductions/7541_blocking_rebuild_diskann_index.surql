@@ -2,6 +2,7 @@
 [env]
 
 [test]
+requires = ["diskann"]
 reason = "A blocking REBUILD INDEX of a DiskANN I8 index returns once the index is ready, and the rebuilt index answers KNN queries. Background compaction of the rebuilt index may still be running when the statement returns, so `compacting` is not asserted."
 issue = 7541
 

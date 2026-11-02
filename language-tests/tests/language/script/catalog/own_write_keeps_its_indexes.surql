@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A write loads its table's indexes when it starts: a unique index an embedded script defines while it runs constrains none of its rows, and constrains the next write."
 
 [[test.results]]

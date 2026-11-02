@@ -2,6 +2,7 @@
 [env]
 
 [test]
+requires = ["diskann"]
 reason = """
 A record id holding a nested number must stay reachable through an ANN index.
 

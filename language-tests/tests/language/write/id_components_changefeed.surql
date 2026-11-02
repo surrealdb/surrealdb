@@ -4,6 +4,7 @@ namespace = true
 database = true
 
 [test]
+requires = ["changefeed"]
 reason = """
 	A change feed records the image a write leaves, and the image of a table
 	whose `id` names its components holds them as it holds a COMPUTED field's

@@ -3,6 +3,7 @@
 imports = ["upgrade/define/3.01.00_index_diskann_import.surql"]
 
 [test]
+requires = ["diskann"]
 upgrade = true
 reason = """
 A DiskANN index written by an older binary keeps its own doc-ID space until it

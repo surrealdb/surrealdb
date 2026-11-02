@@ -3,6 +3,7 @@
 timeout = 30000
 
 [test]
+requires = ["scripting"]
 reason = "Differential spatial index lifecycle and edge-case battery: retroactive index creation on existing data, UPDATE (moving geometry, non-spatial field update, NONE/NULL cycle), UPSERT, DELETE, REBUILD INDEX, empty GeometryCollection/MultiPolygon vacuous truth, and domain boundary coordinates (-180..180, -90..90) — each verified with and without the SPATIAL index."
 
 [[test.results]]

@@ -1,6 +1,7 @@
 /**
 [test]
 
+requires = ["diskann"]
 [[test.results]]
 value = "[{ id: pts:1, point: [1f, 2f, 3f, 4f] }]"
 

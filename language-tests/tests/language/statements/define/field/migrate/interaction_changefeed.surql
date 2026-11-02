@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["changefeed"]
 reason = "A changefeed records, for a write to a row behind a migration step, the migrated values: the row it stores, and with INCLUDE ORIGINAL the original it replaces, are what a read of the row returned before the write. An entry written before the step keeps the values that were written then."
 
 [[test.results]]

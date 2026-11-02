@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A statement of a function body after a call that runs an embedded script defining a field applies that field."
 
 [[test.results]]

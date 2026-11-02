@@ -1,6 +1,7 @@
 /**
 [test]
 
+requires = ["scripting"]
 [[test.results]]
 value = "{ type: 'LineString', coordinates: [[1f, 2f], [3f, 4f]] }"
 

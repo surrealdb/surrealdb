@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A write nested in an expression is planned when it runs: a field an embedded script defines earlier in the statement applies to the nested write's records, from the first row on."
 
 [[test.results]]

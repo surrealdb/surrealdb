@@ -1,5 +1,6 @@
 /**
 [test]
+requires = ["scripting"]
 reason = "A write loads its table's fields when it starts: a field an embedded script removes while it runs still applies to all its rows, and to none of the next write's."
 
 [[test.results]]
