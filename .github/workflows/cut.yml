@@ -50,6 +50,9 @@ jobs:
     name: Cut ${{ inputs.cut-type }} release
     if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
     runs-on: ubuntu-latest
+    # An executing cut binds release-deploy, the environment that holds the
+    # release-automation App's key. A dry-run binds nothing.
+    environment: ${{ inputs.execute && 'release-deploy' || '' }}
     permissions:
       contents: write
       pull-requests: write
@@ -59,12 +62,24 @@ jobs:
         with:
           egress-policy: audit
 
+      # The release-automation App's token checks out, pushes the release
+      # branch (the App bypasses the release-branch ruleset) and the PR branch,
+      # and opens the PR, so its checks run. An executing cut requires it; a
+      # dry-run uses GITHUB_TOKEN and pushes nothing.
+      - name: Generate a release-automation token
+        id: app-token
+        if: inputs.execute
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.git-sha || 'main' }}
           fetch-depth: 0
-          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
 
       # CI tooling (scripts) comes from the WORKFLOW ref - the branch/tag this
       # run was dispatched from - not from the (possibly older) commit being
@@ -98,6 +113,6 @@ jobs:
       - name: Cut release
         id: cut
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: .ci/.github/scripts/cut-release.sh "${{ inputs.cut-type }}" "${{ inputs.execute }}"
 

@@ -1185,6 +1185,7 @@ jobs:
     needs: [prepare, propagate]
     if: ${{ always() && needs.prepare.result == 'success' && needs.prepare.outputs.nightly-release != 'true' && needs.propagate.result == 'success' }}
     runs-on: ubuntu-latest
+    environment: ${{ needs.prepare.outputs.publish == 'true' && 'release-deploy' || '' }}
     permissions:
       contents: write
       pull-requests: write
@@ -1197,25 +1198,12 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Checkout the release branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.prepare.outputs.git-branch }}
-          fetch-depth: 0
-          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-
-      - name: Install cargo-edit
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
-        with:
-          tool: cargo-edit@0.13.11
-
-      # A PR opened with GITHUB_TOKEN triggers no CI, so the release-automation
-      # App opens it when configured. Gated on the private key (a secret) rather
-      # than the client id (a variable), because variables are visible where
-      # secrets are withheld.
+      # The release-automation App's token checks out, pushes the PR branch and
+      # opens the PR, so the PR's checks run (a PR opened with GITHUB_TOKEN
+      # triggers no pull_request CI). This job binds the release-deploy
+      # environment on a publish; GITHUB_TOKEN is used whenever the App's key is
+      # not visible to the job (not configured, or a dry-run once the key is
+      # held in release-deploy rather than the repository's secrets).
       - name: Release-PR App configured?
         id: prapp
         env:
@@ -1224,16 +1212,31 @@ jobs:
           set -euo pipefail
           echo "configured=${HAS_APP}" >> "$GITHUB_OUTPUT"
           if [[ "${HAS_APP}" != "true" ]]; then
-            echo "::notice title=Release-PR App::Not configured; opening the PR with GITHUB_TOKEN, so its CI will not run automatically."
+            echo "::notice title=Release-PR App::The release-automation App's key is not available to this job (a dry-run, or not set in release-deploy); using GITHUB_TOKEN, so a PR this job opens runs no CI automatically."
           fi
 
-      - name: Generate a token to open the PR
+      - name: Generate a release-automation token
         id: pr-app-token
         if: steps.prapp.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+
+      - name: Checkout the release branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.git-branch }}
+          fetch-depth: 0
+          token: ${{ steps.pr-app-token.outputs.token || github.token }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Install cargo-edit
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        with:
+          tool: cargo-edit@0.13.11
 
       - name: Create PR to bump release branch
         id: bump
@@ -1252,6 +1255,7 @@ jobs:
     needs: [prepare, propagate]
     if: ${{ always() && needs.prepare.result == 'success' && needs.prepare.outputs.nightly-release != 'true' && needs.prepare.outputs.pre-release == 'false' && needs.propagate.result == 'success' }}
     runs-on: ubuntu-latest
+    environment: ${{ needs.prepare.outputs.publish == 'true' && 'release-deploy' || '' }}
     permissions:
       contents: write
       pull-requests: write
@@ -1263,21 +1267,12 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Checkout main
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          fetch-depth: 0
-          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-
-      - name: Install cargo-edit
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
-        with:
-          tool: cargo-edit@0.13.11
-
+      # The release-automation App's token checks out, pushes the PR branch and
+      # opens the PR, so the PR's checks run (a PR opened with GITHUB_TOKEN
+      # triggers no pull_request CI). This job binds the release-deploy
+      # environment on a publish; GITHUB_TOKEN is used whenever the App's key is
+      # not visible to the job (not configured, or a dry-run once the key is
+      # held in release-deploy rather than the repository's secrets).
       - name: Release-PR App configured?
         id: prapp
         env:
@@ -1286,16 +1281,31 @@ jobs:
           set -euo pipefail
           echo "configured=${HAS_APP}" >> "$GITHUB_OUTPUT"
           if [[ "${HAS_APP}" != "true" ]]; then
-            echo "::notice title=Release-PR App::Not configured; opening the PR with GITHUB_TOKEN, so its CI will not run automatically."
+            echo "::notice title=Release-PR App::The release-automation App's key is not available to this job (a dry-run, or not set in release-deploy); using GITHUB_TOKEN, so a PR this job opens runs no CI automatically."
           fi
 
-      - name: Generate a token to open the PR
+      - name: Generate a release-automation token
         id: pr-app-token
         if: steps.prapp.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.pr-app-token.outputs.token || github.token }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Install cargo-edit
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        with:
+          tool: cargo-edit@0.13.11
 
       - name: Create PR to advance main
         id: advance
@@ -1323,6 +1333,9 @@ jobs:
       && needs.promote.result == 'success'
       && needs.propagate.result == 'success' }}
     runs-on: ubuntu-latest
+    # The tap PR is opened with a release-automation App token; the App's key
+    # is held in the release-deploy environment, bound on a publish.
+    environment: ${{ needs.prepare.outputs.publish == 'true' && 'release-deploy' || '' }}
     # Every release's formula bump takes turns, release.yml's too, from the
     # latest check through the merge, so an older release cannot merge its
     # formula after a newer one.
@@ -1350,14 +1363,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          configured="${HAS_APP}"
-          if [[ "${HAS_APP}" != "true" ]]; then
-            echo "::notice title=Update Homebrew tap::Not configured (release App secrets absent); skipping."
-          elif [[ "${PUBLISH}" == "true" ]]; then
-            current=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')
-            if [[ "${current}" != "v${VERSION}" ]]; then
-              echo "::notice title=Update Homebrew tap::${current} has become latest since this release was promoted; skipping."
+          # A dry-run previews the bump from the public tap with GITHUB_TOKEN;
+          # a publish needs the App's key, held in release-deploy.
+          configured=true
+          if [[ "${PUBLISH}" == "true" ]]; then
+            if [[ "${HAS_APP}" != "true" ]]; then
+              echo "::notice title=Update Homebrew tap::The release-automation App's key is not available to this job (not set in release-deploy); skipping."
               configured=false
+            else
+              current=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')
+              if [[ "${current}" != "v${VERSION}" ]]; then
+                echo "::notice title=Update Homebrew tap::${current} has become latest since this release was promoted; skipping."
+                configured=false
+              fi
             fi
           fi
           echo "configured=${configured}" >> "$GITHUB_OUTPUT"
@@ -1374,7 +1392,7 @@ jobs:
 
       - name: Generate a token for the Homebrew tap
         id: app-token
-        if: steps.preflight.outputs.configured == 'true'
+        if: steps.preflight.outputs.configured == 'true' && needs.prepare.outputs.publish == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
@@ -1386,14 +1404,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/${{ env.TAP_REPO }}
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
           path: homebrew-tap
 
       - name: Open Homebrew bump PR
         id: open-pr
         if: steps.preflight.outputs.configured == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           VERSION: ${{ needs.prepare.outputs.name }}
           TAP_DIR: homebrew-tap
           DRY_RUN: ${{ needs.prepare.outputs.publish != 'true' }}

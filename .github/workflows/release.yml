@@ -1244,6 +1244,7 @@ jobs:
     # requiring its success confirms the release chain completed.
     if: ${{ always() && inputs.release-type == 'versioned' && startsWith(needs.prepare-vars.outputs.branch-slug, 'releases-') && needs.prepare-vars.result == 'success' && needs.propagate.result == 'success' }}
     runs-on: ubuntu-latest
+    environment: ${{ needs.prepare-vars.outputs.publish == 'true' && 'release-deploy' || '' }}
     permissions:
       contents: write
       pull-requests: write
@@ -1256,12 +1257,43 @@ jobs:
         with:
           egress-policy: audit
 
+      # The release-automation App's token checks out, pushes the PR branch and
+      # opens the PR, so the PR's checks run (a PR opened with GITHUB_TOKEN
+      # triggers no pull_request CI). This job binds the release-deploy
+      # environment on a publish; GITHUB_TOKEN is used whenever the App's key is
+      # not visible to the job (not configured, or a dry-run once the key is
+      # held in release-deploy rather than the repository's secrets).
+      - name: Release-PR App configured?
+        id: prapp
+        env:
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_APP}" == "true" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Release-PR App::The release-automation App's key is not available to this job (a dry-run, or not set in release-deploy); using GITHUB_TOKEN, so a PR this job opens runs no CI automatically."
+          fi
+
+      - name: Generate a release-automation token
+        id: pr-app-token
+        if: steps.prapp.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare-vars.outputs.git-branch }}
           fetch-depth: 0
-          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          token: ${{ steps.pr-app-token.outputs.token || github.token }}
 
       # This orchestration job runs against a different branch than the code it
       # checks out, so its CI tooling comes from the workflow ref, not git-branch.
@@ -1285,36 +1317,6 @@ jobs:
         uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: cargo-edit@0.13.11
-
-      # A PR opened with GITHUB_TOKEN does NOT trigger pull_request CI. When the
-      # release-PR App is configured (installed on this repo with Contents +
-      # Pull requests write), open the PR with its token so the bump PR's checks
-      # run automatically. Optional: falls back to GITHUB_TOKEN (unchanged
-      # behaviour) when the App is not configured.
-      - name: Release-PR App configured?
-        id: prapp
-        env:
-          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
-          # variables are present in contexts where secrets are withheld, so
-          # gating on the id would run the token mint without a key and hard-fail
-          # instead of no-opping. Matches downstream-compat.yml.
-          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
-        run: |
-          set -euo pipefail
-          if [[ "${HAS_APP}" == "true" ]]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Release-PR App::Not configured; opening the PR with GITHUB_TOKEN, so its CI will not run automatically until RELEASE_AUTOMATION_APP_* is set."
-          fi
-
-      - name: Generate a token to open the PR
-        id: pr-app-token
-        if: steps.prapp.outputs.configured == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
 
       - name: Create PR to bump release branch
         id: bump
@@ -1346,6 +1348,7 @@ jobs:
     # completed.
     if: ${{ always() && inputs.release-type == 'versioned' && needs.prepare-vars.outputs.pre-release == 'false' && needs.prepare-vars.result == 'success' && needs.propagate.result == 'success' }}
     runs-on: ubuntu-latest
+    environment: ${{ needs.prepare-vars.outputs.publish == 'true' && 'release-deploy' || '' }}
     permissions:
       contents: write
       pull-requests: write
@@ -1357,12 +1360,43 @@ jobs:
         with:
           egress-policy: audit
 
+      # The release-automation App's token checks out, pushes the PR branch and
+      # opens the PR, so the PR's checks run (a PR opened with GITHUB_TOKEN
+      # triggers no pull_request CI). This job binds the release-deploy
+      # environment on a publish; GITHUB_TOKEN is used whenever the App's key is
+      # not visible to the job (not configured, or a dry-run once the key is
+      # held in release-deploy rather than the repository's secrets).
+      - name: Release-PR App configured?
+        id: prapp
+        env:
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_APP}" == "true" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Release-PR App::The release-automation App's key is not available to this job (a dry-run, or not set in release-deploy); using GITHUB_TOKEN, so a PR this job opens runs no CI automatically."
+          fi
+
+      - name: Generate a release-automation token
+        id: pr-app-token
+        if: steps.prapp.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+
       - name: Checkout main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
-          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          token: ${{ steps.pr-app-token.outputs.token || github.token }}
 
       # This orchestration job runs against main while its CI tooling must come
       # from the workflow ref (the released commit), not from main.
@@ -1386,36 +1420,6 @@ jobs:
         uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: cargo-edit@0.13.11
-
-      # A PR opened with GITHUB_TOKEN does NOT trigger pull_request CI. When the
-      # release-PR App is configured (installed on this repo with Contents +
-      # Pull requests write), open the PR with its token so the bump PR's checks
-      # run automatically. Optional: falls back to GITHUB_TOKEN (unchanged
-      # behaviour) when the App is not configured.
-      - name: Release-PR App configured?
-        id: prapp
-        env:
-          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
-          # variables are present in contexts where secrets are withheld, so
-          # gating on the id would run the token mint without a key and hard-fail
-          # instead of no-opping. Matches downstream-compat.yml.
-          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
-        run: |
-          set -euo pipefail
-          if [[ "${HAS_APP}" == "true" ]]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Release-PR App::Not configured; opening the PR with GITHUB_TOKEN, so its CI will not run automatically until RELEASE_AUTOMATION_APP_* is set."
-          fi
-
-      - name: Generate a token to open the PR
-        id: pr-app-token
-        if: steps.prapp.outputs.configured == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
 
       - name: Create PR to advance main
         id: advance
@@ -1459,8 +1463,11 @@ jobs:
       && ((needs.prepare-vars.outputs.publish == 'true' && needs.propagate.result == 'success')
           || (needs.prepare-vars.outputs.publish != 'true' && (needs.propagate.result == 'success' || needs.propagate.result == 'skipped'))) }}
     runs-on: ubuntu-latest
+    # The tap PR is opened with a release-automation App token; the App's key
+    # is held in the release-deploy environment, bound on a publish.
+    environment: ${{ needs.prepare-vars.outputs.publish == 'true' && 'release-deploy' || '' }}
     # The Homebrew tap is a public repo, so its name is not a secret and is
-    # hardcoded here. The job is gated only on the release App being configured.
+    # hardcoded here.
     env:
       TAP_REPO: homebrew-tap
     outputs:
@@ -1492,21 +1499,26 @@ jobs:
         # checked here, where every release's formula bump takes turns.
         run: |
           set -euo pipefail
-          configured="${HAS_APP}"
-          if [[ "${HAS_APP}" != "true" ]]; then
-            echo "::notice title=Update Homebrew tap::Not configured (release App secrets absent) — skipping."
-          elif [[ "${PUBLISH}" == "true" ]]; then
-            current=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')
-            if [[ "${current}" != "v${VERSION}" ]]; then
-              echo "::notice title=Update Homebrew tap::${current} has become latest since this release was promoted; skipping."
+          # A dry-run previews the bump from the public tap with GITHUB_TOKEN;
+          # a publish needs the App's key, held in release-deploy.
+          configured=true
+          if [[ "${PUBLISH}" == "true" ]]; then
+            if [[ "${HAS_APP}" != "true" ]]; then
+              echo "::notice title=Update Homebrew tap::The release-automation App's key is not available to this job (not set in release-deploy); skipping."
               configured=false
+            else
+              current=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')
+              if [[ "${current}" != "v${VERSION}" ]]; then
+                echo "::notice title=Update Homebrew tap::${current} has become latest since this release was promoted; skipping."
+                configured=false
+              fi
             fi
           fi
           echo "configured=${configured}" >> "$GITHUB_OUTPUT"
 
       - name: Generate a token for the Homebrew tap
         id: app-token
-        if: steps.preflight.outputs.configured == 'true'
+        if: steps.preflight.outputs.configured == 'true' && needs.prepare-vars.outputs.publish == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
@@ -1518,7 +1530,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/${{ env.TAP_REPO }}
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
           path: homebrew-tap
 
       # CI tooling (first-party actions) comes from the WORKFLOW ref - see the
@@ -1537,7 +1549,7 @@ jobs:
         id: open-pr
         if: steps.preflight.outputs.configured == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           VERSION: ${{ needs.prepare-vars.outputs.name }}
           # `working-directory` is not valid on `uses:` steps; the action cds
           # into the tap checkout itself.
