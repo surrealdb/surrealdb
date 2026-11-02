@@ -1461,7 +1461,8 @@ mod tests {
 		use crate::exec::ir::iface::statements::{OutputShape, WriteFlags, WriteForm};
 		use crate::exec::ir::iface::types::TypeKnowledge;
 		use crate::exec::ir::logical::ops::{
-			GateClause, ImageView, LoopKind, WriteAttrs, WriteGates, WriteImage,
+			GateClause, ImageView, LoopKind, RecurseAttrs, RecursePathForm, StepAttrs, WriteAttrs,
+			WriteGates, WriteImage,
 		};
 		use crate::exec::ir::logical::stages::static_mark;
 		use crate::exec::ir::phys::ops::{
@@ -1472,6 +1473,7 @@ mod tests {
 		use crate::exec::vm::ir_lower::tests::Builder;
 		use crate::exec::vm::program::{InsertRowsSpec, Target, WriteOutput};
 		use crate::exec::{AccessMode, ContextLevel};
+		use crate::expr::part::Recurse;
 		use crate::kvs::Direction;
 
 		/// The stages of a `CREATE` of one record, over a table that stores nothing.
@@ -1976,6 +1978,60 @@ mod tests {
 				lowered(&b),
 				Err(IrError::Verify(error)) if error.detail.contains("not their reader")
 			));
+		}
+
+		#[test]
+		fn a_write_whose_targets_are_read_from_a_bare_value_loop_is_one_program() {
+			// Placement leaves a recursion standing bare in the top region, beside the write
+			// whose targets it makes: the loop is a value the targets read, not a statement.
+			let mut b = Builder::new();
+			let start = b.literal(Value::from("person"));
+			let looped = b.add_phys_value(
+				PhysOp::Loop {
+					kind: LoopKind::Recurse,
+					first: false,
+					batch: Batch {
+						max_iterations: 1,
+						max_bytes: 1,
+					},
+					unroll: 1,
+					value: false,
+					step: Some(Box::new(StepAttrs::Recurse(RecurseAttrs {
+						depth: Recurse::Fixed(1),
+						form: RecursePathForm::Absent,
+						instruction: None,
+					}))),
+				},
+				&[start],
+			);
+			b.open_with(
+				looped,
+				RegionKind::Loop,
+				&[TypeKnowledge::Unknown, TypeKnowledge::Unknown],
+				|b, args| {
+					b.yield_phys(args[0]);
+				},
+			);
+			let recursed = b.result_of(looped);
+			let source = b.add(crate::exec::ir::expr::ops::ExprOp::Array, &[recursed]);
+			container(
+				&mut b,
+				attrs(WriteForm::Update, OutputShape::After),
+				WriteSubjectsShape::Targets,
+				source,
+				&[],
+			);
+			b.physical();
+			let program = lowered(&b).expect("the write lowers");
+			assert!(
+				program
+					.pipelines
+					.iter()
+					.chain(&program.host_code)
+					.flat_map(|pipeline| &pipeline.code)
+					.any(|instr| matches!(instr, Instr::Recurse { .. })),
+				"the targets evaluate the recursion"
+			);
 		}
 
 		#[test]

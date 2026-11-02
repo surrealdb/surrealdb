@@ -27,7 +27,9 @@ use std::sync::Arc;
 
 use surrealdb_strand::Strand;
 
-use super::super::program::{DestructureStep, Instr, NavOp, Operand, RecurseCollect, RecurseSpec};
+use super::super::program::{
+	DestructureStep, Instr, NavOp, Operand, RecurseCollect, RecurseSpec, StoreInstr,
+};
 use super::expr::{Lowerer, exactly, region_at};
 use super::units::UnitRequest;
 use crate::exec::ContextLevel;
@@ -47,6 +49,7 @@ use crate::exec::ir::phys::ops::PhysOp;
 use crate::exec::vm::dispatch::Reach;
 use crate::exec::vm::payload::Refusal;
 use crate::expr::part::Recurse;
+use crate::val::Value;
 
 impl Lowerer<'_> {
 	/// The field `name` of the row `data` reads, which is the op's one operand.
@@ -171,8 +174,10 @@ impl Lowerer<'_> {
 	/// value it looks for. Its depth is one level or a range of them, and the range's lower bound
 	/// is one where it states none. A bound below one, or above the configuration's recursion
 	/// limit, is refused, and so is an instruction beside a trailing body that re-enters through
-	/// `.@`. The instruction decides what the recursion answers: the value its
-	/// last depth reached, every value, every path, or the shortest path.
+	/// `.@`. The refusal is raised where the recursion is evaluated, before its operands are, and
+	/// not where it is lowered: a recursion in a branch the run never takes, or in a closure
+	/// applied to no element, raises nothing. The instruction decides what the recursion answers:
+	/// the value its last depth reached, every value, every path, or the shortest path.
 	///
 	/// A recursion with a path steps by the body, which runs as a unit of the program over the
 	/// value of a depth and answers the value the next depth starts from; one with no path steps
@@ -198,7 +203,12 @@ impl Lowerer<'_> {
 			self.limits().idiom_recursion_limit,
 			attrs.instruction.is_some() && attrs.form == RecursePathForm::Trailing && repeat,
 		) {
-			return Err(IrError::Rejected(Box::new(refusal)));
+			// Emitted with no owner, as an `expr.raise` of a refusal is: the refusal reads
+			// nothing of the row. The `NONE` it answers is never read.
+			self.em.emit(Instr::Store(StoreInstr::Refuse {
+				refusal: Box::new(refusal),
+			}));
+			return Ok(Operand::Const(self.em.constant(Value::None)?));
 		}
 		let (collect, shortest) = match &attrs.instruction {
 			None => (RecurseCollect::Last, false),
@@ -1176,6 +1186,30 @@ mod tests {
 		}
 	}
 
+	/// The refusal the program raises where its recursion is evaluated, in place of the
+	/// recursion, if the lowering refused it.
+	fn refused_where_reached(
+		lowered: Result<(Program, Needs, Vec<Needed>), IrError>,
+	) -> Option<Refusal> {
+		let (program, _, _) = lowered.expect("a refused recursion still lowers");
+		let code = code_of(&program);
+		let refusal = code.iter().find_map(|instr| {
+			if let Instr::Store(StoreInstr::Refuse {
+				refusal,
+			}) = instr
+			{
+				Some((**refusal).clone())
+			} else {
+				None
+			}
+		})?;
+		assert!(
+			!code.iter().any(|instr| matches!(instr, Instr::Recurse { .. })),
+			"a refused recursion emits no recursion"
+		);
+		Some(refusal)
+	}
+
 	/// A read of the free parameter `name`.
 	fn param(b: &mut Builder, name: &str) -> ValueId {
 		b.add(
@@ -1340,14 +1374,10 @@ mod tests {
 			};
 			let result = recursion_of(&mut b, attrs, &[start], reentering);
 			let lowered = lower_in(&mut LowerCx::detached(), &b.ir, result);
-			match refused {
-				true => assert!(matches!(
-					lowered,
-					Err(IrError::Rejected(refusal))
-						if *refusal == Refusal::RecursionInstructionPlanConflict
-				)),
-				false => assert!(lowered.is_ok()),
-			}
+			assert_eq!(
+				refused_where_reached(lowered),
+				refused.then_some(Refusal::RecursionInstructionPlanConflict)
+			);
 		}
 	}
 
@@ -1388,10 +1418,10 @@ mod tests {
 				b.method("array::len", marker, &[])
 			},
 		);
-		assert!(matches!(
-			lower_in(&mut LowerCx::detached(), &b.ir, result),
-			Err(IrError::Rejected(refusal)) if *refusal == Refusal::RecursionInstructionPlanConflict
-		));
+		assert_eq!(
+			refused_where_reached(lower_in(&mut LowerCx::detached(), &b.ir, result)),
+			Some(Refusal::RecursionInstructionPlanConflict)
+		);
 
 		// So is a marker deep in the body of an optional chain on the path.
 		let mut b = Builder::new();
@@ -1417,7 +1447,7 @@ mod tests {
 	}
 
 	#[test]
-	fn a_bound_outside_the_limit_is_refused_as_the_planner_refuses_it() {
+	fn a_bound_outside_the_limit_is_refused_where_reached_as_the_planner_refuses_it() {
 		let bound = |found: &str, expected: &str| Refusal::InvalidBound {
 			found: found.to_owned(),
 			expected: expected.to_owned(),
@@ -1441,8 +1471,9 @@ mod tests {
 				idiom_recursion_limit: limit,
 				..LowerLimits::default()
 			});
-			assert!(
-				matches!(lower_in(&mut cx, &b.ir, result), Err(IrError::Rejected(held)) if *held == refusal),
+			assert_eq!(
+				refused_where_reached(lower_in(&mut cx, &b.ir, result)),
+				Some(refusal),
 				"{depth:?} under {limit}"
 			);
 		}

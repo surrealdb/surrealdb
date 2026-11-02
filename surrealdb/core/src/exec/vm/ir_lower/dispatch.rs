@@ -1209,9 +1209,18 @@ pub(super) fn check_write_region(ir: &Ir, region: RegionId, write: OpId) -> Resu
 			})
 			| OpKind::Phys(PhysOp::Yield)
 			| OpKind::Expr(_) => true,
-			// A value the targets are read from: the pipeline the physical phase wraps a value loop
-			// in and a `{ ... }` block in value position, each lowered in place by the target that
-			// reads it, and the values it yields.
+			// A value the targets are read from: a loop in value position, bare or in the pipeline
+			// the physical phase wraps it in, and a `{ ... }` block in value position, each
+			// lowered in place by the target that reads it, and the values it yields.
+			OpKind::Phys(PhysOp::Loop {
+				kind:
+					LoopKind::ElementFilter
+					| LoopKind::Broadcast
+					| LoopKind::Closure
+					| LoopKind::Recurse
+					| LoopKind::GraphStep,
+				..
+			}) => true,
 			OpKind::Phys(PhysOp::Pipeline(_)) if pipe::is_value_pipeline(ir, op) => true,
 			OpKind::Phys(PhysOp::Block) => true,
 			OpKind::Phys(PhysOp::Values {
