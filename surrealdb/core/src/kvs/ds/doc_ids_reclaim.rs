@@ -15,12 +15,14 @@
 //! statement again in a fresh transaction, whose claim then finds nothing
 //! queued.
 //!
-//! The drain here skips the reclaim grace, which is sound only because it runs
-//! for a set that has already started: a resume cursor is only written by a
-//! page, and a page only runs on an entry observed for the whole grace; and the
-//! set is enqueued in one transaction, so its entries share a commit and one
-//! entry's grace having elapsed means every entry's has. A set no page has
-//! touched is left to the claim, which cancels it.
+//! The drain here skips the reclaim grace. The grace protects a reader whose
+//! snapshot predates the removal from the out-of-transaction range destroy,
+//! which these kinds never take ([`crate::key::reclaim::ReclaimKind::is_doc_id`]):
+//! the drain deletes page by page inside transactions, which MVCC keeps from
+//! such a reader. It runs only for a set that has started — a cursor written by
+//! a page, the empty cursor an entry repaired from an unreadable state carries,
+//! or a sibling already retired. A set nothing has started is left to the
+//! claim, which cancels it.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -177,8 +179,27 @@ impl Datastore {
 		for (key, state) in states {
 			Self::ensure_not_cancelled(canceller)?;
 			let rc = ReclaimKey::decode_key(&key)?;
+			// What a page records for an entry with no stamp: its sighting, or now.
+			// A started entry always carries an observation, so the reaper never
+			// holds one back as untouched.
+			let observed_ms = match state.observed_ms {
+				0 => self
+					.reclaim_sightings
+					.lock()
+					.get(&key)
+					.copied()
+					.unwrap_or_else(|| self.wall_clock_ms().max(1)),
+				stamped => stamped,
+			};
 			let outcome = match self
-				.reclaim_decoded(&rc, &state, ReclaimMode::Leased(&lh), canceller, &mut budget)
+				.reclaim_decoded(
+					&rc,
+					&state,
+					observed_ms,
+					ReclaimMode::Leased(&lh),
+					canceller,
+					&mut budget,
+				)
 				.await
 			{
 				// A page lost its commit to a concurrent page of the entry.

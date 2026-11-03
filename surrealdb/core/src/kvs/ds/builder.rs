@@ -771,6 +771,8 @@ impl Builder {
 			node_expire_cursor: parking_lot::Mutex::new(None),
 			node_cleanup_cursor: parking_lot::Mutex::new(None),
 			reclaim_cursor: parking_lot::Mutex::new(None),
+			reclaim_sightings: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
+			reclaim_sightings_since: std::sync::atomic::AtomicU64::new(0),
 			changefeed_sweep: parking_lot::Mutex::new(crate::cf::gc::ChangefeedSweep::default()),
 			live_event_sweep: parking_lot::Mutex::new(crate::cf::gc::ChangefeedSweep::default()),
 			compaction_cursor: parking_lot::Mutex::new(super::CompactionCursor::default()),

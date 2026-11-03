@@ -2075,6 +2075,604 @@ async fn a_started_doc_id_reclaim_cannot_be_cancelled() {
 	assert_eq!(reclaim_queue_len(&ds).await, 0, "the completed entry must retire");
 }
 
+/// A claim made inside the grace is not refused by the reclaim task.
+///
+/// The task stamps every other kind of entry on first sight, but leaves a
+/// doc-ID entry unwritten until its grace has passed: a `DEFINE INDEX` that
+/// claims the space back compare-deletes the entries, and a stamp committed
+/// while it is open would refuse it with a write conflict though nothing had
+/// been deleted.
+#[tokio::test]
+async fn a_claim_inside_the_grace_meets_no_stamp() {
+	let ds = mem_ds().await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	ds.execute(
+		"DEFINE NAMESPACE test;
+		 DEFINE DATABASE tenant;
+		 DEFINE TABLE thing SCHEMALESS;
+		 DEFINE INDEX idx ON thing FIELDS val;
+		 CREATE thing:1 SET val = 1;",
+		&ses,
+		None,
+	)
+	.await
+	.unwrap();
+	ds.execute("REMOVE INDEX idx ON thing;", &ses, None).await.unwrap();
+	assert_eq!(count_doc_kinds(&reclaim_queue_kinds(&ds).await), ALL_DOC_ID_KINDS.len());
+	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
+	let tb = TableName::from("thing");
+
+	// The claim's transaction stays open across a whole pass inside the grace.
+	let tx = ds.transaction(Write).await.unwrap();
+	let claim = tx.claim_tb_doc_ids_reclaim(ns_id, db_id, &tb).await.unwrap();
+	assert_eq!(claim, DocIdsReclaimClaim::Available);
+	Datastore::reclaim_tombstones(
+		Arc::clone(&ds),
+		Duration::from_secs(1),
+		Duration::from_secs(3600),
+		CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+	tx.commit().await.expect("a pass inside the grace must not refuse the claim");
+
+	// The claim withdrew every doc-ID entry. The index's own entry stays queued,
+	// stamped by the pass as every other kind is.
+	let tx = ds.transaction(Read).await.unwrap();
+	let items = tx.getr(ReclaimPrefix {}.range().unwrap(), None).await.unwrap();
+	let _ = tx.cancel().await;
+	let left: Vec<(ReclaimKind, u64)> = items
+		.iter()
+		.map(|(k, state)| (ReclaimKey::decode_key(k).unwrap().kind, state.observed_ms))
+		.collect();
+	assert_eq!(left.len(), 1, "only the index's own entry may remain: {left:?}");
+	assert_eq!(left[0].0, ReclaimKind::Index);
+	assert_ne!(left[0].1, 0, "the index's own entry must be stamped");
+}
+
+/// The queue key of a doc-ID reclaim entry of `kind` for table `tb`.
+fn doc_id_entry(
+	kind: ReclaimKind,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+) -> ReclaimKey<'static> {
+	ReclaimKey {
+		kind,
+		ns,
+		db,
+		tb: Cow::Owned(tb.clone()),
+		ix: IndexId(0),
+		expunge: Expunge::Keep,
+		uid: Uuid::now_v7(),
+	}
+}
+
+/// Queue `rcs` with `state`, in one transaction.
+async fn queue_entries(ds: &Datastore, rcs: &[ReclaimKey<'_>], state: &ReclaimState) {
+	let tx = ds.transaction(Write).await.unwrap();
+	for rc in rcs {
+		tx.set_key(rc, state).await.unwrap();
+	}
+	tx.commit().await.unwrap();
+}
+
+/// The state of the queue entry `rc`, which must be queued.
+async fn entry_state(ds: &Datastore, rc: &ReclaimKey<'_>) -> ReclaimState {
+	let tx = ds.transaction(Read).await.unwrap();
+	let state = tx.get_key(rc, None).await.unwrap().expect("the entry must be queued");
+	let _ = tx.cancel().await;
+	state
+}
+
+/// A table `thing` in a fresh datastore, with `keys` keys seeded under its
+/// `!di` prefix: the ids, the table, and the prefix.
+async fn doc_id_space(
+	keys: usize,
+) -> (Arc<Datastore>, NamespaceId, DatabaseId, TableName, RawRange) {
+	let ds = mem_ds().await;
+	let (ns_id, db_id, tb, di) = seed_doc_id_space(&ds, keys).await;
+	(ds, ns_id, db_id, tb, di)
+}
+
+/// A table `thing` in `ds`, with `keys` keys seeded under its `!di` prefix:
+/// the ids, the table, and the prefix.
+async fn seed_doc_id_space(
+	ds: &Datastore,
+	keys: usize,
+) -> (NamespaceId, DatabaseId, TableName, RawRange) {
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	ds.execute(
+		"DEFINE NAMESPACE test;
+		 DEFINE DATABASE tenant;
+		 DEFINE TABLE thing SCHEMALESS;",
+		&ses,
+		None,
+	)
+	.await
+	.unwrap();
+	let (ns_id, db_id) = ids(ds, "test", "tenant").await;
+	let tb = TableName::from("thing");
+	let di = DocLookupPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
+	seed_range(ds, &di, keys).await;
+	(ns_id, db_id, tb, di)
+}
+
+/// An unstamped doc-ID entry ages from the reclaim task's first sighting of it,
+/// held in memory: the pass that first sees it writes nothing and deletes
+/// nothing, and a pass once the grace has passed since reclaims it.
+#[tokio::test]
+async fn a_doc_id_entry_ages_from_its_first_sighting_unwritten() {
+	let (ds, ns_id, db_id, tb, di) = doc_id_space(RECLAIM_BATCH_SIZE as usize / 2).await;
+	let rc = doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb);
+	queue_entries(&ds, std::slice::from_ref(&rc), &ReclaimState::enqueued()).await;
+	let grace = Duration::from_millis(300);
+	let pass = || {
+		Datastore::reclaim_tombstones(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			grace,
+			CancellationToken::new(),
+		)
+	};
+
+	pass().await.unwrap();
+	assert_eq!(
+		entry_state(&ds, &rc).await,
+		ReclaimState::enqueued(),
+		"the pass that first sees a doc-ID entry must not write it"
+	);
+	assert_eq!(count_range(&ds, di.clone()).await, RECLAIM_BATCH_SIZE as usize / 2);
+
+	tokio::time::sleep(grace + Duration::from_millis(100)).await;
+	pass().await.unwrap();
+	assert_eq!(count_range(&ds, di).await, 0, "an entry seen a grace ago must be reclaimed");
+	assert_eq!(reclaim_queue_len(&ds).await, 0, "the completed entry must retire");
+}
+
+/// A sighting is forgotten on a restart or a lease move, so an untouched doc-ID
+/// entry queued for twice the grace that the task holds no sighting of is
+/// stamped instead, and ages durably from the stamp: a lease holder that
+/// churns faster than the grace cannot defer the reclaim for good.
+#[tokio::test]
+async fn a_doc_id_entry_queued_past_the_backstop_is_stamped() {
+	backstop_stamps_an_entry_queued_at(|now, grace| now - grace * 3).await;
+}
+
+/// A `uid` dated past the backstop ahead of the reclaiming node's clock came
+/// from a clock that cannot date the entry, so it is stamped on sight rather
+/// than holding the backstop off until that clock's time.
+#[tokio::test]
+async fn a_doc_id_entry_queued_far_in_the_future_is_stamped() {
+	backstop_stamps_an_entry_queued_at(|now, grace| now + grace * 3).await;
+}
+
+/// Queue an untouched doc-ID entry whose `uid` is dated `queued(now, grace)`
+/// and assert that the first pass stamps it, and that it is reclaimed a grace
+/// after the stamp.
+async fn backstop_stamps_an_entry_queued_at(queued: impl Fn(Duration, Duration) -> Duration) {
+	let (ds, ns_id, db_id, tb, di) = doc_id_space(RECLAIM_BATCH_SIZE as usize / 2).await;
+	let grace = Duration::from_millis(300);
+	let rc = ReclaimKey {
+		uid: uid_at(queued(Duration::from_millis(now_ms()), grace)),
+		..doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb)
+	};
+	queue_entries(&ds, std::slice::from_ref(&rc), &ReclaimState::enqueued()).await;
+	let pass = || {
+		Datastore::reclaim_tombstones(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			grace,
+			CancellationToken::new(),
+		)
+	};
+
+	let before = now_ms();
+	pass().await.unwrap();
+	let after = now_ms();
+	let state = entry_state(&ds, &rc).await;
+	assert!(
+		(before..=after).contains(&state.observed_ms),
+		"an entry queued past the backstop must be stamped on sight, got {state:?}"
+	);
+	assert_eq!(state.cursor, None);
+	assert_eq!(ds.reclaim_sightings_len(), 0, "a stamped entry needs no sighting");
+	assert_eq!(
+		count_range(&ds, di.clone()).await,
+		RECLAIM_BATCH_SIZE as usize / 2,
+		"a stamped entry still waits out its grace"
+	);
+
+	tokio::time::sleep(grace + Duration::from_millis(100)).await;
+	pass().await.unwrap();
+	assert_eq!(count_range(&ds, di).await, 0, "an entry stamped a grace ago must be reclaimed");
+	assert_eq!(reclaim_queue_len(&ds).await, 0, "the completed entry must retire");
+}
+
+/// An entry queued after this node's sightings began that holds no sighting
+/// has not been seen yet rather than seen and forgotten, so it is sighted, not
+/// stamped, even when its `uid` is past the backstop: a `REMOVE` that stayed
+/// open for twice the grace before it committed still leaves a claim its
+/// conflict-free window.
+#[tokio::test]
+async fn a_doc_id_entry_queued_after_the_sightings_began_is_sighted() {
+	let (ds, ns_id, db_id, tb, di) = doc_id_space(RECLAIM_BATCH_SIZE as usize / 2).await;
+	let grace = Duration::from_millis(300);
+	let pass = || {
+		Datastore::reclaim_tombstones(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			grace,
+			CancellationToken::new(),
+		)
+	};
+	// The sightings begin with this pass, before the removal's `uid`.
+	pass().await.unwrap();
+	let rc = ReclaimKey {
+		uid: uid_at(Duration::from_millis(now_ms())),
+		..doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb)
+	};
+	// The removal commits only once its `uid` is past the backstop.
+	tokio::time::sleep(grace * 2 + Duration::from_millis(100)).await;
+	queue_entries(&ds, std::slice::from_ref(&rc), &ReclaimState::enqueued()).await;
+
+	pass().await.unwrap();
+	assert_eq!(
+		entry_state(&ds, &rc).await,
+		ReclaimState::enqueued(),
+		"an entry queued after the sightings began must be sighted, not stamped"
+	);
+	assert_eq!(ds.reclaim_sightings_len(), 1);
+
+	tokio::time::sleep(grace + Duration::from_millis(100)).await;
+	pass().await.unwrap();
+	assert_eq!(count_range(&ds, di).await, 0, "an entry seen a grace ago must be reclaimed");
+	assert_eq!(reclaim_queue_len(&ds).await, 0, "the completed entry must retire");
+}
+
+/// A version-7 `uid` dated `at` after the unix epoch.
+fn uid_at(at: Duration) -> Uuid {
+	Uuid::new_v7(uuid::Timestamp::from_unix(uuid::NoContext, at.as_secs(), at.subsec_nanos()))
+}
+
+/// The first page of an unstamped doc-ID entry records the task's sighting of
+/// it with the cursor, so a restart or a lease move resumes a started entry
+/// against the time it was first seen rather than starting its grace again.
+#[tokio::test]
+async fn a_doc_id_entry_records_its_sighting_with_its_first_page() {
+	let page = RECLAIM_BATCH_SIZE as usize;
+	let (ds, ns_id, db_id, tb, di) = doc_id_space(page * 3).await;
+	let rc = doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb);
+	queue_entries(&ds, std::slice::from_ref(&rc), &ReclaimState::enqueued()).await;
+	let grace = Duration::from_millis(300);
+
+	let before = now_ms();
+	Datastore::reclaim_tombstones(
+		Arc::clone(&ds),
+		Duration::from_secs(1),
+		grace,
+		CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+	let after = now_ms();
+	tokio::time::sleep(grace + Duration::from_millis(100)).await;
+	// One page of budget, so the entry stays queued with its cursor.
+	Datastore::reclaim_tombstones_with_budget(
+		Arc::clone(&ds),
+		Duration::from_secs(1),
+		grace,
+		page as u64,
+		CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+
+	assert!(count_range(&ds, di).await > 0, "one page must leave the prefix part-reclaimed");
+	let state = entry_state(&ds, &rc).await;
+	assert!(state.cursor.is_some(), "the page must record its cursor");
+	assert!(
+		(before..=after).contains(&state.observed_ms),
+		"the page must record the first sighting, {} not in {before}..={after}",
+		state.observed_ms
+	);
+	assert_eq!(ds.reclaim_sightings_len(), 0, "a recorded sighting is not held in memory too");
+}
+
+/// A reclaim that fails before its first page lands keeps the entry's
+/// sighting, so the next pass retries it at once rather than starting its grace
+/// again.
+#[tokio::test]
+async fn a_failed_first_page_keeps_the_sighting() {
+	use crate::kvs::testing::{RetryableConflictSite, inject_retryable_conflict};
+
+	let (ds, ns_id, db_id, tb, di) = doc_id_space(RECLAIM_BATCH_SIZE as usize / 2).await;
+	let rc = doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb);
+	queue_entries(&ds, std::slice::from_ref(&rc), &ReclaimState::enqueued()).await;
+	let grace = Duration::from_millis(300);
+	let pass = || {
+		Datastore::reclaim_tombstones(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			grace,
+			CancellationToken::new(),
+		)
+	};
+	pass().await.unwrap();
+	tokio::time::sleep(grace + Duration::from_millis(100)).await;
+
+	// The entry is eligible, and its first page loses its commit.
+	{
+		let _lost = inject_retryable_conflict(RetryableConflictSite::ReclaimPageCommit, ds.id());
+		pass().await.unwrap();
+	}
+	assert_eq!(entry_state(&ds, &rc).await, ReclaimState::enqueued(), "the entry is untouched");
+	assert_eq!(ds.reclaim_sightings_len(), 1, "a failed first page must keep the sighting");
+
+	pass().await.unwrap();
+	assert_eq!(count_range(&ds, di).await, 0, "the next pass must reclaim without a new grace");
+	assert_eq!(reclaim_queue_len(&ds).await, 0, "the completed entry must retire");
+}
+
+/// An entry whose prefix is already empty completes without a page, and keeps
+/// its sighting until its retirement commits: a retirement that fails leaves the
+/// entry to the next pass, which retires it at once rather than starting its
+/// grace again.
+#[tokio::test]
+async fn a_failed_retirement_keeps_the_sighting() {
+	use crate::kvs::testing::{RetryableConflictSite, inject_retryable_conflict};
+
+	let (ds, ns_id, db_id, tb, _) = doc_id_space(0).await;
+	let rc = doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb);
+	queue_entries(&ds, std::slice::from_ref(&rc), &ReclaimState::enqueued()).await;
+	let grace = Duration::from_millis(300);
+	let pass = || {
+		Datastore::reclaim_tombstones(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			grace,
+			CancellationToken::new(),
+		)
+	};
+	pass().await.unwrap();
+	tokio::time::sleep(grace + Duration::from_millis(100)).await;
+
+	// The entry is eligible and its empty prefix completes, but its retirement
+	// loses its commit.
+	{
+		let _lost = inject_retryable_conflict(RetryableConflictSite::ReclaimQueueRetire, ds.id());
+		pass().await.unwrap();
+	}
+	assert_eq!(entry_state(&ds, &rc).await, ReclaimState::enqueued(), "the entry is untouched");
+	assert_eq!(ds.reclaim_sightings_len(), 1, "a failed retirement must keep the sighting");
+
+	pass().await.unwrap();
+	assert_eq!(reclaim_queue_len(&ds).await, 0, "the next pass must retire without a new grace");
+	assert_eq!(ds.reclaim_sightings_len(), 0, "a retired entry leaves no sighting");
+}
+
+/// An entry a retirement could not delete stays queued and keeps its sighting,
+/// while the entries retired beside it in the same transaction forget theirs.
+#[tokio::test]
+async fn an_entry_left_by_a_retirement_keeps_its_sighting() {
+	use crate::kvs::testing::{NonRetryableErrorSite, inject_non_retryable_error};
+
+	let (ds, ns_id, db_id, tb, _) = doc_id_space(0).await;
+	let rcs = [
+		doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb),
+		doc_id_entry(ReclaimKind::DocLookupIdentity, ns_id, db_id, &tb),
+	];
+	queue_entries(&ds, &rcs, &ReclaimState::enqueued()).await;
+	let grace = Duration::from_millis(300);
+	let pass = || {
+		Datastore::reclaim_tombstones(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			grace,
+			CancellationToken::new(),
+		)
+	};
+	pass().await.unwrap();
+	assert_eq!(ds.reclaim_sightings_len(), 2);
+	tokio::time::sleep(grace + Duration::from_millis(100)).await;
+
+	// Both prefixes are empty and both entries complete; one entry's delete fails.
+	{
+		let _failed =
+			inject_non_retryable_error(NonRetryableErrorSite::ReclaimQueueRetireEntry, ds.id());
+		pass().await.unwrap();
+	}
+	assert_eq!(reclaim_queue_len(&ds).await, 1, "one entry must be retired and one left");
+	assert_eq!(ds.reclaim_sightings_len(), 1, "the entry left must keep its sighting");
+
+	pass().await.unwrap();
+	assert_eq!(reclaim_queue_len(&ds).await, 0, "the next pass must retire without a new grace");
+}
+
+/// A doc-ID entry with a cursor but no stamp has started, and is stamped
+/// rather than held back as untouched by an in-memory sighting.
+#[tokio::test]
+async fn a_started_doc_id_entry_without_a_stamp_is_stamped() {
+	let (ds, ns_id, db_id, tb, di) = doc_id_space(0).await;
+	let rc = doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb);
+	let started = ReclaimState {
+		observed_ms: 0,
+		cursor: Some(di.start().as_ref().to_vec()),
+	};
+	queue_entries(&ds, std::slice::from_ref(&rc), &started).await;
+
+	Datastore::reclaim_tombstones(
+		Arc::clone(&ds),
+		Duration::from_secs(1),
+		Duration::from_secs(3600),
+		CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+	assert_eq!(ds.reclaim_sightings_len(), 0, "a started entry must not be sighted");
+	assert_ne!(entry_state(&ds, &rc).await.observed_ms, 0, "a started entry must be stamped");
+}
+
+/// The doc-ID drain records an observation with every cursor it writes, so an
+/// entry it leaves part-drained is never taken for an untouched one.
+#[tokio::test]
+async fn the_doc_id_drain_records_an_observation_with_its_cursor() {
+	let page = RECLAIM_BATCH_SIZE as usize;
+	let (ds, ns_id, db_id, tb, di) = doc_id_space(page * 3).await;
+	// Two kinds of the four, so the set reads as started.
+	let rcs = [
+		doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb),
+		doc_id_entry(ReclaimKind::DocLookupIdentity, ns_id, db_id, &tb),
+	];
+	queue_entries(&ds, &rcs, &ReclaimState::enqueued()).await;
+
+	ds.finish_tb_doc_ids_reclaim_step(ns_id, db_id, &tb, page as u64, &CancellationToken::new())
+		.await
+		.unwrap();
+	assert!(count_range(&ds, di).await > 0, "one page must leave the prefix part-drained");
+	let state = entry_state(&ds, &rcs[0]).await;
+	assert!(state.cursor.is_some(), "the drain must record its cursor");
+	assert_ne!(state.observed_ms, 0, "the drain must record an observation with it");
+}
+
+/// A pass that finds the lease held by another node forgets its sightings: the
+/// node holding the lease now ages entries from its own, and a sighting kept
+/// across a lease that moved away and back would date an entry from before.
+#[tokio::test]
+async fn a_pass_without_the_lease_forgets_its_sightings() {
+	use crate::catalog::TaskLease;
+	use crate::key::schema::TaskLeaseKey;
+	use crate::kvs::tasklease::TaskLeaseType;
+
+	let (ds, ns_id, db_id, tb, _) = doc_id_space(0).await;
+	let rc = doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb);
+	queue_entries(&ds, &[rc], &ReclaimState::enqueued()).await;
+	let pass = || {
+		Datastore::reclaim_tombstones(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			Duration::from_secs(3600),
+			CancellationToken::new(),
+		)
+	};
+	pass().await.unwrap();
+	assert_eq!(ds.reclaim_sightings_len(), 1);
+
+	// Another node takes the lease.
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.set_key(
+		&TaskLeaseKey {
+			task_id: TaskLeaseType::ReclaimTombstones,
+		},
+		&TaskLease::new(Uuid::from_u128(2), chrono::Utc::now() + chrono::Duration::hours(1)),
+	)
+	.await
+	.unwrap();
+	tx.commit().await.unwrap();
+
+	pass().await.unwrap();
+	assert_eq!(ds.reclaim_sightings_len(), 0, "a pass without the lease must forget its sightings");
+}
+
+/// A doc-ID entry that carries a stamp, from an older node or a repair, ages
+/// from that stamp.
+#[tokio::test]
+async fn a_stamped_doc_id_entry_ages_from_its_stamp() {
+	let (ds, ns_id, db_id, tb, di) = doc_id_space(RECLAIM_BATCH_SIZE as usize / 2).await;
+	let grace = Duration::from_secs(60);
+	let rc = doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb);
+	let stamped = ReclaimState {
+		observed_ms: now_ms() - 2 * grace.as_millis() as u64,
+		cursor: None,
+	};
+	queue_entries(&ds, &[rc], &stamped).await;
+
+	Datastore::reclaim_tombstones(
+		Arc::clone(&ds),
+		Duration::from_secs(1),
+		grace,
+		CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+	assert_eq!(count_range(&ds, di).await, 0, "an entry stamped a grace ago must be reclaimed");
+	assert_eq!(reclaim_queue_len(&ds).await, 0, "the completed entry must retire");
+}
+
+/// The task forgets the sighting of a doc-ID entry once the entry has gone,
+/// wherever its key sorts: past every entry still queued, or with nothing
+/// queued at all.
+#[tokio::test]
+async fn sightings_of_gone_entries_are_forgotten() {
+	let (ds, ns_id, db_id, _, _) = doc_id_space(0).await;
+	let pass = || {
+		Datastore::reclaim_tombstones(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			Duration::from_secs(3600),
+			CancellationToken::new(),
+		)
+	};
+	let dequeue = |rc: ReclaimKey<'static>| {
+		let ds = Arc::clone(&ds);
+		async move {
+			let tx = ds.transaction(Write).await.unwrap();
+			tx.del_key(&rc).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+	};
+
+	let b = doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &TableName::from("b"));
+	queue_entries(&ds, std::slice::from_ref(&b), &ReclaimState::enqueued()).await;
+	pass().await.unwrap();
+	assert_eq!(ds.reclaim_sightings_len(), 1);
+
+	// `b` is claimed, and an entry whose key sorts below it is queued.
+	dequeue(b).await;
+	let a = doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &TableName::from("a"));
+	queue_entries(&ds, std::slice::from_ref(&a), &ReclaimState::enqueued()).await;
+	pass().await.unwrap();
+	assert_eq!(ds.reclaim_sightings_len(), 1, "only the entry still queued may be sighted");
+
+	// `a` is claimed too, leaving nothing queued.
+	dequeue(a).await;
+	pass().await.unwrap();
+	assert_eq!(ds.reclaim_sightings_len(), 0, "an empty queue leaves no sighting");
+}
+
+/// A doc-ID entry whose state could not be read is repaired as started, with
+/// an empty cursor: the state it lost may have held a cursor, so the space may
+/// be torn, and a claim must not adopt it.
+#[tokio::test]
+async fn a_repaired_doc_id_entry_reads_as_started() {
+	let (ds, ns_id, db_id, tb, _) = doc_id_space(0).await;
+	let rcs: Vec<_> =
+		ALL_DOC_ID_KINDS.into_iter().map(|kind| doc_id_entry(kind, ns_id, db_id, &tb)).collect();
+	queue_entries(&ds, &rcs, &ReclaimState::enqueued()).await;
+	// Bytes no revision of the state decodes to.
+	{
+		let tx = ds.transaction(Write).await.unwrap();
+		let key = crate::key::KVKey::encode_key(&rcs[0]).unwrap();
+		tx.set(key, vec![0xde, 0xad, 0xbe, 0xef]).await.unwrap();
+		tx.commit().await.unwrap();
+	}
+
+	Datastore::reclaim_tombstones(
+		Arc::clone(&ds),
+		Duration::from_secs(1),
+		Duration::from_secs(3600),
+		CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+	assert_eq!(entry_state(&ds, &rcs[0]).await.cursor, Some(Vec::new()));
+
+	let tx = ds.transaction(Write).await.unwrap();
+	let claim = tx.claim_tb_doc_ids_reclaim(ns_id, db_id, &tb).await.unwrap();
+	tx.cancel().await.unwrap();
+	assert_eq!(claim, DocIdsReclaimClaim::InProgress, "a repaired entry must read as started");
+}
+
 /// A queued doc-ID reclaim is retired without deleting anything once the table
 /// has a doc-ID consumer again.
 ///
@@ -2550,6 +3148,35 @@ async fn the_budget_goes_to_the_longest_waiting_entry() {
 	);
 }
 
+/// A batch that comes back short ends the scan even when its last key is below
+/// the end the scan began with: the entry at that end has gone since (claimed or
+/// retired), and nothing lies past the batch. The pass reports its walk done
+/// rather than saving a position past the end of the queue.
+#[tokio::test]
+async fn a_short_batch_ends_the_scan() {
+	let ds = mem_ds().await;
+	let grace = Duration::from_secs(600);
+	let batch = RECLAIM_BATCH_SIZE as usize;
+	let slice = RECLAIM_PASS_WALK_BATCHES * batch;
+
+	// A first pass walks `slice` entries. The second resumes with one batch
+	// fewer than a pass walks still full, then one entry, then the scan's end.
+	let total = slice + (RECLAIM_PASS_WALK_BATCHES - 1) * batch + 2;
+	queue_database_entries(&ds, 1..=(total as u32)).await;
+	let (_, first) = walk_pass(&ds, grace).await;
+	assert_eq!(first.progress, Progress::More);
+
+	// The entry at the end the scan began with goes, so the second pass's last
+	// batch is short and ends below that end.
+	let end = keys_in_range(&ds, ReclaimPrefix {}.range().unwrap()).await.pop().unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.del(Key::from(&end)).await.unwrap();
+	tx.commit().await.unwrap();
+
+	let (_, second) = walk_pass(&ds, grace).await;
+	assert_eq!(second.progress, Progress::Done, "a short batch must end the walk");
+}
+
 /// Queue one database-reclaim entry per id in `dbs`, none yet observed and each
 /// naming an empty prefix, in one transaction.
 async fn queue_database_entries(ds: &Datastore, dbs: std::ops::RangeInclusive<u32>) {
@@ -2834,6 +3461,43 @@ async fn a_hosted_reclaim_pass_judges_the_grace_on_the_injected_clock() {
 	assert!(!due.more && due.retry_after.is_none());
 	assert_eq!(count_range(&ds, range).await, 0);
 	assert_eq!(reclaim_queue_len(&ds).await, 0);
+}
+
+/// A hosted pass ages an untouched doc-ID entry from its sighting, held in
+/// memory and read on the datastore's wall clock: the pass that sights it
+/// writes nothing and reports it due a whole grace later, and the first pass
+/// after the grace lapses reclaims it.
+#[tokio::test]
+async fn a_hosted_reclaim_pass_reports_a_sighted_doc_id_entry_due() {
+	let clock = manual_clock();
+	let ds = hosted_ds(Arc::clone(&clock)).await;
+	let keys = RECLAIM_BATCH_SIZE as usize / 2;
+	let (ns_id, db_id, tb, di) = seed_doc_id_space(&ds, keys).await;
+	let rc = doc_id_entry(ReclaimKind::DocLookup, ns_id, db_id, &tb);
+	queue_entries(&ds, std::slice::from_ref(&rc), &ReclaimState::enqueued()).await;
+
+	let grace = Duration::from_secs(10);
+	let first = ds.run_reclaim(RECLAIM_PASS_KEY_BUDGET, grace).await.unwrap();
+	assert_eq!(first.keys, 0, "an entry first sighted now is inside its grace");
+	assert!(!first.more);
+	assert_eq!(first.retry_after, Some(grace), "the entry is due a whole grace from now");
+	let state = entry_state(&ds, &rc).await;
+	assert_eq!((state.observed_ms, state.cursor), (0, None), "a sighting writes nothing");
+	assert_eq!(ds.reclaim_sightings_len(), 1);
+
+	clock.advance(chrono::Duration::seconds(9));
+	let early = ds.run_reclaim(RECLAIM_PASS_KEY_BUDGET, grace).await.unwrap();
+	assert_eq!(early.keys, 0, "the grace has not lapsed on the injected clock");
+	assert_eq!(early.retry_after, Some(Duration::from_secs(1)));
+	assert_eq!(count_range(&ds, di.clone()).await, keys);
+
+	clock.advance(chrono::Duration::seconds(1));
+	let due = ds.run_reclaim(RECLAIM_PASS_KEY_BUDGET, grace).await.unwrap();
+	assert_eq!(due.keys, keys as u64, "the lapsed entry is reclaimed: {due:?}");
+	assert!(!due.more && due.retry_after.is_none());
+	assert_eq!(count_range(&ds, di).await, 0);
+	assert_eq!(reclaim_queue_len(&ds).await, 0);
+	assert_eq!(ds.reclaim_sightings_len(), 0, "a retired entry's sighting is forgotten");
 }
 
 /// A hosted pass pages every prefix through transactions, even where the

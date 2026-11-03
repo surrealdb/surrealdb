@@ -7953,7 +7953,10 @@ impl Transaction {
 	/// conditional deletes make the cancellation atomic with a concurrent page on
 	/// last-writer-wins backends: either this transaction removes the claim and
 	/// defines the consumer, or the page advances the state and this transaction
-	/// is rejected.
+	/// is rejected. Besides a page, the reclaim task writes an untouched entry
+	/// only to repair a state it cannot read, or to stamp one queued for twice
+	/// its grace whose sighting a restart or a lease move forgot. A claim made
+	/// otherwise inside the grace meets no conflict from it.
 	///
 	/// Once a cursor exists, or a strict subset of the entries survives, the
 	/// space may be torn. In that case no entry is cancelled: the caller must not

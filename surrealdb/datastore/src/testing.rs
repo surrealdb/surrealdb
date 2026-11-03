@@ -89,6 +89,10 @@ pub enum RetryableConflictSite {
 	/// entry committing first raises on a backend that detects write-write
 	/// conflicts at commit.
 	ReclaimPageCommit,
+	/// A conflict on the commit of a reclaim pass's retirement of the entries
+	/// it emptied, raised in place of that commit, as a concurrent write to one
+	/// of those entries committing first raises.
+	ReclaimQueueRetire,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -169,6 +173,10 @@ pub enum NonRetryableErrorSite {
 	/// The DiskANN counterpart, raised in place of the apply whose own commit
 	/// would have failed.
 	DiskAnnCompaction,
+	/// A storage error on one entry's guarded delete in a reclaim pass's
+	/// retirement of the entries it emptied, raised in place of that delete,
+	/// which leaves the entry queued while the others retire.
+	ReclaimQueueRetireEntry,
 }
 
 static RETRYABLE_CONFLICTS: OnceLock<Mutex<HashMap<(RetryableConflictSite, Uuid), usize>>> =
@@ -290,6 +298,7 @@ pub fn maybe_inject_non_retryable_error(site: NonRetryableErrorSite, node_id: Uu
 		| NonRetryableErrorSite::DiskAnnCompaction
 		| NonRetryableErrorSite::AsyncEventClaim
 		| NonRetryableErrorSite::AsyncEventSettle
+		| NonRetryableErrorSite::ReclaimQueueRetireEntry
 		| NonRetryableErrorSite::LiveQueryRouterAfterEvent => {
 			Err(surrealdb_kvs::Error::Internal(format!("injected non-retryable error at {site:?}"))
 				.into())

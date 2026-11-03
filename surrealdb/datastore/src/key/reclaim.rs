@@ -42,6 +42,15 @@ pub struct ReclaimState {
 	/// snapshot-safety grace is therefore measured from `observed_ms`, never
 	/// from the pre-commit `uid`.
 	///
+	/// A doc-ID entry ([`ReclaimKind::is_doc_id`]) is the exception: the task
+	/// leaves it at `0` until its first page, holding its first sighting in
+	/// memory meanwhile, because a claim may compare-delete it while the grace
+	/// runs and a stamp would conflict with that claim. The first page records
+	/// the sighting with its cursor. An entry queued for twice the grace (by its
+	/// `uid`) whose sighting the task no longer holds is stamped instead, so a
+	/// sighting forgotten on every restart or lease move cannot defer the reclaim
+	/// indefinitely.
+	///
 	/// Every cursor write carries the stamp through unchanged: a prefix too
 	/// large for one pass must keep ageing against its first observation rather
 	/// than resetting its own grace on every page.
@@ -77,7 +86,12 @@ impl ReclaimKind {
 	/// withdrawal, so these kinds are always deleted through the paged path,
 	/// which re-reads the claim inside every page's transaction. The
 	/// out-of-transaction range destroy some backends offer cannot see the
-	/// cancellation and so is never used for them.
+	/// cancellation and so is never used for them. Nor does the reclaim task stamp
+	/// them inside the claim window ([`ReclaimState::observed_ms`]): an untouched
+	/// entry is written by nothing but the claim until a page deletes from its
+	/// prefix, or until it has been queued for twice the grace. An entry whose
+	/// state could not be read is repaired with an empty cursor, which reads as
+	/// started, since the state it lost may have held a cursor.
 	pub fn is_doc_id(&self) -> bool {
 		matches!(self, Self::DocKey | Self::DocLookup | Self::DocLookupIdentity | Self::DocPending)
 	}

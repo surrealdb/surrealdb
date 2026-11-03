@@ -67,6 +67,9 @@ pub(crate) enum PageCompanion<'a> {
 		/// every commit turns the cursor write into a compare-and-set, so a
 		/// concurrent cancellation or page wins instead of being overwritten.
 		state: ReclaimState,
+		/// When the entry was first observed: what a cursor write records while
+		/// `state` carries no stamp of its own.
+		observed_ms: u64,
 	},
 	/// A changefeed retention fence. The window's upper bound is only the keys
 	/// the database's retention has made stale, and that policy is catalog
@@ -200,10 +203,15 @@ impl<R: AnyRange + Resumable + Clone> PagedDelete<'_, R> {
 			let advanced = if let PageCompanion::ReclaimEntry {
 				rc,
 				state,
+				observed_ms,
 			} = &self.companion
 			{
 				let advanced = ReclaimState {
-					observed_ms: state.observed_ms,
+					observed_ms: if state.observed_ms == 0 {
+						*observed_ms
+					} else {
+						state.observed_ms
+					},
 					cursor: Some(last.clone()),
 				};
 				// The queue entry is the claim authorising these deletes. Advance

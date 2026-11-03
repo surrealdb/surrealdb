@@ -1,8 +1,9 @@
 use std::any::TypeId;
 use std::borrow::Cow;
 use std::collections::hash_map::Entry;
-use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fmt::{self, Display};
+use std::ops::Bound;
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::pin::pin;
@@ -933,6 +934,23 @@ pub struct Datastore {
 	/// ([`Datastore::run_reclaim`]) runs on the one node its host drives. See
 	/// [`ReclaimScan`].
 	reclaim_cursor: parking_lot::Mutex<Option<ReclaimScan>>,
+	/// When this node's reclaim task first saw each doc-ID queue entry that
+	/// carries no stamp, in unix milliseconds, keyed by the entry's key. Such an
+	/// entry ages from here and is not written until its first page, which
+	/// records this time with its cursor: a `DEFINE INDEX` may compare-delete it
+	/// throughout its grace, and a stamp would refuse that claim. This node's
+	/// alone, lost on restart and forgotten when the lease is found elsewhere,
+	/// each of which only restarts a grace: a node the lease moves to sees the
+	/// entry anew. Dropped once the entry carries a record of its own. See
+	/// [`ReclaimKind::is_doc_id`].
+	reclaim_sightings: parking_lot::Mutex<BTreeMap<Vec<u8>, u64>>,
+	/// Since when, in unix milliseconds, [`Self::reclaim_sightings`] has been
+	/// kept without a break: set by the first walk that holds the lease, and
+	/// reset to `0` (unset) when a pass finds the lease elsewhere and the
+	/// sightings are forgotten. An entry queued after it that holds no sighting
+	/// has not been seen yet, rather than seen and forgotten, so the backstop
+	/// that stamps a forgotten one leaves it to be sighted.
+	reclaim_sightings_since: std::sync::atomic::AtomicU64,
 	/// The changefeed-collection sweep in progress, or one not begun between
 	/// sweeps. This node's alone: the sweep runs under a lease, and a node the
 	/// lease moves to begins a sweep of its own. See [`ChangefeedSweep`].
@@ -1322,11 +1340,15 @@ impl Display for Datastore {
 /// [`RECLAIM_PASS_ENTRY_QUOTA`], where "greatest" is the newest and so the first
 /// to lose its place.
 struct ReclaimCandidate {
-	/// When the reclaim task first observed the entry. Zero only where the grace
-	/// is disabled, in which case every candidate ties and key order decides.
+	/// When the reclaim task first observed the entry, by the clock of the node
+	/// holding the lease: its stamp, or for an unstamped doc-ID entry its
+	/// sighting in [`Datastore::reclaim_sightings`]. Zero only where the grace is
+	/// disabled, in which case every candidate ties and key order decides.
 	observed_ms: u64,
 	/// The queue key, as the scan returned it.
 	key: Vec<u8>,
+	/// The queue key, decoded during the walk.
+	rc: ReclaimKey<'static>,
 	/// The state read during the walk, carrying the resume cursor the delete
 	/// continues from.
 	state: ReclaimState,
@@ -1973,6 +1995,8 @@ impl Datastore {
 			node_expire_cursor: parking_lot::Mutex::new(None),
 			node_cleanup_cursor: parking_lot::Mutex::new(None),
 			reclaim_cursor: parking_lot::Mutex::new(None),
+			reclaim_sightings: parking_lot::Mutex::new(BTreeMap::new()),
+			reclaim_sightings_since: std::sync::atomic::AtomicU64::new(0),
 			changefeed_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
 			live_event_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
 			compaction_cursor: parking_lot::Mutex::new(CompactionCursor::default()),
@@ -2082,6 +2106,8 @@ impl Datastore {
 			node_expire_cursor: parking_lot::Mutex::new(None),
 			node_cleanup_cursor: parking_lot::Mutex::new(None),
 			reclaim_cursor: parking_lot::Mutex::new(None),
+			reclaim_sightings: parking_lot::Mutex::new(BTreeMap::new()),
+			reclaim_sightings_since: std::sync::atomic::AtomicU64::new(0),
 			changefeed_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
 			live_event_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
 			compaction_cursor: parking_lot::Mutex::new(CompactionCursor::default()),
@@ -7267,6 +7293,27 @@ impl Datastore {
 	/// the language-test harness teardown, or no out-of-transaction destroy, as for a
 	/// host's own passes ([`Self::run_reclaim`]).
 	///
+	/// A doc-ID entry ([`ReclaimKind::is_doc_id`]) is observed without being
+	/// written: its first sighting is held in [`Self::reclaim_sightings`], and the
+	/// first page records it with the cursor. Until the entry has been queued
+	/// for twice the grace, this task writes it only to repair a state it cannot
+	/// read, so a `DEFINE INDEX` claiming the space back meets no conflict from
+	/// it. A restart or a lease move forgets the sightings and restarts the grace
+	/// of an entry no page has touched; an entry a page has touched ages from the
+	/// time that page recorded. So that sightings forgotten faster than the grace
+	/// cannot defer the reclaim indefinitely, an entry this node holds no
+	/// sighting of, queued by its `uid` both twice the grace ago and before this
+	/// node's sightings began ([`Self::reclaim_sightings_since`]), is stamped, as
+	/// every other kind is, and ages from the stamp; so is one whose `uid` is
+	/// twice the grace ahead of this node's clock, which cannot date it. An
+	/// entry queued after the sightings began, however long its `REMOVE` stayed
+	/// open, is new to this node and is sighted. The `uid` only decides when to
+	/// stamp, never how long the grace runs. Comparing it with this node's clock
+	/// assumes node clocks agree to well within the backstop, as the task's
+	/// lease already does to within its far shorter duration: a node whose clock
+	/// trails by more than the backstop has its fresh entries stamped as though
+	/// forgotten, which costs a claim its conflict-free window, never the grace.
+	///
 	/// Returns `(iterations, errors)`.
 	#[cfg_attr(
 		feature = "observability",
@@ -7362,10 +7409,11 @@ impl Datastore {
 	///
 	/// An entry is reclaimed only once it has been observed for `grace`, measured on the
 	/// datastore's wall clock ([`Builder::with_wall_clock`]) from the pass that first saw it,
-	/// which stamps it. A `grace` of zero reclaims every entry on the first pass that reaches it
-	/// and writes no stamp; it is sound on a backend whose reads hold their snapshot for as long
-	/// as they run, since every page is an ordinary transaction. A host whose readers need the
-	/// data kept for some time after the `REMOVE` commits passes that time.
+	/// which stamps it, or, for an untouched doc-ID entry, holds the sighting in memory
+	/// ([`Self::reclaim_tombstones`]). A `grace` of zero reclaims every entry on the first pass
+	/// that reaches it and writes no stamp; it is sound on a backend whose reads hold their
+	/// snapshot for as long as they run, since every page is an ordinary transaction. A host whose
+	/// readers need the data kept for some time after the `REMOVE` commits passes that time.
 	///
 	/// A commit that queues an entry puts a key [`Self::is_reclaim_key`] matches and notifies
 	/// [`CommitTriggers::reclaim`](surrealdb_datastore::triggers::CommitTriggers::reclaim). A
@@ -7508,17 +7556,28 @@ impl Datastore {
 					lease_held = false;
 					break;
 				}
+				// The sightings are kept from here until the lease is found
+				// elsewhere ([`Self::reclaim_sightings_since`]).
+				if dbs.reclaim_sightings_since.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+					let now_ms = dbs.wall_clock_ms().max(1);
+					dbs.reclaim_sightings_since.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+				}
 				Self::ensure_not_cancelled(canceller)?;
 				// The window to read: after the batch the scan last read, or from
 				// the head of a scan begun now, which ends at the last entry there
 				// is. Nothing queued at all ends the walk.
+				let walked_after = scan.as_ref().map(|scan| scan.after.clone());
 				let (window, end) = match scan.take() {
 					Some(scan) => {
 						(queue.clone().resume_after(&scan.after, Direction::Forward), scan.end)
 					}
 					None => match dbs.range_end(queue.clone()).await? {
 						Some(end) => (queue.clone(), end),
-						None => break,
+						None => {
+							// Nothing is queued, so no sighting names a live entry.
+							dbs.reclaim_sightings.lock().clear();
+							break;
+						}
 					},
 				};
 				// Read one bounded batch of queue entries in a short-lived read
@@ -7535,14 +7594,25 @@ impl Datastore {
 				Self::ensure_not_cancelled(canceller)?;
 				let Some((last, _)) = items.last().cloned() else {
 					// The window has run off the end of the queue: everything queued
-					// has been walked.
+					// has been walked, and nothing past the scan's position is held.
+					dbs.prune_reclaim_sightings(walked_after.as_deref(), None, &items);
 					break;
 				};
 				count_iteration += 1;
+				// The batch that completes the scan holds the last entry there was
+				// when the scan began, or is short because nothing lies past it now
+				// (the last entry may have been claimed since the scan began). Either
+				// way nothing past it was sighted live.
+				let exhausted = items.len() < RECLAIM_BATCH_SIZE as usize || last >= end;
+				let through = (!exhausted).then_some(last.as_slice());
+				dbs.prune_reclaim_sightings(walked_after.as_deref(), through, &items);
 				// Current wall-clock time (unix millis), used to age each entry
 				// against `grace` and to stamp first observations.
 				let now_ms = dbs.wall_clock_ms();
 				let grace_ms = grace.as_millis() as u64;
+				// How long an untouched doc-ID entry may stay queued before it is
+				// stamped rather than sighted ([`Self::reclaim_tombstones`]).
+				let sighting_backstop_ms = grace_ms.saturating_mul(2);
 				let mut due = |at: u64| {
 					next_due_ms = Some(next_due_ms.map_or(at, |d| d.min(at)));
 				};
@@ -7552,11 +7622,14 @@ impl Datastore {
 				let mut to_stamp: Vec<(Vec<u8>, Vec<u8>, ReclaimState)> = Vec::new();
 				for (k, v) in items.iter() {
 					Self::ensure_not_cancelled(canceller)?;
-					if let Err(e) = ReclaimKey::decode_key(k) {
-						count_error += 1;
-						warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
-						continue;
-					}
+					let rc = match ReclaimKey::decode_key(k) {
+						Ok(rc) => rc,
+						Err(e) => {
+							count_error += 1;
+							warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
+							continue;
+						}
+					};
 					// The state carries both the observation stamp the grace is
 					// measured from and the resume cursor a partly-reclaimed prefix
 					// continues at, so it is read before either is consulted.
@@ -7580,15 +7653,21 @@ impl Datastore {
 							// the reclaim. A typed cursor CAS cannot use unreadable bytes as
 							// its expected value, and a blind repair could resurrect a claim
 							// concurrently cancelled on another node.
+							// A doc-ID entry's lost state may have held a cursor, so
+							// the space it names may be torn. It is repaired with an
+							// empty cursor, which reads as started to a claim
+							// ([`ReclaimKind::is_doc_id`]) and restarts the reclaim
+							// from the head of its prefix.
 							let repaired = ReclaimState {
 								observed_ms: if grace.is_zero() {
 									0
 								} else {
 									now_ms
 								},
-								cursor: None,
+								cursor: rc.kind.is_doc_id().then(Vec::new),
 							};
 							to_stamp.push((k.clone(), v.clone(), repaired.clone()));
+							dbs.reclaim_sightings.lock().remove(k.as_slice());
 							// Zero-grace callers may reclaim immediately after the
 							// conditional repair commits. If that repair loses a race, the
 							// page's own CAS sees that `repaired` is not current and stops.
@@ -7596,6 +7675,7 @@ impl Datastore {
 								candidates.push(ReclaimCandidate {
 									observed_ms: repaired.observed_ms,
 									key: k.clone(),
+									rc: rc.into_owned(),
 									state: repaired,
 								});
 								if candidates.len() > RECLAIM_BATCH_SIZE as usize {
@@ -7608,8 +7688,71 @@ impl Datastore {
 					// A zero grace reclaims immediately, skipping the
 					// observe-then-age dance (tests / harness teardown — no
 					// concurrent readers).
+					let mut observed_ms = state.observed_ms;
+					// Only an untouched doc-ID entry is aged from a sighting. One that
+					// carries a stamp or a cursor has a durable record of its own, and
+					// its sighting is no longer needed.
+					let untouched_doc_id =
+						rc.kind.is_doc_id() && observed_ms == 0 && state.cursor.is_none();
+					if rc.kind.is_doc_id() && !untouched_doc_id {
+						dbs.reclaim_sightings.lock().remove(k.as_slice());
+					}
 					if !grace.is_zero() {
-						if state.observed_ms == 0 {
+						if untouched_doc_id {
+							// First sighting of an unstamped doc-ID entry: held in
+							// memory rather than written, so a claim on it meets no
+							// stamp ([`Self::reclaim_sightings`]). Not a candidate this
+							// pass: its grace starts now. One queued past the backstop
+							// with no sighting held is stamped instead, so a sighting
+							// forgotten on every restart or lease move cannot hold it
+							// back for good. Past it means queued at least twice the
+							// grace before now, by its `uid`, and before this node's
+							// sightings began ([`Self::reclaim_sightings_since`]): an
+							// entry queued since then that holds no sighting is new to
+							// this node, however long its `REMOVE` stayed open before
+							// it committed. A `uid` with no timestamp is past it, and
+							// so is one further ahead of this node's clock than the
+							// backstop: a `uid` that far ahead came from a clock that
+							// cannot date the entry, and would otherwise hold the
+							// backstop off until that clock's time.
+							let sightings_since = dbs
+								.reclaim_sightings_since
+								.load(std::sync::atomic::Ordering::Relaxed);
+							let past_backstop = rc.uid.get_timestamp().is_none_or(|t| {
+								let (secs, nanos) = t.to_unix();
+								let queued_ms = secs
+									.saturating_mul(1000)
+									.saturating_add(u64::from(nanos / 1_000_000));
+								match queued_ms.checked_sub(now_ms) {
+									Some(ahead) => ahead >= sighting_backstop_ms,
+									None => {
+										now_ms - queued_ms >= sighting_backstop_ms
+											&& queued_ms < sightings_since
+									}
+								}
+							});
+							match dbs.reclaim_sightings.lock().entry(k.clone()) {
+								std::collections::btree_map::Entry::Occupied(seen) => {
+									observed_ms = *seen.get()
+								}
+								std::collections::btree_map::Entry::Vacant(slot) => {
+									if past_backstop {
+										to_stamp.push((
+											k.clone(),
+											v.clone(),
+											ReclaimState {
+												observed_ms: now_ms,
+												cursor: None,
+											},
+										));
+									} else {
+										slot.insert(now_ms);
+									}
+									due(now_ms.saturating_add(grace_ms));
+									continue;
+								}
+							}
+						} else if observed_ms == 0 {
 							// First sighting of this committed entry — record an
 							// observation time (>= commit) and defer reclaim. Aging
 							// is measured from here, never from the pre-commit
@@ -7629,14 +7772,15 @@ impl Datastore {
 						// observed for at least `grace`, by which point any
 						// transaction that could still read it is behind the MVCC
 						// GC safepoint.
-						if now_ms.saturating_sub(state.observed_ms) < grace_ms {
-							due(state.observed_ms.saturating_add(grace_ms));
+						if now_ms.saturating_sub(observed_ms) < grace_ms {
+							due(observed_ms.saturating_add(grace_ms));
 							continue;
 						}
 					}
 					candidates.push(ReclaimCandidate {
-						observed_ms: state.observed_ms,
+						observed_ms,
 						key: k.clone(),
+						rc: rc.into_owned(),
 						state,
 					});
 					if candidates.len() > RECLAIM_BATCH_SIZE as usize {
@@ -7704,8 +7848,9 @@ impl Datastore {
 					}
 				}
 				// The batch that reaches the end the scan began with ends it: what
-				// lies past that key was queued since, and is the next scan's.
-				if last >= end {
+				// lies past that key was queued since, and is the next scan's. A short
+				// batch ends it too, having found nothing past its last entry.
+				if exhausted {
 					break;
 				}
 				// Seek past the batch just walked.
@@ -7751,19 +7896,18 @@ impl Datastore {
 					break;
 				}
 				let ReclaimCandidate {
+					observed_ms,
 					key,
+					rc,
 					state,
-					..
 				} = candidate;
-				// Decoded during the walk that selected it, so this cannot fail; a
-				// failure is still counted rather than panicking on it.
-				let rc = match ReclaimKey::decode_key(&key) {
-					Ok(rc) => rc,
-					Err(e) => {
-						count_error += 1;
-						warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
-						remaining = remaining.saturating_sub(1);
-						continue;
+				// The candidate carries the sighting to the page that records it. It
+				// is forgotten once the entry has a record of its own or is retired,
+				// and kept through a failure that left the entry untouched, so a retry
+				// on the next pass does not start its grace again.
+				let forget = |key: &[u8]| {
+					if rc.kind.is_doc_id() {
+						dbs.reclaim_sightings.lock().remove(key);
 					}
 				};
 				// Keys this entry may delete before the pass moves on: its share of
@@ -7802,17 +7946,24 @@ impl Datastore {
 				// rather than broken on directly, so the budget below is charged
 				// for the pages this entry did commit before the pass ends.
 				let mut lease_lost = false;
-				match dbs.reclaim_decoded(&rc, &state, mode, canceller, &mut left).await {
+				match dbs
+					.reclaim_decoded(&rc, &state, observed_ms, mode, canceller, &mut left)
+					.await
+				{
 					// The prefix is empty, so the entry has nothing left to
 					// name and can be retired.
+					// Its sighting is forgotten once the retirement below commits.
 					Ok(ReclaimOutcome::Complete) => done.push(key),
 					// Progress is durable but keys remain: leaving the entry
 					// queued is what lets a later pass resume it.
-					Ok(ReclaimOutcome::Incomplete) => incomplete = true,
+					Ok(ReclaimOutcome::Incomplete) => {
+						forget(&key);
+						incomplete = true;
+					}
 					// The entry is already gone, so it must not be added to
 					// `done`: that would delete whatever a concurrent writer
 					// put at the same key.
-					Ok(ReclaimOutcome::Cancelled) => {}
+					Ok(ReclaimOutcome::Cancelled) => forget(&key),
 					// Whichever node holds the lease now resumes from the
 					// cursors this pass committed, and the pass reports the
 					// lease elsewhere, as it does when the check before the
@@ -7863,17 +8014,33 @@ impl Datastore {
 				// completion from deleting a state advanced by another node, and
 				// makes a concurrent cancellation win cleanly on TiKV.
 				let mut condition_failed = false;
+				// The entries this transaction retires, or found already gone: only
+				// their sightings are forgotten once it commits. One whose read or
+				// delete failed stays queued, and keeps its sighting.
+				let mut retired: Vec<&[u8]> = Vec::with_capacity(done.len());
 				for k in &done {
 					let current = match txn.get(Key::from(k), None).await {
 						Ok(Some(current)) => current,
-						Ok(None) => continue,
+						Ok(None) => {
+							retired.push(k);
+							continue;
+						}
 						Err(e) => {
 							warn!(target: TARGET, "Failed to read reclaim queue entry: {e}");
 							continue;
 						}
 					};
-					match txn.del_compare(Key::from(k), Some(&current)).await {
-						Ok(()) => {}
+					let deleted = async {
+						#[cfg(test)]
+						maybe_inject_non_retryable_error(
+							NonRetryableErrorSite::ReclaimQueueRetireEntry,
+							dbs.id,
+						)?;
+						txn.del_compare(Key::from(k), Some(&current)).await
+					}
+					.await;
+					match deleted {
+						Ok(()) => retired.push(k),
 						Err(e) if super::is_conditional_write_conflict(&e) => {
 							condition_failed = true;
 							break;
@@ -7891,14 +8058,42 @@ impl Datastore {
 				// without recording that it did, so it is counted: an uncounted
 				// failure here reports as a healthy pass and leaves nothing for an
 				// operator to see but the next tick repeating the same work.
-				if let Err(e) = txn.commit().await {
-					let _ = txn.cancel().await;
-					if !super::is_conditional_write_conflict(&e) {
-						count_error += 1;
-						warn!(target: TARGET, "Failed to commit reclaim queue update: {e}");
+				let committed = async {
+					#[cfg(test)]
+					maybe_inject_retryable_conflict(
+						RetryableConflictSite::ReclaimQueueRetire,
+						dbs.id,
+					)?;
+					txn.commit().await
+				}
+				.await;
+				match committed {
+					// Retired, so their sightings name nothing. A retirement that does
+					// not commit keeps them all, and the next pass retires them at once.
+					Ok(()) => {
+						let mut sightings = dbs.reclaim_sightings.lock();
+						for k in retired {
+							sightings.remove(k);
+						}
+					}
+					Err(e) => {
+						let _ = txn.cancel().await;
+						if !super::is_conditional_write_conflict(&e) {
+							count_error += 1;
+							warn!(target: TARGET, "Failed to commit reclaim queue update: {e}");
+						}
 					}
 				}
 			}
+		}
+		// A node without the lease forgets the walk it held: the node holding
+		// the lease now walks from its own head, and a sighting kept across a
+		// lease that moved away and back would age an entry from before another
+		// node held it.
+		if !lease_held {
+			*dbs.reclaim_cursor.lock() = None;
+			dbs.reclaim_sightings.lock().clear();
+			dbs.reclaim_sightings_since.store(0, std::sync::atomic::Ordering::Relaxed);
 		}
 		// A spent key budget, or a walk stopped with entries still to walk, are
 		// what end a pass with work still queued: every other exit has either
@@ -7951,15 +8146,51 @@ impl Datastore {
 		res
 	}
 
+	/// Forget the sightings ([`Self::reclaim_sightings`]) of entries after `after`
+	/// and through `through` that `held`, the batch read over that span in key
+	/// order, does not hold: entries claimed or retired since they were sighted,
+	/// whose keys are never queued again. `None` leaves that side unbounded.
+	fn prune_reclaim_sightings<V>(
+		&self,
+		after: Option<&[u8]>,
+		through: Option<&[u8]>,
+		held: &[(Vec<u8>, V)],
+	) {
+		let mut sightings = self.reclaim_sightings.lock();
+		if sightings.is_empty() {
+			return;
+		}
+		let lower = after.map_or(Bound::Unbounded, Bound::Excluded);
+		let upper = through.map_or(Bound::Unbounded, Bound::Included);
+		// `held` is a forward scan, so it is sorted by key.
+		let gone: Vec<Vec<u8>> = sightings
+			.range::<[u8], _>((lower, upper))
+			.filter(|(k, _)| held.binary_search_by(|(probe, _)| probe.as_slice().cmp(k)).is_err())
+			.map(|(k, _)| k.clone())
+			.collect();
+		for k in gone {
+			sightings.remove(&k);
+		}
+	}
+
+	/// How many sightings this node holds ([`Self::reclaim_sightings`]).
+	#[cfg(test)]
+	pub(crate) fn reclaim_sightings_len(&self) -> usize {
+		self.reclaim_sightings.lock().len()
+	}
+
 	/// Destroy the data prefix a decoded reclaim queue entry names.
 	///
 	/// Resolves the entry's kind to the byte range beneath it and hands that
 	/// range to [`Self::reclaim_range`]. All of these kinds name a subtree holding
 	/// keys of more than one type, so the range is resolved as bytes.
+	/// `observed_ms` is when the entry was first observed, which its first page
+	/// records if `state` carries no stamp.
 	async fn reclaim_decoded(
 		&self,
 		rc: &ReclaimKey<'_>,
 		state: &ReclaimState,
+		observed_ms: u64,
 		mode: ReclaimMode<'_>,
 		canceller: &CancellationToken,
 		budget: &mut u64,
@@ -8035,7 +8266,7 @@ impl Datastore {
 				DocPendingPrefix::new(rc.ns, rc.db, Cow::Borrowed(rc.tb.as_ref())).raw_range()?
 			}
 		};
-		self.reclaim_range(rc, state, prefix, mode, canceller, budget).await
+		self.reclaim_range(rc, state, observed_ms, prefix, mode, canceller, budget).await
 	}
 
 	/// Destroy every key beneath `prefix`, resuming from the queue entry's
@@ -8056,10 +8287,14 @@ impl Datastore {
 	/// progress is monotonic: a restart, a lost lease or an exhausted budget
 	/// resumes at the cursor instead of rescanning the prefix. Resuming is also
 	/// what keeps each scan off the delete tombstones the retired pages left
-	/// behind. [`ReclaimState::observed_ms`] is carried through every cursor
-	/// write unchanged — the grace gate measures from the first observation, and
+	/// behind. Every cursor write carries [`ReclaimState::observed_ms`] through
+	/// unchanged, or `observed_ms` where the entry carries no stamp — an
+	/// unstamped doc-ID entry, whose first sighting is otherwise held only in
+	/// memory. The grace gate measures from the first observation, and
 	/// restamping here would let a prefix too large for one pass reset its own
-	/// grace and never age past it.
+	/// grace and never age past it. An empty cursor marks a doc-ID entry whose
+	/// unreadable state was repaired: started, with nothing durably deleted
+	/// past the head of the prefix.
 	///
 	/// Giving up single-transaction atomicity is sound because the catalog entry
 	/// naming this prefix is already committed-removed: a partly-destroyed
@@ -8067,10 +8302,12 @@ impl Datastore {
 	///
 	/// Idempotent: a re-run on an already-empty prefix scans one empty page and
 	/// reports [`ReclaimOutcome::Complete`].
+	#[expect(clippy::too_many_arguments)]
 	async fn reclaim_range(
 		&self,
 		rc: &ReclaimKey<'_>,
 		state: &ReclaimState,
+		observed_ms: u64,
 		prefix: RawRange,
 		mode: ReclaimMode<'_>,
 		canceller: &CancellationToken,
@@ -8117,6 +8354,7 @@ impl Datastore {
 			.as_deref()
 			.is_some_and(|c| c >= prefix.start().as_slice() && c < prefix.end().as_slice());
 		let window = match &state.cursor {
+			Some(cursor) if cursor.is_empty() => prefix,
 			Some(cursor) if resumable => prefix.resume_after(cursor, Direction::Forward),
 			Some(_) => {
 				warn!(
@@ -8133,6 +8371,7 @@ impl Datastore {
 			companion: PageCompanion::ReclaimEntry {
 				rc,
 				state: state.clone(),
+				observed_ms,
 			},
 			expunge: rc.expunge == Expunge::Expunge,
 			page: RECLAIM_BATCH_SIZE,
