@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """A silo package without DIGEST must be fetched and read to pin it. This build has no extension runtime and cannot read archives, so the definition fails and says to give DIGEST."""

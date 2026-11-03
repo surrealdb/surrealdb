@@ -114,7 +114,6 @@ impl std::str::FromStr for FuncTarget {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum ExperimentalTarget {
-	Files,
 	Surrealism,
 	/// `POST /kvexport`, which serves the stored bytes of the whole keyspace.
 	KvExport,
@@ -123,7 +122,6 @@ pub enum ExperimentalTarget {
 impl fmt::Display for ExperimentalTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::Files => write!(f, "files"),
 			Self::Surrealism => write!(f, "surrealism"),
 			Self::KvExport => write!(f, "kvexport"),
 		}
@@ -139,7 +137,6 @@ impl Target for ExperimentalTarget {
 impl Target<str> for ExperimentalTarget {
 	fn matches(&self, elem: &str) -> bool {
 		match self {
-			Self::Files => elem.eq_ignore_ascii_case("files"),
 			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
 			Self::KvExport => elem.eq_ignore_ascii_case("kvexport"),
 		}
@@ -167,7 +164,6 @@ impl std::str::FromStr for ExperimentalTarget {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.trim().to_ascii_lowercase().as_str() {
-			"files" => Ok(ExperimentalTarget::Files),
 			"surrealism" => Ok(ExperimentalTarget::Surrealism),
 			"kvexport" => Ok(ExperimentalTarget::KvExport),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
@@ -1272,22 +1268,22 @@ mod tests {
 
 	#[test]
 	fn test_experimental_target() {
-		assert_eq!(ExperimentalTarget::from_str("files").unwrap(), ExperimentalTarget::Files);
 		assert_eq!(
 			ExperimentalTarget::from_str("surrealism").unwrap(),
 			ExperimentalTarget::Surrealism
 		);
-		// GQL is not an experimental target, under either spelling.
+		// Neither GQL nor files is an experimental target.
 		ExperimentalTarget::from_str("gql").unwrap_err();
+		ExperimentalTarget::from_str("files").unwrap_err();
 		ExperimentalTarget::from_str("opengql").unwrap_err();
 		ExperimentalTarget::from_str("").unwrap_err();
 
-		assert_eq!(ExperimentalTarget::Files.to_string(), "files");
+		assert_eq!(ExperimentalTarget::Surrealism.to_string(), "surrealism");
 		assert_eq!(
 			ExperimentalTarget::from_str(&ExperimentalTarget::Surrealism.to_string()).unwrap(),
 			ExperimentalTarget::Surrealism
 		);
-		assert!(!ExperimentalTarget::Files.matches("surrealism"));
+		assert!(!ExperimentalTarget::Surrealism.matches("kvexport"));
 
 		assert_eq!(ExperimentalTarget::from_str("kvexport").unwrap(), ExperimentalTarget::KvExport);
 		assert_eq!(ExperimentalTarget::KvExport.to_string(), "kvexport");

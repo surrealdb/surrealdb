@@ -3,7 +3,7 @@
 imports = ["upgrade/define/3.00.00_module_wasm_import.surql"]
 
 [env.capabilities]
-allow-experimental = ["files", "surrealism"]
+allow-experimental = ["surrealism"]
 
 [test]
 upgrade = true

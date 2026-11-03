@@ -3915,15 +3915,11 @@ mod binding {
 		bind_request(&input, &cx).await.expect("the request binds")
 	}
 
-	/// Binds `sql`, and answers the container the binder built.
-	/// `sql` bound as a request, parsed with the experimental files feature on so that the
-	/// bucket statements are written.
+	/// Binds `sql` as a request, and answers the container the binder built.
 	async fn bind(sql: &str) -> Ir {
 		use crate::dbs::Capabilities;
-		use crate::dbs::capabilities::{ExperimentalTarget, Targets};
 		let env = Env::new();
-		let capabilities = Capabilities::all()
-			.with_experimental(Targets::Some([ExperimentalTarget::Files].into()));
+		let capabilities = Capabilities::all();
 		let parsed = crate::syn::parse_with_capabilities(
 			sql,
 			&capabilities,

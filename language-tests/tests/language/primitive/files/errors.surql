@@ -2,9 +2,6 @@
 
 [test]
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 # 0: Put on non-existent bucket
 [[test.results]]
 error = "The bucket 'nonexistent' does not exist"

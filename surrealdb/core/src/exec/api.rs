@@ -386,16 +386,6 @@ async fn call_middleware(
 					"Unknown function '{name}' - not found in function registry"
 				))
 			})?;
-			if let Some(target) = crate::exec::function::experimental_target(name)
-				&& !eval.capabilities().allows_experimental(&target)
-			{
-				return Err(ControlFlow::Err(anyhow::Error::new(
-					crate::exec::Error::InvalidFunction {
-						name: name.clone(),
-						message: format!("Experimental feature {target} is not enabled"),
-					},
-				)));
-			}
 			if builtin.is_pure() && !builtin.is_async() {
 				builtin.invoke(args).map_err(ControlFlow::Err)
 			} else {

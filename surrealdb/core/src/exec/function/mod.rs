@@ -46,7 +46,7 @@ pub(crate) use index::{TERM_READS, TERM_STATES_READ};
 pub use method::{MethodDescriptor, ValueKind};
 pub use projection::ProjectionFunction;
 pub use registry::FunctionRegistry;
-pub(crate) use registry::{FnKind, check_fallibility_row, experimental_target};
+pub(crate) use registry::{FnKind, check_fallibility_row};
 pub use signature::{ReturnRule, Signature};
 
 use crate::exec::ir::iface::Fallibility;

@@ -77,7 +77,6 @@ fn an_analyzer_function_renders_as_ext() {
 fn import(src: &str) -> String {
 	let settings = parser::ParserSettings {
 		surrealism_enabled: true,
-		files_enabled: true,
 		import: true,
 		..Default::default()
 	};

@@ -10,7 +10,7 @@ use surrealdb_parser_next::ast::{
 use surrealdb_parser_next::lex::decode_duration;
 use surrealdb_strand::{Strand as Ident, Strand, TableName};
 
-use super::{FILES_DISABLED, Lower, R, Reject, SURREALISM_DISABLED};
+use super::{Lower, R, Reject, SURREALISM_DISABLED};
 use crate::expr::access::AccessDuration;
 use crate::expr::access_type::{
 	BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess, JwtAccessIssue,
@@ -1542,9 +1542,6 @@ impl Lower<'_> {
 
 	/// Rejects a `DEFINE`, `ALTER` or `REMOVE` of a kind whose feature is off.
 	fn gate_kind(&self, kind: u8) -> R<()> {
-		if kind == K::Bucket as u8 && !self.opts.files {
-			return Err(Reject::new(FILES_DISABLED));
-		}
 		if kind == K::Module as u8 && !self.opts.surrealism {
 			return Err(Reject::new(SURREALISM_DISABLED));
 		}

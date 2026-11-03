@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """A Sigstore SIGNER needs its anchor (`ca`, `log`) and its identity rule (`issuer`, `identity`): a certificate authority vouches for many identities, so an anchor without a rule would accept any of them."""

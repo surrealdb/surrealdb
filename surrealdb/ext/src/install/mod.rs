@@ -526,10 +526,7 @@ mod tests {
 
 	async fn memory_db() -> Surreal<Any> {
 		let mut caps = Capabilities::all();
-		caps.allow_experimental_features(&[
-			ExperimentalFeature::Files,
-			ExperimentalFeature::Surrealism,
-		]);
+		caps.allow_experimental_features(&[ExperimentalFeature::Surrealism]);
 		let db =
 			connect(("mem://", Config::default().capabilities(caps))).await.expect("mem engine");
 		db.use_ns("test").use_db("test").await.expect("select ns/db");

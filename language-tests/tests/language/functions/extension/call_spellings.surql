@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = "`ext::name::fn()` and its deprecated alias `mod::name::fn()` call the same definition, so both report the same outcome under the same `ext::` name. A call renders with the prefix it was written in, so a stored body keeps the key its projections were written to produce."

@@ -1168,7 +1168,6 @@ fn measured_builtin(
 	let plain = function.is_pure()
 		&& !function.is_async()
 		&& function.metered().is_none()
-		&& crate::exec::function::experimental_target(name).is_none()
 		&& refuse_mutating_builtin(function.name(), function.effects(), ctx.exec_ctx).is_ok();
 	plain.then_some(function)
 }
@@ -8889,14 +8888,6 @@ async fn call_builtin(
 			call.name
 		))
 	})?;
-	if let Some(target) = crate::exec::function::experimental_target(&call.name)
-		&& !ctx.capabilities().allows_experimental(&target)
-	{
-		return Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::InvalidFunction {
-			name: call.name.clone(),
-			message: format!("Experimental feature {target} is not enabled"),
-		})));
-	}
 	refuse_mutating_builtin(func.name(), func.effects(), ctx.exec_ctx)?;
 	let mut ctx = ctx;
 	ctx.plan_depth = ctx.plan_depth.max(call.plan_depth);
@@ -9748,14 +9739,6 @@ async fn call_method(
 	func_args.push(recv);
 	func_args.extend(args);
 	ctx.check_allowed_function(func.name()).map_err(ControlFlow::Err)?;
-	if let Some(target) = crate::exec::function::experimental_target(func.name())
-		&& !ctx.capabilities().allows_experimental(&target)
-	{
-		return Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::InvalidFunction {
-			name: name.to_string(),
-			message: format!("Experimental feature {target} is not enabled"),
-		})));
-	}
 	refuse_mutating_builtin(func.name(), func.effects(), ctx.exec_ctx)?;
 	let result = invoke_builtin(func, func_args, &ctx).await?;
 	let writing = method.writing || ctx.exec_ctx.root().writing;

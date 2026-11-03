@@ -1739,12 +1739,10 @@ mod tests {
 				true,
 				"1".to_string(),
 			),
-			// 7 - Specific experimental feature enabled
+			// 7 - Buckets need no experimental feature
 			(
 				Datastore::builder()
-					.with_capabilities(
-						Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
-					)
+					.with_capabilities(Capabilities::default())
 					.build_with_path("memory")
 					.await
 					.unwrap(),
@@ -1758,15 +1756,15 @@ mod tests {
 				Datastore::builder()
 					.with_capabilities(
 						Capabilities::default()
-							.without_experimental(ExperimentalTarget::Files.into()),
+							.without_experimental(ExperimentalTarget::Surrealism.into()),
 					)
 					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner().with_ns("test").with_db("test"),
-				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
+				"RETURN ext::nonexistent();".to_string(),
 				false,
-				"expected the experimental files feature to be enabled".to_string(),
+				"Surrealism extensions are not enabled".to_string(),
 			),
 			//
 			// 9 - Some functions are not allowed

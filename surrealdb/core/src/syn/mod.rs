@@ -49,7 +49,6 @@ pub fn settings_from_capabilities_config(
 	config: &ParserConfig,
 ) -> ParserSettings {
 	ParserSettings {
-		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
 		surrealism_enabled: cap.allows_experimental(&ExperimentalTarget::Surrealism),
 		..ParserSettings::from_config(config)
 	}

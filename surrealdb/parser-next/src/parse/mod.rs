@@ -65,9 +65,6 @@ pub struct Limits {
 	/// at the established position; without it, patterns are left to the
 	/// consumer.
 	pub regex: Option<fn(&str, u32, u32) -> bool>,
-	/// File literals and buckets are rejected, at the established positions,
-	/// with the files feature off.
-	pub no_files: bool,
 	/// Surrealism extensions are rejected, at the established positions, with
 	/// the feature off.
 	pub no_surrealism: bool,
@@ -97,7 +94,6 @@ impl Default for Limits {
 			strict_record_ids: false,
 			builtin: None,
 			regex: None,
-			no_files: false,
 			no_surrealism: false,
 			import: false,
 		}
@@ -130,7 +126,6 @@ impl Limits {
 			strict_record_ids: false,
 			builtin: None,
 			regex: None,
-			no_files: false,
 			no_surrealism: false,
 			import: false,
 		}
@@ -659,18 +654,6 @@ impl<'a, 's> Parser<'a, 's> {
 			Diag::message(t.start, t.end, "Surrealism extensions are not enabled")
 				.with_label(label),
 		)
-	}
-
-	/// The established error for a files construct with the feature off, at `t`.
-	fn files_off(&mut self, t: Tok) -> Stop {
-		self.diag(Diag {
-			start: t.start,
-			end: t.end,
-			kind: DiagKind::Unexpected,
-			msg: "the experimental files feature to be enabled",
-			label: "",
-			extra: None,
-		})
 	}
 
 	/// Consumes `kind` directly after the previous token: whitespace before

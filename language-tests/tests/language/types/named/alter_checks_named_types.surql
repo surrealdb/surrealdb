@@ -3,9 +3,6 @@
 namespace = true
 database = true
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 reason = "An ALTER that sets a clause or a permission naming a type the database does not define is refused, as DEFINE refuses it, and leaves the definition as it was; an ALTER IF EXISTS of a missing definition judges nothing, and a clause naming a defined type is stored"
 

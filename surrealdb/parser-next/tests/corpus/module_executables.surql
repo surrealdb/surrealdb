@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = "Granting the `surrealism` experimental capability satisfies the DEFINE MODULE gate, which is purely a runtime check: the statement parses and writes its definition to the database catalog. `files` is granted alongside it because the file executable form is a file literal, which carries its own experimental gate. Defining a module records catalog metadata only and needs bleifm r os a file literal, which carries its own experimental gate. Defining a module records catalog metadata only and needs no Surrealism runtime, so it succeed FULL', "silo::acme::pkg::<1.0.0>": 'DEFINE MODULE silo::acme::pkg::<1.0.0> UNSIGNED PERMISSIONS FULL' }, prams: {  }, sequences: {  }, tables: {  }, users: {  } }"""

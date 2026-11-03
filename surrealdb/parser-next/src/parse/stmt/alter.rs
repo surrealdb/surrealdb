@@ -50,9 +50,6 @@ impl<'a, 's> Parser<'a, 's> {
 		} else {
 			return Err(self.unexpected("a alter statement keyword"));
 		};
-		if self.limits.no_files && kind == DefineKind::Bucket as u8 {
-			return Err(self.files_off(t));
-		}
 		self.bump();
 		let mut deprecated = 0;
 		if kind == DefineKind::Module as u8 {

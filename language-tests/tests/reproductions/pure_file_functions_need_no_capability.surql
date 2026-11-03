@@ -1,9 +1,6 @@
 /**
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
-reason = "With the experimental target enabled the same calls run normally, so the gate does not cost the feature when it is on"
+reason = "type::file, file::bucket and file::key run with no capability enabled"
 
 [[test.results]]
 value = 'f"bucket:/key"'

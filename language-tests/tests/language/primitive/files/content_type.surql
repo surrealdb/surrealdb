@@ -3,9 +3,6 @@
 namespace = true
 database = true
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 reason = "A content type is stored only when given, never inferred from the key, reported by file::head but not by file::list, normalised so application/octet-stream means none, and refused rather than dropped when invalid or misspelled."
 

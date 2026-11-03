@@ -8,10 +8,10 @@
 use surrealdb::Surreal;
 use surrealdb::engine::local::Mem;
 use surrealdb::opt::Config;
-use surrealdb::opt::capabilities::{Capabilities, ExperimentalFeature};
+use surrealdb::opt::capabilities::Capabilities;
 
 fn capabilities() -> Capabilities {
-	Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::Files)
+	Capabilities::new()
 }
 
 fn file_url(dir: &std::path::Path) -> String {

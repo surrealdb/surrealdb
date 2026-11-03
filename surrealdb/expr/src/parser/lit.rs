@@ -838,7 +838,6 @@ pub fn legacy_strand(s: String) -> Literal {
 			src: &s,
 			opts: Options {
 				legacy_strands: false,
-				files: false,
 				surrealism: false,
 			},
 		};

@@ -936,7 +936,7 @@ mod tests {
 	async fn no_other_capability_turns_the_route_on_or_off() -> Result<()> {
 		assert!(!enabled_with(Capabilities::all()).await?, "`all` enabled the route");
 		let other = Capabilities::default()
-			.with_experimental(Targets::Some([ExperimentalTarget::Files].into()));
+			.with_experimental(Targets::Some([ExperimentalTarget::Surrealism].into()));
 		assert!(!enabled_with(other).await?, "another experimental target enabled it");
 		let denied_experimental = kvexport_allowed()
 			.without_experimental(Targets::Some([ExperimentalTarget::KvExport].into()));

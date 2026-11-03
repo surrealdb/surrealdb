@@ -301,9 +301,9 @@ pub fn record_id(input: &str) -> Result<PublicRecordId, ParseError> {
 
 /// Re-parses the canonical kind-grammar text a catalog definition stores for
 /// one of its type-annotated fields (e.g. `StoredFieldDefinition.field_kind`,
-/// `StoredFunctionDefinition.args`/`.returns`). A kind can embed a `<file>`
-/// bucket restriction or other experimental-gated grammar, so this parses
-/// under [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
+/// `StoredFunctionDefinition.args`/`.returns`). Stored text must read back
+/// whatever the live capabilities, so this parses under
+/// [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
 /// profile — unlike [`kind`], which parses fresh input. The whole of `input`
 /// must be consumed, for the reason [`expr_for_definition`] documents.
 ///

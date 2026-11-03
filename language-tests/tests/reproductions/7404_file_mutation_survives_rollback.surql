@@ -3,9 +3,6 @@
 namespace = true
 database = true
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 reason = """
 Issue 7404: file writes are not transactional. `file::put`, `file::delete` and `file::rename`

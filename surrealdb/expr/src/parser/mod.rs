@@ -102,7 +102,6 @@ pub struct Lower<'a> {
 	pub opts: Options,
 }
 
-pub(crate) const FILES_DISABLED: &str = "the experimental files feature to be enabled";
 pub(crate) const SURREALISM_DISABLED: &str = "Surrealism extensions are not enabled";
 
 /// The deprecation warning for each spelling in `bits`, a set of
@@ -525,9 +524,6 @@ impl<'a> Lower<'a> {
 					Expr::Literal(Literal::String(Strand::new(s)))
 				}
 				b'f' => {
-					if !self.opts.files {
-						return Err(Reject::new(FILES_DISABLED));
-					}
 					let mut s = String::new();
 					if !decode::unescape(decode::strip_delims(self.text(id)), &mut s) {
 						return Err(Reject::new("invalid escape"));

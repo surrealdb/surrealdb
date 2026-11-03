@@ -3,9 +3,6 @@
 namespace = true
 database = true
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 reason = "REMOVE TYPE is refused while a field's REFERENCE ON DELETE THEN or MATERIALIZE WHERE, an index's COUNT condition, a bucket's permission or the API config's permission names the type"
 

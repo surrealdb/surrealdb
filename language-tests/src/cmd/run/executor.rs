@@ -216,9 +216,6 @@ impl Executor for EmbeddedExecutor {
 		match case.dialect {
 			Dialect::SurrealQl => {
 				let settings = ParserSettings {
-					files_enabled: dbs
-						.get_capabilities()
-						.allows_experimental(&ExperimentalTarget::Files),
 					surrealism_enabled: dbs
 						.get_capabilities()
 						.allows_experimental(&ExperimentalTarget::Surrealism),
@@ -1231,7 +1228,7 @@ mod remote_executor {
 					// source to the server to execute.
 					//
 					// We can't read the remote server's capabilities from here, so we
-					// assume the Files/Surrealism experimental syntax is enabled. This
+					// assume the Surrealism experimental syntax is enabled. This
 					// parse exists only to reproduce the ParserError *result type*; the
 					// server's actual capabilities still govern execution. The only
 					// divergence is a test using that experimental syntax against an
@@ -1241,7 +1238,6 @@ mod remote_executor {
 					// (such tests are best run against an endpoint with matching
 					// capabilities).
 					let settings = ParserSettings {
-						files_enabled: true,
 						surrealism_enabled: true,
 						..Default::default()
 					};

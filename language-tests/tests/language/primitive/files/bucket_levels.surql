@@ -4,9 +4,6 @@ namespace = false
 database = false
 auth = { level = "owner" }
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 reason = "A bucket is defined at the root, a namespace or a database, and a file pointer reaches the buckets at the level of the session: a root session the root's, a session with a namespace that namespace's, a session with a database that database's."
 

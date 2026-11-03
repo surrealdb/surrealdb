@@ -18,10 +18,6 @@ value = "NONE"
 
 [[test.results]]
 value = "{  }"
-
-[env.capabilities]
-allow-experimental = ["files"]
-
 */
 LET $name = "test";
 LET $comment = "test comment";

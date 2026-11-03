@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """DIGEST takes a string literal, not an expression."""

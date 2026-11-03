@@ -28,8 +28,6 @@ pub enum PlannerStrategy {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum ExperimentalFeature {
-	/// Enable the Files feature.
-	Files,
 	/// Enable Surrealism feature.
 	Surrealism,
 	/// Enable the `POST /kvexport` endpoint.
@@ -41,7 +39,6 @@ pub enum ExperimentalFeature {
 impl From<&ExperimentalFeature> for ExperimentalTarget {
 	fn from(feature: &ExperimentalFeature) -> Self {
 		match feature {
-			ExperimentalFeature::Files => ExperimentalTarget::Files,
 			ExperimentalFeature::Surrealism => ExperimentalTarget::Surrealism,
 			ExperimentalFeature::KvExport => ExperimentalTarget::KvExport,
 		}

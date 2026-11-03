@@ -21,7 +21,7 @@ use surrealdb_parser_next::decode;
 use surrealdb_parser_next::lex::decode_duration;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::{CHECK_NAMES, FILES_DISABLED, Lower, R, Reject, binary, lit};
+use super::{CHECK_NAMES, Lower, R, Reject, binary, lit};
 use crate::expr::operator::BindingPower;
 use crate::expr::{BinaryOperator, Function, Literal};
 
@@ -881,9 +881,6 @@ impl Lower<'_> {
 				}
 			}
 			b'f' => {
-				if !self.opts.files {
-					return Err(Reject::new(FILES_DISABLED));
-				}
 				let mut s = String::new();
 				if !decode::unescape(decode::strip_delims(self.text(id)), &mut s) {
 					return Err(Reject::new("invalid escape"));
@@ -2059,7 +2056,6 @@ mod tests {
 				..Options::ALL
 			},
 			Options {
-				files: false,
 				surrealism: false,
 				legacy_strands: false,
 			},

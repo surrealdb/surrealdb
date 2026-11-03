@@ -172,7 +172,6 @@ fn probe(parser: &str, family: &str, depth: usize, stack: usize) -> ! {
 					strict_record_ids: false,
 					builtin: None,
 					regex: None,
-					no_files: false,
 					no_surrealism: false,
 					import: false,
 				};
@@ -464,7 +463,6 @@ fn main() {
 					strict_record_ids: false,
 					builtin: None,
 					regex: None,
-					no_files: false,
 					no_surrealism: false,
 					import: false,
 				};

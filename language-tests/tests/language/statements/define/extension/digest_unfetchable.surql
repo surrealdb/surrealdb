@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """Without DIGEST the definition must read its archive to pin it. This build has no extension runtime and cannot read archives, so the definition fails before it fetches anything, rather than store an extension that is pinned to nothing."""

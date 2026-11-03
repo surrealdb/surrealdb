@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = "REMOVE EXTENSION removes a definition by its `ext::` name. The deprecated REMOVE MODULE and `mod::` spellings remove the same definition, and an absent extension errors unless IF EXISTS is given."

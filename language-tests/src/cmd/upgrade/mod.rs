@@ -33,8 +33,10 @@ use crate::version::version_matches;
 pub struct UpgradeTestConfig {
 	from: DsVersion,
 	to: DsVersion,
-	/// The `to` version already resolved by `run()`. Re-deriving it per task
-	/// would spawn `cargo metadata` for every scheduled run of a path-version.
+	/// The `from` and `to` versions already resolved by `run()`. Re-deriving
+	/// them per task would spawn `cargo metadata` for every scheduled run of a
+	/// path-version.
+	from_version: Version,
 	to_version: Version,
 	port: u16,
 	path: String,
@@ -579,6 +581,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 					res.push(UpgradeTestConfig {
 						from: from.clone(),
 						to: to.clone(),
+						from_version: from_v.clone(),
 						to_version: to_v.clone(),
 						// Set later.
 						port: 0,
@@ -1471,6 +1474,7 @@ async fn run_chain_task_inner(
 			let mut process = process::SurrealProcess::new(
 				&config,
 				version,
+				actual,
 				dir,
 				run.config.port,
 				&experimental,
@@ -1651,6 +1655,7 @@ async fn run_task_inner(
 	let mut process = process::SurrealProcess::new(
 		&config,
 		&run.config.from,
+		&run.config.from_version,
 		dir,
 		run.config.port,
 		&experimental,
@@ -1679,6 +1684,7 @@ async fn run_task_inner(
 		let process = process::SurrealProcess::new(
 			&config,
 			&run.config.to,
+			&run.config.to_version,
 			dir,
 			run.config.port,
 			&experimental,

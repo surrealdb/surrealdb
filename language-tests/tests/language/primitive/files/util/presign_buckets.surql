@@ -5,10 +5,6 @@
 
 [test]
 run = false
-
-[env.capabilities]
-allow-experimental = ["files"]
-
 */
 
 -- Downloads only, and only for the lifetimes this clause allows. `$expires` is

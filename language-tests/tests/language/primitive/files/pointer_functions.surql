@@ -2,9 +2,6 @@
 
 [test]
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [[test.results]]
 value = 'f"test:/a.txt"'
 

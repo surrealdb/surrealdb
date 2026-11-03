@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = "ALTER EXTENSION changes a definition addressed by its `ext::` name, and the deprecated ALTER MODULE and `mod::` spellings address the same definition."

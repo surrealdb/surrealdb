@@ -1,7 +1,6 @@
 //! File functions for the engine.
 //!
 //! These provide file storage functionality for working with buckets.
-//! Note: File functions require the experimental "files" capability to be enabled.
 //!
 //! File writes are not transactional. `file::put`, `file::delete`, `file::copy`,
 //! `file::rename` and their `_if_not_exists` variants act on the bucket's object
@@ -24,10 +23,9 @@ use crate::buc::store::{
 use crate::buc::{BucketOperation, Error as BucError};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, LogicalPermissionBody};
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::EngineError;
 use crate::exec::function::ScalarFunction;
-use crate::exec::{Error as ExecError, EvalContext, ExecutionContext};
+use crate::exec::{EvalContext, ExecutionContext};
 use crate::expr::Error as ExprError;
 use crate::expr::logical::LogicalPermission;
 use crate::fnc::args::{FromArgs, Optional};
@@ -59,16 +57,6 @@ struct StreamingBucketOps<'a> {
 impl<'a> StreamingBucketOps<'a> {
 	/// Creates a new StreamingBucketOps for the specified bucket.
 	async fn new(ctx: &'a EvalContext<'_>, bucket_name: &str) -> Result<Self> {
-		// Check experimental capability
-		let caps = ctx.capabilities();
-		if !caps.allows_experimental(&ExperimentalTarget::Files) {
-			return Err(ExecError::InvalidFunction {
-				name: "file::*".to_string(),
-				message: "Experimental capability `files` is not enabled".to_string(),
-			}
-			.into());
-		}
-
 		// Get the FrozenContext and the Options for this call.
 		let frozen_ctx = ctx.exec_ctx.ctx();
 		let opt = ctx.exec_ctx.options().ok_or_else(|| {

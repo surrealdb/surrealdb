@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = "An analyzer FUNCTION clause names an extension function as `ext::` or its deprecated alias `mod::`. Both store the same reference, which renders as `ext::`."

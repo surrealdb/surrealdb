@@ -3,7 +3,7 @@
 imports = ["upgrade/define/3.00.00_module_definition_clauses_import.surql"]
 
 [env.capabilities]
-allow-experimental = ["files", "surrealism"]
+allow-experimental = ["surrealism"]
 
 [test]
 upgrade = true

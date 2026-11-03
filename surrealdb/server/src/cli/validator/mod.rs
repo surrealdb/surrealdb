@@ -414,6 +414,13 @@ mod tests {
 	}
 
 	#[test]
+	fn files_is_not_an_experimental_target() {
+		assert!(experimental_targets("files").is_err());
+		assert!(experimental_targets("surrealism,files").is_err());
+		assert!(experimental_targets("surrealism").is_ok());
+	}
+
+	#[test]
 	fn an_unknown_strategy_is_refused() {
 		assert!(retired_planner_strategy("nonsense").is_err());
 	}

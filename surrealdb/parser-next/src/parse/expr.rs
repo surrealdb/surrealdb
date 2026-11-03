@@ -1311,9 +1311,6 @@ impl<'a, 's> Parser<'a, 's> {
 		if t.kind == T::Digits {
 			self.number(t.start, false)
 		} else if t.kind == T::Str {
-			if t.aux() == b'f' && self.limits.no_files {
-				return Err(self.files_off(t));
-			}
 			self.bump();
 			Ok(self.leaf(Tag::Str, t.aux(), t))
 		} else if t.kind == T::Param {

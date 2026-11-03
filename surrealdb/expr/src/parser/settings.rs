@@ -100,8 +100,6 @@ pub struct ParserSettings {
 	/// per node), overflowing the call stack on long enough chains — a denial
 	/// of service reachable from query text alone.
 	pub expr_recursion_limit: usize,
-	/// Whether the files feature is enabled
-	pub files_enabled: bool,
 	/// Whether the surrealism feature is enabled
 	pub surrealism_enabled: bool,
 	/// Whether to allow JSON-style UTF-16 surrogate pairs in \uXXXX escapes.
@@ -120,7 +118,6 @@ impl Default for ParserSettings {
 			object_recursion_limit: 100,
 			query_recursion_limit: 20,
 			expr_recursion_limit: 128,
-			files_enabled: false,
 			surrealism_enabled: false,
 			json_string_escapes: false,
 			import: false,
@@ -137,12 +134,12 @@ impl ParserSettings {
 	/// This profile is part of the storage wire contract and is deliberately
 	/// independent of the datastore's live capabilities and configuration:
 	///
-	/// - The full grammar is enabled (`files_enabled`, `surrealism_enabled`) because
-	///   experimental-syntax gates apply to *fresh statements* at the query boundary. Stored text
-	///   already passed that gate when the statement that produced it ran; re-gating it under the
-	///   *current* capabilities would make stored definitions undecodable after a capability
-	///   downgrade, while adding no enforcement — execution of gated features is guarded at runtime
-	///   by `Capabilities::allows_experimental` checks at each point of use.
+	/// - The full grammar is enabled (`surrealism_enabled`) because experimental-syntax gates apply
+	///   to *fresh statements* at the query boundary. Stored text already passed that gate when the
+	///   statement that produced it ran; re-gating it under the *current* capabilities would make
+	///   stored definitions undecodable after a capability downgrade, while adding no enforcement —
+	///   execution of gated features is guarded at runtime by `Capabilities::allows_experimental`
+	///   checks at each point of use.
 	/// - The recursion limits are far above the configured defaults, because the text fit within
 	///   whatever (env-tunable) limits applied where it was written and re-parsing under today's
 	///   limits would reject data that was legal to store. They are not unbounded, though, and the
@@ -166,7 +163,6 @@ impl ParserSettings {
 		object_recursion_limit: 400,
 		query_recursion_limit: 400,
 		expr_recursion_limit: 512,
-		files_enabled: true,
 		surrealism_enabled: true,
 		json_string_escapes: false,
 		import: false,
@@ -207,11 +203,10 @@ impl ParserSettings {
 	/// compile-time constant, so no configuration can put a value in storage
 	/// that this ceiling cannot read back.
 	///
-	/// Unlike [`Self::STORED_TEXT`] the grammar gates are left off. Import
+	/// Unlike [`Self::STORED_TEXT`] the Surrealism gate is left off. Import
 	/// text is a fresh statement at the query boundary rather than text this
 	/// engine previously rendered, so it is subject to the experimental-syntax
-	/// gates; callers set `files_enabled` and `surrealism_enabled` from the
-	/// live capabilities.
+	/// gate; callers set `surrealism_enabled` from the live capabilities.
 	pub const fn for_value_depth(value_depth: usize) -> Self {
 		// Framing allowance, well above the two levels an export's
 		// `INSERT [ … ];` actually adds.
@@ -222,7 +217,6 @@ impl ParserSettings {
 			object_recursion_limit: limit,
 			query_recursion_limit: limit,
 			expr_recursion_limit: limit,
-			files_enabled: false,
 			surrealism_enabled: false,
 			json_string_escapes: false,
 			import: false,
@@ -231,7 +225,6 @@ impl ParserSettings {
 
 	pub fn default_with_experimental(enabled: bool) -> Self {
 		ParserSettings {
-			files_enabled: enabled,
 			surrealism_enabled: enabled,
 			..Self::default()
 		}
@@ -254,7 +247,6 @@ impl ParserSettings {
 	/// unrestricted capability set produces.
 	pub fn all_features(config: &ParserConfig) -> Self {
 		ParserSettings {
-			files_enabled: true,
 			surrealism_enabled: true,
 			..Self::from_config(config)
 		}
@@ -274,13 +266,11 @@ impl ParserSettings {
 				strict_record_ids: !s.flexible_record_id,
 				builtin: Some(super::is_builtin),
 				regex: Some(super::is_regex),
-				no_files: !s.files_enabled,
 				no_surrealism: !s.surrealism_enabled,
 				import: s.import,
 			},
 			opts: Options {
 				legacy_strands: s.legacy_strands,
-				files: s.files_enabled,
 				surrealism: s.surrealism_enabled,
 			},
 		}

@@ -13,7 +13,6 @@ fuzz_target!(|query: Ast| {
 			object_recursion_limit: ParserSettings::STORED_TEXT.object_recursion_limit,
 			query_recursion_limit: ParserSettings::STORED_TEXT.query_recursion_limit,
 			expr_recursion_limit: ParserSettings::STORED_TEXT.expr_recursion_limit,
-			files_enabled: true,
 			surrealism_enabled: true,
 			..ParserSettings::default()
 		},

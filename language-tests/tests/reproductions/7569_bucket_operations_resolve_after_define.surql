@@ -3,9 +3,6 @@
 namespace = true
 database = true
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 reason = """
 Issue 7569: bucket operations on a freshly defined bucket resolve and run. This is a smoke test only:

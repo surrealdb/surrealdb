@@ -5,7 +5,6 @@ use anyhow::Result;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::fnc::closure::FrameClosureEvaluator;
 use crate::val::Value;
@@ -65,21 +64,13 @@ pub mod vector;
 /// `cpu_intensive`.
 macro_rules! dispatch {
     ($ctx: ident, $name: ident, $args: expr_2021, $message: expr_2021,
-        $($(exp($exp_target: ident))? $function_name: literal =>
+        $($function_name: literal =>
             $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr_2021))* $(.$await:tt)*,)+
     ) => {
         {
             match $name {
                 $(
                     $function_name => {
-                        $(
-                            if !$ctx.get_capabilities().allows_experimental(&ExperimentalTarget::$exp_target) {
-                                return Err(::anyhow::Error::new($crate::exec::Error::InvalidFunction {
-                                    name: String::from($name),
-                                    message: format!("Experimental feature {} is not enabled", ExperimentalTarget::$exp_target),
-                                }));
-                            }
-                        )?
                         let args = args::FromArgs::from_args($name, $args)?;
                         #[allow(clippy::redundant_closure_call)]
                         $($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
@@ -206,8 +197,8 @@ pub fn synchronous(
 		"duration::from_secs" => duration::from::secs,
 		"duration::from_weeks" => duration::from::weeks,
 		//
-		exp(Files) "file::bucket" => file::bucket,
-		exp(Files) "file::key" => file::key,
+		"file::bucket" => file::bucket,
+		"file::key" => file::key,
 		//
 		"encoding::base64::decode" => encoding::base64::decode,
 		"encoding::base64::encode" => encoding::base64::encode,
@@ -465,7 +456,7 @@ pub fn synchronous(
 		"type::duration" => r#type::duration,
 		"type::f16" => r#type::f16,
 		"type::f32" => r#type::f32,
-		exp(Files) "type::file" => r#type::file,
+		"type::file" => r#type::file,
 		"type::float" => r#type::float,
 		"type::geometry" => r#type::geometry,
 		"type::i8" => r#type::i8,
@@ -624,19 +615,19 @@ pub async fn asynchronous(
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
 		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::r#gen.await,
 		//
-		exp(Files) "file::put" => file::put((ctx, opt, doc)).await,
-		exp(Files) "file::put_if_not_exists" => file::put_if_not_exists((ctx, opt, doc)).await,
-		exp(Files) "file::get" => file::get((ctx, opt, doc)).await,
-		exp(Files) "file::presign_get" => file::presign_get((ctx, opt, doc)).await,
-		exp(Files) "file::presign_put" => file::presign_put((ctx, opt, doc)).await,
-		exp(Files) "file::head" => file::head((ctx, opt, doc)).await,
-		exp(Files) "file::delete" => file::delete((ctx, opt, doc)).await,
-		exp(Files) "file::copy" => file::copy((ctx, opt, doc)).await,
-		exp(Files) "file::copy_if_not_exists" => file::copy_if_not_exists((ctx, opt, doc)).await,
-		exp(Files) "file::rename" => file::rename((ctx, opt, doc)).await,
-		exp(Files) "file::rename_if_not_exists" => file::rename_if_not_exists((ctx, opt, doc)).await,
-		exp(Files) "file::exists" => file::exists((ctx, opt, doc)).await,
-		exp(Files) "file::list" => file::list((ctx, opt, doc)).await,
+		"file::put" => file::put((ctx, opt, doc)).await,
+		"file::put_if_not_exists" => file::put_if_not_exists((ctx, opt, doc)).await,
+		"file::get" => file::get((ctx, opt, doc)).await,
+		"file::presign_get" => file::presign_get((ctx, opt, doc)).await,
+		"file::presign_put" => file::presign_put((ctx, opt, doc)).await,
+		"file::head" => file::head((ctx, opt, doc)).await,
+		"file::delete" => file::delete((ctx, opt, doc)).await,
+		"file::copy" => file::copy((ctx, opt, doc)).await,
+		"file::copy_if_not_exists" => file::copy_if_not_exists((ctx, opt, doc)).await,
+		"file::rename" => file::rename((ctx, opt, doc)).await,
+		"file::rename_if_not_exists" => file::rename_if_not_exists((ctx, opt, doc)).await,
+		"file::exists" => file::exists((ctx, opt, doc)).await,
+		"file::list" => file::list((ctx, opt, doc)).await,
 		//
 		"http::head" => http::head(ctx).await,
 		"http::get" => http::get(ctx).await,

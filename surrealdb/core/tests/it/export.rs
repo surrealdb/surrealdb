@@ -11,7 +11,7 @@ use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_iam::{Actor, Auth, Level, Role};
-use surrealdb_rpc::capabilities::{Capabilities, ExperimentalTarget, Targets};
+use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_types::Value;
 
 use crate::helpers::new_ns_db;
@@ -30,11 +30,9 @@ async fn ds_with_batch_size(batch: Option<usize>) -> Result<Arc<Datastore>> {
 	Ok(ds)
 }
 
-/// Builds a memory datastore with the experimental `files` feature enabled, for a
-/// fixture that stores a file value.
+/// Builds a memory datastore for a fixture that stores a file value.
 async fn ds_with_files() -> Result<Arc<Datastore>> {
-	let caps =
-		Capabilities::all().with_experimental(Targets::Some([ExperimentalTarget::Files].into()));
+	let caps = Capabilities::all();
 	let ds = Datastore::builder().with_capabilities(caps).build_with_path("memory").await?;
 	new_ns_db(&ds, "test", "test").await?;
 	Ok(ds)

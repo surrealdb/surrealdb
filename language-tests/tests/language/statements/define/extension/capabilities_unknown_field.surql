@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """Unknown CAPABILITIES fields are refused, so a misspelt or long-form name such as `allow_net` cannot be silently ignored."""

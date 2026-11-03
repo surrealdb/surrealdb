@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = "DEFINE MODULE with an executable and no name is a parse error, not an internal 'unreachable logic' error at execution."

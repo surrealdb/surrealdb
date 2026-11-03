@@ -227,7 +227,8 @@ impl RemoteConn {
 		if !status.is_success() {
 			// A route-level rejection is the single result. Include the status so a
 			// missing route (404 — server built without the `gql` feature) or a
-			// disabled route (403 — the `gql` route target is denied) is actionable rather than an empty error.
+			// disabled route (403 — the `gql` route target is denied) is actionable rather than an
+			// empty error.
 			let body = String::from_utf8_lossy(&bytes);
 			let body = body.trim();
 			let msg = if body.is_empty() {

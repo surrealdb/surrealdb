@@ -957,14 +957,6 @@ pub(crate) fn try_fold_to_literal(
 			if !capabilities.allows_function_name(name.as_str()) {
 				return None;
 			}
-			// A pure built-in behind an experimental target is gated the same
-			// way, and for the same reason: the physical expression raises the
-			// experimental error at evaluation.
-			if let Some(target) = crate::exec::function::experimental_target(name.as_str())
-				&& !capabilities.allows_experimental(&target)
-			{
-				return None;
-			}
 			let func = registry.get(name.as_str())?;
 			// `is_pure` only says the call needs no context; folding also
 			// requires that repeated calls agree, or the single plan-time

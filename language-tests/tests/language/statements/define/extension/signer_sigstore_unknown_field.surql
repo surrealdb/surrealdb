@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """Unknown fields in a Sigstore SIGNER are refused, so a misspelt identity rule cannot be silently ignored."""

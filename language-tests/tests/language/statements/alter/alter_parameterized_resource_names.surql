@@ -5,9 +5,6 @@ database = true
 auth = { level = "owner" }
 timeout = 10000
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 reason = "ALTER resource names and table targets accept bound parameters (as DEFINE and REMOVE accept them)"
 

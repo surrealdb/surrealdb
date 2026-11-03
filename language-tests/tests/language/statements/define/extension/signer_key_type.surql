@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """A key SIGNER accepts `ssh-ed25519` and `ecdsa-sha2-nistp256` public keys."""

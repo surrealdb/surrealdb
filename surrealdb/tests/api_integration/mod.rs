@@ -596,19 +596,16 @@ mod mem {
 
 	#[test_log::test(tokio::test)]
 	async fn experimental_features() {
-		let surql = "
-		    USE NAMESPACE namespace DATABASE database;
-			DEFINE BUCKET test BACKEND \"memory\";
-		";
-		// Experimental features are rejected by default
+		let surql = "RETURN ext::nonexistent();";
+		// Experimental syntax is rejected by default, when the query is parsed
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 		db.query(surql).await.unwrap_err();
-		// Experimental features can be allowed
+		// Allowed, it parses, and only the statement fails: no such extension exists
 		let capabilities =
-			Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::Files);
+			Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::Surrealism);
 		let config = Config::new().capabilities(capabilities);
 		let db = Surreal::new::<Mem>(config).await.unwrap();
-		db.query(surql).await.unwrap().check().unwrap();
+		db.query(surql).await.unwrap().check().unwrap_err();
 	}
 
 	/// A `DEFINE TABLE IF NOT EXISTS` that reports success leaves the table

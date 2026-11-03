@@ -231,9 +231,8 @@ mod surrealism_integration {
 
 	static DEMO_DIR: LazyLock<DemoModuleDir> = LazyLock::new(build_demo_dir);
 
-	/// Start a SurrealDB server with the `files` and `surrealism` experimental
-	/// capabilities enabled, and a bucket folder allowlist pointing at the given
-	/// directory.
+	/// Start a SurrealDB server with the `surrealism` experimental capability
+	/// enabled, and a bucket folder allowlist pointing at the given directory.
 	async fn start_surrealism_server(
 		bucket_dir: &Path,
 	) -> Result<(String, common::Child), Box<dyn std::error::Error>> {
@@ -265,7 +264,7 @@ mod surrealism_integration {
 
 		common::start_server(common::StartServerArguments {
 			args: format!(
-				"--allow-experimental files,surrealism --allow-net 127.0.0.1,localhost{}",
+				"--allow-experimental surrealism --allow-net 127.0.0.1,localhost{}",
 				if extra_args.is_empty() {
 					String::new()
 				} else {

@@ -1,7 +1,4 @@
 /**
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 
 [[test.results]]

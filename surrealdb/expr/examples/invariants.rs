@@ -733,9 +733,8 @@ fn render_check(files: &[PathBuf], verbose: bool, fuzz: bool) {
 			},
 		),
 		(
-			"no files, no surrealism",
+			"no surrealism",
 			Options {
-				files: false,
 				surrealism: false,
 				legacy_strands: false,
 			},
@@ -919,12 +918,9 @@ fn render_check(files: &[PathBuf], verbose: bool, fuzz: bool) {
 						let mut out = String::new();
 						lower.render_expr(id, &mut out).map(|()| out).map_err(|e| e.msg.to_string())
 					});
-					let gated = !opts.files && n.op == b'f' && n.tag == Tag::Str
-						|| !opts.surrealism
-							&& n.tag == Tag::Call && ast
-							.nodes
-							.get(n.a as usize)
-							.is_some_and(|c| matches!(c.op, 2 | 3));
+					let gated = !opts.surrealism
+						&& n.tag == Tag::Call
+						&& ast.nodes.get(n.a as usize).is_some_and(|c| matches!(c.op, 2 | 3));
 					// The logical form of the lowered expression, which `--logical` shows
 					// equals direct lowering; report-only, and a panic there counts as no form.
 					let logical = if verbose {

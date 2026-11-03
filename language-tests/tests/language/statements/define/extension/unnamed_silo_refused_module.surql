@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = "The unnamed silo form is refused under the deprecated MODULE keyword too, so the alias cannot be used to create a definition the new keyword refuses."

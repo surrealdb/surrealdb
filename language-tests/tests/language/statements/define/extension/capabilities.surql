@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """CAPABILITIES is one object listing everything an extension may do. Fields left out keep their defaults, which grant nothing and keep timeouts enforced; only the fields that differ from the default render back, and INFO STRUCTURE shows every field."""

@@ -714,66 +714,53 @@ test("<set> decodes as a native Set with dedup, distinct from a plain array", as
 });
 
 test("file references roundtrip as FileRef; the <file> cast and slashless literals are rejected", async () => {
-	// The `f"bucket:/key"` literal is gated behind an experimental feature.
-	const fileServer = await startServer({ args: ["--allow-experimental=files"] });
-	try {
-		const { db } = await rootClient(fileServer);
-
-		// A file literal requires a `/`-prefixed key; the bucket and key survive.
-		const [t] = await db.query<[string]>('RETURN type::of(f"docs:/readme.md")').json();
-		expect(t).toBe("file");
-		const [out] = (await db.query('RETURN f"docs:/readme.md"')) as [FileRef];
-		expect(out).toBeInstanceOf(FileRef);
-		expect(out.bucket).toBe("docs");
-		expect(out.key).toBe("/readme.md");
-
-		// .json() flattens a file to its `bucket:/key` string form.
-		const [j] = await db.query('RETURN f"docs:/readme.md"').json();
-		expect(j).toBe("docs:/readme.md");
-
-		// A FileRef bound from the SDK roundtrips, and FileRef.equals works across
-		// the bundle's class copies. A key given without a leading slash comes
-		// back normalized WITH one.
-		const bound = new FileRef("bucket", "key");
-		const [bt] = await db.query<[string]>("RETURN type::of($f)", { f: bound }).json();
-		expect(bt).toBe("file");
-		const [bout] = (await db.query("RETURN $f", { f: bound })) as [FileRef];
-		expect(bout).toBeInstanceOf(FileRef);
-		expect(bout.bucket).toBe("bucket");
-		expect(bout.key).toBe("/key");
-		const slashed = new FileRef("bucket", "/key");
-		expect(bout.equals(slashed)).toBe(true);
-
-		// Stored in a record and read back, still a FileRef with parts intact.
-		await db.query('CREATE file_probe:one SET f = f"docs:/readme.md"');
-		const [rows] = (await db.query("SELECT * FROM file_probe:one")) as [
-			Array<{ f: FileRef }>,
-		];
-		expect(rows[0].f).toBeInstanceOf(FileRef);
-		expect(rows[0].f.bucket).toBe("docs");
-		expect(rows[0].f.key).toBe("/readme.md");
-
-		// A `<file>` cast from a string is NOT a valid path to a file value: it
-		// fails at runtime regardless of whether the string carries a `/`.
-		const castErr = await rejects(db.query('RETURN <file>"bucket:/key"').collect());
-		expect(castErr.constructor.name).toBe("InternalError");
-		expect(String(castErr)).toMatch(/Could not cast into `file`/);
-
-		// A file literal whose key lacks a leading `/` is a parse error.
-		const slashErr = await rejects(db.query('RETURN f"bucket:key"').collect());
-		expect(slashErr.constructor.name).toBe("ValidationError");
-		expect(String(slashErr)).toMatch(/Parse error/);
-
-		await db.close();
-	} finally {
-		await fileServer.stop();
-	}
-
-	// Without the experimental feature the literal is rejected at parse time.
 	const { db } = await rootClient(server);
-	const gatedErr = await rejects(db.query('RETURN f"docs:/readme.md"').collect());
-	expect(gatedErr.constructor.name).toBe("ValidationError");
-	expect(String(gatedErr)).toMatch(/experimental files feature to be enabled/);
+
+	// A file literal requires a `/`-prefixed key; the bucket and key survive.
+	const [t] = await db.query<[string]>('RETURN type::of(f"docs:/readme.md")').json();
+	expect(t).toBe("file");
+	const [out] = (await db.query('RETURN f"docs:/readme.md"')) as [FileRef];
+	expect(out).toBeInstanceOf(FileRef);
+	expect(out.bucket).toBe("docs");
+	expect(out.key).toBe("/readme.md");
+
+	// .json() flattens a file to its `bucket:/key` string form.
+	const [j] = await db.query('RETURN f"docs:/readme.md"').json();
+	expect(j).toBe("docs:/readme.md");
+
+	// A FileRef bound from the SDK roundtrips, and FileRef.equals works across
+	// the bundle's class copies. A key given without a leading slash comes
+	// back normalized WITH one.
+	const bound = new FileRef("bucket", "key");
+	const [bt] = await db.query<[string]>("RETURN type::of($f)", { f: bound }).json();
+	expect(bt).toBe("file");
+	const [bout] = (await db.query("RETURN $f", { f: bound })) as [FileRef];
+	expect(bout).toBeInstanceOf(FileRef);
+	expect(bout.bucket).toBe("bucket");
+	expect(bout.key).toBe("/key");
+	const slashed = new FileRef("bucket", "/key");
+	expect(bout.equals(slashed)).toBe(true);
+
+	// Stored in a record and read back, still a FileRef with parts intact.
+	await db.query('CREATE file_probe:one SET f = f"docs:/readme.md"');
+	const [rows] = (await db.query("SELECT * FROM file_probe:one")) as [
+		Array<{ f: FileRef }>,
+	];
+	expect(rows[0].f).toBeInstanceOf(FileRef);
+	expect(rows[0].f.bucket).toBe("docs");
+	expect(rows[0].f.key).toBe("/readme.md");
+
+	// A `<file>` cast from a string is NOT a valid path to a file value: it
+	// fails at runtime regardless of whether the string carries a `/`.
+	const castErr = await rejects(db.query('RETURN <file>"bucket:/key"').collect());
+	expect(castErr.constructor.name).toBe("InternalError");
+	expect(String(castErr)).toMatch(/Could not cast into `file`/);
+
+	// A file literal whose key lacks a leading `/` is a parse error.
+	const slashErr = await rejects(db.query('RETURN f"bucket:key"').collect());
+	expect(slashErr.constructor.name).toBe("ValidationError");
+	expect(String(slashErr)).toMatch(/Parse error/);
+
 	await db.close();
 });
 

@@ -3,9 +3,6 @@
 namespace = true
 database = true
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 reason = "An `f\"bucket:/key\"` literal stops the key at a second colon and drops the rest without an error, so a key containing a colon silently addresses a different object. `type::file()` accepts the same key correctly, which shows the loss is in the literal's lexer and not in the file value."
 # TODO: the assertions below state the contract `f"bucket:/key"` must uphold --

@@ -1235,7 +1235,7 @@ mod http_integration {
 			// capability
 			("", 403),
 			("--allow-all", 403),
-			("--allow-experimental files,surrealism", 403),
+			("--allow-experimental surrealism", 403),
 			("--allow-experimental kvexport", 200),
 			("--allow-experimental kvexport --deny-experimental kvexport", 403),
 			("--allow-experimental kvexport --deny-http kvexport", 403),
@@ -3852,11 +3852,10 @@ mod http_integration {
 
 	#[test(tokio::test)]
 	async fn experimental_capabilities() {
-		// Allow 1
+		// Buckets need no experimental capability
 		{
-			// Start server disallowing routes for queries, exporting and importing
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-experimental * --allow-experimental files".to_string(),
+				args: "--deny-experimental *".to_string(),
 				// Auth disabled to ensure unauthorized errors are due to capabilities
 				auth: false,
 				..Default::default()
@@ -3878,7 +3877,6 @@ mod http_integration {
 				.unwrap();
 			let base_url = &format!("http://{addr}");
 
-			// Check that denied routes are disallowed
 			let res = client
 				.post(format!("{base_url}/sql"))
 				.basic_auth(USER, Some(PASS))
@@ -3891,11 +3889,10 @@ mod http_integration {
 			assert_eq!(res[0]["status"], "OK", "body: {res}");
 			assert_eq!(res[0]["result"], serde_json::Value::Null, "body: {res}");
 		}
-		// Deny 1
+		// A denied experimental capability is refused, whatever else is allowed
 		{
-			// Start server disallowing routes for queries, exporting and importing
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-experimental files --allow-experimental *".to_string(),
+				args: "--deny-experimental surrealism --allow-experimental *".to_string(),
 				// Auth disabled to ensure unauthorized errors are due to capabilities
 				auth: false,
 				..Default::default()
@@ -3917,20 +3914,15 @@ mod http_integration {
 				.unwrap();
 			let base_url = &format!("http://{addr}");
 
-			// Check that denied routes are disallowed
 			let res = client
 				.post(format!("{base_url}/sql"))
 				.basic_auth(USER, Some(PASS))
-				.body("DEFINE BUCKET test BACKEND \"memory\"")
+				.body("RETURN ext::nonexistent()")
 				.send()
 				.await
 				.unwrap();
 			let res = res.text().await.unwrap();
-			assert!(
-				res.contains("expected the experimental files feature to be enabled"),
-				"body: {}",
-				res
-			);
+			assert!(res.contains("Surrealism extensions are not enabled"), "body: {}", res);
 		}
 	}
 
@@ -3940,9 +3932,9 @@ mod http_integration {
 		const NS: &str = "bucket_permission_ns";
 		const DB: &str = "bucket_permission_db";
 
-		let mut args = "--allow-experimental files".to_string();
+		let mut args = String::new();
 		if let Some(retired_planner_strategy) = retired_planner_strategy {
-			args.push_str(&format!(" --planner-strategy {retired_planner_strategy}"));
+			args.push_str(&format!("--planner-strategy {retired_planner_strategy}"));
 		}
 		let (addr, server) = common::start_server(StartServerArguments {
 			args,
@@ -5212,10 +5204,11 @@ mod http_integration {
 			"http-integration-presign-secret-0000".to_string(),
 		);
 		vars.insert("SURREAL_BUCKET_FOLDER_ALLOWLIST".to_string(), folder.clone());
-		let mut args = "--allow-experimental files".to_string();
-		if allow_guests {
-			args.push_str(" --allow-guests");
-		}
+		let args = if allow_guests {
+			"--allow-guests".to_string()
+		} else {
+			String::new()
+		};
 		let (addr, server) = common::start_server(StartServerArguments {
 			args,
 			vars: Some(vars),

@@ -3,9 +3,6 @@
 namespace = true
 database = true
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 reason = "A definition whose stored clauses name an unknown type is refused: an event's WHEN or THEN, a field's permissions or REFERENCE, a function's permission, a table's permissions or view, a parameter's permission, an API, an access method's clauses, an index's COUNT condition, a bucket's permission and the API config's permission"
 

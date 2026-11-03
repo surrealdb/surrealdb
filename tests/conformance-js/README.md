@@ -219,8 +219,7 @@ the pin in `package.json` to a release whose range includes it.
     whole response with "Closure values cannot be converted to public value"
     (`type::of` still reports `function`); a regex literal is a parse error, so
     it never reaches the encoder; `<set>` decodes as a native JS `Set`; a `<file>`
-    value needs `--allow-experimental=files` and the `f"bucket:/key"` form (the
-    `<file>"…"` cast fails); a bound record-id range reports `type::of` `record`,
+    value needs the `f"bucket:/key"` form (the `<file>"…"` cast fails); a bound record-id range reports `type::of` `record`,
     not `range` (`surrealql-wire`).
   - RPC surface: `insert_relation` returns an array even for a single edge
     (unlike `relate`, which returns one object); `reset` clears the `ns`/`db`

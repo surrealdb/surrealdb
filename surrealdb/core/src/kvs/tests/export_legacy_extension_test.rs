@@ -34,9 +34,8 @@ const LEGACY: &str = "silo::acme::widgets::<1.2.3>";
 const LEGACY_NAME: &str = "silo::acme::widgets<1.2.3>";
 
 async fn ds() -> Arc<Datastore> {
-	let caps = Capabilities::all().with_experimental(Targets::Some(
-		[ExperimentalTarget::Surrealism, ExperimentalTarget::Files].into(),
-	));
+	let caps = Capabilities::all()
+		.with_experimental(Targets::Some([ExperimentalTarget::Surrealism].into()));
 	Datastore::builder()
 		.without_maintenance_tasks()
 		.with_capabilities(caps)

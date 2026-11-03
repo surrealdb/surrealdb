@@ -5,8 +5,6 @@ pub struct Options {
 	/// A plain string that reads as a uuid, datetime or record id is that
 	/// value (`legacy_strands`).
 	pub legacy_strands: bool,
-	/// File literals and buckets are allowed (`files_enabled`).
-	pub files: bool,
 	/// Surrealism extensions are allowed (`surrealism_enabled`).
 	pub surrealism: bool,
 }
@@ -15,7 +13,6 @@ impl Options {
 	/// Every optional grammar enabled and strings read as written.
 	pub const ALL: Options = Options {
 		legacy_strands: false,
-		files: true,
 		surrealism: true,
 	};
 }

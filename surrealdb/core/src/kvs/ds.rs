@@ -12031,7 +12031,6 @@ impl Datastore {
 	/// the first two, and the executor refuses the third outside an import.
 	fn import_parser_settings(capabilities: &Capabilities) -> ParserSettings {
 		ParserSettings {
-			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
 			surrealism_enabled: capabilities.allows_experimental(&ExperimentalTarget::Surrealism),
 			import: true,
 			..ParserSettings::for_value_depth(MAX_VALUE_DEPTH)

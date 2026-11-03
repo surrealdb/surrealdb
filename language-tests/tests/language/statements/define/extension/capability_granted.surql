@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = "DEFINE EXTENSION writes a named definition for both executable forms, a file and a silo package. The silo form takes an `ext::` name like the file form, so a query calls every extension through `ext::` whatever its source. Defining an extension that gives its DIGEST records catalog metadata only and fetches no archive, so it succeeds in a build without the `surrealism` cargo feature. INFO FOR DB lists the definitions under `extensions`, keyed by `ext::` name, and renders each statement as DEFINE EXTENSION."

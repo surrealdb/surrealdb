@@ -17,7 +17,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::dbs::capabilities::Capabilities;
-use crate::exec::function::{FunctionRegistry, ScalarFunction, experimental_target};
+use crate::exec::function::{FunctionRegistry, ScalarFunction};
 use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
@@ -110,16 +110,11 @@ pub(crate) enum CapabilityPolicy {
 }
 
 impl CapabilityPolicy {
-	/// Whether a fold may call the builtin `name`: the function-name capability allows it, and so
-	/// does the experimental capability when the builtin sits behind one.
+	/// Whether a fold may call the builtin `name`: the function-name capability allows it.
 	pub(crate) fn allows_call(&self, name: &str) -> bool {
-		let gate = experimental_target(name);
 		match self {
-			CapabilityPolicy::AllowAll => gate.is_none(),
-			CapabilityPolicy::Request(capabilities) => {
-				capabilities.allows_function_name(name)
-					&& gate.is_none_or(|target| capabilities.allows_experimental(&target))
-			}
+			CapabilityPolicy::AllowAll => true,
+			CapabilityPolicy::Request(capabilities) => capabilities.allows_function_name(name),
 		}
 	}
 }

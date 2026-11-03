@@ -684,9 +684,11 @@ mod tests {
 	/// deliberate act with a failing test, not a quiet change of meaning.
 	#[test]
 	fn a_builtin_that_mutates_outside_a_statement_is_a_read_only_statement() {
-		// `file::*` belongs here too, but its argument is a file literal, which
-		// needs the `files` experimental target to parse.
-		for query in ["sequence::nextval('n')", "http::post('https://example.com/', {})"] {
+		for query in [
+			"sequence::nextval('n')",
+			"http::post('https://example.com/', {})",
+			"file::put(f\"b:/k\", 'x')",
+		] {
 			let expr: Expr = crate::syn::expr(query).expect(query);
 			assert!(expr.read_only(), "{query} takes no savepoint, so it may overlap");
 		}

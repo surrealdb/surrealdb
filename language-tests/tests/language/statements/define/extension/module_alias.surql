@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = "The `MODULE` keyword and the `mod::` prefix stay accepted during 4.0 as deprecated aliases of `EXTENSION` and `ext::`, in any combination. Each spelling defines the same definition under the same catalog key, which every render writes as DEFINE EXTENSION and `ext::`. INFO FOR DB lists them under `extensions`, keyed by `ext::` name, and has no `modules` key. Using an alias logs a deprecation warning; the statement's result is unchanged."

@@ -1,17 +1,14 @@
 
 /**
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 
 [test.results]
 parsing-error = '''
 Unexpected end of file string, missing bucket separator `:/`
-  --> [20:5]
+  --> [17:5]
    |
-20 | f"fo";
+17 | f"fo";
    |     ^
 '''
 

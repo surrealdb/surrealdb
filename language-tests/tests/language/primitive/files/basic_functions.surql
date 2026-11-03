@@ -2,10 +2,6 @@
 
 [test]
 
-[env.capabilities]
-allow-experimental = ["files"]
-
-
 # 0: Define bucket
 [[test.results]]
 value = "NONE"

@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """A key SIGNER records an SSH public key line; the key is the whole anchor, so there is no identity rule. Without CAPABILITIES the definition grants nothing, which renders as `CAPABILITIES {}`."""

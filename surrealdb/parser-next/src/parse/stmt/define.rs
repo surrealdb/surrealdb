@@ -171,9 +171,6 @@ impl<'a, 's> Parser<'a, 's> {
 		} else {
 			return Err(self.unexpected("a define statement keyword"));
 		};
-		if self.limits.no_files && kind == DefineKind::Bucket {
-			return Err(self.files_off(t));
-		}
 		self.bump();
 		let mut deprecated = 0;
 		if kind == DefineKind::Module {

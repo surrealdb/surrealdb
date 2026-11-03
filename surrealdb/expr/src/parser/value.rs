@@ -802,17 +802,7 @@ impl<'a> Parser<'a> {
 					let token = &self.src[t.start as usize..t.end as usize];
 					let at = |r| Error::Lower(lit::in_token(r, token, t.start));
 					let v = match t.aux() {
-						b'f' => {
-							if !self.settings.opts.files {
-								let msg = format!(
-									"Unexpected token `{}`, expected {}",
-									render::token_name(self.src, t.start),
-									super::FILES_DISABLED
-								);
-								return Err(self.err_at(t.start, t.end, msg));
-							}
-							Value::File(lit::file(&body).map_err(at)?)
-						}
+						b'f' => Value::File(lit::file(&body).map_err(at)?),
 						b'd' => {
 							let Literal::Datetime(d) = lit::datetime(&body).map_err(at)? else {
 								unreachable!("a datetime literal");
@@ -1306,7 +1296,6 @@ fn legacy_strand(s: String) -> Value {
 		limits: Default::default(),
 		opts: super::Options {
 			legacy_strands: false,
-			files: false,
 			surrealism: false,
 		},
 	};

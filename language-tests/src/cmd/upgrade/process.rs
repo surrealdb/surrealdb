@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use futures::{SinkExt, StreamExt};
+use semver::Version;
 use surrealdb_rpc::{DbResponse, DbResult};
 use surrealdb_types::{Error as TypesError, Value};
 use tokio::io::AsyncReadExt;
@@ -28,17 +29,15 @@ use crate::tests::report::TestTaskResult;
 ///
 /// What the harness assumes, and why it names the subprotocol:
 ///
-/// - [`SurrealConnection`] encodes each request and decodes each response as
-///   flatbuffers, so every binary it starts, the releases the suite upgrades from
-///   and the checkout under test alike, has to answer in flatbuffers.
-/// - A server chooses the response format from the subprotocol the client offers,
-///   by name. A release asked for `cbor` answers in CBOR, which the flatbuffers
-///   decoder rejects ("Failed to decode fb value"). The harness therefore assumes
-///   that every release it starts accepts `flatbuffers` by name, and that the
-///   checkout does too (checked by a unit test below).
-/// - It offers the name, not a position in `PROTOCOLS`. The list is a detail of
-///   the checkout and its order changes whenever a format is added, so a position
-///   does not name a format.
+/// - [`SurrealConnection`] encodes each request and decodes each response as flatbuffers, so every
+///   binary it starts, the releases the suite upgrades from and the checkout under test alike, has
+///   to answer in flatbuffers.
+/// - A server chooses the response format from the subprotocol the client offers, by name. A
+///   release asked for `cbor` answers in CBOR, which the flatbuffers decoder rejects ("Failed to
+///   decode fb value"). The harness therefore assumes that every release it starts accepts
+///   `flatbuffers` by name, and that the checkout does too (checked by a unit test below).
+/// - It offers the name, not a position in `PROTOCOLS`. The list is a detail of the checkout and
+///   its order changes whenever a format is added, so a position does not name a format.
 ///
 /// The Rust SDK makes the same choice by name (`surrealdb/src/engine/remote/ws`).
 /// Clients that speak CBOR, such as the JavaScript SDK, offer `cbor` or `cbor.2`
@@ -58,6 +57,21 @@ impl fmt::Display for ProcessOutput {
 	}
 }
 
+/// The last release whose server knows the `files` experimental target.
+/// Buckets and file values need it up to here; every later version, release or
+/// checkout, has them unconditionally and refuses the name at startup.
+const LAST_FILES_TARGET_RELEASE: &str = "4.0.0-beta.1";
+
+/// Whether a binary of `version` knows the `files` experimental target.
+///
+/// Compared by SemVer precedence, which ignores build metadata: a checkout at
+/// `4.0.0-beta.1+local` is beta.1, and `Version`'s own ordering would put it
+/// after.
+fn accepts_files_target(version: &Version) -> bool {
+	let last = Version::parse(LAST_FILES_TARGET_RELEASE).expect("a valid version");
+	version.cmp_precedence(&last).is_le()
+}
+
 pub struct SurrealProcess {
 	process: Child,
 	port: u16,
@@ -67,6 +81,7 @@ impl SurrealProcess {
 	pub async fn new(
 		config: &Config,
 		version: &DsVersion,
+		resolved: &Version,
 		tmp_dir: &str,
 		port: u16,
 		experimental: &[String],
@@ -119,9 +134,18 @@ impl SurrealProcess {
 
 		// Experimental capabilities have no `surreal start` flag, but the server
 		// reads them from this variable on every release the chain spans, so a
-		// test needing one (DEFINE BUCKET, file values) can be spawned for.
-		// A target an older binary does not recognise makes it exit during
-		// startup, which surfaces as a failure to open the connection.
+		// test needing one (a Surrealism extension) can be spawned for. A target
+		// a binary does not recognise makes it exit during startup, which
+		// surfaces as a failure to open the connection.
+		//
+		// A binary that still gates buckets and file values behind the `files`
+		// target is started with it, so it accepts the bucket definitions and
+		// file values a later one accepts unconditionally. A later one refuses
+		// the name, so it never gets it.
+		let mut experimental = experimental.to_vec();
+		if accepts_files_target(resolved) && !experimental.iter().any(|t| t == "files") {
+			experimental.push("files".to_owned());
+		}
 		if !experimental.is_empty() {
 			command.env("SURREAL_CAPS_ALLOW_EXPERIMENTAL", experimental.join(","));
 		}
@@ -393,6 +417,18 @@ impl SurrealConnection {
 #[cfg(test)]
 mod tests {
 	use surrealdb_core::rpc::format::{Format, PROTOCOLS};
+
+	#[test]
+	fn the_files_target_is_given_to_the_releases_that_know_it() {
+		use super::{Version, accepts_files_target};
+		let accepts = |v: &str| accepts_files_target(&Version::parse(v).unwrap());
+		for known in ["3.0.0", "3.3.5", "4.0.0-alpha.1", "4.0.0-beta.1", "4.0.0-beta.1+local"] {
+			assert!(accepts(known), "{known}");
+		}
+		for stable in ["4.0.0-beta.2", "4.0.0-nightly", "4.0.0-rc.1", "4.0.0", "4.1.0"] {
+			assert!(!accepts(stable), "{stable}");
+		}
+	}
 
 	use super::FLATBUFFERS_SUBPROTOCOL;
 

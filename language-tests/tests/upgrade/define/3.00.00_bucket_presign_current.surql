@@ -2,9 +2,6 @@
 [env]
 imports = ["upgrade/define/3.00.00_bucket_import.surql"]
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 upgrade = true
 reason = """

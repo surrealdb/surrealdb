@@ -1,16 +1,13 @@
 /**
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 
 [test.results]
 parsing-error = '''
 Unexpected character `b`, expected `/`
-  --> [18:7]
+  --> [15:7]
    |
-18 | f"foo:bar";
+15 | f"foo:bar";
    |       ^
 '''
 

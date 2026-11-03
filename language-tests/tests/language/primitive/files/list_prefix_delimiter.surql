@@ -3,9 +3,6 @@
 namespace = true
 database = true
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 reason = "file::list matches `prefix` as a plain string, keeps a trailing slash, groups on `delimiter`, pages through groups with `start`, and reports each object's etag."
 

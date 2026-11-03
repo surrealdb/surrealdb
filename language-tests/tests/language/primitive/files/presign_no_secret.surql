@@ -3,9 +3,6 @@
 namespace = true
 database = true
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 # Shorter than the 32-byte minimum, so the node holds no signing secret. The
 # harness configures a valid one for every other test; this overrides it.
 [env.config]

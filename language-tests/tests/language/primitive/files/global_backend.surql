@@ -4,9 +4,6 @@ namespace = true
 database = true
 auth = { level = "owner" }
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [env.config]
 global_bucket = "memory"
 

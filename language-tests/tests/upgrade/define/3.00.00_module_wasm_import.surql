@@ -1,6 +1,6 @@
 /**
 [env.capabilities]
-allow-experimental = ["files", "surrealism"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """

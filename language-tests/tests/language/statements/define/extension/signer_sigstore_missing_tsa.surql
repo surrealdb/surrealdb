@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """`tsa` is required in a Sigstore SIGNER, like `ca` and `log`: without a timestamp authority no signing time can be trusted."""

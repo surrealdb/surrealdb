@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """A Sigstore SIGNER records the anchor (the certificate authority chain, the log key and the timestamp authority chain) and the identity rule (issuer, identity and the numeric repository and owner IDs). It is checked for shape only; whether an archive satisfies it is decided when archives are verified. It renders back as written, and INFO STRUCTURE shows it with the capabilities granted."""

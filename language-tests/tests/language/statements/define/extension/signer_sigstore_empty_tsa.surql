@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """A Sigstore SIGNER needs at least one timestamp authority certificate: Rekor v2 records no time, so the signing time the short-lived certificate is checked against comes only from an RFC 3161 timestamp."""

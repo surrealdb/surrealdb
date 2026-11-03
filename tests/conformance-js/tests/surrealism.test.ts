@@ -17,8 +17,8 @@
 // `multiply`), and `util` (the `name` override on the `utility_helpers` mod,
 // carrying `negate` and the nested `nested::deep`).
 //
-// Loading a module needs the `files` and `surrealism` experimental capabilities,
-// and the bucket directory must be on SURREAL_BUCKET_FOLDER_ALLOWLIST. The
+// Loading a module needs the `surrealism` experimental capability, and the
+// bucket directory must be on SURREAL_BUCKET_FOLDER_ALLOWLIST. The
 // module declares `allow_net = ["localhost", "127.0.0.1"]`, so the server must
 // grant at least those: a module whose declared targets are not all allowed is
 // refused at load. Harness trap (README): variadic capability flags take the `--flag=value`
@@ -61,7 +61,7 @@ beforeAll(async () => {
 	bucketDir = realpathSync(mkdtempSync(join(tmpdir(), "surrealism-bucket-")));
 	copyFileSync(SURLI, join(bucketDir, "demo.surli"));
 	server = await startServer({
-		args: ["--allow-experimental=files,surrealism", "--allow-net=127.0.0.1,localhost"],
+		args: ["--allow-experimental=surrealism", "--allow-net=127.0.0.1,localhost"],
 		env: { SURREAL_BUCKET_FOLDER_ALLOWLIST: bucketDir },
 	});
 	db = await defineModule();

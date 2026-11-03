@@ -2,9 +2,6 @@
 
 [test]
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 # 0: Define a readonly bucket
 [[test.results]]
 value = "NONE"

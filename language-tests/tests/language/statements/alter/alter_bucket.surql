@@ -28,10 +28,6 @@ value = "NONE"
 
 [[test.results]]
 error = "The bucket 'nonexistent' does not exist"
-
-[env.capabilities]
-allow-experimental = ["files"]
-
 */
 
 -- Setup

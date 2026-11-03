@@ -79,9 +79,6 @@ value = "NONE"
 
 [[test.results]]
 value = "NONE"
-
-[env.capabilities]
-allow-experimental = ["files"]
 */
 
 DEFINE BUCKET test BACKEND "memory";

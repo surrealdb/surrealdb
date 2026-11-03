@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = "Every new extension needs a name: a silo package defined without one is refused at parse time in either keyword spelling. An unnamed definition already in the catalog keeps loading, and only an import reads the unnamed form back."

@@ -5,9 +5,6 @@
 [env]
 imports = ["./util/presign_buckets.surql"]
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [env.auth]
 namespace = "test"
 database = "test"

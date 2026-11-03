@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """Repository and owner IDs are the numeric IDs the certificate carries, written as strings of decimal digits; a name would be reusable."""

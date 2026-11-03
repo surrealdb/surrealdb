@@ -151,10 +151,10 @@ KEEP-RUST:
   `bucket_target_variable_gates_copy_and_rename_in_streaming_planner`,
   `bucket_list_is_denied_for_record_users_in_streaming_planner`,
   `bucket_list_is_denied_for_record_users_in_compute_only_planner` (and the
-  bucket helpers) — **experimental-feature** (`--allow-experimental=files` +
-  record access + `file::` streaming)
-- `experimental_capabilities` — **experimental-feature** (files gating; belongs
-  with capability coverage)
+  bucket helpers) — **experimental-feature** (record access + `file::`
+  streaming)
+- `experimental_capabilities` — **experimental-feature** (capability gating;
+  belongs with capability coverage)
 
 ### `tests/graphql_integration.rs`
 
