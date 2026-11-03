@@ -925,6 +925,37 @@ $result.users.test = /DEFINE USER test ON ROOT PASSHASH '\\$argon2id\\$.*' ROLES
 error = false
 ```
 
+##### Traces
+
+A test that sets [`[env.trace]`](#envtrace) runs its query as a traced request,
+and each statement's trace is graded beside its value. A result written as a
+table states the trace under `trace`, in SurrealQL like `value`:
+
+```toml
+[[test.results]]
+value = "[place:cafe, place:lib]"
+trace = "{ relations: [[person:a, customer_of:a_cafe, place:cafe], [person:a, customer_of:a_lib, place:lib]] }"
+
+# A statement whose trace must be empty states none.
+[[test.results]]
+value = "[{ id: person:a }]"
+
+# A match expectation can carry a trace too.
+[[test.results]]
+match = "type::is_uuid($result)"
+trace = "{ subscriptions: [u'00000000-0000-0000-0000-000000000000'] }"
+```
+
+A result that states no `trace` expects the statement to send none, so a traced
+test fixes what every statement reports, the empty ones included. A failed
+statement sends no trace and is written as an error.
+
+Traces are compared after the entries of `relations`, `references`, `links` and
+`subscriptions` are sorted, because the engine orders them by when it walked
+them. Duplicates are kept, so an entry reported twice is a mismatch. Uuids are
+compared loosely, because a live query's id is new on each run.
+`--results accept` writes the `trace` of every statement that sent one.
+
 ### `[env]`
 
 The `[env]` table specifies the environment in which the test must be run.
@@ -971,6 +1002,26 @@ than the entire test is not run.
 This can be used to import a dataset before running queries, importing
 utility functions, or setting up a database with root access before running 
 permission specific tests.
+
+Defaults to `[]`
+
+#### `[env.trace]`
+
+The trace kinds the test's query asks for, the names a `query` call's `trace`
+option takes: `"relations"`, `"references"`, `"links"`, `"variables"` and
+`"subscriptions"`. A test that names any runs as a traced request with those
+kinds, and its results state each statement's trace (see
+[Traces](#traces)). A test that names `"subscriptions"` runs on a session that
+may open live queries, and declares [`[env.clean]`](#envclean), because a live
+query stays registered on the node after the namespace is removed.
+
+Traced tests run only in-process; `run --endpoint` skips them.
+
+```toml
+[env]
+imports = ["language/trace/graph_import.surql"]
+trace = ["relations", "links"]
+```
 
 Defaults to `[]`
 

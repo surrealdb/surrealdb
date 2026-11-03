@@ -126,8 +126,8 @@ use crate::exec::vm::payload::{
 };
 use crate::exec::vm::plain::ValueData;
 use crate::expr::logical::{
-	Emission, GuardKind, OutputPath, OutputPathPart, Schema, WindowFrame, WindowFrameBound,
-	WindowFrameUnits, WindowFunction,
+	Emission, GuardKind, LookupTrace, OutputPath, OutputPathPart, Schema, WindowFrame,
+	WindowFrameBound, WindowFrameUnits, WindowFunction,
 };
 use crate::expr::lookup::LookupKind;
 use crate::expr::match_plan::{
@@ -2341,7 +2341,15 @@ text_struct!(LookupAttrs {
 	split: Option<u16>,
 	group: Option<u16>,
 	limit: Option<u16>,
-	start: Option<u16>
+	start: Option<u16>,
+	trace: LookupTrace
+});
+
+text_unit_enum!(LookupTrace {
+	None,
+	Traced,
+	Partial,
+	Inner
 });
 
 text_struct!(RecurseAttrs {
@@ -4988,6 +4996,7 @@ mod tests {
 			group: Some(0),
 			limit: Some(3),
 			start: None,
+			trace: crate::expr::logical::LookupTrace::None,
 		};
 		let steps = [
 			StepAttrs::Flatten,

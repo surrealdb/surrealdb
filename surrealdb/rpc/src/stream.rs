@@ -22,6 +22,7 @@ use surrealdb_types::{
 };
 
 use crate::encoded::EncodedRows;
+use crate::trace::{Trace, TraceKinds};
 use crate::{QueryResult, QueryType};
 
 /// The channel depth a consumer should give a streaming execution.
@@ -68,6 +69,15 @@ pub enum QueryStreamItem {
 		query_type: QueryType,
 		error: Option<Error>,
 	},
+	/// Trace entries for statement `index`, for an execution that asked for a
+	/// trace (see [`crate::trace`]). Sent beside the rows items it describes
+	/// and before the statement's `Finished`, and retracted with them when
+	/// that `Finished` carries an error. A transport carries it inside the
+	/// statement's next frame rather than as a message of its own.
+	Trace {
+		index: usize,
+		trace: Box<Trace>,
+	},
 }
 
 impl QueryStreamItem {
@@ -87,6 +97,10 @@ impl QueryStreamItem {
 				..
 			}
 			| Self::Finished {
+				index,
+				..
+			}
+			| Self::Trace {
 				index,
 				..
 			} => *index,
@@ -112,6 +126,9 @@ impl QueryStreamItem {
 				..
 			}
 			| other @ Self::Finished {
+				..
+			}
+			| other @ Self::Trace {
 				..
 			} => Ok(other),
 		}
@@ -157,6 +174,195 @@ pub fn items_for_result(index: usize, result: QueryResult) -> Vec<QueryStreamIte
 	match payload {
 		Some(payload) => vec![payload, finished],
 		None => vec![finished],
+	}
+}
+
+/// The most bytes of trace entries [`Collected`] keeps across all statements,
+/// by estimate of the record ids they hold: an answer given all at once
+/// carries its whole trace in one reply, so it is bounded where a stream's is
+/// not. Past it, a kind stops collecting and is listed as truncated on the
+/// statement that reached it.
+pub const COLLECTED_TRACE_BYTES: usize = 1 << 20;
+
+/// A streaming execution's items gathered back into the answer a buffered
+/// execution gives: one [`QueryResult`] per statement that finished, in order,
+/// each with the trace its statement sent, if any.
+///
+/// The stream's contract is applied as a consumer applies it: a statement's
+/// rows and trace stand only once its `Finished` arrives, and one carrying an
+/// error retracts them. A statement that sent no `Finished` — one control flow
+/// skipped — contributes nothing.
+#[derive(Default)]
+pub struct Collected {
+	statements: Vec<Option<CollectedStatement>>,
+	entries: usize,
+}
+
+#[derive(Default)]
+struct CollectedStatement {
+	rows: Vec<Value>,
+	single: Option<Value>,
+	trace: Option<Trace>,
+	/// The bytes of trace entries this statement holds of
+	/// [`COLLECTED_TRACE_BYTES`], given back when it fails.
+	entries: usize,
+	finished: Option<(Duration, QueryType, Option<Error>)>,
+}
+
+impl CollectedStatement {
+	fn failed(&self) -> bool {
+		matches!(self.finished, Some((_, _, Some(_))))
+	}
+}
+
+impl Collected {
+	fn statement(&mut self, index: usize) -> &mut CollectedStatement {
+		if index >= self.statements.len() {
+			self.statements.resize_with(index + 1, || None);
+		}
+		self.statements[index].get_or_insert_with(CollectedStatement::default)
+	}
+
+	/// Statement `index` failed with `error`: what it produced is retracted, and
+	/// the trace entries it held are free for the statements after it.
+	fn fail(&mut self, index: usize, time: Duration, query_type: QueryType, error: Error) {
+		let statement = self.statement(index);
+		statement.finished = Some((time, query_type, Some(error)));
+		statement.rows.clear();
+		statement.single = None;
+		statement.trace = None;
+		let released = std::mem::take(&mut statement.entries);
+		self.entries -= released;
+	}
+
+	/// Fold one item in. Encoded rows are read as the values they encode, and
+	/// rows that cannot be read fail their statement.
+	pub fn absorb(&mut self, item: QueryStreamItem) {
+		match item {
+			QueryStreamItem::Rows {
+				index,
+				values,
+			} => self.statement(index).rows.extend(values),
+			QueryStreamItem::Frame {
+				index,
+				rows,
+			} => match rows.to_values() {
+				Ok(values) => self.statement(index).rows.extend(values),
+				Err(error) => self.fail(index, Duration::ZERO, QueryType::Other, error),
+			},
+			QueryStreamItem::Value {
+				index,
+				value,
+			} => self.statement(index).single = Some(value),
+			QueryStreamItem::Trace {
+				index,
+				trace,
+			} => {
+				// A statement already failed takes nothing further.
+				if self.statement(index).failed() {
+					return;
+				}
+				let mut trace = *trace;
+				let room = COLLECTED_TRACE_BYTES.saturating_sub(self.entries);
+				let mut truncated = TraceKinds::NONE;
+				// Keep entries in order while their bytes fit what is left.
+				fn cut<T>(entries: &mut Vec<T>, left: &mut usize, bytes: fn(&T) -> usize) -> bool {
+					let mut kept = 0;
+					for entry in entries.iter() {
+						let size = bytes(entry);
+						if size > *left {
+							break;
+						}
+						*left -= size;
+						kept += 1;
+					}
+					let cut = kept < entries.len();
+					entries.truncate(kept);
+					cut
+				}
+				let mut left = room;
+				if cut(&mut trace.relations, &mut left, Trace::relation_bytes) {
+					truncated = truncated.union(TraceKinds::RELATIONS);
+				}
+				if cut(&mut trace.references, &mut left, Trace::reference_bytes) {
+					truncated = truncated.union(TraceKinds::REFERENCES);
+				}
+				if cut(&mut trace.links, &mut left, Trace::link_bytes) {
+					truncated = truncated.union(TraceKinds::LINKS);
+				}
+				// A variable that does not fit is kept by name, as the statement's
+				// own cap keeps one, so the client still sees it was bound.
+				let mut kept = 0;
+				for variable in &trace.variables {
+					let size = Trace::variable_bytes(variable);
+					if size > left {
+						break;
+					}
+					left -= size;
+					kept += 1;
+				}
+				if kept < trace.variables.len() {
+					for (_, value) in &mut trace.variables[kept..] {
+						*value = Value::None;
+					}
+					truncated = truncated.union(TraceKinds::VARIABLES);
+				}
+				trace.truncated = trace.truncated.union(truncated);
+				self.entries += room - left;
+				let statement = self.statement(index);
+				statement.entries += room - left;
+				match &mut statement.trace {
+					Some(held) => held.absorb(trace),
+					held @ None => *held = Some(trace),
+				}
+			}
+			QueryStreamItem::Finished {
+				index,
+				time,
+				query_type,
+				error,
+			} => {
+				// Rows that could not be read already failed the statement.
+				if self.statement(index).finished.is_some() {
+					return;
+				}
+				match error {
+					Some(error) => self.fail(index, time, query_type, error),
+					None => self.statement(index).finished = Some((time, query_type, None)),
+				}
+			}
+		}
+	}
+
+	/// Each finished statement's result, in order, with its trace.
+	pub fn finish(self) -> Vec<(QueryResult, Option<Trace>)> {
+		self.statements
+			.into_iter()
+			.flatten()
+			.filter_map(|statement| {
+				let (time, query_type, error) = statement.finished?;
+				Some(match error {
+					Some(error) => (
+						QueryResult {
+							time,
+							result: Err(error),
+							query_type,
+						},
+						None,
+					),
+					None => (
+						QueryResult {
+							time,
+							result: Ok(statement
+								.single
+								.unwrap_or_else(|| Value::Array(Array::from(statement.rows)))),
+							query_type,
+						},
+						statement.trace.filter(|trace| !trace.is_empty()),
+					),
+				})
+			})
+			.collect()
 	}
 }
 
@@ -231,12 +437,16 @@ pub enum QueryStreamFrame {
 	Rows {
 		index: usize,
 		values: Vec<Value>,
+		/// Trace entries of the statement; see [`crate::trace`].
+		trace: Option<Box<Trace>>,
 	},
 	/// Statement `index` produced a single value that is not a list of rows —
 	/// `SELECT ONLY`, `RETURN 1 + 2`, a block.
 	Value {
 		index: usize,
 		value: Value,
+		/// Trace entries of the statement; see [`crate::trace`].
+		trace: Option<Box<Trace>>,
 	},
 	/// Statement `index` is final. Terminal for that index: no further frame
 	/// carries it. `error` set means the statement failed and any rows already
@@ -250,6 +460,9 @@ pub enum QueryStreamFrame {
 		query_type: QueryType,
 		single: bool,
 		error: Option<Error>,
+		/// The statement-level trace, and any entries no earlier frame took;
+		/// see [`crate::trace`].
+		trace: Option<Box<Trace>>,
 	},
 	/// The stream is complete; nothing follows. `results` is the number of
 	/// statements whose `Finished` frame was delivered, so it agrees with what
@@ -292,25 +505,34 @@ impl QueryStreamFrame {
 			Self::Rows {
 				index,
 				values,
-			} => Value::Object(object! {
-				stream: "rows",
-				index: index as i64,
-				values: Value::Array(Array::from(values)),
-			}),
+				trace,
+			} => with_trace(
+				object! {
+					stream: "rows",
+					index: index as i64,
+					values: Value::Array(Array::from(values)),
+				},
+				trace,
+			),
 			Self::Value {
 				index,
 				value,
-			} => Value::Object(object! {
-				stream: "value",
-				index: index as i64,
-				value: value,
-			}),
+				trace,
+			} => with_trace(
+				object! {
+					stream: "value",
+					index: index as i64,
+					value: value,
+				},
+				trace,
+			),
 			Self::Finished {
 				index,
 				time,
 				query_type,
 				single,
 				error,
+				trace,
 			} => {
 				let mut map = object! {
 					stream: "finished",
@@ -322,7 +544,7 @@ impl QueryStreamFrame {
 				if let Some(error) = error {
 					map.insert("error", SurrealValue::into_value(error));
 				}
-				Value::Object(map)
+				with_trace(map, trace)
 			}
 			Self::End {
 				results,
@@ -362,11 +584,13 @@ impl QueryStreamFrame {
 				Ok(Self::Rows {
 					index: take_index(&mut map, "index")?,
 					values: values.into_inner(),
+					trace: take_trace(&mut map)?,
 				})
 			}
 			"value" => Ok(Self::Value {
 				index: take_index(&mut map, "index")?,
 				value: map.remove("value").unwrap_or(Value::None),
+				trace: take_trace(&mut map)?,
 			}),
 			"finished" => Ok(Self::Finished {
 				index: take_index(&mut map, "index")?,
@@ -377,6 +601,7 @@ impl QueryStreamFrame {
 				},
 				single: matches!(map.remove("single"), Some(Value::Bool(true))),
 				error: map.remove("error").map(Error::from_value).transpose()?,
+				trace: take_trace(&mut map)?,
 			}),
 			"end" => Ok(Self::End {
 				results: take_index(&mut map, "results")?,
@@ -386,6 +611,18 @@ impl QueryStreamFrame {
 			_ => Err(frame_error("Unknown stream frame tag")),
 		}
 	}
+}
+
+/// `map` with `trace` under its key, when there is one to send.
+fn with_trace(mut map: Object, trace: Option<Box<Trace>>) -> Value {
+	if let Some(trace) = trace.filter(|trace| !trace.is_empty()) {
+		map.insert("trace", trace.into_value());
+	}
+	Value::Object(map)
+}
+
+fn take_trace(map: &mut Object) -> Result<Option<Box<Trace>>, Error> {
+	map.remove("trace").map(|value| Trace::from_value(value).map(Box::new)).transpose()
 }
 
 fn frame_error(msg: &str) -> Error {
@@ -469,6 +706,188 @@ mod tests {
 		));
 	}
 
+	/// Gathered items answer what a buffered execution would, with the trace of
+	/// each statement that finished well and none of one that failed.
+	#[test]
+	fn collected_items_answer_the_buffered_results() {
+		let trace = |n: i64| QueryStreamItem::Trace {
+			index: 0,
+			trace: Box::new(Trace {
+				variables: vec![(format!("v{n}"), int(n))],
+				..Trace::default()
+			}),
+		};
+		let mut collected = Collected::default();
+		collected.absorb(trace(1));
+		collected.absorb(QueryStreamItem::Rows {
+			index: 0,
+			values: vec![int(1), int(2)],
+		});
+		collected.absorb(QueryStreamItem::Finished {
+			index: 0,
+			time: Duration::ZERO,
+			query_type: QueryType::Other,
+			error: None,
+		});
+		collected.absorb(QueryStreamItem::Trace {
+			index: 1,
+			trace: Box::new(Trace {
+				partial: true,
+				..Trace::default()
+			}),
+		});
+		collected.absorb(QueryStreamItem::Finished {
+			index: 1,
+			time: Duration::ZERO,
+			query_type: QueryType::Other,
+			error: Some(Error::internal("no".to_string())),
+		});
+		let results = collected.finish();
+		assert_eq!(results.len(), 2);
+		assert_eq!(
+			results[0].0.result.as_ref().unwrap(),
+			&Value::Array(Array::from(vec![int(1), int(2)]))
+		);
+		assert_eq!(results[0].1.as_ref().unwrap().variables.len(), 1);
+		assert!(results[1].0.result.is_err());
+		assert!(results[1].1.is_none(), "a failed statement's trace is retracted");
+	}
+
+	/// `n` relations whose ids all weigh the same, and how many of them fill
+	/// [`COLLECTED_TRACE_BYTES`].
+	fn even_relations(n: usize) -> (Vec<crate::trace::Relation>, usize) {
+		let relation = |n: usize| crate::trace::Relation {
+			r#in: None,
+			edge: surrealdb_types::RecordId::new("e", format!("{n:08}")),
+			out: None,
+		};
+		let fill = COLLECTED_TRACE_BYTES / Trace::relation_bytes(&relation(0));
+		((0..n).map(relation).collect(), fill)
+	}
+
+	/// A statement that fails gives back the trace bytes it held, so the
+	/// statements after it are not cut for a trace the answer does not carry.
+	#[test]
+	fn a_failed_statement_frees_its_share_of_the_bound() {
+		let (_, fill) = even_relations(0);
+		let full = || {
+			Box::new(Trace {
+				relations: even_relations(fill).0,
+				..Trace::default()
+			})
+		};
+		let mut collected = Collected::default();
+		collected.absorb(QueryStreamItem::Trace {
+			index: 0,
+			trace: full(),
+		});
+		collected.absorb(QueryStreamItem::Finished {
+			index: 0,
+			time: Duration::ZERO,
+			query_type: QueryType::Other,
+			error: Some(Error::internal("no".to_string())),
+		});
+		collected.absorb(QueryStreamItem::Trace {
+			index: 1,
+			trace: full(),
+		});
+		collected.absorb(QueryStreamItem::Finished {
+			index: 1,
+			time: Duration::ZERO,
+			query_type: QueryType::Other,
+			error: None,
+		});
+		let results = collected.finish();
+		let trace = results[1].1.as_ref().expect("the second statement keeps its trace");
+		assert_eq!(trace.relations.len(), fill);
+		assert!(trace.truncated.is_empty());
+	}
+
+	/// Past the bound on an answer given at once, entries are cut and their kind
+	/// is listed as truncated.
+	#[test]
+	fn a_collected_trace_is_bounded() {
+		let (_, fill) = even_relations(0);
+		let (relations, _) = even_relations(fill + 5);
+		let mut collected = Collected::default();
+		collected.absorb(QueryStreamItem::Trace {
+			index: 0,
+			trace: Box::new(Trace {
+				relations,
+				..Trace::default()
+			}),
+		});
+		collected.absorb(QueryStreamItem::Finished {
+			index: 0,
+			time: Duration::ZERO,
+			query_type: QueryType::Other,
+			error: None,
+		});
+		let trace = collected.finish().remove(0).1.unwrap();
+		assert_eq!(trace.relations.len(), fill);
+		assert!(trace.truncated.contains(TraceKinds::RELATIONS));
+	}
+
+	/// Bound variables count toward the bound: past it a variable is kept by
+	/// name with `NONE`, and `variables` is truncated.
+	#[test]
+	fn variables_count_toward_the_collected_bound() {
+		let big = Value::String("x".repeat(COLLECTED_TRACE_BYTES / 3));
+		let mut collected = Collected::default();
+		for index in 0..5 {
+			collected.absorb(QueryStreamItem::Trace {
+				index,
+				trace: Box::new(Trace {
+					variables: vec![("v".to_owned(), big.clone())],
+					..Trace::default()
+				}),
+			});
+			collected.absorb(QueryStreamItem::Finished {
+				index,
+				time: Duration::ZERO,
+				query_type: QueryType::Other,
+				error: None,
+			});
+		}
+		let results = collected.finish();
+		let kept =
+			results.iter().filter(|(_, t)| t.as_ref().unwrap().variables[0].1 != Value::None);
+		assert!(kept.count() < 5, "the bound stops the copies");
+		let last = results[4].1.as_ref().unwrap();
+		assert_eq!(last.variables, vec![("v".to_owned(), Value::None)]);
+		assert!(last.truncated.contains(TraceKinds::VARIABLES));
+	}
+
+	/// The bound is in bytes: relations whose ids hold long keys reach it after
+	/// a few entries.
+	#[test]
+	fn long_keys_reach_the_collected_bound_sooner() {
+		let relations = (0..20)
+			.map(|n| crate::trace::Relation {
+				r#in: None,
+				edge: surrealdb_types::RecordId::new("e", format!("{n}{}", "x".repeat(100_000))),
+				out: None,
+			})
+			.collect();
+		let mut collected = Collected::default();
+		collected.absorb(QueryStreamItem::Trace {
+			index: 0,
+			trace: Box::new(Trace {
+				relations,
+				..Trace::default()
+			}),
+		});
+		collected.absorb(QueryStreamItem::Finished {
+			index: 0,
+			time: Duration::ZERO,
+			query_type: QueryType::Other,
+			error: None,
+		});
+		let trace = collected.finish().remove(0).1.unwrap();
+		assert!(trace.relations.len() < 20, "kept {}", trace.relations.len());
+		assert!(trace.truncated.contains(TraceKinds::RELATIONS));
+	}
+
 	/// Every frame kind survives the trip through its wire value, including
 	/// the optional error and the duration rendering.
 	#[test]
@@ -480,14 +899,17 @@ mod tests {
 			QueryStreamFrame::Rows {
 				index: 0,
 				values: vec![int(1), int(2)],
+				trace: None,
 			},
 			QueryStreamFrame::Rows {
 				index: 1,
 				values: vec![],
+				trace: None,
 			},
 			QueryStreamFrame::Value {
 				index: 1,
 				value: Value::None,
+				trace: None,
 			},
 			QueryStreamFrame::Finished {
 				index: 0,
@@ -495,6 +917,7 @@ mod tests {
 				query_type: QueryType::Other,
 				single: false,
 				error: None,
+				trace: None,
 			},
 			QueryStreamFrame::Finished {
 				index: 1,
@@ -502,6 +925,7 @@ mod tests {
 				query_type: QueryType::Live,
 				single: true,
 				error: Some(Error::internal("boom".to_string())),
+				trace: None,
 			},
 			QueryStreamFrame::End {
 				results: 2,
@@ -557,10 +981,12 @@ mod tests {
 			QueryStreamFrame::Rows {
 				index: 0,
 				values: vec![int(1)],
+				trace: None,
 			},
 			QueryStreamFrame::Value {
 				index: 0,
 				value: int(1),
+				trace: None,
 			},
 			QueryStreamFrame::Finished {
 				index: 0,
@@ -568,6 +994,7 @@ mod tests {
 				query_type: QueryType::Other,
 				single: false,
 				error: None,
+				trace: None,
 			},
 			QueryStreamFrame::End {
 				results: 1,
@@ -608,6 +1035,7 @@ mod tests {
 				query_type: QueryType::Other,
 				single,
 				error: None,
+				trace: None,
 			})
 			.into_value() else {
 				panic!("frames are objects");

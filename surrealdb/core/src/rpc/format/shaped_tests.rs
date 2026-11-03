@@ -103,12 +103,14 @@ async fn shaped_stream_frames_decode_as_cbor_frames_decode() {
 				OutgoingFrame::Rows {
 					index,
 					rows,
+					trace,
 				} => super::encoded::encode_stream_rows(
 					format,
 					id.clone(),
 					session_id,
 					index,
 					&rows,
+					trace,
 					&mut scope,
 				)
 				.expect("encodes"),

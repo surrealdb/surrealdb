@@ -307,6 +307,10 @@ fn stream_items_for(item: QueryStreamItem) -> Vec<StreamItem> {
 				None => Ok(()),
 			},
 		}],
+		// A query run through the SDK asks for no trace.
+		QueryStreamItem::Trace {
+			..
+		} => Vec::new(),
 	}
 }
 

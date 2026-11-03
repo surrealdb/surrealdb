@@ -45,6 +45,14 @@ pub(crate) fn kept_bytes(value: &Value) -> usize {
 	}
 }
 
+/// The bytes record id `id` holds, its own size included: its table's name and
+/// its key, however long or structured.
+pub(crate) fn record_id_bytes(id: &crate::val::RecordId) -> usize {
+	std::mem::size_of::<crate::val::RecordId>()
+		+ id.table.as_str().len()
+		+ key_heap_bytes(&id.key, DEPTH)
+}
+
 /// The bytes `values` hold, their own sizes included.
 pub(crate) fn values_bytes(values: &[Value]) -> usize {
 	values.iter().map(value_bytes).sum()
@@ -109,7 +117,7 @@ fn heap_bytes(value: &Value, depth: usize) -> usize {
 			object.iter().map(|(k, v)| SLOT + 24 + k.len() + heap_bytes(v, depth - 1)).sum()
 		}
 		Value::RecordId(rid) => rid.table.as_str().len() + key_heap_bytes(&rid.key, depth),
-		Value::Geometry(_) => 64,
+		Value::Geometry(geometry) => geometry.heap_bytes(),
 		Value::Table(t) => t.as_str().len(),
 		Value::File(f) => f.bucket.capacity() + f.key.capacity(),
 		Value::Regex(r) => r.0.as_str().len(),

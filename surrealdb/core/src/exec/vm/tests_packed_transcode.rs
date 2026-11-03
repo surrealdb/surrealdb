@@ -569,6 +569,9 @@ async fn streamed(
 						*entry = Err(error.to_string());
 					}
 				}
+				QueryStreamItem::Trace {
+					..
+				} => {}
 			}
 		}
 	};

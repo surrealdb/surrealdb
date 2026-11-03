@@ -364,6 +364,11 @@ impl QueryCollector {
 					query_type,
 				});
 			}
+			// A buffered answer carries no trace: only a streaming execution
+			// is asked for one.
+			QueryStreamItem::Trace {
+				..
+			} => {}
 		}
 		Ok(())
 	}
@@ -681,16 +686,20 @@ pub fn shaped_outgoing(
 		OutgoingFrame::Frame(QueryStreamFrame::Rows {
 			index,
 			values,
+			trace,
 		}) => OutgoingFrame::Rows {
 			index,
 			rows: shaped(&values, shaper)?,
+			trace,
 		},
 		OutgoingFrame::Rows {
 			index,
 			rows,
+			trace,
 		} if rows.format() != RowFormat::Shaped => OutgoingFrame::Rows {
 			index,
 			rows: shaped(&rows.to_values()?, shaper)?,
+			trace,
 		},
 		frame @ (OutgoingFrame::Frame(_)
 		| OutgoingFrame::Rows {
@@ -743,17 +752,24 @@ pub fn encode_stream_rows(
 	session_id: Option<uuid::Uuid>,
 	index: usize,
 	rows: &EncodedRows,
+	trace: Option<Box<surrealdb_rpc::Trace>>,
 	scope: &mut ShapeScope,
 ) -> anyhow::Result<Vec<u8>> {
 	anyhow::ensure!(rows.format() == format, "rows encoded in another format");
 	let index = i64::try_from(index)?;
+	let trace = trace.filter(|trace| !trace.is_empty()).map(|trace| trace.into_value());
 	write_envelope(format, id, session_id, ENVELOPE_SLACK + rows.bytes().len(), |out| {
-		// `{ index, stream, values }`, in key order.
-		let mut object = ObjectWriter::open(format, out, 3);
+		// `{ index, stream, trace, values }`, in key order, `trace` only when
+		// there is one.
+		let mut object = ObjectWriter::open(format, out, 3 + usize::from(trace.is_some()));
 		object.key("index")?;
 		object.value(Value::from_t(index))?;
 		object.key("stream")?;
 		object.value(Value::String("rows".to_owned()))?;
+		if let Some(trace) = trace {
+			object.key("trace")?;
+			object.value(trace)?;
+		}
 		object.key("values")?;
 		write_rows(format, rows, scope, object.out, None)?;
 		object.close();
@@ -1218,6 +1234,7 @@ pub(crate) mod tests {
 						OutgoingFrame::Rows {
 							index,
 							rows,
+							trace,
 						} => {
 							encoded_frames += 1;
 							super::encode_stream_rows(
@@ -1226,6 +1243,7 @@ pub(crate) mod tests {
 								session_id,
 								index,
 								&rows,
+								trace,
 								&mut surrealdb_types::shaped::ShapeScope::new(),
 							)
 							.expect("encodes")

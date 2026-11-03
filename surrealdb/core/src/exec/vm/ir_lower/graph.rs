@@ -534,8 +534,15 @@ impl Lowerer<'_> {
 			chain.push(inner);
 		}
 		// A caller whose reads go unchecked reads a hop through an edge and the hop to the vertex
-		// beyond it as one hop over the adjacency keys ([`through_hop`]).
-		let fuse = self.caller_reads_unchecked();
+		// beyond it as one hop over the adjacency keys ([`through_hop`]). A traced lookup reports
+		// the edges it walks, which a fused hop never names, so it is not fused; only a request
+		// that asks for a trace marks one.
+		let fuse = self.caller_reads_unchecked()
+			&& matches!(
+				last.attrs.trace,
+				crate::expr::logical::LookupTrace::None
+					| crate::expr::logical::LookupTrace::Partial
+			);
 		if fuse && chain.len() == 1 {
 			let edge = match value_hop_of(ir, source)? {
 				Some(edge) if joins(edge) => Some(edge),
@@ -582,6 +589,7 @@ impl Lowerer<'_> {
 			checked: true,
 			page,
 			window: chain.iter().all(|hop| self.em.serves_hop(hop.op)),
+			trace: last.attrs.trace,
 		};
 		let src = self.value(source)?;
 		let lookup = self.em.lookup(spec)?;
@@ -633,6 +641,11 @@ impl Lowerer<'_> {
 		let Some(direction) = bare_graph_hop(hop) else {
 			return Ok(None);
 		};
+		// A count from storage runs no lookup, so a lookup a query trace marked is run, and reports
+		// what it is to the trace.
+		if hop.attrs.trace != crate::expr::logical::LookupTrace::None {
+			return Ok(None);
+		}
 		let source = first_operand(hop.data)?;
 		if value_hop_of(ir, source)?.is_some() {
 			return Ok(None);
@@ -1347,6 +1360,7 @@ mod step_tests {
 			group: None,
 			limit: None,
 			start: None,
+			trace: crate::expr::logical::LookupTrace::None,
 		}
 	}
 

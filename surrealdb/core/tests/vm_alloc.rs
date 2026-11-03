@@ -1095,12 +1095,14 @@ async fn respond(
 							OutgoingFrame::Rows {
 								index,
 								rows,
+								trace,
 							} => encode_stream_rows(
 								format,
 								id.clone(),
 								None,
 								index,
 								&rows,
+								trace,
 								&mut scope,
 							),
 						}

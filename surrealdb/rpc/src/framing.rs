@@ -18,7 +18,7 @@ use std::time::Duration;
 use surrealdb_types::{Error as TypesError, Value};
 use uuid::Uuid;
 
-use crate::{EncodedRows, QueryStreamFrame, QueryStreamItem, QueryType};
+use crate::{EncodedRows, QueryStreamFrame, QueryStreamItem, QueryType, Trace};
 
 /// The first rows frame a statement sends, in records.
 ///
@@ -74,6 +74,8 @@ pub enum OutgoingFrame {
 	Rows {
 		index: usize,
 		rows: EncodedRows,
+		/// Trace entries of the statement; see [`crate::trace`].
+		trace: Option<Box<Trace>>,
 	},
 }
 
@@ -222,16 +224,23 @@ impl PendingRows {
 		Ok(())
 	}
 
-	/// The next `n` rows as statement `index`'s frame.
-	fn take(&mut self, index: usize, n: usize) -> Result<OutgoingFrame, TypesError> {
+	/// The next `n` rows as statement `index`'s frame, carrying `trace`.
+	fn take(
+		&mut self,
+		index: usize,
+		n: usize,
+		trace: Option<Box<Trace>>,
+	) -> Result<OutgoingFrame, TypesError> {
 		match self {
 			Self::Values(values) => Ok(OutgoingFrame::Frame(QueryStreamFrame::Rows {
 				index,
 				values: values.drain(..n).collect(),
+				trace,
 			})),
 			Self::Encoded(queue) => Ok(OutgoingFrame::Rows {
 				index,
 				rows: queue.take(n)?,
+				trace,
 			}),
 		}
 	}
@@ -267,6 +276,9 @@ struct PendingStatement {
 	/// The statement's outcome, once known. Its `Finished` frame goes out after
 	/// everything else the statement owes.
 	closing: Option<(Duration, QueryType, Option<TypesError>)>,
+	/// Trace entries not yet sent. They ride on the statement's next frame,
+	/// whichever kind it is, so a trace never costs a frame of its own.
+	trace: Option<Box<Trace>>,
 }
 
 impl Default for PendingStatement {
@@ -278,6 +290,7 @@ impl Default for PendingStatement {
 			is_single: false,
 			live_query: None,
 			closing: None,
+			trace: None,
 		}
 	}
 }
@@ -368,11 +381,13 @@ impl StreamFrames {
 				OutgoingFrame::Rows {
 					index,
 					rows,
+					trace,
 				} => match rows.to_values() {
 					Ok(values) => {
 						return Some(QueryStreamFrame::Rows {
 							index,
 							values,
+							trace,
 						});
 					}
 					// Its rows were never delivered, so the retraction holds.
@@ -403,6 +418,7 @@ impl StreamFrames {
 					break 'found Some(OutgoingFrame::Frame(QueryStreamFrame::Value {
 						index,
 						value,
+						trace: entry.trace.take(),
 					}));
 				}
 				// A full frame's worth while the statement is open; whatever is
@@ -415,7 +431,7 @@ impl StreamFrames {
 					// first row arrive early do not become a per-frame cost on a
 					// long result.
 					entry.target = (entry.target * 2).min(QUERY_BATCH_RECORDS);
-					match entry.rows.take(index, take) {
+					match entry.rows.take(index, take, entry.trace.take()) {
 						Ok(frame) => break 'found Some(frame),
 						Err(error) => {
 							failed = Some((index, error));
@@ -425,6 +441,7 @@ impl StreamFrames {
 				}
 				if let Some((time, query_type, error)) = entry.closing.take() {
 					let single = error.is_none() && entry.is_single;
+					let trace = entry.trace.take();
 					self.pending.remove(&index);
 					self.order.remove(position);
 					break 'found Some(OutgoingFrame::Frame(QueryStreamFrame::Finished {
@@ -433,6 +450,7 @@ impl StreamFrames {
 						query_type,
 						single,
 						error,
+						trace,
 					}));
 				}
 			}
@@ -514,6 +532,13 @@ impl StreamFrames {
 				}
 				self.finished(index, time, query_type, error);
 			}
+			QueryStreamItem::Trace {
+				index,
+				trace,
+			} => match &mut self.entry(index).trace {
+				Some(held) => held.absorb(*trace),
+				held @ None => *held = Some(trace),
+			},
 		}
 	}
 
@@ -542,6 +567,7 @@ impl StreamFrames {
 		if failed {
 			entry.rows.clear();
 			entry.single = None;
+			entry.trace = None;
 		}
 		entry.closing = Some((time, query_type, error));
 	}
@@ -781,7 +807,7 @@ mod tests {
 				&produced[2],
 				QueryStreamFrame::Rows {
 					index: 1,
-					values,
+					values, ..
 				} if values.len() == 3
 			),
 			"a residue below the first ramp target flushes on finish"
@@ -976,9 +1002,11 @@ mod tests {
 				OutgoingFrame::Rows {
 					index,
 					rows,
+					..
 				} => QueryStreamFrame::Rows {
 					index,
 					values: rows.to_values().expect("rows decode"),
+					trace: None,
 				},
 			})
 			.collect()
@@ -1129,6 +1157,7 @@ mod tests {
 				QueryStreamFrame::Rows {
 					index: 1,
 					values,
+					..
 				} => Some(values.len()),
 				QueryStreamFrame::Begin {
 					..
@@ -1213,5 +1242,111 @@ mod tests {
 				);
 			}
 		}
+	}
+
+	fn traced(index: usize, n: i64) -> QueryStreamItem {
+		QueryStreamItem::Trace {
+			index,
+			trace: Box::new(Trace {
+				variables: vec![(format!("v{n}"), int(n))],
+				..Trace::default()
+			}),
+		}
+	}
+
+	fn trace_of(frame: &QueryStreamFrame) -> Option<&Trace> {
+		match frame {
+			QueryStreamFrame::Rows {
+				trace,
+				..
+			}
+			| QueryStreamFrame::Value {
+				trace,
+				..
+			}
+			| QueryStreamFrame::Finished {
+				trace,
+				..
+			} => trace.as_deref(),
+			QueryStreamFrame::Begin {
+				..
+			}
+			| QueryStreamFrame::End {
+				..
+			} => None,
+		}
+	}
+
+	/// A trace never costs a frame of its own: it rides on the statement's
+	/// next frame, and traces that arrive before one frame goes out ride on it
+	/// together.
+	#[test]
+	fn a_trace_rides_on_its_statements_next_frame() {
+		let mut frames = StreamFrames::new();
+		frames.absorb(traced(0, 1));
+		frames.absorb(traced(0, 2));
+		frames.absorb(rows(0, 3));
+		frames.absorb(finished(0));
+		let out = drain(&mut frames);
+		assert_eq!(out.len(), 2, "{out:?}");
+		let names: Vec<_> = trace_of(&out[0])
+			.expect("the rows frame carries it")
+			.variables
+			.iter()
+			.map(|(name, _)| name.as_str())
+			.collect();
+		assert_eq!(names, vec!["v1", "v2"]);
+		assert!(trace_of(&out[1]).is_none(), "nothing is left for the finished frame");
+	}
+
+	/// A trace with no rows frame after it goes out on the statement's
+	/// `finished` frame, and on the `value` frame of a single-valued statement.
+	#[test]
+	fn a_trace_with_no_rows_goes_out_on_finished_or_value() {
+		let mut frames = StreamFrames::new();
+		frames.absorb(traced(0, 1));
+		frames.absorb(finished(0));
+		frames.absorb(traced(1, 2));
+		frames.absorb(QueryStreamItem::Value {
+			index: 1,
+			value: int(7),
+		});
+		frames.absorb(finished(1));
+		let out = drain(&mut frames);
+		assert!(matches!(
+			out[0],
+			QueryStreamFrame::Finished {
+				index: 0,
+				..
+			}
+		));
+		assert!(trace_of(&out[0]).is_some());
+		assert!(matches!(
+			out[1],
+			QueryStreamFrame::Value {
+				index: 1,
+				..
+			}
+		));
+		assert!(trace_of(&out[1]).is_some());
+		assert!(trace_of(&out[2]).is_none());
+	}
+
+	/// A statement that fails retracts its trace with its rows: none of it
+	/// reaches the wire.
+	#[test]
+	fn a_failed_statement_sends_no_trace() {
+		let mut frames = StreamFrames::new();
+		frames.absorb(traced(0, 1));
+		frames.absorb(rows(0, 2));
+		frames.absorb(QueryStreamItem::Finished {
+			index: 0,
+			time: Duration::ZERO,
+			query_type: QueryType::Other,
+			error: Some(TypesError::internal("boom".to_string())),
+		});
+		let out = drain(&mut frames);
+		assert_eq!(out.len(), 1, "{out:?}");
+		assert!(trace_of(&out[0]).is_none());
 	}
 }

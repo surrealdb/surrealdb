@@ -70,7 +70,7 @@ impl TestReport {
 		println!("Updating for test `{}`", self.name);
 
 		match values {
-			TestOutputs::Values(values) => apply_results(&mut doc, values),
+			TestOutputs::Values(values) => apply_results(&mut doc, values, self.traces()),
 			TestOutputs::ParsingError(error) => apply_error(&mut doc, "parsing-error", error),
 			TestOutputs::SigninError(error) => apply_error(&mut doc, "signin-error", error),
 			TestOutputs::SignupError(error) => apply_error(&mut doc, "signup-error", error),
@@ -190,7 +190,16 @@ fn expectation(value: &SurValue) -> Item {
 	}
 }
 
-pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>]) {
+/// The `trace` a result table records for statement `index`, where it sent one.
+fn trace_of(traces: Option<&[Option<SurValue>]>, index: usize) -> Option<&SurValue> {
+	traces.and_then(|traces| traces.get(index)).and_then(Option::as_ref)
+}
+
+pub fn apply_results(
+	doc: &mut DocumentMut,
+	values: &[Result<SurValue, String>],
+	traces: Option<&[Option<SurValue>]>,
+) {
 	let results_array = doc
 		.entry("test")
 		.or_insert_with(toml_edit::table)
@@ -211,6 +220,9 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 						x["error"] = toml_edit::value(e.to_string());
 					}
 				}
+				if let Some(trace) = trace_of(traces, idx) {
+					x["trace"] = expectation(trace);
+				}
 			} else {
 				let mut table = Table::default();
 				match r {
@@ -220,6 +232,9 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 					Err(e) => {
 						table["error"] = toml_edit::value(e.to_string());
 					}
+				}
+				if let Some(trace) = trace_of(traces, idx) {
+					table["trace"] = expectation(trace);
 				}
 				arr.push(table);
 			}
@@ -231,9 +246,11 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 
 		arr.clear();
 
-		if values.iter().any(|x| x.is_err()) {
+		// A trace is a key of a result table, so a traced result is written as one.
+		let traced = traces.is_some_and(|traces| traces.iter().any(Option::is_some));
+		if values.iter().any(|x| x.is_err()) || traced {
 			let mut t = ArrayOfTables::new();
-			for r in values.iter() {
+			for (idx, r) in values.iter().enumerate() {
 				let mut table = toml_edit::Table::new();
 				match r {
 					Ok(x) => {
@@ -243,8 +260,12 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 						table.insert("error", toml_edit::value(e.to_string()));
 					}
 				}
+				if let Some(trace) = trace_of(traces, idx) {
+					table.insert("trace", expectation(trace));
+				}
 				t.push(table);
 			}
+			*results_array = Item::ArrayOfTables(t);
 		} else {
 			for (idx, r) in values.iter().enumerate() {
 				let v = expectation(r.as_ref().unwrap()).into_value().unwrap();

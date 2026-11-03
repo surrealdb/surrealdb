@@ -215,6 +215,10 @@ pub struct QueryRequest<'a> {
 	/// the server builds no public value for them. `None` streams rows as
 	/// values. A buffered execution ignores it.
 	pub row_format: Option<surrealdb_rpc::RowFormat>,
+	/// The trace kinds a streaming execution reports beside its rows and on
+	/// each statement's `Finished` (see [`surrealdb_rpc::trace`]). Empty
+	/// reports none. A buffered execution ignores it.
+	pub trace: surrealdb_rpc::TraceKinds,
 	/// Run the whole query as one read-only block. See [`ReadOnlyOptions`].
 	/// Refused together with a caller-owned transaction, which has its own
 	/// mode.
@@ -223,6 +227,9 @@ pub struct QueryRequest<'a> {
 	/// it resolves. Visible to the datastore only, so the public field set is
 	/// unchanged.
 	pub(super) held_transactions: bool,
+	/// Whether the consumer gathers the whole answer before any of it reaches
+	/// a client, as a buffered answer does. Visible to the datastore only.
+	pub(super) collected: bool,
 }
 
 impl<'a> QueryRequest<'a> {
@@ -236,8 +243,10 @@ impl<'a> QueryRequest<'a> {
 			transaction: None,
 			cancel: None,
 			row_format: None,
+			trace: surrealdb_rpc::TraceKinds::NONE,
 			read_only: None,
 			held_transactions: false,
+			collected: false,
 		}
 	}
 
@@ -278,6 +287,12 @@ impl<'a> QueryRequest<'a> {
 		self
 	}
 
+	/// Report the trace kinds `trace` while streaming. See [`Self::trace`].
+	pub fn with_trace(mut self, trace: surrealdb_rpc::TraceKinds) -> Self {
+		self.trace = trace;
+		self
+	}
+
 	/// Stream rows encoded in `format`, or as values when `None`. See
 	/// [`Self::row_format`].
 	pub fn with_row_format(mut self, format: Option<surrealdb_rpc::RowFormat>) -> Self {
@@ -292,6 +307,17 @@ impl<'a> QueryRequest<'a> {
 	#[doc(hidden)]
 	pub fn with_held_transactions(mut self) -> Self {
 		self.held_transactions = true;
+		self
+	}
+
+	/// The streamed items are gathered into a whole answer before any of it
+	/// reaches a client, so no item counts as delivered while the query runs:
+	/// a write that loses a retryable commit conflict is run again however much
+	/// it had produced, as it is for a buffered answer. Read only by
+	/// `Datastore::run_streaming`. An internal knob, not an API.
+	#[doc(hidden)]
+	pub fn with_collected_answer(mut self) -> Self {
+		self.collected = true;
 		self
 	}
 }

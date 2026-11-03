@@ -10991,8 +10991,10 @@ impl Datastore {
 			transaction,
 			cancel,
 			row_format: _,
+			trace: _,
 			read_only,
 			held_transactions: _,
+			collected: _,
 		} = req;
 		let statements = match linked_sql_text(&source) {
 			Some((text, LinkedSql::PgSql)) => {
@@ -11050,8 +11052,10 @@ impl Datastore {
 			transaction,
 			cancel,
 			row_format: _,
+			trace: _,
 			read_only: _,
 			held_transactions: _,
+			collected: _,
 		} = req;
 		if transaction.is_some() {
 			return Err(TypesError::internal(
@@ -11064,6 +11068,30 @@ impl Datastore {
 		Executor::execute_fragments(self, ctx, opt, statements)
 			.await
 			.map_err(crate::err::anyhow_to_types_error)
+	}
+
+	/// Run a query as a streaming execution does and gather its items back
+	/// into the answer [`Self::run`] gives, each statement's result with the
+	/// trace it sent ([`QueryRequest::trace`]). The request is run as a
+	/// collected answer ([`QueryRequest::with_collected_answer`]), so a write
+	/// that loses a retryable conflict runs again as it does for [`Self::run`].
+	pub async fn run_collected(
+		self: &Arc<Self>,
+		req: QueryRequest<'_>,
+	) -> std::result::Result<Vec<(QueryResult, Option<surrealdb_rpc::Trace>)>, TypesError> {
+		let (items, received) = async_channel::bounded(surrealdb_rpc::QUERY_STREAM_BUFFER);
+		let job = self.run_streaming(req.with_collected_answer(), items)?;
+		// The execution and the gathering run together: the channel is bounded.
+		let gather = async {
+			let mut collected = surrealdb_rpc::Collected::default();
+			while let Ok(item) = received.recv().await {
+				collected.absorb(item);
+			}
+			collected
+		};
+		let (ran, collected) = futures::future::join(job.run, gather).await;
+		ran?;
+		Ok(collected.finish())
 	}
 
 	/// Prepare a query to stream its results.
@@ -11099,8 +11127,10 @@ impl Datastore {
 			transaction,
 			cancel,
 			row_format,
+			trace,
 			read_only,
 			held_transactions,
+			collected,
 		} = req;
 		// SQL text is lowered here without links, which reports what it refuses and
 		// fixes the statement count, and again when the job starts, once the
@@ -11134,7 +11164,7 @@ impl Datastore {
 				};
 				let executed = if in_transaction {
 					Executor::execute_statements_streaming_with_transaction(
-						&kvs, ctx, opt, statements, items, row_format,
+						&kvs, ctx, opt, statements, items, row_format, trace, collected,
 					)
 					.await
 				} else {
@@ -11145,7 +11175,9 @@ impl Datastore {
 						statements,
 						items,
 						row_format,
+						trace,
 						held_transactions,
+						collected,
 					)
 					.await
 				};
@@ -13750,6 +13782,9 @@ pub(crate) mod test {
 						..
 					} => ids.extend(rows.to_values()?),
 					QueryStreamItem::Value {
+						..
+					} => {}
+					QueryStreamItem::Trace {
 						..
 					} => {}
 				}

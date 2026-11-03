@@ -2262,6 +2262,9 @@ pub(crate) struct LookupAttrs {
 	pub(crate) group: Option<u16>,
 	pub(crate) limit: Option<OperandSlot>,
 	pub(crate) start: Option<OperandSlot>,
+	/// What a query trace does with the lookup, as the statement was marked
+	/// ([`crate::expr::logical::trace`]).
+	pub(crate) trace: crate::expr::logical::LookupTrace,
 }
 
 /// How the path of a recursion was written.

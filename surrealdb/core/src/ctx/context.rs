@@ -174,6 +174,10 @@ pub struct Context {
 	/// around this context, which the program's host steps record their
 	/// counters into. A child context carries its parent's.
 	vm_metrics: Option<Arc<crate::exec::metrics::OperatorMetrics>>,
+	/// What the statement running around this context reports to a query
+	/// trace (`crate::exec::trace`), when its request asked for one. A child
+	/// context carries its parent's.
+	query_trace: Option<Arc<crate::exec::trace::StatementTrace>>,
 	/// The edge cascade a delete is running the stages of a record of an
 	/// edge beneath: the bundle an edge cascade of those stages runs again
 	/// (`crate::exec::vm::write_cascade`). A child context carries its
@@ -321,6 +325,7 @@ impl Context {
 			vm_deref: parent.vm_deref.clone(),
 			vm_served: parent.vm_served.clone(),
 			vm_metrics: parent.vm_metrics.clone(),
+			query_trace: parent.query_trace.clone(),
 			vm_edge_cascade: parent.vm_edge_cascade.clone(),
 			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: None,
@@ -410,6 +415,7 @@ impl Context {
 			vm_deref: parent.vm_deref.clone(),
 			vm_served: parent.vm_served.clone(),
 			vm_metrics: parent.vm_metrics.clone(),
+			query_trace: parent.query_trace.clone(),
 			vm_edge_cascade: parent.vm_edge_cascade.clone(),
 			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: parent.tenant_identity.clone(),
@@ -458,6 +464,7 @@ impl Context {
 			vm_deref: parent.vm_deref.clone(),
 			vm_served: parent.vm_served.clone(),
 			vm_metrics: parent.vm_metrics.clone(),
+			query_trace: parent.query_trace.clone(),
 			vm_edge_cascade: parent.vm_edge_cascade.clone(),
 			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: parent.tenant_identity.clone(),
@@ -534,6 +541,7 @@ impl Context {
 			vm_deref: from.vm_deref.clone(),
 			vm_served: from.vm_served.clone(),
 			vm_metrics: from.vm_metrics.clone(),
+			query_trace: from.query_trace.clone(),
 			vm_edge_cascade: from.vm_edge_cascade.clone(),
 			vm_closures: from.vm_closures.clone(),
 			tenant_identity: from.tenant_identity.clone(),
@@ -616,6 +624,7 @@ impl Context {
 			vm_deref: from.vm_deref.clone(),
 			vm_served: from.vm_served.clone(),
 			vm_metrics: from.vm_metrics.clone(),
+			query_trace: from.query_trace.clone(),
 			vm_edge_cascade: from.vm_edge_cascade.clone(),
 			vm_closures: None,
 			tenant_identity: from.tenant_identity.clone(),
@@ -690,6 +699,7 @@ impl Context {
 			vm_deref: None,
 			vm_served: None,
 			vm_metrics: None,
+			query_trace: None,
 			vm_edge_cascade: None,
 			vm_closures: None,
 			tenant_identity: None,
@@ -755,6 +765,7 @@ impl Context {
 			vm_deref: None,
 			vm_served: None,
 			vm_metrics: None,
+			query_trace: None,
 			vm_edge_cascade: None,
 			vm_closures: None,
 			tenant_identity: None,
@@ -874,6 +885,18 @@ impl Context {
 	/// records into.
 	pub(crate) fn set_vm_metrics(&mut self, metrics: Arc<crate::exec::metrics::OperatorMetrics>) {
 		self.vm_metrics = Some(metrics);
+	}
+
+	/// The query trace the statement running around this context reports to,
+	/// when its request asked for one.
+	pub(crate) fn query_trace(&self) -> Option<&Arc<crate::exec::trace::StatementTrace>> {
+		self.query_trace.as_ref()
+	}
+
+	/// Make `trace` the query trace the statement running around this context
+	/// reports to.
+	pub(crate) fn set_query_trace(&mut self, trace: Arc<crate::exec::trace::StatementTrace>) {
+		self.query_trace = Some(trace);
 	}
 
 	/// The edge cascade running around this context, if any.

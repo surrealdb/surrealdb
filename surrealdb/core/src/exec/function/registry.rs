@@ -437,6 +437,8 @@ pub(crate) const fn check_fallibility_row(kind: FnKind, name: &str, declared: Fa
 /// that every row names a registered builtin.
 #[allow(dead_code)]
 pub(crate) const FALLIBILITY: &[(FnKind, &str, Fallibility)] = &[
+	(FnKind::Scalar, crate::expr::logical::trace::ANCHOR, Fallibility::INFALLIBLE),
+	(FnKind::Scalar, crate::expr::logical::trace::LINK, Fallibility::INFALLIBLE),
 	(
 		FnKind::Scalar,
 		"api::invoke",
@@ -1414,6 +1416,8 @@ mod tests {
 	/// table is declared `PURE`, so this is the one place to read what every
 	/// builtin is declared to do.
 	const EFFECTS: &[(&str, E)] = &[
+		(crate::expr::logical::trace::ANCHOR, E::READS_ROW),
+		(crate::expr::logical::trace::LINK, E::READS_ROW),
 		("api::invoke", E::OPAQUE_BODY.union(E::WRITES_DATA)),
 		("api::req::body", E::OPAQUE_BODY),
 		("api::req::max_body", E::OPAQUE_BODY),

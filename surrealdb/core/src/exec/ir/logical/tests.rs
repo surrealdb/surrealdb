@@ -1882,6 +1882,7 @@ fn the_step_of_a_loop_prints_as_documented() {
 		group: None,
 		limit: None,
 		start: None,
+		trace: crate::expr::logical::LookupTrace::None,
 	};
 	assert_eq!(
 		loop_op(
@@ -1889,7 +1890,7 @@ fn the_step_of_a_loop_prints_as_documented() {
 			SourceOrder::Delivery,
 			Some(Box::new(StepAttrs::Lookup(lookup)))
 		),
-		"kind = GraphStep, sink = Output, order = Delivery, step = some(Lookup({ kind = Graph(Out), only = false, only_path = false, subjects = [{ table = \"knows\", referencing_field = none, range = none }], fields = none, order = none, alias = none, cond = false, split = none, group = none, limit = none, start = none }))"
+		"kind = GraphStep, sink = Output, order = Delivery, step = some(Lookup({ kind = Graph(Out), only = false, only_path = false, subjects = [{ table = \"knows\", referencing_field = none, range = none }], fields = none, order = none, alias = none, cond = false, split = none, group = none, limit = none, start = none, trace = None }))"
 	);
 	let recurse = RecurseAttrs {
 		depth: Recurse::Range(Some(1), None),
@@ -1951,6 +1952,7 @@ fn rich_lookup() -> LookupAttrs {
 		group: Some(0),
 		limit: Some(3),
 		start: Some(4),
+		trace: crate::expr::logical::LookupTrace::None,
 	}
 }
 
@@ -2025,6 +2027,7 @@ fn rich_fixtures() -> Vec<LogOp> {
 				group: None,
 				limit: None,
 				start: None,
+				trace: crate::expr::logical::LookupTrace::None,
 			}))),
 		},
 		LogOp::Loop {
@@ -5699,6 +5702,7 @@ mod binding {
 			limit: None,
 			start: None,
 			alias: None,
+			trace: crate::expr::logical::LookupTrace::None,
 		};
 		let env = Env::new();
 		let mut ir = Ir::new(request_scope(), RegionKind::Request);
@@ -5768,6 +5772,7 @@ mod binding {
 			limit: Some(LogicalExpr::Literal(LogicalLiteral::Integer(3))),
 			start: None,
 			alias: Some(OutputPath::field("friends")),
+			trace: crate::expr::logical::LookupTrace::None,
 		};
 		{
 			let mut cx = BindCx::new(&mut ir, &mut facts, env.cx()).expect("the context builds");

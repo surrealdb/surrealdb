@@ -127,6 +127,9 @@ fn reassemble(items: Vec<QueryStreamItem>) -> Vec<QueryResult> {
 					query_type,
 				});
 			}
+			QueryStreamItem::Trace {
+				..
+			} => {}
 		}
 	}
 	// An index that produced no item at all belongs to a statement that control flow
@@ -520,6 +523,9 @@ async fn a_held_rolled_back_block_emits_no_rows() {
 				| QueryStreamItem::Frame {
 					..
 				} => unreachable!("checked above"),
+				QueryStreamItem::Trace {
+					..
+				} => unreachable!("no trace was asked for"),
 			}
 		}
 
@@ -633,6 +639,9 @@ fn shape(item: &QueryStreamItem) -> (usize, &'static str) {
 		QueryStreamItem::Finished {
 			..
 		} => "finished",
+		QueryStreamItem::Trace {
+			..
+		} => "trace",
 	};
 	(item.index(), kind)
 }

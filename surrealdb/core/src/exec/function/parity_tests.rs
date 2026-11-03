@@ -314,6 +314,10 @@ async fn registry_signatures_match_fnc_layer() {
 
 	let mut problems = Vec::new();
 	for (name, sig, pure) in &entries {
+		// A query trace's own functions have no fnc counterpart: no query names them.
+		if crate::expr::logical::trace::is_internal(name) {
+			continue;
+		}
 		check_function(&ctx, &opt, name, sig, *pure, &mut problems).await;
 	}
 

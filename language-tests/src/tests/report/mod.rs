@@ -119,6 +119,8 @@ pub enum TestTaskResult {
 	Results {
 		did_timeout: bool,
 		res: Vec<Result<SurValue, String>>,
+		/// Each statement's trace, canonical, for a test that asks for one.
+		trace: Option<Vec<Option<SurValue>>>,
 	},
 	/// A cumulative chain walk: the body's outcome at every version that ran it,
 	/// in walk order. Graded hop by hop, and the first hop that does not match
@@ -203,6 +205,12 @@ pub enum MismatchKind {
 	Value(ValueMismatchKind),
 	/// The test specified a matcher expression to match against
 	Matcher(MatcherMismatch),
+	/// The statement sent a trace other than the one the test states
+	/// ([`crate::tests::trace`]); `None` for none.
+	Trace {
+		expected: Option<SurValue>,
+		got: Option<SurValue>,
+	},
 }
 
 pub enum ValueMismatchKind {
@@ -502,6 +510,9 @@ pub struct TestReport {
 	timeout: bool,
 	kind: TestReportKind,
 	outputs: Option<TestOutputs>,
+	/// Each statement's trace, for a test that asks for one: what
+	/// `--results accept` writes beside each value.
+	traces: Option<Vec<Option<SurValue>>>,
 }
 
 impl TestReport {
@@ -611,7 +622,7 @@ impl TestReport {
 			TestTaskResult::LeakedRootState(_) => (false, None),
 			TestTaskResult::Results {
 				did_timeout,
-				res,
+				res, ..
 			} => (*did_timeout, Some(TestOutputs::Values(res.clone()))),
 			// The outputs of the hop the grader will report: the first that does
 			// not match, or the last if they all do. Surfacing them is what lets
@@ -637,6 +648,23 @@ impl TestReport {
 			),
 		};
 
+		let traces = match &job_result {
+			TestTaskResult::Results {
+				trace,
+				..
+			} => trace.clone(),
+			TestTaskResult::Repair {
+				after,
+				..
+			} => match &**after {
+				TestTaskResult::Results {
+					trace,
+					..
+				} => trace.clone(),
+				_ => None,
+			},
+			_ => None,
+		};
 		let cfg = &run.case.test.config.parsed;
 		let match_ctx = MatchContext::new(matching_datastore)
 			.with_unordered(unordered_results(&run, &job_result));
@@ -658,7 +686,13 @@ impl TestReport {
 			kind,
 			timeout,
 			outputs,
+			traces,
 		}
+	}
+
+	/// Each statement's trace, for a test that asks for one.
+	pub fn traces(&self) -> Option<&[Option<SurValue>]> {
+		self.traces.as_deref()
 	}
 
 	pub fn from_panic<T: RunConfig>(
@@ -680,6 +714,7 @@ impl TestReport {
 			kind,
 			timeout: false,
 			outputs: None,
+			traces: None,
 		}
 	}
 
@@ -695,6 +730,7 @@ impl TestReport {
 			},
 			timeout: false,
 			outputs: None,
+			traces: None,
 		}
 	}
 
@@ -818,13 +854,16 @@ impl TestReport {
 			}
 			TestTaskResult::Results {
 				res,
+				trace,
 				..
 			} => {
 				if let Some(declined) = engine_decline(&res) {
 					return TestReportKind::Error(TestError::Running(declined));
 				}
 				let expectation = TestExpectation::from_test_config(config);
-				Self::grade_value_results(expectation, res, match_ctx).await
+				let statements = res.len();
+				let kind = Self::grade_value_results(expectation, res, match_ctx).await;
+				Self::grade_traces(config, statements, trace, kind)
 			}
 			TestTaskResult::Repair {
 				index,
@@ -914,6 +953,49 @@ impl TestReport {
 				}
 				TestReportKind::Valid
 			}
+		}
+	}
+
+	/// `kind`, the grade of a test's values, with each statement's trace graded
+	/// against the one its result states, for a test that asks for a trace. A
+	/// statement whose result states no trace is expected to send none.
+	fn grade_traces(
+		config: &TestConfig,
+		statements: usize,
+		got: Option<Vec<Option<SurValue>>>,
+		kind: TestReportKind,
+	) -> TestReportKind {
+		let Some(expected) = crate::tests::trace::expected(config) else {
+			return kind;
+		};
+		// A statement the values already report as missing or unexpected has no
+		// trace to grade.
+		let got = got.unwrap_or_default();
+		let mut mismatches = Vec::new();
+		for index in 0..expected.len().min(statements) {
+			let expected = expected[index].clone();
+			let got = got.get(index).cloned().flatten();
+			if !crate::tests::trace::agrees(expected.as_ref(), got.as_ref()) {
+				mismatches.push(Mismatch {
+					index,
+					kind: MismatchKind::Trace {
+						expected,
+						got,
+					},
+				});
+			}
+		}
+		if mismatches.is_empty() {
+			return kind;
+		}
+		match kind {
+			TestReportKind::Valid => TestReportKind::MismatchedValues(mismatches),
+			TestReportKind::MismatchedValues(mut values) => {
+				values.extend(mismatches);
+				values.sort_by_key(|mismatch| mismatch.index);
+				TestReportKind::MismatchedValues(values)
+			}
+			other => other,
 		}
 	}
 

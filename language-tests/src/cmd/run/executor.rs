@@ -63,6 +63,9 @@ pub enum Unsupported {
 	/// file path) and so can't be reproduced over the API. The carried string is
 	/// the test author's reason.
 	EmbeddedOnly(String),
+	/// The test asks for a query trace (`[env] trace`), which the harness asks
+	/// of the in-process datastore and the SDK it connects with has no option for.
+	Trace,
 	/// The test is written in a wire dialect (`.pgsql`, `.mysql`). The server
 	/// accepts those on their own protocol ports, not through the SurrealQL RPC
 	/// the harness connects over, so the source cannot be submitted from here.
@@ -87,6 +90,9 @@ impl Unsupported {
 			Unsupported::Versioned => {
 				Cow::Borrowed("requires a versioned datastore (server-startup config)")
 			}
+			Unsupported::Trace => {
+				Cow::Borrowed("asks for a query trace, which the SDK connection cannot request")
+			}
 			Unsupported::RecordAuth => {
 				Cow::Borrowed("record-level auth cannot be fabricated over the API")
 			}
@@ -107,6 +113,9 @@ pub enum ExecOutcome {
 	Executed {
 		did_timeout: bool,
 		result: Result<Vec<Result<SurValue, String>>>,
+		/// Each statement's trace, canonical, for a test that asks for one
+		/// ([`crate::tests::trace`]).
+		trace: Option<Vec<Option<SurValue>>>,
 	},
 }
 
@@ -176,6 +185,8 @@ pub struct EmbeddedExecutor {
 	/// How a SurrealQL query under test is submitted: as one request, or as
 	/// the fragments of one stream.
 	mode: RunMode,
+	/// The trace kinds the test asks for; empty for none.
+	trace: surrealdb_rpc::TraceKinds,
 }
 
 impl EmbeddedExecutor {
@@ -185,6 +196,7 @@ impl EmbeddedExecutor {
 			session: Session::default(),
 			compatibility: None,
 			mode,
+			trace: surrealdb_rpc::TraceKinds::NONE,
 		}
 	}
 }
@@ -193,6 +205,7 @@ impl Executor for EmbeddedExecutor {
 	async fn prepare(&mut self, config: &TestConfig) -> Result<()> {
 		self.session = util::session_from_test_config(config);
 		self.compatibility = config.env.compatibility;
+		self.trace = crate::tests::trace::kinds(config)?;
 		Ok(())
 	}
 
@@ -231,6 +244,41 @@ impl Executor for EmbeddedExecutor {
 						Err(e) => return Err(anyhow::anyhow!(e)),
 					};
 
+				// A traced test runs as a traced request: the statements' answer is
+				// the one a buffered `query` gives, each with the trace it sent.
+				// A test tracing subscriptions runs on a session that may open live
+				// queries, as an RPC connection is.
+				if !self.trace.is_empty() {
+					let live = self.trace.contains(surrealdb_rpc::TraceKinds::SUBSCRIPTIONS);
+					let session = &session.clone().with_rt(live || session.rt);
+					let start = Instant::now();
+					let answer = dbs
+						.run_collected(
+							QueryRequest::new(case.source.as_str(), session).with_trace(self.trace),
+						)
+						.await;
+					let did_timeout = start.elapsed() > timeout;
+					let (result, trace) = match answer {
+						Ok(answer) => {
+							let (results, traces): (Vec<_>, Vec<_>) = answer
+								.into_iter()
+								.map(|(result, trace)| {
+									(
+										result.result.map_err(|e| e.to_string()),
+										crate::tests::trace::got(trace),
+									)
+								})
+								.unzip();
+							(Ok(results), Some(traces))
+						}
+						Err(e) => (Err(anyhow::anyhow!(e)), None),
+					};
+					return Ok(ExecOutcome::Executed {
+						did_timeout,
+						result,
+						trace,
+					});
+				}
 				let start = Instant::now();
 				let result = match self.mode {
 					RunMode::Request => dbs
@@ -245,7 +293,7 @@ impl Executor for EmbeddedExecutor {
 				let did_timeout = start.elapsed() > timeout;
 				Ok(ExecOutcome::Executed {
 					did_timeout,
-					result,
+					result, trace: None,
 				})
 			}
 			Dialect::Gql => {
@@ -272,7 +320,7 @@ impl Executor for EmbeddedExecutor {
 					.map_err(|e| anyhow::anyhow!(e));
 				Ok(ExecOutcome::Executed {
 					did_timeout,
-					result,
+					result, trace: None,
 				})
 			}
 			Dialect::GraphQl => {
@@ -288,12 +336,12 @@ impl Executor for EmbeddedExecutor {
 						let did_timeout = start.elapsed() > timeout;
 						Ok(ExecOutcome::Executed {
 							did_timeout,
-							result: Ok(vec![graphql::response_to_result(response)]),
+							result: Ok(vec![graphql::response_to_result(response)]), trace: None,
 						})
 					}
 					Err(e) => Ok(ExecOutcome::Executed {
 						did_timeout: false,
-						result: Ok(vec![Err(e)]),
+						result: Ok(vec![Err(e)]), trace: None,
 					}),
 				}
 			}
@@ -314,7 +362,7 @@ impl Executor for EmbeddedExecutor {
 					.map_err(|e| anyhow::anyhow!(e));
 				Ok(ExecOutcome::Executed {
 					did_timeout,
-					result,
+					result, trace: None,
 				})
 			}
 		}
@@ -1032,6 +1080,9 @@ mod remote_executor {
 		if env.versioned {
 			return Some(Unsupported::Versioned);
 		}
+		if !env.trace.is_empty() {
+			return Some(Unsupported::Trace);
+		}
 		if matches!(env.auth, Some(TestAuth::Record { .. })) {
 			return Some(Unsupported::RecordAuth);
 		}
@@ -1294,7 +1345,7 @@ mod remote_executor {
 					};
 					Ok(ExecOutcome::Executed {
 						did_timeout,
-						result,
+						result, trace: None,
 					})
 				}
 				Dialect::Gql => {
@@ -1312,7 +1363,7 @@ mod remote_executor {
 					let (Some(ns), Some(db)) = (self.ns.as_deref(), self.db.as_deref()) else {
 						return Ok(ExecOutcome::Executed {
 							did_timeout: false,
-							result: Err(anyhow!("GQL requires a namespace/database")),
+							result: Err(anyhow!("GQL requires a namespace/database")), trace: None,
 						});
 					};
 					let start = Instant::now();
@@ -1332,14 +1383,14 @@ mod remote_executor {
 					};
 					Ok(ExecOutcome::Executed {
 						did_timeout,
-						result,
+						result, trace: None,
 					})
 				}
 				Dialect::GraphQl => {
 					let (Some(ns), Some(db)) = (self.ns.as_deref(), self.db.as_deref()) else {
 						return Ok(ExecOutcome::Executed {
 							did_timeout: false,
-							result: Err(anyhow!("GraphQL requires a namespace/database")),
+							result: Err(anyhow!("GraphQL requires a namespace/database")), trace: None,
 						});
 					};
 					let variables = graphql::request_variables(case)
@@ -1361,7 +1412,7 @@ mod remote_executor {
 					};
 					Ok(ExecOutcome::Executed {
 						did_timeout,
-						result,
+						result, trace: None,
 					})
 				}
 			}

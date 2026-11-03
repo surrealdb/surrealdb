@@ -182,6 +182,9 @@ async fn stream(
 					error,
 					..
 				} => answers.entry(index).or_default().error = error.map(|e| e.to_string()),
+				QueryStreamItem::Trace {
+					..
+				} => {}
 			}
 		}
 	};

@@ -65,6 +65,25 @@ objects with newlines in a nested string. Text a literal cannot hold — text
 carrying a literal delimiter of its own, or a carriage return — stays on one
 line.
 
+### Query traces
+
+`[env] trace = ["relations", "links", …]` runs the query as a traced request,
+and a table-form result states the statement's trace under `trace`. The
+statement's trace and its value are checked together:
+
+```surql
+[[test.results]]
+value = "[person:b]"
+trace = "{ relations: [[person:a, knows:ab, person:b]] }"
+```
+
+A result with no `trace` expects none, so a traced test fixes every
+statement's trace, the empty ones too. The tests live in
+`tests/language/trace/`. `--no-results --results accept` writes what the
+engine sends now, which can include its bugs. Read each recorded trace against
+the query before keeping it, and check that it holds no record, edge or link
+the session cannot read. `README.md > Traces` has the comparison rules.
+
 ### Which engine a test runs on
 
 Every `.surql` and `.gql` file runs once per backend, on the default engine:

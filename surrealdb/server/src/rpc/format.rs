@@ -82,6 +82,7 @@ pub trait WsFormat {
 		session_id: Option<uuid::Uuid>,
 		index: usize,
 		rows: &EncodedRows,
+		trace: Option<Box<surrealdb_rpc::Trace>>,
 		scope: &mut ShapeScope,
 	) -> Option<Result<(usize, Message), TypesError>>;
 }
@@ -156,11 +157,12 @@ impl WsFormat for Format {
 		session_id: Option<uuid::Uuid>,
 		index: usize,
 		rows: &EncodedRows,
+		trace: Option<Box<surrealdb_rpc::Trace>>,
 		scope: &mut ShapeScope,
 	) -> Option<Result<(usize, Message), TypesError>> {
 		let format = self.row_format().filter(|format| *format == rows.format())?;
 		let encoded = surrealdb_core::rpc::format::encoded::encode_stream_rows(
-			format, id, session_id, index, rows, scope,
+			format, id, session_id, index, rows, trace, scope,
 		)
 		.map_err(|_| parse_error());
 		Some(encoded.and_then(|bytes| match format {

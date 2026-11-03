@@ -4866,6 +4866,7 @@ mod tests {
 					for_update: false,
 				},
 			))),
+			trace: crate::expr::logical::LookupTrace::None,
 		})
 	}
 

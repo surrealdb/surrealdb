@@ -193,6 +193,36 @@ impl_geometry! (
 );
 
 impl Geometry {
+	/// The heap bytes this geometry holds: its coordinates, and a vector header
+	/// for each line, ring and collection that holds them. An estimate for a
+	/// memory bound, iterative so a deeply nested collection cannot overflow the
+	/// stack.
+	pub fn heap_bytes(&self) -> usize {
+		const COORD: usize = std::mem::size_of::<Coord<f64>>();
+		const VEC: usize = std::mem::size_of::<Vec<Coord<f64>>>();
+		let line = |line: &LineString<f64>| VEC + line.0.len() * COORD;
+		let polygon = |polygon: &Polygon<f64>| {
+			line(polygon.exterior()) + VEC + polygon.interiors().iter().map(line).sum::<usize>()
+		};
+		let mut total = 0;
+		let mut stack = vec![self];
+		while let Some(geometry) = stack.pop() {
+			total += match geometry {
+				Self::Point(_) => 0,
+				Self::Line(l) => line(l),
+				Self::Polygon(p) => polygon(p),
+				Self::MultiPoint(points) => VEC + points.0.len() * COORD,
+				Self::MultiLine(lines) => VEC + lines.0.iter().map(line).sum::<usize>(),
+				Self::MultiPolygon(polygons) => VEC + polygons.0.iter().map(polygon).sum::<usize>(),
+				Self::Collection(geometries) => {
+					stack.extend(geometries.iter());
+					VEC + geometries.len() * std::mem::size_of::<Geometry>()
+				}
+			};
+		}
+		total
+	}
+
 	/// Check if this has valid latitude and longitude points:
 	/// * -90 <= lat <= 90
 	/// * -180 <= lng <= 180
@@ -718,6 +748,18 @@ fn polygon_lines(polygon: &Polygon) -> impl Iterator<Item = Line> + '_ {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// A geometry weighs its coordinates, however deep a collection holds them.
+	#[test]
+	fn a_geometry_weighs_its_coordinates() {
+		let points: Vec<(f64, f64)> = (0..100_000).map(|i| (i as f64, i as f64)).collect();
+		let coords = points.len() * std::mem::size_of::<Coord<f64>>();
+		let line = Geometry::Line(LineString::from(points));
+		assert!(line.heap_bytes() >= coords);
+		let nested = Geometry::Collection(vec![Geometry::Collection(vec![line.clone()])]);
+		assert!(nested.heap_bytes() > line.heap_bytes());
+		assert_eq!(Geometry::Point(Point::new(1.0, 2.0)).heap_bytes(), 0);
+	}
 
 	fn collection() -> Geometry {
 		Geometry::Collection(vec![

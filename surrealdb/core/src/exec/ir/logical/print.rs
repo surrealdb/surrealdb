@@ -103,8 +103,8 @@ use crate::expr::graphql_config::{
 use crate::expr::index::{DiskAnnParams, Distance, FullTextParams, HnswParams, VectorType};
 use crate::expr::language::Language;
 use crate::expr::logical::{
-	Emission, GuardKind, JoinKind, OutputPath, OutputPathPart, RelationAlias, WindowFrame,
-	WindowFrameBound, WindowFrameUnits, WindowFunction,
+	Emission, GuardKind, JoinKind, LookupTrace, OutputPath, OutputPathPart, RelationAlias,
+	WindowFrame, WindowFrameBound, WindowFrameUnits, WindowFunction,
 };
 use crate::expr::lookup::LookupKind;
 use crate::expr::match_plan::{
@@ -2290,7 +2290,15 @@ text_struct!(LookupAttrs {
 	split: Option<u16>,
 	group: Option<u16>,
 	limit: Option<u16>,
-	start: Option<u16>
+	start: Option<u16>,
+	trace: LookupTrace
+});
+
+text_unit_enum!(LookupTrace {
+	None,
+	Traced,
+	Partial,
+	Inner
 });
 
 text_struct!(RecurseAttrs {

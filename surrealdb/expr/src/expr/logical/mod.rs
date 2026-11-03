@@ -161,6 +161,7 @@ mod expr;
 pub(crate) mod lower;
 mod request;
 pub mod schema;
+pub mod trace;
 
 use std::fmt::{self, Display, Formatter};
 use std::ops::ControlFlow;
@@ -195,6 +196,7 @@ pub use self::schema::{
 	ComputedBody, FieldPath, FieldSchema, FieldSegment, LogicalPermission, LogicalPermissionRef,
 	Openness, Schema, coercion_is_identity, kind_may_be_record,
 };
+pub use self::trace::LookupTrace;
 use crate::expr::match_plan::MatchPlan;
 use crate::expr::with::With;
 use crate::expr::{Base, ExplainFormat, Idiom, Kind, Param};
@@ -714,6 +716,9 @@ pub struct LogicalWrite {
 	pub duplicate_update: Option<LogicalData>,
 	/// The statement's `WHERE`, in logical form.
 	pub cond: Option<LogicalExpr>,
+	/// What a query trace does with the lookups of the statement's `RETURN`
+	/// fields, which are lowered apart from this form ([`trace::mark_fields`]).
+	pub trace: LookupTrace,
 }
 
 impl LogicalWrite {
@@ -2112,6 +2117,7 @@ impl LogicalOp {
 				data,
 				duplicate_update,
 				cond,
+				trace,
 			}) => LogicalOp::Write(LogicalWrite {
 				statement,
 				data,
@@ -2125,6 +2131,7 @@ impl LogicalOp {
 						leaf
 					}
 				},
+				trace,
 			}),
 			LogicalOp::UnionAll(LogicalUnionAll {
 				inputs,
@@ -3894,6 +3901,7 @@ mod tests {
 				data: None,
 				duplicate_update: None,
 				cond: None,
+				trace: crate::expr::logical::LookupTrace::None,
 			}),
 			LogicalOp::UnionAll(LogicalUnionAll {
 				inputs: vec![source("a"), source("b")],

@@ -141,7 +141,7 @@ use crate::expr::logical::{
 	lower, lower_expr, lower_fields, lower_request,
 };
 use crate::expr::lookup::LookupKind;
-use crate::expr::{BinaryOperator, Function, Idiom, Kind, Output, Part};
+use crate::expr::{Function, Idiom, Kind, Output, Part};
 
 /// What binding a statement left in the block it was bound in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1951,7 +1951,7 @@ fn value_split_over_source(op: &LogicalOp) -> Option<LogicalOp> {
 			let raw_parts = alias
 				.as_ref()
 				.map(|path| path.parts.clone())
-				.unwrap_or_else(|| named_after_gates(expr).output_path().parts);
+				.unwrap_or_else(|| expr.named_after_gates().output_path().parts);
 			let target_path = if raw_parts.is_empty() {
 				OutputPath::field("value")
 			} else {
@@ -2774,7 +2774,7 @@ pub(super) fn columns_of(fields: &LogicalFields) -> Vec<Column<'_>> {
 					expr,
 					frame: Some(frame),
 					path: Some(
-						alias.clone().unwrap_or_else(|| named_after_gates(expr).output_path()),
+						alias.clone().unwrap_or_else(|| expr.named_after_gates().output_path()),
 					),
 				}),
 			})
@@ -2837,58 +2837,10 @@ pub(super) fn aggregate_names(fields: &LogicalFields) -> Vec<OutputPath> {
 				expr,
 				alias,
 				..
-			} => Some(alias.clone().unwrap_or_else(|| named_after_gates(expr).output_path())),
+			} => Some(alias.clone().unwrap_or_else(|| expr.named_after_gates().output_path())),
 			LogicalField::All => None,
 		})
 		.collect()
-}
-
-/// Whether `expr` is an `AND` or `OR` whose left operand is a boolean literal.
-fn is_literal_gate(expr: &LogicalExpr) -> bool {
-	matches!(
-		expr,
-		LogicalExpr::Binary {
-			left,
-			op: BinaryOperator::And | BinaryOperator::Or,
-			..
-		} if matches!(left.as_ref(), LogicalExpr::Literal(LogicalLiteral::Bool(_)))
-	)
-}
-
-/// The expression an unaliased field is named after: the expression with each `AND` or `OR` whose
-/// left operand is a boolean literal replaced by what it evaluates to. `false AND x` and
-/// `true OR x` are their left literal, and `true AND x` and `false OR x` are `x`, so the name
-/// is the one the folded expression gets, whichever of these the fold pass applies to the value.
-/// An expression with no such gate is its own name.
-fn named_after_gates(expr: &LogicalExpr) -> Cow<'_, LogicalExpr> {
-	if !expr.any(is_literal_gate) {
-		return Cow::Borrowed(expr);
-	}
-	let folded = expr.clone().transform::<std::convert::Infallible>(&mut |node| {
-		let LogicalExpr::Binary {
-			left,
-			op,
-			right,
-		} = node
-		else {
-			return Ok(node);
-		};
-		Ok(match (*left, op) {
-			(LogicalExpr::Literal(LogicalLiteral::Bool(true)), BinaryOperator::And)
-			| (LogicalExpr::Literal(LogicalLiteral::Bool(false)), BinaryOperator::Or) => *right,
-			(literal @ LogicalExpr::Literal(LogicalLiteral::Bool(false)), BinaryOperator::And)
-			| (literal @ LogicalExpr::Literal(LogicalLiteral::Bool(true)), BinaryOperator::Or) => literal,
-			(left, op) => LogicalExpr::Binary {
-				left: Box::new(left),
-				op,
-				right,
-			},
-		})
-	});
-	match folded {
-		Ok(folded) => Cow::Owned(folded),
-		Err(never) => match never {},
-	}
 }
 
 /// The name each unaliased field of `fields` lands under, in order: an expression that is a path
@@ -2904,7 +2856,7 @@ pub(super) fn unaliased_names(fields: &LogicalFields) -> Vec<OutputPath> {
 				alias: None,
 				..
 			} => {
-				let named = named_after_gates(expr);
+				let named = expr.named_after_gates();
 				Some(if named.is_path() {
 					named.output_path()
 				} else {
@@ -3819,9 +3771,10 @@ fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Resu
 		&[TypeKnowledge::Unknown],
 	)?;
 	if let Some(fields) = output {
-		let fields = lower_fields(fields.clone()).map_err(|error| {
+		let mut fields = lower_fields(fields.clone()).map_err(|error| {
 			invariant(&format!("the RETURN clause of a write has no logical form: {error}"))
 		})?;
+		crate::expr::logical::trace::mark_fields(&mut fields, write.trace);
 		// The columns bind `$parent` from the frame around the write, as the clause does, so the
 		// record the projection reads is never its own `$parent`.
 		enter_row_region(cx, op, RegionKind::Clause(ClauseRole::ReturnClause), |cx, row| {
@@ -5696,6 +5649,7 @@ fn bind_hop(
 		group: clause_count(lookup.group.as_deref())?,
 		limit,
 		start,
+		trace: lookup.trace,
 	};
 	let sink = LoopSink::Output;
 	let entry = vec![TypeKnowledge::Unknown; loop_body_args(&sink)];

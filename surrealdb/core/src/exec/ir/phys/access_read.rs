@@ -418,6 +418,7 @@ impl Read<'_> {
 			group,
 			limit,
 			start,
+			trace,
 		} = attrs;
 		let bare = !*only
 			&& !*only_path
@@ -457,6 +458,7 @@ impl Read<'_> {
 				limit: None,
 				start: None,
 				alias: None,
+				trace: *trace,
 			}),
 		}))
 	}

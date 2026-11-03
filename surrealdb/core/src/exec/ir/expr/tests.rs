@@ -1728,6 +1728,7 @@ fn graph_lookup() -> Box<LogicalLookup> {
 		limit: None,
 		start: None,
 		alias: None,
+		trace: crate::expr::logical::LookupTrace::None,
 	})
 }
 

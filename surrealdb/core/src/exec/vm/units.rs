@@ -351,6 +351,7 @@ fn subjects_erased(
 		data: write.data.clone(),
 		duplicate_update: write.duplicate_update.clone(),
 		cond: write.cond.clone(),
+		trace: write.trace,
 	}
 }
 

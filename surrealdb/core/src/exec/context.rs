@@ -1790,6 +1790,13 @@ impl ExecutionContext {
 		self.with_new_ctx(child.freeze())
 	}
 
+	/// Derive a context whose statement reports to the query trace `trace`.
+	pub(crate) fn with_query_trace(&self, trace: Arc<crate::exec::trace::StatementTrace>) -> Self {
+		let mut child = Context::new_child(self.ctx());
+		child.set_query_trace(trace);
+		self.with_new_ctx(child.freeze())
+	}
+
 	/// The metrics the program running around this context records into, if
 	/// its plan is analysed.
 	pub(crate) fn vm_metrics(&self) -> Option<&Arc<crate::exec::metrics::OperatorMetrics>> {

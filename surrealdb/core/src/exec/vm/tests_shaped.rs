@@ -66,6 +66,9 @@ async fn stream(db: &TestDb, session: &Session, sql: &str, format: RowFormat) ->
 					error,
 					..
 				} => answers.entry(index).or_default().error = error.map(|e| e.to_string()),
+				QueryStreamItem::Trace {
+					..
+				} => {}
 			}
 		}
 	};

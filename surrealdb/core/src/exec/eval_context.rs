@@ -444,6 +444,10 @@ impl<'a> EvalContext<'a> {
 	pub fn check_allowed_function(&self, name: &str) -> anyhow::Result<()> {
 		use crate::dbs::capabilities::Error as CapabilitiesError;
 
+		// The query trace's own functions are written by the trace, never by the query.
+		if crate::expr::logical::trace::is_internal(name) {
+			return Ok(());
+		}
 		if !self.capabilities().allows_function_name(name) {
 			return Err(CapabilitiesError::FunctionNotAllowed(name.to_string()).into());
 		}

@@ -129,6 +129,7 @@ pub fn lower(expr: impl Into<surface::Expr>) -> Lowered<LogicalOp> {
 					cond: None,
 					statement: LogicalWriteStatement::Create(stmt),
 					source: LogicalWriteSource::Targets(targets),
+					trace: crate::expr::logical::LookupTrace::None,
 				}),
 				timeout,
 			)
@@ -146,6 +147,7 @@ pub fn lower(expr: impl Into<surface::Expr>) -> Lowered<LogicalOp> {
 					cond: stmt.cond.clone().map(|c| lower_expr(c.0)).transpose()?,
 					statement: LogicalWriteStatement::Update(stmt),
 					source: LogicalWriteSource::Rows(Box::new(rows)),
+					trace: crate::expr::logical::LookupTrace::None,
 				}),
 				timeout,
 			)?;
@@ -168,6 +170,7 @@ pub fn lower(expr: impl Into<surface::Expr>) -> Lowered<LogicalOp> {
 					cond: stmt.cond.clone().map(|c| lower_expr(c.0)).transpose()?,
 					statement: LogicalWriteStatement::Upsert(stmt),
 					source: LogicalWriteSource::Targets(targets),
+					trace: crate::expr::logical::LookupTrace::None,
 				}),
 				timeout,
 			)?;
@@ -186,6 +189,7 @@ pub fn lower(expr: impl Into<surface::Expr>) -> Lowered<LogicalOp> {
 					cond: stmt.cond.clone().map(|c| lower_expr(c.0)).transpose()?,
 					statement: LogicalWriteStatement::Delete(stmt),
 					source: LogicalWriteSource::Rows(Box::new(rows)),
+					trace: crate::expr::logical::LookupTrace::None,
 				}),
 				timeout,
 			)?;
@@ -205,6 +209,7 @@ pub fn lower(expr: impl Into<surface::Expr>) -> Lowered<LogicalOp> {
 					cond: None,
 					statement: LogicalWriteStatement::Insert(stmt),
 					source: LogicalWriteSource::Inserts(inserts),
+					trace: crate::expr::logical::LookupTrace::None,
 				}),
 				timeout,
 			)
@@ -224,6 +229,7 @@ pub fn lower(expr: impl Into<surface::Expr>) -> Lowered<LogicalOp> {
 					cond: None,
 					statement: LogicalWriteStatement::Relate(stmt),
 					source: LogicalWriteSource::Targets(targets),
+					trace: crate::expr::logical::LookupTrace::None,
 				}),
 				timeout,
 			)
@@ -1549,6 +1555,7 @@ pub(crate) fn lower_lookup(lookup: surface::lookup::Lookup) -> Lowered<LogicalLo
 		limit: lookup.limit.map(|l| lower_expr(l.0)).transpose()?,
 		start: lookup.start.map(|s| lower_expr(s.0)).transpose()?,
 		alias: lookup.alias.map(lower_output_path).transpose()?,
+		trace: crate::expr::logical::LookupTrace::None,
 	})
 }
 

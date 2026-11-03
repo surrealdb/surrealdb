@@ -405,7 +405,7 @@ impl SurrealConnection {
 
 				Ok(TestTaskResult::Results {
 					did_timeout: false,
-					res: results,
+					res: results, trace: None,
 				})
 			}
 			Ok(_) => bail!("Got invalid response type"),

@@ -701,6 +701,9 @@ pub struct LogicalLookup {
 	/// `AS name`: where the lookup's value lands in the output, which is also
 	/// the name of any path containing this lookup.
 	pub alias: Option<OutputPath>,
+	/// What a query trace does with the lookup ([`super::trace`]). Set only for
+	/// a request that asks for a trace; [`LookupTrace::None`] otherwise.
+	pub trace: super::LookupTrace,
 }
 
 /// What a [`LogicalLookup`] scans: a whole table or a key range on it.
@@ -2780,6 +2783,58 @@ impl LogicalExpr {
 				..
 			}
 			| LogicalExpr::Subquery(_) => out.push(Segment::Start(self)),
+		}
+	}
+
+	/// The expression an unaliased field is named after: the expression with each `AND` or `OR`
+	/// whose left operand is a boolean literal replaced by what it evaluates to. `false AND x` and
+	/// `true OR x` are their left literal, and `true AND x` and `false OR x` are `x`, so the name
+	/// is the one the folded expression gets, whichever of these the fold pass applies to the
+	/// value. An expression with no such gate is its own name.
+	pub fn named_after_gates(&self) -> std::borrow::Cow<'_, LogicalExpr> {
+		fn is_literal_gate(expr: &LogicalExpr) -> bool {
+			matches!(
+				expr,
+				LogicalExpr::Binary {
+					left,
+					op: BinaryOperator::And | BinaryOperator::Or,
+					..
+				} if matches!(left.as_ref(), LogicalExpr::Literal(LogicalLiteral::Bool(_)))
+			)
+		}
+		if !self.any(is_literal_gate) {
+			return std::borrow::Cow::Borrowed(self);
+		}
+		let folded = self.clone().transform::<std::convert::Infallible>(&mut |node| {
+			let LogicalExpr::Binary {
+				left,
+				op,
+				right,
+			} = node
+			else {
+				return Ok(node);
+			};
+			Ok(match (*left, op) {
+				(LogicalExpr::Literal(LogicalLiteral::Bool(true)), BinaryOperator::And)
+				| (LogicalExpr::Literal(LogicalLiteral::Bool(false)), BinaryOperator::Or) => *right,
+				(
+					literal @ LogicalExpr::Literal(LogicalLiteral::Bool(false)),
+					BinaryOperator::And,
+				)
+				| (
+					literal @ LogicalExpr::Literal(LogicalLiteral::Bool(true)),
+					BinaryOperator::Or,
+				) => literal,
+				(left, op) => LogicalExpr::Binary {
+					left: Box::new(left),
+					op,
+					right,
+				},
+			})
+		});
+		match folded {
+			Ok(folded) => std::borrow::Cow::Owned(folded),
+			Err(never) => match never {},
 		}
 	}
 

@@ -1412,6 +1412,7 @@ async fn two_hops(window: bool, corrupt: Option<i64>) -> Hops {
 		checked: true,
 		page: None,
 		window,
+		trace: crate::expr::logical::LookupTrace::None,
 	};
 	let program = program_with(Vec::new(), Vec::new(), Vec::new(), 0);
 	let ctx = db.exec_ctx().await;
@@ -1474,6 +1475,7 @@ async fn paged_two_hops(window: bool, needs: usize, corrupt: i64) -> String {
 			limit: Some(needs),
 		}),
 		window,
+		trace: crate::expr::logical::LookupTrace::None,
 	};
 	let program = program_with(Vec::new(), Vec::new(), Vec::new(), 0);
 	let ctx = db.exec_ctx().await;

@@ -32,7 +32,7 @@ use crate::expr::Param;
 use crate::expr::logical::{
 	LogicalAggregate, LogicalExpr, LogicalFields, LogicalFilter, LogicalLimit, LogicalLiteral,
 	LogicalLookup, LogicalOnly, LogicalOp, LogicalProject, LogicalSort, LogicalSplit,
-	LogicalValues,
+	LogicalValues, LookupTrace,
 };
 
 /// The name the statement form of a lookup reads its source by. The binder declares it. No query
@@ -78,6 +78,12 @@ pub(crate) fn statement(lookup: &LogicalLookup, only: bool) -> LogicalOp {
 		limit: None,
 		start: None,
 		alias: None,
+		// The statement reshapes what the lookup reaches, so the records reached are not what the
+		// result holds: a traced lookup of this form feeds the result through a change of value.
+		trace: match lookup.trace {
+			LookupTrace::Traced | LookupTrace::Partial | LookupTrace::Inner => LookupTrace::Partial,
+			LookupTrace::None => LookupTrace::None,
+		},
 	};
 	let mut op = LogicalOp::Values(LogicalValues {
 		expr: LogicalExpr::Lookup {
@@ -259,6 +265,7 @@ mod tests {
 			limit: None,
 			start: None,
 			alias: None,
+			trace: crate::expr::logical::LookupTrace::None,
 		}
 	}
 

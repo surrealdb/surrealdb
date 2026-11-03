@@ -166,6 +166,13 @@ pub struct TestEnv {
 	#[serde(default)]
 	pub remote_exclusive: bool,
 
+	/// The trace kinds the query asks for, as a `query` call's `trace` option
+	/// names them: `trace = ["relations", "references", "links", "variables",
+	/// "subscriptions"]`. Each statement's trace is then graded beside its value
+	/// ([`crate::tests::trace`]). Empty asks for none.
+	#[serde(default)]
+	pub trace: Vec<String>,
+
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
@@ -264,6 +271,10 @@ pub struct ErrorTestResult {
 #[serde(rename_all = "kebab-case")]
 pub struct ValueTestResult {
 	pub value: SurrealConfigValue,
+	/// The trace the statement sends, for a test that asks for one; none when
+	/// absent ([`crate::tests::trace`]).
+	#[serde(default)]
+	pub trace: Option<SurrealConfigValue>,
 	#[serde(default)]
 	pub skip_datetime: Option<bool>,
 	#[serde(default)]
@@ -285,6 +296,10 @@ pub struct MatchTestResult {
 	pub _match: SurrealExpr,
 	#[serde(default)]
 	pub error: Option<bool>,
+	/// The trace the statement sends, for a test that asks for one; none when
+	/// absent ([`crate::tests::trace`]).
+	#[serde(default)]
+	pub trace: Option<SurrealConfigValue>,
 }
 
 /// Duration which deserializes from both a string as well as a number.

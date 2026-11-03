@@ -1228,6 +1228,7 @@ impl<'a> IndexAnalyzer<'a> {
 			limit,
 			start,
 			alias,
+			..
 		} = lookup;
 		let LookupKind::Graph(dir) = kind else {
 			return None;

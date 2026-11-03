@@ -535,6 +535,20 @@ struct StreamSink {
 	/// The encoding rows are sent in, as
 	/// [`QueryStreamItem::Frame`]s; `None` sends them as values.
 	row_format: Option<surrealdb_rpc::RowFormat>,
+	/// The trace kinds the consumer asked for. Empty records nothing.
+	trace: surrealdb_rpc::TraceKinds,
+	/// The trace of each statement not yet finalised that its rows have not
+	/// carried: what a top-level `LET` bound, and what its reads recorded after
+	/// its last batch of rows. Sent before the statement's `Finished` once its
+	/// outcome is final, and dropped with a statement that failed or was
+	/// rolled back.
+	statement_traces: HashMap<usize, surrealdb_rpc::Trace>,
+	/// The statement whose reads record into a trace ([`StatementTrace`]),
+	/// when the consumer asked for a kind they record: its index and the
+	/// trace. Created when the statement is first planned to run, and folded
+	/// into [`Self::statement_traces`] once another statement runs or results
+	/// are finalised.
+	reads: Option<(usize, Arc<crate::exec::trace::StatementTrace>)>,
 	/// How many of [`Executor::results`] have been finalised. Results at or
 	/// past this index are still provisional — inside an unresolved
 	/// `BEGIN … COMMIT` block, they may yet be rewritten into errors.
@@ -580,6 +594,13 @@ impl StreamSink {
 		}
 	}
 
+	/// Stage without a bound: the consumer gathers the whole answer before any
+	/// of it reaches a client, so an attempt's items never count as delivered
+	/// and a write that loses a retryable conflict is always run again.
+	fn collect_whole(&mut self) {
+		self.stage_max = usize::MAX;
+	}
+
 	/// Whether items are being held back.
 	fn holding(&self) -> bool {
 		self.stage == Stage::Holding
@@ -619,6 +640,12 @@ impl StreamSink {
 	/// and stop staging. Answers whether any of the attempt's items had
 	/// already reached the consumer, in which case it must not run again.
 	fn discard_staged(&mut self, index: usize) -> bool {
+		// What the attempt's reads recorded goes with its rows.
+		if let Some((at, reads)) = &self.reads
+			&& *at == index
+		{
+			let _ = reads.take();
+		}
 		let released = self.stage == Stage::Released;
 		self.stage = Stage::Off;
 		self.staged.clear();
@@ -630,6 +657,56 @@ impl StreamSink {
 	/// Whether the consumer has gone away.
 	fn is_closed(&self) -> bool {
 		self.items.is_closed()
+	}
+
+	/// The trace statement `index`'s reads record into, when the consumer
+	/// asked for a kind they record. The trace of a statement before it is
+	/// folded into [`Self::statement_traces`] first.
+	fn reads_for(&mut self, index: usize) -> Option<Arc<crate::exec::trace::StatementTrace>> {
+		if let Some((at, reads)) = &self.reads
+			&& *at == index
+		{
+			return Some(Arc::clone(reads));
+		}
+		self.fold_reads();
+		let reads = Arc::new(crate::exec::trace::StatementTrace::new(self.trace)?);
+		self.reads = Some((index, Arc::clone(&reads)));
+		Some(reads)
+	}
+
+	/// Move what the running statement's reads recorded and its rows did not
+	/// carry into [`Self::statement_traces`], and stop recording it.
+	fn fold_reads(&mut self) {
+		if let Some((index, reads)) = self.reads.take() {
+			let trace = reads.take();
+			if !trace.is_empty() {
+				self.statement_traces.entry(index).or_default().absorb(trace);
+			}
+		}
+	}
+
+	/// Send what statement `index`'s reads recorded so far, ahead of the batch
+	/// of its rows about to be sent, holding it back with them while staging.
+	async fn send_reads(&mut self, index: usize) {
+		let Some((at, reads)) = &self.reads else {
+			return;
+		};
+		if *at != index {
+			return;
+		}
+		// Charged at what it holds, so a held attempt's traces count toward the
+		// staging bound with its rows.
+		let (trace, bytes) = reads.take_sized();
+		if !trace.is_empty() {
+			self.send_rows(
+				QueryStreamItem::Trace {
+					index,
+					trace: Box::new(trace),
+				},
+				bytes,
+			)
+			.await;
+		}
 	}
 }
 
@@ -805,7 +882,8 @@ pub(crate) struct Carried {
 }
 
 /// An estimate of the memory `value` retains: the inline size of every node
-/// plus the heap bytes of its strings and byte buffers.
+/// plus what each holds on the heap — strings, byte buffers, names, a
+/// geometry's coordinates and a closure's captures.
 ///
 /// Iterative, so a deeply nested value cannot overflow the stack. The
 /// estimate is a measure for the bound, not an allocator's account.
@@ -849,6 +927,12 @@ fn estimate_bytes(value: &Value) -> usize {
 					}
 				}
 			}
+			Value::Geometry(geometry) => total += geometry.heap_bytes(),
+			Value::Table(table) => total += table.as_str().len(),
+			Value::File(file) => total += file.bucket.len() + file.key.len(),
+			Value::Regex(regex) => total += regex.0.as_str().len(),
+			// What a closure captured is held with it.
+			Value::Closure(_) => total += crate::exec::memory::size::value_bytes(value),
 			Value::None
 			| Value::Null
 			| Value::Bool(_)
@@ -859,12 +943,7 @@ fn estimate_bytes(value: &Value) -> usize {
 			| Value::Time(_)
 			| Value::Timestamp(_)
 			| Value::Interval(_)
-			| Value::Uuid(_)
-			| Value::Geometry(_)
-			| Value::Table(_)
-			| Value::File(_)
-			| Value::Regex(_)
-			| Value::Closure(_) => {}
+			| Value::Uuid(_) => {}
 		}
 	}
 	total
@@ -1590,6 +1669,7 @@ impl Executor {
 		opt: Options,
 		items: Sender<QueryStreamItem>,
 		row_format: Option<surrealdb_rpc::RowFormat>,
+		trace: surrealdb_rpc::TraceKinds,
 	) -> Self {
 		let mut this = Self::new(kvs, ctx, opt);
 		this.stream = Some(StreamSink {
@@ -1599,10 +1679,23 @@ impl Executor {
 			stage_max: kvs.config().exec.stream_stage_bytes,
 			stage: Stage::Off,
 			row_format,
+			trace,
+			statement_traces: HashMap::new(),
+			reads: None,
 			streamed: HashMap::new(),
 			finalised: 0,
 		});
 		this
+	}
+
+	/// Hold every attempt's items until its commit outcome is known, however
+	/// many there are, for a consumer that gathers the whole answer before any
+	/// of it reaches a client: nothing it receives has been delivered, so a
+	/// write that loses a retryable conflict is always run again.
+	fn collect_whole_answer(&mut self) {
+		if let Some(sink) = self.stream.as_mut() {
+			sink.collect_whole();
+		}
 	}
 
 	/// Whether a streaming execution has lost its consumer.
@@ -1803,9 +1896,30 @@ impl Executor {
 		let Some(sink) = self.stream.as_mut() else {
 			return;
 		};
+		// A statement with a result has ended: what its reads recorded is final.
+		if sink.reads.as_ref().is_some_and(|(index, _)| *index < self.results.len()) {
+			sink.fold_reads();
+		}
 		while sink.finalised < self.results.len() {
 			let index = sink.finalised;
 			sink.finalised += 1;
+			let result = &mut self.results[index];
+			// A statement's trace stands only with its outcome: one that failed
+			// or was rolled back retracts it with its rows.
+			let mut trace = sink.statement_traces.remove(&index).unwrap_or_default();
+			if sink.trace.contains(surrealdb_rpc::TraceKinds::SUBSCRIPTIONS)
+				&& matches!(result.query_type, QueryType::Live)
+				&& let Ok(surrealdb_types::Value::Uuid(id)) = &result.result
+			{
+				trace.subscriptions.push(*id);
+			}
+			if result.result.is_ok() && !trace.is_empty() {
+				sink.send(QueryStreamItem::Trace {
+					index,
+					trace: Box::new(trace),
+				})
+				.await;
+			}
 			let result = &mut self.results[index];
 			// A statement whose rows already went out is owed only its terminal
 			// item; one that failed is owed only that too, since its rows (if
@@ -2355,6 +2469,11 @@ impl Executor {
 			)
 			.await?
 			.with_session_sink(Arc::clone(&self.session_sink));
+		let index = self.current_index();
+		let exec_ctx = match self.stream.as_mut().and_then(|sink| sink.reads_for(index)) {
+			Some(reads) => exec_ctx.with_query_trace(reads),
+			None => exec_ctx,
+		};
 
 		// A statement whose rows stream to a consumer that takes them encoded
 		// is run to hand them on encoded, which its operators may do without
@@ -2396,7 +2515,6 @@ impl Executor {
 		// array first. A scalar one cannot: its value IS the single row, so
 		// there is nothing to stream and one item carries it.
 		let streaming = stream_rows && matches!(plan.output_shape(), OutputShape::Rows);
-		let index = self.current_index();
 
 		// Collect all results
 		let mut results = Vec::new();
@@ -2469,6 +2587,9 @@ impl Executor {
 						// no row follows a create that fails.
 						txn.flush_held().await.map_err(|e| ControlFlow::Err(e.into()))?;
 						let sink = self.stream.as_mut().expect("streaming implies a sink");
+						// The batch's trace goes ahead of it, so a consumer has
+						// the edges behind a row when the row arrives.
+						sink.send_reads(index).await;
 						sink.send_rows(item, bytes).await;
 						// A consumer that stopped reading wants no more rows. The
 						// statement fails rather than ends, so that its transaction
@@ -2615,7 +2736,41 @@ impl Executor {
 	/// A `SELECT` is checked against the `FOR UPDATE` rules before lowering,
 	/// on the runtime syntax the parser produced. The expression is consumed.
 	fn lower_bare_expression(&self, expr: Expr) -> Result<LogicalOp, Error> {
-		lower_statement(expr)
+		lower_statement(expr).map(|op| self.traced(op))
+	}
+
+	/// Whether the consumer asked for a trace kind a statement's reads record,
+	/// so each statement's lookups are marked for it before it is planned.
+	fn marks_lookups(&self) -> bool {
+		self.stream
+			.as_ref()
+			.is_some_and(|sink| !sink.trace.intersection(crate::exec::trace::RECORDED).is_empty())
+	}
+
+	/// `op` with its lookups marked for a query trace, when the consumer asked
+	/// for one ([`crate::expr::logical::trace`]).
+	fn traced(&self, mut op: LogicalOp) -> LogicalOp {
+		if self.marks_lookups() {
+			crate::expr::logical::trace::mark(&mut op);
+		}
+		op
+	}
+
+	/// Mark the lookups of every statement of the request that arrived
+	/// lowered; a statement lowered from syntax is marked where it is lowered.
+	fn mark_statements(&self, statements: &mut [TopLevelStatement]) {
+		if !self.marks_lookups() {
+			return;
+		}
+		for statement in statements {
+			match statement {
+				TopLevelStatement::Plan(op) => crate::expr::logical::trace::mark(op),
+				TopLevelStatement::Surreal(stmt) => {
+					crate::expr::logical::trace::mark(&mut stmt.plan)
+				}
+				TopLevelStatement::Ast(_) => {}
+			}
+		}
 	}
 
 	/// Bind a lowered bare expression for `txn` and plan it as the operator
@@ -2961,6 +3116,7 @@ impl Executor {
 		let name = stm.name.to_string();
 		let kind = stm.kind.clone();
 		let statement = TopLevelStatement::Ast(TopLevelExpr::Expr(Expr::Let(Box::new(stm))));
+		let marks = self.marks_lookups();
 		self.run_binding(
 			name,
 			kind,
@@ -2969,11 +3125,18 @@ impl Executor {
 				let TopLevelStatement::Ast(TopLevelExpr::Expr(Expr::Let(stm))) = &statement else {
 					unreachable!("binding statement carries LET syntax");
 				};
-				lower(stm.what.clone()).map_err(|reason| {
-					ControlFlow::Err(anyhow::Error::new(ExecError::PlannerUnsupported {
-						reason: reason.to_string(),
-					}))
-				})
+				lower(stm.what.clone())
+					.map(|mut op| {
+						if marks {
+							crate::expr::logical::trace::mark(&mut op);
+						}
+						op
+					})
+					.map_err(|reason| {
+						ControlFlow::Err(anyhow::Error::new(ExecError::PlannerUnsupported {
+							reason: reason.to_string(),
+						}))
+					})
 			},
 			txn,
 			start,
@@ -3072,7 +3235,9 @@ impl Executor {
 		// value.
 		crate::val::check_value_depth(&result)?;
 
-		self.bind_session_let(&name, Arc::new(result))?;
+		let result = Arc::new(result);
+		self.trace_variable(&name, &result);
+		self.bind_session_let(&name, result)?;
 
 		// The runtime formatter redacts credentials, including nested user
 		// definitions. The plan names every parameter the statement references.
@@ -3081,6 +3246,36 @@ impl Executor {
 		}
 		// Finalise transaction, returning nothing unless it couldn't commit
 		Ok(Value::None)
+	}
+
+	/// Record what a top-level `LET` bound in the statement's trace, when the
+	/// consumer asked for `variables`.
+	///
+	/// A value estimated past [`crate::exec::trace::CAP_BYTES`] is never copied:
+	/// its name is reported with `NONE` and `variables` is truncated. A value that
+	/// cannot be converted is left out rather than failing the statement: tracing
+	/// never fails a query.
+	fn trace_variable(&mut self, name: &str, value: &Value) {
+		let index = self.current_index();
+		let Some(sink) = self
+			.stream
+			.as_mut()
+			.filter(|sink| sink.trace.contains(surrealdb_rpc::TraceKinds::VARIABLES))
+		else {
+			return;
+		};
+		let trace = sink.statement_traces.entry(index).or_default();
+		trace.variables.retain(|(bound, _)| bound != name);
+		// A value past the cap is not copied: its name is reported with `NONE`,
+		// and `variables` is truncated.
+		if estimate_bytes(value) > crate::exec::trace::CAP_BYTES {
+			trace.variables.push((name.to_owned(), surrealdb_types::Value::None));
+			trace.truncated = trace.truncated.union(surrealdb_rpc::TraceKinds::VARIABLES);
+			return;
+		}
+		if let Ok(value) = convert_value_to_public_value(value.clone()) {
+			trace.variables.push((name.to_owned(), value));
+		}
 	}
 
 	/// Bind the value of a top-level `LET` into the request's scope for the statements after it.
@@ -4920,6 +5115,10 @@ impl Executor {
 	/// statement's result is final as soon as the statement ends — there is no
 	/// block resolution to wait for, and whether the caller later commits is
 	/// its own affair, exactly as on the buffered path.
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "the request's statements, where they stream to and how"
+	)]
 	pub(crate) async fn execute_statements_streaming_with_transaction(
 		kvs: &Datastore,
 		ctx: FrozenContext,
@@ -4927,8 +5126,15 @@ impl Executor {
 		statements: Vec<TopLevelStatement>,
 		items: Sender<QueryStreamItem>,
 		row_format: Option<surrealdb_rpc::RowFormat>,
+		trace: surrealdb_rpc::TraceKinds,
+		collected: bool,
 	) -> Result<Vec<QueryResult>> {
-		let mut executor = Self::new_streaming(kvs, ctx, opt, items, row_format);
+		let mut executor = Self::new_streaming(kvs, ctx, opt, items, row_format, trace);
+		if collected {
+			executor.collect_whole_answer();
+		}
+		let mut statements = statements;
+		executor.mark_statements(&mut statements);
 		executor.prepare_request(&statements);
 		let outcome =
 			crate::exec::compiles::request(executor.run_with_transaction(kvs, statements)).await;
@@ -5206,6 +5412,10 @@ impl Executor {
 	///
 	/// Returns the results as well, so an embedded caller that wants both the
 	/// streamed items and the assembled answer pays for the query once.
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "the request's statements, where they stream to and how"
+	)]
 	pub(crate) async fn execute_statements_streaming(
 		kvs: &Datastore,
 		ctx: FrozenContext,
@@ -5213,12 +5423,19 @@ impl Executor {
 		statements: Vec<TopLevelStatement>,
 		items: Sender<QueryStreamItem>,
 		row_format: Option<surrealdb_rpc::RowFormat>,
+		trace: surrealdb_rpc::TraceKinds,
 		held_transactions: bool,
+		collected: bool,
 	) -> Result<Vec<QueryResult>> {
-		let mut this = Executor::new_streaming(kvs, ctx, opt, items, row_format);
+		let mut this = Executor::new_streaming(kvs, ctx, opt, items, row_format, trace);
 		if held_transactions {
 			this.explicit_emission = Emission::Hold;
 		}
+		if collected {
+			this.collect_whole_answer();
+		}
+		let mut statements = statements;
+		this.mark_statements(&mut statements);
 		this.prepare_request(&statements);
 		let stream = this.counted(futures::stream::iter(statements.into_iter().map(Ok)));
 		let outcome =
@@ -5588,12 +5805,14 @@ impl Executor {
 					name: stmt.name.to_string(),
 					kind: stmt.kind.clone(),
 					read_only,
-					value: Some(lower(stmt.what.clone()).map_err(|reason| {
-						ExecError::PlannerUnsupported {
-							reason: reason.to_string(),
-						}
-						.into()
-					})),
+					value: Some(lower(stmt.what.clone()).map(|op| self.traced(op)).map_err(
+						|reason| {
+							ExecError::PlannerUnsupported {
+								reason: reason.to_string(),
+							}
+							.into()
+						},
+					)),
 				},
 				TopLevelExpr::Expr(expr) => RequestEntry::Run {
 					op: Some(self.lower_bare_expression(expr.clone())),
@@ -6353,6 +6572,15 @@ mod tests {
 	use crate::iam::{Level, Role};
 	use crate::kvs::Datastore;
 	use crate::val::{Array, Value};
+
+	/// SECURITY: a traced `LET` is copied only under the cap, so the estimate
+	/// counts what a geometry holds: a line past the cap is past it here too.
+	#[test]
+	fn a_large_geometry_is_estimated_past_the_trace_cap() {
+		let points: Vec<(f64, f64)> = (0..100_000).map(|i| (i as f64, i as f64)).collect();
+		let line = Value::Geometry(crate::val::Geometry::Line(geo_types::LineString::from(points)));
+		assert!(super::estimate_bytes(&line) > crate::exec::trace::CAP_BYTES);
+	}
 
 	#[tokio::test]
 	async fn reached_credentials_replace_inert_request_payloads() {
@@ -7934,6 +8162,9 @@ mod tests {
 					| QueryStreamItem::Finished {
 						..
 					} => {}
+					QueryStreamItem::Trace {
+						..
+					} => {}
 				}
 			}
 			(rows, error)
@@ -8054,8 +8285,27 @@ mod tests {
 				stage: Stage::Off,
 				streamed: HashMap::new(),
 				row_format: None,
+				trace: surrealdb_rpc::TraceKinds::NONE,
+				statement_traces: HashMap::new(),
+				reads: None,
 				finalised: 0,
 			}
+		}
+
+		/// An answer gathered whole holds an attempt's items past the bound:
+		/// none of them has reached a client, so the attempt may run again.
+		#[tokio::test]
+		async fn a_collected_answer_holds_an_attempt_past_the_bound() {
+			let (tx, rx) = async_channel::unbounded();
+			let mut sink = sink(tx, 1000);
+			sink.collect_whole();
+			sink.begin_staging();
+			for _ in 0..10 {
+				sink.send_rows(rows(0), 300).await;
+			}
+			assert!(rx.is_empty(), "a collected answer sends nothing before the commit");
+			assert_eq!(sink.stage, Stage::Holding, "so the attempt may still run again");
+			assert!(!sink.discard_staged(0), "discarding it reports nothing delivered");
 		}
 
 		/// The held items never pass the bound by more than the item that

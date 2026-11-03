@@ -7950,6 +7950,7 @@ pub(super) mod tests {
 				checked: true,
 				page: None,
 				window: false,
+				trace: crate::expr::logical::LookupTrace::None,
 			})
 			.expect("a lookup is appended");
 		em.note_hop_lookup(

@@ -2054,7 +2054,17 @@ pub trait RpcProtocol {
 			return Err(method_not_allowed(Method::Query.to_string()));
 		}
 		// Process the method arguments
-		let (query, vars, read_only) = extract_query_params(params, &session)?;
+		let (query, vars, read_only, trace) = extract_query_params(params, &session)?;
+
+		// A traced answer carries a trace beside each result, which neither the
+		// results' own type nor their encoded form has room for.
+		if !trace.is_empty() {
+			return Ok(DbResult::Other(
+				run_query_traced(self, txn, session_id, &session, &query, vars, read_only, trace)
+					.await
+					.map_err(types_error_from_anyhow)?,
+			));
+		}
 
 		if let Some(format) = self.row_format() {
 			return Ok(DbResult::Encoded(
@@ -2144,7 +2154,7 @@ pub trait RpcProtocol {
 		// execution runs against the session as it was when the query started,
 		// which is what the buffered path effectively gives it too — there, a
 		// concurrent mutation simply waits instead.
-		let (query, vars, read_only, session, principal) = {
+		let (query, vars, read_only, trace, session, principal) = {
 			let session_lock = self.get_session(&session_id).await?;
 			let session = session_lock.read().await;
 			// Check if the user is allowed to query
@@ -2154,12 +2164,12 @@ pub trait RpcProtocol {
 			if !Self::LQ_SUPPORT && session.rt {
 				return Err(bad_lq_config());
 			}
-			let (query, vars, read_only) = extract_query_params(params, &session)?;
+			let (query, vars, read_only, trace) = extract_query_params(params, &session)?;
 			// Captured under the same guard as everything else the execution
 			// needs, so it names the principal the query actually runs as rather
 			// than whoever the session belongs to by the time it finishes.
 			let principal = AuthPrincipalSnapshot::capture(&session);
-			(query, vars, read_only, session.clone(), principal)
+			(query, vars, read_only, trace, session.clone(), principal)
 		};
 
 		// Kept so the wall-clock guard below can stop the execution
@@ -2180,6 +2190,7 @@ pub trait RpcProtocol {
 				.with_optional_transaction(transaction)
 				.with_optional_cancel(cancel)
 				.with_row_format(self.row_format())
+				.with_trace(trace)
 				.with_read_only(read_only),
 			items,
 		)?;
@@ -3299,13 +3310,20 @@ enum QueryForm<'a> {
 fn extract_query_params(
 	params: PublicArray,
 	session: &Session,
-) -> Result<(String, Option<PublicVariables>, Option<ReadOnlyOptions>), surrealdb_types::Error> {
+) -> Result<
+	(String, Option<PublicVariables>, Option<ReadOnlyOptions>, surrealdb_rpc::TraceKinds),
+	surrealdb_types::Error,
+> {
 	let (query, vars, options) =
 		extract_args::<(PublicValue, Option<PublicValue>, Option<PublicValue>)>(params.into_vec())
 			.ok_or(invalid_params(
 				"Expected (query:string, vars:object, options:object)".to_string(),
 			))?;
-	let read_only = extract_read_only(options)?;
+	let ParsedOptions {
+		read_only,
+		trace,
+		..
+	} = parse_options(options, OptionsFor::Query)?;
 
 	let PublicValue::String(query) = query else {
 		return Err(invalid_params("Expected query to be string".to_string()));
@@ -3324,7 +3342,7 @@ fn extract_query_params(
 		}
 	};
 
-	Ok((query, vars, read_only))
+	Ok((query, vars, read_only, trace))
 }
 
 /// The options of a `begin` call: nothing, or one options object holding
@@ -3337,19 +3355,37 @@ pub fn extract_begin_options(
 	if params.next().is_some() {
 		return Err(invalid_params("Expected (options:object)".to_string()));
 	}
-	let (isolation, read_only) = parse_options(options, true)?;
+	let parsed = parse_options(options, OptionsFor::Begin)?;
 	Ok(crate::kvs::BeginRequest {
-		isolation,
-		read_only,
+		isolation: parsed.isolation,
+		read_only: parsed.read_only,
 	})
 }
 
 /// The `read_only` entry of a query call's options object. See
 /// [`parse_options`]; a query call takes no isolation level.
+#[cfg(test)]
 fn extract_read_only(
 	options: Option<PublicValue>,
 ) -> Result<Option<ReadOnlyOptions>, surrealdb_types::Error> {
-	Ok(parse_options(options, false)?.1)
+	Ok(parse_options(options, OptionsFor::Query)?.read_only)
+}
+
+/// The call an options object belongs to, which decides the entries it takes.
+#[derive(Clone, Copy)]
+enum OptionsFor {
+	/// A `begin` call: `isolation` and `read_only`.
+	Begin,
+	/// A `query` or `query_stream` call: `read_only` and `trace`.
+	Query,
+}
+
+/// The entries of a `query` or `begin` call's options object.
+#[derive(Default)]
+struct ParsedOptions {
+	isolation: Option<crate::kvs::Isolation>,
+	read_only: Option<ReadOnlyOptions>,
+	trace: surrealdb_rpc::TraceKinds,
 }
 
 /// The options object of a `query` or `begin` call.
@@ -3362,15 +3398,19 @@ fn extract_read_only(
 /// - `isolation: "snapshot" | "serializable"` selects the isolation level of the transaction a
 ///   `begin` opens; the SQL names `repeatable read`, `read committed` and `read uncommitted` mean
 ///   `snapshot`, in any case. A query call does not take it: a lone statement is always `SNAPSHOT`.
+/// - `trace: ["relations", "references", "links", "variables", "subscriptions"]` asks a `query` or
+///   `query_stream` call to report those kinds (see [`surrealdb_rpc::trace`]): beside the rows of a
+///   stream, and beside each result of a buffered answer.
 ///
 /// A missing or null options object asks for nothing. Unknown entries are
 /// refused rather than ignored, so a misspelt option is never silently dropped.
 fn parse_options(
 	options: Option<PublicValue>,
-	allow_isolation: bool,
-) -> Result<(Option<crate::kvs::Isolation>, Option<ReadOnlyOptions>), surrealdb_types::Error> {
+	call: OptionsFor,
+) -> Result<ParsedOptions, surrealdb_types::Error> {
+	let allow_isolation = matches!(call, OptionsFor::Begin);
 	let object = match options {
-		None | Some(PublicValue::None | PublicValue::Null) => return Ok((None, None)),
+		None | Some(PublicValue::None | PublicValue::Null) => return Ok(ParsedOptions::default()),
 		Some(PublicValue::Object(object)) => object,
 		Some(other) => {
 			return Err(invalid_params(format!("Expected options to be object, got {other:?}")));
@@ -3378,8 +3418,10 @@ fn parse_options(
 	};
 	let mut isolation = None;
 	let mut read_only = None;
+	let mut trace = surrealdb_rpc::TraceKinds::NONE;
 	for (key, value) in object.iter() {
 		match (key.as_str(), value) {
+			("trace", value) if !allow_isolation => trace = parse_trace_kinds(value)?,
 			("isolation", PublicValue::None | PublicValue::Null) if allow_isolation => {}
 			("isolation", PublicValue::String(level)) if allow_isolation => {
 				isolation = Some(sql_dialect::isolation_named(level).ok_or_else(|| {
@@ -3441,7 +3483,33 @@ fn parse_options(
 			}
 		}
 	}
-	Ok((isolation, read_only))
+	Ok(ParsedOptions {
+		isolation,
+		read_only,
+		trace,
+	})
+}
+
+/// The `trace` entry of a `query_stream` call's options: a list of kind names.
+/// An unknown name is refused, so a client asking a server for a kind it does
+/// not support learns so rather than reading an empty trace.
+fn parse_trace_kinds(
+	value: &PublicValue,
+) -> Result<surrealdb_rpc::TraceKinds, surrealdb_types::Error> {
+	let PublicValue::Array(names) = value else {
+		return Err(invalid_params(format!("Expected trace to be an array, got {value:?}")));
+	};
+	let mut kinds = surrealdb_rpc::TraceKinds::NONE;
+	for name in names.iter() {
+		let PublicValue::String(name) = name else {
+			return Err(invalid_params(format!("Expected a trace kind name, got {name:?}")));
+		};
+		let Some(kind) = surrealdb_rpc::TraceKinds::from_name(name) else {
+			return Err(invalid_params(format!("Unknown trace kind `{name}`")));
+		};
+		kinds = kinds.union(kind);
+	}
+	Ok(kinds)
 }
 
 /// The id of the transaction a `begin` call opened, which the method answers with bare when it
@@ -3596,6 +3664,68 @@ where
 		None => None,
 	};
 	run_query_in(this, transaction, session_id, session, query, vars, read_only).await
+}
+
+/// [`run_query_as`] for a request that asks for a trace: the statements run as a
+/// streaming execution does, and its items are gathered back into the results
+/// a buffered execution answers ([`surrealdb_rpc::Collected`]). The answer is
+/// the results' wire form, each result carrying its statement's trace under
+/// `trace` where it has one. The live queries the results start are registered
+/// as [`run_query_in`] registers them.
+#[expect(clippy::too_many_arguments, reason = "the call's session, query and options")]
+async fn run_query_traced<T>(
+	this: &T,
+	txn: Option<Uuid>,
+	session_id: Uuid,
+	session: &Session,
+	text: &str,
+	vars: Option<PublicVariables>,
+	read_only: Option<ReadOnlyOptions>,
+	trace: surrealdb_rpc::TraceKinds,
+) -> Result<PublicValue>
+where
+	T: RpcProtocol + ?Sized,
+{
+	if !T::LQ_SUPPORT && session.rt {
+		return Err(bad_lq_config().into());
+	}
+	let transaction = match txn {
+		Some(txn_id) => Some(this.get_tx(txn_id).await.map_err(anyhow::Error::from)?),
+		None => None,
+	};
+	let cancel = CALL_CANCEL.try_with(Clone::clone).ok().or_else(|| this.cancel_handle());
+	let results = this
+		.kvs_arc()
+		.run_collected(
+			QueryRequest::new(QuerySource::in_dialect(text, Dialect::SurrealQl), session)
+				.with_variables(vars)
+				.with_optional_transaction(transaction)
+				.with_optional_cancel(cancel)
+				.with_read_only(read_only)
+				.with_trace(trace),
+		)
+		.await
+		.map_err(anyhow::Error::from)?;
+	let live_namespace = session.ns.clone();
+	let live_database = session.db.clone();
+	for (response, _) in &results {
+		if response.query_type == QueryType::Live
+			&& let Ok(PublicValue::Uuid(lqid)) = &response.result
+		{
+			this.handle_live(lqid, session_id, live_namespace.clone(), live_database.clone()).await;
+		}
+	}
+	let answers = results
+		.into_iter()
+		.map(|(result, trace)| {
+			let mut answer = result.into_value();
+			if let (PublicValue::Object(answer), Some(trace)) = (&mut answer, trace) {
+				answer.insert("trace", trace.into_value());
+			}
+			answer
+		})
+		.collect::<Vec<_>>();
+	Ok(PublicValue::Array(answers.into()))
 }
 
 /// [`run_query_as`] with the transaction already in hand, for a caller that opened one itself.
@@ -3910,6 +4040,68 @@ mod tests {
 
 	fn use_params(ns: &str, db: &str) -> PublicArray {
 		vec![PublicValue::String(ns.to_owned()), PublicValue::String(db.to_owned())].into()
+	}
+
+	/// A buffered `query` that asks for a trace answers the results a plain one
+	/// does, each carrying its statement's trace under `trace`.
+	#[tokio::test]
+	async fn a_buffered_query_answers_its_trace_beside_each_result() {
+		use surrealdb_types::{Array, Object, RecordId, SurrealValue};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let text = |sql: &str| -> PublicArray { vec![PublicValue::String(sql.to_owned())].into() };
+		let sid = Uuid::from_u128(61);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		let setup = text("CREATE person:a, person:b; RELATE person:a->knows:ab->person:b;");
+		rpc.execute(None, sid, Some(sid), Method::Query, setup).await.unwrap();
+
+		let sql = "LET $x = 1; SELECT ->knows->person AS f FROM person:a;";
+		let plain = rpc.execute(None, sid, Some(sid), Method::Query, text(sql)).await.unwrap();
+		let mut options = Object::new();
+		options.insert(
+			"trace",
+			PublicValue::Array(Array::from(vec![
+				PublicValue::String("relations".to_owned()),
+				PublicValue::String("variables".to_owned()),
+			])),
+		);
+		let params: PublicArray = vec![
+			PublicValue::String(sql.to_owned()),
+			PublicValue::Object(Object::new()),
+			PublicValue::Object(options),
+		]
+		.into();
+		let traced = rpc.execute(None, sid, Some(sid), Method::Query, params).await.unwrap();
+
+		let DbResult::Query(plain) = plain else {
+			panic!("a plain query answers its results");
+		};
+		let DbResult::Other(PublicValue::Array(answers)) = traced else {
+			panic!("a traced query answers its results as values");
+		};
+		assert_eq!(answers.len(), plain.len());
+		let mut traces = Vec::new();
+		for (answer, result) in answers.into_vec().into_iter().zip(plain) {
+			let PublicValue::Object(mut answer) = answer else {
+				panic!("each result is an object");
+			};
+			traces.push(answer.remove("trace"));
+			let PublicValue::Object(expected) = result.into_value() else {
+				panic!("each result is an object");
+			};
+			assert_eq!(answer.get("status"), expected.get("status"));
+			assert_eq!(answer.get("result"), expected.get("result"));
+		}
+		let trace = |at: usize| {
+			surrealdb_rpc::Trace::from_value(traces[at].clone().expect("a trace")).unwrap()
+		};
+		assert_eq!(trace(0).variables, vec![("x".to_owned(), PublicValue::from_t(1i64))]);
+		let relations = trace(1).relations;
+		assert_eq!(relations.len(), 1);
+		assert_eq!(relations[0].edge, RecordId::new("knows", "ab"));
+		assert_eq!(relations[0].out, Some(RecordId::new("person", "b")));
 	}
 
 	#[test]
@@ -5508,5 +5700,49 @@ mod read_only_option_tests {
 			extract_begin_options(Array::from(vec![Value::Object(Object::new()), Value::None]))
 				.is_err()
 		);
+	}
+}
+
+#[cfg(test)]
+mod trace_option_tests {
+	use surrealdb_rpc::TraceKinds;
+	use surrealdb_types::{Array, Object, Value};
+
+	use super::*;
+
+	fn trace(names: &[&str]) -> Option<Value> {
+		let mut options = Object::new();
+		let names = names.iter().map(|name| Value::String((*name).to_owned())).collect::<Vec<_>>();
+		options.insert("trace", Value::Array(Array::from(names)));
+		Some(Value::Object(options))
+	}
+
+	fn query() -> OptionsFor {
+		OptionsFor::Query
+	}
+
+	#[test]
+	fn a_query_takes_the_kinds_it_names() {
+		let parsed = parse_options(trace(&["relations", "variables"]), query()).unwrap();
+		assert!(parsed.trace.contains(TraceKinds::RELATIONS));
+		assert!(parsed.trace.contains(TraceKinds::VARIABLES));
+		assert!(!parsed.trace.contains(TraceKinds::LINKS));
+		assert!(parse_options(trace(&[]), query()).unwrap().trace.is_empty());
+	}
+
+	/// A kind this server does not know is refused, so a client never mistakes
+	/// a kind it is not given for an empty one.
+	#[test]
+	fn an_unknown_kind_is_refused() {
+		assert!(parse_options(trace(&["records"]), query()).is_err());
+		let mut options = Object::new();
+		options.insert("trace", Value::String("relations".to_owned()));
+		assert!(parse_options(Some(Value::Object(options)), query()).is_err());
+	}
+
+	/// A `begin` runs nothing, so it has nothing to trace.
+	#[test]
+	fn a_begin_takes_no_trace() {
+		assert!(parse_options(trace(&["relations"]), OptionsFor::Begin).is_err());
 	}
 }

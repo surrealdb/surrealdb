@@ -709,6 +709,7 @@ mod tests {
 				QueryStreamFrame::Rows {
 					index: 1,
 					values,
+					..
 				} => Some(values.len()),
 				QueryStreamFrame::Begin {
 					..
@@ -828,6 +829,7 @@ mod tests {
 				QueryStreamFrame::Rows {
 					index: 0,
 					values,
+					..
 				} => Some(values),
 				QueryStreamFrame::Begin {
 					..
@@ -1453,11 +1455,12 @@ impl FramedQueryFrames {
 	/// what lets an envelope that came out too large be split in halves after
 	/// all.
 	fn push(&mut self, frame: QueryStreamFrame) -> anyhow::Result<()> {
-		let (index, mut values) = match frame {
+		let (index, mut values, mut trace) = match frame {
 			QueryStreamFrame::Rows {
 				index,
 				values,
-			} if values.len() > 1 => (index, values),
+				trace,
+			} if values.len() > 1 => (index, values, trace),
 			frame @ QueryStreamFrame::Begin {
 				..
 			}
@@ -1484,14 +1487,15 @@ impl FramedQueryFrames {
 				// Rows per envelope at the estimate, with room for rows larger
 				// than the average so far.
 				let fit = (self.max_bytes / 2 / per_row.max(1)).max(1);
+				// The trace rides on the first envelope of the split.
 				while values.len() > fit {
 					let rest = values.split_off(fit);
-					self.push_rows(index, values)?;
+					self.push_rows(index, values, trace.take())?;
 					values = rest;
 				}
-				self.push_rows(index, values)
+				self.push_rows(index, values, trace)
 			}
-			None => self.push_checked(index, values),
+			None => self.push_checked(index, values, trace),
 		}
 	}
 
@@ -1501,15 +1505,17 @@ impl FramedQueryFrames {
 		&mut self,
 		index: usize,
 		values: Vec<surrealdb_types::Value>,
+		trace: Option<Box<surrealdb_rpc::Trace>>,
 	) -> anyhow::Result<()> {
 		let n = values.len();
 		let predicted = self.row_bytes.unwrap_or(usize::MAX).saturating_mul(n);
 		if n > 1 && predicted > self.max_bytes / 2 {
-			return self.push_checked(index, values);
+			return self.push_checked(index, values, trace);
 		}
 		let encoded = self.envelope(QueryStreamFrame::Rows {
 			index,
 			values,
+			trace,
 		})?;
 		self.learn(encoded.len(), n);
 		self.pending.push_back((KIND_ROWS, encoded));
@@ -1517,16 +1523,18 @@ impl FramedQueryFrames {
 	}
 
 	/// Encode a rows frame from a copy, splitting it in halves until each
-	/// envelope fits.
+	/// envelope fits. The trace stays with the first half.
 	fn push_checked(
 		&mut self,
 		index: usize,
 		mut values: Vec<surrealdb_types::Value>,
+		trace: Option<Box<surrealdb_rpc::Trace>>,
 	) -> anyhow::Result<()> {
 		let n = values.len();
 		let encoded = self.envelope(QueryStreamFrame::Rows {
 			index,
 			values: values.clone(),
+			trace: trace.clone(),
 		})?;
 		self.learn(encoded.len(), n);
 		if encoded.len() <= self.max_bytes || n <= 1 {
@@ -1534,8 +1542,8 @@ impl FramedQueryFrames {
 			return Ok(());
 		}
 		let tail = values.split_off(n / 2);
-		self.push_checked(index, values)?;
-		self.push_checked(index, tail)
+		self.push_checked(index, values, trace)?;
+		self.push_checked(index, tail, None)
 	}
 
 	/// Fold an envelope's size into the bytes-per-row estimate (the largest
@@ -1568,6 +1576,7 @@ impl FramedQueryFrames {
 			if let QueryStreamFrame::Rows {
 				index,
 				values,
+				trace,
 			} = &mut frame
 			{
 				let target = COALESCE_BYTES.min(self.max_bytes);
@@ -1578,7 +1587,15 @@ impl FramedQueryFrames {
 						Some(Some(QueryStreamFrame::Rows {
 							index: i,
 							values: more,
-						})) if i == *index => values.extend(more),
+							trace: more_trace,
+						})) if i == *index => {
+							values.extend(more);
+							match (trace.as_mut(), more_trace) {
+								(Some(held), Some(more)) => held.absorb(*more),
+								(None, more) => *trace = more,
+								(Some(_), None) => {}
+							}
+						}
 						Some(Some(other)) => {
 							self.held = Some(other);
 							break;
@@ -1595,6 +1612,31 @@ impl FramedQueryFrames {
 			self.push(frame)?;
 		}
 	}
+}
+
+/// Keep the trace a frame of statement `index` carried, counting its encoding
+/// toward the reply's bytes and in `charged`, by statement.
+fn keep_trace(
+	traces: &mut std::collections::BTreeMap<usize, surrealdb_rpc::Trace>,
+	charged: &mut std::collections::BTreeMap<usize, usize>,
+	index: usize,
+	trace: Option<Box<surrealdb_rpc::Trace>>,
+	format: Format,
+	bytes: &mut usize,
+) -> anyhow::Result<()> {
+	let Some(trace) = trace.filter(|trace| !trace.is_empty()) else {
+		return Ok(());
+	};
+	let size = wire::encode(format, trace.clone().into_value())?.len();
+	*bytes += size;
+	*charged.entry(index).or_default() += size;
+	match traces.entry(index) {
+		std::collections::btree_map::Entry::Occupied(mut held) => held.get_mut().absorb(*trace),
+		std::collections::btree_map::Entry::Vacant(slot) => {
+			slot.insert(*trace);
+		}
+	}
+	Ok(())
 }
 
 /// Envelope kinds, by the frame each carries ([`FramedQueryFrames::last_kind`]).
@@ -1732,6 +1774,13 @@ impl EmbeddedEngine {
 		let mut values: std::collections::BTreeMap<usize, surrealdb_types::Value> =
 			Default::default();
 		let mut finished: std::collections::BTreeMap<usize, QueryResult> = Default::default();
+		// Per statement: the trace its frames carried, for a request that asked
+		// for one; answered beside its result, as a buffered `query` answers it.
+		let mut traces: std::collections::BTreeMap<usize, surrealdb_rpc::Trace> =
+			Default::default();
+		// The bytes each statement's trace is charged toward `max_bytes`, given
+		// back when the statement fails and its trace is retracted.
+		let mut trace_bytes: std::collections::BTreeMap<usize, usize> = Default::default();
 		let mut bytes = 0usize;
 		let mut scratch = Vec::new();
 		while let Some(frame) = frames.next().await {
@@ -1758,7 +1807,9 @@ impl EmbeddedEngine {
 				QueryStreamFrame::Rows {
 					index,
 					values: batch,
+					trace,
 				} => {
+					keep_trace(&mut traces, &mut trace_bytes, index, trace, format, &mut bytes)?;
 					if splice {
 						// Encoded once, here, and the values dropped.
 						let (n, out) = encoded.entry(index).or_default();
@@ -1786,7 +1837,9 @@ impl EmbeddedEngine {
 				QueryStreamFrame::Value {
 					index,
 					value,
+					trace,
 				} => {
+					keep_trace(&mut traces, &mut trace_bytes, index, trace, format, &mut bytes)?;
 					scratch.clear();
 					wire::encode_into(format, &value, &mut scratch)?;
 					bytes += scratch.len();
@@ -1798,7 +1851,14 @@ impl EmbeddedEngine {
 					query_type,
 					single,
 					error,
+					trace,
 				} => {
+					keep_trace(&mut traces, &mut trace_bytes, index, trace, format, &mut bytes)?;
+					// A failed statement's trace is retracted with its rows.
+					if error.is_some() {
+						traces.remove(&index);
+						bytes -= trace_bytes.remove(&index).unwrap_or(0);
+					}
 					let result = match error {
 						Some(error) => Err(error),
 						None if single => {
@@ -1848,7 +1908,25 @@ impl EmbeddedEngine {
 				 or LIMIT/START to page it"
 			))
 		};
-		let envelope = respond(Ok(crate::DbResult::Query(finished.into_values().collect())))?;
+		let answer = if traces.is_empty() {
+			crate::DbResult::Query(finished.into_values().collect())
+		} else {
+			// The results' wire form, each carrying its statement's trace.
+			let results = finished
+				.into_iter()
+				.map(|(index, result)| {
+					let mut value = surrealdb_types::SurrealValue::into_value(result);
+					if let (surrealdb_types::Value::Object(object), Some(trace)) =
+						(&mut value, traces.remove(&index))
+					{
+						object.insert("trace", trace.into_value());
+					}
+					value
+				})
+				.collect::<Vec<_>>();
+			crate::DbResult::Other(surrealdb_types::Value::Array(results.into()))
+		};
+		let envelope = respond(Ok(answer))?;
 		if encoded.is_empty() {
 			return if envelope.len() > max_bytes {
 				respond(Err(over()))
@@ -2054,6 +2132,43 @@ mod inline {
 		// compare each statement's rows in order, and the frame kinds' sequence less repeats.
 		assert_eq!(rows_by_statement(&spawned), rows_by_statement(&inline));
 		assert_eq!(kinds(&spawned), kinds(&inline));
+	}
+
+	/// A bounded reply to a `query` that asks for a trace carries each
+	/// statement's trace beside its result, as the unbounded reply does.
+	#[tokio::test(flavor = "current_thread")]
+	async fn bounded_reply_carries_the_trace() {
+		let e = EmbeddedEngine::connect("memory", Options::default()).await.unwrap();
+		let setup = "USE NS test DB test; CREATE person:a, person:b; \
+		             RELATE person:a->knows:ab->person:b;";
+		e.execute_framed(Format::Cbor, &req("query", setup)).await.unwrap();
+		let q = "USE NS test DB test; LET $x = 1; SELECT ->knows->person AS f FROM person:a; \
+		         THROW 'no'";
+		let body = format!(
+			r#"{{"id":7,"method":"query","params":["{q}",{{}},{{"trace":["relations","variables"]}}]}}"#
+		)
+		.into_bytes();
+		let bounded = e.execute_bounded(Format::Json, &body, 64 << 20).await.unwrap();
+		let plain = e.execute_framed(Format::Json, &body).await.unwrap();
+		let results = |bytes: &[u8]| {
+			let mut v = wire::decode(Format::Json, bytes, 64).unwrap().into_object().unwrap();
+			let Some(Value::Array(results)) = v.remove("result") else {
+				panic!("no results: {v:?}")
+			};
+			results
+				.into_iter()
+				.map(|r| {
+					let mut r = r.into_object().unwrap();
+					r.remove("time");
+					r
+				})
+				.collect::<Vec<_>>()
+		};
+		let (bounded, plain) = (results(&bounded), results(&plain));
+		assert_eq!(bounded, plain);
+		assert!(bounded[1].contains_key("trace"), "the LET reports what it bound: {bounded:?}");
+		assert!(bounded[2].contains_key("trace"), "the lookup reports its edge: {bounded:?}");
+		assert!(!bounded[3].contains_key("trace"), "a failed statement carries none");
 	}
 
 	/// The limit covers the whole reply, envelope included, and a value that looks like a row

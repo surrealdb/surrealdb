@@ -393,6 +393,35 @@ impl TestReport {
 						f.indent(|f| Self::display_expectation(expected, f))
 					})
 				})?,
+				MismatchKind::Trace {
+					ref expected,
+					ref got,
+				} => f.indent(|f| {
+					writeln!(
+						f,
+						"> The trace of the statement at index `{}` did not match expectation.",
+						v.index
+					)?;
+					let shown = |trace: &Option<SurValue>| match trace {
+						Some(trace) => trace.clone(),
+						None => SurValue::None,
+					};
+					f.indent(|f| {
+						writeln!(f, "= Expected:")?;
+						f.indent(|f| Self::display_labelled_value("Trace", &shown(expected), f))?;
+						writeln!(f, "= Got:")?;
+						f.indent(|f| Self::display_labelled_value("Trace", &shown(got), f))?;
+						writeln!(f, "= Diff:")?;
+						f.indent(|f| {
+							Self::display_diff(
+								&Self::diffable(&shown(got)),
+								&Self::diffable(&shown(expected)),
+								use_color,
+								f,
+							)
+						})
+					})
+				})?,
 				MismatchKind::Value(ref x) => f.indent(|f| {
 					writeln!(
 						f,

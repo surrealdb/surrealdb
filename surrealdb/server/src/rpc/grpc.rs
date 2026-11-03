@@ -2375,6 +2375,11 @@ impl QueryFrames {
 			return None;
 		}
 		match item {
+			// A gRPC query has no option to ask for a trace, so its execution
+			// sends none.
+			QueryStreamItem::Trace {
+				..
+			} => None,
 			// gRPC frames carry values: encoded rows are read as the values
 			// they encode.
 			QueryStreamItem::Frame {

@@ -66,3 +66,5 @@ mod stream_test;
 pub(crate) mod test;
 #[cfg(test)]
 mod top_level_test;
+#[cfg(all(test, feature = "kv-mem"))]
+mod trace_test;

@@ -132,6 +132,9 @@ fn reassemble(items: Vec<QueryStreamItem>) -> Vec<QueryResult> {
 					query_type,
 				});
 			}
+			QueryStreamItem::Trace {
+				..
+			} => {}
 		}
 	}
 	statements

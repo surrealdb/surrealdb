@@ -368,6 +368,7 @@ impl Lower<'_> {
 			} else {
 				Some(self.logical_expr(rec[s::FETCH], stored)?.output_path())
 			},
+			trace: crate::expr::logical::LookupTrace::None,
 		})
 	}
 

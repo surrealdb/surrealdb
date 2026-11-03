@@ -44,6 +44,17 @@
 //! itself, so a window changes where bytes come from and nothing a read does
 //! with them.
 //!
+//! A lookup a query trace reports ([`crate::exec::trace`]) records, hop by hop,
+//! the adjacency entries and references behind the records each hop answered,
+//! after the caller's reads and the hop's `WHERE` judged them, so nothing a hop
+//! dropped is ever recorded. Once the lookup has answered, what it recorded is
+//! cut to what leads to its answer: an entry is kept where its edge, or the
+//! record beyond it, is in the answer, or is the record a kept entry was read
+//! from. A walk that ends on edges reports their ends as the caller sees them
+//! through the edge's field view, never from the adjacency key, which a field
+//! permission on `in` or `out` does not cover. A traced lookup is never fused
+//! ([`super::ir_lower`]), so every edge it walks is a record its hop names.
+//!
 //! The permissions and field views are the ones lowering found for the caller
 //! it lowered for. A lookup taken where the caller's reads are judged
 //! otherwise — inside a permission predicate, whose reads are unchecked —
@@ -57,6 +68,7 @@ use std::ops::Bound;
 pub(super) use frontier::Frontier;
 use frontier::{SOURCES_PER_FILL, Windows};
 use surrealdb_datastore::values::inline_cache::{CacheValue, EdgeCacheEntry, RefCacheEntry};
+use surrealdb_rpc::TraceKinds;
 
 use super::descriptor::TableMemo;
 use super::interp::State;
@@ -70,7 +82,9 @@ use crate::exec::operators::scan::common::{
 	extract_record_ids_into, resolve_record_batch, resolve_version_stamp,
 };
 use crate::exec::operators::scan::graph_keys::{GraphRange, graph_ranges, observe_fold_candidate};
+use crate::exec::trace::{StatementTrace, WALKED_BYTES, Walk, WalkKind, answered_ids, kinds_of};
 use crate::exec::{ControlFlowExt, Error as ExecError, ExecutionContext};
+use crate::expr::logical::LookupTrace;
 use crate::expr::{ControlFlow, Dir, FlowResult};
 use crate::iam::Action;
 use crate::idx::adjacency::{
@@ -106,6 +120,24 @@ pub(super) async fn lookup(
 	// A window that stands when the lookup starts is an enclosing lookup's to drop.
 	#[cfg(test)]
 	let entered_empty = state.frontier_hop.is_empty() && state.frontier_origins.is_empty();
+	let trace = match spec.trace {
+		LookupTrace::None => None,
+		LookupTrace::Partial => {
+			if let Some(trace) = ctx.ctx().query_trace() {
+				let kinds = spec.hops.iter().fold(TraceKinds::NONE, |kinds, hop| {
+					kinds.union(match &*hop.read {
+						HopRead::Graph {
+							..
+						} => TraceKinds::RELATIONS,
+						HopRead::References(_) => TraceKinds::REFERENCES,
+					})
+				});
+				trace.mark_partial(kinds);
+			}
+			None
+		}
+		LookupTrace::Traced | LookupTrace::Inner => ctx.ctx().query_trace().cloned(),
+	};
 	let mut run = Run {
 		program,
 		spec,
@@ -113,6 +145,9 @@ pub(super) async fn lookup(
 		conds: conds.as_ref().unwrap_or(&ctx),
 		ctx: &ctx,
 		doc,
+		trace,
+		walked: Vec::new(),
+		walked_bytes: 0,
 	};
 	let room = spec.page.and_then(|page| page.needs());
 	let answer = run.answer(&origin, room).await.map_err(ControlFlow::Err);
@@ -127,6 +162,16 @@ pub(super) async fn lookup(
 		(Some(page), Value::Array(items)) => Value::Array(page.of(items.0).into()),
 		(_, answer) => answer,
 	};
+	if let Some(trace) = run.trace.take() {
+		let walked = std::mem::take(&mut run.walked);
+		if spec.trace == LookupTrace::Inner {
+			// The lookup or step the path ends in reports it.
+			trace.hold(walked);
+		} else {
+			// What the path's inner lookups walked leads to this answer or to nothing.
+			trace.report(walked, &answer);
+		}
+	}
 	if !spec.only_path {
 		return Ok(answer);
 	}
@@ -171,6 +216,12 @@ struct Run<'r> {
 	/// The row the lookup is taken over, the `$parent` of a table permission
 	/// that reads it.
 	doc: Option<&'r Value>,
+	/// The query trace a traced lookup reports to.
+	trace: Option<std::sync::Arc<StatementTrace>>,
+	/// What the hops of a traced lookup walked, for [`StatementTrace::report`].
+	walked: Vec<Walk>,
+	/// The bytes [`Self::walked`] holds ([`Walk::bytes`]).
+	walked_bytes: usize,
 }
 
 impl Run<'_> {
@@ -368,7 +419,10 @@ impl Run<'_> {
 		for (at_hop, hop) in self.spec.hops.iter().enumerate() {
 			// Only the last hop's records are the page's.
 			let room = room.filter(|_| at_hop == last);
-			values = self.hop(hop, values, checked, &at, room).await.map_err(signal_error)?;
+			values = self
+				.hop(hop, values, checked, &at, room, at_hop == last)
+				.await
+				.map_err(signal_error)?;
 		}
 		let results = if self.spec.extract_id {
 			values
@@ -407,6 +461,7 @@ impl Run<'_> {
 		checked: bool,
 		at: &At,
 		room: Option<usize>,
+		last: bool,
 	) -> FlowResult<Vec<Value>> {
 		let mut sources = Vec::new();
 		for value in values {
@@ -417,7 +472,10 @@ impl Run<'_> {
 		// so a read that falls short of the room reads again over more.
 		let mut cap = room.unwrap_or(usize::MAX);
 		loop {
-			let reached = self.reach(hop, &sources, at, cap).await?;
+			let (reached, walks) = match self.trace.is_some() {
+				true => self.reach_walked(hop, &sources, at, cap).await?,
+				false => (self.reach(hop, &sources, at, cap).await?, Vec::new()),
+			};
 			let read = reached.len();
 			let mut values = self.resolve(hop, reached, checked, at).await?;
 			if let Some(cond) = hop.cond {
@@ -430,14 +488,168 @@ impl Run<'_> {
 				values = kept;
 			}
 			let Some(room) = room else {
+				self.walked_into(hop, walks, &values, checked, at, last).await?;
 				return Ok(values);
 			};
 			if values.len() >= room || read < cap {
 				values.truncate(room);
+				self.walked_into(hop, walks, &values, checked, at, last).await?;
 				return Ok(values);
 			}
 			cap = cap.saturating_mul(2);
 		}
+	}
+
+	/// [`Self::reach`] for a traced lookup, source by source, with what each
+	/// record reached was reached through: an edge whose adjacency key names the
+	/// record beyond it, or a reference.
+	async fn reach_walked(
+		&mut self,
+		hop: &LookupHop,
+		sources: &[RecordId],
+		at: &At,
+		cap: usize,
+	) -> FlowResult<(Vec<RecordId>, Vec<Walk>)> {
+		let mut reached = Vec::new();
+		let mut walks = Vec::new();
+		// References are read as [`Self::references_of`] reads them, each subject
+		// over every source in turn, so tracing keeps the order a page cuts.
+		// Each bound is evaluated once for the hop, as the untraced read does, and
+		// the sources are read in turn over it.
+		if let HopRead::References(subjects) = &*hop.read {
+			for subject in subjects {
+				let start = Box::pin(self.key_bound(&subject.start)).await?;
+				let end = Box::pin(self.key_bound(&subject.end)).await?;
+				for source in sources {
+					if reached.len() >= cap {
+						return Ok((reached, walks));
+					}
+					let before = reached.len();
+					references(
+						subject,
+						(&start, &end),
+						source,
+						at,
+						self.ctx,
+						&mut self.state.tables,
+						cap,
+						&mut reached,
+						Windows::NONE,
+					)
+					.await?;
+					for referrer in &reached[before..] {
+						walks.push(Walk {
+							source: source.clone(),
+							reached: referrer.clone(),
+							kind: WalkKind::Reference,
+						});
+					}
+				}
+			}
+			return Ok((reached, walks));
+		}
+		let ranges = self.hop_ranges(hop).await?;
+		for source in sources {
+			let Some(left) = cap.checked_sub(reached.len()).filter(|left| *left > 0) else {
+				break;
+			};
+			let one = std::slice::from_ref(source);
+			for entry in self.entries_within(hop, &ranges, one, at, left).await? {
+				if let Some(far) = entry.far {
+					walks.push(Walk {
+						source: source.clone(),
+						reached: entry.id.clone(),
+						kind: WalkKind::Edge {
+							dir: entry.dir,
+							far,
+							ends: None,
+						},
+					});
+				}
+				reached.push(entry.id);
+			}
+		}
+		Ok((reached, walks))
+	}
+
+	/// Keep for [`report`] the `walks` whose record `hop` answered in `values`:
+	/// nothing the caller's reads or the hop's `WHERE` dropped is recorded. Where
+	/// `last` and the caller's reads are checked, a walk that ends on an edge
+	/// takes the edge's ends from the edge as the caller sees it.
+	async fn walked_into(
+		&mut self,
+		hop: &LookupHop,
+		mut walks: Vec<Walk>,
+		values: &[Value],
+		checked: bool,
+		at: &At,
+		last: bool,
+	) -> FlowResult<()> {
+		if walks.is_empty() {
+			return Ok(());
+		}
+		let mut answered = std::collections::HashSet::new();
+		for value in values {
+			answered_ids(value, &mut answered);
+		}
+		walks.retain(|walk| answered.contains(&walk.reached));
+		let ends_on_edges = matches!(
+			&*hop.read,
+			HopRead::Graph {
+				targets: None,
+				..
+			}
+		);
+		// Every walk held for a lookup that ends on the edges, whether the path ends there or a
+		// step cuts it later: what is held is reported, so its ends are only what the caller reads.
+		if last && checked && ends_on_edges && !walks.is_empty() {
+			let edges: Vec<RecordId> = walks.iter().map(|walk| walk.reached.clone()).collect();
+			let shown = resolve_record_batch(
+				self.ctx,
+				&at.txn,
+				at.ns,
+				at.db,
+				&edges,
+				true,
+				checked,
+				at.version,
+				CachePolicy::ReadWrite,
+				&mut Default::default(),
+			)
+			.await?;
+			let mut seen = std::collections::HashMap::new();
+			for edge in shown {
+				let Value::Object(edge) = edge else {
+					continue;
+				};
+				let end = |name: &str| match edge.get(name) {
+					Some(Value::RecordId(id)) => Some(id.clone()),
+					_ => None,
+				};
+				if let Some(Value::RecordId(id)) = edge.get("id") {
+					seen.insert(id.clone(), (end("in"), end("out")));
+				}
+			}
+			for walk in &mut walks {
+				if let WalkKind::Edge {
+					ends,
+					..
+				} = &mut walk.kind
+				{
+					*ends = Some(seen.remove(&walk.reached).unwrap_or((None, None)));
+				}
+			}
+		}
+		let bytes = walks.iter().map(Walk::bytes).sum::<usize>();
+		if self.walked_bytes.saturating_add(bytes) > WALKED_BYTES {
+			if let Some(trace) = &self.trace {
+				trace.truncate(kinds_of(&walks));
+			}
+			return Ok(());
+		}
+		self.walked.extend(walks);
+		self.walked_bytes += bytes;
+		Ok(())
 	}
 
 	/// The first `cap` records `hop` reaches from `sources`, before the
@@ -451,22 +663,78 @@ impl Run<'_> {
 	) -> FlowResult<Vec<RecordId>> {
 		Ok(match &*hop.read {
 			HopRead::Graph {
-				specs,
-				target_specs,
-				fixed,
+				..
+			} => self
+				.graph_entries(hop, sources, at, cap)
+				.await?
+				.into_iter()
+				.map(|entry| entry.id)
+				.collect(),
+			HopRead::References(subjects) => {
+				let windowed = self.reads_in_windows(sources);
+				let reached = self.references_of(subjects, sources, at, cap, windowed).await;
+				// The window this call filled is dropped whether the reads answered or failed.
+				if windowed {
+					self.state.frontier_hop.clear();
+				}
+				reached?
+			}
+		})
+	}
+
+	/// The first `cap` adjacency entries graph hop `hop` reaches from
+	/// `sources`, before the caller's reads judge their records, in the order
+	/// the hop reads them.
+	async fn graph_entries(
+		&mut self,
+		hop: &LookupHop,
+		sources: &[RecordId],
+		at: &At,
+		cap: usize,
+	) -> FlowResult<Vec<Entry>> {
+		let ranges = self.hop_ranges(hop).await?;
+		self.entries_within(hop, &ranges, sources, at, cap).await
+	}
+
+	/// The key ranges graph hop `hop` reads, its bounds evaluated once.
+	async fn hop_ranges(&mut self, hop: &LookupHop) -> FlowResult<std::sync::Arc<KeyRanges>> {
+		let HopRead::Graph {
+			specs,
+			target_specs,
+			fixed,
+			..
+		} = &*hop.read
+		else {
+			return Err(ControlFlow::Err(anyhow::anyhow!("the key ranges of a reference hop")));
+		};
+		Ok(match fixed {
+			Some(fixed) => std::sync::Arc::clone(fixed),
+			// Boxed: evaluating a bound runs a host pipeline, whose state
+			// the hop does not carry where its bounds are constants.
+			None => std::sync::Arc::new(KeyRanges {
+				specs: Box::pin(self.key_ranges(specs)).await?,
+				targets: Box::pin(self.key_ranges(target_specs)).await?,
+				whole: specs.iter().all(EdgeSpec::is_whole),
+			}),
+		})
+	}
+
+	/// [`Self::graph_entries`] within `ranges`, the hop's key ranges as
+	/// [`Self::hop_ranges`] evaluated them.
+	async fn entries_within(
+		&mut self,
+		hop: &LookupHop,
+		ranges: &std::sync::Arc<KeyRanges>,
+		sources: &[RecordId],
+		at: &At,
+		cap: usize,
+	) -> FlowResult<Vec<Entry>> {
+		Ok(match &*hop.read {
+			HopRead::Graph {
 				..
 			} => {
-				let ranges = match fixed {
-					Some(fixed) => std::sync::Arc::clone(fixed),
-					// Boxed: evaluating a bound runs a host pipeline, whose state
-					// the hop does not carry where its bounds are constants.
-					None => std::sync::Arc::new(KeyRanges {
-						specs: Box::pin(self.key_ranges(specs)).await?,
-						targets: Box::pin(self.key_ranges(target_specs)).await?,
-						whole: specs.iter().all(EdgeSpec::is_whole),
-					}),
-				};
-				let entries = match &hop.key_cond {
+				let ranges = std::sync::Arc::clone(ranges);
+				match &hop.key_cond {
 					None => self.adjacencies_of(&hop.read, &ranges, sources, at, cap).await?,
 					Some(cond) => {
 						let mut entries = Vec::new();
@@ -492,17 +760,12 @@ impl Run<'_> {
 						}
 						entries
 					}
-				};
-				entries.into_iter().map(|entry| entry.id).collect()
-			}
-			HopRead::References(subjects) => {
-				let windowed = self.reads_in_windows(sources);
-				let reached = self.references_of(subjects, sources, at, cap, windowed).await;
-				// The window this call filled is dropped whether the reads answered or failed.
-				if windowed {
-					self.state.frontier_hop.clear();
 				}
-				reached?
+			}
+			HopRead::References(_) => {
+				return Err(ControlFlow::Err(anyhow::anyhow!(
+					"adjacency entries of a reference hop"
+				)));
 			}
 		})
 	}

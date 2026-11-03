@@ -644,19 +644,30 @@ impl StreamDriver<'_> {
 			OutgoingFrame::Rows {
 				index,
 				rows,
-			} => match self.rpc.format.rows_ws(
-				Some(self.id.clone()),
-				self.client_session,
+				trace,
+			} if self.rpc.format.row_format() != Some(rows.format()) => QueryStreamFrame::Rows {
 				index,
-				&rows,
-				&mut self.shapes,
-			) {
-				Some(message) => return message,
-				None => QueryStreamFrame::Rows {
-					index,
-					values: rows.to_values()?,
-				},
+				values: rows.to_values()?,
+				trace,
 			},
+			OutgoingFrame::Rows {
+				index,
+				rows,
+				trace,
+			} => {
+				return self
+					.rpc
+					.format
+					.rows_ws(
+						Some(self.id.clone()),
+						self.client_session,
+						index,
+						&rows,
+						trace,
+						&mut self.shapes,
+					)
+					.expect("rows in the connection's format are written encoded");
+			}
 		};
 		self.rpc.format.res_ws(DbResponse::success(
 			Some(self.id.clone()),

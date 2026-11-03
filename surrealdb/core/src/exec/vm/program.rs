@@ -5796,6 +5796,8 @@ pub(crate) struct LookupSpec {
 	/// for a lookup whose every hop reads a whole adjacency or a whole set of references over
 	/// constant key bounds, with no `WHERE` and no page, in a pipeline that admits windows.
 	pub(super) window: bool,
+	/// What a query trace does with the lookup ([`crate::exec::trace`]).
+	pub(super) trace: crate::expr::logical::LookupTrace,
 }
 
 /// `START` and `LIMIT` of a lookup's last hop, written as integers.

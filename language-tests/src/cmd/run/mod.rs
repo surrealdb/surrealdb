@@ -1316,6 +1316,7 @@ enum BodyOutcome {
 	Executed {
 		did_timeout: bool,
 		result: Result<Vec<Result<SurValue, String>>, anyhow::Error>,
+		trace: Option<Vec<Option<SurValue>>>,
 	},
 }
 
@@ -1347,7 +1348,7 @@ async fn run_test<E: Executor>(
 	let outcome = outcome?;
 	cleanup?;
 
-	let (did_timeout, result) = match outcome {
+	let (did_timeout, result, trace) = match outcome {
 		BodyOutcome::Early(result) => {
 			// A body that stopped early still ran its imports, and an import creates
 			// root-level state as readily as the query can. Hold it to the same
@@ -1363,7 +1364,8 @@ async fn run_test<E: Executor>(
 		BodyOutcome::Executed {
 			did_timeout,
 			result,
-		} => (did_timeout, result),
+			trace,
+		} => (did_timeout, result, trace),
 	};
 
 	// If the test was not a clean test it should ensure that the datastore is reset for the next
@@ -1389,6 +1391,7 @@ async fn run_test<E: Executor>(
 		Ok(res) => Ok(TestTaskResult::Results {
 			did_timeout,
 			res,
+			trace,
 		}),
 		Err(e) => Ok(TestTaskResult::RunningError(e)),
 	}
@@ -1432,9 +1435,11 @@ async fn run_test_body<E: Executor>(
 		ExecOutcome::Executed {
 			did_timeout,
 			result,
+			trace,
 		} => Ok(BodyOutcome::Executed {
 			did_timeout,
 			result,
+			trace,
 		}),
 	}
 }

@@ -70,6 +70,7 @@ pub(crate) mod live;
 pub(crate) mod scalar_unit;
 pub(crate) mod session;
 pub(crate) mod surface;
+pub(crate) mod trace;
 pub(crate) use crate::val::field_path;
 pub(crate) mod field_path_convert;
 pub(crate) mod field_rules;

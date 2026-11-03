@@ -47,6 +47,7 @@ mod sleep;
 mod sql;
 mod string;
 mod time;
+mod trace;
 #[cfg(feature = "scripting")]
 pub(crate) use time::timezone_at;
 mod r#type;
@@ -80,6 +81,7 @@ static EDGE_SCALARS: &[&[&dyn ScalarFunction]] = &[
 	sql::SCALARS,
 	string::SCALARS,
 	time::SCALARS,
+	trace::SCALARS,
 	r#type::SCALARS,
 	value::SCALARS,
 	vector::SCALARS,
