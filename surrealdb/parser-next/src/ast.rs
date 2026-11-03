@@ -306,8 +306,8 @@ pub enum DefineKind {
 	Sequence,
 	/// `EXTENSION`, or its alias `MODULE`.
 	Module,
-	/// `ENUM`. Numbered after [`ALTER_SYSTEM`] so the two never share an `op`.
-	Enum = 17,
+	/// `TYPE`. Numbered after [`ALTER_SYSTEM`] so the two never share an `op`.
+	Type = 17,
 }
 
 /// Deprecated spellings of an extension, as bits of the `b` of a
@@ -431,7 +431,8 @@ pub enum Cl {
 	/// `a`: integer.
 	MaxDepth,
 	/// `a`: kind, a [`kind::LIT_KEYED`] node when the field is `id` and its
-	/// type names the components of the key; `b`: 1 with `FLEXIBLE`.
+	/// type names the components of the key; `b`: 1 with `FLEXIBLE`. Also the
+	/// `AS` body of `DEFINE TYPE`, with `b` 0.
 	FieldType,
 	Readonly,
 	Inline,
@@ -568,20 +569,21 @@ pub enum Cl {
 	/// `MATERIALIZE INTO table.field [WHERE cond]` on a field: `a` index into
 	/// `extra` of `[table Name, field Name, cond or NONE]`.
 	Materialize,
-	/// `VALUES a, b, …` of `DEFINE ENUM`: `a` the list of label strings.
-	EnumValues,
-	/// `ADD VALUE [IF NOT EXISTS] a [BEFORE|AFTER x]` of `ALTER ENUM`: `a` the
+	/// `ADD VALUE [IF NOT EXISTS] a [BEFORE|AFTER x]` of `ALTER TYPE`: `a` the
 	/// label string; `b` index into `extra` of `[anchor string or NONE, 0
 	/// append / 1 before / 2 after, 1 with `IF NOT EXISTS`]`.
 	EnumAdd,
-	/// `RENAME VALUE a TO b` of `ALTER ENUM`: `a` and `b` the label strings.
+	/// `RENAME VALUE a TO b` of `ALTER TYPE`: `a` and `b` the label strings.
 	EnumRename,
-	/// `SQL TYPE dialect 'text'` on a field: `a` the dialect, 0 `POSTGRESQL`, 1
+	/// `SQL TYPE dialect 'text'` on a field or a type: `a` the dialect, 0 `POSTGRESQL`, 1
 	/// `MYSQL` or 2 `DYNAMODB`; `b` the string node of the text. Under
 	/// `ALTER FIELD … DROP SQL TYPE` this code is the [`Cl::AlterDrop`] payload.
 	SqlType,
 	/// `REVOKE SIGNATURES` on a bucket.
 	RevokeSignatures,
+	/// `[CONSTRAINT name] ASSERT a` of `DEFINE TYPE`: `a` the expression; `b` the constraint
+	/// `Name`, or `NONE`.
+	Check,
 }
 
 /// Slots of an HNSW or DiskANN record in `extra`. Absent parts are `NONE`.
@@ -716,12 +718,13 @@ pub mod kind {
 	pub const TIME: u8 = 40;
 	pub const TIMESTAMP: u8 = 41;
 	pub const INTERVAL: u8 = 42;
-	/// `enum<name>` or `enum<'a', 'b'>`: `a` the list holding one `Name`, or
-	/// the list of `Str` labels when `b` is 1.
+	/// `enum<'a', 'b'>`: `a` the list of `Str` labels.
 	pub const ENUM: u8 = 43;
 	pub const SIMPLE_LIMIT: u8 = 44;
 	/// `bigdecimal`: an arbitrary-precision decimal.
 	pub const BIGDECIMAL: u8 = 45;
+	/// A type declared by `DEFINE TYPE`: `a` its `Name`.
+	pub const NAMED: u8 = 46;
 }
 
 #[repr(u8)]

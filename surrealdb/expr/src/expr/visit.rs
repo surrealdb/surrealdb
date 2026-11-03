@@ -15,22 +15,21 @@ use crate::expr::statements::access::{
 use crate::expr::statements::alter::{
 	AlterAccessStatement, AlterAnalyzerStatement, AlterApiClause, AlterApiStatement,
 	AlterBucketStatement, AlterConfigStatement, AlterDatabaseStatement, AlterDefault,
-	AlterEnumStatement, AlterEventStatement, AlterFieldStatement, AlterFunctionStatement,
-	AlterIndexStatement, AlterKind, AlterModuleStatement, AlterNamespaceStatement,
-	AlterParamStatement, AlterSequenceStatement, AlterSystemStatement, AlterTableStatement,
+	AlterEventStatement, AlterFieldStatement, AlterFunctionStatement, AlterIndexStatement,
+	AlterKind, AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement,
+	AlterSequenceStatement, AlterSystemStatement, AlterTableStatement, AlterTypeStatement,
 	AlterUserStatement,
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
 use crate::expr::statements::define::config::defaults::DefaultConfig;
 use crate::expr::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineEnumStatement,
-	DefineSequenceStatement, DefineUserTypeStatement, UserTypeBody,
+	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault,
+	DefineSequenceStatement, DefineTypeStatement,
 };
 use crate::expr::statements::rebuild::RebuildStatement;
 use crate::expr::statements::remove::{
-	RemoveApiStatement, RemoveBucketStatement, RemoveEnumStatement, RemoveSequenceStatement,
-	RemoveUserTypeStatement,
+	RemoveApiStatement, RemoveBucketStatement, RemoveSequenceStatement, RemoveTypeStatement,
 };
 use crate::expr::statements::{
 	AccessStatement, AlterStatement, CreateStatement, DefineAccessStatement,
@@ -371,7 +370,7 @@ implement_visitor! {
 			AlterStatement::Field(a) => { this.visit_alter_field(a)?; },
 			AlterStatement::Param(a) => { this.visit_alter_param(a)?; },
 			AlterStatement::Bucket(a) => { this.visit_alter_bucket(a)?; },
-			AlterStatement::Enum(a) => { this.visit_alter_enum(a)?; },
+			AlterStatement::Type(a) => { this.visit_alter_type(a)?; },
 			AlterStatement::Config(a) => { this.visit_alter_config(a)?; },
 			AlterStatement::Analyzer(a) => { this.visit_alter_analyzer(a)?; },
 			AlterStatement::Function(a) => { this.visit_alter_function(a)?; },
@@ -494,7 +493,7 @@ implement_visitor! {
 		Ok(())
 	}
 
-	fn visit_alter_enum(this, a: &AlterEnumStatement){
+	fn visit_alter_type(this, a: &AlterTypeStatement){
 		let _ = a;
 		Ok(())
 	}
@@ -527,6 +526,10 @@ implement_visitor! {
 	fn visit_alter_field(this, a: &AlterFieldStatement){
 		this.visit_expr(&a.name)?;
 		this.visit_expr(&a.what)?;
+
+		if let AlterKind::Set(ref k) = a.kind {
+			this.visit_kind(k)?;
+		}
 
 		match a.value {
 			AlterKind::None |
@@ -708,11 +711,8 @@ implement_visitor! {
 			RemoveStatement::Bucket(r) => {
 				this.visit_remove_bucket(r)?;
 			},
-			RemoveStatement::Enum(r) => {
-				this.visit_remove_enum(r)?;
-			},
-			RemoveStatement::UserType(r) => {
-				this.visit_remove_user_type(r)?;
+			RemoveStatement::Type(r) => {
+				this.visit_remove_type(r)?;
 			},
 			RemoveStatement::Sequence(r) => {
 				this.visit_remove_sequence(r)?;
@@ -799,12 +799,7 @@ implement_visitor! {
 		Ok(())
 	}
 
-	fn visit_remove_enum(this, r: &RemoveEnumStatement){
-		let _ = r;
-		Ok(())
-	}
-
-	fn visit_remove_user_type(this, r: &RemoveUserTypeStatement){
+	fn visit_remove_type(this, r: &RemoveTypeStatement){
 		let _ = r;
 		Ok(())
 	}
@@ -963,11 +958,8 @@ implement_visitor! {
 			DefineStatement::Bucket(d) => {
 				this.visit_define_bucket(d)?;
 			},
-			DefineStatement::Enum(d) => {
-				this.visit_define_enum(d)?;
-			},
-			DefineStatement::UserType(d) => {
-				this.visit_define_user_type(d)?;
+			DefineStatement::Type(d) => {
+				this.visit_define_type(d)?;
 			},
 			DefineStatement::Sequence(d) => {
 				this.visit_define_sequence(d)?;
@@ -987,29 +979,16 @@ implement_visitor! {
 		Ok(())
 	}
 
-	fn visit_define_enum(this, d: &DefineEnumStatement) {
-		this.visit_permission(&d.permissions)?;
-		this.visit_expr(&d.comment)?;
-		Ok(())
-	}
-
-	fn visit_define_user_type(this, d: &DefineUserTypeStatement) {
-		match &d.body {
-			UserTypeBody::Domain(domain) => {
-				this.visit_kind(&domain.base)?;
-				if let Some(default) = &domain.default {
-					this.visit_expr(default)?;
-				}
-				for check in &domain.checks {
-					this.visit_expr(&check.check)?;
-				}
-			}
-			UserTypeBody::Composite(composite) => {
-				for field in &composite.fields {
-					this.visit_kind(&field.kind)?;
-				}
-			}
+	fn visit_define_type(this, d: &DefineTypeStatement) {
+		this.visit_kind(&d.body)?;
+		for assert in &d.asserts {
+			this.visit_expr(&assert.check)?;
 		}
+		if let Some(default) = &d.default {
+			this.visit_expr(default)?;
+		}
+		this.visit_expr(&d.comment)?;
+		this.visit_permission(&d.permissions)?;
 		Ok(())
 	}
 
@@ -1463,6 +1442,8 @@ implement_visitor! {
 
 	fn visit_kind(this, kind: &Kind){
 		match kind {
+			// What a named type holds is the catalog's to say, which this does not read.
+			Kind::Named(_) => {},
 			Kind::None |
 				Kind::Any |
 				Kind::Null |
@@ -2007,7 +1988,7 @@ implement_visitor_mut! {
 			AlterStatement::Field(a) => { this.visit_mut_alter_field(a)?; },
 			AlterStatement::Param(a) => { this.visit_mut_alter_param(a)?; },
 			AlterStatement::Bucket(a) => { this.visit_mut_alter_bucket(a)?; },
-			AlterStatement::Enum(a) => { this.visit_mut_alter_enum(a)?; },
+			AlterStatement::Type(a) => { this.visit_mut_alter_type(a)?; },
 			AlterStatement::Config(a) => { this.visit_mut_alter_config(a)?; },
 			AlterStatement::Analyzer(a) => { this.visit_mut_alter_analyzer(a)?; },
 			AlterStatement::Function(a) => { this.visit_mut_alter_function(a)?; },
@@ -2122,7 +2103,7 @@ implement_visitor_mut! {
 		Ok(())
 	}
 
-	fn visit_mut_alter_enum(this, a: &mut AlterEnumStatement){
+	fn visit_mut_alter_type(this, a: &mut AlterTypeStatement){
 		let _ = a;
 		Ok(())
 	}
@@ -2163,6 +2144,10 @@ implement_visitor_mut! {
 	fn visit_mut_alter_field(this, a: &mut AlterFieldStatement){
 		this.visit_mut_expr(&mut a.name)?;
 		this.visit_mut_expr(&mut a.what)?;
+
+		if let AlterKind::Set(ref mut k) = a.kind {
+			this.visit_mut_kind(k)?;
+		}
 
 		match a.value {
 			AlterKind::None |
@@ -2344,11 +2329,8 @@ implement_visitor_mut! {
 			RemoveStatement::Bucket(r) => {
 				this.visit_mut_remove_bucket(r)?;
 			},
-			RemoveStatement::Enum(r) => {
-				this.visit_mut_remove_enum(r)?;
-			},
-			RemoveStatement::UserType(r) => {
-				this.visit_mut_remove_user_type(r)?;
+			RemoveStatement::Type(r) => {
+				this.visit_mut_remove_type(r)?;
 			},
 			RemoveStatement::Sequence(r) => {
 				this.visit_mut_remove_sequence(r)?;
@@ -2435,12 +2417,7 @@ implement_visitor_mut! {
 		Ok(())
 	}
 
-	fn visit_mut_remove_enum(this, r: &mut RemoveEnumStatement){
-		let _ = r;
-		Ok(())
-	}
-
-	fn visit_mut_remove_user_type(this, r: &mut RemoveUserTypeStatement){
+	fn visit_mut_remove_type(this, r: &mut RemoveTypeStatement){
 		let _ = r;
 		Ok(())
 	}
@@ -2599,11 +2576,8 @@ implement_visitor_mut! {
 			DefineStatement::Bucket(d) => {
 				this.visit_mut_define_bucket(d)?;
 			},
-			DefineStatement::Enum(d) => {
-				this.visit_mut_define_enum(d)?;
-			},
-			DefineStatement::UserType(d) => {
-				this.visit_mut_define_user_type(d)?;
+			DefineStatement::Type(d) => {
+				this.visit_mut_define_type(d)?;
 			},
 			DefineStatement::Sequence(d) => {
 				this.visit_mut_define_sequence(d)?;
@@ -2624,29 +2598,16 @@ implement_visitor_mut! {
 		Ok(())
 	}
 
-	fn visit_mut_define_enum(this, d: &mut DefineEnumStatement) {
-		this.visit_mut_permission(&mut d.permissions)?;
-		this.visit_mut_expr(&mut d.comment)?;
-		Ok(())
-	}
-
-	fn visit_mut_define_user_type(this, d: &mut DefineUserTypeStatement) {
-		match &mut d.body {
-			UserTypeBody::Domain(domain) => {
-				this.visit_mut_kind(&mut domain.base)?;
-				if let Some(default) = &mut domain.default {
-					this.visit_mut_expr(default)?;
-				}
-				for check in &mut domain.checks {
-					this.visit_mut_expr(&mut check.check)?;
-				}
-			}
-			UserTypeBody::Composite(composite) => {
-				for field in &mut composite.fields {
-					this.visit_mut_kind(&mut field.kind)?;
-				}
-			}
+	fn visit_mut_define_type(this, d: &mut DefineTypeStatement) {
+		this.visit_mut_kind(&mut d.body)?;
+		for assert in &mut d.asserts {
+			this.visit_mut_expr(&mut assert.check)?;
 		}
+		if let Some(default) = &mut d.default {
+			this.visit_mut_expr(default)?;
+		}
+		this.visit_mut_expr(&mut d.comment)?;
+		this.visit_mut_permission(&mut d.permissions)?;
 		Ok(())
 	}
 
@@ -3105,6 +3066,8 @@ implement_visitor_mut! {
 
 	fn visit_mut_kind(this, kind: &mut Kind){
 		match kind {
+			// What a named type holds is the catalog's to say, which this does not read.
+			Kind::Named(_) => {},
 			Kind::None |
 				Kind::Any |
 				Kind::Null |
@@ -3406,6 +3369,43 @@ implement_visitor_mut! {
 				this.visit_mut_record_id_key_range(range)?;
 			},
 		}
+		Ok(())
+	}
+}
+
+/// Calls `f` with the name of every named type a type written in `expr` names: a cast, the type
+/// of a `LET`, a closure's parameter or return type, or a type a statement declares. Text that
+/// spells a type (a string literal, a comment) names none.
+pub fn each_named_type_in_expr(expr: &Expr, f: &mut dyn FnMut(&str)) {
+	let _ = NamedTypes(f).visit_expr(expr);
+}
+
+/// [`each_named_type_in_expr`] over every expression of `block`.
+pub fn each_named_type_in_block(block: &Block, f: &mut dyn FnMut(&str)) {
+	let _ = NamedTypes(f).visit_block(block);
+}
+
+/// Reports the named types of the kinds a walk reaches, and of a cast's kind, which the walk
+/// does not reach of its own: the visitor of [`each_named_type_in_expr`], for a walk over
+/// something other than an expression or a block.
+pub struct NamedTypes<'a>(pub &'a mut dyn FnMut(&str));
+
+impl Visitor for NamedTypes<'_> {
+	type Error = std::convert::Infallible;
+
+	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+		if let Expr::Prefix {
+			op: crate::expr::PrefixOperator::Cast(kind),
+			..
+		} = expr
+		{
+			self.visit_kind(kind)?;
+		}
+		expr.visit(self)
+	}
+
+	fn visit_kind(&mut self, kind: &Kind) -> Result<(), Self::Error> {
+		kind.each_named_type(self.0);
 		Ok(())
 	}
 }

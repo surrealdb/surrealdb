@@ -341,3 +341,17 @@ fn a_bare_bpchar_is_unbounded_where_a_bare_char_is_char_one() {
 fn a_mysql_point_is_reported_as_the_json_the_wire_sends() {
 	assert_eq!(pg_report(&my("point")).oid, 114);
 }
+
+#[test]
+fn postgres_wire_types_follow_the_declared_type() {
+	use crate::SqlType;
+	let wire = |text: &str| pg_wire_type(&pg(text));
+	assert_eq!(wire("float(10)"), Some(SqlType::Float4));
+	assert_eq!(wire("float(40)"), Some(SqlType::Float8));
+	assert_eq!(wire("inet"), Some(SqlType::Inet));
+	assert_eq!(wire("cidr"), Some(SqlType::Cidr));
+	assert_eq!(wire("macaddr"), Some(SqlType::MacAddr));
+	assert_eq!(wire("timestamp(3) with time zone"), Some(SqlType::TimestampTz));
+	assert_eq!(wire("varchar(10)[]"), SqlType::array_of(SqlType::Varchar));
+	assert_eq!(wire("jsonb"), Some(SqlType::Json));
+}

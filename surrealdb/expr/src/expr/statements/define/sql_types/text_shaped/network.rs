@@ -94,7 +94,13 @@ pub fn parse(text: &str) -> Result<Network, NetworkError> {
 	let (family, address) = if address_text.contains(':') {
 		(Family::V6, parse_v6(address_text).ok_or_else(refuse)?)
 	} else {
-		(Family::V4, parse_v4(address_text).ok_or_else(refuse)?)
+		let (address, components) = parse_v4(address_text).ok_or_else(refuse)?;
+		// An IPv4 address with fewer than four components, its missing ones zero, is read only
+		// with a prefix, as in `10/8` or `192.168.1/24`.
+		if components < 4 && prefix_text.is_none() {
+			return Err(refuse());
+		}
+		(Family::V4, address)
 	};
 	let bits = match prefix_text {
 		None => family.max_bits(),
@@ -117,9 +123,12 @@ pub fn parse(text: &str) -> Result<Network, NetworkError> {
 }
 
 /// Read a `cidr`: as [`parse`], and refuse an address with a host bit set to the right of its
-/// prefix.
+/// prefix. An IPv4 address without a prefix takes its [classful prefix](classful_prefix).
 pub fn parse_cidr(text: &str) -> Result<Network, NetworkError> {
-	let network = parse(text)?;
+	let network = match classful_prefix(text.trim()) {
+		Some(bits) => parse(&format!("{}/{bits}", text.trim()))?,
+		None => parse(text)?,
+	};
 	if host_bits_set(&network) {
 		return Err(NetworkError {
 			reason: format!(
@@ -129,6 +138,36 @@ pub fn parse_cidr(text: &str) -> Result<Network, NetworkError> {
 		});
 	}
 	Ok(network)
+}
+
+/// The prefix PostgreSQL's `cidr` input gives an IPv4 address written without one: the mask of its
+/// class in the classful numbering (8 bits below 128, 16 below 192, 24 below 224, 8 for a
+/// multicast address, 32 from 240, and 4 for a lone `224`), widened to cover every octet written.
+/// `None` when the text has a prefix or is not such an address.
+fn classful_prefix(text: &str) -> Option<u8> {
+	if text.contains(['/', ':']) {
+		return None;
+	}
+	let (address, components) = parse_v4(text)?;
+	let first = *address.first()?;
+	let class = if first >= 240 {
+		32
+	} else if first >= 224 {
+		8
+	} else if first >= 192 {
+		24
+	} else if first >= 128 {
+		16
+	} else {
+		8
+	};
+	let written = u8::try_from(components * 8).ok()?;
+	let bits = class.max(written);
+	Some(if bits == 8 && first == 224 {
+		4
+	} else {
+		bits
+	})
 }
 
 /// Whether an address has a bit set to the right of its prefix.
@@ -154,6 +193,32 @@ pub fn compare(a: &Network, b: &Network) -> Ordering {
 	compare_bits(&a.address, &b.address, a.family.max_bits())
 }
 
+/// A key whose byte order is the order of [`compare`]: the family code, the address with the bits
+/// to the right of the prefix cleared, the prefix length, then the whole address.
+///
+/// Two networks agree on the bits their shorter prefix covers exactly when their cleared addresses
+/// agree on those bits, and where they do the network with the shorter prefix has the smaller
+/// cleared address or an equal one, so the cleared address decides as the shared bits and then
+/// the prefix lengths do.
+pub fn sort_key(network: &Network) -> Vec<u8> {
+	let octets = network.family.octets();
+	let mut key = Vec::with_capacity(2 + 2 * octets);
+	key.push(network.family.pg_code());
+	key.extend((0..octets).map(|index| {
+		let octet = network.address[index];
+		let covered = usize::from(network.bits).saturating_sub(index * 8).min(8);
+		let mask = if covered == 0 {
+			0
+		} else {
+			0xffu8 << (8 - covered)
+		};
+		octet & mask
+	}));
+	key.push(network.bits);
+	key.extend_from_slice(&network.address[..octets]);
+	key
+}
+
 /// The first `count` bits of `a` against those of `b`, most significant first.
 fn compare_bits(a: &[u8; 16], b: &[u8; 16], count: u8) -> Ordering {
 	(0..count)
@@ -169,10 +234,13 @@ fn bit(address: &[u8; 16], index: u8) -> bool {
 	address.get(octet).is_some_and(|byte| byte & mask != 0)
 }
 
-/// Read a dotted quad. Each octet is decimal, at most three digits, with no leading zero.
-fn parse_v4(text: &str) -> Option<[u8; 16]> {
+/// Read a dotted IPv4 address of one to four components, the missing trailing ones zero, with
+/// the number of components given. Each octet is decimal, at most three digits, with no leading
+/// zero.
+fn parse_v4(text: &str) -> Option<([u8; 16], usize)> {
 	let parts: Vec<&str> = text.split('.').collect();
-	if parts.len() != 4 {
+	let components = parts.len();
+	if !(1..=4).contains(&components) {
 		return None;
 	}
 	let mut address = [0u8; 16];
@@ -186,7 +254,7 @@ fn parse_v4(text: &str) -> Option<[u8; 16]> {
 		}
 		*slot = part.parse::<u8>().ok()?;
 	}
-	Some(address)
+	Some((address, components))
 }
 
 /// Read an IPv6 address: hexadecimal groups, at most one `::`, and optionally a dotted quad as
@@ -241,7 +309,9 @@ fn v6_words(part: &str, allow_v4: bool) -> Option<Vec<u16>> {
 			if !allow_v4 || index != last {
 				return None;
 			}
-			let quad = parse_v4(piece)?;
+			let (quad, 4) = parse_v4(piece)? else {
+				return None;
+			};
 			words.push(u16::from_be_bytes([quad[0], quad[1]]));
 			words.push(u16::from_be_bytes([quad[2], quad[3]]));
 		} else {
@@ -329,8 +399,55 @@ fn format_v6(bytes: &[u8; 16]) -> String {
 mod tests {
 	use super::*;
 
+	#[test]
+	fn a_cidr_without_a_prefix_takes_its_classful_prefix() {
+		let cidr = |text: &str| parse_cidr(text).expect("a cidr").cidr_text();
+		assert_eq!(cidr("10"), "10.0.0.0/8");
+		assert_eq!(cidr("192.168.1"), "192.168.1.0/24");
+		assert_eq!(cidr("128.1"), "128.1.0.0/16");
+		assert_eq!(cidr("128"), "128.0.0.0/16");
+		assert_eq!(cidr("10.1.2.3"), "10.1.2.3/32");
+		assert!(parse_cidr("192.168.1.5/24").is_err());
+	}
+
+	#[test]
+	fn an_abbreviated_ipv4_address_is_read_with_a_prefix() {
+		assert_eq!(parse("10/8").expect("abbreviated").cidr_text(), "10.0.0.0/8");
+		assert_eq!(parse_cidr("192.168.1/24").expect("abbreviated").cidr_text(), "192.168.1.0/24");
+		assert!(parse("10").is_err());
+		assert!(parse("192.168.1").is_err());
+		assert!(parse("::10.1/96").is_err());
+	}
+
 	fn inet(text: &str) -> String {
 		parse(text).expect("an inet").inet_text()
+	}
+
+	#[test]
+	fn the_sort_key_orders_as_compare_does() {
+		let texts = [
+			"::1",
+			"::/0",
+			"10.0.0.2",
+			"10.0.0.0/8",
+			"9.255.255.255",
+			"10.0.0.0/16",
+			"10.0.0.1",
+			"10.1.0.0/16",
+			"10.0.255.255/8",
+			"0.0.0.0/0",
+			"192.168.1.5/24",
+			"192.168.1.0/24",
+			"192.168.0.0/16",
+			"2001:db8::/32",
+			"2001:db8::1",
+		];
+		let networks: Vec<Network> = texts.iter().map(|t| parse(t).expect("a network")).collect();
+		for a in &networks {
+			for b in &networks {
+				assert_eq!(sort_key(a).cmp(&sort_key(b)), compare(a, b), "{a:?} against {b:?}");
+			}
+		}
 	}
 
 	#[test]

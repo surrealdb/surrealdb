@@ -1073,6 +1073,7 @@ pub fn bind_expr(
 		} => match lit {
 			PgLiteral::Integer(i) => Ok(BoundExpr::Literal(BoundLiteral::Integer(*i))),
 			PgLiteral::Float(f) => Ok(BoundExpr::Literal(BoundLiteral::Float(*f))),
+			PgLiteral::Numeric(text) => Ok(BoundExpr::Literal(BoundLiteral::Numeric(text.clone()))),
 			PgLiteral::String(s) => Ok(BoundExpr::Literal(BoundLiteral::String(s.clone()))),
 			PgLiteral::Boolean(b) => Ok(BoundExpr::Literal(BoundLiteral::Boolean(*b))),
 			PgLiteral::Null => Ok(BoundExpr::Literal(BoundLiteral::Null)),
@@ -1840,6 +1841,21 @@ fn bind_function_call(
 	} else {
 		bound_args
 	};
+	// `lower()` and `upper()` of a range give its bounds rather than its text in another case.
+	let bound_args = if matches!(fn_name.as_str(), "lower" | "upper") {
+		bound_args.into_iter().map(range_alternatives_as_range).collect()
+	} else {
+		bound_args
+	};
+	let fn_name = match (fn_name.as_str(), bound_args.as_slice()) {
+		("lower", [arg]) if crate::lower::expr::is_range(arg) => {
+			crate::functions::RANGE_LOWER.to_owned()
+		}
+		("upper", [arg]) if crate::lower::expr::is_range(arg) => {
+			crate::functions::RANGE_UPPER.to_owned()
+		}
+		_ => fn_name,
+	};
 	if let Some(call) = bind_catalog_function(&fn_name, over.is_none(), &bound_args, catalog)? {
 		return Ok(call);
 	}
@@ -1869,6 +1885,134 @@ fn bind_function_call(
 	}
 }
 
+/// `expr` with each untyped alternative cast to the range type it resolves to, when `expr` is a
+/// `COALESCE`, `NULLIF`, `GREATEST`, `LEAST` or `CASE` one of whose results is a range: a
+/// string literal, `NULL` or parameter among its results is read as a value of that range type,
+/// as PostgreSQL resolves the results to a common type. Any other `expr` is returned as it is.
+fn range_alternatives_as_range(expr: BoundExpr) -> BoundExpr {
+	if crate::lower::expr::range_type(&expr).is_none() {
+		return expr;
+	}
+	if let BoundExpr::FunctionCall {
+		name,
+		args,
+		distinct,
+	} = expr
+	{
+		let range = args.iter().find(|arg| crate::lower::expr::is_range(arg)).cloned();
+		let args = match range {
+			Some(range) => args.into_iter().map(|arg| range_literal_as(&range, arg)).collect(),
+			None => args,
+		};
+		return BoundExpr::FunctionCall {
+			name,
+			args,
+			distinct,
+		};
+	}
+	if let BoundExpr::Case {
+		operand,
+		branches,
+		else_expr,
+	} = expr
+	{
+		let range = branches
+			.iter()
+			.map(|(_, result)| result)
+			.chain(else_expr.as_deref())
+			.find(|result| crate::lower::expr::is_range(result))
+			.cloned();
+		let Some(range) = range else {
+			return BoundExpr::Case {
+				operand,
+				branches,
+				else_expr,
+			};
+		};
+		return BoundExpr::Case {
+			operand,
+			branches: branches
+				.into_iter()
+				.map(|(condition, result)| (condition, range_literal_as(&range, result)))
+				.collect(),
+			else_expr: else_expr.map(|result| Box::new(range_literal_as(&range, *result))),
+		};
+	}
+	expr
+}
+
+/// `expr` with each untyped alternative cast to the network type it resolves to, when `expr` is a
+/// `COALESCE`, `NULLIF`, `GREATEST`, `LEAST` or `CASE` whose results are networks: a string
+/// literal or parameter among its results is read as a value of that network type, as PostgreSQL
+/// resolves the results to a common type. Any other `expr` is returned as it is.
+pub(crate) fn network_alternatives_as_network(expr: BoundExpr) -> BoundExpr {
+	let Some(target) = crate::lower::network_rank::network_type_name(&expr) else {
+		return expr;
+	};
+	let cast = |result: BoundExpr| {
+		if matches!(result, BoundExpr::Literal(BoundLiteral::String(_)) | BoundExpr::Param { .. }) {
+			BoundExpr::Cast {
+				expr: Box::new(result),
+				target_type: target.to_owned(),
+			}
+		} else {
+			result
+		}
+	};
+	if let BoundExpr::FunctionCall {
+		name,
+		args,
+		distinct,
+	} = expr
+	{
+		let args = if matches!(name.as_str(), "coalesce" | "nullif" | "greatest" | "least") {
+			args.into_iter().map(cast).collect()
+		} else {
+			args
+		};
+		return BoundExpr::FunctionCall {
+			name,
+			args,
+			distinct,
+		};
+	}
+	if let BoundExpr::Case {
+		operand,
+		branches,
+		else_expr,
+	} = expr
+	{
+		return BoundExpr::Case {
+			operand,
+			branches: branches
+				.into_iter()
+				.map(|(condition, result)| (condition, cast(result)))
+				.collect(),
+			else_expr: else_expr.map(|result| Box::new(cast(*result))),
+		};
+	}
+	expr
+}
+
+/// `operand` cast to the range type of `range` when it is a string literal, `NULL` or a parameter
+/// and `range` is a range, as PostgreSQL infers an untyped literal or parameter opposite a range
+/// operand; `operand` itself otherwise. The cast also gives a parameter its type to describe.
+fn range_literal_as(range: &BoundExpr, operand: BoundExpr) -> BoundExpr {
+	if !matches!(
+		operand,
+		BoundExpr::Literal(BoundLiteral::String(_) | BoundLiteral::Null) | BoundExpr::Param { .. }
+	) {
+		return operand;
+	}
+	let Some(target_type) = crate::lower::expr::range_type(range).and_then(|ty| ty.name()) else {
+		return operand;
+	};
+	BoundExpr::Cast {
+		expr: Box::new(operand),
+		target_type,
+	}
+}
+
 /// A binary operator applied to two operands. Out of line from [`bind_expr`], whose frame every
 /// level of a nested expression holds, so that frame does not carry this arm's temporaries.
 #[inline(never)]
@@ -1890,6 +2034,44 @@ fn bind_binary_op(
 			op: BoundBinaryOp::VectorDistance(metric),
 			right: Box::new(vector_operand(r)),
 		});
+	}
+	let range_call = |name: &str, args: Vec<BoundExpr>| BoundExpr::FunctionCall {
+		name: name.to_owned(),
+		args,
+		distinct: false,
+	};
+	let overlaps =
+		matches!(op, surrealdb_pgsql::ast::op::BinaryOperator::Custom(custom) if custom == "&&");
+	// A string literal opposite a range is read as a range of the same type, for each range
+	// operator.
+	let (l, r) = (range_alternatives_as_range(l), range_alternatives_as_range(r));
+	let (l, r) = (network_alternatives_as_network(l), network_alternatives_as_network(r));
+	let (l, r) = if overlaps
+		|| matches!(
+			op,
+			surrealdb_pgsql::ast::op::BinaryOperator::Contains
+				| surrealdb_pgsql::ast::op::BinaryOperator::ContainedBy
+		) {
+		let coerced_l = range_literal_as(&r, l.clone());
+		let r = range_literal_as(&l, r);
+		(coerced_l, r)
+	} else {
+		(l, r)
+	};
+	// The range operators apply between two ranges of one type; PostgreSQL has no operator
+	// between ranges of different element types, nor for the other overloads of `&&`.
+	let both_ranges = matches!(
+		(crate::lower::expr::range_type(&l), crate::lower::expr::range_type(&r)),
+		(Some(left), Some(right)) if left == right
+	);
+	if overlaps && both_ranges {
+		return Ok(range_call(crate::functions::RANGE_OVERLAPS, vec![l, r]));
+	}
+	if both_ranges && matches!(op, surrealdb_pgsql::ast::op::BinaryOperator::Contains) {
+		return Ok(range_call(crate::functions::RANGE_CONTAINS, vec![l, r]));
+	}
+	if both_ranges && matches!(op, surrealdb_pgsql::ast::op::BinaryOperator::ContainedBy) {
+		return Ok(range_call(crate::functions::RANGE_CONTAINS, vec![r, l]));
 	}
 	let bound_op = match op {
 		surrealdb_pgsql::ast::op::BinaryOperator::Add => BoundBinaryOp::Add,

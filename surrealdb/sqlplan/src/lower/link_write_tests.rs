@@ -304,7 +304,7 @@ fn an_expression_written_to_a_link_is_evaluated_once() {
 #[test]
 fn a_value_that_is_no_key_is_written_as_it_is() {
 	for (value, rendered) in
-		[("NULL", "NULL"), ("1.5", "1.5f"), ("''", "''"), ("true", "true"), ("DEFAULT", "NONE")]
+		[("NULL", "NULL"), ("1.5", "1.5dec"), ("''", "''"), ("true", "true"), ("DEFAULT", "NONE")]
 	{
 		let values =
 			row(pg(&format!("INSERT INTO emp (id, name, dept) VALUES (8, 'Sam', {value})")));
@@ -582,7 +582,7 @@ fn a_where_clause_leaves_a_comparison_that_names_no_link_as_it_was() {
 		cond(pg("DELETE FROM emp WHERE dept = NULL")),
 		"IF dept = NULL OR dept = NONE OR NULL = NULL OR NULL = NONE THEN NULL ELSE dept = NULL END"
 	);
-	assert_eq!(cond(pg("DELETE FROM emp WHERE dept = 1.5")), "dept = 1.5f");
+	assert_eq!(cond(pg("DELETE FROM emp WHERE dept = 1.5")), "dept = 1.5dec");
 	assert_eq!(cond(pg("DELETE FROM emp WHERE dept = ''")), "dept = ''");
 	assert_eq!(cond(pg("DELETE FROM visitor WHERE dept = 1")), "dept = 1");
 	assert_eq!(cond(pg("DELETE FROM emp WHERE id = 3")), "id = (emp:3)");
@@ -766,8 +766,8 @@ fn the_name_the_catalog_is_asked_about_is_the_name_the_column_is_written_by() {
 const KEYED: [(&str, &str); 14] = [
 	("dept > 1", "{k} > 1"),
 	("dept < 10", "{k} < 10"),
-	("dept >= 1.5", "{k} >= 1.5f"),
-	("1.5 <= dept", "1.5f <= {k}"),
+	("dept >= 1.5", "{k} >= 1.5dec"),
+	("1.5 <= dept", "1.5dec <= {k}"),
 	("dept > mentor", "{k} > {m}"),
 	("dept BETWEEN 1 AND 3", "{k} >= 1 AND {k} <= 3"),
 	("dept + 1 = 3", "{k} + 1 = 3"),

@@ -37,7 +37,7 @@ INSERT INTO events (id, at) VALUES (1, CAST('2024-01-01T00:00:00Z' AS timestampt
 
 DELETE FROM events WHERE at < '2024-03-01' RETURNING id;
 
-DELETE FROM events WHERE at > now() + interval '30 days' RETURNING id;
+DELETE FROM events WHERE at > now() + '30 days'::interval RETURNING id;
 
 UPDATE events SET at = CAST('2025-01-01T00:00:00Z' AS timestamptz) WHERE at > '2024-08-01' AND at < '2024-10-01' RETURNING id;
 

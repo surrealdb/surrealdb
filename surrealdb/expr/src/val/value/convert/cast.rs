@@ -1114,7 +1114,9 @@ impl Value {
 					self.can_cast_to_file_buckets(buckets)
 				}
 			}
-			Kind::Enum(reference) => self.is_enum_member(reference),
+			Kind::Enum(labels) => self.is_enum_member(labels),
+			// A named type's body is judged where the catalog is reachable.
+			Kind::Named(_) => true,
 		}
 	}
 
@@ -1247,8 +1249,10 @@ impl Value {
 					self.cast_to_file_buckets(buckets).map(Value::from)
 				}
 			}
-			Kind::Enum(reference) => {
-				if self.is_enum_member(reference) {
+			// A named type's body is judged where the catalog is reachable.
+			Kind::Named(_) => Ok(self),
+			Kind::Enum(labels) => {
+				if self.is_enum_member(labels) {
 					Ok(self)
 				} else {
 					Err(CastError::InvalidKind {

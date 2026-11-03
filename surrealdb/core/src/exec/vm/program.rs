@@ -1603,11 +1603,15 @@ pub(crate) enum StoreInstr {
 	/// or through other views, as the registrations stand when the instruction
 	/// runs. Maintaining such a view would feed each row it writes back into
 	/// itself.
+	///
+	/// It also refuses an aggregated view in the table definition `definition` that keeps the
+	/// `MIN` or `MAX` of a source field holding the labels of a union type.
 	RefuseViewCycle {
 		ns: Reg,
 		db: Reg,
 		tb: Reg,
 		sources: Box<[crate::val::TableName]>,
+		definition: Reg,
 	},
 	/// Raise [`crate::exec::Error::SchemaClauseEffect`] when a schema clause of
 	/// the definition in `definition`, stored as `object` names, has an effect
@@ -2309,47 +2313,58 @@ pub(crate) enum StoreInstr {
 		columns: Reg,
 		schemafull: Reg,
 	},
-	/// Edit the stored enum definition in `definition` by `edits`, in order: refuse an edit that
-	/// names a label that does not exist, or adds one that does (an `IF NOT EXISTS` add is
-	/// skipped), and leave the edited definition in the register.
-	AlterEnum {
+	/// Edit the labels of the stored type definition in `definition` by `edits`, in order: refuse
+	/// a type that is not a union of labels, an edit that names a label that does not exist, or
+	/// one that adds a label that does (an `IF NOT EXISTS` add is skipped), and leave the edited
+	/// definition in the register.
+	AlterType {
 		definition: Reg,
 		edits: Vec<crate::exec::ir::iface::statements::EnumEdit>,
 	},
 	/// Rewrite the stored values that carry a label `edits` renamed, in every field of the
-	/// database `ns`/`db` whose type names the enum `name`, through the writes of the records that
-	/// hold them, so that index entries, events and field clauses follow. Runs after the edited
-	/// definition is stored, in the same transaction.
+	/// database `ns`/`db` whose type names the union type `name`, through the writes of the
+	/// records that hold them, so that index entries, events and field clauses follow. Runs after
+	/// the edited definition is stored, in the same transaction.
 	RewriteEnumLabels {
 		ns: Reg,
 		db: Reg,
 		name: Reg,
 		edits: Vec<crate::exec::ir::iface::statements::EnumEdit>,
 	},
-	/// Refuse to remove the enum named in `name` of the database `ns`/`db` while a field of the
-	/// database has a type that names it, or a function declares it in a parameter or a return
-	/// type or its body names it.
-	CheckEnumUnreferenced {
+	/// Refuse the definition of `subject`, a field or a function of the database `ns`/`db`,
+	/// when one of `names`, the types its kinds name, is not a type the database defines.
+	CheckTypesDefined {
 		ns: Reg,
 		db: Reg,
-		name: Reg,
+		names: Box<[String]>,
+		subject: String,
 	},
-	/// Raise that the domain or composite type named in `name` already exists (`exists`), or does
-	/// not.
-	RaiseUserType {
-		name: Reg,
-		exists: bool,
-	},
-	/// Refuse to remove the stored domain or composite type in `definition`, named in `name`, of
-	/// the database `ns`/`db`: when it is not a domain and `domain` says it must be, or not a
-	/// composite type and `domain` says it must not be, and while a field of the database declares
-	/// its SQL type with it.
-	CheckUserTypeRemovable {
-		ns: Reg,
-		db: Reg,
-		name: Reg,
+	/// Refuse to remove the stored type definition in `definition` when it is not the kind of SQL
+	/// object `object` names: a domain removed as a type, or an enum or composite type removed as
+	/// a domain.
+	CheckTypeObject {
 		definition: Reg,
-		domain: bool,
+		object: crate::expr::statements::remove::SqlTypeObject,
+	},
+	/// Refuse to remove the type named in `name` of the database `ns`/`db` while a field, a
+	/// function or another type of the database names it.
+	CheckTypeUnreferenced {
+		ns: Reg,
+		db: Reg,
+		name: Reg,
+	},
+	/// Reconcile and check the stored type definition in `definition`, about to replace the stored
+	/// one in `existing` (`NONE` when there is none), of the database `ns`/`db`. Replacing a union
+	/// with the same labels in the same order keeps the stored labels and their identities; with
+	/// anything else it is refused while a field or a function of the database names the type, and
+	/// otherwise keeps the identity of each label it keeps. The definition is refused when its body
+	/// names a type the database does not define, or a type whose own definition leads back to it,
+	/// and is left reconciled in the register.
+	CheckTypeDefinition {
+		ns: Reg,
+		db: Reg,
+		existing: Reg,
+		definition: Reg,
 	},
 	/// Raise what `ALTER TABLE` raises when the table definition in `updated`,
 	/// formed from the one in `previous` by its clauses, changes a
@@ -2441,7 +2456,6 @@ pub(crate) enum Definitions {
 	Analyzer,
 	/// A database's buckets.
 	Bucket,
-	Enum,
 	/// The root's buckets.
 	RootBucket,
 	/// A namespace's buckets.
@@ -2452,6 +2466,8 @@ pub(crate) enum Definitions {
 	Model,
 	Param,
 	Table,
+	/// The database's named types.
+	Type,
 	User,
 	Config,
 	Sequence,
@@ -3388,7 +3404,7 @@ pub(crate) enum StatementError {
 	ApAlreadyExists,
 	CgAlreadyExists,
 	BuAlreadyExists,
-	EnAlreadyExists,
+	TyAlreadyExists,
 	MdAlreadyExists,
 	MlAlreadyExists,
 	/// A user that exists; the argument is an object of the error's fields.
@@ -3412,7 +3428,7 @@ pub(crate) enum StatementError {
 	SeqNotFound,
 	AzNotFound,
 	BuNotFound,
-	EnNotFound,
+	TyNotFound,
 	MdNotFound,
 	MlNotFound,
 	/// The not-found errors of access methods, users and APIs; the argument

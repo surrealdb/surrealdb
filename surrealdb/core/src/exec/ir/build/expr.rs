@@ -545,23 +545,9 @@ fn bind_node(host: &mut dyn ExprHost, expr: &LogicalExpr) -> Result<Built, IrErr
 			op,
 			expr: operand,
 		} => match op {
-			// A cast to a named enum is judged against the labels the catalog holds, which only a
-			// function reaches: `<enum<name>> x` is `enum::cast('name', x)`.
-			PrefixOperator::Cast(crate::expr::Kind::Enum(crate::expr::EnumRef::Named(name))) => {
-				let call = LogicalExpr::Call(Box::new(crate::expr::logical::LogicalCall {
-					receiver: Function::Normal("enum::cast".to_owned()),
-					args: vec![
-						LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::String(
-							Strand::new(name.clone()),
-						)),
-						(**operand).clone(),
-					],
-				}));
-				bind_expr(host, &call)
-			}
-			// A cast to a type that holds a named enum beside other types judges the labels the
-			// same way, at whatever depth the enum stands.
-			PrefixOperator::Cast(kind) if kind.has_named_enum() => {
+			// A cast to a type that names a type of the catalog reads the catalog, which only a
+			// function reaches: `<T> x` is `enum::cast('T', x)`.
+			PrefixOperator::Cast(kind) if kind.has_named_type() => {
 				let call = LogicalExpr::Call(Box::new(crate::expr::logical::LogicalCall {
 					receiver: Function::Normal("enum::cast".to_owned()),
 					args: vec![

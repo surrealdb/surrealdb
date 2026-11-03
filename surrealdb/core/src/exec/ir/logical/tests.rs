@@ -4877,9 +4877,9 @@ mod binding {
 		(DdlForm::AlterField, "ALTER FIELD f ON t TYPE string"),
 		(DdlForm::AlterParam, "ALTER PARAM $p VALUE 2"),
 		(DdlForm::AlterBucket, "ALTER BUCKET b COMMENT 'c'"),
-		(DdlForm::DefineEnum, "DEFINE ENUM e VALUES 'a', 'b' COMMENT 'c'"),
-		(DdlForm::RemoveEnum, "REMOVE ENUM e"),
-		(DdlForm::AlterEnum, "ALTER ENUM e ADD VALUE 'c' AFTER 'a'"),
+		(DdlForm::DefineType, "DEFINE TYPE e AS 'a' | 'b' COMMENT 'c'"),
+		(DdlForm::RemoveType, "REMOVE TYPE e"),
+		(DdlForm::AlterType, "ALTER TYPE e ADD VALUE 'c' AFTER 'a'"),
 		(DdlForm::AlterConfig, "ALTER CONFIG API PERMISSIONS NONE"),
 		(DdlForm::AlterAnalyzer, "ALTER ANALYZER a COMMENT 'c'"),
 		(DdlForm::AlterFunction, "ALTER FUNCTION fn::f($x: int) { RETURN $x }"),
@@ -4947,10 +4947,6 @@ mod binding {
 			DdlForm::RemoveModel,
 			DdlForm::RemoveModule,
 			DdlForm::AlterModule,
-			// Domains and composite types have no SurrealQL statement; only the PostgreSQL front
-			// end writes them.
-			DdlForm::DefineUserType,
-			DdlForm::RemoveUserType,
 		];
 		for (form, sql) in WRITTEN {
 			covered.push(*form);

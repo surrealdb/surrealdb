@@ -64,6 +64,7 @@ impl ComponentKind {
 	/// durations, bools and records keep a storage order that a key range can use.
 	pub fn classify(kind: &Kind) -> Option<Self> {
 		Some(match kind {
+			Kind::Named(_) => return None,
 			Kind::String => Self::String,
 			Kind::Int => Self::Int,
 			Kind::Datetime => Self::Datetime,
@@ -676,6 +677,7 @@ fn group_component_kind(expr: &Expr) -> ComponentKind {
 		return ComponentKind::Unknown;
 	};
 	match kind {
+		Kind::Named(_) => ComponentKind::Unknown,
 		Kind::String => ComponentKind::String,
 		Kind::Int => ComponentKind::Int,
 		Kind::Uuid => ComponentKind::Uuid,

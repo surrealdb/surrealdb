@@ -106,8 +106,7 @@ const API_HOLES: &[TemplateHole] = &[
 	TemplateHole::Other("middleware"),
 	TemplateHole::AuthLimit,
 ];
-const ENUM_HOLES: &[TemplateHole] = &[TemplateHole::Other("id"), TemplateHole::Comment];
-const USER_TYPE_HOLES: &[TemplateHole] = &[TemplateHole::Other("id")];
+const TYPE_HOLES: &[TemplateHole] = &[TemplateHole::Other("id"), TemplateHole::Comment];
 const BUCKET_HOLES: &[TemplateHole] = &[
 	TemplateHole::Name,
 	TemplateHole::Other("backend"),
@@ -141,8 +140,7 @@ pub(crate) fn template_holes(form: DdlForm) -> Option<&'static [TemplateHole]> {
 		DdlForm::DefineApi => API_HOLES,
 		DdlForm::DefineBucket => BUCKET_HOLES,
 		DdlForm::DefineSequence => SEQUENCE_HOLES,
-		DdlForm::DefineEnum => ENUM_HOLES,
-		DdlForm::DefineUserType => USER_TYPE_HOLES,
+		DdlForm::DefineType => TYPE_HOLES,
 		DdlForm::RemoveNamespace
 		| DdlForm::RemoveDatabase
 		| DdlForm::RemoveFunction
@@ -160,9 +158,8 @@ pub(crate) fn template_holes(form: DdlForm) -> Option<&'static [TemplateHole]> {
 		| DdlForm::RemoveSequence
 		| DdlForm::RemoveModule
 		| DdlForm::RemoveConfig
-		| DdlForm::RemoveEnum
-		| DdlForm::RemoveUserType
-		| DdlForm::AlterEnum
+		| DdlForm::RemoveType
+		| DdlForm::AlterType
 		| DdlForm::AlterSystem
 		| DdlForm::AlterNamespace
 		| DdlForm::AlterDatabase
@@ -892,85 +889,48 @@ pub(super) fn plan_define<'e>(
 				None,
 			)
 		}
-		DefineStatement::Enum(stmt) => {
+		DefineStatement::Type(stmt) => {
 			let comment = s.comment(&stmt.comment)?;
 			let permissions = s.permission(&stmt.permissions)?;
-			let definition = crate::catalog::EnumDefinition {
-				id: crate::catalog::EnumId(0),
+			let body = crate::catalog::TypeBody::declared(stmt.body.clone());
+			let labels = match &body {
+				crate::catalog::TypeBody::Union(labels) => labels.labels.len(),
+				crate::catalog::TypeBody::Kind(_) => 0,
+			};
+			let definition = crate::catalog::TypeDefinition {
+				id: crate::catalog::TypeId(0),
 				name: stmt.name.clone(),
-				labels: stmt
-					.labels
-					.iter()
-					.zip(crate::catalog::EnumDefinition::initial_orders(stmt.labels.len()))
-					.zip(1..)
-					.map(|((label, order), ident)| crate::catalog::EnumLabel {
-						label: label.clone(),
-						order,
-						ident,
-					})
-					.collect(),
+				body,
+				asserts: stmt.asserts.clone(),
+				default: stmt.default.clone(),
+				sql_type: stmt.sql_type.clone(),
 				permissions: stmt.permissions.clone(),
 				comment: comment_text(&stmt.comment),
 			};
-			let too_many = stmt.labels.len() >= crate::catalog::ENUM_LABEL_IDENT_LIMIT as usize;
-			let refusal = if too_many {
-				Some(crate::exec::vm::payload::Refusal::InvalidStatement {
+			let refusal = (labels >= crate::catalog::ENUM_LABEL_IDENT_LIMIT as usize).then(|| {
+				crate::exec::vm::payload::Refusal::InvalidStatement {
 					message: format!(
-						"The enum '{}' lists {} labels; an enum holds at most {}",
+						"The type '{}' lists {labels} labels; a union holds at most {}",
 						stmt.name,
-						stmt.labels.len(),
 						crate::catalog::ENUM_LABEL_IDENT_LIMIT - 1
 					),
-				})
-			} else {
-				stmt.labels
-					.iter()
-					.enumerate()
-					.find(|(i, label)| stmt.labels[..*i].contains(label))
-					.map(|(_, label)| crate::exec::vm::payload::Refusal::InvalidStatement {
-						message: format!(
-							"The enum '{}' lists the label '{label}' more than once",
-							stmt.name
-						),
-					})
-			};
+				}
+			});
 			(
-				DdlForm::DefineEnum,
+				DdlForm::DefineType,
 				(EDIT, ResourceKind::Parameter, Base::Db),
-				DefineObject::Enum {
+				DefineObject::Type {
 					name: stmt.name.clone(),
-					labels: stmt.labels.clone().into_boxed_slice(),
 					comment,
 					permissions,
 				},
 				template(
-					"StoredEnumDefinition",
-					stored_value(codec, &definition.to_stored(), "StoredEnumDefinition")?,
-					ENUM_HOLES,
+					"StoredTypeDefinition",
+					stored_value(codec, &definition.to_stored(), "StoredTypeDefinition")?,
+					TYPE_HOLES,
 				),
 				stmt.kind.clone(),
 				refusal,
-			)
-		}
-		DefineStatement::UserType(stmt) => {
-			let definition = crate::catalog::UserTypeDefinition {
-				id: crate::catalog::UserTypeId(0),
-				name: stmt.name.clone(),
-				body: stmt.body.clone(),
-			};
-			(
-				DdlForm::DefineUserType,
-				(EDIT, ResourceKind::Parameter, Base::Db),
-				DefineObject::UserType {
-					name: stmt.name.clone(),
-				},
-				template(
-					"StoredUserTypeDefinition",
-					stored_value(codec, &definition.to_stored(), "StoredUserTypeDefinition")?,
-					USER_TYPE_HOLES,
-				),
-				stmt.kind.clone(),
-				None,
 			)
 		}
 		DefineStatement::Sequence(stmt) => {

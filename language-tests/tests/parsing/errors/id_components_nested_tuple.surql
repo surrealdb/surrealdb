@@ -4,11 +4,11 @@ reason = "Component names are accepted only on the outermost tuple."
 
 [test.results]
 parsing-error = """
-Unexpected token `an identifier`, expected a kind name
-  --> [15:53]
+Unexpected token `:`, expected a kind name
+  --> [15:56]
    |
-15 | ...ing, at: [lat: float, lon: float]];
-   |              ^^^
+15 | ..., at: [lat: float, lon: float]];
+   |              ^
 """
 
 */

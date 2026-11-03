@@ -188,7 +188,7 @@ fn canonical_range(element: Element, range: Range) -> Result<Range, RangeError> 
 			Bound::Excluded(value) if !is_infinite_date(&value) => {
 				Bound::Included(successor(element, &value)?)
 			}
-			other @ (Bound::Excluded(_) | Bound::Included(_) | Bound::Unbounded) => other,
+			other @ (Bound::Included(_) | Bound::Excluded(_) | Bound::Unbounded) => other,
 		};
 		let upper = match upper {
 			Bound::Included(value) if !is_infinite_date(&value) => {
@@ -373,6 +373,76 @@ fn successor(element: Element, value: &Value) -> Result<Value, RangeError> {
 	}
 }
 
+/// The lower bound of a range, as PostgreSQL's `lower()` gives it: `NULL` for an empty range and
+/// for a range with no lower bound.
+pub fn lower(range: &Range) -> Value {
+	match &range.start {
+		Bound::Included(value) | Bound::Excluded(value) if !range.is_empty() => value.clone(),
+		Bound::Included(_) | Bound::Excluded(_) | Bound::Unbounded => Value::Null,
+	}
+}
+
+/// The upper bound of a range, as PostgreSQL's `upper()` gives it: `NULL` for an empty range and
+/// for a range with no upper bound.
+pub fn upper(range: &Range) -> Value {
+	match &range.end {
+		Bound::Included(value) | Bound::Excluded(value) if !range.is_empty() => value.clone(),
+		Bound::Included(_) | Bound::Excluded(_) | Bound::Unbounded => Value::Null,
+	}
+}
+
+/// Whether two ranges have a value in common, PostgreSQL's `&&`. An empty range overlaps nothing.
+pub fn overlaps(a: &Range, b: &Range) -> bool {
+	!a.is_empty() && !b.is_empty() && starts_by(&a.start, &b.end) && starts_by(&b.start, &a.end)
+}
+
+/// Whether every value of `inner` lies in `outer`, PostgreSQL's range `@>` range. Every range
+/// contains the empty range, and the empty range contains no other.
+pub fn contains(outer: &Range, inner: &Range) -> bool {
+	if inner.is_empty() {
+		return true;
+	}
+	!outer.is_empty()
+		&& compare_starts(&outer.start, &inner.start) != Ordering::Greater
+		&& compare_ends(&outer.end, &inner.end) != Ordering::Less
+}
+
+/// Whether a value lies at or after the lower bound `start` and at or before the upper bound
+/// `end`, so that a range starting at `start` and one ending at `end` can share it.
+fn starts_by(start: &Bound<Value>, end: &Bound<Value>) -> bool {
+	match (start, end) {
+		(Bound::Unbounded, _) | (_, Bound::Unbounded) => true,
+		(Bound::Included(s), Bound::Included(e)) => s <= e,
+		(Bound::Included(s) | Bound::Excluded(s), Bound::Included(e) | Bound::Excluded(e)) => s < e,
+	}
+}
+
+/// The order of two lower bounds: no bound first, then by value, and at one value an inclusive
+/// bound before an exclusive one.
+fn compare_starts(a: &Bound<Value>, b: &Bound<Value>) -> Ordering {
+	match (a, b) {
+		(Bound::Unbounded, Bound::Unbounded) => Ordering::Equal,
+		(Bound::Unbounded, _) => Ordering::Less,
+		(_, Bound::Unbounded) => Ordering::Greater,
+		(Bound::Included(x) | Bound::Excluded(x), Bound::Included(y) | Bound::Excluded(y)) => x
+			.cmp(y)
+			.then_with(|| matches!(a, Bound::Excluded(_)).cmp(&matches!(b, Bound::Excluded(_)))),
+	}
+}
+
+/// The order of two upper bounds: by value, at one value an exclusive bound before an inclusive
+/// one, and no bound last.
+fn compare_ends(a: &Bound<Value>, b: &Bound<Value>) -> Ordering {
+	match (a, b) {
+		(Bound::Unbounded, Bound::Unbounded) => Ordering::Equal,
+		(Bound::Unbounded, _) => Ordering::Greater,
+		(_, Bound::Unbounded) => Ordering::Less,
+		(Bound::Included(x) | Bound::Excluded(x), Bound::Included(y) | Bound::Excluded(y)) => x
+			.cmp(y)
+			.then_with(|| matches!(a, Bound::Included(_)).cmp(&matches!(b, Bound::Included(_)))),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -416,6 +486,53 @@ mod tests {
 			start: Bound::Included(i32_value(lower)),
 			end: Bound::Excluded(i32_value(upper)),
 		}))
+	}
+
+	fn range(start: Bound<Value>, end: Bound<Value>) -> Range {
+		Range {
+			start,
+			end,
+		}
+	}
+
+	#[test]
+	fn lower_and_upper_are_null_for_an_empty_or_unbounded_side() {
+		assert_eq!(lower(&range(included(1), excluded(5))), int(1));
+		assert_eq!(upper(&range(included(1), excluded(5))), int(5));
+		assert_eq!(lower(&range(Bound::Unbounded, excluded(5))), Value::Null);
+		assert_eq!(upper(&range(included(1), Bound::Unbounded)), Value::Null);
+		assert_eq!(lower(&range(included(3), excluded(3))), Value::Null);
+		assert_eq!(upper(&range(included(3), excluded(3))), Value::Null);
+	}
+
+	#[test]
+	fn ranges_overlap_when_they_share_a_value() {
+		assert!(overlaps(&range(included(1), excluded(5)), &range(included(4), excluded(8))));
+		assert!(!overlaps(&range(included(1), excluded(5)), &range(included(5), excluded(8))));
+		assert!(overlaps(&range(included(1), included(5)), &range(included(5), excluded(8))));
+		assert!(!overlaps(&range(included(1), included(5)), &range(excluded(5), excluded(8))));
+		assert!(overlaps(
+			&range(Bound::Unbounded, excluded(2)),
+			&range(included(1), Bound::Unbounded)
+		));
+		assert!(!overlaps(
+			&range(included(3), excluded(3)),
+			&range(Bound::Unbounded, Bound::Unbounded)
+		));
+	}
+
+	#[test]
+	fn a_range_contains_a_range_within_its_bounds() {
+		let outer = range(included(1), excluded(10));
+		assert!(contains(&outer, &range(included(2), excluded(5))));
+		assert!(contains(&outer, &range(included(1), excluded(10))));
+		assert!(!contains(&outer, &range(included(0), excluded(5))));
+		assert!(!contains(&outer, &range(included(2), included(10))));
+		assert!(contains(&outer, &range(excluded(1), included(9))));
+		assert!(!contains(&outer, &range(included(2), Bound::Unbounded)));
+		assert!(contains(&range(Bound::Unbounded, Bound::Unbounded), &outer));
+		assert!(contains(&outer, &range(included(20), excluded(20))));
+		assert!(!contains(&range(included(20), excluded(20)), &outer));
 	}
 
 	#[test]

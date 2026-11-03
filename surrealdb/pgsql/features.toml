@@ -46,7 +46,7 @@ key = "ddl.enum_types"
 source = "postgresql-15-grammar"
 productions = ["DefineStmt", "AlterEnumStmt", "opt_enum_val_list", "enum_val_list"]
 supported = ["CREATE TYPE name AS ENUM (labels)", "ALTER TYPE name ADD VALUE [IF NOT EXISTS] label [BEFORE | AFTER label]", "ALTER TYPE name RENAME VALUE label TO label", "DROP TYPE [IF EXISTS] name"]
-execution = "lowered to DEFINE ENUM, ALTER ENUM and REMOVE ENUM; the type's labels order by declaration"
+execution = "lowered to DEFINE TYPE over a union of the labels, ALTER TYPE and REMOVE TYPE; the type's labels order by declaration"
 unsupported = ["CREATE TYPE of a composite, range or base type", "ALTER TYPE owner, schema and attribute actions", "DROP TYPE CASCADE, which does not drop the columns that use the type"]
 
 [[features]]

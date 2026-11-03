@@ -41,6 +41,8 @@ pub enum RecordIdKeyLit {
 impl RecordIdKeyLit {
 	pub fn kind_supported(kind: &Kind) -> bool {
 		match kind {
+			// What a named type holds is the catalog's to say, which this does not read.
+			Kind::Named(_) => false,
 			Kind::Any
 			| Kind::Number
 			| Kind::Int

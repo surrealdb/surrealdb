@@ -43,7 +43,6 @@ mod compiled_test;
 mod database_compatibility;
 mod diskann_state;
 mod durable_session;
-mod enum_definition;
 mod field_migrations;
 pub(crate) mod fixtures;
 mod generator;
@@ -55,6 +54,7 @@ mod table_migration_state;
 mod temporal_keys;
 mod temporal_records;
 mod tests;
+mod type_definition;
 
 #[rustfmt::skip]
 mod v3_0_0_beta_1;

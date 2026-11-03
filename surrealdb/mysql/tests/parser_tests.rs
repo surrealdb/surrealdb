@@ -758,11 +758,13 @@ fn test_parse_executable_version_comments() {
 }
 
 #[test]
-fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_float() {
-	for literal in ["9223372036854775808", "18446744073709551616", "123456789012345678901234567890"]
-	{
+fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_decimal() {
+	// The magnitude of the int8 minimum stays a double, so a sign can be folded into it.
+	let e = parse_expr("9223372036854775808").expect("the int8 minimum magnitude");
+	assert_eq!(e, Expr::Literal(Literal::Float(2f64.powi(63)), e.span()));
+	for literal in ["18446744073709551616", "123456789012345678901234567890"] {
 		let e = parse_expr(literal).expect(literal);
-		assert_eq!(e, Expr::Literal(Literal::Float(literal.parse::<f64>().unwrap()), e.span()));
+		assert_eq!(e, Expr::Literal(Literal::Decimal(literal.to_string()), e.span()));
 	}
 	assert!(parse_expr(&"9".repeat(400)).is_err(), "a literal beyond a double has no value");
 }
@@ -802,7 +804,11 @@ fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
 			UnaryOperator::Minus,
 			Literal::Unsigned(9_223_372_036_854_775_809),
 		),
-		("-9223372036854775808.0", UnaryOperator::Minus, Literal::Float(two_pow_63)),
+		(
+			"-9223372036854775808.0",
+			UnaryOperator::Minus,
+			Literal::Decimal("9223372036854775808.0".to_string()),
+		),
 		("-9223372036854775808e0", UnaryOperator::Minus, Literal::Float(two_pow_63)),
 		("-9223372036854775807", UnaryOperator::Minus, Literal::Integer(i64::MAX)),
 		("+9223372036854775808", UnaryOperator::Plus, Literal::Float(two_pow_63)),

@@ -542,6 +542,84 @@ async fn check_patch_pointers(
 
 /// Take `instr` for the record in flight, and answer the instruction the body
 /// continues at: `next`, or a target the instruction holds.
+/// The settled id of `row` judged against the named types its kind holds where `exec` reaches
+/// the catalog, and written under the key those types coerce it to: the `id` field's kind
+/// judges the whole key, and on a table whose ids name their components, each component's
+/// declared kind judges its element. The settling before it coerced the key to those kinds,
+/// which take a named type as written.
+async fn check_id_named_types(
+	row: &mut WriteRow,
+	ctx: &crate::exec::operators::write::ctx::WriteCtx,
+	exec: &ExecutionContext,
+) -> Result<(), ControlFlow> {
+	let Some(id) = row.id.as_ref() else {
+		return Ok(());
+	};
+	if let Some(key) = ctx.key.as_deref() {
+		let crate::val::RecordIdKey::Array(elements) = &id.key else {
+			return Ok(());
+		};
+		if !key.components.iter().any(|c| c.declared.as_ref().is_some_and(|k| k.has_named_type())) {
+			return Ok(());
+		}
+		let mut checked = Vec::with_capacity(elements.len());
+		for (position, element) in elements.iter().enumerate() {
+			let declared = key
+				.components
+				.iter()
+				.find(|c| c.position as usize == position)
+				.and_then(|c| c.declared.as_ref().map(|kind| (c, kind)));
+			let element = match declared {
+				Some((component, kind)) if kind.has_named_type() => {
+					crate::exec::vm::schema_host::check_types_held(exec, kind, element.clone())
+						.await
+						.map_err(|error| {
+							ControlFlow::Err(anyhow::Error::new(DocError::IdComponentCoerce {
+								table: id.table.to_string(),
+								component: match &component.name {
+									Some(name) => name.to_string(),
+									None => position.to_string(),
+								},
+								error: error.to_string(),
+							}))
+						})?
+				}
+				Some(_) | None => element.clone(),
+			};
+			checked.push(element);
+		}
+		let key = Value::Array(checked.into());
+		if key != id.key.clone().into_value() {
+			let table = id.table.clone();
+			row.id = Some(key.generate(table, false).map_err(ControlFlow::Err)?);
+		}
+		return Ok(());
+	}
+	let Some(kind) = ctx
+		.id_field
+		.and_then(|index| ctx.fields.get(index))
+		.and_then(|fd| fd.field_kind.as_ref())
+		.filter(|kind| kind.has_named_type() && !kind.is_record())
+	else {
+		return Ok(());
+	};
+	let key = id.key.clone().into_value();
+	let checked = crate::exec::vm::schema_host::check_types_held(exec, kind, key.clone())
+		.await
+		.map_err(|error| {
+			ControlFlow::Err(anyhow::Error::new(DocError::FieldCoerce {
+				record: id.to_sql(),
+				field_name: "id".to_string(),
+				error: Box::new(error),
+			}))
+		})?;
+	if checked != key {
+		let table = id.table.clone();
+		row.id = Some(checked.generate(table, false).map_err(ControlFlow::Err)?);
+	}
+	Ok(())
+}
+
 pub(super) async fn step(
 	program: &Program,
 	instr: &DataInstr,
@@ -745,6 +823,7 @@ pub(super) async fn step(
 				table,
 			} = data::settle_record_id(row, &ctx)?
 			else {
+				check_id_named_types(row, &ctx, exec).await?;
 				return Ok(next);
 			};
 			let (Some(pipeline), Some(field)) =
@@ -769,6 +848,7 @@ pub(super) async fn step(
 			row.id_draws.extend(draws);
 			let id = value.generate(table, false).map_err(ControlFlow::Err)?;
 			data::finish_record_id(row, &ctx, id)?;
+			check_id_named_types(row, &ctx, exec).await?;
 			Ok(next)
 		}
 		DataInstr::MergeSupplied => {

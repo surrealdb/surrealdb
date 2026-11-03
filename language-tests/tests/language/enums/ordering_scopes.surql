@@ -55,11 +55,11 @@ value = "['happy', 'ok', 'sad']"
 value = "['happy']"
 */
 
-DEFINE ENUM mood VALUES 'sad', 'ok', 'happy';
+DEFINE TYPE mood AS 'sad' | 'ok' | 'happy';
 DEFINE TABLE a SCHEMAFULL;
-DEFINE FIELD m ON a TYPE enum<mood>;
+DEFINE FIELD m ON a TYPE mood;
 DEFINE TABLE b SCHEMAFULL;
-DEFINE FIELD m ON b TYPE enum<mood>;
+DEFINE FIELD m ON b TYPE mood;
 DEFINE TABLE c SCHEMAFULL;
 DEFINE FIELD m ON c TYPE string;
 CREATE a:1 SET m = 'happy' RETURN NONE;

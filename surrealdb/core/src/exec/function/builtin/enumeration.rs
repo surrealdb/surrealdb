@@ -85,12 +85,51 @@ enum_function!(
 	crate::fnc::enumeration::max
 );
 
-enum_function!(
-	EnumCast,
-	"enum::cast",
-	Signature::new().arg("name", Kind::Any).arg("value", Kind::Any).returns(Kind::Any),
-	crate::fnc::enumeration::cast
-);
+/// `enum::cast(type, value)`: `value` cast to the type `type` spells, judged by every named type
+/// it holds. This is what a cast to a type that names a type of the catalog evaluates to.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EnumCast;
+
+impl ScalarFunction for EnumCast {
+	fn name(&self) -> &'static str {
+		"enum::cast"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "enum::cast", Fallibility::DATA)
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::READS_CATALOG
+	}
+
+	fn signature(&self) -> Signature {
+		Signature::new().arg("name", Kind::Any).arg("value", Kind::Any).returns(Kind::Any)
+	}
+
+	fn is_pure(&self) -> bool {
+		false
+	}
+
+	fn is_async(&self) -> bool {
+		true
+	}
+
+	fn invoke(&self, _args: Vec<Value>) -> Result<Value> {
+		Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
+	}
+
+	fn invoke_async<'a>(
+		&'a self,
+		ctx: &'a EvalContext<'_>,
+		args: Vec<Value>,
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
+		Box::pin(async move {
+			let (name, value) = FromArgs::from_args("enum::cast", args)?;
+			crate::fnc::enumeration::cast_in(ctx.exec_ctx, (name, value)).await
+		})
+	}
+}
 
 /// The `enum::*` scalar builtins.
 pub(super) const SCALARS: &[&dyn ScalarFunction] =

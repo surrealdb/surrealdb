@@ -50,6 +50,7 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 			| surrealdb_sqlplan::PlanError::ParameterOutOfRange(_)
 			| surrealdb_sqlplan::PlanError::DivisionByZero
 			| surrealdb_sqlplan::PlanError::NumericValueOutOfRange
+			| surrealdb_sqlplan::PlanError::ValueOutOfRange(_)
 			| surrealdb_sqlplan::PlanError::InvalidTextRepresentation(_)
 			| surrealdb_sqlplan::PlanError::NoActiveTransaction
 			| surrealdb_sqlplan::PlanError::InFailedTransaction
@@ -65,8 +66,10 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 			| surrealdb_sqlplan::PlanError::DuplicateDomainConstraint {
 				..
 			}
+			| surrealdb_sqlplan::PlanError::DuplicateEnumLabel(_)
 			| surrealdb_sqlplan::PlanError::DuplicateColumn(_)
 			| surrealdb_sqlplan::PlanError::InvalidParameterValue(_)
+			| surrealdb_sqlplan::PlanError::DatatypeMismatch(_)
 			| surrealdb_sqlplan::PlanError::DataException(_)
 			| surrealdb_sqlplan::PlanError::ProgramLimitExceeded(_)
 			| surrealdb_sqlplan::PlanError::UndefinedOperatorClass {

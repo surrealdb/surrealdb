@@ -15,6 +15,7 @@ pub mod geometry;
 pub mod lsn;
 pub mod money;
 pub mod range;
+pub mod value;
 
 use std::ops::Bound;
 use std::str::FromStr;

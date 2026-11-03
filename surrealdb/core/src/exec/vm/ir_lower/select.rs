@@ -245,6 +245,7 @@ pub(super) fn admits_int(ty: &TypeKnowledge) -> bool {
 fn kind_admits_int(kind: &Kind) -> bool {
 	match kind {
 		Kind::Any
+		| Kind::Named(_)
 		| Kind::Int
 		| Kind::Number
 		| Kind::I8

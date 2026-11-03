@@ -30,7 +30,7 @@ value = "NONE"
 value = '''{ accesses: {  }, buckets: {  }, databases: { "": 'DEFINE DATABASE `` COMPATIBILITY 3' }, users: {  } }'''
 
 [[test.results]]
-value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 3, configs: {  }, enums: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { "": 'DEFINE TABLE `` TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' }, users: {  } }'''
+value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 3, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { "": 'DEFINE TABLE `` TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' }, types: {  }, users: {  } }'''
 
 [[test.results]]
 value = '''{ events: {  }, fields: { "``": 'DEFINE FIELD `` ON `` TYPE object PERMISSIONS FULL', "``.``": 'DEFINE FIELD ``.`` ON `` TYPE number PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }'''

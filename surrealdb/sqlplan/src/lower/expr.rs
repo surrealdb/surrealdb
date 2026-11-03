@@ -7,6 +7,7 @@ use surrealdb_expr::expr::logical::{
 use surrealdb_expr::expr::{BinaryOperator, Function, Kind, Param, PrefixOperator};
 use surrealdb_strand::Strand;
 
+use crate::SqlType;
 use crate::array_literal::{is_array_space, parse_text_array_literal};
 use crate::dialect::{DialectPolicy, SqlDialect};
 use crate::error::PlanError;
@@ -22,6 +23,10 @@ use crate::lower::id_key::{
 };
 use crate::lower::link::{
 	LinkOperand, link_column, link_comparison_operand, link_operand, lower_stored, same_table_pair,
+};
+use crate::lower::network_rank::{
+	canonical_literal as canonical_network_literal, canonical_param as canonical_network_param,
+	common_network, is_network, key as network_key,
 };
 use crate::lower::plan::lower_bound_subquery;
 use crate::lower::quote_ident::{lower_quote_ident, quote_ident_str};
@@ -40,7 +45,7 @@ pub(crate) fn cast_kind(target_type: &str, dialect: SqlDialect) -> Kind {
 			name = inner;
 			levels += 1;
 		}
-		let mut kind = Kind::Enum(surrealdb_expr::expr::EnumRef::Named(name.to_owned()));
+		let mut kind = Kind::Named(name.to_owned());
 		for _ in 0..levels {
 			kind = Kind::Array(Box::new(kind), None);
 		}
@@ -97,6 +102,131 @@ pub(crate) fn cast_kind(target_type: &str, dialect: SqlDialect) -> Kind {
 	}
 }
 
+/// The value of a numeric constant: a decimal when it fits one, and a bigdecimal otherwise. Both
+/// are normalised, as a SurrealQL decimal literal is, so `1.50` reads as `1.5`.
+pub(crate) enum NumericValue {
+	Decimal(surrealdb_types::Decimal),
+	BigDecimal(surrealdb_types::BigDecimal),
+}
+
+/// Read the text of a numeric constant (`1.50`, `1e3`, `123456789012345678901234567890.5`).
+pub(crate) fn numeric_value(text: &str) -> Result<NumericValue, PlanError> {
+	let big = text
+		.parse::<surrealdb_types::BigDecimal>()
+		.map_err(|_| PlanError::InvalidTextRepresentation(format!("numeric: \"{text}\"")))?;
+	Ok(match surrealdb_types::Decimal::try_from(&big) {
+		Ok(decimal) => NumericValue::Decimal(decimal),
+		Err(_) => NumericValue::BigDecimal(big),
+	})
+}
+
+/// The declared type of a cast to `numeric(p,s)` or `decimal(p,s)`, normalised to
+/// `numeric(p,s)`. A MySQL `DECIMAL` without a precision is `DECIMAL(10,0)`. `None` for a
+/// PostgreSQL `numeric` without a precision, which holds any number of digits, and for every
+/// other type.
+fn scaled_numeric(clean_type: &str, dialect: SqlDialect) -> Option<String> {
+	let is_numeric = |base: &str| matches!(base.trim(), "numeric" | "decimal" | "dec" | "fixed");
+	let Some((base, modifiers)) = clean_type.split_once('(') else {
+		return (dialect == SqlDialect::MySql && is_numeric(clean_type))
+			.then(|| "numeric(10,0)".to_owned());
+	};
+	if !is_numeric(base) {
+		return None;
+	}
+	let modifiers: String = modifiers.chars().filter(|c| !c.is_whitespace()).collect();
+	Some(format!("numeric({modifiers}"))
+}
+
+/// Whether a cast to text of `expr` is SurrealQL's cast to a string: for a string literal, an
+/// operand of a text type, and the key an `id` or link column reads.
+fn is_text_operand(expr: &BoundExpr, dialect: SqlDialect) -> bool {
+	if let BoundExpr::Literal(BoundLiteral::String(_)) = expr {
+		return true;
+	}
+	// The key of an `id` or link column is cast as SurrealQL casts a key.
+	if let BoundExpr::Column(col) = expr
+		&& (col.id_table.is_some() || col.link_table.is_some())
+	{
+		return true;
+	}
+	let ty = crate::lower::temporal::static_type(expr, dialect);
+	matches!(ty, SqlType::Text | SqlType::Varchar | SqlType::Bpchar | SqlType::Name | SqlType::Char)
+		&& declared_text(expr).is_none()
+}
+
+/// The PostgreSQL type a value of `expr` is declared as, as text: the `SQL TYPE` of a column or the
+/// network type the catalog gives it, the target of a cast to a type with a family of its own, or
+/// `bpchar` for a cast to a blank-padded character type.
+/// A column whose `SQL TYPE` names a domain is declared as the domain's base type, which the
+/// catalog types the column by. `None` when neither says.
+fn declared_text(expr: &BoundExpr) -> Option<String> {
+	if let BoundExpr::Column(col) = expr {
+		let declared = col
+			.declared_sql
+			.as_deref()
+			.filter(|declared| {
+				declared.dialect()
+					== surrealdb_expr::expr::statements::define::SqlTypeDialect::PostgreSql
+			})
+			.and_then(|declared| {
+				let names_a_domain = SqlType::from_name(declared.base()) == SqlType::Unknown
+					&& col.declared_type != SqlType::Unknown;
+				if names_a_domain {
+					col.declared_type.name()
+				} else {
+					Some(declared.canonical_text())
+				}
+			});
+		// A column the catalog types as a network has no `SQL TYPE` to name it by.
+		return declared.or_else(|| {
+			if col.declared_type == SqlType::Inet {
+				Some("inet".to_owned())
+			} else if col.declared_type == SqlType::Cidr {
+				Some("cidr".to_owned())
+			} else {
+				None
+			}
+		});
+	}
+	if let BoundExpr::Cast {
+		target_type,
+		..
+	} = expr
+		&& super::family_cast::is_family_target(target_type)
+	{
+		return Some(target_type.clone());
+	}
+	// A cast to `char(n)`, `character` or `bpchar` yields a blank-padded value, whose cast to text
+	// drops the padding whatever the width.
+	if let BoundExpr::Cast {
+		target_type,
+		..
+	} = expr
+		&& is_blank_padded(target_type)
+	{
+		return Some("bpchar".to_owned());
+	}
+	None
+}
+
+/// Whether a cast target names PostgreSQL's blank-padded character type: `char(n)`,
+/// `character(n)` or `bpchar`, with or without a width.
+pub(crate) fn is_blank_padded(target_type: &str) -> bool {
+	SqlType::from_name(target_type.split('(').next().unwrap_or_default().trim()) == SqlType::Bpchar
+}
+
+/// A call of the builtin `name`.
+fn call(name: &str, args: Vec<LogicalExpr>) -> LogicalExpr {
+	LogicalExpr::Call(Box::new(LogicalCall {
+		receiver: Function::Normal(name.to_owned()),
+		args,
+	}))
+}
+
+fn string_literal(text: &str) -> LogicalExpr {
+	LogicalExpr::Literal(LogicalLiteral::String(Strand::from(text)))
+}
+
 /// The operand of a MySQL cast to `TIME`, which is an interval: a datetime or timestamp is its time
 /// of day, and any other value is left for the cast to read. The operand is evaluated once.
 fn mysql_time_operand(value: LogicalExpr) -> LogicalExpr {
@@ -133,6 +263,10 @@ pub fn lower_bound_expr(
 			BoundLiteral::Integer(i) => Ok(LogicalExpr::Literal(LogicalLiteral::Integer(*i))),
 			BoundLiteral::Unsigned(u) => Ok(LogicalExpr::Literal(LogicalLiteral::U64(*u))),
 			BoundLiteral::Float(f) => Ok(LogicalExpr::Literal(LogicalLiteral::Float(*f))),
+			BoundLiteral::Numeric(text) => Ok(LogicalExpr::Literal(match numeric_value(text)? {
+				NumericValue::Decimal(decimal) => LogicalLiteral::Decimal(decimal),
+				NumericValue::BigDecimal(big) => LogicalLiteral::BigDecimal(Box::new(big)),
+			})),
 			BoundLiteral::String(s) => {
 				Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(s.as_str()))))
 			}
@@ -1116,14 +1250,26 @@ pub fn lower_bound_expr(
 				lower_bound_expr(super::temporal::operand_at(&promoted, 1, low), policy)?,
 				lower_bound_expr(super::temporal::operand_at(&promoted, 2, high), policy)?,
 			);
-			Ok(match scalar_enum(expr).or_else(|| scalar_enum(low)).or_else(|| scalar_enum(high)) {
-				Some(reference) => sql_between(
+			let reference =
+				scalar_enum(expr).or_else(|| scalar_enum(low)).or_else(|| scalar_enum(high));
+			let network = common_network([&**expr, &**low, &**high].into_iter());
+			Ok(match (reference, network) {
+				(Some(reference), _) => sql_between(
 					rank(reference, value),
 					rank(reference, low_bound),
 					rank(reference, high_bound),
 					*negated,
 				),
-				None => sql_between(value, low_bound, high_bound, *negated),
+				(None, Some(network)) => {
+					refuse_non_network_peers(network, [&**expr, &**low, &**high], ">=")?;
+					sql_between(
+						network_key(network_operand(network, expr, value)?),
+						network_key(network_operand(network, low, low_bound)?),
+						network_key(network_operand(network, high, high_bound)?),
+						*negated,
+					)
+				}
+				(None, None) => sql_between(value, low_bound, high_bound, *negated),
 			})
 		}
 		BoundExpr::InList {
@@ -1154,6 +1300,12 @@ pub fn lower_bound_expr(
 				.iter()
 				.map(|item| lower_bound_expr(item, policy))
 				.collect::<Result<Vec<_>, _>>()?;
+			// The subject and the items take one network type when any of them is a network, as
+			// PostgreSQL resolves an untyped subject from the items.
+			if let Some(network) = common_network(std::iter::once(&**expr).chain(list)) {
+				refuse_non_network_peers(network, std::iter::once(&**expr).chain(list), "=")?;
+				return lower_network_membership(network, expr, val, list, items, *negated);
+			}
 			Ok(sql_membership(val, LogicalExpr::Array(items), *negated))
 		}
 		BoundExpr::IsNull {
@@ -1239,9 +1391,31 @@ pub fn lower_bound_expr(
 					.and_then(|count| count.trim().parse::<usize>().ok());
 				return super::vector_expr::lower_cast(lowered, dimensions);
 			}
+			// A value read at run time is cast to a type with a family of its own as a write to a
+			// column of the type reads it: its text is parsed and the value canonicalised.
+			if policy.dialect == SqlDialect::Postgres
+				&& super::family_cast::is_family_target(&clean_type)
+			{
+				return Ok(call(
+					"sql::fit",
+					vec![lowered, string_literal(&clean_type), string_literal("postgresql")],
+				));
+			}
 			let kind = cast_kind(target_type, policy.dialect);
 			if matches!(kind, Kind::Any) {
 				return Ok(lowered);
+			}
+			// A cast to text writes the value as PostgreSQL writes it, by its declared type when
+			// the operand has one: a date as `2026-10-27`, a numeric with its scale, a range in
+			// brackets, an `inet` with its prefix.
+			if policy.dialect == SqlDialect::Postgres
+				&& matches!(kind, Kind::String)
+				&& !is_text_operand(expr, policy.dialect)
+			{
+				return Ok(call(
+					"sql::text",
+					vec![lowered, string_literal(&declared_text(expr).unwrap_or_default())],
+				));
 			}
 			if matches!(lowered, LogicalExpr::Literal(LogicalLiteral::Null | LogicalLiteral::None))
 			{
@@ -1272,6 +1446,32 @@ pub fn lower_bound_expr(
 			} else {
 				lowered
 			};
+			// A cast to `numeric(p,s)` rounds to the scale and refuses more integer digits than
+			// the precision leaves, as a write to a column of the type does.
+			if let Some(scaled) = scaled_numeric(&clean_type, policy.dialect) {
+				let cast = if matches!(lowered, LogicalExpr::Literal(_)) {
+					LogicalExpr::Prefix {
+						op: PrefixOperator::Cast(kind),
+						expr: Box::new(lowered),
+					}
+				} else {
+					LogicalExpr::Optional {
+						base: Box::new(lowered),
+						then: Box::new(LogicalExpr::Prefix {
+							op: PrefixOperator::Cast(kind),
+							expr: Box::new(LogicalExpr::Current),
+						}),
+					}
+				};
+				let dialect = match policy.dialect {
+					SqlDialect::Postgres => "postgresql",
+					SqlDialect::MySql => "mysql",
+				};
+				return Ok(call(
+					"sql::fit",
+					vec![cast, string_literal(&scaled), string_literal(dialect)],
+				));
+			}
 			if matches!(lowered, LogicalExpr::Literal(_)) {
 				return Ok(LogicalExpr::Prefix {
 					op: PrefixOperator::Cast(kind),
@@ -1719,7 +1919,183 @@ fn lower_operands(
 	{
 		return Ok((rank(reference, l), rank(reference, r)));
 	}
+	if is_network(left) || is_network(right) {
+		let ordering = matches!(
+			op,
+			BoundBinaryOp::LessThan
+				| BoundBinaryOp::LessThanEqual
+				| BoundBinaryOp::GreaterThan
+				| BoundBinaryOp::GreaterThanEqual
+		);
+		let equality = matches!(
+			op,
+			BoundBinaryOp::Equal
+				| BoundBinaryOp::NotEqual
+				| BoundBinaryOp::NullSafeEqual
+				| BoundBinaryOp::DistinctFrom
+		);
+		// Two network values compare by the network each holds, so an `inet` and a `cidr`
+		// spelling the same network are equal although their stored texts differ.
+		if (ordering || equality) && is_network(left) && is_network(right) {
+			return Ok((network_key(l), network_key(r)));
+		}
+		// A network has no comparison with an operand of another declared type, such as a column
+		// declared `text` or a number.
+		if ordering || equality {
+			let (network, other) = if is_network(left) {
+				(left, right)
+			} else {
+				(right, left)
+			};
+			if !is_network(other)
+				&& let Some(other_type) = declared_non_network_type(other)
+			{
+				let network_type =
+					crate::lower::network_rank::network_type_name(network).unwrap_or("inet");
+				return Err(PlanError::UndefinedOperator(format!(
+					"operator does not exist: {network_type} {} {other_type}",
+					comparison_symbol(op)
+				)));
+			}
+		}
+		// A literal or a parameter opposite a network is read as a value of that network's type,
+		// so text the type refuses, such as a `cidr` with host bits set, is refused. A stored
+		// network is its canonical text, so an equality compares that text.
+		if ordering || equality {
+			if let Some(text) = canonical_network_literal(left, right) {
+				r = text?;
+			} else if let Some(text) = canonical_network_literal(right, left) {
+				l = text?;
+			} else if let Some(text) = canonical_network_param(left, right, &r) {
+				r = text;
+			} else if let Some(text) = canonical_network_param(right, left, &l) {
+				l = text;
+			}
+		}
+		if ordering {
+			return Ok((network_key(l), network_key(r)));
+		}
+	}
 	Ok((l, r))
+}
+
+/// The name of the type `expr` is declared as when it is declared as something other than a
+/// network: a number, boolean or numeric literal, a cast to a type that is not a network, or a
+/// column with a PostgreSQL `SQL TYPE` naming a built-in type that is not a network. `None` for an
+/// expression of no declared type, such as a string literal, a parameter or a schemaless field.
+fn declared_non_network_type(expr: &BoundExpr) -> Option<String> {
+	let named = |ty: SqlType| {
+		(!matches!(ty, SqlType::Inet | SqlType::Cidr | SqlType::Unknown))
+			.then(|| ty.name())
+			.flatten()
+	};
+	if let BoundExpr::Literal(literal) = expr {
+		return match literal {
+			BoundLiteral::Integer(_) | BoundLiteral::Unsigned(_) => Some("integer".to_owned()),
+			BoundLiteral::Float(_) => Some("double precision".to_owned()),
+			BoundLiteral::Numeric(_) => Some("numeric".to_owned()),
+			BoundLiteral::Boolean(_) => Some("boolean".to_owned()),
+			BoundLiteral::String(_) | BoundLiteral::Null => None,
+		};
+	}
+	if let BoundExpr::Cast {
+		target_type,
+		..
+	} = expr
+	{
+		return named(SqlType::from_name(target_type));
+	}
+	if let BoundExpr::Column(col) = expr
+		&& let Some(declared) = col.declared_sql.as_deref()
+		&& declared.dialect()
+			== surrealdb_expr::expr::statements::define::SqlTypeDialect::PostgreSql
+	{
+		return named(SqlType::from_name(declared.base()));
+	}
+	None
+}
+
+/// Refuses a predicate over `network` one of whose `peers` is declared as a type that is not a
+/// network, as PostgreSQL finds no operator between them.
+fn refuse_non_network_peers<'e>(
+	network: &BoundExpr,
+	peers: impl IntoIterator<Item = &'e BoundExpr>,
+	symbol: &str,
+) -> Result<(), PlanError> {
+	let network_type = crate::lower::network_rank::network_type_name(network).unwrap_or("inet");
+	for peer in peers {
+		if !is_network(peer)
+			&& let Some(other_type) = declared_non_network_type(peer)
+		{
+			return Err(PlanError::UndefinedOperator(format!(
+				"operator does not exist: {network_type} {symbol} {other_type}"
+			)));
+		}
+	}
+	Ok(())
+}
+
+/// The SQL spelling of a comparison operator, for an error message.
+fn comparison_symbol(op: BoundBinaryOp) -> &'static str {
+	if op == BoundBinaryOp::Equal || op == BoundBinaryOp::NullSafeEqual {
+		"="
+	} else if op == BoundBinaryOp::NotEqual || op == BoundBinaryOp::DistinctFrom {
+		"<>"
+	} else if op == BoundBinaryOp::LessThan {
+		"<"
+	} else if op == BoundBinaryOp::LessThanEqual {
+		"<="
+	} else if op == BoundBinaryOp::GreaterThan {
+		">"
+	} else {
+		">="
+	}
+}
+
+/// `operand` read as a value of the type of `network`: a literal or a parameter as the canonical
+/// text of the network it spells, refused when the type refuses it, such as a `cidr` with host
+/// bits set; any other operand as `lowered`.
+fn network_operand(
+	network: &BoundExpr,
+	operand: &BoundExpr,
+	lowered: LogicalExpr,
+) -> Result<LogicalExpr, PlanError> {
+	if let Some(text) = canonical_network_literal(network, operand) {
+		return text;
+	}
+	Ok(canonical_network_param(network, operand, &lowered).unwrap_or(lowered))
+}
+
+/// `subject [NOT] IN (items)` where `network`, the subject or an item, is a network: each literal
+/// or parameter, the subject's included, is read as the canonical text of the network it spells.
+/// When the subject is a network and every item is a literal or parameter, the stored text is
+/// tested for membership; otherwise both sides are compared by their [network keys](network_key).
+fn lower_network_membership(
+	network: &BoundExpr,
+	subject: &BoundExpr,
+	value: LogicalExpr,
+	list: &[BoundExpr],
+	items: Vec<LogicalExpr>,
+	negated: bool,
+) -> Result<LogicalExpr, PlanError> {
+	let value = network_operand(network, subject, value)?;
+	// Only a column holds a network's canonical text; a compound subject may yield the raw text of
+	// an untyped alternative, so it is compared by key.
+	let all_canonical = matches!(subject, BoundExpr::Column(_))
+		&& is_network(subject)
+		&& list.iter().all(|item| {
+			matches!(item, BoundExpr::Literal(BoundLiteral::String(_)) | BoundExpr::Param { .. })
+		});
+	let items = list
+		.iter()
+		.zip(items)
+		.map(|(item, lowered)| network_operand(network, item, lowered))
+		.collect::<Result<Vec<_>, _>>()?;
+	if all_canonical {
+		return Ok(sql_membership(value, LogicalExpr::Array(items), negated));
+	}
+	let keys = items.into_iter().map(network_key).collect();
+	Ok(sql_membership(network_key(value), LogicalExpr::Array(keys), negated))
 }
 
 /// The truth value a string literal spells in PostgreSQL's boolean input (`'t'`, `'false'`, ...).
@@ -2153,20 +2529,74 @@ fn lower_json_op(
 	})
 }
 
-/// Whether `expr` is a range: a column declared as a range type, or a cast to one. A multirange
-/// is not a range.
-fn is_range(expr: &BoundExpr) -> bool {
+/// Whether `expr` is a range. A multirange is not a range.
+pub(crate) fn is_range(expr: &BoundExpr) -> bool {
+	range_type(expr).is_some()
+}
+
+/// The range type of `expr`, when it is known to be a range: a column declared as a range type, a
+/// cast to one, or a `COALESCE`, `NULLIF`, `GREATEST`, `LEAST` or `CASE` whose range results
+/// share one [range type](common_range_type).
+pub(crate) fn range_type(expr: &BoundExpr) -> Option<crate::SqlType> {
 	if let BoundExpr::Column(col) = expr {
-		return matches!(col.declared_type, crate::SqlType::Range(_));
+		return matches!(col.declared_type, crate::SqlType::Range(_)).then_some(col.declared_type);
 	}
 	if let BoundExpr::Cast {
 		target_type,
 		..
 	} = expr
 	{
-		return matches!(crate::SqlType::from_name(target_type), crate::SqlType::Range(_));
+		let ty = crate::SqlType::from_name(target_type);
+		return matches!(ty, crate::SqlType::Range(_)).then_some(ty);
 	}
-	false
+	if let BoundExpr::FunctionCall {
+		name,
+		args,
+		..
+	} = expr
+		&& matches!(name.as_str(), "coalesce" | "nullif" | "greatest" | "least")
+	{
+		return common_range_type(args.iter());
+	}
+	if let BoundExpr::Case {
+		branches,
+		else_expr,
+		..
+	} = expr
+	{
+		return common_range_type(
+			branches.iter().map(|(_, result)| result).chain(else_expr.as_deref()),
+		);
+	}
+	None
+}
+
+/// The range type every range among `results` has. `None` when none is a range, when two are
+/// ranges of different types, or when a result is of a type of its own that is not a range:
+/// PostgreSQL resolves those to no common type. A string literal, `NULL` or parameter is of no
+/// type of its own and takes the range type.
+fn common_range_type<'e>(results: impl Iterator<Item = &'e BoundExpr>) -> Option<crate::SqlType> {
+	let mut common = None;
+	for result in results {
+		if is_untyped(result) {
+			continue;
+		}
+		let ty = range_type(result)?;
+		if common.is_some_and(|common| common != ty) {
+			return None;
+		}
+		common = Some(ty);
+	}
+	common
+}
+
+/// Whether `expr` is of no type of its own, which PostgreSQL resolves from the operands beside it:
+/// a string literal, `NULL` or a parameter.
+pub(crate) fn is_untyped(expr: &BoundExpr) -> bool {
+	matches!(
+		expr,
+		BoundExpr::Literal(BoundLiteral::String(_) | BoundLiteral::Null) | BoundExpr::Param { .. }
+	)
 }
 
 /// `operand IS NULL`.
@@ -2324,7 +2754,9 @@ fn json_operand(op: BoundBinaryOp, operand: &BoundExpr) -> Result<JsonOperand, P
 			Ok(index) => Ok(JsonOperand::Element(i64::from(index))),
 			Err(_) => Err(undefined("bigint")),
 		},
-		BoundLiteral::Unsigned(_) | BoundLiteral::Float(_) => Err(undefined("numeric")),
+		BoundLiteral::Unsigned(_) | BoundLiteral::Float(_) | BoundLiteral::Numeric(_) => {
+			Err(undefined("numeric"))
+		}
 		BoundLiteral::Boolean(_) => Err(undefined("boolean")),
 		BoundLiteral::String(_) | BoundLiteral::Null => Ok(JsonOperand::Dynamic),
 	}
@@ -2777,11 +3209,19 @@ pub fn lower_bound_order(
 	// sort as stored.
 	let value = match id_column(&order.expr).or_else(|| link_column(&order.expr)) {
 		Some((col, _)) => lower_column_raw(col),
+		// The untyped alternatives of a network compound are read as its network type, so text
+		// the type refuses is refused whichever alternative a row takes.
+		None if is_network(&order.expr) => lower_bound_expr(
+			&crate::binder::pgsql::network_alternatives_as_network(order.expr.clone()),
+			policy,
+		)?,
 		None => lower_bound_expr(&order.expr, policy)?,
 	};
 	// An enum column orders by the position of its labels in the declaration.
 	let value = match scalar_enum(&order.expr) {
 		Some(reference) => rank(reference, value),
+		// A network column orders by address, as PostgreSQL orders `inet` and `cidr`.
+		None if is_network(&order.expr) => network_key(value),
 		None => value,
 	};
 	let direction = match order.direction {

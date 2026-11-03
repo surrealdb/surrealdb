@@ -26,3 +26,67 @@ pub fn parse(src: &str) -> (Ast, Vec<Diag>) {
 	parse_script(src, Limits::default(), &mut ast, &mut scratch);
 	(ast, scratch.diags)
 }
+
+/// The words a kind reads as a built-in type, compared without regard to case. None of them
+/// names a type declared by `DEFINE TYPE`: a kind reads each as the built-in type or refuses it,
+/// so a declared type is refused one of these names.
+pub const BUILTIN_KIND_NAMES: &[&str] = &[
+	"any",
+	"array",
+	"bigdecimal",
+	"bool",
+	"bytes",
+	"collection",
+	"date",
+	"datetime",
+	"decimal",
+	"duration",
+	"either",
+	"enum",
+	"f16",
+	"f32",
+	"f64",
+	"false",
+	"file",
+	"float",
+	"function",
+	"geometry",
+	"i16",
+	"i32",
+	"i64",
+	"i8",
+	"int",
+	"interval",
+	"line",
+	"literal",
+	"multiline",
+	"multipoint",
+	"multipolygon",
+	"none",
+	"null",
+	"number",
+	"object",
+	"option",
+	"point",
+	"polygon",
+	"range",
+	"record",
+	"regex",
+	"set",
+	"string",
+	"table",
+	"tb",
+	"time",
+	"timestamp",
+	"true",
+	"u16",
+	"u32",
+	"u64",
+	"u8",
+	"uuid",
+];
+
+/// Whether `name` is one of [`BUILTIN_KIND_NAMES`].
+pub fn is_builtin_kind_name(name: &str) -> bool {
+	BUILTIN_KIND_NAMES.iter().any(|builtin| builtin.eq_ignore_ascii_case(name))
+}

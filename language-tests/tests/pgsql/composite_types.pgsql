@@ -31,7 +31,7 @@ value = "[{ a: { street: 'Elm', zip: 7 } }]"
 value = "[{ s: 'Elm' }]"
 
 [[test.results]]
-error = "Invalid statement: cannot drop type address because other objects depend on it: column home of table person depends on type address"
+error = "Invalid statement: Cannot remove the type 'address': the field 'home' on the table 'person' has a type that names it"
 
 [[test.results]]
 value = "NONE"

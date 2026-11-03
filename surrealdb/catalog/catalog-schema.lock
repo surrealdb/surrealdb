@@ -680,6 +680,21 @@ type StoredTableDefinition struct since=4.0 reserved=[] revision_embedded
   40 inline_edges_cap option<int:u32> critical since=4.0 absent=none
   42 inline_refs_cap option<int:u32> critical since=4.0 absent=none
   44 graph_inline_gen int:u32 critical since=4.0 absent=required
+type StoredTypeAssert struct since=4.0 reserved=[]
+  2 name option<string> critical since=4.0 absent=none
+  4 check text:expr critical since=4.0 absent=required
+type StoredTypeBody enum since=4.0 reserved=[]
+  1 Kind item:text:kind since=4.0
+  2 Union item:list<StoredEnumLabel> since=4.0
+type StoredTypeDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 id int:u32 critical since=4.0 absent=required
+  4 name string critical since=4.0 absent=required
+  6 body StoredTypeBody critical since=4.0 absent=required
+  8 asserts list<StoredTypeAssert> critical since=4.0 absent=required
+  10 default option<text:expr> critical since=4.0 absent=none
+  12 sql_type option<string> critical since=4.0 absent=none
+  14 permissions StoredPermission critical since=4.0 absent=required
 type StoredUserTypeBody enum since=4.0 reserved=[]
   1 Domain item:StoredDomain since=4.0
   2 Composite item:StoredComposite since=4.0
@@ -723,6 +738,7 @@ type Tokenizer enum since=4.0 reserved=[]
   3 Class unit since=4.0
   4 Punct unit since=4.0
   5 Segment item:SegmentLanguage since=4.0
+type TypeId transparent:int:u32 since=4.0
 type UserDefinition struct since=4.0 reserved=[]
   1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
   2 name string critical since=4.0 absent=required

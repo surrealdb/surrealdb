@@ -19,10 +19,10 @@ value = "NONE"
 value = "[{ c: 'none', id: 1, qty: 5i32 }]"
 
 [[test.results]]
-error = "Found -1i32 for field `qty`, with record `item:2`, but field must conform to: (IF $value = NULL OR $value = NONE OR 0 = NULL OR 0 = NONE THEN NULL ELSE $value > 0 END) != false"
+error = "Couldn't coerce value for field `qty` of `item:2`: Expected `posint (constraint posint_check failed)` but found `-1i32`"
 
 [[test.results]]
-error = "An error occurred: domain code does not allow null values"
+error = "Couldn't coerce value for field `c` of `item:3`: Expected `code (string)` but found `NULL`"
 
 [[test.results]]
 value = "[{ c: 'x', id: 4, qty: NULL }]"
@@ -34,7 +34,7 @@ value = "[{ c: 'none', id: 1, qty: 5i32 }, { c: 'x', id: 4, qty: NULL }]"
 value = "NONE"
 
 [[test.results]]
-error = "Found 500i32 for field `qty`, with record `item:5`, but field must conform to: (IF $value = NULL OR $value = NONE OR 0 = NULL OR 0 = NONE THEN NULL ELSE $value > 0 END) != false AND (IF $value = NULL OR $value = NONE OR 100 = NULL OR 100 = NONE THEN NULL ELSE $value < 100 END) != false"
+error = "Couldn't coerce value for field `qty` of `item:5`: Expected `posint (constraint small failed)` but found `500i32`"
 
 [[test.results]]
 value = "[{ c: 'none', id: 6, qty: 50i32 }]"
@@ -61,19 +61,16 @@ value = "[{ c: 'x', id: 4, qty: NULL }]"
 value = "NONE"
 
 [[test.results]]
-error = "An error occurred: domain posint does not allow null values"
+error = "Couldn't coerce value for field `qty` of `item:9`: Expected `posint (i32)` but found `NULL`"
 
 [[test.results]]
 value = "[{ c: 'z', id: 10, qty: 3i32 }]"
 
 [[test.results]]
-error = "Invalid statement: cannot drop type posint because other objects depend on it: column qty of table item depends on type posint"
+error = "Invalid statement: Cannot remove the type 'posint': the field 'qty' on the table 'item' has a type that names it"
 
 [[test.results]]
-error = 'Invalid statement: type "posint" already exists'
-
-[[test.results]]
-value = "NONE"
+error = "The type 'posint' already exists"
 
 [[test.results]]
 value = "NONE"
@@ -85,7 +82,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = 'Invalid statement: type "code" does not exist'
+value = "NONE"
+
+[[test.results]]
+error = "The type 'code' does not exist"
 
 */
 

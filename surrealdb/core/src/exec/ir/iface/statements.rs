@@ -44,6 +44,7 @@ use crate::expr::statements::access::PurgeKind;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::table::TableMigrateClause;
 use crate::expr::statements::define::MigrateClause;
+use crate::expr::statements::remove::SqlTypeObject;
 pub(crate) use crate::expr::statements::show::ShowSince;
 use crate::expr::table_type::TableType;
 use crate::expr::{Algorithm, ApiMethod, Base, ChangeFeed, EventKind, Filter, Kind, Tokenizer};
@@ -582,20 +583,15 @@ pub(crate) enum DefineObject {
 		start: OperandSlot,
 		timeout: OperandSlot,
 	},
-	Enum {
+	/// A named type, whose whole definition but its id and comment is the op's template.
+	Type {
 		name: Strand,
-		/// The labels in declaration order.
-		labels: Box<[String]>,
 		comment: OperandSlot,
 		permissions: PermissionShape,
 	},
-	/// A domain or composite type, whose whole definition is the op's template.
-	UserType {
-		name: Strand,
-	},
 }
 
-/// One change `ALTER ENUM` makes to the labels of an enum.
+/// One change `ALTER TYPE` makes to the labels of a union type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum EnumEdit {
 	/// `ADD VALUE`: `value` is placed before or after `anchor` when one is named (`after`
@@ -778,13 +774,10 @@ pub(crate) enum RemoveObject {
 	Config {
 		kind: ConfigKind,
 	},
-	Enum {
+	Type {
 		name: Strand,
-	},
-	/// A domain when `domain`, a composite type otherwise.
-	UserType {
-		name: Strand,
-		domain: bool,
+		/// The kind of SQL object the stored type must be; `None` removes a type of any kind.
+		object: Option<SqlTypeObject>,
 	},
 }
 
@@ -880,7 +873,7 @@ pub(crate) enum AlterObject {
 		comment: AlterKind<String>,
 		permissions: Option<PermissionShape>,
 	},
-	Enum {
+	Type {
 		name: Strand,
 		edits: Box<[EnumEdit]>,
 	},

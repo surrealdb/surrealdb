@@ -423,6 +423,9 @@ impl<'a> Parser<'a> {
 		} else if let TokenKind::FloatLiteral(fl) = tok.kind {
 			self.bump();
 			Ok(Expr::Literal(Literal::Float(fl), tok.span))
+		} else if let TokenKind::DecimalLiteral(text) = tok.kind {
+			self.bump();
+			Ok(Expr::Literal(Literal::Decimal(text), tok.span))
 		} else if let TokenKind::StringLiteral(s) = tok.kind {
 			self.bump();
 			Ok(Expr::Literal(Literal::String(s), tok.span))

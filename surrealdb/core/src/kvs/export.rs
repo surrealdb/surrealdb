@@ -10,8 +10,8 @@ use surrealdb_types::ToSql;
 
 use super::Transaction;
 use crate::catalog::providers::{
-	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, EnumProvider,
-	NamespaceProvider, TableProvider, UserProvider,
+	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
+	TableProvider, TypeProvider, UserProvider,
 };
 use crate::catalog::{
 	DatabaseId, Error, NamespaceId, Record, TableDefinition, TableType, ViewDefinition,
@@ -254,6 +254,25 @@ async fn export_metadata(
 		.await?;
 	}
 
+	// Output TYPES
+	//
+	// Every other definition the export holds may name a type, in a kind, a cast or a
+	// permission, and is checked against the catalog when it is defined, so the types are
+	// defined first, each after the types it names; an export that holds none of them has no use
+	// for one.
+	if cfg.tables.is_any()
+		|| cfg.functions
+		|| cfg.accesses
+		|| cfg.params
+		|| cfg.apis
+		|| cfg.buckets
+		|| cfg.modules
+		|| cfg.configs
+	{
+		let types = tx.all_db_types(ns, db, None).await?;
+		export_section("TYPES", in_dependency_order(&types).into_iter(), chn).await?;
+	}
+
 	// Output ACCESSES
 	if cfg.accesses {
 		let accesses = tx.all_db_accesses(ns, db, None).await?;
@@ -269,15 +288,6 @@ async fn export_metadata(
 	if cfg.params {
 		let params = tx.all_db_params(ns, db, None).await?;
 		export_section("PARAMS", params.iter(), chn).await?;
-	}
-
-	// Output ENUMS
-	//
-	// Fields and functions name an enum in their types, so it is defined first; an export that
-	// holds neither has no use for one.
-	if cfg.tables.is_any() || cfg.functions {
-		let enums = tx.all_db_enums(ns, db, None).await?;
-		export_section("ENUMS", enums.iter(), chn).await?;
 	}
 
 	// Output FUNCTIONS
@@ -1531,6 +1541,48 @@ pub(crate) fn define_user_statement_from_definition(
 			.unwrap_or(Expr::Literal(Literal::None)),
 		scram: def.scram.clone(),
 	}
+}
+
+/// `types` ordered so that every type follows the types its body, checks, default and permissions
+/// name, and otherwise in the order given. A type that names one not among `types` is placed as if
+/// it named nothing.
+fn in_dependency_order(
+	types: &[crate::catalog::TypeDefinition],
+) -> Vec<&crate::catalog::TypeDefinition> {
+	fn visit<'a>(
+		index: usize,
+		types: &'a [crate::catalog::TypeDefinition],
+		state: &mut [u8],
+		out: &mut Vec<&'a crate::catalog::TypeDefinition>,
+	) {
+		// 0: unvisited, 1: on the path, 2: placed. A type on the path is a cycle, which the
+		// catalog refuses at definition, and is placed where it is reached.
+		if state[index] != 0 {
+			return;
+		}
+		state[index] = 1;
+		let mut names = types[index].referenced_types();
+		if let crate::catalog::Permission::Specific(expr) = &types[index].permissions {
+			crate::expr::visit::each_named_type_in_expr(expr, &mut |name| {
+				if !names.iter().any(|n| n == name) {
+					names.push(name.to_owned());
+				}
+			});
+		}
+		for name in names {
+			if let Some(next) = types.iter().position(|t| t.name.as_str() == name) {
+				visit(next, types, state, out);
+			}
+		}
+		state[index] = 2;
+		out.push(&types[index]);
+	}
+	let mut state = vec![0u8; types.len()];
+	let mut out = Vec::with_capacity(types.len());
+	for index in 0..types.len() {
+		visit(index, types, &mut state, &mut out);
+	}
+	out
 }
 
 #[cfg(test)]

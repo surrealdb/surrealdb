@@ -627,6 +627,18 @@ pub(super) const PGSQL: &[Case] = &[
 	),
 	Case::stmt(r#"__sql_subscript"#, r#"SELECT (string_to_array('a,b,c', ','))[2] AS v"#, r#"b"#),
 	Case::stmt(
+		r#"__sql_range_overlaps"#,
+		r#"SELECT '[1,5)'::int4range && '[4,8)'::int4range AS v"#,
+		r#"t"#,
+	),
+	Case::stmt(
+		r#"__sql_range_contains"#,
+		r#"SELECT '[1,10)'::int4range @> '[2,5)'::int4range AS v"#,
+		r#"t"#,
+	),
+	Case::stmt(r#"__sql_range_lower"#, r#"SELECT lower('[3,7)'::int4range) AS v"#, r#"3"#),
+	Case::stmt(r#"__sql_range_upper"#, r#"SELECT upper('[3,7)'::int4range) AS v"#, r#"7"#),
+	Case::stmt(
 		r#"generate_subscripts"#,
 		r#"SELECT generate_subscripts(string_to_array('a,b', ','), 1) AS v"#,
 		r#"1|2"#,

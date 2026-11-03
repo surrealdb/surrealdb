@@ -38,7 +38,7 @@ use surrealdb_types::ToSql;
 
 use crate::expr::data::Assignment;
 use crate::expr::field::Selector;
-use crate::expr::kind::{EnumRef, GeometryKind, KindLiteral};
+use crate::expr::kind::{GeometryKind, KindLiteral};
 use crate::expr::literal::ObjectEntry;
 use crate::expr::lookup::{LookupKind, LookupSubject};
 use crate::expr::operator::{
@@ -853,7 +853,7 @@ impl<'a> Lower<'a> {
 					.collect(),
 			),
 			k::FILE => Kind::File(names(n.a)?),
-			k::ENUM if n.b == 1 => {
+			k::ENUM => {
 				let mut labels = Vec::new();
 				for &l in self.list(n.a) {
 					let mut s = String::new();
@@ -862,12 +862,9 @@ impl<'a> Lower<'a> {
 					}
 					labels.push(s);
 				}
-				Kind::Enum(EnumRef::Inline(labels))
+				Kind::Enum(labels)
 			}
-			k::ENUM => {
-				let mut names = names(n.a)?;
-				Kind::Enum(EnumRef::Named(names.pop().unwrap_or_default()))
-			}
+			k::NAMED => Kind::Named(self.name(n.a)?),
 			k::ARRAY | k::SET => {
 				let inner = if n.a == NONE {
 					Kind::Any

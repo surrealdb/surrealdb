@@ -1083,7 +1083,8 @@ fn stand_in_literal_for_kind(kind: &crate::expr::Kind) -> Option<LogicalLiteral>
 		| Kind::U64
 		| Kind::Int
 		| Kind::Number
-		| Kind::Any => Some(LogicalLiteral::Integer(0)),
+		| Kind::Any
+		| Kind::Named(_) => Some(LogicalLiteral::Integer(0)),
 		Kind::F16 | Kind::F32 | Kind::Float => Some(LogicalLiteral::Float(0.0)),
 		Kind::Decimal => Some(LogicalLiteral::Decimal(rust_decimal::Decimal::ZERO)),
 		Kind::BigDecimal => {

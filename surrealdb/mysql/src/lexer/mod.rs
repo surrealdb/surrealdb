@@ -39,6 +39,22 @@ pub enum LexError {
 	},
 }
 
+/// The most digits an exact-value number holds, as a DECIMAL's precision.
+const MAX_EXACT_DIGITS: usize = 65;
+
+/// The exact-value literal `text` (digits with at most one point), or an invalid number when it
+/// has more significant digits than a DECIMAL holds: those of the integer part past its leading
+/// zeros, and every digit of the fraction.
+fn exact_literal(text: String, offset: usize) -> Result<TokenKind, LexError> {
+	let (integer, fraction) = text.split_once('.').unwrap_or((&text, ""));
+	if integer.trim_start_matches('0').len() + fraction.len() > MAX_EXACT_DIGITS {
+		return Err(LexError::InvalidNumber {
+			offset,
+		});
+	}
+	Ok(TokenKind::DecimalLiteral(text))
+}
+
 /// Tokenize an entire MySQL SQL source string into a vector of tokens.
 pub fn tokenize(src: &str) -> Result<Vec<Token>, LexError> {
 	tokenize_with_settings(src, ParserSettings::default())
@@ -733,7 +749,9 @@ impl<'a> Lexer<'a> {
 		}
 
 		let end = self.offset();
-		if is_float {
+		if is_float && !num_str.contains(['e', 'E']) {
+			Ok(Token::new(exact_literal(num_str, start)?, Span::new(start, end)))
+		} else if is_float {
 			let val = num_str.parse::<f64>().map_err(|_| LexError::InvalidNumber {
 				offset: start,
 			})?;
@@ -743,13 +761,21 @@ impl<'a> Lexer<'a> {
 				Ok(val) => Ok(Token::new(TokenKind::IntLiteral(val), Span::new(start, end))),
 				Err(_) => {
 					// The magnitude of the minimum 64-bit integer stays a double, so the sign of
-					// the literal can be folded into it. Every other integer up to `u64::MAX`
-					// is exact.
+					// the literal can be folded into it. Every other integer is exact: up to
+					// `u64::MAX` an unsigned integer, and beyond it a decimal.
 					if let Ok(val) = num_str.parse::<u64>()
 						&& val != 1 << 63
 					{
 						return Ok(Token::new(
 							TokenKind::UnsignedIntLiteral(val),
+							Span::new(start, end),
+						));
+					}
+					if num_str.parse::<u64>() != Ok(1 << 63)
+						&& num_str.parse::<f64>().is_ok_and(f64::is_finite)
+					{
+						return Ok(Token::new(
+							exact_literal(num_str, start)?,
 							Span::new(start, end),
 						));
 					}
@@ -789,6 +815,9 @@ impl<'a> Lexer<'a> {
 			}
 		}
 		let end = self.offset();
+		if !num_str.contains(['e', 'E']) {
+			return Ok(Token::new(exact_literal(num_str, start)?, Span::new(start, end)));
+		}
 		let val = num_str.parse::<f64>().map_err(|_| LexError::InvalidNumber {
 			offset: start,
 		})?;

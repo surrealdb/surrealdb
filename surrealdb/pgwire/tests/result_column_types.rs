@@ -32,6 +32,8 @@ const OID_TIMESTAMP: i32 = 1114;
 const OID_TIMESTAMPTZ: i32 = 1184;
 const OID_INTERVAL: i32 = 1186;
 const OID_NUMERIC: i32 = 1700;
+const OID_JSON_ARRAY: i32 = 199;
+const OID_JSONB_ARRAY: i32 = 3807;
 
 async fn start() -> (std::net::SocketAddr, CancellationToken) {
 	start_on(Datastore::new("memory").await.expect("create the datastore")).await
@@ -371,18 +373,18 @@ async fn a_number_function_is_announced_as_the_type_its_results_have() {
 	let (addr, shutdown) = start().await;
 	let mut stream = connect(addr).await;
 	for (sql, oid, rows) in [
-		("SELECT floor(1.5)", OID_FLOAT8, ["1"]),
-		("SELECT ceil(1.2)", OID_FLOAT8, ["2"]),
-		("SELECT ceiling(-1.2)", OID_FLOAT8, ["-1"]),
+		("SELECT floor(1.5)", OID_NUMERIC, ["1"]),
+		("SELECT ceil(1.2)", OID_NUMERIC, ["2"]),
+		("SELECT ceiling(-1.2)", OID_NUMERIC, ["-1"]),
 		("SELECT floor(1)", OID_INT8, ["1"]),
 		("SELECT ceil(7)", OID_INT8, ["7"]),
-		("SELECT greatest(1, 2.5)", OID_FLOAT8, ["2.5"]),
-		("SELECT greatest(3, 2.5)", OID_FLOAT8, ["3"]),
-		("SELECT least(1, 2.5)", OID_FLOAT8, ["1"]),
-		("SELECT least(4, 2.5)", OID_FLOAT8, ["2.5"]),
+		("SELECT greatest(1, 2.5)", OID_NUMERIC, ["2.5"]),
+		("SELECT greatest(3, 2.5)", OID_NUMERIC, ["3"]),
+		("SELECT least(1, 2.5)", OID_NUMERIC, ["1"]),
+		("SELECT least(4, 2.5)", OID_NUMERIC, ["2.5"]),
 		("SELECT greatest(1, 2, 3)", OID_INT8, ["3"]),
-		("SELECT coalesce(1, 2.5)", OID_FLOAT8, ["1"]),
-		("SELECT coalesce(NULL, 2.5)", OID_FLOAT8, ["2.5"]),
+		("SELECT coalesce(1, 2.5)", OID_NUMERIC, ["1"]),
+		("SELECT coalesce(NULL, 2.5)", OID_NUMERIC, ["2.5"]),
 		("SELECT coalesce(NULL, NULL, 7)", OID_INT8, ["7"]),
 		("SELECT coalesce(NULL, 'a', 1)", OID_TEXT, ["a"]),
 		("SELECT coalesce(NULL, NULL)", OID_TEXT, ["NULL"]),
@@ -397,12 +399,12 @@ async fn a_case_is_announced_as_the_type_all_its_branches_have() {
 	let (addr, shutdown) = start().await;
 	let mut stream = connect(addr).await;
 	for (sql, oid, rows) in [
-		("SELECT CASE WHEN false THEN 1 ELSE 2.5 END", OID_FLOAT8, ["2.5"]),
-		("SELECT CASE WHEN true THEN 1 ELSE 2.5 END", OID_FLOAT8, ["1"]),
-		("SELECT CASE WHEN false THEN 1.5 ELSE 2 END", OID_FLOAT8, ["2"]),
+		("SELECT CASE WHEN false THEN 1 ELSE 2.5 END", OID_NUMERIC, ["2.5"]),
+		("SELECT CASE WHEN true THEN 1 ELSE 2.5 END", OID_NUMERIC, ["1"]),
+		("SELECT CASE WHEN false THEN 1.5 ELSE 2 END", OID_NUMERIC, ["2"]),
 		("SELECT CASE WHEN true THEN 1 ELSE 2 END", OID_INT4, ["1"]),
-		("SELECT CASE WHEN false THEN 1 WHEN true THEN 2.5 ELSE 3 END", OID_FLOAT8, ["2.5"]),
-		("SELECT CASE 2 WHEN 1 THEN 1 WHEN 2 THEN 2.5 END", OID_FLOAT8, ["2.5"]),
+		("SELECT CASE WHEN false THEN 1 WHEN true THEN 2.5 ELSE 3 END", OID_NUMERIC, ["2.5"]),
+		("SELECT CASE 2 WHEN 1 THEN 1 WHEN 2 THEN 2.5 END", OID_NUMERIC, ["2.5"]),
 		// Text holds a value of any kind, so a CASE of different kinds is read as text.
 		("SELECT CASE WHEN true THEN 1 ELSE 'a' END", OID_TEXT, ["1"]),
 		("SELECT CASE WHEN false THEN 1 ELSE 'a' END", OID_TEXT, ["a"]),
@@ -411,7 +413,7 @@ async fn a_case_is_announced_as_the_type_all_its_branches_have() {
 		// A NULL branch has no value of its own.
 		("SELECT CASE WHEN true THEN 1 ELSE NULL END", OID_INT8, ["1"]),
 		("SELECT CASE WHEN false THEN 1 ELSE NULL END", OID_INT8, ["NULL"]),
-		("SELECT CASE WHEN false THEN NULL ELSE 1.5 END", OID_FLOAT8, ["1.5"]),
+		("SELECT CASE WHEN false THEN NULL ELSE 1.5 END", OID_NUMERIC, ["1.5"]),
 		("SELECT CASE WHEN false THEN 1 END", OID_INT4, ["NULL"]),
 	] {
 		assert_answer(&mut stream, sql, oid, &rows).await;
@@ -772,5 +774,21 @@ async fn an_interval_is_announced_as_an_interval_with_its_months_days_and_negati
 		want.extend_from_slice(&months.to_be_bytes());
 		assert_eq!(cell, want, "{sql}");
 	}
+	shutdown.cancel();
+}
+
+/// A `json[]` or `jsonb[]` column, of one dimension or two, nullable or not, is announced as the
+/// array type it is declared with: its kind, an array of `any`, names no type, and its declared
+/// SQL type does.
+#[tokio::test]
+async fn a_json_array_column_is_announced_as_an_array_of_json() {
+	let (addr, shutdown) = start().await;
+	let mut stream = connect(addr).await;
+	let sql = "CREATE TABLE ja (id INT PRIMARY KEY, j JSON[], jb JSONB[] NOT NULL, grid JSONB[][])";
+	assert_eq!(simple(&mut stream, sql).await.error, None, "{sql}");
+	let sql = "SELECT j, jb, grid FROM ja";
+	let oids: Vec<i32> =
+		described_statement(&mut stream, sql).await.iter().map(|column| column.oid).collect();
+	assert_eq!(oids, [OID_JSON_ARRAY, OID_JSONB_ARRAY, OID_JSONB_ARRAY], "{sql}");
 	shutdown.cancel();
 }

@@ -196,7 +196,7 @@ TbNotFound	{ cause: NONE, code: -32000, details: { details: { name: 't' }, kind:
 ApNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The api 'sample' does not exist" }
 AzNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The analyzer 'sample' does not exist" }
 BuNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The bucket 'sample' does not exist" }
-EnNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The enum 'sample' does not exist" }
+TyNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The type 'sample' does not exist" }
 IxNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The index 'sample' does not exist" }
 UserRootNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The root user 'sample' does not exist" }
 UserNsNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The user 'sample' does not exist in the namespace 'sample'" }
@@ -210,7 +210,7 @@ AccessGrantDbNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "T
 ApAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The api 'sample' already exists" }
 AzAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The analyzer 'sample' already exists" }
 BuAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The bucket 'sample' already exists" }
-EnAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The enum 'sample' already exists" }
+TyAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The type 'sample' already exists" }
 DbAlreadyExists	{ cause: NONE, code: -32000, details: { details: { name: 'sample' }, kind: 'Database' }, kind: 'AlreadyExists', message: "The database 'sample' already exists" }
 EvAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The event 'sample' already exists" }
 FdAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The field 'sample' already exists" }

@@ -25,7 +25,6 @@ value = """{
 	buckets: {},
 	compatibility: 4,
 	configs: {},
-	enums: {},
 	extensions: {},
 	functions: {},
 	models: {},
@@ -38,6 +37,7 @@ value = """{
 			select_delete_full: 'DEFINE TABLE select_delete_full TYPE ANY SCHEMALESS PERMISSIONS FOR select, delete FULL, FOR create, update NONE',
 			select_full: 'DEFINE TABLE select_full TYPE ANY SCHEMALESS PERMISSIONS FOR select FULL, FOR create, update, delete NONE'
 	},
+	types: {},
 	users: {}
 }"""
 

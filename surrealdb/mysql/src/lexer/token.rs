@@ -34,15 +34,20 @@ pub enum TokenKind {
 
 	// Literals
 	IntLiteral(i64),
-	/// A decimal integer literal that does not fit 64 bits: the nearest double to its value, and
-	/// whether it is the magnitude of the minimum 64-bit integer (9223372036854775808).
+	/// The magnitude of the minimum 64-bit integer (9223372036854775808) as a decimal integer
+	/// literal: the nearest double to its value, so that its negation folds to that integer. Every
+	/// other decimal integer beyond 64 bits is a [`TokenKind::DecimalLiteral`].
 	WideIntLiteral {
 		value: f64,
 		int8_minimum_magnitude: bool,
 	},
 	/// A decimal integer literal above `i64::MAX` that fits 64 unsigned bits, held exactly.
 	UnsignedIntLiteral(u64),
+	/// An approximate-value literal: one with an exponent (`1.5e3`).
 	FloatLiteral(f64),
+	/// An exact-value literal as written: one with a decimal point and no exponent (`1.50`), or a
+	/// decimal integer beyond 64 bits. MySQL reads it as `DECIMAL`.
+	DecimalLiteral(String),
 	StringLiteral(String),
 	HexLiteral(Vec<u8>),
 	BitLiteral(Vec<u8>),
@@ -113,6 +118,7 @@ impl std::fmt::Display for TokenKind {
 			} => write!(f, "{value}"),
 			Self::UnsignedIntLiteral(n) => write!(f, "{n}"),
 			Self::FloatLiteral(fl) => write!(f, "{fl}"),
+			Self::DecimalLiteral(text) => f.write_str(text),
 			Self::StringLiteral(s) => write!(f, "'{s}'"),
 			Self::HexLiteral(_) => write!(f, "HEX_LITERAL"),
 			Self::BitLiteral(_) => write!(f, "BIT_LITERAL"),

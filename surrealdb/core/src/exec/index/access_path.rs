@@ -1763,6 +1763,7 @@ fn kind_at_admits_set(kind: &Kind, path: &[Part]) -> bool {
 			}
 		},
 		Kind::Any
+		| Kind::Named(_)
 		| Kind::None
 		| Kind::Null
 		| Kind::Bool
@@ -1841,6 +1842,7 @@ fn kind_admits_set(kind: &Kind) -> bool {
 		Kind::Set(..) => true,
 		Kind::Either(kinds) => kinds.iter().any(kind_admits_set),
 		Kind::Any
+		| Kind::Named(_)
 		| Kind::None
 		| Kind::Null
 		| Kind::Bool
@@ -2368,6 +2370,7 @@ fn links_along<'a>(
 			}
 		},
 		Kind::Any
+		| Kind::Named(_)
 		| Kind::None
 		| Kind::Null
 		| Kind::Bool

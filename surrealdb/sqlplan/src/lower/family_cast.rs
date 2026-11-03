@@ -15,6 +15,7 @@ use std::ops::Bound;
 use surrealdb_expr::expr::logical::{LogicalExpr, LogicalLiteral, LogicalPostfixOperator};
 use surrealdb_expr::expr::statements::define::SqlTypeDialect;
 use surrealdb_expr::expr::statements::define::declared_type::{DeclaredSqlType, TypeViolation};
+use surrealdb_expr::expr::statements::define::sql_types::text_shaped::network;
 use surrealdb_expr::expr::statements::define::sql_types::{self, text_form};
 use surrealdb_expr::expr::{BinaryOperator, PrefixOperator};
 use surrealdb_expr::val::{Number, Value};
@@ -95,6 +96,13 @@ pub(crate) fn lower_cast_to_text(
 	Some(read_value(&declared, text).and_then(|value| {
 		let text = match text_form::write(&declared, &value) {
 			Some(text) => text,
+			// The cast to text writes an `inet` with its prefix, whole or not.
+			None if matches!(declared.base(), "inet" | "cidr")
+				&& let Value::String(text) = &value
+				&& let Ok(parsed) = network::parse(text.as_str()) =>
+			{
+				parsed.cidr_text()
+			}
 			None => {
 				let Value::String(text) = value else {
 					return Err(PlanError::Custom(format!(
@@ -272,6 +280,7 @@ mod tests {
 		assert_eq!(as_text("[1,5]", "int4range"), "[1,6)");
 		assert_eq!(as_text("08-00-2B-01-02-03", "macaddr"), "08:00:2b:01:02:03");
 		assert_eq!(as_text("( 1 , 2 )", "point"), "(1,2)");
-		assert_eq!(as_text("192.168.1.5/32", "inet"), "192.168.1.5");
+		assert_eq!(as_text("192.168.1.5/32", "inet"), "192.168.1.5/32");
+		assert_eq!(as_text("192.168.1.5", "inet"), "192.168.1.5/32");
 	}
 }

@@ -37,11 +37,11 @@ value = "[t:2]"
 value = "[]"
 */
 
-DEFINE ENUM left VALUES 'z', 'a';
-DEFINE ENUM right VALUES 'b', 'y';
+DEFINE TYPE left AS 'z' | 'a';
+DEFINE TYPE right AS 'b' | 'y';
 DEFINE TABLE t SCHEMAFULL;
-DEFINE FIELD l ON t TYPE enum<left>;
-DEFINE FIELD r ON t TYPE enum<right>;
+DEFINE FIELD l ON t TYPE left;
+DEFINE FIELD r ON t TYPE right;
 CREATE t:1 SET l = 'a', r = 'y' RETURN NONE;
 CREATE t:2 SET l = 'z', r = 'b' RETURN NONE;
 SELECT VALUE id FROM t WHERE l < r ORDER BY id;

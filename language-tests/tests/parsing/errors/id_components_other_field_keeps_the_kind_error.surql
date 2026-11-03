@@ -4,11 +4,11 @@ reason = "Component names are accepted only in the TYPE of the field id. Any oth
 
 [test.results]
 parsing-error = """
-Unexpected token `an identifier`, expected a kind name
-  --> [15:37]
+Unexpected token `:`, expected a kind name
+  --> [15:41]
    |
 15 | DEFINE FIELD value ON reading TYPE [city: string];
-   |                                     ^^^^
+   |                                         ^
 """
 
 */

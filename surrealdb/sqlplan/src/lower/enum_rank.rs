@@ -6,11 +6,11 @@
 //! The operand opposite a column is ranked by the same enum, which refuses a label the enum does
 //! not hold.
 
+use surrealdb_expr::expr::Function;
 use surrealdb_expr::expr::logical::{LogicalCall, LogicalExpr, LogicalLiteral};
-use surrealdb_expr::expr::{EnumRef, Function};
 use surrealdb_strand::Strand;
 
-use crate::catalog::{EnumColumn, EnumShape};
+use crate::catalog::{EnumColumn, EnumRef, EnumShape};
 use crate::ir::BoundExpr;
 
 /// The enum a single-label column read by `expr` holds, where `expr` is a plain column reference.

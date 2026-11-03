@@ -3045,13 +3045,34 @@ impl Executor {
 		};
 		let result = match &kind {
 			Some(kind) => {
-				let kind = kind.clone();
-				res.coerce_to_kind(&kind)
-					.map_err(|e| ExecError::SetCoerce {
+				let set_coerce = |e| {
+					ControlFlow::Err(anyhow::Error::new(ExecError::SetCoerce {
 						name: name.clone(),
 						error: Box::new(e),
-					})
-					.map_err(anyhow::Error::new)?
+					}))
+				};
+				let res = res.coerce_to_kind(kind).map_err(set_coerce)?;
+				if kind.has_named_type() {
+					// The named types the kind holds are judged against the catalog of the
+					// session's database, as a block-scoped `LET` judges them.
+					let cancellation = match self.ctx.cancel_token() {
+						Some(parent) => parent.child_token(),
+						None => tokio_util::sync::CancellationToken::new(),
+					};
+					let exec_ctx = self
+						.statement_context(
+							&txn,
+							&cancellation,
+							false,
+							crate::exec::context::ContextLevel::Root,
+						)
+						.await?;
+					crate::exec::vm::schema_host::check_types_held(&exec_ctx, kind, res)
+						.await
+						.map_err(set_coerce)?
+				} else {
+					res
+				}
 			}
 			None => res,
 		};

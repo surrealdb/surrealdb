@@ -250,7 +250,8 @@ impl<'k> Flat<'k> {
 		let mut stack: Vec<&'k Kind> = vec![kind];
 		while let Some(kind) = stack.pop() {
 			match kind {
-				Kind::Any => {
+				// A named type's body is the catalog's, which a layout does not read.
+				Kind::Any | Kind::Named(_) => {
 					flat.any = true;
 					flat.none = true;
 					flat.null = true;

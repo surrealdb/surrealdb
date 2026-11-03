@@ -92,6 +92,8 @@ impl Ddl<'_, '_> {
 		let template = Self::alter_template(attrs)?;
 		self.guard()?;
 		let ac = self.name(access.name, NameClause::Access)?.operand;
+		// A named type is a type of a database, so only a database access method can name one.
+		let mut database = None;
 		let (route, mut fields, missing) = match access.base {
 			Base::Root => ("RootAccessMethodKey", Vec::new(), StatementError::AccessRootNotFound),
 			Base::Ns => {
@@ -104,6 +106,7 @@ impl Ddl<'_, '_> {
 			}
 			Base::Db => {
 				let (ns, db) = self.session_ids()?;
+				database = Some((ns, db));
 				(
 					"DbAccessMethodKey",
 					vec![("ns", Operand::Reg(ns)), ("db", Operand::Reg(db))],
@@ -128,6 +131,15 @@ impl Ddl<'_, '_> {
 		});
 		self.missing_at_base(attrs.if_exists, access.base, ("ac", ac), missing)?;
 		self.bind(present)?;
+		if let Some(database) = database {
+			let subject = self.shown_subject("The access method", access.name)?;
+			self.check_altered_types(
+				template,
+				database,
+				crate::exec::vm::schema_host::access_named_types,
+				|| subject,
+			)?;
+		}
 		self.replace_fields(method, template)?;
 		self.store(StoreInstr::AccessCheck {
 			check: AccessCheck::Altered {
@@ -221,6 +233,8 @@ impl Ddl<'_, '_> {
 				});
 			}
 		}
+		// The database a database access method is defined in, whose types its clauses may name.
+		let mut database = None;
 		let (route, mut fields, exists) = match access.base {
 			Base::Root => {
 				("RootAccessMethodKey", Vec::new(), StatementError::AccessRootAlreadyExists)
@@ -235,6 +249,7 @@ impl Ddl<'_, '_> {
 			}
 			Base::Db => {
 				let (ns, db) = self.ids_creating()?;
+				database = Some((ns, db));
 				(
 					"DbAccessMethodKey",
 					vec![("ns", Operand::Reg(ns)), ("db", Operand::Reg(db))],
@@ -263,6 +278,15 @@ impl Ddl<'_, '_> {
 			|_| Ok(()),
 		)?;
 		self.bind(missing)?;
+		if let Some(database) = database {
+			let written: crate::catalog::AccessDefinition =
+				super::definition_of(&attrs.template.value, "StoredAccessDefinition")?;
+			let names = crate::exec::vm::schema_host::access_named_types(&written);
+			if !names.is_empty() {
+				let subject = self.shown_subject("The access method", access.name)?;
+				self.check_types_defined(database, names, || subject);
+			}
+		}
 		if jwts.iter().any(|(jwt, _)| uses_es512(jwt)) {
 			self.store(StoreInstr::AccessCheck {
 				check: AccessCheck::RejectEs512 {

@@ -308,7 +308,7 @@ const SHIFTING_BASE: &str = "(CASE WHEN random() < 0.5 THEN data ELSE data END)"
 /// How many times the shifting base is evaluated by the lowered expression: the comparison that
 /// chooses the branch is lowered once per evaluation.
 fn shifting_reads(text: &str) -> usize {
-	text.matches("op: LessThan, right: Literal(Float(0.5))").count()
+	text.matches("op: LessThan, right: Literal(Decimal(0.5))").count()
 }
 
 #[test]

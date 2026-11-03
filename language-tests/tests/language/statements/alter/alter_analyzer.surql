@@ -6,19 +6,19 @@ reason = "Test ALTER ANALYZER with all variations"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: { my_analyzer: 'DEFINE ANALYZER my_analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, enums: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: { my_analyzer: 'DEFINE ANALYZER my_analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: {  }, users: {  } }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: { my_analyzer: "DEFINE ANALYZER my_analyzer TOKENIZERS CLASS FILTERS ASCII COMMENT 'updated analyzer'" }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, enums: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: { my_analyzer: "DEFINE ANALYZER my_analyzer TOKENIZERS CLASS FILTERS ASCII COMMENT 'updated analyzer'" }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: { my_analyzer: 'DEFINE ANALYZER my_analyzer' }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, enums: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: { my_analyzer: 'DEFINE ANALYZER my_analyzer' }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: {  }, users: {  } }"
 
 [[test.results]]
 value = "NONE"

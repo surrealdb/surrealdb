@@ -15,16 +15,25 @@
 //! `enum::min` or `enum::max` over the labels the group holds.
 //!
 //! Only a field of the table the pipeline reads is typed, by the kind its definition declares at
-//! its top level (an enum, or an enum that may also be `NONE` or `NULL`).
+//! its top level (an enum, or an enum that may also be `NONE` or `NULL`). A field of a type
+//! declared over a union of labels (an alias of it, or a domain that may also be `NONE` or
+//! `NULL`), at any depth of such types, orders by the declaration of that union.
 
 use surrealdb_strand::Strand;
 
-use super::visit_binding_mut;
+use super::{Descend, visit_binding_pruning_mut};
 use crate::expr::logical::{
 	LogicalCall, LogicalExpr, LogicalField, LogicalFields, LogicalLiteral, LogicalOp, LogicalOrder,
 	LogicalOrdering, OutputPathPart,
 };
-use crate::expr::{BinaryOperator, EnumRef, Function, Kind, PrefixOperator};
+use crate::expr::{BinaryOperator, Function, Kind, PrefixOperator};
+
+/// The enum a field holds: a union type of the catalog, by name, or the labels of an inline enum.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum EnumRef {
+	Named(String),
+	Inline(Vec<String>),
+}
 
 /// The one enum an ordering comparison follows: the enum of whichever side is an enum field, or
 /// `None` when both sides are fields of different enums.
@@ -36,17 +45,30 @@ fn one_enum(left: Option<EnumRef>, right: Option<EnumRef>) -> Option<EnumRef> {
 }
 
 /// The enum a field of `kind` holds: the kind itself, or a union of one enum with `NONE` and
-/// `NULL`.
-fn enum_of(kind: &Kind) -> Option<&EnumRef> {
+/// `NULL`. A named type holds an enum when `union_of` names the union of labels it holds, which
+/// is the type itself, or the union an alias or a domain of it is declared over.
+fn enum_of(kind: &Kind, union_of: &dyn Fn(&str) -> Option<String>) -> Option<EnumRef> {
+	let reference = |kind: &Kind| {
+		if let Kind::Enum(labels) = kind {
+			Some(EnumRef::Inline(labels.clone()))
+		} else if let Kind::Named(name) = kind {
+			union_of(name).map(EnumRef::Named)
+		} else {
+			None
+		}
+	};
 	match kind {
-		Kind::Enum(reference) => Some(reference),
+		Kind::Enum(_) | Kind::Named(_) => reference(kind),
 		Kind::Either(kinds) => {
 			let mut found = None;
 			for kind in kinds {
 				match kind {
 					Kind::None | Kind::Null => {}
-					Kind::Enum(reference) if found.is_none() => found = Some(reference),
+					Kind::Enum(_) | Kind::Named(_) if found.is_none() => {
+						found = Some(reference(kind)?);
+					}
 					Kind::Enum(_)
+					| Kind::Named(_)
 					| Kind::Any
 					| Kind::Bool
 					| Kind::Bytes
@@ -148,20 +170,31 @@ fn rank(reference: &EnumRef, value: LogicalExpr) -> LogicalExpr {
 	}))
 }
 
+/// The output fields of the stages beneath the one being rewritten: those that hold the labels of
+/// an enum, and every other name an output field shadows a table field with.
+#[derive(Default)]
+struct Outputs {
+	enums: Vec<(String, EnumRef)>,
+	shadowed: Vec<String>,
+}
+
 /// The enum the field `expr` reads holds, where `expr` is a read of an output field that
-/// `aliases` says holds one, or of a field `fields` types.
+/// `outputs` says holds one, or of a field `fields` types that no output field shadows.
 fn field_enum<'k>(
 	expr: &LogicalExpr,
-	fields: &'k dyn Fn(&str) -> Option<&'k Kind>,
-	aliases: &[(String, EnumRef)],
+	fields: &'k dyn Fn(&str) -> Option<EnumRef>,
+	outputs: &Outputs,
 ) -> Option<EnumRef> {
 	let LogicalExpr::Field(name) = expr else {
 		return None;
 	};
-	match aliases.iter().find(|(alias, _)| alias == name.as_str()) {
-		Some((_, reference)) => Some(reference.clone()),
-		None => enum_of(fields(name.as_str())?).cloned(),
+	if let Some((_, reference)) = outputs.enums.iter().find(|(alias, _)| alias == name.as_str()) {
+		return Some(reference.clone());
 	}
+	if outputs.shadowed.iter().any(|shadowed| shadowed == name.as_str()) {
+		return None;
+	}
+	fields(name.as_str())
 }
 
 /// The label the group's `value` holds that ranks first (`last` false) or last: `enum::min` or
@@ -260,44 +293,147 @@ fn rank_range(reference: &EnumRef, expr: &mut LogicalExpr) -> bool {
 	false
 }
 
-/// The output fields of the aggregation `fields` that hold the labels of an enum, by name: a
-/// group field of an enum, and the `MIN` or `MAX` of one.
+/// The output fields of the aggregation `fields`: those that hold the labels of an enum (a group
+/// field of an enum, and the `MIN` or `MAX` of one), and the names of all the others.
 fn enum_outputs<'k>(
 	fields: &LogicalFields,
-	typed: &'k dyn Fn(&str) -> Option<&'k Kind>,
-	aliases: &[(String, EnumRef)],
-) -> Vec<(String, EnumRef)> {
+	typed: &'k dyn Fn(&str) -> Option<EnumRef>,
+	below: &Outputs,
+) -> Outputs {
+	let mut found = Outputs::default();
 	let LogicalFields::Select(selected) = fields else {
-		return Vec::new();
+		return found;
 	};
-	let mut found = Vec::new();
 	for field in selected {
 		let LogicalField::Single {
 			expr,
-			alias: Some(path),
+			alias,
 			..
 		} = field
 		else {
 			continue;
 		};
-		let [OutputPathPart::Field(name)] = path.parts.as_slice() else {
-			continue;
+		let name = match (alias, expr) {
+			(Some(path), _) => match path.parts.as_slice() {
+				[OutputPathPart::Field(name)] => name.clone(),
+				_ => continue,
+			},
+			(None, LogicalExpr::Field(name)) => name.as_str().to_owned(),
+			(None, _) => continue,
 		};
 		let held = if let LogicalExpr::Call(call) = expr {
 			match (&call.receiver, call.args.as_slice()) {
 				(Function::Normal(function), [argument]) if extreme_of(function).is_some() => {
-					field_enum(argument, typed, aliases)
+					field_enum(argument, typed, below)
 				}
 				_ => None,
 			}
 		} else {
-			field_enum(expr, typed, aliases)
+			field_enum(expr, typed, below)
 		};
-		if let Some(reference) = held {
-			found.push((name.clone(), reference));
+		match held {
+			Some(reference) => found.enums.push((name, reference)),
+			None => found.shadowed.push(name),
 		}
 	}
 	found
+}
+
+/// Rewrites the comparison, range membership or (`aggregates`) group extreme `expr` is, over enum
+/// fields, and answers whether the walk enters what it holds. The walk passes over the bodies
+/// that read another value than the row (an element filter, a graph or reference hop, a
+/// recursion, a destructure, a guarded or broadcast rest of a path) and enters only their base.
+fn rewrite_expr(
+	expr: &mut LogicalExpr,
+	fields: &dyn Fn(&str) -> Option<EnumRef>,
+	outputs: &Outputs,
+	aggregates: bool,
+) {
+	visit_binding_pruning_mut(expr, &mut |expr| {
+		if let LogicalExpr::Filter {
+			base,
+			..
+		}
+		| LogicalExpr::Lookup {
+			base,
+			..
+		}
+		| LogicalExpr::Destructure {
+			base,
+			..
+		}
+		| LogicalExpr::Optional {
+			base,
+			..
+		}
+		| LogicalExpr::Broadcast {
+			base,
+			..
+		} = expr
+		{
+			rewrite_expr(base, fields, outputs, aggregates);
+			return Descend::Over;
+		}
+		if matches!(expr, LogicalExpr::Recurse(_)) {
+			return Descend::Over;
+		}
+		if aggregates
+			&& let LogicalExpr::Call(call) = expr
+			&& let Function::Normal(name) = &call.receiver
+			&& let Some(last) = extreme_of(name)
+			&& let [argument] = call.args.as_slice()
+			&& let Some(reference) = field_enum(argument, fields, outputs)
+		{
+			*expr = extreme(&reference, argument.clone(), last);
+			return Descend::Over;
+		}
+		if let LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} = expr && is_ordering(op)
+			&& let Some(reference) =
+				one_enum(field_enum(left, fields, outputs), field_enum(right, fields, outputs))
+		{
+			let (l, r) = (
+				std::mem::replace(left.as_mut(), LogicalExpr::Current),
+				std::mem::replace(right.as_mut(), LogicalExpr::Current),
+			);
+			**left = rank(&reference, l);
+			**right = rank(&reference, r);
+			return Descend::Into;
+		}
+		if let LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} = expr && let Some(left_member) = membership(op)
+		{
+			let (member, range) = if left_member {
+				(left, right)
+			} else {
+				(right, left)
+			};
+			if let Some(reference) = field_enum(member, fields, outputs)
+				&& rank_range(&reference, range)
+			{
+				let read = std::mem::replace(member.as_mut(), LogicalExpr::Current);
+				**member = rank(&reference, read);
+			}
+		}
+		Descend::Into
+	});
+}
+
+/// Rewrites the ordering comparisons of a mutation's `WHERE`, `cond`, over the enum fields of the
+/// table it writes, whose top-level field kinds `kinds` answers.
+pub(super) fn rewrite_condition<'k>(
+	cond: &mut LogicalExpr,
+	kinds: &'k dyn Fn(&str) -> Option<&'k Kind>,
+	union_of: &dyn Fn(&str) -> Option<String>,
+) {
+	let resolved = |name: &str| enum_of(kinds(name)?, union_of);
+	rewrite_expr(cond, &resolved, &Outputs::default(), false);
 }
 
 /// Rewrites the ordering comparisons and sort keys of `stages` over enum fields. `fields` answers
@@ -305,15 +441,18 @@ fn enum_outputs<'k>(
 /// aggregation that hold labels of an enum order by declaration in the stages above it.
 pub(super) fn rewrite_stages<'k>(
 	stages: &mut [LogicalOp],
-	fields: &'k dyn Fn(&str) -> Option<&'k Kind>,
+	kinds: &'k dyn Fn(&str) -> Option<&'k Kind>,
+	union_of: &dyn Fn(&str) -> Option<String>,
 ) {
-	let mut aliases: Vec<(String, EnumRef)> = Vec::new();
+	let resolved = |name: &str| enum_of(kinds(name)?, union_of);
+	let fields: &dyn Fn(&str) -> Option<EnumRef> = &resolved;
+	let mut outputs = Outputs::default();
 	// The stages are outermost first, and a stage reads what the ones beneath it produce.
 	for stage in stages.iter_mut().rev() {
-		let outputs = if let LogicalOp::Aggregate(aggregate) = &*stage {
-			enum_outputs(&aggregate.fields, fields, &aliases)
+		let produced = if let LogicalOp::Aggregate(aggregate) = &*stage {
+			Some(enum_outputs(&aggregate.fields, fields, &outputs))
 		} else {
-			Vec::new()
+			None
 		};
 		if let LogicalOp::Sort(sort) = stage
 			&& let LogicalOrdering::Order(keys) = &mut sort.ordering
@@ -323,7 +462,7 @@ pub(super) fn rewrite_stages<'k>(
 				..
 			} in keys
 			{
-				if let Some(reference) = field_enum(value, fields, &aliases) {
+				if let Some(reference) = field_enum(value, fields, &outputs) {
 					let read = std::mem::replace(value, LogicalExpr::Current);
 					*value = rank(&reference, read);
 				}
@@ -331,55 +470,12 @@ pub(super) fn rewrite_stages<'k>(
 		}
 		let aggregates = matches!(stage, LogicalOp::Aggregate(_));
 		let _ = stage.visit_scalars_mut(&mut |scalar| {
-			visit_binding_mut::<std::convert::Infallible>(scalar, &mut |expr| {
-				if aggregates
-					&& let LogicalExpr::Call(call) = expr
-					&& let Function::Normal(name) = &call.receiver
-					&& let Some(last) = extreme_of(name)
-					&& let [argument] = call.args.as_slice()
-					&& let Some(reference) = field_enum(argument, fields, &aliases)
-				{
-					*expr = extreme(&reference, argument.clone(), last);
-					return Ok(());
-				}
-				if let LogicalExpr::Binary {
-					left,
-					op,
-					right,
-				} = expr && is_ordering(op)
-					&& let Some(reference) = one_enum(
-						field_enum(left, fields, &aliases),
-						field_enum(right, fields, &aliases),
-					) {
-					let (l, r) = (
-						std::mem::replace(left.as_mut(), LogicalExpr::Current),
-						std::mem::replace(right.as_mut(), LogicalExpr::Current),
-					);
-					**left = rank(&reference, l);
-					**right = rank(&reference, r);
-					return Ok(());
-				}
-				if let LogicalExpr::Binary {
-					left,
-					op,
-					right,
-				} = expr && let Some(left_member) = membership(op)
-				{
-					let (member, range) = if left_member {
-						(left, right)
-					} else {
-						(right, left)
-					};
-					if let Some(reference) = field_enum(member, fields, &aliases)
-						&& rank_range(&reference, range)
-					{
-						let read = std::mem::replace(member.as_mut(), LogicalExpr::Current);
-						**member = rank(&reference, read);
-					}
-				}
-				Ok(())
-			})
+			rewrite_expr(scalar, fields, &outputs, aggregates);
+			Ok::<(), std::convert::Infallible>(())
 		});
-		aliases.extend(outputs);
+		if let Some(produced) = produced {
+			// An aggregation's output replaces the row: above it, a name reads its output field.
+			outputs = produced;
+		}
 	}
 }

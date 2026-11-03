@@ -117,9 +117,9 @@ pub enum Error {
 		name: String,
 	},
 
-	/// The requested enum does not exist
-	#[error("The enum '{name}' does not exist")]
-	EnNotFound {
+	/// The requested type does not exist
+	#[error("The type '{name}' does not exist")]
+	TyNotFound {
 		name: String,
 	},
 
@@ -213,9 +213,9 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested enum already exists
-	#[error("The enum '{value}' already exists")]
-	EnAlreadyExists {
+	/// The requested type already exists
+	#[error("The type '{value}' already exists")]
+	TyAlreadyExists {
 		value: String,
 	},
 
@@ -603,7 +603,7 @@ impl LeafError for Error {
 			| Error::BuNotFound {
 				..
 			}
-			| Error::EnNotFound {
+			| Error::TyNotFound {
 				..
 			}
 			| Error::IxNotFound {
@@ -645,7 +645,7 @@ impl LeafError for Error {
 			| Error::BuAlreadyExists {
 				..
 			}
-			| Error::EnAlreadyExists {
+			| Error::TyAlreadyExists {
 				..
 			}
 			| Error::EvAlreadyExists {

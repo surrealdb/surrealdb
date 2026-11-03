@@ -490,9 +490,22 @@ impl<'a, 's> Parser<'a, 's> {
 					s if s.eq_ignore_ascii_case("timestamp") => k::TIMESTAMP,
 					s if s.eq_ignore_ascii_case("interval") => k::INTERVAL,
 					s if s.eq_ignore_ascii_case("enum") => k::ENUM,
-					_ => return Err(self.unexpected("a kind name")),
+					s if crate::is_builtin_kind_name(s) => {
+						return Err(self.unexpected("a kind name"));
+					}
+					_ => return self.named_kind(t).map(Some),
 				}
 			}
+		} else if t.kind == T::EscIdent {
+			// A built-in kind's name is no type's name, escaped or not: a type of that name is
+			// never defined, and its stored text would read back as the built-in kind.
+			let mut name = String::new();
+			if crate::decode::unescape(crate::decode::strip_delims(self.text_of(t)), &mut name)
+				&& crate::is_builtin_kind_name(&name)
+			{
+				return Err(self.unexpected("a kind name"));
+			}
+			return self.named_kind(t).map(Some);
 		} else {
 			return Err(self.unexpected("a kind name"));
 		};
@@ -503,29 +516,34 @@ impl<'a, 's> Parser<'a, 's> {
 		Ok(Some(self.leaf(Tag::Kind, code, t)))
 	}
 
-	/// `enum<name>` or `enum<'a', 'b'>` at the `enum` token `t`.
+	/// `enum<'a', 'b'>` at the `enum` token `t`.
 	fn enum_kind(&mut self, t: Tok) -> R<NodeId> {
 		self.bump();
 		let open = self.tok;
 		self.expect(T::Lt, "<")?;
 		let mark = self.vals.len() as u32;
-		let inline = self.tok.kind == T::Str;
 		loop {
-			let item = if inline {
-				self.string_lit()?
-			} else {
-				let n = self.ident()?;
-				self.leaf(Tag::Name, 0, n)
-			};
+			let item = self.string_lit()?;
 			self.vals.push(item);
-			if inline && self.eat(T::Comma) {
-				continue;
+			if !self.eat(T::Comma) {
+				break;
 			}
-			break;
 		}
 		self.close(T::Gt, open.start)?;
 		let list = self.list_from(mark).0;
-		self.node(Tag::Kind, k::ENUM, list, inline as u32, t.start, 1)
+		self.node(Tag::Kind, k::ENUM, list, 0, t.start, 1)
+	}
+
+	/// The name of a type declared by `DEFINE TYPE`, at the identifier `t`.
+	fn named_kind(&mut self, t: Tok) -> R<NodeId> {
+		self.bump();
+		let op = if t.kind == T::EscIdent {
+			1
+		} else {
+			0
+		};
+		let name = self.leaf(Tag::Name, op, t);
+		self.node(Tag::Kind, k::NAMED, name, 0, t.start, 1)
 	}
 }
 

@@ -33,10 +33,9 @@ use rand::Rng;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_catalog::providers::{
-	CancellationProbe, DatabaseProvider, EnumProvider, NamespaceProvider, TableProvider,
-	UserTypeProvider,
+	CancellationProbe, DatabaseProvider, NamespaceProvider, TableProvider, TypeProvider,
 };
-use surrealdb_catalog::{DatabaseId, EnumId, IndexId, NamespaceId, SequenceDefinition, TableId};
+use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId, SequenceDefinition, TableId, TypeId};
 use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_kvs::key::{KVKey, KVKeyDecode, TypedRange};
 use surrealdb_strand::TableName;
@@ -431,7 +430,7 @@ enum SequenceDomain {
 	DatabasesIds(NamespaceId),
 	/// A sequence generating IDs for tables
 	TablesIds(NamespaceId, DatabaseId),
-	/// A sequence generating IDs for enums
+	/// A sequence generating IDs for types
 	EnumIds(NamespaceId, DatabaseId),
 	/// A sequence generating IDs for indexes
 	IndexIds(NamespaceId, DatabaseId, TableName),
@@ -1134,19 +1133,19 @@ impl Sequences {
 		Ok(TableId(id as u32))
 	}
 
-	/// A new unique enum ID for the given database
+	/// A new unique type ID for the given database
 	pub async fn next_enum_id(
 		&self,
 		ctx: Option<&dyn CancellationProbe>,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<EnumId> {
+	) -> Result<TypeId> {
 		if let Some(id) = self.take_released(&CatalogSequence::Enums(ns, db)) {
-			return Ok(EnumId(id));
+			return Ok(TypeId(id));
 		}
 		let domain = Arc::new(SequenceDomain::new_enum_ids(ns, db));
 		let id = self.next_val(ctx, domain, 0, 100, None).await?;
-		Ok(EnumId(id as u32))
+		Ok(TypeId(id as u32))
 	}
 
 	/// Generates the next index ID within a table.
@@ -1693,11 +1692,7 @@ impl Sequence {
 				}
 			}
 			SequenceDomain::EnumIds(ns, db) => {
-				for en in tx.all_db_enums(*ns, *db, None).await?.iter() {
-					seeded = seeded.max(en.id.0 as i64 + 1);
-				}
-				// Domains and composite types draw their ids from the same sequence.
-				for ty in tx.all_db_user_types(*ns, *db, None).await?.iter() {
+				for ty in tx.all_db_types(*ns, *db, None).await?.iter() {
 					seeded = seeded.max(ty.id.0 as i64 + 1);
 				}
 			}

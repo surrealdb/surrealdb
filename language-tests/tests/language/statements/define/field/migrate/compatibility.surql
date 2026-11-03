@@ -90,7 +90,7 @@ value = "{ events: {  }, fields: { a: 'DEFINE FIELD a ON p TYPE int PERMISSIONS 
 value = "[{ a: 1, e: 5, id: p:1 }]"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, enums: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { loose: 'DEFINE TABLE loose TYPE ANY SCHEMALESS PERMISSIONS NONE', p: 'DEFINE TABLE p TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { loose: 'DEFINE TABLE loose TYPE ANY SCHEMALESS PERMISSIONS NONE', p: 'DEFINE TABLE p TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' }, types: {  }, users: {  } }"
 */
 DEFINE TABLE p SCHEMAFULL;
 DEFINE FIELD a ON p TYPE string;

@@ -373,6 +373,12 @@ impl ViewDefinition {
 		Ok(())
 	}
 
+	/// Calls `f` with the name of every named type a type written in the view's clauses
+	/// ([`ViewDefinition::visit_clauses`]) names: a cast, or a type a nested statement declares.
+	pub fn each_named_type(&self, f: &mut dyn FnMut(&str)) {
+		let _ = self.visit_clauses(&mut crate::expr::visit::NamedTypes(f));
+	}
+
 	/// The tables the view's clauses ([`ViewDefinition::visit_clauses`]) name,
 	/// in the statements nested in them too: a table expression such as a
 	/// subquery's `FROM`, the table of a record id, and the subject of a graph

@@ -559,7 +559,12 @@ fn is_no_collection(
 /// Whether every value of `kind` is a single value a broadcast does not map over.
 fn is_scalar_kind(kind: &Kind) -> bool {
 	match kind {
-		Kind::Any | Kind::Array(..) | Kind::Set(..) | Kind::Either(_) | Kind::Literal(_) => false,
+		Kind::Any
+		| Kind::Named(_)
+		| Kind::Array(..)
+		| Kind::Set(..)
+		| Kind::Either(_)
+		| Kind::Literal(_) => false,
 		Kind::None
 		| Kind::Null
 		| Kind::Bool

@@ -1172,5 +1172,5 @@ fn a_number_literal_compared_with_an_id_in_a_predicate_is_compared_with_the_key_
 		}
 	}
 	let predicate = predicate(&pg_select("SELECT name FROM emp WHERE id = 3.0"));
-	assert!(predicate.contains("record::id(id) = 3f"), "{predicate}");
+	assert!(predicate.contains("record::id(id) = 3dec"), "{predicate}");
 }

@@ -7,8 +7,12 @@ use std::fmt;
 pub enum Literal {
 	/// Integer literal (e.g. `42`, `0x2A`).
 	Integer(i64),
-	/// Floating-point or numeric literal (e.g. `3.14159`, `1e-4`).
+	/// A floating-point value, for a constant the front end builds rather than reads.
 	Float(f64),
+	/// A numeric constant as written, without its digit separators: a constant with a decimal
+	/// point or an exponent (`3.14159`, `1e-4`), or an integer beyond the range of `bigint`.
+	/// PostgreSQL reads it as `numeric`, exactly.
+	Numeric(String),
 	/// String constant (e.g. `'hello'`, `E'escaped\n'`).
 	String(String),
 	/// Boolean literal (`TRUE` or `FALSE`).
@@ -29,6 +33,7 @@ impl fmt::Display for Literal {
 		match self {
 			Self::Integer(n) => write!(f, "{}", n),
 			Self::Float(n) => write!(f, "{}", n),
+			Self::Numeric(text) => f.write_str(text),
 			Self::String(s) => write!(f, "'{}'", s.replace('\'', "''")),
 			Self::Boolean(b) => f.write_str(if *b {
 				"TRUE"

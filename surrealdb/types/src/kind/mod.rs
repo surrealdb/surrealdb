@@ -103,49 +103,13 @@ pub enum Kind {
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<String>),
-	/// An enum type: a string constrained to an ordered, named set of labels.
-	Enum(EnumRef),
+	/// An inline enum type: a string constrained to an ordered set of labels, in declaration
+	/// order.
+	Enum(Vec<String>),
+	/// A type declared by `DEFINE TYPE`, by name.
+	Named(String),
 	/// Arbitrary-precision decimal type, with no bound on digits or scale.
 	BigDecimal,
-}
-
-/// What an enum kind names: a catalog enum, or its labels inline.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum EnumRef {
-	/// An enum declared by `DEFINE ENUM`, by name.
-	Named(String),
-	/// A column-scoped enum, its labels in declaration order.
-	Inline(Vec<String>),
-}
-
-impl EnumRef {
-	/// The labels of an inline enum, in declaration order.
-	pub fn inline_labels(&self) -> Option<&[String]> {
-		match self {
-			EnumRef::Named(_) => None,
-			EnumRef::Inline(labels) => Some(labels),
-		}
-	}
-}
-
-impl ToSql for EnumRef {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		f.push_str("enum<");
-		match self {
-			EnumRef::Named(name) => {
-				write_sql!(f, fmt, "{}", crate::utils::escape::EscapeSqonIdent(name));
-			}
-			EnumRef::Inline(labels) => {
-				for (i, label) in labels.iter().enumerate() {
-					if i > 0 {
-						f.push_str(", ");
-					}
-					write_sql!(f, fmt, "{}", QuoteStr(label));
-				}
-			}
-		}
-		f.push('>');
-	}
 }
 
 impl Kind {
@@ -306,7 +270,19 @@ impl ToSql for Kind {
 					write_sql!(f, fmt, "file<{}>", format_seperated(bucket, " | "))
 				}
 			}
-			Kind::Enum(reference) => reference.fmt_sql(f, fmt),
+			Kind::Enum(labels) => {
+				f.push_str("enum<");
+				for (i, label) in labels.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					write_sql!(f, fmt, "{}", QuoteStr(label));
+				}
+				f.push('>');
+			}
+			Kind::Named(name) => {
+				write_sql!(f, fmt, "{}", crate::utils::escape::EscapeSqonIdent(name));
+			}
 		}
 	}
 }

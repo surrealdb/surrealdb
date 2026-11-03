@@ -523,10 +523,16 @@ fn truncate_values(values: Vec<LogicalExpr>) -> LogicalExpr {
 				),
 			)
 		};
+		// A value kept to `d` places has scale `d`, as the truncated value of a numeric has.
+		let towards_point = kept(call("math::pow", vec![float(10.0), d.clone()]), true);
 		when(
-			binary(d.clone(), BinaryOperator::MoreThanEqual, int(0)),
-			kept(call("math::pow", vec![float(10.0), d.clone()]), true),
-			kept(call("math::pow", vec![float(10.0), negate(d.clone())]), false),
+			binary(d.clone(), BinaryOperator::MoreThan, int(0)),
+			call("math::fixed", vec![towards_point.clone(), d.clone()]),
+			when(
+				binary(d.clone(), BinaryOperator::Equal, int(0)),
+				towards_point,
+				kept(call("math::pow", vec![float(10.0), negate(d.clone())]), false),
+			),
 		)
 	})
 }
@@ -534,24 +540,46 @@ fn truncate_values(values: Vec<LogicalExpr>) -> LogicalExpr {
 /// `round(x, d)`, half away from zero, computed on decimals so that a halfway case is not decided
 /// by binary rounding.
 fn lower_round(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalExpr, PlanError> {
+	Ok(strict(lower_args(args, policy)?, |v| round_half_away(&v[0], &v[1])))
+}
+
+/// `round(x)`: an exact numeric (a decimal or an arbitrary-precision decimal) rounds half away
+/// from zero, as `round(x, 0)` does; a float or an integer keeps the engine's `math::round`.
+fn lower_round_whole(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalExpr, PlanError> {
 	Ok(strict(lower_args(args, policy)?, |v| {
-		let decimal = |value: LogicalExpr| call("type::decimal", vec![value]);
-		let scale = decimal(call("math::pow", vec![float(10.0), v[1].clone()]));
-		let scaled = binary(decimal(v[0].clone()), BinaryOperator::Multiply, scale.clone());
-		let rounded = call(
-			"math::floor",
-			vec![binary(
-				call("math::abs", vec![scaled.clone()]),
-				BinaryOperator::Add,
-				decimal(float(0.5)),
-			)],
-		);
-		binary(
-			binary(call("math::sign", vec![scaled]), BinaryOperator::Multiply, rounded),
-			BinaryOperator::Divide,
-			scale,
+		when(
+			binary(
+				call("type::is_float", vec![v[0].clone()]),
+				BinaryOperator::Or,
+				call("type::is_int", vec![v[0].clone()]),
+			),
+			call("math::round", vec![v[0].clone()]),
+			round_half_away(&v[0], &int(0)),
 		)
 	}))
+}
+
+/// `x` rounded half away from zero to `d` places, computed exactly. A float is converted to a
+/// decimal first; an exact numeric keeps its own representation, so an arbitrary-precision value
+/// beyond a decimal's range is rounded as it is.
+fn round_half_away(x: &LogicalExpr, d: &LogicalExpr) -> LogicalExpr {
+	let decimal = |value: LogicalExpr| call("type::decimal", vec![value]);
+	let scale = decimal(call("math::pow", vec![float(10.0), d.clone()]));
+	let exact = when(call("type::is_float", vec![x.clone()]), decimal(x.clone()), x.clone());
+	let scaled = binary(exact, BinaryOperator::Multiply, scale.clone());
+	let rounded = call(
+		"math::floor",
+		vec![binary(
+			call("math::abs", vec![scaled.clone()]),
+			BinaryOperator::Add,
+			decimal(float(0.5)),
+		)],
+	);
+	binary(
+		binary(call("math::sign", vec![scaled]), BinaryOperator::Multiply, rounded),
+		BinaryOperator::Divide,
+		scale,
+	)
 }
 
 /// `left(s, n)` and `right(s, n)`. A negative `n` is all but the last (first) `-n` characters in
@@ -1202,6 +1230,7 @@ fn lower_pg_typeof(args: &[BoundExpr], policy: &DialectPolicy) -> Result<Logical
 		("f32", "real"),
 		("float", "double precision"),
 		("decimal", "numeric"),
+		("bigdecimal", "numeric"),
 		("string", "text"),
 		("datetime", "timestamp with time zone"),
 		("date", "date"),
@@ -2272,6 +2301,7 @@ pub(super) fn lower_function(
 		("ln" | "log", _) => lower_log(name, args, policy)?,
 		("truncate", _) => lower_truncate(args, policy)?,
 		("round", _) if args.len() == 2 => lower_round(args, policy)?,
+		("round", _) if args.len() == 1 => lower_round_whole(args, policy)?,
 		("left" | "right", _) => lower_left_right(name, args, policy)?,
 		("split_part", _) => lower_split_part(args, policy)?,
 		("instr" | "locate" | "position" | "strpos", _) => lower_locate(name, args, policy)?,

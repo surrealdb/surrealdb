@@ -353,6 +353,9 @@ fn run_body(
 			| Step::KnnQuery {
 				..
 			}
+			| Step::FieldTypes {
+				..
+			}
 			| Step::Measure {
 				..
 			}

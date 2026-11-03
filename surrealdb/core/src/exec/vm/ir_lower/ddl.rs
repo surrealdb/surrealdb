@@ -70,7 +70,8 @@ use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::statements::{
-	AlterObject, AlterTemplate, DdlGuard, DefineObject, OperandSlot, RegionSlot, RemoveObject,
+	AlterObject, AlterTemplate, DdlGuard, DefineFunction, DefineObject, OperandSlot, RegionSlot,
+	RemoveObject,
 };
 use crate::exec::ir::logical::ddl as statement;
 use crate::exec::ir::logical::ops::{AlterAttrs, DefineAttrs, LoopKind, RebuildAttrs, RemoveAttrs};
@@ -80,6 +81,7 @@ use crate::expr::Base;
 use crate::expr::module::ModuleExecutable;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::define::DefineKind;
+use crate::expr::statements::remove::SqlTypeObject;
 use crate::iam::{Action, ConfigKind, ResourceKind};
 use crate::val::Value;
 
@@ -1973,9 +1975,7 @@ impl Ddl<'_, '_> {
 				comment,
 				..
 			} => self.define_param(attrs, name.as_str(), *value, *comment),
-			DefineObject::Function(function) => {
-				self.define_function(attrs, function.name.as_str(), function.comment)
-			}
+			DefineObject::Function(function) => self.define_function(attrs, function),
 			DefineObject::Model {
 				name,
 				version,
@@ -2035,14 +2035,11 @@ impl Ddl<'_, '_> {
 				start,
 				timeout,
 			} => self.define_sequence(attrs, *name, (*batch, *start, *timeout)),
-			DefineObject::Enum {
+			DefineObject::Type {
 				name,
 				comment,
 				..
-			} => self.define_enum(attrs, name.as_str(), *comment),
-			DefineObject::UserType {
-				name,
-			} => self.define_user_type(attrs, name.as_str()),
+			} => self.define_type(attrs, name.as_str(), *comment),
 		}
 	}
 
@@ -2232,6 +2229,10 @@ impl Ddl<'_, '_> {
 		let missing =
 			self.exists(&attrs.mode, existing, StatementError::PaAlreadyExists, name_reg)?;
 		self.bind(missing)?;
+		let written: crate::catalog::ParamDefinition =
+			definition_of(&attrs.template.value, "StoredParamDefinition")?;
+		let names = super::super::schema_host::permission_named_types(&written.permissions);
+		self.check_types_defined((ns, db), names, || format!("The parameter '${param}'"));
 		let comment = self.comment(comment)?;
 		let template = self.constant(attrs.template.value.clone())?;
 		let definition = self.load(template)?;
@@ -2254,13 +2255,42 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
+	/// Refuses, where it runs, the definition `subject` of the database `ns`/`db` when one of
+	/// `names`, the types its clauses name, is not a type the database defines. Emitted where the
+	/// definition is about to be stored, so an `IF NOT EXISTS` that meets a definition judges
+	/// nothing.
+	pub(super) fn check_types_defined(
+		&mut self,
+		(ns, db): (Reg, Reg),
+		names: Vec<String>,
+		subject: impl FnOnce() -> String,
+	) {
+		if !names.is_empty() {
+			self.store(StoreInstr::CheckTypesDefined {
+				ns,
+				db,
+				names: names.into(),
+				subject: subject(),
+			});
+		}
+	}
+
+	/// `kind` followed by the name in operand `slot` quoted, as a refusal shows a definition, or
+	/// `kind` alone for a name the statement evaluates.
+	pub(super) fn shown_subject(&self, kind: &str, slot: OperandSlot) -> Result<String, IrError> {
+		Ok(match self.literal(slot)? {
+			Some(Value::String(name)) => format!("{kind} '{}'", name.as_str()),
+			Some(_) | None => kind.to_owned(),
+		})
+	}
+
 	/// `DEFINE FUNCTION`: the definition is stamped with the session's authority.
 	fn define_function(
 		&mut self,
 		attrs: &DefineAttrs,
-		function: &str,
-		comment: OperandSlot,
+		defined: &DefineFunction,
 	) -> Result<(), IrError> {
+		let (function, comment) = (defined.name.as_str(), defined.comment);
 		self.guard()?;
 		let (ns, db) = self.ids_creating()?;
 		let name = self.constant(Value::String(function.into()))?;
@@ -2277,6 +2307,12 @@ impl Ddl<'_, '_> {
 		let shown = self.load(shown)?;
 		let missing = self.exists(&attrs.mode, existing, StatementError::FcAlreadyExists, shown)?;
 		self.bind(missing)?;
+		// The types the function names are judged only where it is defined: an `IF NOT EXISTS`
+		// that meets the function stores nothing.
+		let names = super::super::schema_host::function_named_types(&function_definition_of(
+			&attrs.template.value,
+		)?);
+		self.check_types_defined((ns, db), names, || format!("The function 'fn::{function}'"));
 		let comment = self.comment(comment)?;
 		let template = self.constant(attrs.template.value.clone())?;
 		let definition = self.load(template)?;
@@ -2309,6 +2345,7 @@ impl Ddl<'_, '_> {
 	) -> Result<(), IrError> {
 		self.guard()?;
 		let (ns, db) = self.ids_creating()?;
+		let shown = format!("The model 'ml::{model}<{version}>'");
 		let name = self.constant(Value::String(model.into()))?;
 		let version = self.constant(Value::String(version.into()))?;
 		let key = self.object(&[
@@ -2328,6 +2365,10 @@ impl Ddl<'_, '_> {
 		let missing =
 			self.exists(&attrs.mode, existing, StatementError::MlAlreadyExists, name_reg)?;
 		self.bind(missing)?;
+		let written: crate::catalog::MlModelDefinition =
+			definition_of(&attrs.template.value, "StoredMlModelDefinition")?;
+		let names = super::super::schema_host::permission_named_types(&written.permissions);
+		self.check_types_defined((ns, db), names, || shown);
 		let comment = self.comment(comment)?;
 		let template = self.constant(attrs.template.value.clone())?;
 		let definition = self.load(template)?;
@@ -2353,6 +2394,7 @@ impl Ddl<'_, '_> {
 		comment: OperandSlot,
 	) -> Result<(), IrError> {
 		self.refuse_no_write()?;
+		let name_slot = name;
 		let name = self.name(name, NameClause::Event)?;
 		let table = self.name(table, NameClause::TargetTable)?;
 		self.allow()?;
@@ -2371,6 +2413,15 @@ impl Ddl<'_, '_> {
 		let missing =
 			self.exists(&attrs.mode, existing, StatementError::EvAlreadyExists, name_reg)?;
 		self.bind(missing)?;
+		// The types the event names are judged only where it is defined: an `IF NOT EXISTS` that
+		// meets the event stores nothing.
+		let written: crate::catalog::EventDefinition =
+			definition_of(&attrs.template.value, "StoredEventDefinition")?;
+		let names = super::super::schema_host::event_named_types(&written);
+		if !names.is_empty() {
+			let subject = self.shown_subject("The event", name_slot)?;
+			self.check_types_defined((ns, db), names, || subject);
+		}
 		let tb_key = self.object(&[("ns", ns_op), ("db", db_op), ("tb", tb)])?;
 		let database = self.database_definition(ns)?;
 		let table_def = self.table_creating((ns, db, database), tb, tb_key)?;
@@ -2522,9 +2573,10 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
-	/// `DEFINE ENUM`: the enum's id is the existing definition's, or a fresh one, so a redefinition
-	/// keeps the identity the database knows it by.
-	fn define_enum(
+	/// `DEFINE TYPE`: the type's id is the existing definition's, or a fresh one, so a
+	/// redefinition keeps the identity the database knows it by. The definition is refused when
+	/// its body names a type the database does not define, or leads back to itself.
+	fn define_type(
 		&mut self,
 		attrs: &DefineAttrs,
 		name: &str,
@@ -2534,18 +2586,18 @@ impl Ddl<'_, '_> {
 		let (ns, db) = self.ids_creating()?;
 		let name = self.constant(Value::String(name.into()))?;
 		let key =
-			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("en", name)])?;
+			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("ty", name)])?;
 		let existing = self.reg()?;
 		self.store(StoreInstr::Get {
-			route: RouteId::named("EnumDefKey"),
+			route: RouteId::named("UserTypeKey"),
 			key,
-			ty: TypeId::named("StoredEnumDefinition"),
+			ty: TypeId::named("StoredTypeDefinition"),
 			dst: existing,
 		});
 		let name_reg = self.load(name)?;
 		let id = self.reg()?;
 		let missing =
-			self.exists(&attrs.mode, existing, StatementError::EnAlreadyExists, name_reg)?;
+			self.exists(&attrs.mode, existing, StatementError::TyAlreadyExists, name_reg)?;
 		self.get_field(existing, "id", id)?;
 		let built = self.label()?;
 		self.emit(Instr::Jump {
@@ -2566,89 +2618,16 @@ impl Ddl<'_, '_> {
 		let definition = self.load(template)?;
 		self.set_comment(definition, &comment)?;
 		self.set_field(definition, "id", Operand::Reg(id))?;
-		self.store(StoreInstr::Put {
-			route: RouteId::named("EnumDefKey"),
-			key,
-			ty: TypeId::named("StoredEnumDefinition"),
-			value: definition,
-		});
-		self.store(StoreInstr::ClearCache);
-		self.answer_none()
-	}
-
-	/// The definition of a domain or composite type, whose whole body is the op's template: the
-	/// type's id is the existing definition's, or a fresh one drawn from the sequence that numbers
-	/// the database's enums. A name an enum of the database holds is refused, as the two share
-	/// PostgreSQL's name space of types.
-	fn define_user_type(&mut self, attrs: &DefineAttrs, name: &str) -> Result<(), IrError> {
-		self.guard()?;
-		let (ns, db) = self.ids_creating()?;
-		let name = self.constant(Value::String(name.into()))?;
-		let key =
-			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("ty", name)])?;
-		let existing = self.reg()?;
-		self.store(StoreInstr::Get {
-			route: RouteId::named("UserTypeKey"),
-			key,
-			ty: TypeId::named("StoredUserTypeDefinition"),
-			dst: existing,
-		});
-		let name_reg = self.load(name)?;
-		let enum_key =
-			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("en", name)])?;
-		let enumeration = self.reg()?;
-		self.store(StoreInstr::Get {
-			route: RouteId::named("EnumDefKey"),
-			key: enum_key,
-			ty: TypeId::named("StoredEnumDefinition"),
-			dst: enumeration,
-		});
-		let no_enum = self.label()?;
-		self.emit(Instr::JumpIf {
-			cond: Operand::Reg(enumeration),
-			truthy: false,
-			target: no_enum,
-		});
-		self.store(StoreInstr::RaiseUserType {
-			name: name_reg,
-			exists: true,
-		});
-		self.bind(no_enum)?;
-		let id = self.reg()?;
-		let missing = self.exists_with(
-			&attrs.mode,
+		self.store(StoreInstr::CheckTypeDefinition {
+			ns,
+			db,
 			existing,
-			|l| {
-				l.store(StoreInstr::RaiseUserType {
-					name: name_reg,
-					exists: true,
-				});
-				Ok(())
-			},
-			|_| Ok(()),
-		)?;
-		self.get_field(existing, "id", id)?;
-		let built = self.label()?;
-		self.emit(Instr::Jump {
-			target: built,
+			definition,
 		});
-		self.bind(missing)?;
-		self.store(StoreInstr::NextId {
-			sequence: IdSequence::Enum,
-			ns: Some(ns),
-			db: Some(db),
-			dst: id,
-			draw: 0,
-			reserved: None,
-		});
-		self.bind(built)?;
-		let template = self.constant(attrs.template.value.clone())?;
-		let definition = self.load(template)?;
-		self.set_field(definition, "id", Operand::Reg(id))?;
 		self.store(StoreInstr::Put {
 			route: RouteId::named("UserTypeKey"),
 			key,
-			ty: TypeId::named("StoredUserTypeDefinition"),
+			ty: TypeId::named("StoredTypeDefinition"),
 			value: definition,
 		});
 		self.store(StoreInstr::ClearCache);
@@ -2753,6 +2732,7 @@ impl Ddl<'_, '_> {
 			});
 			self.bind(import)?;
 		}
+		let name_slot = name;
 		let name = self.name(name, NameClause::Bucket)?;
 		let (route, ns, db) = self.bucket_scope(base, true)?;
 		let bu = name.operand;
@@ -2791,6 +2771,17 @@ impl Ddl<'_, '_> {
 			reserved: None,
 		});
 		self.bind(built)?;
+		// A named type is a type of a database, so only a database bucket's permission can name
+		// one.
+		if let (Some(ns), Some(db)) = (ns, db) {
+			let written: crate::catalog::BucketDefinition =
+				definition_of(&attrs.template.value, "StoredBucketDefinition")?;
+			let names = super::super::schema_host::permission_named_types(&written.permissions);
+			if !names.is_empty() {
+				let subject = self.shown_subject("The bucket", name_slot)?;
+				self.check_types_defined((ns, db), names, || subject);
+			}
+		}
 		let backend = match backend {
 			Some(slot) => match self.literal(slot)? {
 				Some(Value::String(written)) => {
@@ -2889,6 +2880,10 @@ impl Ddl<'_, '_> {
 			},
 		)?;
 		self.bind(missing)?;
+		let written: crate::catalog::ModuleDefinition =
+			definition_of(&attrs.template.value, "StoredModuleDefinition")?;
+		let names = super::super::schema_host::permission_named_types(&written.permissions);
+		self.check_types_defined((ns, db), names, || format!("The module '{storage}'"));
 		let comment = self.comment(comment)?;
 		self.set_comment(definition, &comment)?;
 		self.store(StoreInstr::VerifyModule {
@@ -2950,13 +2945,10 @@ impl Ddl<'_, '_> {
 				name,
 				base,
 			} => self.remove_bucket(*name, *base, if_exists),
-			RemoveObject::Enum {
+			RemoveObject::Type {
 				name,
-			} => self.remove_enum(name.as_str(), if_exists),
-			RemoveObject::UserType {
-				name,
-				domain,
-			} => self.remove_user_type(name.as_str(), *domain, if_exists),
+				object,
+			} => self.remove_type(name.as_str(), *object, if_exists),
 			RemoveObject::Module {
 				name,
 			} => self.remove_module(&name.get_storage_name(), if_exists),
@@ -3156,41 +3148,12 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
-	/// `REMOVE ENUM`: refused while a field has a type that names the enum.
-	fn remove_enum(&mut self, name: &str, if_exists: bool) -> Result<(), IrError> {
-		self.guard()?;
-		let (ns, db) = self.session_ids()?;
-		let name = self.constant(Value::String(name.into()))?;
-		let key =
-			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("en", name)])?;
-		let definition = self.reg()?;
-		self.store(StoreInstr::Get {
-			route: RouteId::named("EnumDefKey"),
-			key,
-			ty: TypeId::named("StoredEnumDefinition"),
-			dst: definition,
-		});
-		let name_reg = self.load(name)?;
-		self.must_exist(if_exists, definition, StatementError::EnNotFound, name_reg)?;
-		self.store(StoreInstr::CheckEnumUnreferenced {
-			ns,
-			db,
-			name: name_reg,
-		});
-		self.store(StoreInstr::Delete {
-			route: RouteId::named("EnumDefKey"),
-			key,
-		});
-		self.store(StoreInstr::ClearCache);
-		self.answer_none()
-	}
-
-	/// The removal of a domain (`domain`) or a composite type: refused when the type is of the
-	/// other kind, and while a field of the database declares its SQL type with it.
-	fn remove_user_type(
+	/// `REMOVE TYPE`: refused when `object` is set and the stored type is not that kind of SQL
+	/// object, and while a field, a function or another type names the type.
+	fn remove_type(
 		&mut self,
 		name: &str,
-		domain: bool,
+		object: Option<SqlTypeObject>,
 		if_exists: bool,
 	) -> Result<(), IrError> {
 		self.guard()?;
@@ -3202,31 +3165,21 @@ impl Ddl<'_, '_> {
 		self.store(StoreInstr::Get {
 			route: RouteId::named("UserTypeKey"),
 			key,
-			ty: TypeId::named("StoredUserTypeDefinition"),
+			ty: TypeId::named("StoredTypeDefinition"),
 			dst: definition,
 		});
 		let name_reg = self.load(name)?;
-		let present = self.label()?;
-		self.emit(Instr::JumpIf {
-			cond: Operand::Reg(definition),
-			truthy: true,
-			target: present,
-		});
-		if if_exists {
-			self.answer_none()?;
-		} else {
-			self.store(StoreInstr::RaiseUserType {
-				name: name_reg,
-				exists: false,
+		self.must_exist(if_exists, definition, StatementError::TyNotFound, name_reg)?;
+		if let Some(object) = object {
+			self.store(StoreInstr::CheckTypeObject {
+				definition,
+				object,
 			});
 		}
-		self.bind(present)?;
-		self.store(StoreInstr::CheckUserTypeRemovable {
+		self.store(StoreInstr::CheckTypeUnreferenced {
 			ns,
 			db,
 			name: name_reg,
-			definition,
-			domain,
 		});
 		self.store(StoreInstr::Delete {
 			route: RouteId::named("UserTypeKey"),
@@ -3267,8 +3220,9 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
-	/// `ALTER ENUM`: the stored definition edited by the statement's changes and written back.
-	fn alter_enum(
+	/// `ALTER TYPE`: the stored definition's labels edited by the statement's changes and written
+	/// back.
+	fn alter_type(
 		&mut self,
 		attrs: &AlterAttrs,
 		name: &str,
@@ -3278,21 +3232,21 @@ impl Ddl<'_, '_> {
 		let (ns, db) = self.session_ids()?;
 		let name = self.constant(Value::String(name.into()))?;
 		let key =
-			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("en", name)])?;
+			self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("ty", name)])?;
 		let definition = self.stored_at(
-			("EnumDefKey", "StoredEnumDefinition"),
+			("UserTypeKey", "StoredTypeDefinition"),
 			key,
 			attrs.if_exists,
-			(StatementError::EnNotFound, name),
+			(StatementError::TyNotFound, name),
 		)?;
-		self.store(StoreInstr::AlterEnum {
+		self.store(StoreInstr::AlterType {
 			definition,
 			edits: edits.to_vec(),
 		});
 		self.store(StoreInstr::Put {
-			route: RouteId::named("EnumDefKey"),
+			route: RouteId::named("UserTypeKey"),
 			key,
-			ty: TypeId::named("StoredEnumDefinition"),
+			ty: TypeId::named("StoredTypeDefinition"),
 			value: definition,
 		});
 		self.store(StoreInstr::ClearCache);
@@ -3871,10 +3825,10 @@ impl Ddl<'_, '_> {
 				matches!(backend, AlterKind::Set(_)) || !matches!(readonly, AlterKind::None),
 				*revoke_signatures,
 			),
-			AlterObject::Enum {
+			AlterObject::Type {
 				name,
 				edits,
-			} => self.alter_enum(attrs, name.as_str(), edits),
+			} => self.alter_type(attrs, name.as_str(), edits),
 			AlterObject::Config {
 				inner,
 				..
@@ -4132,6 +4086,27 @@ impl Ddl<'_, '_> {
 		Ok(())
 	}
 
+	/// Refuses, where it runs, the alteration of `subject` in the database `ns`/`db` when a type
+	/// the clauses it sets name is not one the database defines, as `DEFINE` refuses the
+	/// definition. The template decodes to the definition the statement forms, whose clauses the
+	/// statement leaves unset name no type; `named` reads the types it names. Emitted once the
+	/// altered definition is known to exist, so an `IF EXISTS` that finds nothing judges nothing.
+	fn check_altered_types<D>(
+		&mut self,
+		template: &AlterTemplate,
+		database: (Reg, Reg),
+		named: impl FnOnce(&D) -> Vec<String>,
+		subject: impl FnOnce() -> String,
+	) -> Result<(), IrError>
+	where
+		D: crate::catalog::FromStored,
+		D::Stored: crate::key::KVValue<KeyContext = ()>,
+	{
+		let altered: D = definition_of(&template.value, template.ty)?;
+		self.check_types_defined(database, named(&altered), subject);
+		Ok(())
+	}
+
 	/// `ALTER PARAM`: a value is evaluated once the parameter is read.
 	fn alter_param(
 		&mut self,
@@ -4150,6 +4125,14 @@ impl Ddl<'_, '_> {
 			key,
 			attrs.if_exists,
 			(StatementError::PaNotFound, name),
+		)?;
+		self.check_altered_types(
+			template,
+			(ns, db),
+			|altered: &crate::catalog::ParamDefinition| {
+				super::super::schema_host::permission_named_types(&altered.permissions)
+			},
+			|| format!("The parameter '${param}'"),
 		)?;
 		if let Some(slot) = value {
 			let value = self.evaluated(slot)?;
@@ -4191,6 +4174,13 @@ impl Ddl<'_, '_> {
 			key,
 			attrs.if_exists,
 			(StatementError::EvNotFound, ev),
+		)?;
+		let subject = self.shown_subject("The event", name)?;
+		self.check_altered_types(
+			template,
+			(ns, db),
+			super::super::schema_host::event_named_types,
+			|| subject,
 		)?;
 		self.replace_fields(event, template)?;
 		self.session_auth_limit(event)?;
@@ -4234,6 +4224,12 @@ impl Ddl<'_, '_> {
 			attrs.if_exists,
 			(StatementError::FcNotFound, shown),
 		)?;
+		self.check_altered_types(
+			template,
+			(ns, db),
+			super::super::schema_host::function_named_types,
+			|| format!("The function 'fn::{function}'"),
+		)?;
 		self.replace_fields(definition, template)?;
 		self.session_auth_limit(definition)?;
 		self.store(StoreInstr::Put {
@@ -4266,6 +4262,19 @@ impl Ddl<'_, '_> {
 			attrs.if_exists,
 			(StatementError::BuNotFound, bu),
 		)?;
+		// A named type is a type of a database, so only a database bucket's permission can name
+		// one.
+		if let (Some(ns), Some(db)) = (ns, db) {
+			let subject = self.shown_subject("The bucket", name)?;
+			self.check_altered_types(
+				template,
+				(ns, db),
+				|altered: &crate::catalog::BucketDefinition| {
+					super::super::schema_host::permission_named_types(&altered.permissions)
+				},
+				|| subject,
+			)?;
+		}
 		self.replace_fields(definition, template)?;
 		// A new backend, or a new mode a provider may open its handle in, is
 		// connected before it is stored.
@@ -4336,6 +4345,14 @@ impl Ddl<'_, '_> {
 			key,
 			attrs.if_exists,
 			(StatementError::MdNotFound, md),
+		)?;
+		self.check_altered_types(
+			template,
+			(ns, db),
+			|altered: &crate::catalog::ModuleDefinition| {
+				super::super::schema_host::permission_named_types(&altered.permissions)
+			},
+			|| format!("The module '{storage}'"),
 		)?;
 		self.replace_fields(module, template)?;
 		self.store(StoreInstr::Put {
@@ -4441,6 +4458,29 @@ fn changefeed_value(cf: &crate::expr::ChangeFeed) -> Value {
 	object.insert("expiry".to_owned(), Value::Duration(crate::val::Duration(cf.expiry.0)));
 	object.insert("store_diff".to_owned(), Value::Bool(cf.store_diff));
 	Value::Object(object)
+}
+
+/// The function definition the definition template `template` holds, as the catalog compiles it.
+fn function_definition_of(template: &Value) -> Result<crate::catalog::FunctionDefinition, IrError> {
+	definition_of(template, "StoredFunctionDefinition")
+}
+
+/// The runtime definition the template `template`, an encoding of the stored type `ty`, decodes
+/// to: the definition as the statement writes it, with its holes at their defaults.
+pub(super) fn definition_of<D>(template: &Value, ty: &'static str) -> Result<D, IrError>
+where
+	D: crate::catalog::FromStored,
+	D::Stored: crate::key::KVValue<KeyContext = ()>,
+{
+	use crate::key::KVValue as _;
+	let bytes = crate::exec::vm::codec::encode(&crate::exec::vm::codec::FULL_CODEC, ty, template)
+		.map_err(|_| {
+		IrError::Stale("ir_lower::ddl: a definition template that does not encode")
+	})?;
+	let stored = D::Stored::kv_decode_value(&bytes, ())
+		.map_err(|_| IrError::Stale("ir_lower::ddl: a definition template that does not decode"))?;
+	D::from_stored(&stored)
+		.map_err(|_| IrError::Stale("ir_lower::ddl: a definition template that does not compile"))
 }
 
 #[cfg(test)]

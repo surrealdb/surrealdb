@@ -1,8 +1,8 @@
-//! Functions over the labels of a catalog enum, which order by declaration.
+//! Functions over the labels of a union type of the catalog, which order by declaration.
 
 use anyhow::{Result, bail};
 
-use crate::catalog::providers::EnumProvider;
+use crate::catalog::providers::TypeProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::Base;
@@ -26,9 +26,9 @@ impl Labels {
 	}
 }
 
-/// The labels `source` names: the enum of that name in the session's database, refused where the
-/// session checks permissions and the enum is not readable by everyone, or, for an array of
-/// strings, an inline enum's labels as written.
+/// The labels `source` names: the union type of that name in the session's database, refused
+/// where the session checks permissions and the type is not readable by everyone or is not a
+/// union of labels, or, for an array of strings, an inline enum's labels as written.
 async fn labels((ctx, opt): (&FrozenContext, &Options), source: &Value) -> Result<Labels> {
 	match source {
 		Value::Array(items) => {
@@ -57,15 +57,21 @@ async fn labels((ctx, opt): (&FrozenContext, &Options), source: &Value) -> Resul
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			let txn = ctx.tx();
 			let definition =
-				crate::exec::vm::descriptor::object(txn.expect_db_enum(ns, db, name)).await?;
+				crate::exec::vm::descriptor::object(txn.expect_db_type(ns, db, name)).await?;
 			if ctx.check_perms(opt, Action::View)?
 				&& !matches!(definition.permissions, crate::catalog::Permission::Full)
 			{
-				bail!("You don't have permission to read the enum '{name}'");
+				bail!("You don't have permission to read the type '{name}'");
 			}
+			let Some(labels) = definition.union() else {
+				bail!(
+					"The type '{name}' is not a union of string labels, so it has no order: it is {}",
+					surrealdb_types::ToSql::to_sql(&definition.kind())
+				);
+			};
 			Ok(Labels {
 				name: name.to_owned(),
-				labels: definition.label_names().map(str::to_owned).collect(),
+				labels: labels.label_names().map(str::to_owned).collect(),
 			})
 		}
 		Value::None
@@ -89,7 +95,7 @@ async fn labels((ctx, opt): (&FrozenContext, &Options), source: &Value) -> Resul
 		| Value::Timestamp(_)
 		| Value::Interval(_)
 		| Value::Closure(_) => bail!(
-			"An enum is named by a string, but found {}",
+			"A type is named by a string, but found {}",
 			surrealdb_types::ToSql::to_sql(source)
 		),
 	}
@@ -103,7 +109,7 @@ fn rank_of(labels: &Labels, value: &Value) -> Result<Option<i64>> {
 	}
 	let Value::String(label) = value else {
 		bail!(
-			"The enum '{}' orders strings, but found {}",
+			"The type '{}' orders strings, but found {}",
 			labels.name,
 			surrealdb_types::ToSql::to_sql(value)
 		);
@@ -111,7 +117,7 @@ fn rank_of(labels: &Labels, value: &Value) -> Result<Option<i64>> {
 	match labels.rank(label.as_str()) {
 		Some(rank) => Ok(Some(rank as i64)),
 		None => bail!(
-			"'{label}' is not a value of the enum '{}'; its values are {}",
+			"'{label}' is not a value of the type '{}'; its values are {}",
 			labels.name,
 			labels.describe()
 		),
@@ -192,12 +198,55 @@ pub async fn max(
 	extreme(&labels((ctx, opt), &name).await?, values, true)
 }
 
-/// `enum::cast(name, value)`: `value` cast to a string, when that string is a label of the enum.
-/// This is what `<enum<name>> value` evaluates to.
-///
-/// Where `name` spells a type rather than naming an enum (`array<enum<name>>`,
-/// `option<enum<name>>`), `value` is cast to that type and every named enum the type holds, at any
-/// depth, judges the labels the value carries. This is what a cast to such a type evaluates to.
+/// `enum::cast(type, value)`: `value` cast to the type `type` spells, with every named type it
+/// holds cast to its body and judged by its checks. A bare name spells the type of that name.
+pub async fn cast_in(
+	exec: &crate::exec::ExecutionContext,
+	(name, value): (Value, Value),
+) -> Result<Value> {
+	let Value::String(text) = &name else {
+		bail!("A type is named by a string, but found {}", surrealdb_types::ToSql::to_sql(&name));
+	};
+	let kind = crate::syn::kind(text.as_str())?;
+	refuse_unreadable_types(exec, &kind).await?;
+	let cast = value.cast_to_kind(&kind)?;
+	crate::exec::vm::schema_host::cast_types_held(exec, &kind, cast)
+		.await
+		.map_err(|e| anyhow::anyhow!("Could not cast into `{}`: {e}", text.as_str()))
+}
+
+/// Refuses `kind` where the session checks permissions and a type it names is not readable by
+/// everyone, as [`labels`] refuses reading one: a cast reveals what the type admits.
+async fn refuse_unreadable_types(
+	exec: &crate::exec::ExecutionContext,
+	kind: &crate::expr::Kind,
+) -> Result<()> {
+	if !kind.has_named_type() {
+		return Ok(());
+	}
+	let Some(opt) = exec.options() else {
+		return Ok(());
+	};
+	let ctx = exec.ctx();
+	if !ctx.check_perms(opt, Action::View)? {
+		return Ok(());
+	}
+	let mut names = Vec::new();
+	kind.each_named_type(&mut |name| names.push(name.to_owned()));
+	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+	let txn = ctx.tx();
+	for name in names {
+		let definition =
+			crate::exec::vm::descriptor::object(txn.expect_db_type(ns, db, &name)).await?;
+		if !matches!(definition.permissions, crate::catalog::Permission::Full) {
+			bail!("You don't have permission to read the type '{name}'");
+		}
+	}
+	Ok(())
+}
+
+/// `enum::cast(name, value)` where no execution context is at hand (a script): `value` cast to a
+/// string that is a label of the union type `name`.
 pub async fn cast(
 	(ctx, opt): (&FrozenContext, Option<&Options>),
 	(name, value): (Value, Value),
@@ -205,20 +254,6 @@ pub async fn cast(
 	let Some(opt) = opt else {
 		return Ok(Value::None);
 	};
-	if let Value::String(text) = &name
-		&& text.contains('<')
-	{
-		let kind = crate::syn::kind(text.as_str())?;
-		let cast = value.cast_to_kind(&kind)?;
-		if kind.has_named_enum() {
-			opt.valid_for_db()?;
-			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			crate::exec::vm::schema_host::check_named_enums(&ctx.tx(), ns, db, &kind, &cast)
-				.await
-				.map_err(|e| anyhow::anyhow!("Could not cast into `{}`: {e}", text.as_str()))?;
-		}
-		return Ok(cast);
-	}
 	let labels = labels((ctx, opt), &name).await?;
 	let value = value.cast_to_kind(&crate::expr::Kind::String)?;
 	let text = if let Value::String(s) = &value {
@@ -228,7 +263,7 @@ pub async fn cast(
 	};
 	if labels.rank(text).is_none() {
 		bail!(
-			"Could not cast into `enum<{}>` using input `{}`; its values are {}",
+			"Could not cast into `{}` using input `{}`; its values are {}",
 			labels.name,
 			surrealdb_types::ToSql::to_sql(&value),
 			labels.describe()

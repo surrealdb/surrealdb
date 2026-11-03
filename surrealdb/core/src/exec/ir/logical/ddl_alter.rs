@@ -25,7 +25,7 @@ use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::AlterStatement;
 use crate::expr::statements::alter::api::AlterApiClause;
 use crate::expr::statements::alter::field::AlterDefault;
-use crate::expr::statements::alter::{AlterEnumAction, AlterKind, EnumPosition};
+use crate::expr::statements::alter::{AlterKind, AlterTypeAction, EnumPosition};
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::{Base, Expr};
 use crate::iam::{Action, ResourceKind};
@@ -130,8 +130,9 @@ fn stored_api_secured(
 	}
 }
 
-/// The values an `ALTER API` sets: `clauses` holds one object per clause in order, and `security`
-/// the stored handler security mode the statement sets, or `NONE`. A `FOR ANY` clause holds the
+/// The values an `ALTER API` sets: `clauses` holds one object per clause in order, `security`
+/// the stored handler security mode the statement sets, or `NONE`, and `types` the names of the
+/// types the clauses name ([`api_clause_named_types`]). A `FOR ANY` clause holds the
 /// stored `config` and `fallback` it sets, a `FOR` clause the stored `methods` and `action`, and a
 /// `DROP` the `methods` it removes.
 fn api_alteration_values(
@@ -155,7 +156,58 @@ fn api_alteration_values(
 	let mut values = crate::val::Object::default();
 	values.insert("clauses".to_owned(), api_clause_values(codec, clauses)?);
 	values.insert("security".to_owned(), security);
+	values.insert("types".to_owned(), api_clause_named_types(clauses)?);
 	Ok(Value::Object(values))
+}
+
+/// The names of the types the clauses of an `ALTER API` name, each once, as a list of strings: in
+/// the configuration and the fallback a `FOR ANY` sets, and in the action and the configuration of
+/// a `FOR`.
+fn api_clause_named_types(clauses: &[AlterApiClause]) -> Planned<Value> {
+	let mut names: Vec<String> = Vec::new();
+	for clause in clauses {
+		let (actions, config, fallback) = match clause {
+			AlterApiClause::ForAny {
+				config,
+				fallback,
+			} => {
+				let fallback = match fallback {
+					AlterKind::Set(expr) => Some(expr.clone()),
+					AlterKind::Drop | AlterKind::None => None,
+				};
+				(Vec::new(), config.as_ref().map(catalog_api_config), fallback)
+			}
+			AlterApiClause::SetAction(action) => (
+				vec![crate::catalog::ApiAction {
+					methods: action.methods.iter().map(|m| (*m).into()).collect(),
+					action: action.action.clone(),
+					config: catalog_api_config(&action.config),
+				}],
+				None,
+				None,
+			),
+			AlterApiClause::DropAction {
+				..
+			} => continue,
+		};
+		let api = crate::catalog::ApiDefinition {
+			path: "/"
+				.parse()
+				.map_err(|_| PlanError::Invariant("the root API path did not parse".into()))?,
+			actions,
+			fallback,
+			config: config.unwrap_or_else(|| catalog_api_config(&Default::default())),
+			auth_limit: crate::catalog::auth::AuthLimit::default(),
+			security: crate::catalog::ApiSecurity::default(),
+			comment: None,
+		};
+		for name in crate::exec::vm::schema_host::api_named_types(&api) {
+			if !names.contains(&name) {
+				names.push(name);
+			}
+		}
+	}
+	Ok(Value::Array(names.into_iter().map(|name| Value::String(name.into())).collect()))
 }
 
 /// The values the clauses of an `ALTER API` set, one object per clause in order: a `FOR ANY`
@@ -722,16 +774,16 @@ pub(super) fn plan_alter<'e>(
 				stmt.if_exists,
 			)
 		}
-		AlterStatement::Enum(stmt) => (
-			DdlForm::AlterEnum,
+		AlterStatement::Type(stmt) => (
+			DdlForm::AlterType,
 			(EDIT, ResourceKind::Parameter, Base::Db),
-			AlterObject::Enum {
+			AlterObject::Type {
 				name: stmt.name.clone(),
 				edits: stmt
 					.actions
 					.iter()
 					.map(|action| match action {
-						AlterEnumAction::AddValue {
+						AlterTypeAction::AddValue {
 							value,
 							position,
 							if_not_exists,
@@ -746,7 +798,7 @@ pub(super) fn plan_alter<'e>(
 							after: matches!(position, Some(EnumPosition::After(_))),
 							if_not_exists: *if_not_exists,
 						},
-						AlterEnumAction::RenameValue {
+						AlterTypeAction::RenameValue {
 							from,
 							to,
 						} => EnumEdit::Rename {

@@ -38,15 +38,16 @@ fn test_string_literals() {
 fn test_numbers() {
 	let tokens = tokenize("42 3.25 0.5 .75 1e5 2.5e-3").unwrap();
 	assert_eq!(tokens[0].kind, TokenKind::IntLiteral(42));
-	assert_eq!(tokens[1].kind, TokenKind::FloatLiteral(3.25));
-	assert_eq!(tokens[2].kind, TokenKind::FloatLiteral(0.5));
-	assert_eq!(tokens[3].kind, TokenKind::FloatLiteral(0.75));
+	// A literal with a decimal point and no exponent is exact, as written.
+	assert_eq!(tokens[1].kind, TokenKind::DecimalLiteral("3.25".to_string()));
+	assert_eq!(tokens[2].kind, TokenKind::DecimalLiteral("0.5".to_string()));
+	assert_eq!(tokens[3].kind, TokenKind::DecimalLiteral("0.75".to_string()));
 	assert_eq!(tokens[4].kind, TokenKind::FloatLiteral(100000.0));
 	assert_eq!(tokens[5].kind, TokenKind::FloatLiteral(0.0025));
 }
 
 #[test]
-fn test_a_decimal_integer_beyond_64_bits_is_a_wide_integer() {
+fn test_a_decimal_integer_beyond_64_bits_is_a_decimal() {
 	let tokens = tokenize(
 		"9223372036854775807 9223372036854775808 9223372036854775809 18446744073709551616 \
 		 123456789012345678901234567890 00009223372036854775808",
@@ -63,20 +64,17 @@ fn test_a_decimal_integer_beyond_64_bits_is_a_wide_integer() {
 	);
 	// Every other integer up to `u64::MAX` is exact.
 	assert_eq!(tokens[2].kind, TokenKind::UnsignedIntLiteral(9223372036854775809));
-	for (index, text) in [
-		(3, "18446744073709551616"),
-		(4, "123456789012345678901234567890"),
-		(5, "00009223372036854775808"),
-	] {
-		assert_eq!(
-			tokens[index].kind,
-			TokenKind::WideIntLiteral {
-				value: text.parse::<f64>().unwrap(),
-				int8_minimum_magnitude: text.parse::<u64>().is_ok(),
-			},
-			"{text}"
-		);
+	// Beyond 64 bits an integer is an exact decimal.
+	for (index, text) in [(3, "18446744073709551616"), (4, "123456789012345678901234567890")] {
+		assert_eq!(tokens[index].kind, TokenKind::DecimalLiteral(text.to_string()), "{text}");
 	}
+	assert_eq!(
+		tokens[5].kind,
+		TokenKind::WideIntLiteral {
+			value: 2f64.powi(63),
+			int8_minimum_magnitude: true,
+		}
+	);
 	assert!(tokenize(&"9".repeat(400)).is_err(), "a literal beyond a double has no value");
 }
 
@@ -222,4 +220,16 @@ fn test_unicode_identifiers() {
 	assert_eq!(tokens[3].kind, TokenKind::Ident("café".to_string()));
 	assert_eq!(tokens[4].kind, TokenKind::Keyword(Keyword::From));
 	assert_eq!(tokens[5].kind, TokenKind::Ident("table_ñ".to_string()));
+}
+
+#[test]
+fn test_an_exact_literal_holds_at_most_65_digits() {
+	let digits = |n: usize| "9".repeat(n);
+	for text in [digits(65), format!("{}.{}", digits(30), digits(35)), format!("000{}", digits(65))]
+	{
+		assert!(tokenize(&text).is_ok(), "{text}");
+	}
+	for text in [digits(66), format!("{}.{}", digits(30), digits(36)), format!(".{}", digits(66))] {
+		assert!(tokenize(&text).is_err(), "{text}");
+	}
 }

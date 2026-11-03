@@ -177,13 +177,17 @@ pub(crate) async fn run_module_export(
 		.into());
 	}
 
-	// Validate and coerce arguments to their expected types
+	// Each argument is coerced to its declared kind and judged against the named types it holds.
+	let refused = |e| Error::InvalidFunctionArguments {
+		name: fnc_name.clone(),
+		message: format!("Failed to coerce argument: {e}"),
+	};
 	let mut coerced_args = Vec::with_capacity(args.len());
 	for (arg, kind) in args.into_iter().zip(signature.args.iter()) {
-		let coerced = arg.coerce_to_kind(kind).map_err(|e| Error::InvalidFunctionArguments {
-			name: fnc_name.clone(),
-			message: format!("Failed to coerce argument: {e}"),
-		})?;
+		let coerced = arg.coerce_to_kind(kind).map_err(refused)?;
+		let coerced = crate::exec::vm::schema_host::check_types_held(ctx.exec_ctx, kind, coerced)
+			.await
+			.map_err(refused)?;
 		coerced_args.push(coerced);
 	}
 
@@ -227,8 +231,19 @@ pub(crate) async fn run_module_export(
 	)
 	.await?;
 
-	// Validate return value if signature specifies a return type
-	validate_return(&fnc_name, signature.returns.as_ref(), result).map_err(Into::into)
+	// The result is coerced to the declared return kind and judged against the named types it
+	// holds.
+	let result = validate_return(&fnc_name, signature.returns.as_ref(), result)?;
+	let Some(kind) = signature.returns.as_ref() else {
+		return Ok(result);
+	};
+	crate::exec::vm::schema_host::check_types_held(ctx.exec_ctx, kind, result).await.map_err(|e| {
+		anyhow::Error::new(crate::exec::Error::ReturnCoerce {
+			name: fnc_name,
+			error: Box::new(e),
+		})
+		.into()
+	})
 }
 
 /// The error a call of an extension export raises in a build without the

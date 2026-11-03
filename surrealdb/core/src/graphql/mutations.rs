@@ -26,7 +26,6 @@ use super::schema::{
 };
 use super::tables::{CachedRecord, cond_from_filter, idiom_to_graphql_name};
 use super::utils::{GraphqlValueUtils, execute_statement};
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{FieldDefinition, TableDefinition, TableType};
 use crate::dbs::Session;
 use crate::expr::part::Part;
@@ -384,7 +383,7 @@ pub async fn process_mutations(
 		let tb_name_str = tb_name.as_str().to_string();
 		let is_relation = matches!(tb.table_type, TableType::Relation(_));
 
-		let fds = schema_ctx.tx.all_tb_fields(schema_ctx.ns, schema_ctx.db, &tb_name, None).await?;
+		let fds = schema_ctx.table_fields(&tb_name).await?;
 
 		// Generate input types — fields are camelCased / aliased via the
 		// shared `naming` helpers (see GitHub issues #4537 and #4552).

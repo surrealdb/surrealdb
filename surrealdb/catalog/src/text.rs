@@ -836,7 +836,6 @@ mod tests {
 			"array<any | int>",
 			"{ a: any | int }",
 			"any int",
-			"anything | int",
 		] {
 			assert!(KindText::from_raw(text).compile().is_err(), "{text}");
 		}

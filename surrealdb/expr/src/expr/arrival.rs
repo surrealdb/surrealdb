@@ -48,21 +48,20 @@ use crate::expr::statements::access::{
 };
 use crate::expr::statements::alter::{
 	AlterAccessStatement, AlterAnalyzerStatement, AlterApiStatement, AlterBucketStatement,
-	AlterConfigStatement, AlterDatabaseStatement, AlterEnumStatement, AlterEventStatement,
-	AlterFieldStatement, AlterFunctionStatement, AlterIndexStatement, AlterKind,
-	AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement,
-	AlterSystemStatement, AlterTableStatement, AlterUserStatement,
+	AlterConfigStatement, AlterDatabaseStatement, AlterEventStatement, AlterFieldStatement,
+	AlterFunctionStatement, AlterIndexStatement, AlterKind, AlterModuleStatement,
+	AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement, AlterSystemStatement,
+	AlterTableStatement, AlterTypeStatement, AlterUserStatement,
 };
 use crate::expr::statements::define::config::api::ApiConfig;
 use crate::expr::statements::define::config::defaults::DefaultConfig;
 use crate::expr::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineEnumStatement,
-	DefineSequenceStatement, DefineUserTypeStatement,
+	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineSequenceStatement,
+	DefineTypeStatement,
 };
 use crate::expr::statements::rebuild::RebuildIndexStatement;
 use crate::expr::statements::remove::{
-	RemoveApiStatement, RemoveBucketStatement, RemoveEnumStatement, RemoveSequenceStatement,
-	RemoveUserTypeStatement,
+	RemoveApiStatement, RemoveBucketStatement, RemoveSequenceStatement, RemoveTypeStatement,
 };
 use crate::expr::statements::{
 	AlterStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
@@ -646,6 +645,8 @@ fn part_release(part: &Part) -> Release {
 
 fn kind_release(kind: &Kind) -> Release {
 	match kind {
+		// What a named type holds is the catalog's to say, which this does not read.
+		Kind::Named(_) => FIRST,
 		Kind::Any
 		| Kind::None
 		| Kind::Null
@@ -719,8 +720,7 @@ fn define_release(statement: &DefineStatement) -> Release {
 		| DefineStatement::Config(..)
 		| DefineStatement::Api(..)
 		| DefineStatement::Bucket(..)
-		| DefineStatement::Enum(..)
-		| DefineStatement::UserType(..)
+		| DefineStatement::Type(..)
 		| DefineStatement::Sequence(..)
 		| DefineStatement::Module(..) => FIRST,
 	}
@@ -739,7 +739,7 @@ fn alter_release(statement: &AlterStatement) -> Release {
 		| AlterStatement::Field(..)
 		| AlterStatement::Param(..)
 		| AlterStatement::Bucket(..)
-		| AlterStatement::Enum(..)
+		| AlterStatement::Type(..)
 		| AlterStatement::Config(..)
 		| AlterStatement::Analyzer(..)
 		| AlterStatement::Function(..)
@@ -765,8 +765,7 @@ fn remove_release(statement: &RemoveStatement) -> Release {
 		| RemoveStatement::Model(..)
 		| RemoveStatement::Api(..)
 		| RemoveStatement::Bucket(..)
-		| RemoveStatement::Enum(..)
-		| RemoveStatement::UserType(..)
+		| RemoveStatement::Type(..)
 		| RemoveStatement::Sequence(..)
 		| RemoveStatement::Module(..)
 		| RemoveStatement::Config(..) => FIRST,
@@ -1035,14 +1034,15 @@ impl Visitor for ArrivalVisitor {
 		visit_remove_model(RemoveModelStatement) { name: _, version: _, if_exists: _ } []
 		visit_remove_api(RemoveApiStatement) { name: _, if_exists: _ } []
 		visit_remove_bucket(RemoveBucketStatement) { name: _, base: _, if_exists: _ } []
-		visit_remove_enum(RemoveEnumStatement) { name: _, if_exists: _ } []
-		visit_remove_user_type(RemoveUserTypeStatement) { name: _, type_kind: _, if_exists: _ } []
-		visit_define_user_type(DefineUserTypeStatement) { kind: _, name: _, body: _ } []
-		visit_alter_enum(AlterEnumStatement) { name: _, if_exists: _, actions: _ } []
-		visit_define_enum(DefineEnumStatement) {
+		visit_remove_type(RemoveTypeStatement) { name: _, if_exists: _, object: _ } []
+		visit_alter_type(AlterTypeStatement) { name: _, if_exists: _, actions: _ } []
+		visit_define_type(DefineTypeStatement) {
 			kind: _,
 			name: _,
-			labels: _,
+			body: _,
+			asserts: _,
+			default: _,
+			sql_type: _,
 			comment: _,
 			permissions: _,
 		} []

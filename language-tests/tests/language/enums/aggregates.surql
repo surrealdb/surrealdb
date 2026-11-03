@@ -49,11 +49,11 @@ value = "'ok'"
 value = "'ok'"
 */
 
-DEFINE ENUM mood VALUES 'sad', 'ok', 'happy';
+DEFINE TYPE mood AS 'sad' | 'ok' | 'happy';
 DEFINE TABLE person SCHEMAFULL;
 DEFINE FIELD name ON person TYPE string;
 DEFINE FIELD team ON person TYPE string;
-DEFINE FIELD mood ON person TYPE none | enum<mood>;
+DEFINE FIELD mood ON person TYPE none | mood;
 CREATE person:a SET name = 'a', team = 'x', mood = 'happy' RETURN NONE;
 CREATE person:b SET name = 'b', team = 'x', mood = 'ok' RETURN NONE;
 CREATE person:c SET name = 'c', team = 'y', mood = 'sad' RETURN NONE;

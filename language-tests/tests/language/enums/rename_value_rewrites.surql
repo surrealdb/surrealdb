@@ -76,7 +76,7 @@ value = "[{ feels: {'fine', 'happy'} }]"
 value = "[{ mood: 'fine', name: 'a2' }]"
 
 [[test.results]]
-error = "Couldn't coerce value for field `mood` of `person:a`: Expected `enum<mood>, one of 'sad', 'fine', 'happy'` but found `'ok'`"
+error = "Couldn't coerce value for field `mood` of `person:a`: Expected `mood ('sad' | 'fine' | 'happy')` but found `'ok'`"
 
 [[test.results]]
 value = "NONE"
@@ -85,17 +85,17 @@ value = "NONE"
 value = "[{ mood: 'okay', name: 'a2' }]"
 
 [[test.results]]
-error = "The enum 'mood' already has the value 'happy'"
+error = "The type 'mood' already has the value 'happy'"
 */
 
-DEFINE ENUM mood VALUES 'sad', 'ok', 'happy';
+DEFINE TYPE mood AS 'sad' | 'ok' | 'happy';
 DEFINE TABLE person SCHEMAFULL;
 DEFINE FIELD name ON person TYPE string;
-DEFINE FIELD mood ON person TYPE none | enum<mood>;
-DEFINE FIELD past ON person TYPE none | array<enum<mood>>;
+DEFINE FIELD mood ON person TYPE none | mood;
+DEFINE FIELD past ON person TYPE none | array<mood>;
 DEFINE INDEX person_mood ON person FIELDS mood;
 DEFINE TABLE pet SCHEMAFULL;
-DEFINE FIELD feels ON pet TYPE option<set<enum<mood>>>;
+DEFINE FIELD feels ON pet TYPE option<set<mood>>;
 CREATE person:a SET name = 'a', mood = 'ok', past = ['ok', 'sad', 'ok'] RETURN NONE;
 CREATE person:b SET name = 'b', mood = 'happy' RETURN NONE;
 CREATE person:c SET name = 'c' RETURN NONE;
@@ -103,7 +103,7 @@ CREATE pet:p SET feels = ['ok', 'happy'] RETURN NONE;
 DEFINE TABLE touched SCHEMALESS;
 DEFINE EVENT audit ON person WHEN $event = 'UPDATE' THEN { CREATE touched SET who = $after.id };
 DEFINE TABLE person_moods AS SELECT mood FROM person;
-ALTER ENUM mood RENAME VALUE 'ok' TO 'fine';
+ALTER TYPE mood RENAME VALUE 'ok' TO 'fine';
 SELECT VALUE who FROM touched ORDER BY who;
 SELECT name, mood, past FROM person ORDER BY name;
 SELECT name FROM person WHERE mood = 'fine';
@@ -112,6 +112,6 @@ SELECT name FROM person WHERE mood = 'fine' EXPLAIN;
 SELECT feels FROM pet;
 UPDATE person:a SET name = 'a2' RETURN name, mood;
 UPDATE person:a SET mood = 'ok';
-ALTER ENUM mood RENAME VALUE 'fine' TO 'x' RENAME VALUE 'x' TO 'okay';
+ALTER TYPE mood RENAME VALUE 'fine' TO 'x' RENAME VALUE 'x' TO 'okay';
 SELECT name, mood FROM person WHERE mood = 'okay';
-ALTER ENUM mood RENAME VALUE 'sad' TO 'happy';
+ALTER TYPE mood RENAME VALUE 'sad' TO 'happy';

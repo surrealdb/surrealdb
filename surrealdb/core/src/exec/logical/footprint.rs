@@ -653,8 +653,7 @@ fn ddl_footprint(statement: &LogicalDdlStatement, out: &mut Footprint) {
 			| DefineStatement::Config(_)
 			| DefineStatement::Api(_)
 			| DefineStatement::Bucket(_)
-			| DefineStatement::Enum(_)
-			| DefineStatement::UserType(_)
+			| DefineStatement::Type(_)
 			| DefineStatement::Sequence(_)
 			| DefineStatement::Module(_) => {
 				out.read(catalog(CatalogKind::Other, None, None));
@@ -723,8 +722,7 @@ fn ddl_footprint(statement: &LogicalDdlStatement, out: &mut Footprint) {
 			| RemoveStatement::Model(_)
 			| RemoveStatement::Api(_)
 			| RemoveStatement::Bucket(_)
-			| RemoveStatement::Enum(_)
-			| RemoveStatement::UserType(_)
+			| RemoveStatement::Type(_)
 			| RemoveStatement::Sequence(_)
 			| RemoveStatement::Module(_)
 			| RemoveStatement::Config(_) => {
@@ -777,7 +775,7 @@ fn ddl_footprint(statement: &LogicalDdlStatement, out: &mut Footprint) {
 			AlterStatement::Api(_)
 			| AlterStatement::Sequence(_)
 			| AlterStatement::Bucket(_)
-			| AlterStatement::Enum(_)
+			| AlterStatement::Type(_)
 			| AlterStatement::Config(_)
 			| AlterStatement::Analyzer(_)
 			| AlterStatement::User(_)

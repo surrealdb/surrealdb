@@ -146,6 +146,13 @@ impl Ddl<'_, '_> {
 			});
 		}
 		self.bind(built)?;
+		let written: crate::catalog::TableDefinition =
+			super::definition_of(&attrs.template.value, "StoredTableDefinition")?;
+		let names = crate::exec::vm::schema_host::table_named_types(&written);
+		if !names.is_empty() {
+			let subject = self.shown_subject("The table", table.name)?;
+			self.check_types_defined((ns, db), names, || subject);
+		}
 
 		let template = self.constant(attrs.template.value.clone())?;
 		let definition = self.load(template)?;
@@ -220,6 +227,7 @@ impl Ddl<'_, '_> {
 				db,
 				tb: name_reg,
 				sources: view.what.clone(),
+				definition,
 			});
 		}
 		if let Some(redefined) = redefined {
@@ -711,6 +719,13 @@ impl Ddl<'_, '_> {
 			self.answer_none()?;
 			self.bind(fresh)?;
 		}
+		let subject = self.shown_subject("The table", alter.name)?;
+		self.check_altered_types(
+			template,
+			(ns, db),
+			crate::exec::vm::schema_host::table_named_types,
+			|| subject,
+		)?;
 		// What the rewrite is compared against, read before it.
 		let previous = self.load(Operand::Reg(table))?;
 		let (old_changefeed, old_edges, old_refs) = (self.reg()?, self.reg()?, self.reg()?);

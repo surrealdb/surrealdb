@@ -438,30 +438,64 @@ const NAMED_PLANNER_ERRORS: &[(&str, &str, &str)] = &[
 	("extension \"", "\" is not available", "58P01"),
 	("type \"", "\" does not exist", "42704"),
 	("constraint \"", "\" already exists", "42710"),
+	("enum label \"", "\" used more than once", "42710"),
 	("column \"", "\" specified more than once", "42701"),
 ];
 
-/// The SQLSTATE of a refusal of the engine to define, alter or drop a domain or composite type,
-/// worded as an invalid statement:
+/// The SQLSTATE of a refusal of the engine to define, alter or remove a type, which a domain, a
+/// composite type and an enum all are:
 /// - a type whose name is taken is `42710`, and one that does not exist is `42704`;
-/// - a type that a column still uses is `2BP01`;
-/// - `DROP DOMAIN` of a composite type, or `DROP TYPE` of a domain, is `42809`.
+/// - a type that a column, a function or another type still names is `2BP01`;
+/// - an enum value added that the type already holds is `42710`, one renamed that it does not hold
+///   is `22023`, and a value edit of a type that is no enum is `42809`;
+/// - `DROP DOMAIN` of a type that is no domain, and `DROP TYPE` of a domain, are `42809`;
+/// - an enum past the number of labels a type can hold is `54000`.
 ///
 /// Any other message gives `None`. As for [`engine_sqlstate`], a message is read by the text it
 /// starts and ends with, which the client's own names do not choose.
 fn user_type_sqlstate(message: &str) -> Option<&'static str> {
-	let reason = message.strip_prefix("Invalid statement: ")?;
-	if reason.starts_with("type \"") && reason.ends_with("\" already exists") {
-		Some("42710")
-	} else if reason.starts_with("type \"") && reason.ends_with("\" does not exist") {
-		Some("42704")
-	} else if reason.starts_with("cannot drop type ") {
-		Some("2BP01")
-	} else if reason.starts_with('"')
-		&& (reason.ends_with("\" is not a domain")
-			|| reason.ends_with("\" is not a composite type"))
+	let refusal = message.strip_prefix("Invalid statement: ").unwrap_or(message);
+	if refusal.starts_with("Cannot change the type '")
+		&& refusal.contains(" holds a value it does not admit: ")
 	{
-		Some("42809")
+		// NULL or NONE ends the refusal only when it is the whole value held. Refused by the
+		// type's body it is a NOT NULL violation; refused by one of the type's checks it is a
+		// CHECK violation, as any other value is.
+		let absent =
+			refusal.ends_with(" but found `NULL`") || refusal.ends_with(" but found `NONE`");
+		let checked =
+			refusal.contains(" failed)` but found `") || refusal.contains(" failed with: ");
+		return Some(if absent && !checked {
+			"23502"
+		} else {
+			"23514"
+		});
+	}
+	if refusal.starts_with("The type '") {
+		if refusal.contains("' already has the value '") {
+			return Some("42710");
+		}
+		if refusal.contains("' has no value '") {
+			return Some("22023");
+		}
+		if refusal.ends_with(" is not a union of string labels, so it has no values to alter") {
+			return Some("42809");
+		}
+		if refusal.ends_with("' is not a domain; remove it with DROP TYPE")
+			|| refusal.ends_with("' is a domain; remove it with DROP DOMAIN")
+		{
+			return Some("42809");
+		}
+		if refusal.contains(" a union holds at most ") {
+			return Some("54000");
+		}
+	}
+	if message.starts_with("The type '") && message.ends_with("' already exists") {
+		Some("42710")
+	} else if message.starts_with("The type '") && message.ends_with("' does not exist") {
+		Some("42704")
+	} else if message.starts_with("Invalid statement: Cannot remove the type '") {
+		Some("2BP01")
 	} else {
 		None
 	}
@@ -470,10 +504,10 @@ fn user_type_sqlstate(message: &str) -> Option<&'static str> {
 /// The SQLSTATE of a refusal by the SQL planner, which is the code the planner chose for it
 /// (`PlanError::pg_sqlstate`). A feature the planner does not lower is `0A000`, a text it cannot
 /// read as a value of the type it must have is `22P02`, an operator that has no definition for
-/// its operand types is `42883`, an integer result beyond 64 bits is `22003` and a constraint the
-/// table does not have is `42704`; a table, column, function or position the statement names
-/// wrongly has the code of that kind of error ([`NAMED_PLANNER_ERRORS`]). Any other message gives
-/// `None`.
+/// its operand types is `42883`, a value beyond the range of its type is `22003` and a
+/// constraint the table does not have is `42704`; a table, column, function or position the
+/// statement names wrongly has the code of that kind of error ([`NAMED_PLANNER_ERRORS`]). Any
+/// other message gives `None`.
 fn planner_sqlstate(message: &str) -> Option<&'static str> {
 	let reason = planner_message(message);
 	if unsupported_construct(message).is_some() {
@@ -482,7 +516,7 @@ fn planner_sqlstate(message: &str) -> Option<&'static str> {
 		Some("22P02")
 	} else if reason.starts_with("operator does not exist: ") {
 		Some("42883")
-	} else if reason == "bigint out of range" {
+	} else if is_out_of_range(reason) {
 		Some("22003")
 	} else if reason.starts_with("constraint \"") && reason.ends_with("\" does not exist") {
 		Some("42704")
@@ -500,6 +534,25 @@ fn planner_sqlstate(message: &str) -> Option<&'static str> {
 			})
 			.map(|(_, _, code)| *code)
 	}
+}
+
+/// Whether `reason` is the planner's refusal of a value beyond the range of its type: an integer
+/// type's `<type> out of range`, `numeric field overflow`, a float's `value out of range:
+/// overflow` or `underflow`, and a text constant's `value "<text>" is out of range for type
+/// <type>`.
+fn is_out_of_range(reason: &str) -> bool {
+	matches!(
+		reason,
+		"smallint out of range"
+			| "integer out of range"
+			| "bigint out of range"
+			| "numeric field overflow"
+			| "value out of range: overflow"
+			| "value out of range: underflow"
+	) || reason
+		.strip_prefix("value \"")
+		.and_then(|rest| rest.rsplit_once("\" is out of range for type "))
+		.is_some_and(|(_, type_name)| matches!(type_name, "smallint" | "integer" | "bigint"))
 }
 
 /// The kind of construct the planner refused as unsupported, from the text of a planner error:
@@ -529,6 +582,10 @@ pub(super) fn unsupported_construct(message: &str) -> Option<&'static str> {
 ///
 /// A message is read by the text the engine starts or ends it with, never by a word anywhere in
 /// it: the rest of a message quotes the client's own values, which must not choose the code.
+/// The end of the engine's refusal of a value by the assertion a `NOT NULL` column lowers to.
+const NOT_NULL_ASSERTION_TAIL: &str =
+	" but field must conform to: $value != NONE AND $value != NULL";
+
 fn engine_sqlstate(message: &str) -> Option<&'static str> {
 	if message.starts_with("Database index `") && message.contains("` already contains ") {
 		Some("23505")
@@ -538,9 +595,17 @@ fn engine_sqlstate(message: &str) -> Option<&'static str> {
 		// a value of the wrong type for that element.
 		if message.ends_with(" but found `NULL`") || message.ends_with(" but found `NONE`") {
 			Some("23502")
+		} else if message.contains(" failed)` but found `") || message.contains(" failed with: ") {
+			// A value of a named type that one of the type's checks refuses: a domain's CHECK.
+			Some("23514")
 		} else {
 			Some("42804")
 		}
+	} else if message.starts_with("Found NULL for field `")
+		&& message.ends_with(NOT_NULL_ASSERTION_TAIL)
+	{
+		// A NULL a `NOT NULL` column's assertion refuses, over a type that admits NULL.
+		Some("23502")
 	} else if message.starts_with("Could not cast into `") {
 		// Text written to a typed column that does not read as the column's type.
 		Some("42804")
@@ -591,10 +656,6 @@ fn thrown_sqlstate(message: &str) -> &'static str {
 		"field position must not be zero" => "22023",
 		unit if unit.starts_with("unit \"") && unit.contains("\" not recognized for type ") => {
 			"22023"
-		}
-		// The NOT NULL of a domain, which a column of the domain asserts.
-		null if null.starts_with("domain ") && null.ends_with(" does not allow null values") => {
-			"23502"
 		}
 		_ => "P0001",
 	}
@@ -946,6 +1007,12 @@ mod tests {
 			PlanError::SubqueryMustHaveAlias,
 			PlanError::DivisionByZero,
 			PlanError::NumericValueOutOfRange,
+			PlanError::ValueOutOfRange("smallint out of range".to_string()),
+			PlanError::ValueOutOfRange("numeric field overflow".to_string()),
+			PlanError::ValueOutOfRange("value out of range: overflow".to_string()),
+			PlanError::ValueOutOfRange(
+				"value \"100000\" is out of range for type smallint".to_string(),
+			),
 			PlanError::InvalidTextRepresentation("integer: \"a\"".to_string()),
 			PlanError::UnsupportedStatement("MERGE".to_string()),
 			PlanError::UnsupportedExpression("Row".to_string()),
@@ -977,6 +1044,7 @@ mod tests {
 				constraint: name(),
 				domain: name(),
 			},
+			PlanError::DuplicateEnumLabel(name()),
 			PlanError::DuplicateColumn(name()),
 			PlanError::Custom("each query must have the same number of columns".to_string()),
 		];
@@ -1002,7 +1070,7 @@ mod tests {
 					PlanError::WindowFunctionWithoutOver(_) => "42809",
 					PlanError::SubqueryMustHaveAlias => "42601",
 					PlanError::DivisionByZero => "22012",
-					PlanError::NumericValueOutOfRange => "22003",
+					PlanError::NumericValueOutOfRange | PlanError::ValueOutOfRange(_) => "22003",
 					PlanError::InvalidTextRepresentation(_) => "22P02",
 					PlanError::UnsupportedStatement(_) | PlanError::UnsupportedExpression(_) => {
 						"0A000"
@@ -1022,12 +1090,14 @@ mod tests {
 						..
 					} => "42704",
 					PlanError::InvalidParameterValue(_) => "22023",
+					PlanError::DatatypeMismatch(_) => "42804",
 					PlanError::DataException(_) => "22000",
 					PlanError::ProgramLimitExceeded(_) => "54000",
 					PlanError::ExtensionNotAvailable(_) => "58P01",
 					PlanError::DuplicateDomainConstraint {
 						..
-					} => "42710",
+					}
+					| PlanError::DuplicateEnumLabel(_) => "42710",
 					PlanError::DuplicateColumn(_) => "42701",
 					// A planning error of no kind of its own is a syntax error.
 					PlanError::Custom(_) => "42601",
@@ -1216,21 +1286,48 @@ mod tests {
 	#[test]
 	fn test_user_type_refusals_have_postgres_codes() {
 		for (message, code) in [
-			("Invalid statement: type \"posint\" already exists", "42710"),
-			("Invalid statement: type \"posint\" does not exist", "42704"),
+			("The type 'posint' already exists", "42710"),
+			("The type 'posint' does not exist", "42704"),
 			(
-				"Invalid statement: cannot drop type posint because other objects depend on it: column n of table t depends on type posint",
+				"Invalid statement: Cannot remove the type 'posint': the field 'n' on the table 't' has a type that names it",
 				"2BP01",
 			),
-			("Invalid statement: \"address\" is not a domain", "42809"),
-			("Invalid statement: \"posint\" is not a composite type", "42809"),
+			("The type 'mood' already has the value 'sad'", "42710"),
+			("The type 'mood' has no value 'meh'; its values are 'sad', 'happy'", "22023"),
+			(
+				"The type 'posint' is not a union of string labels, so it has no values to alter",
+				"42809",
+			),
+			("The type 'mood' is not a domain; remove it with DROP TYPE", "42809"),
+			("The type 'd' is a domain; remove it with DROP DOMAIN", "42809"),
+			(
+				"Invalid statement: The type 'mood' lists 1024 labels; a union holds at most 1023",
+				"54000",
+			),
+			(
+				"The type 'mood' cannot take another value: a union holds at most 1023 values over its life",
+				"54000",
+			),
+			(
+				"Invalid statement: Cannot change the type 'amount': the field 'a' on the table 'ledger' holds a value it does not admit: Expected `amount (constraint small failed)` but found `500i32`",
+				"23514",
+			),
+			(
+				"Invalid statement: Cannot change the type 'maybe': the field 'm' on the table 'ledger' holds a value it does not admit: Expected `maybe (i32)` but found `NULL`",
+				"23502",
+			),
+			(
+				"Invalid statement: Cannot change the type 'jdom': the field 'j' on the table 't' holds a value it does not admit: Expected `jdom (constraint c failed)` but found `NULL`",
+				"23514",
+			),
 		] {
 			assert_eq!(user_type_sqlstate(message), Some(code), "{message}");
 		}
-		assert_eq!(user_type_sqlstate("type \"posint\" does not exist"), None);
 		assert_eq!(
-			thrown_sqlstate("An error occurred: domain posint does not allow null values"),
-			"23502"
+			engine_sqlstate(
+				"Couldn't coerce value for field `n` of `t:1`: Expected `posint (constraint positive failed)` but found `-1`"
+			),
+			Some("23514")
 		);
 		assert_eq!(user_type_sqlstate("Invalid statement: something else"), None);
 		for (message, code) in [

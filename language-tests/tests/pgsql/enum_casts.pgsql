@@ -11,19 +11,19 @@ reason = "PostgreSQL casts to an enum type judge membership, including inside ar
 value = "[{ m: 'ok' }]"
 
 [[test.results]]
-error = "Could not cast into `enum<mood>` using input `'nope'`; its values are 'sad', 'ok', 'happy'"
+error = "Could not cast into `mood`: Expected `mood ('sad' | 'ok' | 'happy')` but found `'nope'`"
 
 [[test.results]]
 value = "[{ m: 'happy' }]"
 
 [[test.results]]
-error = "Could not cast into `enum<mood>` using input `'nope'`; its values are 'sad', 'ok', 'happy'"
+error = "Could not cast into `mood`: Expected `mood ('sad' | 'ok' | 'happy')` but found `'nope'`"
 
 [[test.results]]
 value = "[{ a: ['sad', 'ok'] }]"
 
 [[test.results]]
-error = "Could not cast into `array<enum<mood>>`: Expected `enum<mood>, one of 'sad', 'ok', 'happy'` but found `'nope'`"
+error = "Could not cast into `array<mood>`: Expected `mood ('sad' | 'ok' | 'happy')` but found `'nope'`"
 
 [[test.results]]
 value = "[{ m: NULL }]"

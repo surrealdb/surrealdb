@@ -317,7 +317,7 @@ fn distinctness_and_null_safe_equality_compare_with_the_record() {
 #[test]
 fn a_literal_that_is_no_key_is_compared_as_it_is() {
 	for (sql, tail) in [
-		("dept = 1.5", "ELSE dept = 1.5f END"),
+		("dept = 1.5", "ELSE dept = 1.5dec END"),
 		("dept = ''", "ELSE dept = '' END"),
 		("dept = NULL", "ELSE dept = NULL END"),
 	] {

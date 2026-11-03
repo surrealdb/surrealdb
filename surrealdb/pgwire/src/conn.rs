@@ -120,6 +120,7 @@ enum StatementKind {
 	CreateDomain,
 	AlterDomain,
 	DropType,
+	DropDomain,
 	Truncate,
 	Other,
 }
@@ -146,16 +147,7 @@ impl StatementKind {
 			PgStatement::AlterType(_) => Some((Self::AlterType, false)),
 			PgStatement::CreateDomain(_) => Some((Self::CreateDomain, false)),
 			PgStatement::AlterDomain(_) => Some((Self::AlterDomain, false)),
-			PgStatement::Drop(drop) => Some((
-				if matches!(drop.object_type, DropObjectType::Type) {
-					Self::DropType
-				} else if matches!(drop.object_type, DropObjectType::Schema) {
-					Self::DropSchema
-				} else {
-					Self::DropTable
-				},
-				false,
-			)),
+			PgStatement::Drop(drop) => Some((Self::of_drop(drop.object_type), false)),
 			PgStatement::Select(_)
 			| PgStatement::Copy(_)
 			| PgStatement::Transaction(_)
@@ -169,6 +161,20 @@ impl StatementKind {
 			| PgStatement::CreatePropertyGraph(_)
 			| PgStatement::DropPropertyGraph(_)
 			| PgStatement::Empty => None,
+		}
+	}
+
+	/// The kind of a `DROP` of `object`: a schema, a type and a domain have tags of their own, and
+	/// every other object answers as a table.
+	fn of_drop(object: DropObjectType) -> Self {
+		if matches!(object, DropObjectType::Type) {
+			Self::DropType
+		} else if matches!(object, DropObjectType::Domain) {
+			Self::DropDomain
+		} else if matches!(object, DropObjectType::Schema) {
+			Self::DropSchema
+		} else {
+			Self::DropTable
 		}
 	}
 
@@ -191,6 +197,7 @@ impl StatementKind {
 			Self::CreateDomain => "CREATE DOMAIN".to_string(),
 			Self::AlterDomain => "ALTER DOMAIN".to_string(),
 			Self::DropType => "DROP TYPE".to_string(),
+			Self::DropDomain => "DROP DOMAIN".to_string(),
 			Self::Truncate => "TRUNCATE TABLE".to_string(),
 			Self::Other => format!("SELECT {count}"),
 		}
@@ -1673,11 +1680,7 @@ impl Connection {
 								returns_rows = false;
 							}
 							PgStatement::Drop(drop) => {
-								kind = if matches!(drop.object_type, DropObjectType::Schema) {
-									StatementKind::DropSchema
-								} else {
-									StatementKind::DropTable
-								};
+								kind = StatementKind::of_drop(drop.object_type);
 								returns_rows = false;
 								let cur_db = self
 									.session

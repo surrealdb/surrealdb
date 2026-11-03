@@ -178,21 +178,12 @@ pub(super) fn plan_remove(remove: &RemoveStatement, checks: DdlChecks) -> Planne
 			stmt.if_exists,
 			false,
 		),
-		RemoveStatement::Enum(stmt) => (
-			DdlForm::RemoveEnum,
+		RemoveStatement::Type(stmt) => (
+			DdlForm::RemoveType,
 			(EDIT, ResourceKind::Parameter, Base::Db),
-			RemoveObject::Enum {
+			RemoveObject::Type {
 				name: stmt.name.clone(),
-			},
-			stmt.if_exists,
-			false,
-		),
-		RemoveStatement::UserType(stmt) => (
-			DdlForm::RemoveUserType,
-			(EDIT, ResourceKind::Parameter, Base::Db),
-			RemoveObject::UserType {
-				name: stmt.name.clone(),
-				domain: stmt.type_kind == crate::expr::statements::define::UserTypeKind::Domain,
+				object: stmt.object,
 			},
 			stmt.if_exists,
 			false,

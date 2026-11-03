@@ -48,6 +48,7 @@ pub(crate) fn static_type(expr: &BoundExpr, dialect: SqlDialect) -> SqlType {
 			op: BoundUnaryOp::Negate | BoundUnaryOp::Positive,
 			expr,
 		} => static_type(expr, dialect),
+		BoundExpr::Literal(BoundLiteral::Numeric(_)) => SqlType::Numeric,
 		BoundExpr::Literal(_)
 		| BoundExpr::Access {
 			..

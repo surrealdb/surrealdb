@@ -58,7 +58,7 @@ value = "['a', 'c']"
 value = "['c']"
 
 [[test.results]]
-error = "'nope' is not a value of the enum 'mood'; its values are 'sad', 'ok', 'happy'"
+error = "'nope' is not a value of the type 'mood'; its values are 'sad', 'ok', 'happy'"
 
 [[test.results]]
 value = "NONE"
@@ -66,10 +66,10 @@ value = "NONE"
 [[test.results]]
 value = "['a', 'b', 'c']"
 */
-DEFINE ENUM mood VALUES 'sad', 'ok', 'happy';
+DEFINE TYPE mood AS 'sad' | 'ok' | 'happy';
 DEFINE TABLE person SCHEMAFULL;
 DEFINE FIELD name ON person TYPE string;
-DEFINE FIELD mood ON person TYPE enum<mood>;
+DEFINE FIELD mood ON person TYPE mood;
 CREATE person:a SET name = 'a', mood = 'happy' RETURN NONE;
 CREATE person:b SET name = 'b', mood = 'sad' RETURN NONE;
 CREATE person:c SET name = 'c', mood = 'ok' RETURN NONE;

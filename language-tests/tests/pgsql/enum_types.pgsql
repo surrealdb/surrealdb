@@ -16,7 +16,7 @@ value = "NONE"
 value = "[{ id: 1, m: 'happy', name: 'a' }, { id: 2, m: 'sad', name: 'b' }, { id: 3, m: 'ok', name: 'c' }]"
 
 [[test.results]]
-error = "Couldn't coerce value for field `m` of `person:4`: Expected `enum<mood>, one of 'sad', 'ok', 'happy'` but found `'nope'`"
+error = "Couldn't coerce value for field `m` of `person:4`: Expected `mood ('sad' | 'ok' | 'happy')` but found `'nope'`"
 
 [[test.results]]
 value = "NONE"
@@ -40,7 +40,7 @@ value = "[{ typname: 'mood', typtype: 'e' }]"
 value = "[{ labels: 5 }]"
 
 [[test.results]]
-error = "Invalid statement: Cannot remove the enum 'mood': the field 'm' on the table 'person' has a type that names it"
+error = "Invalid statement: Cannot remove the type 'mood': the field 'm' on the table 'person' has a type that names it"
 
 [[test.results]]
 value = "NONE"

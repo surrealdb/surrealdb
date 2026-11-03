@@ -24,10 +24,10 @@ error = "value too long for type character varying(3) (field `s` of `t:1`, SQL T
 error = "value too long for type character varying(3) (field `s` of `t:1`, SQL TYPE varchar(3))"
 
 [[test.results]]
-value = "[{ c: 'ab ', id: t:1, s: 'abc' }]"
+value = "[{ c: 'ab', id: t:1, s: 'abc' }]"
 
 [[test.results]]
-value = "[{ c: 'ab ', id: t:1, s: 'abc' }]"
+value = "[{ c: 'ab', id: t:1, s: 'abc' }]"
 
 [[test.results]]
 error = "value too long for type character varying(3) (field `s` of `t:1`, SQL TYPE varchar(3))"
@@ -63,7 +63,7 @@ error = "value too long for type character varying(3) (field `s` of `e:1`, SQL T
 error = "value too long for type character varying(3) (field `s` of `e:2`, SQL TYPE varchar(3))"
 
 [[test.results]]
-value = "[{ c: 'ab ', id: t:1, s: 'abc' }]"
+value = "[{ c: 'ab', id: t:1, s: 'abc' }]"
 
 [[test.results]]
 value = "[]"

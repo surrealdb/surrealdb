@@ -185,62 +185,17 @@ pub enum Kind {
 	Timestamp,
 	#[revision(start = 2)]
 	Interval,
-	/// An enum type: a string constrained to an ordered, named set of labels.
+	/// An inline enum type: a string constrained to an ordered set of labels, in declaration
+	/// order.
 	#[revision(start = 2)]
-	Enum(EnumRef),
+	Enum(Vec<String>),
 	/// An arbitrary-precision decimal number
 	BigDecimal,
-}
-
-/// What an enum kind names: a catalog enum by name, or its labels inline.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum EnumRef {
-	/// An enum declared by `DEFINE ENUM`.
+	/// A type declared by `DEFINE TYPE`, by name. What it admits is the catalog's to say: a value
+	/// coerces to it unchanged, and the write path, a cast and a function call judge the value
+	/// against the definition the database holds.
+	#[revision(start = 2)]
 	Named(String),
-	/// A column-scoped enum, its labels in declaration order.
-	Inline(Vec<String>),
-}
-
-impl EnumRef {
-	/// The labels of an inline enum, in declaration order.
-	pub fn inline_labels(&self) -> Option<&[String]> {
-		match self {
-			EnumRef::Named(_) => None,
-			EnumRef::Inline(labels) => Some(labels),
-		}
-	}
-}
-
-impl ToSql for EnumRef {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		f.push_str("enum<");
-		match self {
-			EnumRef::Named(name) => write_sql!(f, fmt, "{}", EscapeKwFreeIdent(name)),
-			EnumRef::Inline(labels) => {
-				write_sql!(f, fmt, "{}", Fmt::comma_separated(labels.iter().map(|l| QuoteStr(l))))
-			}
-		}
-		f.push('>');
-	}
-}
-
-impl From<crate::types::PublicEnumRef> for EnumRef {
-	fn from(r: crate::types::PublicEnumRef) -> Self {
-		match r {
-			crate::types::PublicEnumRef::Named(n) => EnumRef::Named(n),
-			crate::types::PublicEnumRef::Inline(l) => EnumRef::Inline(l),
-		}
-	}
-}
-
-impl From<EnumRef> for crate::types::PublicEnumRef {
-	fn from(r: EnumRef) -> Self {
-		match r {
-			EnumRef::Named(n) => crate::types::PublicEnumRef::Named(n),
-			EnumRef::Inline(l) => crate::types::PublicEnumRef::Inline(l),
-		}
-	}
 }
 
 impl ::revision::SerializeRevisioned for Kind {
@@ -452,6 +407,11 @@ impl ::revision::SerializeRevisioned for Kind {
 				38u32.serialize_revisioned(writer)?;
 				v.serialize_revisioned(writer)
 			}
+			Kind::Named(v) => {
+				2u16.serialize_revisioned(writer)?;
+				40u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
 		}
 	}
 }
@@ -508,7 +468,8 @@ fn clone_kind(kind: &Kind) -> Kind {
 		Kind::Time => Kind::Time,
 		Kind::Timestamp => Kind::Timestamp,
 		Kind::Interval => Kind::Interval,
-		Kind::Enum(reference) => Kind::Enum(reference.clone()),
+		Kind::Enum(labels) => Kind::Enum(labels.clone()),
+		Kind::Named(name) => Kind::Named(name.clone()),
 	}
 }
 
@@ -570,6 +531,11 @@ impl Kind {
 					if self.widens_to(arm) {
 						return true;
 					}
+					// `NONE` and `NULL` coerce to themselves alone and unchanged, so an arm of
+					// either changes no value the later arms would take.
+					if matches!(arm, Kind::None | Kind::Null) {
+						continue;
+					}
 					if domain & arm.coerce_domain() != 0 && !self.excludes_literal(arm) {
 						return false;
 					}
@@ -607,9 +573,7 @@ impl Kind {
 			}
 			// An enum is a string, and an inline enum widens to one whose labels include its own.
 			(Kind::Enum(_), Kind::String) => true,
-			(Kind::Enum(EnumRef::Inline(old)), Kind::Enum(EnumRef::Inline(new))) => {
-				old.iter().all(|l| new.contains(l))
-			}
+			(Kind::Enum(old), Kind::Enum(new)) => old.iter().all(|l| new.contains(l)),
 			_ => false,
 		}
 	}
@@ -656,10 +620,9 @@ impl Kind {
 			Kind::String => d::STRING,
 			// A string coerces to a table name.
 			Kind::Table(_) => d::STRING | d::TABLE,
-			Kind::Datetime => d::DATETIME,
-			Kind::Date => d::DATE,
+			// A datetime, a date and a timestamp each coerce from the other two.
+			Kind::Datetime | Kind::Date | Kind::Timestamp => d::DATETIME | d::DATE | d::TIMESTAMP,
 			Kind::Time => d::TIME,
-			Kind::Timestamp => d::TIMESTAMP,
 			Kind::Interval => d::INTERVAL,
 			Kind::Duration => d::DURATION,
 			Kind::Uuid => d::UUID,
@@ -677,39 +640,43 @@ impl Kind {
 			Kind::File(_) => d::FILE,
 			// A string coerces into an enum; membership is judged where the labels are known.
 			Kind::Enum(_) => d::STRING,
+			// A named type admits what its body admits, which only the catalog knows, so it is
+			// taken to admit every value.
+			Kind::Named(_) => d::ALL,
 			Kind::Either(kinds) => kinds.iter().fold(0, |acc, k| acc | k.coerce_domain()),
 		}
 	}
 
-	/// Whether this kind is, or contains, a named enum.
-	pub fn has_named_enum(&self) -> bool {
+	/// Whether this kind is, or contains, a named type.
+	pub fn has_named_type(&self) -> bool {
 		let mut found = false;
-		self.each_named_enum(&mut |_| found = true);
+		self.each_named_type(&mut |_| found = true);
 		found
 	}
 
-	/// Whether this kind is, or contains, the named enum `name`.
-	pub fn references_enum(&self, name: &str) -> bool {
+	/// Whether this kind is, or contains, the named type `name`.
+	pub fn references_type(&self, name: &str) -> bool {
 		let mut found = false;
-		self.each_named_enum(&mut |n| found |= n == name);
+		self.each_named_type(&mut |n| found |= n == name);
 		found
 	}
 
-	/// Calls `f` with the name of each named enum this kind is, or contains.
-	pub fn each_named_enum(&self, f: &mut dyn FnMut(&str)) {
+	/// Calls `f` with the name of each named type this kind is, or contains, at any depth of the
+	/// kind itself. The bodies of the named types are not read.
+	pub fn each_named_type(&self, f: &mut dyn FnMut(&str)) {
 		match self {
-			Kind::Enum(EnumRef::Named(name)) => f(name),
+			Kind::Named(name) => f(name),
 			Kind::Either(kinds) | Kind::Literal(KindLiteral::Array(kinds)) => {
-				kinds.iter().for_each(|k| k.each_named_enum(f))
+				kinds.iter().for_each(|k| k.each_named_type(f))
 			}
-			Kind::Array(inner, _) | Kind::Set(inner, _) => inner.each_named_enum(f),
+			Kind::Array(inner, _) | Kind::Set(inner, _) => inner.each_named_type(f),
 			Kind::Literal(KindLiteral::Object(fields)) => {
-				fields.values().for_each(|k| k.each_named_enum(f))
+				fields.values().for_each(|k| k.each_named_type(f))
 			}
 			Kind::Function(args, ret) => {
-				args.iter().flatten().for_each(|k| k.each_named_enum(f));
+				args.iter().flatten().for_each(|k| k.each_named_type(f));
 				if let Some(ret) = ret {
-					ret.each_named_enum(f);
+					ret.each_named_type(f);
 				}
 			}
 			Kind::Any
@@ -746,7 +713,7 @@ impl Kind {
 			| Kind::Geometry(_)
 			| Kind::Range
 			| Kind::File(_)
-			| Kind::Enum(EnumRef::Inline(_))
+			| Kind::Enum(_)
 			| Kind::Literal(
 				KindLiteral::String(_)
 				| KindLiteral::Integer(_)
@@ -755,6 +722,72 @@ impl Kind {
 				| KindLiteral::Duration(_)
 				| KindLiteral::Bool(_),
 			) => {}
+		}
+	}
+
+	/// This kind with each named type it is, or contains, at any depth of the kind itself,
+	/// replaced by what `f` gives for its name; a named type `f` gives `None` for is kept.
+	pub fn replace_named_types(&self, f: &mut dyn FnMut(&str) -> Option<Kind>) -> Kind {
+		match self {
+			Kind::Named(name) => f(name).unwrap_or_else(|| self.clone()),
+			Kind::Either(kinds) => {
+				Kind::Either(kinds.iter().map(|k| k.replace_named_types(f)).collect())
+			}
+			Kind::Literal(KindLiteral::Array(kinds)) => Kind::Literal(KindLiteral::Array(
+				kinds.iter().map(|k| k.replace_named_types(f)).collect(),
+			)),
+			Kind::Array(inner, len) => Kind::Array(Box::new(inner.replace_named_types(f)), *len),
+			Kind::Set(inner, len) => Kind::Set(Box::new(inner.replace_named_types(f)), *len),
+			Kind::Literal(KindLiteral::Object(fields)) => Kind::Literal(KindLiteral::Object(
+				fields.iter().map(|(key, k)| (key.clone(), k.replace_named_types(f))).collect(),
+			)),
+			Kind::Function(args, ret) => Kind::Function(
+				args.as_ref().map(|args| args.iter().map(|k| k.replace_named_types(f)).collect()),
+				ret.as_ref().map(|ret| Box::new(ret.replace_named_types(f))),
+			),
+			Kind::Any
+			| Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Date
+			| Kind::Time
+			| Kind::Timestamp
+			| Kind::Interval
+			| Kind::Decimal
+			| Kind::BigDecimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32
+			| Kind::Number
+			| Kind::Object
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Record(_)
+			| Kind::Geometry(_)
+			| Kind::Range
+			| Kind::File(_)
+			| Kind::Enum(_)
+			| Kind::Literal(
+				KindLiteral::String(_)
+				| KindLiteral::Integer(_)
+				| KindLiteral::Float(_)
+				| KindLiteral::Decimal(_)
+				| KindLiteral::Duration(_)
+				| KindLiteral::Bool(_),
+			) => self.clone(),
 		}
 	}
 
@@ -843,6 +876,8 @@ impl Kind {
 	/// erring towards running the scan is always safe.
 	pub fn reference_can_target(&self, table: &TableName) -> bool {
 		match self {
+			// What a named type holds is the catalog's to say, which this does not read.
+			Kind::Named(_) => true,
 			Kind::Record(tables) => tables.is_empty() || tables.iter().any(|t| t == table),
 			Kind::Array(inner, _) | Kind::Set(inner, _) => inner.reference_can_target(table),
 			Kind::Either(kinds) => kinds.iter().any(|k| k.reference_can_target(table)),
@@ -908,6 +943,8 @@ impl Kind {
 	/// matched shapes are identical to that method's.
 	pub fn collect_reference_target_tables(&self, out: &mut HashSet<TableName>) -> bool {
 		match self {
+			// What a named type holds is the catalog's to say, which this does not read.
+			Kind::Named(_) => true,
 			Kind::Record(tables) => {
 				if tables.is_empty() {
 					return true;
@@ -982,6 +1019,8 @@ impl Kind {
 	/// Returns true if this type is optional
 	pub fn can_be_none(&self) -> bool {
 		match self {
+			// What a named type holds is the catalog's to say, which this does not read.
+			Kind::Named(_) => true,
 			Kind::None | Kind::Any => true,
 			Kind::Either(x) => x.iter().any(|x| x.can_be_none()),
 			Kind::Null
@@ -1027,6 +1066,8 @@ impl Kind {
 	/// Returns true if this type is a literal, or contains a literal
 	pub fn contains_literal(&self) -> bool {
 		match self {
+			// What a named type holds is the catalog's to say, which this does not read.
+			Kind::Named(_) => false,
 			Kind::Literal(_) => true,
 			Kind::Either(x) => x.iter().any(|x| x.contains_literal()),
 			Kind::Any
@@ -1076,6 +1117,8 @@ impl Kind {
 	/// and union types where every non-none variant permits sub-field access.
 	pub fn allows_sub_fields(&self) -> bool {
 		match self {
+			// What a named type holds is the catalog's to say, which this does not read.
+			Kind::Named(_) => true,
 			Kind::Any | Kind::Object | Kind::Array(..) | Kind::Set(..) => true,
 			Kind::Literal(KindLiteral::Object(_) | KindLiteral::Array(_)) => true,
 			Kind::Either(kinds) => {
@@ -1132,6 +1175,8 @@ impl Kind {
 	// For `array<number> | set<float>` this returns `number | float`.
 	pub fn inner_kind(&self) -> Option<Kind> {
 		match self {
+			// What a named type holds is the catalog's to say, which this does not read.
+			Kind::Named(_) => None,
 			Kind::Any
 			| Kind::None
 			| Kind::Null
@@ -1191,6 +1236,8 @@ impl Kind {
 
 		if !path.is_empty() {
 			match self {
+				// What a named type holds is the catalog's to say, which this does not read.
+				Kind::Named(_) => return true,
 				Kind::Object => return matches!(path.first(), Some(Part::Field(_) | Part::All)),
 				Kind::Either(kinds) => {
 					return kinds
@@ -1257,6 +1304,8 @@ impl Kind {
 		}
 
 		match self {
+			// What a named type holds is the catalog's to say, which this does not read.
+			Kind::Named(_) => false,
 			// Check if the literal matches the kind
 			Kind::Literal(lit) => lit.allows_nested_kind(path, kind),
 			// Check if any of the kinds in the either match the kind
@@ -1562,7 +1611,15 @@ impl ToSql for Kind {
 			Kind::Either(k) => write_sql!(f, fmt, "{}", Fmt::verbar_separated(k)),
 			Kind::Range => f.push_str("range"),
 			Kind::Literal(l) => l.fmt_sql(f, fmt),
-			Kind::Enum(reference) => reference.fmt_sql(f, fmt),
+			Kind::Enum(labels) => {
+				write_sql!(
+					f,
+					fmt,
+					"enum<{}>",
+					Fmt::comma_separated(labels.iter().map(|l| QuoteStr(l)))
+				)
+			}
+			Kind::Named(name) => write_sql!(f, fmt, "{}", EscapeKwFreeIdent(name)),
 			Kind::File(k) => {
 				if k.is_empty() {
 					f.push_str("file");
@@ -1647,7 +1704,8 @@ impl From<crate::types::PublicKind> for Kind {
 				ret.map(|r| Box::new(Kind::from(*r))),
 			),
 			crate::types::PublicKind::File(bucket) => Kind::File(bucket),
-			crate::types::PublicKind::Enum(reference) => Kind::Enum(reference.into()),
+			crate::types::PublicKind::Enum(labels) => Kind::Enum(labels),
+			crate::types::PublicKind::Named(name) => Kind::Named(name),
 			crate::types::PublicKind::Literal(lit) => Kind::Literal(lit.into()),
 			crate::types::PublicKind::I8 => Kind::I8,
 			crate::types::PublicKind::U8 => Kind::U8,
@@ -1707,7 +1765,8 @@ impl From<Kind> for crate::types::PublicKind {
 				ret.map(|r| Box::new((*r).into())),
 			),
 			Kind::File(bucket) => crate::types::PublicKind::File(bucket),
-			Kind::Enum(reference) => crate::types::PublicKind::Enum(reference.into()),
+			Kind::Enum(labels) => crate::types::PublicKind::Enum(labels),
+			Kind::Named(name) => crate::types::PublicKind::Named(name),
 			Kind::Literal(lit) => crate::types::PublicKind::Literal(lit.into()),
 			Kind::I8 => crate::types::PublicKind::I8,
 			Kind::U8 => crate::types::PublicKind::U8,
@@ -2496,6 +2555,8 @@ mod widening_tests {
 			("'a' | 'b'", "'a' | 'b' | 'c'"),
 			("'a' | 'b'", "'c' | 'a' | 'b'"),
 			("1 | 2", "1 | 2 | 3"),
+			("date", "date | datetime"),
+			("mood", "option<mood>"),
 		] {
 			assert!(kind(old).widens_to(&kind(new)), "{old} -> {new}");
 		}
@@ -2506,6 +2567,13 @@ mod widening_tests {
 			("'a' | 'b'", "'a'"),
 			("'a' | 'b' | 'c'", "'a' | 'b'"),
 			("1 | 2", "2"),
+			// The earlier arm coerces the value, since each of these coerces from the others.
+			("date", "datetime | date"),
+			("datetime", "timestamp | datetime"),
+			("timestamp", "date | timestamp"),
+			// A named type may coerce any value, so an arm before the one it widens to may take
+			// it.
+			("int", "mood | int"),
 		] {
 			assert!(!kind(old).widens_to(&kind(new)), "{old} -> {new}");
 		}

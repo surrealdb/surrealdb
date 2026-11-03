@@ -52,6 +52,7 @@ pub mod array;
 pub mod crypto;
 #[cfg(not(feature = "geo"))]
 pub mod geo;
+pub mod sql;
 pub mod string;
 pub mod value;
 pub mod vector;
@@ -334,6 +335,15 @@ pub fn synchronous(
 		"set::remove" => set::remove,
 		"set::slice" => set::slice,
 		"set::union" => set::union,
+		//
+		"sql::fit" => sql::fit,
+		"sql::network_key" => sql::network_key,
+		"sql::network_text" => sql::network_text,
+		"sql::range_contains" => sql::range_contains,
+		"sql::range_lower" => sql::range_lower,
+		"sql::range_overlaps" => sql::range_overlaps,
+		"sql::range_upper" => sql::range_upper,
+		"sql::text" => sql::text,
 		//
 		"string::capitalize" => string::capitalize,
 		"string::concat" => string::concat,
@@ -707,6 +717,11 @@ mod tests {
 
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
+			// The `sql::*` functions are reached only from plans the SQL front ends build; they
+			// have no SurrealQL syntax and no JavaScript binding.
+			if name.starts_with("sql::") {
+				continue;
+			}
 
 			let res = crate::syn::expr_with_capabilities(
 				&format!("{}()", name),

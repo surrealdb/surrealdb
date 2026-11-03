@@ -128,6 +128,88 @@ pub(crate) struct SchemaContext<'a> {
 	pub ns: NamespaceId,
 	pub db: DatabaseId,
 	pub datastore: &'a Arc<Datastore>,
+	/// The kind a value of each type of the database has, by the type's name.
+	pub named_types: HashMap<String, Kind>,
+}
+
+impl SchemaContext<'_> {
+	/// The field definitions of the table `tb`, each with its kind read through the types it
+	/// names ([`resolve_named_kinds`]).
+	pub(crate) async fn table_fields(
+		&self,
+		tb: &TableName,
+	) -> Result<Arc<[FieldDefinition]>, GraphqlError> {
+		let fds = self.tx.all_tb_fields(self.ns, self.db, tb, None).await?;
+		Ok(resolve_field_kinds(fds, &self.named_types))
+	}
+}
+
+/// The kind a value of each type of the database `ns`/`db` has, by the type's name.
+async fn named_type_kinds(
+	tx: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+) -> Result<HashMap<String, Kind>, GraphqlError> {
+	use crate::catalog::providers::TypeProvider;
+	let types = tx.all_db_types(ns, db, None).await?;
+	Ok(types.iter().map(|definition| (definition.name.to_string(), definition.kind())).collect())
+}
+
+/// `kind` with each named type it holds replaced by the kind of its definition in `types`, read
+/// the same way through the types that kind names, so that a field of a type maps to GraphQL as
+/// the type's body does: an alias as what it names, and a union of string labels as the union of
+/// string literals it holds. A union a replacement places in a union is merged into it. A type
+/// `types` does not hold, and one past [`crate::catalog::UNION_ALIAS_DEPTH`] types deep, stays
+/// named and maps to `any`.
+pub(crate) fn resolve_named_kinds(kind: &Kind, types: &HashMap<String, Kind>) -> Kind {
+	fn resolve(kind: &Kind, types: &HashMap<String, Kind>, depth: usize) -> Kind {
+		if let Kind::Either(members) = kind {
+			let mut merged = Vec::with_capacity(members.len());
+			for member in members {
+				let resolved = resolve(member, types, depth);
+				if let Kind::Either(inner) = resolved {
+					merged.extend(inner);
+				} else {
+					merged.push(resolved);
+				}
+			}
+			return Kind::Either(merged);
+		}
+		if let Kind::Array(inner, len) = kind {
+			return Kind::Array(Box::new(resolve(inner, types, depth)), *len);
+		}
+		if let Kind::Set(inner, len) = kind {
+			return Kind::Set(Box::new(resolve(inner, types, depth)), *len);
+		}
+		kind.replace_named_types(&mut |name| {
+			let body = types.get(name)?;
+			let depth = depth.checked_sub(1)?;
+			Some(resolve(body, types, depth))
+		})
+	}
+	resolve(kind, types, crate::catalog::UNION_ALIAS_DEPTH)
+}
+
+/// `fds` with the kind of each field resolved by [`resolve_named_kinds`]. The definitions are
+/// returned as they are when none of their kinds names a type.
+pub(crate) fn resolve_field_kinds(
+	fds: Arc<[FieldDefinition]>,
+	types: &HashMap<String, Kind>,
+) -> Arc<[FieldDefinition]> {
+	if !fds.iter().any(|fd| fd.field_kind.as_ref().is_some_and(Kind::has_named_type)) {
+		return fds;
+	}
+	fds.iter()
+		.map(|fd| {
+			let mut fd = fd.clone();
+			if let Some(kind) = fd.field_kind.as_ref()
+				&& kind.has_named_type()
+			{
+				fd.field_kind = Some(resolve_named_kinds(kind, types));
+			}
+			fd
+		})
+		.collect()
 }
 
 /// Generate a complete GraphQL schema from database metadata.
@@ -237,11 +319,13 @@ pub async fn generate_schema(
 		None => Vec::new(),
 	};
 
+	let named_types = named_type_kinds(&tx, db_def.namespace_id, db_def.database_id).await?;
 	let schema_ctx = SchemaContext {
 		tx: &tx,
 		ns: db_def.namespace_id,
 		db: db_def.database_id,
 		datastore,
+		named_types,
 	};
 
 	let mut mutation_obj: Option<Object> = None;
@@ -281,6 +365,20 @@ pub async fn generate_schema(
 	}
 
 	if let Some(fns) = fns {
+		// A function's argument and return kinds map through the types they name, as a field's do.
+		let fns: Arc<[crate::catalog::FunctionDefinition]> = fns
+			.iter()
+			.map(|fnd| {
+				let mut fnd = fnd.clone();
+				for (_, kind) in &mut fnd.args {
+					*kind = resolve_named_kinds(kind, &schema_ctx.named_types);
+				}
+				if let Some(kind) = fnd.returns.as_mut() {
+					*kind = resolve_named_kinds(kind, &schema_ctx.named_types);
+				}
+				fnd
+			})
+			.collect();
 		query = process_fns(fns, query, &mut types, datastore, &exposed_table_names).await?;
 	}
 
@@ -698,7 +796,7 @@ fn kind_to_type_inner(
 ) -> Result<TypeRef, GraphqlError> {
 	let optional = kind.can_be_none();
 	let out_ty = match kind {
-		Kind::Any => TypeRef::named("any"),
+		Kind::Any | Kind::Named(_) => TypeRef::named("any"),
 		Kind::None => TypeRef::named("none"),
 		Kind::Null => TypeRef::named("null"),
 		Kind::Bool => TypeRef::named(TypeRef::BOOLEAN),
@@ -1183,7 +1281,7 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 ) -> Result<SurValue, GraphqlError> {
 	use crate::syn;
 	match kind {
-		Kind::Any => match val {
+		Kind::Any | Kind::Named(_) => match val {
 			GraphqlValue::String(s) => {
 				use Kind::*;
 				// Detect the temporal/uuid formats the datastore cannot coerce
@@ -2139,6 +2237,58 @@ mod tests {
 	use async_graphql::Number;
 
 	use super::*;
+
+	#[test]
+	fn a_named_type_maps_as_its_body() {
+		let mood = Kind::Either(vec![
+			Kind::Literal(KindLiteral::String("sad".into())),
+			Kind::Literal(KindLiteral::String("ok".into())),
+		]);
+		let named = |name: &str| Kind::Named(name.into());
+		let types: HashMap<String, Kind> = [
+			("mood".to_owned(), mood.clone()),
+			("feeling".to_owned(), named("mood")),
+			("maybe_mood".to_owned(), Kind::Either(vec![Kind::None, Kind::Null, named("mood")])),
+			("small".to_owned(), Kind::Int),
+		]
+		.into_iter()
+		.collect();
+		// An alias of a union is the union; a domain that may be empty is the union beside NONE
+		// and NULL, merged into one union.
+		assert_eq!(resolve_named_kinds(&named("feeling"), &types), mood);
+		let Kind::Either(members) = resolve_named_kinds(&named("maybe_mood"), &types) else {
+			panic!("a domain of a union resolves to a union");
+		};
+		assert_eq!(members.len(), 4);
+		assert_eq!(
+			resolve_named_kinds(&Kind::Array(Box::new(named("small")), None), &types),
+			Kind::Array(Box::new(Kind::Int), None)
+		);
+		assert_eq!(resolve_named_kinds(&named("unknown"), &types), named("unknown"));
+
+		let mut graphql_types = Vec::new();
+		let scope = Some("t_f");
+		let union = kind_to_type_with_enum_prefix(
+			resolve_named_kinds(&named("feeling"), &types),
+			&mut graphql_types,
+			false,
+			scope,
+		)
+		.unwrap();
+		assert_eq!(union.to_string(), "T_F_ENUM_SAD_OR_OK!");
+		let optional = kind_to_type_with_enum_prefix(
+			resolve_named_kinds(&named("maybe_mood"), &types),
+			&mut graphql_types,
+			false,
+			scope,
+		)
+		.unwrap();
+		assert_eq!(optional.to_string(), "T_F_ENUM_SAD_OR_OK");
+		let small =
+			kind_to_type(resolve_named_kinds(&named("small"), &types), &mut graphql_types, false)
+				.unwrap();
+		assert_eq!(small.to_string(), "Int!");
+	}
 
 	#[test]
 	fn either_flattens_nested_variants() {

@@ -260,6 +260,30 @@ pub fn pg_reported_type(declared: &DeclaredSqlType) -> Option<PgReportedType> {
 	Some(report_pg(&scalar, dimensions))
 }
 
+/// The wire type the values of `declared` travel as through PostgreSQL: the type
+/// [`crate::SqlType::of_declared`] names, or else the built-in type [`pg_reported_type`] reports,
+/// as an array for each array dimension. `None` when neither names a wire type, and the values
+/// travel as their kind reads.
+pub fn pg_wire_type(declared: &DeclaredSqlType) -> Option<crate::SqlType> {
+	if let Some(sql_type) = crate::SqlType::of_declared(declared) {
+		return Some(sql_type);
+	}
+	let scalar = match declared.dialect() {
+		SqlTypeDialect::PostgreSql => pg_scalar(declared)?,
+		SqlTypeDialect::MySql => mysql_as_pg(declared)?,
+		SqlTypeDialect::DynamoDb => return None,
+	};
+	// A type `from_pg_oid` does not read, such as `jsonb`, travels as the type its name reads as.
+	let mut sql_type = crate::SqlType::from_pg_oid(scalar.base.oid).or_else(|| {
+		Some(crate::SqlType::from_name(scalar.base.typname))
+			.filter(|sql_type| *sql_type != crate::SqlType::Unknown)
+	})?;
+	for _ in declared.array_dimensions() {
+		sql_type = crate::SqlType::array_of(sql_type)?;
+	}
+	Some(sql_type)
+}
+
 /// The scalar PostgreSQL type a PostgreSQL declaration names.
 fn pg_scalar(declared: &DeclaredSqlType) -> Option<PgScalar> {
 	// An interval's field qualifier is in its base, `interval day to second`, and is read

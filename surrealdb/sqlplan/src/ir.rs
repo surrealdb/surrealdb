@@ -1,7 +1,7 @@
 //! Bound Intermediate Representation (Bound IR) with explicit SQL semantics.
 
 /// A fully bound SQL `SELECT` statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct BoundSelect {
 	/// Common Table Expressions (WITH clause).
 	pub with: Option<BoundWithClause>,
@@ -409,6 +409,10 @@ pub enum BoundLiteral {
 	/// An integer above `i64::MAX` that fits 64 unsigned bits.
 	Unsigned(u64),
 	Float(f64),
+	/// An exact number as written in the source, without digit separators: PostgreSQL's numeric
+	/// constant (`1.5`, `1e3`) and MySQL's exact-value literal (`1.5`). It is read as `numeric`,
+	/// held as a decimal when it fits one and as a bigdecimal otherwise.
+	Numeric(String),
 	String(String),
 	Boolean(bool),
 	Null,

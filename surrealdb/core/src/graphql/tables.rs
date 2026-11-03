@@ -71,7 +71,6 @@ use super::schema::{
 	sanitize_kind_for_exposed_tables, sql_value_to_graphql_value,
 	sql_value_to_graphql_value_with_kind,
 };
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{FieldDefinition, TableDefinition};
 use crate::dbs::Session;
 use crate::expr::field::{Field as SelectField, Selector};
@@ -1442,7 +1441,7 @@ pub async fn process_tbs(
 		if let std::collections::hash_map::Entry::Vacant(e) =
 			relation_table_fds.entry(rel.table_name.clone())
 		{
-			let fds = ctx.tx.all_tb_fields(ctx.ns, ctx.db, &rel.table_name, None).await?;
+			let fds = ctx.table_fields(&rel.table_name).await?;
 			e.insert(fds);
 		}
 	}
@@ -1543,7 +1542,7 @@ pub async fn process_tbs(
 	for tb in tbs.iter() {
 		trace!("Adding table: {}", tb.name);
 		let tb_name = tb.name.clone();
-		let fds = ctx.tx.all_tb_fields(ctx.ns, ctx.db, &tb_name, None).await?;
+		let fds = ctx.table_fields(&tb_name).await?;
 		table_fields.insert(tb_name, Arc::clone(&fds));
 
 		// Build and register the table's type system. We need the relation
@@ -2111,6 +2110,7 @@ fn filter_from_type(
 			filter_impl!(filter, id_ty, "contains");
 		}
 		Kind::Any
+		| Kind::Named(_)
 		| Kind::None
 		| Kind::Null
 		| Kind::Bool

@@ -606,6 +606,7 @@ fn declared(kind: &crate::expr::Kind) -> (Kind, Option<Kind>, u8, String) {
 			}
 		}
 		K::Any
+		| K::Named(_)
 		| K::Number
 		| K::Object
 		| K::Regex

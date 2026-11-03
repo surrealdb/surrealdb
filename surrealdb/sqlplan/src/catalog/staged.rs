@@ -22,7 +22,7 @@ use surrealdb_expr::expr::reference::ReferenceDeleteStrategy;
 use surrealdb_expr::expr::statements::AlterStatement;
 use surrealdb_expr::expr::statements::alter::{AlterDefault, AlterFieldStatement, AlterKind};
 use surrealdb_expr::expr::statements::define::{DefineDefault, DefineKind, DefineStatement};
-use surrealdb_expr::expr::statements::remove::RemoveStatement;
+use surrealdb_expr::expr::statements::remove::{RemoveStatement, SqlTypeObject};
 use surrealdb_expr::expr::{Expr, Function, Literal};
 
 use super::{
@@ -37,6 +37,9 @@ pub struct StagedCatalog<'a> {
 	inner: &'a dyn BinderCatalog,
 	/// The shapes of the staged columns, by (table, column).
 	shapes: HashMap<(String, String), ColumnShape>,
+	/// The SQL type each staged column is declared with, by (table, column), for the staged
+	/// columns that declare one.
+	declared: HashMap<(String, String), crate::declared_type::DeclaredSqlType>,
 	/// The staged columns whose definition applies only if the column does not exist.
 	tentative: HashSet<(String, String)>,
 	/// Tables a staged statement creates or removes: the wrapped catalog describes none of their
@@ -55,6 +58,9 @@ pub struct StagedCatalog<'a> {
 	/// The columns whose foreign key and sequence a staged statement defines or removes, which
 	/// replace what the wrapped catalog lists for them.
 	touched: HashSet<(String, String)>,
+	/// The columns of tables the wrapped catalog describes that a staged statement alters without
+	/// changing their kind or declared SQL type, whose type the wrapped catalog still answers.
+	retained_types: HashSet<(String, String)>,
 	/// The indexes, by (table, name), that a staged statement defines or removes.
 	replaced_indexes: HashSet<(String, String)>,
 	/// The columns that hold NULL in a row written without them, for each `SCHEMAFULL` table a
@@ -76,10 +82,6 @@ pub struct StagedCatalog<'a> {
 	/// The domains and composite types as the staged statements leave them, once one of them
 	/// defines or removes one; until then the wrapped catalog answers.
 	user_types: Option<StagedUserTypes>,
-	/// The columns a staged statement defines, alters or removes, by (table, column): the domain
-	/// each is declared with and how, or `None` for one that holds no domain or is removed. These
-	/// replace what the wrapped catalog lists for the column.
-	domain_columns: HashMap<(String, String), Option<(String, crate::catalog::DomainColumn)>>,
 }
 
 /// The domains and composite types of a [`StagedCatalog`].
@@ -99,6 +101,7 @@ impl<'a> StagedCatalog<'a> {
 		Self {
 			inner,
 			shapes: HashMap::new(),
+			declared: HashMap::new(),
 			tentative: HashSet::new(),
 			own: HashSet::new(),
 			created: HashSet::new(),
@@ -107,49 +110,14 @@ impl<'a> StagedCatalog<'a> {
 			indexes: HashMap::new(),
 			sequences: HashMap::new(),
 			touched: HashSet::new(),
+			retained_types: HashSet::new(),
 			replaced_indexes: HashSet::new(),
 			nulls: HashMap::new(),
 			defaults: HashMap::new(),
 			changed: HashSet::new(),
 			enums: None,
 			user_types: None,
-			domain_columns: HashMap::new(),
 		}
-	}
-
-	/// Note the domain, if any, that the staged definition of `column` of `table` is declared with.
-	fn stage_domain_column(
-		&mut self,
-		table: &str,
-		column: &str,
-		field: &surrealdb_expr::expr::statements::define::DefineFieldStatement,
-	) {
-		use surrealdb_expr::expr::statements::define::SqlTypeDialect;
-		use surrealdb_expr::expr::statements::define::declared_type::DeclaredSqlType;
-		let declared = field
-			.sql_type
-			.as_ref()
-			.filter(|sql_type| sql_type.dialect == SqlTypeDialect::PostgreSql)
-			.and_then(|sql_type| DeclaredSqlType::from_sql_type(sql_type).ok());
-		let domain = declared.and_then(|declared| {
-			let base = declared.base();
-			self.domain_type(base).or_else(|| self.domain_type(&base.to_lowercase()))
-		});
-		let entry = domain.map(|domain| {
-			(
-				domain.name,
-				crate::catalog::DomainColumn {
-					table: table.to_owned(),
-					column: column.to_owned(),
-					not_null: field.assert.as_ref().is_some_and(leads_with_not_null),
-					default: match &field.default {
-						DefineDefault::Set(default) => Some(default.clone()),
-						DefineDefault::None | DefineDefault::Always(_) => None,
-					},
-				},
-			)
-		});
-		self.domain_columns.insert((table.to_owned(), column.to_owned()), entry);
 	}
 
 	/// The domains and composite types as they stand, copied from the wrapped catalog on first
@@ -162,65 +130,48 @@ impl<'a> StagedCatalog<'a> {
 		})
 	}
 
-	/// Stage the definition of a domain or composite type. A name already defined keeps its
-	/// definition and id unless the statement overwrites it.
-	fn stage_user_type(
-		&mut self,
-		stmt: &surrealdb_expr::expr::statements::define::DefineUserTypeStatement,
-	) {
-		use surrealdb_expr::expr::statements::define::UserTypeBody;
+	/// Stage the definition of a type. A name already defined keeps its definition and id unless
+	/// the statement overwrites it.
+	fn stage_type(&mut self, stmt: &surrealdb_expr::expr::statements::define::DefineTypeStatement) {
 		let name = stmt.name.as_str().to_owned();
+		self.staged_enums();
+		let enums = self.enums.take().unwrap_or_default();
 		let types = self.staged_user_types();
-		let existing = types
-			.domains
+		let existing = enums
 			.iter()
-			.map(|d| (d.name.as_str(), d.id))
+			.map(|e| (e.name.as_str(), e.id))
+			.chain(types.domains.iter().map(|d| (d.name.as_str(), d.id)))
 			.chain(types.composites.iter().map(|c| (c.name.as_str(), c.id)))
 			.find(|(n, _)| *n == name)
 			.map(|(_, id)| id);
-		if existing.is_some() && stmt.kind != DefineKind::Overwrite {
-			return;
-		}
-		let id = existing.unwrap_or_else(|| {
-			types
-				.domains
-				.iter()
-				.map(|d| d.id + 1)
-				.chain(types.composites.iter().map(|c| c.id + 1))
-				.max()
-				.unwrap_or(0)
-		});
-		types.domains.retain(|d| d.name != name);
-		types.composites.retain(|c| c.name != name);
-		match &stmt.body {
-			UserTypeBody::Domain(domain) => types.domains.push(crate::catalog::DomainType {
-				name,
-				id,
-				base: domain.base.clone(),
-				base_type: domain.base_type.clone(),
-				not_null: domain.not_null,
-				default: domain.default.clone(),
-				checks: domain
-					.checks
+		let mut enums = enums;
+		if existing.is_none() || stmt.kind == DefineKind::Overwrite {
+			let id = existing.unwrap_or_else(|| {
+				enums
 					.iter()
-					.map(|check| crate::catalog::DomainCheck {
-						name: check.name.clone(),
-						check: check.check.clone(),
-					})
-					.collect(),
-			}),
-			UserTypeBody::Composite(composite) => {
-				types.composites.push(crate::catalog::CompositeType {
-					name,
-					id,
-					fields: composite
-						.fields
-						.iter()
-						.map(|field| (field.name.clone(), field.kind.clone()))
-						.collect(),
-				})
+					.map(|e| e.id + 1)
+					.chain(types.domains.iter().map(|d| d.id + 1))
+					.chain(types.composites.iter().map(|c| c.id + 1))
+					.max()
+					.unwrap_or(0)
+			});
+			enums.retain(|e| e.name != name);
+			types.domains.retain(|d| d.name != name);
+			types.composites.retain(|c| c.name != name);
+			match crate::catalog::UserType::of_definition(
+				&name,
+				id,
+				&stmt.body,
+				&stmt.asserts,
+				stmt.default.as_ref(),
+				stmt.sql_type.as_deref(),
+			) {
+				crate::catalog::UserType::Enum(declared) => enums.push(declared),
+				crate::catalog::UserType::Domain(domain) => types.domains.push(domain),
+				crate::catalog::UserType::Composite(composite) => types.composites.push(composite),
 			}
 		}
+		self.enums = Some(enums);
 	}
 
 	/// Record what the lowered statements `exprs` declare, for the statements lowered after them.
@@ -229,7 +180,7 @@ impl<'a> StagedCatalog<'a> {
 			if let Expr::Define(define) = expr {
 				self.stage_define(define);
 			} else if let Expr::Alter(alter) = expr
-				&& let AlterStatement::Enum(stmt) = alter.as_ref()
+				&& let AlterStatement::Type(stmt) = alter.as_ref()
 			{
 				self.stage_alter_enum(stmt);
 			} else if let Expr::Alter(alter) = expr
@@ -251,16 +202,16 @@ impl<'a> StagedCatalog<'a> {
 
 	fn stage_alter_enum(
 		&mut self,
-		stmt: &surrealdb_expr::expr::statements::alter::AlterEnumStatement,
+		stmt: &surrealdb_expr::expr::statements::alter::AlterTypeStatement,
 	) {
-		use surrealdb_expr::expr::statements::alter::{AlterEnumAction, EnumPosition};
+		use surrealdb_expr::expr::statements::alter::{AlterTypeAction, EnumPosition};
 		let name = stmt.name.as_str().to_owned();
 		let Some(en) = self.staged_enums().iter_mut().find(|e| e.name == name) else {
 			return;
 		};
 		for action in &stmt.actions {
 			match action {
-				AlterEnumAction::AddValue {
+				AlterTypeAction::AddValue {
 					value,
 					position,
 					..
@@ -272,7 +223,7 @@ impl<'a> StagedCatalog<'a> {
 						None => None,
 					},
 				),
-				AlterEnumAction::RenameValue {
+				AlterTypeAction::RenameValue {
 					from,
 					to,
 				} => en.rename_label(from, to),
@@ -281,19 +232,8 @@ impl<'a> StagedCatalog<'a> {
 	}
 
 	fn stage_define(&mut self, define: &DefineStatement) {
-		if let DefineStatement::Enum(stmt) = define {
-			let name = stmt.name.as_str().to_owned();
-			let enums = self.staged_enums();
-			let existing = enums.iter().find(|e| e.name == name).map(|e| e.id);
-			if existing.is_none() || stmt.kind == DefineKind::Overwrite {
-				let id =
-					existing.unwrap_or_else(|| enums.iter().map(|e| e.id + 1).max().unwrap_or(0));
-				let declared = crate::catalog::EnumType::declared(&name, id, &stmt.labels);
-				enums.retain(|e| e.name != name);
-				enums.push(declared);
-			}
-		} else if let DefineStatement::UserType(stmt) = define {
-			self.stage_user_type(stmt);
+		if let DefineStatement::Type(stmt) = define {
+			self.stage_type(stmt);
 		} else if let DefineStatement::Table(table) = define {
 			if let Expr::Table(name) = &table.name
 				&& (table.kind != DefineKind::IfNotExists || self.is_absent(name.as_str()))
@@ -320,11 +260,19 @@ impl<'a> StagedCatalog<'a> {
 			);
 			let key = (table.to_owned(), column.to_owned());
 			let defined_before = self.shapes.contains_key(&key);
-			if field.kind == DefineKind::IfNotExists {
+			// A column a staged statement removed is absent, so a definition that applies only
+			// when the column does not exist applies.
+			let dropped = self.is_dropped(table, column);
+			if field.kind == DefineKind::IfNotExists && !dropped {
 				self.tentative.insert(key.clone());
 			} else {
 				self.tentative.remove(&key);
 			}
+			match field.sql_type.as_ref().and_then(declared_of) {
+				Some(declared) => self.declared.insert(key.clone(), declared),
+				None => self.declared.remove(&key),
+			};
+			self.retained_types.remove(&key);
 			self.shapes.insert(key, shape);
 			// A definition that does nothing when the column exists may leave what the wrapped
 			// catalog says of the column as it is.
@@ -335,7 +283,8 @@ impl<'a> StagedCatalog<'a> {
 			// statement of the request defined as it is. On a table the wrapped catalog describes,
 			// only a definition that runs adds a column.
 			let own = self.own.contains(table);
-			let applies = field.kind != DefineKind::IfNotExists || (own && !defined_before);
+			let applies =
+				field.kind != DefineKind::IfNotExists || dropped || (own && !defined_before);
 			if applies && (!own || self.nulls.contains_key(table)) {
 				let holds_null = column != "id"
 					&& kind_admits_null(kind)
@@ -385,7 +334,6 @@ impl<'a> StagedCatalog<'a> {
 		column: &str,
 		field: &surrealdb_expr::expr::statements::define::DefineFieldStatement,
 	) {
-		self.stage_domain_column(table, column, field);
 		self.touched.insert((table.to_owned(), column.to_owned()));
 		let keys = self.keys.entry(table.to_owned()).or_default();
 		keys.retain(|key| key.column != column);
@@ -512,13 +460,6 @@ impl<'a> StagedCatalog<'a> {
 			return;
 		};
 		let key = (table.to_owned(), column.to_owned());
-		if let Some(Some((_, domain_column))) = self.domain_columns.get_mut(&key) {
-			match &field.default {
-				AlterDefault::Set(default) => domain_column.default = Some(default.clone()),
-				AlterDefault::Drop | AlterDefault::Always(_) => domain_column.default = None,
-				AlterDefault::None => {}
-			}
-		}
 		self.forget_null_column(table, column);
 		self.stage_reference(table, column, field);
 		// A column the catalog describes changes from the shape it has there, which an alteration
@@ -527,13 +468,34 @@ impl<'a> StagedCatalog<'a> {
 			let Some(shape) = self.inner.column_shape(None, table, column) else {
 				return;
 			};
+			if let Some(declared) = self.inner.column_sql_type(None, table, column) {
+				self.declared.insert(key.clone(), declared);
+			}
 			self.shapes.insert(key.clone(), shape);
+			self.retained_types.insert(key.clone());
+		}
+		if !matches!(field.kind, AlterKind::None) || !matches!(field.sql_type, AlterKind::None) {
+			self.retained_types.remove(&key);
 		}
 		let Some(shape) = self.shapes.get_mut(&key) else {
 			return;
 		};
 		if let AlterKind::Set(kind) = &field.kind {
 			shape.kind = Some(kind.clone());
+		}
+		match &field.sql_type {
+			AlterKind::Set(sql_type) => match declared_of(sql_type) {
+				Some(declared) => {
+					self.declared.insert(key.clone(), declared);
+				}
+				None => {
+					self.declared.remove(&key);
+				}
+			},
+			AlterKind::Drop => {
+				self.declared.remove(&key);
+			}
+			AlterKind::None => {}
 		}
 		match &field.assert {
 			AlterKind::Set(assert) => {
@@ -550,13 +512,30 @@ impl<'a> StagedCatalog<'a> {
 	}
 
 	fn stage_remove(&mut self, remove: &RemoveStatement) {
-		if let RemoveStatement::Enum(stmt) = remove {
+		if let RemoveStatement::Type(stmt) = remove {
+			// A removal that names the type as another kind of object is refused when it runs,
+			// so it leaves the type in place.
 			let name = stmt.name.as_str().to_owned();
-			self.staged_enums().retain(|e| e.name != name);
-		} else if let RemoveStatement::UserType(_) = remove {
-			// The removal of a user type is refused when the request runs while a column uses the
-			// type, so the type stays known to the statements lowered after it: a later `DROP TYPE`
-			// of the name removes the composite type, not an enum.
+			// The removal of a type something still names is refused when it runs, so the
+			// statements after it read the type as it stands.
+			if self.names_type(&name) {
+				return;
+			}
+			let (removes_types, removes_domains) = match stmt.object {
+				None => (true, true),
+				Some(SqlTypeObject::Type) => (true, false),
+				Some(SqlTypeObject::Domain) => (false, true),
+			};
+			if removes_types {
+				self.staged_enums().retain(|e| e.name != name);
+			}
+			let types = self.staged_user_types();
+			if removes_domains {
+				types.domains.retain(|d| d.name != name);
+			}
+			if removes_types {
+				types.composites.retain(|c| c.name != name);
+			}
 		} else if let RemoveStatement::Table(table) = remove {
 			if let Expr::Table(name) = &table.name {
 				self.forget(name.as_str());
@@ -567,9 +546,11 @@ impl<'a> StagedCatalog<'a> {
 				(table_name(&field.table_name), column_name(&field.name))
 		{
 			self.shapes.remove(&(table.to_owned(), column.to_owned()));
+			self.declared.remove(&(table.to_owned(), column.to_owned()));
+			self.tentative.remove(&(table.to_owned(), column.to_owned()));
+			self.retained_types.remove(&(table.to_owned(), column.to_owned()));
 			self.forget_null_column(table, column);
 			self.touched.insert((table.to_owned(), column.to_owned()));
-			self.domain_columns.insert((table.to_owned(), column.to_owned()), None);
 			if let Some(keys) = self.keys.get_mut(table) {
 				keys.retain(|key| key.column != column);
 			}
@@ -598,11 +579,19 @@ impl<'a> StagedCatalog<'a> {
 		self.tentative.contains(&(table.to_owned(), column.to_owned()))
 	}
 
+	/// Whether a staged statement removed `column` of `table` and none defines it again: the
+	/// column is gone, whatever the wrapped catalog says of it.
+	fn is_dropped(&self, table: &str, column: &str) -> bool {
+		let key = (table.to_owned(), column.to_owned());
+		self.touched.contains(&key) && !self.shapes.contains_key(&key)
+	}
+
 	/// Drop what is known of the columns of `table`, which a staged statement creates anew or
 	/// removes.
 	fn forget(&mut self, table: &str) {
 		self.shapes.retain(|(name, _), _| name != table);
-		self.domain_columns.retain(|(name, _), _| name != table);
+		self.declared.retain(|(name, _), _| name != table);
+		self.retained_types.retain(|(name, _)| name != table);
 		self.tentative.retain(|(name, _)| name != table);
 		self.keys.remove(table);
 		self.indexes.remove(table);
@@ -626,26 +615,72 @@ impl<'a> StagedCatalog<'a> {
 		self.changed.insert((table.to_owned(), column.to_owned()));
 	}
 }
-
-/// Whether a field's assertion leads with the column's own `NOT NULL`, alone or as the first
-/// operand of the `AND` that joins a domain's checks to it.
-fn leads_with_not_null(assert: &Expr) -> bool {
-	if crate::lower::ddl::is_not_null_assertion(assert) {
-		return true;
-	}
-	if let Expr::Binary {
-		left,
-		op: surrealdb_expr::expr::operator::BinaryOperator::And,
-		..
-	} = assert
-	{
-		leads_with_not_null(left)
-	} else {
-		false
-	}
-}
-
 impl StagedCatalog<'_> {
+	/// The description of the table `name`, which a staged statement creates.
+	/// Whether a column of a table, a domain or a composite type names the type `name`.
+	fn names_type(&self, name: &str) -> bool {
+		use crate::catalog::BinderCatalog;
+		let staged = self
+			.shapes
+			.values()
+			.any(|shape| shape.kind.as_ref().is_some_and(|kind| kind.references_type(name)));
+		// The tables the wrapped catalog lists, asked for as constraint tables so that a catalog
+		// that records what is asked of it lists them for the lowering that follows. A column a
+		// staged statement removed names nothing; one whose shape is not known names the type
+		// when the listing declares it with the type as its domain or composite type.
+		let held = self.inner.constraint_tables().into_iter().any(|table| {
+			!self.own.contains(&table.name)
+				&& table.columns.iter().any(|column| {
+					match self.column_shape(table.schema.as_deref(), &table.name, &column.name) {
+						Some(shape) => shape.kind.is_some_and(|kind| kind.references_type(name)),
+						None => {
+							!self.is_dropped(&table.name, &column.name)
+								&& (column.domain.as_deref() == Some(name)
+									|| column.composite.as_deref() == Some(name))
+						}
+					}
+				})
+		});
+		staged
+			|| held || self
+			.domain_types()
+			.iter()
+			.any(|domain| domain.name != name && domain.base.references_type(name))
+			|| self.composite_types().iter().any(|composite| {
+				composite.name != name
+					&& composite.fields.iter().any(|(_, kind)| kind.references_type(name))
+			})
+	}
+
+	fn created_table(&self, name: &String) -> TableSchema {
+		let mut columns: Vec<(&str, &ColumnShape)> = self
+			.shapes
+			.iter()
+			.filter(|((table, _), _)| table == name)
+			.map(|((_, column), shape)| (column.as_str(), shape))
+			.filter(|(column, _)| *column != "id")
+			.collect();
+		columns.sort_by_key(|(column, _)| *column);
+		let sequence = |column: &str| self.sequences.get(&(name.clone(), column.to_owned()));
+		let mut id = ColumnInfo::new("id", 0);
+		id.sequence = sequence("id").cloned();
+		let mut infos = vec![id];
+		for (ordinal, (column, shape)) in columns.into_iter().enumerate() {
+			let mut info = ColumnInfo::new(column, ordinal + 1);
+			info.is_nullable = shape.assert != ColumnAssert::NotNull
+				&& shape.kind.as_ref().is_none_or(kind_admits_none);
+			info.sequence = sequence(column).cloned();
+			info.data_type = shape.kind.as_ref().and_then(kind_type_name);
+			info.declared = self.declared.get(&(name.clone(), column.to_owned())).cloned();
+			infos.push(info);
+		}
+		TableSchema::new(name.as_str(), infos)
+			.with_schema("public")
+			.with_indexes(self.indexes.get(name).cloned().unwrap_or_default())
+			.with_foreign_keys(self.keys.get(name).cloned().unwrap_or_default())
+			.with_view_over(self.view_over.get(name).cloned().unwrap_or_default())
+	}
+
 	/// `listed`, the tables the catalog lists, with the staged creations and removals applied. A
 	/// catalog that lists no table (one that is not allowed to, or that only records) stays empty.
 	fn listed(&self, mut listed: Vec<TableSchema>) -> Vec<TableSchema> {
@@ -680,9 +715,12 @@ impl StagedCatalog<'_> {
 				{
 					column.is_nullable = shape.assert != ColumnAssert::NotNull
 						&& shape.kind.as_ref().is_none_or(kind_admits_none);
-					if let Some(kind) = &shape.kind {
+					if let Some(kind) = &shape.kind
+						&& !self.retained_types.contains(&key)
+					{
 						column.data_type = kind_type_name(kind);
 					}
+					column.declared = self.declared.get(&key).cloned();
 				}
 			}
 			let mut added: Vec<(&String, &ColumnShape)> = self
@@ -700,6 +738,7 @@ impl StagedCatalog<'_> {
 					&& shape.kind.as_ref().is_none_or(kind_admits_none);
 				info.sequence = self.sequences.get(&(name.clone(), column.clone())).cloned();
 				info.data_type = shape.kind.as_ref().and_then(kind_type_name);
+				info.declared = self.declared.get(&(name.clone(), column.clone())).cloned();
 				table.columns.push(info);
 			}
 			for (ordinal, column) in table.columns.iter_mut().enumerate() {
@@ -709,33 +748,7 @@ impl StagedCatalog<'_> {
 		let mut created: Vec<&String> = self.created.iter().collect();
 		created.sort();
 		for name in created {
-			let mut columns: Vec<(&str, &ColumnShape)> = self
-				.shapes
-				.iter()
-				.filter(|((table, _), _)| table == name)
-				.map(|((_, column), shape)| (column.as_str(), shape))
-				.filter(|(column, _)| *column != "id")
-				.collect();
-			columns.sort_by_key(|(column, _)| *column);
-			let sequence = |column: &str| self.sequences.get(&(name.clone(), column.to_owned()));
-			let mut id = ColumnInfo::new("id", 0);
-			id.sequence = sequence("id").cloned();
-			let mut infos = vec![id];
-			for (ordinal, (column, shape)) in columns.into_iter().enumerate() {
-				let mut info = ColumnInfo::new(column, ordinal + 1);
-				info.is_nullable = shape.assert != ColumnAssert::NotNull
-					&& shape.kind.as_ref().is_none_or(kind_admits_none);
-				info.sequence = sequence(column).cloned();
-				info.data_type = shape.kind.as_ref().and_then(kind_type_name);
-				infos.push(info);
-			}
-			listed.push(
-				TableSchema::new(name.as_str(), infos)
-					.with_schema("public")
-					.with_indexes(self.indexes.get(name).cloned().unwrap_or_default())
-					.with_foreign_keys(self.keys.get(name).cloned().unwrap_or_default())
-					.with_view_over(self.view_over.get(name).cloned().unwrap_or_default()),
-			);
+			listed.push(self.created_table(name));
 		}
 		listed
 	}
@@ -800,28 +813,6 @@ impl BinderCatalog for StagedCatalog<'_> {
 		}
 	}
 
-	fn domain_columns(&self, name: &str) -> Vec<crate::catalog::DomainColumn> {
-		let mut columns: Vec<_> = self
-			.inner
-			.domain_columns(name)
-			.into_iter()
-			.filter(|column| {
-				!self.own.contains(&column.table)
-					&& !self
-						.domain_columns
-						.contains_key(&(column.table.clone(), column.column.clone()))
-			})
-			.collect();
-		columns.extend(
-			self.domain_columns
-				.values()
-				.flatten()
-				.filter(|(domain, _)| domain == name)
-				.map(|(_, column)| column.clone()),
-		);
-		columns
-	}
-
 	fn get_table(&self, schema: Option<&str>, name: &str) -> Option<TableSchema> {
 		self.inner.get_table(schema, name)
 	}
@@ -843,7 +834,49 @@ impl BinderCatalog for StagedCatalog<'_> {
 	}
 
 	fn column_type(&self, schema: Option<&str>, table: &str, column: &str) -> crate::SqlType {
-		self.inner.column_type(schema, table, column)
+		let key = (table.to_owned(), column.to_owned());
+		let staged = schema.is_none_or(|schema| schema == "public")
+			&& (self.created.contains(table)
+				|| (self.shapes.contains_key(&key)
+					&& !self.tentative.contains(&key)
+					&& !self.retained_types.contains(&key)));
+		if !staged {
+			if schema.is_none_or(|schema| schema == "public") && self.is_dropped(table, column) {
+				return crate::SqlType::Unknown;
+			}
+			return self.inner.column_type(schema, table, column);
+		}
+		if let Some(ty) = self.declared.get(&key).and_then(crate::SqlType::of_declared) {
+			return ty;
+		}
+		self.shapes
+			.get(&key)
+			.and_then(|shape| shape.kind.as_ref())
+			.and_then(kind_type_name)
+			.map(|name| crate::SqlType::from_name(&name))
+			.unwrap_or(crate::SqlType::Unknown)
+	}
+
+	fn column_sql_type(
+		&self,
+		schema: Option<&str>,
+		table: &str,
+		column: &str,
+	) -> Option<crate::declared_type::DeclaredSqlType> {
+		let key = (table.to_owned(), column.to_owned());
+		if schema.is_some_and(|schema| schema != "public")
+			|| self.tentative.contains(&key)
+			|| self.retained_types.contains(&key)
+		{
+			return self.inner.column_sql_type(schema, table, column);
+		}
+		if self.created.contains(table) || self.shapes.contains_key(&key) {
+			return self.declared.get(&key).cloned();
+		}
+		if self.own.contains(table) || self.is_dropped(table, column) {
+			return None;
+		}
+		self.inner.column_sql_type(schema, table, column)
 	}
 
 	fn defers_schema_checks(&self) -> bool {
@@ -874,7 +907,7 @@ impl BinderCatalog for StagedCatalog<'_> {
 		}
 		match self.column_shape(schema, table, column) {
 			Some(shape) => shape.kind.as_ref().and_then(link_target).map(str::to_owned),
-			None if self.own.contains(table) => None,
+			None if self.own.contains(table) || self.is_dropped(table, column) => None,
 			None => self.inner.link_table(schema, table, column),
 		}
 	}
@@ -891,8 +924,10 @@ impl BinderCatalog for StagedCatalog<'_> {
 			return Some(held);
 		}
 		match self.column_shape(schema, table, column) {
-			Some(shape) => shape.kind.as_ref().and_then(crate::catalog::EnumColumn::of_kind),
-			None if self.own.contains(table) => None,
+			Some(shape) => shape.kind.as_ref().and_then(|kind| {
+				crate::catalog::EnumColumn::of_kind(kind, &|name| self.enum_type(name).is_some())
+			}),
+			None if self.own.contains(table) || self.is_dropped(table, column) => None,
 			None => self.inner.column_enum(schema, table, column),
 		}
 	}
@@ -905,7 +940,7 @@ impl BinderCatalog for StagedCatalog<'_> {
 		}
 		match self.column_shape(schema, table, column) {
 			Some(shape) => shape.kind.as_ref().is_some_and(kind_admits_none),
-			None if self.own.contains(table) => false,
+			None if self.own.contains(table) || self.is_dropped(table, column) => false,
 			None => self.inner.link_admits_none(schema, table, column),
 		}
 	}
@@ -967,8 +1002,15 @@ impl BinderCatalog for StagedCatalog<'_> {
 		}
 		match self.shapes.get(&(table.to_owned(), column.to_owned())) {
 			Some(shape) => Some(shape.clone()),
-			None if self.own.contains(table) => None,
+			None if self.own.contains(table) || self.is_dropped(table, column) => None,
 			None => self.inner.column_shape(schema, table, column),
 		}
 	}
+}
+
+/// The SQL type `sql_type` declares, as the catalog describes a column's.
+fn declared_of(
+	sql_type: &surrealdb_expr::expr::statements::define::SqlType,
+) -> Option<crate::declared_type::DeclaredSqlType> {
+	crate::declared_type::DeclaredSqlType::parse(sql_type.dialect, &sql_type.text).ok()
 }

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use surrealdb_expr::expr::{EnumRef, Expr, Kind};
+use surrealdb_expr::expr::{Expr, Kind};
 
 use crate::declared_type::DeclaredSqlType;
 
@@ -314,7 +314,8 @@ pub fn link_target(kind: &Kind) -> Option<&str> {
 		| Kind::Range
 		| Kind::Literal(_)
 		| Kind::File(_)
-		| Kind::Enum(_) => None,
+		| Kind::Enum(_)
+		| Kind::Named(_) => None,
 	}
 }
 
@@ -340,8 +341,8 @@ pub(crate) fn kind_type_name(kind: &Kind) -> Option<String> {
 		Kind::String => "text",
 		Kind::Uuid => "uuid",
 		Kind::Object => "jsonb",
-		Kind::Enum(EnumRef::Named(_)) => "USER-DEFINED",
-		Kind::Enum(EnumRef::Inline(_)) => "enum",
+		Kind::Named(_) => "USER-DEFINED",
+		Kind::Enum(_) => "enum",
 		// Every dimension of an array is named alike, as PostgreSQL names them.
 		Kind::Array(element, _) => {
 			let mut scalar = element.as_ref();
@@ -395,6 +396,16 @@ pub enum EnumShape {
 	Array,
 }
 
+/// The enum whose labels a column holds: a type of the database whose body is a union of labels,
+/// by name, or a column-scoped enum, its labels inline.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum EnumRef {
+	/// A type of the database whose body is a union of labels.
+	Named(String),
+	/// A column-scoped enum, its labels in declaration order.
+	Inline(Vec<String>),
+}
+
 /// A column that holds the labels of an enum, as its declared kind says.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EnumColumn {
@@ -406,12 +417,23 @@ pub struct EnumColumn {
 
 impl EnumColumn {
 	/// The enum a field of `kind` holds labels of: the enum itself, a set or an array of it, any
-	/// of them besides `NONE` and `NULL`. `None` for every other kind, including a union of
-	/// several enums.
-	pub fn of_kind(kind: &Kind) -> Option<Self> {
+	/// of them besides `NONE` and `NULL`. A named type is an enum when `is_enum` says it is one.
+	/// `None` for every other kind, including a union of several enums.
+	pub fn of_kind(kind: &Kind, is_enum: &dyn Fn(&str) -> bool) -> Option<Self> {
+		let reference = |kind: &Kind| {
+			if let Kind::Enum(labels) = kind {
+				Some(EnumRef::Inline(labels.clone()))
+			} else if let Kind::Named(name) = kind
+				&& is_enum(name)
+			{
+				Some(EnumRef::Named(name.clone()))
+			} else {
+				None
+			}
+		};
 		match kind {
-			Kind::Enum(reference) => Some(Self {
-				reference: reference.clone(),
+			Kind::Enum(_) | Kind::Named(_) => Some(Self {
+				reference: reference(kind)?,
 				shape: EnumShape::Scalar,
 			}),
 			Kind::Set(element, _) | Kind::Array(element, _) => {
@@ -420,14 +442,10 @@ impl EnumColumn {
 				} else {
 					EnumShape::Array
 				};
-				if let Kind::Enum(reference) = &**element {
-					Some(Self {
-						reference: reference.clone(),
-						shape,
-					})
-				} else {
-					None
-				}
+				Some(Self {
+					reference: reference(element)?,
+					shape,
+				})
 			}
 			Kind::Either(kinds) => {
 				let mut found = None;
@@ -438,7 +456,7 @@ impl EnumColumn {
 					if found.is_some() {
 						return None;
 					}
-					found = Some(Self::of_kind(kind)?);
+					found = Some(Self::of_kind(kind, is_enum)?);
 				}
 				found
 			}
@@ -609,19 +627,6 @@ pub struct DomainCheck {
 	pub check: Expr,
 }
 
-/// A column declared with a domain, as `ALTER DOMAIN` restates it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DomainColumn {
-	/// The table the column belongs to.
-	pub table: String,
-	/// The column.
-	pub column: String,
-	/// Whether the column refuses NULL by its own `NOT NULL`, whatever the domain says.
-	pub not_null: bool,
-	/// The column's `DEFAULT`, which is the domain's when the column names none of its own.
-	pub default: Option<Expr>,
-}
-
 /// A user-defined composite type: its attributes in declaration order, each with its kind.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompositeType {
@@ -631,6 +636,166 @@ pub struct CompositeType {
 	pub id: u32,
 	/// The attributes in declaration order, with the kind each holds.
 	pub fields: Vec<(String, Kind)>,
+	/// The SQL type each attribute was declared with, for the attributes declared with a type the
+	/// front end reads (an enum attribute is read through its kind).
+	pub declared: Vec<(String, DeclaredSqlType)>,
+}
+
+impl CompositeType {
+	/// The SQL type `attribute` was declared with, if it was declared with one.
+	pub fn declared_type(&self, attribute: &str) -> Option<&DeclaredSqlType> {
+		self.declared.iter().find(|(name, _)| name == attribute).map(|(_, declared)| declared)
+	}
+
+	/// The SQL type the values of `attribute`, of `kind`, travel as: the wire type of its
+	/// declared type ([`crate::reported_type::pg_wire_type`]), or the type its kind reads as.
+	pub fn attribute_sql_type(&self, attribute: &str, kind: &Kind) -> crate::SqlType {
+		if let Some(sql_type) =
+			self.declared_type(attribute).and_then(crate::reported_type::pg_wire_type)
+		{
+			return sql_type;
+		}
+		crate::SqlType::from_name(&kind_type_name(kind).unwrap_or_else(|| "text".to_owned()))
+	}
+}
+
+/// What the PostgreSQL front end reads a type of the database as.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UserType {
+	/// A type whose body is a union of string labels.
+	Enum(EnumType),
+	/// A type whose body is an object literal: the shape of a composite type.
+	Composite(CompositeType),
+	/// Any other type, read as a domain over its body.
+	Domain(DomainType),
+}
+
+impl UserType {
+	/// The type `name`, with the id `id`, defined with `body`, `asserts`, `default` and
+	/// `sql_type`. An enum's labels are numbered as labels declared together are.
+	pub fn of_definition(
+		name: &str,
+		id: u32,
+		body: &Kind,
+		asserts: &[surrealdb_expr::expr::statements::define::TypeAssert],
+		default: Option<&Expr>,
+		sql_type: Option<&str>,
+	) -> Self {
+		use surrealdb_expr::expr::KindLiteral;
+		if let Some(labels) = surrealdb_expr::expr::statements::define::union_labels(body) {
+			return UserType::Enum(EnumType::declared(name, id, &labels));
+		}
+		if let Kind::Literal(KindLiteral::Object(fields)) = body {
+			let declared = sql_type.map(composite_attributes).unwrap_or_default();
+			let mut ordered: Vec<(String, Kind)> = declared
+				.iter()
+				.filter_map(|(attribute, _)| {
+					fields.get(attribute.as_str()).map(|kind| (attribute.clone(), kind.clone()))
+				})
+				.collect();
+			for (field, kind) in fields {
+				if !ordered.iter().any(|(name, _)| name == field.as_str()) {
+					ordered.push((field.as_str().to_owned(), kind.clone()));
+				}
+			}
+			let declared = declared
+				.into_iter()
+				.filter_map(|(attribute, text)| {
+					DeclaredSqlType::parse(crate::SqlTypeDialect::PostgreSql, &text)
+						.ok()
+						.map(|declared| (attribute, declared))
+				})
+				.collect();
+			return UserType::Composite(CompositeType {
+				name: name.to_owned(),
+				id,
+				fields: ordered,
+				declared,
+			});
+		}
+		let members = if let Kind::Either(members) = body {
+			members.clone()
+		} else {
+			vec![body.clone()]
+		};
+		// A domain whose base admits NULL states `NOT NULL` as an assertion.
+		let asserts_not_null =
+			asserts.iter().any(|assert| crate::lower::ddl::is_not_null_assertion(&assert.check));
+		let not_null = asserts_not_null
+			|| !members.iter().any(|kind| matches!(kind, Kind::None | Kind::Null | Kind::Any));
+		let base = Kind::either(
+			members.into_iter().filter(|kind| !matches!(kind, Kind::None | Kind::Null)).collect(),
+		);
+		let base_type = sql_type
+			.map(str::to_owned)
+			.or_else(|| kind_type_name(&base))
+			.unwrap_or_else(|| "text".to_owned());
+		UserType::Domain(DomainType {
+			name: name.to_owned(),
+			id,
+			base,
+			base_type,
+			not_null,
+			// A domain stated with no default holds the NULL PostgreSQL gives an omitted column.
+			default: default
+				.filter(|expr| !matches!(expr, Expr::Literal(surrealdb_expr::expr::Literal::Null)))
+				.cloned(),
+			checks: asserts
+				.iter()
+				.filter(|assert| !crate::lower::ddl::is_not_null_assertion(&assert.check))
+				.map(|assert| DomainCheck {
+					name: assert.name.clone(),
+					check: domain_check_of_assert(&assert.check),
+				})
+				.collect(),
+		})
+	}
+}
+
+/// The check a domain's `ASSERT` states: `check` of `check != false`, or the assertion itself
+/// when it is not of that shape.
+pub fn domain_check_of_assert(assert: &Expr) -> Expr {
+	use surrealdb_expr::expr::{BinaryOperator, Literal};
+	if let Expr::Binary {
+		left,
+		op: BinaryOperator::NotEqual,
+		right,
+	} = assert
+		&& matches!(**right, Expr::Literal(Literal::Bool(false)))
+	{
+		return (**left).clone();
+	}
+	assert.clone()
+}
+
+/// The attributes of a composite type in declaration order, each with its declared type, read
+/// from the `SQL TYPE POSTGRESQL '(attr type, …)'` its definition carries. An attribute name holds
+/// no space, and a comma inside parentheses belongs to the type it is part of.
+pub fn composite_attributes(sql_type: &str) -> Vec<(String, String)> {
+	let Some(inner) = sql_type.trim().strip_prefix('(').and_then(|s| s.strip_suffix(')')) else {
+		return Vec::new();
+	};
+	let mut attributes = Vec::new();
+	let mut depth = 0usize;
+	let mut start = 0usize;
+	let mut push = |part: &str| {
+		if let Some((name, ty)) = part.trim().split_once(char::is_whitespace) {
+			attributes.push((name.to_owned(), ty.trim().to_owned()));
+		}
+	};
+	for (i, c) in inner.char_indices() {
+		match c {
+			'(' => depth += 1,
+			')' => depth = depth.saturating_sub(1),
+			',' if depth == 0 => {
+				push(&inner[start..i]);
+				start = i + 1;
+			}
+			_ => {}
+		}
+	}
+	push(&inner[start..]);
+	attributes
 }
 
 /// The user-defined types that the catalog views list: enums, domains and composite types.
@@ -691,12 +856,6 @@ pub trait BinderCatalog: Send + Sync {
 
 	/// Every user-defined domain, for the system views that list them.
 	fn domain_types(&self) -> Vec<DomainType> {
-		Vec::new()
-	}
-
-	/// The columns declared with the domain `name`, in no particular order, for `ALTER DOMAIN` to
-	/// restate the field definition of each.
-	fn domain_columns(&self, _name: &str) -> Vec<DomainColumn> {
 		Vec::new()
 	}
 
@@ -962,8 +1121,6 @@ pub struct MemoryCatalog {
 	composites: Vec<CompositeType>,
 	/// The SQL types columns are declared with, by (table, column).
 	sql_types: HashMap<(String, String), DeclaredSqlType>,
-	/// The columns declared with a domain.
-	domain_columns: Vec<(String, DomainColumn)>,
 }
 
 impl MemoryCatalog {
@@ -992,13 +1149,6 @@ impl MemoryCatalog {
 		self
 	}
 
-	/// This catalog with `columns`, each declared with the domain it is paired with; see
-	/// [`BinderCatalog::domain_columns`].
-	pub fn with_domain_columns(mut self, columns: Vec<(String, DomainColumn)>) -> Self {
-		self.domain_columns = columns;
-		self
-	}
-
 	pub fn new() -> Self {
 		Self {
 			tables: HashMap::new(),
@@ -1018,7 +1168,6 @@ impl MemoryCatalog {
 			domains: Vec::new(),
 			composites: Vec::new(),
 			sql_types: HashMap::new(),
-			domain_columns: Vec::new(),
 		}
 	}
 
@@ -1236,14 +1385,6 @@ impl BinderCatalog for MemoryCatalog {
 
 	fn composite_types(&self) -> Vec<CompositeType> {
 		self.composites.clone()
-	}
-
-	fn domain_columns(&self, name: &str) -> Vec<DomainColumn> {
-		self.domain_columns
-			.iter()
-			.filter(|(domain, _)| domain == name)
-			.map(|(_, column)| column.clone())
-			.collect()
 	}
 
 	fn all_tables(&self) -> Vec<TableSchema> {

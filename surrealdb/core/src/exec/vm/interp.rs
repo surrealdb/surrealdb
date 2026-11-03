@@ -87,6 +87,12 @@ pub(super) enum Step {
 	Call {
 		at: usize,
 	},
+	/// Judge the value [`Instr::CoerceField`] at `at` left in its register, already coerced to
+	/// its kind, against the named types the kind holds, which the catalog defines; then resume
+	/// after it.
+	FieldTypes {
+		at: usize,
+	},
 	/// Take method or method-closure instruction `at`, then resume after it.
 	Method {
 		at: usize,
@@ -2487,6 +2493,21 @@ pub(super) fn operand_value<'s>(
 	})
 }
 
+/// The refusal of a value that field [`Program::fields`]`[field]` of the record `row` holds does
+/// not coerce to: the error naming the record and field, as a write's refusal names them.
+pub(super) fn field_coerce(
+	program: &Program,
+	row: &dyn RowReader,
+	field: u32,
+	error: crate::val::value::CoerceError,
+) -> anyhow::Result<anyhow::Error> {
+	Ok(anyhow::Error::new(crate::doc::Error::FieldCoerce {
+		record: crate::exec::operators::record_of(&row.record()?),
+		field_name: program.fields[field as usize].as_str().to_owned(),
+		error: Box::new(error),
+	}))
+}
+
 /// Run `pipeline`'s body for the row `row` reads, from instruction `pc`.
 /// `regs` holds at least the pipeline's registers and is the row's own: what
 /// it holds may borrow from the row.
@@ -2593,17 +2614,20 @@ pub(super) fn run_row<'r>(
 				field,
 			} => {
 				let value = std::mem::replace(&mut regs[*reg as usize], Scalar::None).into_value();
-				let coerced = match value.coerce_to_kind(&program.kinds[*kind as usize]) {
+				let kind = &program.kinds[*kind as usize];
+				let coerced = match value.coerce_to_kind(kind) {
 					Ok(coerced) => coerced,
 					Err(error) => {
-						return Err(anyhow::Error::new(crate::doc::Error::FieldCoerce {
-							record: crate::exec::operators::record_of(&row.record()?),
-							field_name: program.fields[*field as usize].as_str().to_owned(),
-							error: Box::new(error),
-						}));
+						return Err(field_coerce(program, row, *field, error)?);
 					}
 				};
 				regs[*reg as usize] = Scalar::Value(Held::Owned(coerced));
+				// A named type is judged against its definition, which only the host reads.
+				if kind.has_named_type() {
+					return Ok(Step::FieldTypes {
+						at: pc,
+					});
+				}
 				pc += 1;
 			}
 			Instr::BeginComputing {

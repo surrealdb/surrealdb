@@ -463,10 +463,70 @@ pub fn translate_expr(
 	}
 }
 
+/// The digits of PostgreSQL numeric constant `text` in positional form, with an exponent such as
+/// `1.5e3` applied to the decimal point (`1500`). A constant whose significant digits would run
+/// past the numeric type's limits, 131072 before the point and 16383 after it, is refused.
+fn positional_numeric(text: &str) -> Result<String, TranslationError> {
+	let Some((mantissa, exponent)) = text.split_once(['e', 'E']) else {
+		return Ok(text.to_owned());
+	};
+	let out_of_range =
+		|| TranslationError::Unsupported(format!("numeric constant out of range: {text}"));
+	if !crate::parser::expr::numeric_in_range(text) {
+		return Err(out_of_range());
+	}
+	let exponent: i64 = exponent.parse().map_err(|_| out_of_range())?;
+	let (integer, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+	let digits = format!("{integer}{fraction}");
+	let point = i64::try_from(integer.len()).map_err(|_| out_of_range())?.saturating_add(exponent);
+	let digit_count = i64::try_from(digits.len()).map_err(|_| out_of_range())?;
+	let positional = if point <= 0 {
+		let zeros = usize::try_from(-point).map_err(|_| out_of_range())?;
+		format!("0.{}{digits}", "0".repeat(zeros))
+	} else if point >= digit_count {
+		let zeros = usize::try_from(point - digit_count).map_err(|_| out_of_range())?;
+		format!("{digits}{}", "0".repeat(zeros))
+	} else {
+		let point = usize::try_from(point).map_err(|_| out_of_range())?;
+		let (integer, fraction) = (
+			digits.get(..point).ok_or_else(out_of_range)?,
+			digits.get(point..).ok_or_else(out_of_range)?,
+		);
+		format!("{integer}.{fraction}")
+	};
+	Ok(positional)
+}
+
+/// The suffix of a SurrealQL literal for the exact positional number `text` (digits with at most
+/// one point, no sign): `dec` when the fixed decimal type holds it exactly (at most 28 fraction
+/// digits once trailing zeros are dropped, and a coefficient within 96 bits), otherwise `bigdec`.
+fn exact_literal_suffix(text: &str) -> &'static str {
+	const MAX_SCALE: usize = 28;
+	const MAX_COEFFICIENT: &str = "79228162514264337593543950335";
+	let (integer, fraction) = text.split_once('.').unwrap_or((text, ""));
+	let fraction = fraction.trim_end_matches('0');
+	let coefficient = format!("{integer}{fraction}");
+	let coefficient = coefficient.trim_start_matches('0');
+	let fits = fraction.len() <= MAX_SCALE
+		&& (coefficient.len() < MAX_COEFFICIENT.len()
+			|| (coefficient.len() == MAX_COEFFICIENT.len() && coefficient <= MAX_COEFFICIENT));
+	if fits {
+		"dec"
+	} else {
+		"bigdec"
+	}
+}
+
 fn translate_literal(lit: &Literal, out: &mut String) -> Result<(), TranslationError> {
 	match lit {
 		Literal::Integer(i) => write!(out, "{i}")?,
 		Literal::Float(f) => write!(out, "{f}")?,
+		// A numeric constant is exact, as a SurrealQL decimal is. Exponent form is written out in
+		// positional digits, which the decimal suffixes take.
+		Literal::Numeric(text) => {
+			let positional = positional_numeric(text)?;
+			write!(out, "{positional}{}", exact_literal_suffix(&positional))?
+		}
 		Literal::String(s) => {
 			out.push('\'');
 			for c in s.chars() {

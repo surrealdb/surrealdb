@@ -11,6 +11,8 @@ use crate::expr::{CoverStmts, Expr, KeyNames, KeyNamesError, Kind, KindLiteral, 
 /// object types, `array<object>` and `option<object>`).
 pub fn kind_contains_object(kind: &Kind) -> bool {
 	match kind {
+		// What a named type holds is the catalog's to say, which this does not read.
+		Kind::Named(_) => false,
 		Kind::Object | Kind::Literal(KindLiteral::Object(_)) => true,
 		Kind::Either(kinds) | Kind::Literal(KindLiteral::Array(kinds)) => {
 			kinds.iter().any(kind_contains_object)

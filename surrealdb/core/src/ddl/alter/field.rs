@@ -316,6 +316,14 @@ async fn alter_field_write(
 	// definition, so any ALTER that sets one of these is refused.
 	crate::exec::field_rules::id_field_restrictions(&df)?;
 
+	// Every type the merged definition names, in its kind and its clauses, is one the database
+	// defines, as `DEFINE FIELD` requires.
+	let named = crate::exec::vm::schema_host::field_named_types(&df);
+	if !named.is_empty() {
+		let subject = format!("The field '{name}' on the table '{what}'");
+		crate::exec::vm::schema_host::check_types_defined(&txn, ns, db, &named, &subject).await?;
+	}
+
 	// A statement that sets `REFERENCE`, or changes the type of a field whose `REFERENCE` it
 	// keeps, has the merged definition judged as `DEFINE FIELD` judges a reference: a top-level
 	// field whose kind holds only records. Import skips this check, so exported definitions load

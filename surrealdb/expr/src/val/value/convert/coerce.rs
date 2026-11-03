@@ -736,7 +736,8 @@ impl Value {
 	/// object read as the geometry it describes, or a number converted across
 	/// a sized numeric boundary (preserving a sized number whose exact kind is
 	/// a union member while keeping declared-member order among `int`, `float`,
-	/// and `decimal`).
+	/// and `decimal`), or a date, datetime or timestamp taken as another of the
+	/// three.
 	pub fn converts_to(&self, kind: &Kind) -> bool {
 		match (self, kind) {
 			(Value::Object(_), Kind::Geometry(_)) => true,
@@ -770,6 +771,10 @@ impl Value {
 				| Kind::F16
 				| Kind::F32,
 			) => true,
+			// A date, a datetime and a timestamp coerce to one another, each changing kind.
+			(Value::Date(_) | Value::Timestamp(_), Kind::Datetime)
+			| (Value::Datetime(_), Kind::Date)
+			| (Value::Date(_) | Value::Datetime(_), Kind::Timestamp) => true,
 			_ => false,
 		}
 	}
@@ -790,16 +795,12 @@ impl Value {
 			.or_else(|| members.iter().find(|k| self.converts_to(k) && takes(self, k)))
 	}
 
-	/// Whether this value is a string that `reference` admits: any string for a named enum, whose
-	/// labels live in the catalog and are judged where it is reachable, and a listed label for an
-	/// inline one.
-	pub fn is_enum_member(&self, reference: &crate::expr::EnumRef) -> bool {
-		match (self, reference) {
-			(Value::String(_), crate::expr::EnumRef::Named(_)) => true,
-			(Value::String(s), crate::expr::EnumRef::Inline(labels)) => {
-				labels.iter().any(|l| l == s.as_str())
-			}
-			_ => false,
+	/// Whether this value is a string among the inline enum's `labels`.
+	pub fn is_enum_member(&self, labels: &[String]) -> bool {
+		if let Value::String(s) = self {
+			labels.iter().any(|l| l == s.as_str())
+		} else {
+			false
 		}
 	}
 
@@ -874,7 +875,9 @@ impl Value {
 					self.can_coerce_to_file_buckets(buckets)
 				}
 			}
-			Kind::Enum(reference) => self.is_enum_member(reference),
+			Kind::Enum(labels) => self.is_enum_member(labels),
+			// A named type's body is judged where the catalog is reachable.
+			Kind::Named(_) => true,
 		}
 	}
 
@@ -1054,8 +1057,10 @@ impl Value {
 					self.coerce_to_file_buckets(buckets).map(Value::from)
 				}
 			}
-			Kind::Enum(reference) => {
-				if self.is_enum_member(reference) {
+			// A named type's body is judged where the catalog is reachable.
+			Kind::Named(_) => Ok(self),
+			Kind::Enum(labels) => {
+				if self.is_enum_member(labels) {
 					Ok(self)
 				} else {
 					Err(CoerceError::InvalidKind {
@@ -1579,5 +1584,24 @@ mod tests {
 			Value::Number(Number::I8(5)).coerce_to_kind(&sized_either).unwrap(),
 			Value::Number(Number::I8(5))
 		));
+	}
+
+	#[test]
+	fn test_union_member_prefers_the_temporal_kind_a_value_already_is() {
+		use crate::val::{Date, Datetime, Timestamp};
+		let date = Value::Date(Date(19_723));
+		let datetime = Value::Datetime(Datetime::from(Date(19_723)));
+		let timestamp = Value::Timestamp(Timestamp::from(Datetime::from(Date(19_723))));
+		let temporal = [Kind::Datetime, Kind::Date, Kind::Timestamp];
+		for (value, own) in
+			[(&date, Kind::Date), (&datetime, Kind::Datetime), (&timestamp, Kind::Timestamp)]
+		{
+			for kind in temporal.iter().filter(|kind| value.can_coerce_to_kind(kind)) {
+				assert_eq!(value.converts_to(kind), *kind != own, "{value:?} as {kind:?}");
+			}
+			assert_eq!(value.union_member(&temporal, Value::can_coerce_to_kind), Some(&own));
+		}
+		let either = Kind::Either(vec![Kind::Datetime, Kind::Date]);
+		assert!(matches!(date.coerce_to_kind(&either).unwrap(), Value::Date(_)));
 	}
 }

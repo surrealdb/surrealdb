@@ -7,6 +7,9 @@ pub enum Literal {
 	/// An integer above `i64::MAX` that fits 64 unsigned bits, held exactly.
 	Unsigned(u64),
 	Float(f64),
+	/// An exact-value number as written: a literal with a decimal point and no exponent, or an
+	/// integer beyond 64 bits.
+	Decimal(String),
 	String(String),
 	IntroducedString {
 		charset: String,
@@ -31,6 +34,7 @@ impl Literal {
 			// The debug form keeps a fraction or an exponent, so a whole-valued double does not
 			// print as an integer literal, which re-parses as an exact integer.
 			Self::Float(fl) => write!(f, "{fl:?}"),
+			Self::Decimal(text) => f.write_str(text),
 			Self::String(s) => {
 				write!(f, "'")?;
 				for ch in s.chars() {

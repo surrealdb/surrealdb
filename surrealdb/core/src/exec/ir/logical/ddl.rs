@@ -72,8 +72,7 @@ pub(crate) enum DdlForm {
 	DefineApi,
 	DefineBucket,
 	DefineSequence,
-	DefineEnum,
-	DefineUserType,
+	DefineType,
 	RemoveNamespace,
 	RemoveDatabase,
 	RemoveFunction,
@@ -91,8 +90,7 @@ pub(crate) enum DdlForm {
 	RemoveSequence,
 	RemoveModule,
 	RemoveConfig,
-	RemoveEnum,
-	RemoveUserType,
+	RemoveType,
 	AlterSystem,
 	AlterNamespace,
 	AlterDatabase,
@@ -110,13 +108,13 @@ pub(crate) enum DdlForm {
 	AlterUser,
 	AlterAccess,
 	AlterModule,
-	AlterEnum,
+	AlterType,
 	RebuildIndex,
 }
 
 impl DdlForm {
 	/// Every form, in declaration order.
-	pub(crate) const ALL: [DdlForm; 57] = [
+	pub(crate) const ALL: [DdlForm; 55] = [
 		DdlForm::DefineNamespace,
 		DdlForm::DefineDatabase,
 		DdlForm::DefineFunction,
@@ -134,8 +132,7 @@ impl DdlForm {
 		DdlForm::DefineApi,
 		DdlForm::DefineBucket,
 		DdlForm::DefineSequence,
-		DdlForm::DefineEnum,
-		DdlForm::DefineUserType,
+		DdlForm::DefineType,
 		DdlForm::RemoveNamespace,
 		DdlForm::RemoveDatabase,
 		DdlForm::RemoveFunction,
@@ -153,8 +150,7 @@ impl DdlForm {
 		DdlForm::RemoveSequence,
 		DdlForm::RemoveModule,
 		DdlForm::RemoveConfig,
-		DdlForm::RemoveEnum,
-		DdlForm::RemoveUserType,
+		DdlForm::RemoveType,
 		DdlForm::AlterSystem,
 		DdlForm::AlterNamespace,
 		DdlForm::AlterDatabase,
@@ -172,7 +168,7 @@ impl DdlForm {
 		DdlForm::AlterUser,
 		DdlForm::AlterAccess,
 		DdlForm::AlterModule,
-		DdlForm::AlterEnum,
+		DdlForm::AlterType,
 		DdlForm::RebuildIndex,
 	];
 }
@@ -198,8 +194,7 @@ pub(crate) fn form_of(statement: &LogicalDdlStatement) -> DdlForm {
 			DefineStatement::Api(_) => DdlForm::DefineApi,
 			DefineStatement::Bucket(_) => DdlForm::DefineBucket,
 			DefineStatement::Sequence(_) => DdlForm::DefineSequence,
-			DefineStatement::Enum(_) => DdlForm::DefineEnum,
-			DefineStatement::UserType(_) => DdlForm::DefineUserType,
+			DefineStatement::Type(_) => DdlForm::DefineType,
 		},
 		LogicalDdlStatement::Remove(remove) => match remove.as_ref() {
 			RemoveStatement::Namespace(_) => DdlForm::RemoveNamespace,
@@ -219,8 +214,7 @@ pub(crate) fn form_of(statement: &LogicalDdlStatement) -> DdlForm {
 			RemoveStatement::Sequence(_) => DdlForm::RemoveSequence,
 			RemoveStatement::Module(_) => DdlForm::RemoveModule,
 			RemoveStatement::Config(_) => DdlForm::RemoveConfig,
-			RemoveStatement::Enum(_) => DdlForm::RemoveEnum,
-			RemoveStatement::UserType(_) => DdlForm::RemoveUserType,
+			RemoveStatement::Type(_) => DdlForm::RemoveType,
 		},
 		LogicalDdlStatement::Alter(alter) => match alter.as_ref() {
 			AlterStatement::System(_) => DdlForm::AlterSystem,
@@ -240,7 +234,7 @@ pub(crate) fn form_of(statement: &LogicalDdlStatement) -> DdlForm {
 			AlterStatement::User(_) => DdlForm::AlterUser,
 			AlterStatement::Access(_) => DdlForm::AlterAccess,
 			AlterStatement::Module(_) => DdlForm::AlterModule,
-			AlterStatement::Enum(_) => DdlForm::AlterEnum,
+			AlterStatement::Type(_) => DdlForm::AlterType,
 		},
 		LogicalDdlStatement::Rebuild(_) => DdlForm::RebuildIndex,
 	}
@@ -342,7 +336,7 @@ pub(crate) fn guard_order(form: DdlForm) -> &'static [DdlStep] {
 		DdlForm::DefineFunction
 		| DdlForm::DefineModel
 		| DdlForm::DefineModule
-		| DdlForm::DefineEnum => &[W, A, COMMENT, S],
+		| DdlForm::DefineType => &[W, A, COMMENT, S],
 		DdlForm::DefineAnalyzer => &[W, A, COMMENT, NAME, S],
 		DdlForm::DefineParam => &[W, A, VALUE, COMMENT, S],
 		DdlForm::DefineTable => &[NAME, W, A, COMMENT, S],
@@ -371,10 +365,8 @@ pub(crate) fn guard_order(form: DdlForm) -> &'static [DdlStep] {
 		| DdlForm::AlterNamespace
 		| DdlForm::AlterFunction
 		| DdlForm::AlterModule
-		| DdlForm::RemoveEnum
-		| DdlForm::AlterEnum
-		| DdlForm::DefineUserType
-		| DdlForm::RemoveUserType
+		| DdlForm::RemoveType
+		| DdlForm::AlterType
 		| DdlForm::RebuildIndex => &[W, A, S],
 		DdlForm::RemoveTable => &[NAME, W, A, S],
 		DdlForm::RemoveEvent => &[W, A, TABLE, NAME, S],

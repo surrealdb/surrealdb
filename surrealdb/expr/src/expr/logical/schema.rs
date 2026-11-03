@@ -449,6 +449,8 @@ pub fn is_numeric(kind: &Kind) -> bool {
 /// fetches nothing.
 pub fn kind_may_be_record(kind: &Kind) -> bool {
 	match kind {
+		// What a named type holds is the catalog's to say, which this does not read.
+		Kind::Named(_) => true,
 		Kind::Any | Kind::Record(_) | Kind::Literal(_) => true,
 		Kind::Either(kinds) => kinds.iter().any(kind_may_be_record),
 		Kind::Array(element, _) | Kind::Set(element, _) => kind_may_be_record(element),
@@ -505,6 +507,8 @@ pub fn kind_may_be_record(kind: &Kind) -> bool {
 /// `actual` of `any` in particular, whose values are unknown.
 pub fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
 	match declared {
+		// What a named type holds is the catalog's to say, which this does not read.
+		Kind::Named(_) => false,
 		Kind::Any => true,
 		Kind::Number => actual.is_numeric(),
 		Kind::Either(kinds) => match kinds.as_slice() {
@@ -520,6 +524,8 @@ pub fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
 			matches!(actual, Kind::Set(elements, None) if coercion_is_identity(inner, elements))
 		}
 		Kind::Record(tables) => match actual {
+			// What a named type holds is the catalog's to say, which this does not read.
+			Kind::Named(_) => false,
 			Kind::Record(of) => {
 				tables.is_empty() || (!of.is_empty() && of.iter().all(|t| tables.contains(t)))
 			}
@@ -610,6 +616,8 @@ pub fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
 /// literal kind, which may name one — is not kept.
 fn each_keeps_element_kind(kind: &Kind) -> bool {
 	match kind {
+		// What a named type holds is the catalog's to say, which this does not read.
+		Kind::Named(_) => false,
 		Kind::Any | Kind::Record(_) | Kind::Either(_) | Kind::Literal(_) => false,
 		Kind::None
 		| Kind::Null

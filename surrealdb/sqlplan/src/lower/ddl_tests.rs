@@ -5,7 +5,7 @@
 use surrealdb_expr::expr::reference::ReferenceDeleteStrategy;
 use surrealdb_expr::expr::statements::alter::{AlterKind, AlterStatement};
 use surrealdb_expr::expr::statements::define::{DefineDefault, DefineKind, DefineStatement};
-use surrealdb_expr::expr::statements::remove::RemoveStatement;
+use surrealdb_expr::expr::statements::remove::{RemoveStatement, SqlTypeObject};
 use surrealdb_expr::expr::{Expr, Kind};
 use surrealdb_types::ToSql;
 
@@ -1068,8 +1068,7 @@ fn field_flexibility(exprs: &[Expr]) -> Vec<(String, bool)> {
 				| DefineStatement::Api(_)
 				| DefineStatement::Bucket(_)
 				| DefineStatement::Sequence(_)
-				| DefineStatement::Enum(_)
-				| DefineStatement::UserType(_)
+				| DefineStatement::Type(_)
 				| DefineStatement::Module(_) => None,
 			},
 			Expr::Literal(_)
@@ -1749,6 +1748,72 @@ mod constraints {
 	}
 
 	#[test]
+	fn an_existing_column_altered_in_a_request_keeps_its_declared_type() {
+		let declared = crate::declared_type::DeclaredSqlType::parse(
+			surrealdb_expr::expr::statements::define::SqlTypeDialect::PostgreSql,
+			"char(5)",
+		)
+		.unwrap();
+		let mut base = shaped("fixed", "code", nullable(Kind::String), ColumnAssert::None)
+			.with_column_type("fixed", "code", crate::SqlType::Bpchar);
+		base.add_table(TableSchema::new(
+			"fixed",
+			vec![
+				ColumnInfo::new("id", 0),
+				ColumnInfo::new("code", 1).with_declared(declared.clone()),
+			],
+		));
+		let mut staged = StagedCatalog::new(&base);
+		let alter =
+			surrealdb_pgsql::parse_statement("ALTER TABLE fixed ALTER COLUMN code SET NOT NULL")
+				.unwrap();
+		staged.stage(&lower_pgsql_ddl_with(&alter, &staged).unwrap());
+		assert_eq!(staged.column_sql_type(None, "fixed", "code"), Some(declared.clone()));
+		assert_eq!(staged.column_type(None, "fixed", "code"), crate::SqlType::Bpchar);
+		let fixed = staged.all_tables().into_iter().find(|t| t.name == "fixed").unwrap();
+		assert_eq!(fixed.columns[1].declared, Some(declared));
+		assert!(!fixed.columns[1].is_nullable);
+	}
+
+	#[test]
+	fn a_column_dropped_in_a_request_no_longer_names_its_domain() {
+		let domain = crate::catalog::DomainType {
+			name: "pos".to_owned(),
+			id: 1,
+			base: Kind::I32,
+			base_type: "integer".to_owned(),
+			not_null: false,
+			default: None,
+			checks: Vec::new(),
+		};
+		let mut base =
+			shaped("held", "x", nullable(Kind::Named("pos".to_owned())), ColumnAssert::None)
+				.with_domains(vec![domain]);
+		base.add_table(TableSchema::new(
+			"held",
+			vec![ColumnInfo::new("id", 0), ColumnInfo::new("x", 1).with_domain("pos")],
+		));
+		let stage = |sqls: &[&str]| {
+			let mut staged = StagedCatalog::new(&base);
+			for sql in sqls {
+				let stmt = surrealdb_pgsql::parse_statement(sql).unwrap();
+				staged.stage(&lower_pgsql_ddl_with(&stmt, &staged).unwrap());
+			}
+			staged.domain_type("pos").is_some()
+		};
+		// A column that names the domain keeps it: the removal is refused when it runs.
+		assert!(stage(&["DROP DOMAIN pos"]));
+		// Once the column is dropped, nothing names the domain, and the removal takes it.
+		assert!(!stage(&["ALTER TABLE held DROP COLUMN x", "DROP DOMAIN pos"]));
+		let mut staged = StagedCatalog::new(&base);
+		let drop = surrealdb_pgsql::parse_statement("ALTER TABLE held DROP COLUMN x").unwrap();
+		staged.stage(&lower_pgsql_ddl_with(&drop, &staged).unwrap());
+		assert!(staged.column_shape(None, "held", "x").is_none());
+		assert_eq!(staged.column_type(None, "held", "x"), crate::SqlType::Unknown);
+		assert_eq!(staged.column_sql_type(None, "held", "x"), None);
+	}
+
+	#[test]
 	fn the_columns_of_an_existing_table_follow_the_request_that_adds_and_drops_them() {
 		let base = catalog();
 		let mut staged = StagedCatalog::new(&base);
@@ -2009,19 +2074,15 @@ fn a_column_with_two_foreign_keys_is_refused() {
 #[test]
 fn lowers_enum_type_statements() {
 	use surrealdb_expr::expr::statements::AlterStatement;
-	use surrealdb_expr::expr::statements::alter::{AlterEnumAction, EnumPosition};
+	use surrealdb_expr::expr::statements::alter::{AlterTypeAction, EnumPosition};
+	use surrealdb_expr::expr::statements::define::union_labels;
 
 	let create =
 		surrealdb_pgsql::parse_statement("CREATE TYPE mood AS ENUM ('sad', 'ok')").expect("parse");
 	let exprs = lower_pgsql_ddl_definitions(&create).expect("lower create type");
-	let [Expr::Define(define)] = exprs.as_slice() else {
-		panic!("expected one definition, got {exprs:?}");
-	};
-	let DefineStatement::Enum(define) = &**define else {
-		panic!("expected DEFINE ENUM");
-	};
+	let define = defined_type(&exprs);
 	assert_eq!(define.name.as_str(), "mood");
-	assert_eq!(define.labels, ["sad", "ok"]);
+	assert_eq!(union_labels(&define.body), Some(vec!["sad".to_owned(), "ok".to_owned()]));
 
 	let alter = surrealdb_pgsql::parse_statement("ALTER TYPE mood ADD VALUE 'meh' BEFORE 'ok'")
 		.expect("parse");
@@ -2029,12 +2090,12 @@ fn lowers_enum_type_statements() {
 	let [Expr::Alter(alter)] = exprs.as_slice() else {
 		panic!("expected one alteration, got {exprs:?}");
 	};
-	let AlterStatement::Enum(alter) = &**alter else {
-		panic!("expected ALTER ENUM");
+	let AlterStatement::Type(alter) = &**alter else {
+		panic!("expected ALTER TYPE");
 	};
 	assert_eq!(
 		alter.actions,
-		[AlterEnumAction::AddValue {
+		[AlterTypeAction::AddValue {
 			value: "meh".to_owned(),
 			position: Some(EnumPosition::Before("ok".to_owned())),
 			if_not_exists: false,
@@ -2045,48 +2106,111 @@ fn lowers_enum_type_statements() {
 	let exprs = lower_pgsql_ddl_definitions(&drop).expect("lower drop type");
 	assert!(matches!(
 		exprs.as_slice(),
-		[Expr::Remove(r)] if matches!(&**r, RemoveStatement::Enum(e) if e.if_exists)
+		[Expr::Remove(r)] if matches!(&**r, RemoveStatement::Type(e) if e.if_exists)
 	));
 }
 
-/// The user type a lowering defines, from its only definition.
-fn defined_user_type(
-	exprs: &[Expr],
-) -> &surrealdb_expr::expr::statements::define::DefineUserTypeStatement {
+/// The type a lowering defines, from its only definition.
+fn defined_type(exprs: &[Expr]) -> &surrealdb_expr::expr::statements::define::DefineTypeStatement {
 	exprs
 		.iter()
 		.find_map(|expr| match expr {
 			Expr::Define(define) => match &**define {
-				DefineStatement::UserType(ty) => Some(ty),
+				DefineStatement::Type(ty) => Some(ty),
 				_ => None,
 			},
 			_ => None,
 		})
-		.unwrap_or_else(|| panic!("no user type defined in {exprs:?}"))
+		.unwrap_or_else(|| panic!("no type defined in {exprs:?}"))
 }
 
 #[test]
-fn lowers_create_domain_to_a_user_type_definition() {
-	use surrealdb_expr::expr::statements::define::UserTypeBody;
-
+fn lowers_create_domain_to_a_type_definition() {
 	let stmt = surrealdb_pgsql::parse_statement(
 		"CREATE DOMAIN posint AS integer NOT NULL DEFAULT 1 CHECK (value > 0) CONSTRAINT small CHECK (VALUE < 100) CHECK (value <> 7)",
 	)
 	.expect("parse");
 	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
-	let ty = defined_user_type(&exprs);
+	let ty = defined_type(&exprs);
 	assert_eq!(ty.name.as_str(), "posint");
 	assert_eq!(ty.kind, DefineKind::Default);
-	let UserTypeBody::Domain(domain) = &ty.body else {
-		panic!("not a domain: {ty:?}");
-	};
-	assert_eq!(domain.base, Kind::I32);
-	assert!(domain.not_null);
-	assert_eq!(domain.default, Some(Expr::Literal(surrealdb_expr::expr::Literal::Integer(1))));
-	let names: Vec<_> = domain.checks.iter().map(|c| c.name.as_deref()).collect();
+	assert_eq!(ty.body, Kind::I32);
+	assert_eq!(ty.default, Some(Expr::Literal(surrealdb_expr::expr::Literal::Integer(1))));
+	assert_eq!(ty.sql_type.as_deref(), Some("integer"));
+	let names: Vec<_> = ty.asserts.iter().map(|c| c.name.as_deref()).collect();
 	// A check declared with no name takes PostgreSQL's `<domain>_check`, numbered once taken.
 	assert_eq!(names, [Some("posint_check"), Some("small"), Some("posint_check1")]);
-	assert!(domain.checks[1].check.to_sql().contains("$value < 100"));
+	assert!(ty.asserts[1].check.to_sql().contains("$value < 100"));
+
+	// A domain that is not NOT NULL admits NONE and NULL.
+	let stmt = surrealdb_pgsql::parse_statement("CREATE DOMAIN maybe AS text").expect("parse");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
+	assert_eq!(defined_type(&exprs).body, Kind::either(vec![Kind::None, Kind::Null, Kind::String]));
+}
+
+#[test]
+fn a_domain_constant_default_is_stored_as_the_value_its_base_type_is_assigned() {
+	for (sql, default) in [
+		("CREATE DOMAIN d AS text DEFAULT 1", "'1'"),
+		("CREATE DOMAIN d AS text DEFAULT true", "'true'"),
+		("CREATE DOMAIN d AS integer DEFAULT 2.5", "3"),
+		("CREATE DOMAIN d AS integer DEFAULT -2.5", "-3"),
+		("CREATE DOMAIN d AS smallint DEFAULT '7'", "7"),
+		("CREATE DOMAIN d AS boolean DEFAULT 'yes'", "true"),
+		("CREATE DOMAIN d AS numeric(5,2) DEFAULT -1.235", "-1.24dec"),
+		("CREATE DOMAIN d AS double precision DEFAULT 1", "1f"),
+	] {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
+		let lowered = defined_type(&exprs).default.as_ref().map(ToSql::to_sql);
+		assert_eq!(lowered.as_deref(), Some(default), "{sql}");
+	}
+	for (sql, code, message) in [
+		("CREATE DOMAIN d AS smallint DEFAULT 100000", "22003", "smallint out of range"),
+		("CREATE DOMAIN d AS integer DEFAULT -3000000000", "22003", "integer out of range"),
+		(
+			"CREATE DOMAIN d AS smallint DEFAULT '100000'",
+			"22003",
+			"value \"100000\" is out of range for type smallint",
+		),
+		("CREATE DOMAIN d AS numeric(3,1) DEFAULT 100", "22003", "numeric field overflow"),
+		("CREATE DOMAIN d AS real DEFAULT 1e100", "22003", "value out of range: overflow"),
+		(
+			"CREATE DOMAIN d AS boolean DEFAULT -1",
+			"42804",
+			"column \"d\" is of type boolean but default expression is of type integer",
+		),
+	] {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		let err = lower_pgsql_ddl_definitions(&stmt).unwrap_err();
+		assert_eq!((err.pg_sqlstate(), err.to_string().as_str()), (code, message), "{sql}");
+	}
+}
+
+#[test]
+fn a_domain_expression_default_of_another_type_family_is_refused() {
+	for (sql, found) in [
+		("CREATE DOMAIN d AS integer DEFAULT now()", "timestamp with time zone"),
+		("CREATE DOMAIN d AS boolean DEFAULT 1 + 2", "bigint"),
+		("CREATE DOMAIN d AS timestamptz DEFAULT 1 + 2", "bigint"),
+	] {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		let err = lower_pgsql_ddl_definitions(&stmt).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "42804", "{sql}");
+		assert!(
+			err.to_string().ends_with(&format!("default expression is of type {found}")),
+			"{sql}: {err}"
+		);
+	}
+	for sql in [
+		"CREATE DOMAIN d AS timestamptz DEFAULT now()",
+		"CREATE DOMAIN d AS text DEFAULT now()",
+		"CREATE DOMAIN d AS numeric DEFAULT 1 + 2",
+		"CREATE DOMAIN d AS date DEFAULT now()",
+	] {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		lower_pgsql_ddl_definitions(&stmt).expect(sql);
+	}
 }
 
 #[test]
@@ -2105,133 +2229,52 @@ fn refuses_a_domain_over_a_user_type_and_a_composite_attribute_of_a_domain() {
 }
 
 #[test]
-fn lowers_create_type_of_a_composite_to_nullable_attributes() {
-	use surrealdb_expr::expr::statements::define::UserTypeBody;
+fn lowers_create_type_of_a_composite_to_an_object_of_nullable_attributes() {
+	use std::collections::BTreeMap;
+
+	use surrealdb_expr::expr::KindLiteral;
+	use surrealdb_strand::Strand;
 
 	let stmt = surrealdb_pgsql::parse_statement("CREATE TYPE address AS (street text, zip int)")
 		.expect("parse");
 	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
-	let ty = defined_user_type(&exprs);
-	let UserTypeBody::Composite(composite) = &ty.body else {
-		panic!("not a composite: {ty:?}");
-	};
-	let fields: Vec<_> =
-		composite.fields.iter().map(|f| (f.name.as_str(), f.kind.clone())).collect();
+	let ty = defined_type(&exprs);
 	assert_eq!(
-		fields,
-		[
-			("street", Kind::either(vec![Kind::None, Kind::Null, Kind::String])),
-			("zip", Kind::either(vec![Kind::None, Kind::Null, Kind::I32])),
-		]
+		ty.body,
+		Kind::Literal(KindLiteral::Object(BTreeMap::from([
+			(Strand::from("street"), Kind::either(vec![Kind::None, Kind::Null, Kind::String])),
+			(Strand::from("zip"), Kind::either(vec![Kind::None, Kind::Null, Kind::I32])),
+		])))
 	);
+	// The declared types keep the attributes' order, which an object does not.
+	let sql_type = ty.sql_type.as_deref().expect("sql type");
+	assert!(sql_type.starts_with("(street "), "{sql_type}");
 }
 
 #[test]
-fn alter_domain_restates_the_columns_of_the_domain() {
-	use surrealdb_expr::expr::statements::AlterStatement;
-	use surrealdb_expr::expr::statements::alter::{AlterDefault, AlterKind};
-	use surrealdb_expr::expr::statements::define::UserTypeBody;
-
-	let nullable = crate::catalog::DomainType {
-		not_null: false,
-		..posint_domain()
-	};
-	let one = Expr::Literal(surrealdb_expr::expr::Literal::Integer(1));
-	// `a` took the domain's default, so holds it as inherited; `b` has its own, and `c` has its own
-	// equal to the domain's.
-	let inherited = Expr::Block(Box::new(surrealdb_expr::expr::Block(vec![one.clone()])));
-	let catalog = crate::catalog::MemoryCatalog::new()
-		.with_domains(vec![nullable])
-		.with_domain_columns(vec![
-			(
-				"posint".to_owned(),
-				crate::catalog::DomainColumn {
-					table: "t".to_owned(),
-					column: "a".to_owned(),
-					not_null: false,
-					default: Some(inherited),
-				},
-			),
-			(
-				"posint".to_owned(),
-				crate::catalog::DomainColumn {
-					table: "t".to_owned(),
-					column: "b".to_owned(),
-					not_null: true,
-					default: Some(Expr::Literal(surrealdb_expr::expr::Literal::Integer(9))),
-				},
-			),
-			(
-				"posint".to_owned(),
-				crate::catalog::DomainColumn {
-					table: "t".to_owned(),
-					column: "c".to_owned(),
-					not_null: false,
-					default: Some(one),
-				},
-			),
-		]);
+fn alter_domain_redefines_the_type() {
 	let lower = |sql: &str| {
+		let catalog = crate::catalog::MemoryCatalog::new().with_domains(vec![posint_domain()]);
 		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
 		super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog)
 	};
-	let alters =
-		|exprs: &[Expr]| -> Vec<surrealdb_expr::expr::statements::alter::AlterFieldStatement> {
-			exprs
-				.iter()
-				.filter_map(|expr| match expr {
-					Expr::Alter(alter) => match &**alter {
-						AlterStatement::Field(field) => Some((**field).clone()),
-						_ => None,
-					},
-					_ => None,
-				})
-				.collect()
-		};
 
-	// A new check overwrites the definition and joins the assertion of every column, behind the
-	// column's own NOT NULL.
+	// A new check overwrites the definition, and no column is restated.
 	let exprs =
 		lower("ALTER DOMAIN posint ADD CONSTRAINT not_seven CHECK (VALUE <> 7)").expect("lower");
-	let ty = defined_user_type(&exprs);
+	assert_eq!(exprs.len(), 1, "{exprs:?}");
+	let ty = defined_type(&exprs);
 	assert_eq!(ty.kind, DefineKind::Overwrite);
-	let UserTypeBody::Domain(domain) = &ty.body else {
-		panic!("not a domain");
-	};
-	assert_eq!(domain.checks.len(), 2);
-	let fields = alters(&exprs);
-	assert_eq!(fields.len(), 3);
-	let AlterKind::Set(a_assert) = &fields[0].assert else {
-		panic!("assertion of a kept: {:?}", fields[0].assert);
-	};
-	assert!(!a_assert.to_sql().contains("!= NONE"), "{}", a_assert.to_sql());
-	let AlterKind::Set(b_assert) = &fields[1].assert else {
-		panic!("assertion of b kept: {:?}", fields[1].assert);
-	};
-	assert!(b_assert.to_sql().starts_with("$value != NONE"), "{}", b_assert.to_sql());
+	assert_eq!(ty.asserts.len(), 2);
 
-	// A new default reaches the column that took the domain's, not the ones with their own, even
-	// one equal to the domain's.
 	let exprs = lower("ALTER DOMAIN posint SET DEFAULT 3").expect("lower");
-	let fields = alters(&exprs);
-	assert_eq!(fields.len(), 1);
-	assert_eq!(fields[0].name.to_sql(), "a");
 	assert_eq!(
-		fields[0].default,
-		AlterDefault::Set(Expr::Block(Box::new(surrealdb_expr::expr::Block(vec![Expr::Literal(
-			surrealdb_expr::expr::Literal::Integer(3)
-		)]))))
+		defined_type(&exprs).default,
+		Some(Expr::Literal(surrealdb_expr::expr::Literal::Integer(3)))
 	);
 
-	// NOT NULL joins the assertion of every column, and leaves the kind as it is.
-	let exprs = lower("ALTER DOMAIN posint SET NOT NULL").expect("lower");
-	let fields = alters(&exprs);
-	assert_eq!(fields.len(), 3);
-	assert_eq!(fields[0].kind, AlterKind::None);
-	let AlterKind::Set(a_assert) = &fields[0].assert else {
-		panic!("assertion of a kept: {:?}", fields[0].assert);
-	};
-	assert!(a_assert.to_sql().contains("does not allow null values"), "{}", a_assert.to_sql());
+	let exprs = lower("ALTER DOMAIN posint DROP NOT NULL").expect("lower");
+	assert_eq!(defined_type(&exprs).body, Kind::either(vec![Kind::None, Kind::Null, Kind::I32]));
 
 	// Errors are PostgreSQL's.
 	for (sql, code) in [
@@ -2246,22 +2289,18 @@ fn alter_domain_restates_the_columns_of_the_domain() {
 }
 
 #[test]
-fn drop_domain_removes_the_user_type() {
-	use surrealdb_expr::expr::statements::define::UserTypeKind;
-
+fn drop_domain_removes_the_type() {
 	let stmt = surrealdb_pgsql::parse_statement("DROP DOMAIN IF EXISTS posint").expect("parse");
 	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	assert!(matches!(
 		exprs.as_slice(),
-		[Expr::Remove(r)] if matches!(&**r, RemoveStatement::UserType(t)
-			if t.if_exists && t.type_kind == UserTypeKind::Domain && t.name.as_str() == "posint")
+		[Expr::Remove(r)] if matches!(&**r, RemoveStatement::Type(t)
+			if t.if_exists && t.name.as_str() == "posint" && t.object == Some(SqlTypeObject::Domain))
 	));
 }
 
 #[test]
-fn a_column_of_an_enum_type_is_an_enum_kind() {
-	use surrealdb_expr::expr::EnumRef;
-
+fn a_column_of_an_enum_type_names_the_type() {
 	let catalog = crate::MemoryCatalog::new().with_enums(vec![crate::EnumType::declared(
 		"mood",
 		0,
@@ -2270,20 +2309,11 @@ fn a_column_of_an_enum_type_is_an_enum_kind() {
 	let create = surrealdb_pgsql::parse_statement("CREATE TABLE p (id int, m mood NOT NULL)")
 		.expect("parse");
 	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&create, &catalog).expect("lower");
-	let kind = exprs.iter().find_map(|expr| match expr {
-		Expr::Define(define) => match &**define {
-			DefineStatement::Field(field) if field.name.to_sql() == "m" => field.field_kind.clone(),
-			_ => None,
-		},
-		_ => None,
-	});
-	assert_eq!(kind, Some(Kind::Enum(EnumRef::Named("mood".to_owned()))));
+	assert_eq!(field_named(&exprs, "m").field_kind, Some(Kind::Named("mood".to_owned())));
 }
 
 #[test]
 fn a_column_of_a_multidimensional_enum_array_holds_the_enum_at_every_level() {
-	use surrealdb_expr::expr::EnumRef;
-
 	let catalog = crate::MemoryCatalog::new().with_enums(vec![crate::EnumType::declared(
 		"mood",
 		0,
@@ -2292,14 +2322,8 @@ fn a_column_of_a_multidimensional_enum_array_holds_the_enum_at_every_level() {
 	let create =
 		surrealdb_pgsql::parse_statement("CREATE TABLE p (id int, m mood[][])").expect("parse");
 	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&create, &catalog).expect("lower");
-	let kind = exprs.iter().find_map(|expr| match expr {
-		Expr::Define(define) => match &**define {
-			DefineStatement::Field(field) if field.name.to_sql() == "m" => field.field_kind.clone(),
-			_ => None,
-		},
-		_ => None,
-	});
-	let element = Kind::Enum(EnumRef::Named("mood".to_owned()));
+	let kind = field_named(&exprs, "m").field_kind.clone();
+	let element = Kind::Named("mood".to_owned());
 	let nested = Kind::Array(Box::new(Kind::Array(Box::new(element), None)), None);
 	let Some(Kind::Either(members)) = kind else {
 		panic!("expected an optional kind, found {kind:?}");
@@ -2309,14 +2333,9 @@ fn a_column_of_a_multidimensional_enum_array_holds_the_enum_at_every_level() {
 
 #[test]
 fn mysql_enum_and_set_columns_keep_their_members() {
-	use surrealdb_expr::expr::EnumRef;
-
 	let labels = vec!["a".to_owned(), "it's".to_owned()];
-	assert_eq!(map_mysql_type("enum('a', 'it''s')"), Kind::Enum(EnumRef::Inline(labels.clone())));
-	assert_eq!(
-		map_mysql_type("set('a', 'it''s')"),
-		Kind::Set(Box::new(Kind::Enum(EnumRef::Inline(labels))), None)
-	);
+	assert_eq!(map_mysql_type("enum('a', 'it''s')"), Kind::Enum(labels.clone()));
+	assert_eq!(map_mysql_type("set('a', 'it''s')"), Kind::Set(Box::new(Kind::Enum(labels)), None));
 	let members = (0..65).map(|i| format!("'m{i}'")).collect::<Vec<_>>().join(", ");
 	assert!(super::ddl::check_mysql_set_limit(&format!("set({members})")).is_err());
 	assert!(super::ddl::check_mysql_set_limit("set('a', 'b')").is_ok());
@@ -2358,15 +2377,6 @@ fn posint_domain() -> crate::catalog::DomainType {
 	}
 }
 
-/// The assertion a domain CHECK lowers to in a field: it holds unless the check is false.
-fn passes(check: Expr) -> Expr {
-	Expr::Binary {
-		left: Box::new(check),
-		op: surrealdb_expr::expr::operator::BinaryOperator::NotEqual,
-		right: Box::new(Expr::Literal(surrealdb_expr::expr::Literal::Bool(false))),
-	}
-}
-
 #[test]
 fn lowers_a_domain_check_over_the_bound_value() {
 	let check = super::ddl::lower_pgsql_domain_check(
@@ -2377,113 +2387,58 @@ fn lowers_a_domain_check_over_the_bound_value() {
 }
 
 #[test]
-fn lowers_a_domain_column_to_its_base_kind_with_the_domain_constraints() {
+fn a_domain_column_names_the_domain() {
 	let catalog = crate::catalog::MemoryCatalog::new().with_domains(vec![posint_domain()]);
 	let stmt = surrealdb_pgsql::parse_statement(
 		"CREATE TABLE t (id INT PRIMARY KEY, n posint, m posint DEFAULT 5)",
 	)
 	.expect("parse");
 	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
-	let domain = posint_domain();
-	let assertion = Expr::Binary {
-		left: Box::new(super::ddl::domain_not_null_assertion("posint")),
-		op: surrealdb_expr::expr::operator::BinaryOperator::And,
-		right: Box::new(passes(domain.checks[0].check.clone())),
-	};
 
-	// The domain's NOT NULL and its CHECK are the assertion, and the column admits NULL by its
-	// kind. The domain's DEFAULT fills the column that names none.
-	let one = Expr::Literal(surrealdb_expr::expr::Literal::Integer(1));
+	// The type holds the domain's constraints and default, so the column states none of them.
 	let n = field_named(&exprs, "n");
-	assert_eq!(n.field_kind, Some(Kind::either(vec![Kind::None, Kind::Null, Kind::I32])));
-	assert_eq!(n.assert, Some(assertion.clone()));
-	assert_eq!(
-		n.default,
-		DefineDefault::Set(Expr::Block(Box::new(surrealdb_expr::expr::Block(vec![one]))))
-	);
+	assert_eq!(n.field_kind, Some(Kind::Named("posint".to_owned())));
+	assert_eq!(n.assert, None);
+	assert_eq!(n.default, DefineDefault::None);
 
-	// A column's own DEFAULT wins over the domain's.
+	// A column's own DEFAULT is its own.
 	let m = field_named(&exprs, "m");
-	let five = Expr::Literal(surrealdb_expr::expr::Literal::Integer(5));
-	assert_eq!(m.default, DefineDefault::Set(five));
-	assert_eq!(m.assert, Some(assertion));
-}
-
-#[test]
-fn lowers_a_nullable_domain_column_and_an_added_domain_column() {
-	let catalog =
-		crate::catalog::MemoryCatalog::new().with_domains(vec![crate::catalog::DomainType {
-			not_null: false,
-			default: None,
-			..posint_domain()
-		}]);
-	let check = passes(posint_domain().checks[0].check.clone());
-	let stmt = surrealdb_pgsql::parse_statement("CREATE TABLE t (id INT PRIMARY KEY, n posint)")
-		.expect("parse");
-	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
-
-	// Without NOT NULL the column admits NONE and NULL, and only the CHECK asserts its value.
-	let n = field_named(&exprs, "n");
-	assert_eq!(n.field_kind, Some(Kind::either(vec![Kind::None, Kind::Null, Kind::I32])));
-	assert_eq!(n.assert, Some(check.clone()));
-	// A column of a domain with no default defaults to NULL, which the assertion judges.
 	assert_eq!(
-		n.default,
-		DefineDefault::Set(Expr::Block(Box::new(surrealdb_expr::expr::Block(vec![
-			Expr::Literal(surrealdb_expr::expr::Literal::Null)
-		]))))
+		m.default,
+		DefineDefault::Set(Expr::Literal(surrealdb_expr::expr::Literal::Integer(5)))
 	);
 
-	// ALTER TABLE ADD COLUMN takes the same constraints.
+	// ALTER TABLE ADD COLUMN names the domain too, and a column's own NOT NULL is its assertion.
 	let stmt = surrealdb_pgsql::parse_statement("ALTER TABLE t ADD COLUMN k posint NOT NULL")
 		.expect("parse");
 	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
 	let k = field_named(&exprs, "k");
-	assert_eq!(k.field_kind, Some(Kind::I32));
-	assert_eq!(
-		k.assert,
-		Some(Expr::Binary {
-			left: Box::new(super::ddl::not_null_assertion()),
-			op: surrealdb_expr::expr::operator::BinaryOperator::And,
-			right: Box::new(check),
-		})
-	);
+	assert_eq!(k.field_kind, Some(Kind::Named("posint".to_owned())));
 }
 
 #[test]
-fn lowers_a_composite_column_to_an_object_of_its_fields() {
-	use std::collections::BTreeMap;
-
-	use surrealdb_expr::expr::KindLiteral;
-	use surrealdb_strand::Strand;
-
+fn a_composite_column_names_the_composite_type() {
 	let catalog =
 		crate::catalog::MemoryCatalog::new().with_composites(vec![crate::catalog::CompositeType {
 			name: "address".to_owned(),
 			id: 1,
 			fields: vec![("street".to_owned(), Kind::String), ("zip".to_owned(), Kind::I32)],
+			declared: Vec::new(),
 		}]);
 	let stmt =
 		surrealdb_pgsql::parse_statement("CREATE TABLE t (id INT PRIMARY KEY, a address NOT NULL)")
 			.expect("parse");
 	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
-	let object = Kind::Literal(KindLiteral::Object(BTreeMap::from([
-		(Strand::from("street"), Kind::String),
-		(Strand::from("zip"), Kind::I32),
-	])));
-	let a = field_named(&exprs, "a");
-	assert_eq!(a.field_kind, Some(object));
-	assert_eq!(a.assert, Some(super::ddl::not_null_assertion()));
+	assert_eq!(field_named(&exprs, "a").field_kind, Some(Kind::Named("address".to_owned())));
 }
 
 #[test]
-fn refuses_domain_arrays_foreign_keys_and_type_changes_it_cannot_state() {
+fn refuses_domain_arrays_and_foreign_keys() {
 	let catalog = crate::catalog::MemoryCatalog::new().with_domains(vec![posint_domain()]);
 	for sql in [
 		"CREATE TABLE t (id INT PRIMARY KEY, n posint[])",
 		"CREATE TABLE t (id INT PRIMARY KEY, n posint REFERENCES u(id))",
 		"ALTER TABLE t ADD COLUMN n posint[]",
-		"ALTER TABLE t ALTER COLUMN n TYPE posint",
 	] {
 		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
 		let err = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).unwrap_err();
@@ -2492,30 +2447,23 @@ fn refuses_domain_arrays_foreign_keys_and_type_changes_it_cannot_state() {
 }
 
 #[test]
-fn drop_type_of_a_composite_is_not_an_enum_removal() {
+fn drop_type_removes_the_type_of_any_kind() {
 	let catalog =
 		crate::catalog::MemoryCatalog::new().with_composites(vec![crate::catalog::CompositeType {
 			name: "address".to_owned(),
 			id: 1,
 			fields: vec![("street".to_owned(), Kind::String)],
+			declared: Vec::new(),
 		}]);
-	use surrealdb_expr::expr::statements::define::UserTypeKind;
-
-	let stmt = surrealdb_pgsql::parse_statement("DROP TYPE address").expect("parse");
-	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
-	assert!(matches!(
-		exprs.as_slice(),
-		[Expr::Remove(r)] if matches!(&**r, RemoveStatement::UserType(t)
-			if t.type_kind == UserTypeKind::Composite)
-	));
-
-	// A name that is no composite type still lowers to the enum removal it always did.
-	let stmt = surrealdb_pgsql::parse_statement("DROP TYPE mood").expect("parse");
-	let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
-	assert!(matches!(
-		exprs.as_slice(),
-		[Expr::Remove(r)] if matches!(&**r, RemoveStatement::Enum(_))
-	));
+	for sql in ["DROP TYPE address", "DROP TYPE mood"] {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		let exprs = super::ddl::lower_pgsql_ddl_definitions_with(&stmt, &catalog).expect("lower");
+		assert!(
+			matches!(exprs.as_slice(), [Expr::Remove(r)] if matches!(&**r, RemoveStatement::Type(t)
+				if t.object == Some(SqlTypeObject::Type))),
+			"{sql}: {exprs:?}"
+		);
+	}
 }
 
 #[test]
@@ -2782,4 +2730,33 @@ mod drop_schema {
 		assert!(lower(&Deferring, "DROP SCHEMA public").unwrap().is_empty());
 		assert!(lower(&Deferring, "DROP SCHEMA public CASCADE").unwrap().is_empty());
 	}
+}
+
+#[test]
+fn a_repeated_enum_label_or_domain_constraint_name_is_refused() {
+	let create = surrealdb_pgsql::parse_statement("CREATE TYPE mood AS ENUM ('ok', 'sad', 'ok')")
+		.expect("parse");
+	let err = lower_pgsql_ddl_definitions(&create).expect_err("a repeated label");
+	assert_eq!(err, crate::PlanError::DuplicateEnumLabel("ok".to_owned()));
+	assert_eq!(err.pg_sqlstate(), "42710");
+
+	let create = surrealdb_pgsql::parse_statement(
+		"CREATE DOMAIN d AS integer CONSTRAINT c CHECK (VALUE > 0) CONSTRAINT c CHECK (VALUE < 9)",
+	)
+	.expect("parse");
+	let err = lower_pgsql_ddl_definitions(&create).expect_err("a repeated constraint name");
+	assert_eq!(
+		err,
+		crate::PlanError::DuplicateDomainConstraint {
+			constraint: "c".to_owned(),
+			domain: "d".to_owned(),
+		}
+	);
+}
+
+#[test]
+fn an_enum_with_no_labels_is_refused() {
+	let create = surrealdb_pgsql::parse_statement("CREATE TYPE e AS ENUM ()").expect("parse");
+	let err = lower_pgsql_ddl_definitions(&create).expect_err("an empty enum");
+	assert_eq!(err.pg_sqlstate(), "0A000", "{err}");
 }

@@ -110,11 +110,6 @@ pub(super) async fn render(
 			};
 			listed_buckets(buckets, structured, crate::expr::Base::Db)
 		}
-		Definitions::Enum => {
-			listed(compiled::<catalog::EnumDefinition>(values)?, structured, |v| {
-				Ok(v.name.to_string())
-			})
-		}
 		Definitions::RootBucket => listed_buckets(
 			compiled::<catalog::BucketDefinition>(values)?,
 			structured,
@@ -158,6 +153,11 @@ pub(super) async fn render(
 		}
 		Definitions::Table => {
 			listed(compiled::<catalog::TableDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_string())
+			})
+		}
+		Definitions::Type => {
+			listed(compiled::<catalog::TypeDefinition>(values)?, structured, |v| {
 				Ok(v.name.to_string())
 			})
 		}
@@ -256,7 +256,6 @@ pub(super) fn render_one(kind: Definitions, structured: bool, value: &Value) -> 
 		| Definitions::Api
 		| Definitions::Analyzer
 		| Definitions::Bucket
-		| Definitions::Enum
 		| Definitions::RootBucket
 		| Definitions::NsBucket
 		| Definitions::Function
@@ -264,6 +263,7 @@ pub(super) fn render_one(kind: Definitions, structured: bool, value: &Value) -> 
 		| Definitions::Model
 		| Definitions::Param
 		| Definitions::Table
+		| Definitions::Type
 		| Definitions::Config
 		| Definitions::Sequence
 		| Definitions::Namespace

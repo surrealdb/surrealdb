@@ -193,23 +193,43 @@ fn flat_and_defined(current: &Value, fields: &[FieldDefinition]) -> bool {
 }
 
 /// Whether a field of kind `kind`, `FLEXIBLE` when `flexible`, admits paths
-/// beneath its value that no definition reaches: `TYPE any` does, a kind
-/// holding an object does when the field is `FLEXIBLE`, and no other kind, a
-/// field with no `TYPE` among them, does.
+/// beneath its value that no definition reaches: `TYPE any` and a union with
+/// an `any` member do ([`admits_anything`]), a kind that names a type does
+/// (the type's coercion judges the shape of what it holds), a kind holding an
+/// object does when the field is `FLEXIBLE`, and no other kind, a field with
+/// no `TYPE` among them, does.
 fn admits_interior(kind: Option<&Kind>, flexible: bool) -> bool {
-	kind.is_some_and(|kind| kind.is_any() || (flexible && kind_contains_object(kind)))
+	kind.is_some_and(|kind| {
+		admits_anything(kind) || kind.has_named_type() || (flexible && kind_contains_object(kind))
+	})
 }
 
-/// Whether `kind` holds a literal object or array, as a member of a union or
-/// the element kind of an array or set: a kind whose shape describes places
-/// beneath a value of it that no definition names.
+/// Whether `kind` is `any` or a union with an `any` member, nested unions
+/// included: a kind every value is an instance of.
+fn admits_anything(kind: &Kind) -> bool {
+	if let Kind::Any = kind {
+		true
+	} else if let Kind::Either(members) = kind {
+		members.iter().any(admits_anything)
+	} else {
+		false
+	}
+}
+
+/// Whether `kind` describes places beneath a value of it that no definition
+/// names: it holds a literal object or array, or an array or set whose
+/// elements are of a kind that admits anything ([`admits_anything`]), as
+/// `array`, `array<any>` and `array<array<any>>` hold, each as a member of a
+/// union or the element kind of an array or set. An element of `any` is a
+/// place whose interior is its own, so a value in it holds whatever keys and
+/// elements it is written with.
 fn describes_places(kind: &Kind) -> bool {
 	if let Kind::Literal(KindLiteral::Object(_) | KindLiteral::Array(_)) = kind {
 		true
 	} else if let Kind::Either(members) = kind {
 		members.iter().any(describes_places)
 	} else if let Kind::Array(element, _) | Kind::Set(element, _) = kind {
-		describes_places(element)
+		admits_anything(element) || describes_places(element)
 	} else {
 		false
 	}
@@ -222,9 +242,10 @@ fn describes_places(kind: &Kind) -> bool {
 ///
 /// A literal object describes the keys of the value it names, a literal array
 /// the elements its length covers, and an array or set kind the elements of an
-/// array, each judged by its own kind in turn. A kind that holds no literal
-/// object or array describes nothing beneath it and is judged as a field of
-/// that kind would be ([`admits_interior`]). A union judges the value by each
+/// array, each judged by its own kind in turn, so an element of `any` admits
+/// whatever it holds. A kind that describes no places ([`describes_places`])
+/// describes nothing beneath it and is judged as a field of that kind would be
+/// ([`admits_interior`]). A union judges the value by each
 /// member the value conforms to, so a member the value is not an instance of
 /// says nothing of it. A value no member conforms to, which an import replays
 /// without coercing, is judged by every member. `place` is left as it was

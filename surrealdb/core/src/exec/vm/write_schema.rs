@@ -416,6 +416,44 @@ fn read_sql_text(
 	}
 }
 
+/// Fills the open place with the `DEFAULT` of the type the open field's `TYPE` names
+/// ([`crate::exec::vm::schema_host::type_default`]) where the place holds nothing, the record is
+/// being created and the field declares no `DEFAULT` of its own. As a field's plain `DEFAULT`
+/// does, the type's `DEFAULT` spares a record that already exists, so a write that leaves the
+/// field `NONE` there leaves it `NONE`.
+async fn fill_type_default(state: &mut State) -> FlowResult<()> {
+	let write = write_state(state)?;
+	let ctx = write.in_flight()?.1;
+	let (exec, table) = (ctx.exec().clone(), Arc::clone(&ctx.table));
+	let schema = record(write)?;
+	if !schema.creating {
+		return Ok(());
+	}
+	let fields = Arc::clone(&schema.fields);
+	let fd = &fields[schema.cursor()?.index];
+	let Some(kind @ crate::expr::Kind::Named(_)) = fd.field_kind.as_ref() else {
+		return Ok(());
+	};
+	if fd.name.is_id()
+		|| !matches!(fd.default, DefineDefault::None)
+		|| !schema.place()?.val.is_none()
+	{
+		return Ok(());
+	}
+	let default = crate::exec::vm::schema_host::type_default(
+		&exec,
+		table.namespace_id,
+		table.database_id,
+		kind,
+	)
+	.await
+	.map_err(ControlFlow::Err)?;
+	if let Some(default) = default {
+		record(write_state(state)?)?.place()?.val = default;
+	}
+	Ok(())
+}
+
 fn write_state(state: &mut State) -> Result<&mut WriteState, ControlFlow> {
 	state.write.as_deref_mut().ok_or_else(|| internal("a write body with no write state"))
 }
@@ -913,6 +951,9 @@ pub(super) async fn step(
 		SchemaInstr::JumpIfPlaceNone {
 			target,
 		} => {
+			// A place the type's `DEFAULT` fills holds a value, which the field's `VALUE` reads
+			// as `$value` once it is coerced.
+			fill_type_default(state).await?;
 			let schema = record(write_state(state)?)?;
 			Ok(if schema.place()?.val.is_none() {
 				*target as usize
@@ -923,6 +964,7 @@ pub(super) async fn step(
 		SchemaInstr::Coerce {
 			sql_type,
 		} => {
+			fill_type_default(state).await?;
 			let write = write_state(state)?;
 			let ctx = write.in_flight()?.1;
 			let (exec, table) = (ctx.exec().clone(), Arc::clone(&ctx.table));
@@ -952,21 +994,17 @@ pub(super) async fn step(
 			let coerced = match fd.field_kind.as_ref() {
 				None => Ok(val),
 				Some(kind) => {
-					let named_enums = kind.has_named_enum();
+					let named = kind.has_named_type();
 					match val.coerce_to_kind(kind) {
-						Ok(val) if named_enums => {
-							match crate::exec::vm::schema_host::check_named_enums(
-								&exec.txn(),
+						Ok(val) if named => {
+							crate::exec::vm::schema_host::check_named_types(
+								&exec,
 								table.namespace_id,
 								table.database_id,
 								kind,
-								&val,
+								val,
 							)
 							.await
-							{
-								Ok(()) => Ok(val),
-								Err(error) => Err(error),
-							}
 						}
 						other => other,
 					}

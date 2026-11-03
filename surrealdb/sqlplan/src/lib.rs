@@ -24,10 +24,10 @@ pub mod vector;
 
 pub use catalog::staged::StagedCatalog;
 pub use catalog::{
-	BinderCatalog, ColumnAssert, ColumnInfo, ColumnShape, CompositeType, DomainCheck, DomainColumn,
-	DomainType, EmptyCatalog, EnumColumn, EnumShape, EnumType, EnumTypeLabel, ForeignKeyInfo,
-	IndexInfo, MemoryCatalog, ReferentialAction, TableSchema, UserTypes, kind_admits_none,
-	kind_admits_null, link_target,
+	BinderCatalog, ColumnAssert, ColumnInfo, ColumnShape, CompositeType, DomainCheck, DomainType,
+	EmptyCatalog, EnumColumn, EnumRef, EnumShape, EnumType, EnumTypeLabel, ForeignKeyInfo,
+	IndexInfo, MemoryCatalog, ReferentialAction, TableSchema, UserType, UserTypes,
+	kind_admits_none, kind_admits_null, link_target,
 };
 pub use descriptor::{
 	ParameterDescriptor, RangeElement, ResultColumn, ResultComposite, ResultDescriptor, ResultEnum,

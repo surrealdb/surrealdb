@@ -288,6 +288,11 @@ struct CatalogSnapshot {
 	/// `VERSION $param` values that named a datetime at bind time, as version
 	/// stamps, by parameter name.
 	param_versions: HashMap<String, u64>,
+	/// The types of the database that hold a union of labels, each by name
+	/// with the name of the union it holds: the union itself, or an alias or
+	/// domain over one. Read when a field of a gathered table names a type: a
+	/// field of one orders by the declaration of the union's labels.
+	unions: HashMap<String, String>,
 }
 
 /// What one bind knows about one table. A table that is not defined has an
@@ -665,11 +670,33 @@ async fn gather(
 		gathered.push_named(&mut worklist, stamp, follows_kinds);
 		tables.insert((table, stamp), Some(gathered.facts));
 	}
+	let names_types = tables.values().flatten().any(|facts| {
+		facts.fields.iter().any(|field| field.kind.as_ref().is_some_and(Kind::has_named_type))
+	});
+	let unions = if names_types {
+		use crate::catalog::providers::TypeProvider;
+		let types = txn.all_db_types(ns, db, None).await.map_err(|e| {
+			catalog_read_error(&e, || format!("reading the types of the database: {e:#}"))
+		})?;
+		let defined: HashMap<&str, &crate::catalog::TypeDefinition> =
+			types.iter().map(|definition| (definition.name.as_str(), definition)).collect();
+		let by_name = |name: &str| defined.get(name).copied();
+		types
+			.iter()
+			.filter_map(|definition| {
+				let union = definition.union_behind(&by_name)?;
+				Some((definition.name.to_string(), union.name.to_string()))
+			})
+			.collect()
+	} else {
+		HashMap::new()
+	};
 	Ok(CatalogSnapshot {
 		tables,
 		stamps,
 		param_sources,
 		param_versions,
+		unions,
 	})
 }
 
@@ -1385,6 +1412,25 @@ impl Resolver<'_> {
 				{
 					drop_refused_leaves(input);
 				}
+				// The `WHERE` of an `UPDATE`, `DELETE` or `UPSERT` compares the enum fields of the
+				// table it writes by declaration, as a `SELECT`'s does.
+				if let LogicalOp::Write(write) = &mut op
+					&& let Some(table) = written_table(&write.source)
+					&& let Some(cond) = write.cond.as_mut()
+					&& let Some(facts) = self.facts(&table, &scope)
+				{
+					super::enum_order::rewrite_condition(
+						cond,
+						&|name| {
+							facts
+								.fields
+								.iter()
+								.find(|f| f.name == name)
+								.and_then(|f| f.kind.as_ref())
+						},
+						&|name| self.snapshot.unions.get(name).cloned(),
+					);
+				}
 				self.resolve_scalars(&mut op, &scope)?;
 				op
 			}
@@ -1419,13 +1465,17 @@ impl Resolver<'_> {
 				self.resolve_scalars(&mut leaf, &scope)?;
 				match (facts, table) {
 					(Some(facts), Some(table)) => {
-						super::enum_order::rewrite_stages(&mut stages, &|name| {
-							facts
-								.fields
-								.iter()
-								.find(|f| f.name == name)
-								.and_then(|f| f.kind.as_ref())
-						});
+						super::enum_order::rewrite_stages(
+							&mut stages,
+							&|name| {
+								facts
+									.fields
+									.iter()
+									.find(|f| f.name == name)
+									.and_then(|f| f.kind.as_ref())
+							},
+							&|name| self.snapshot.unions.get(name).cloned(),
+						);
 						self.table_stack(leaf, &table, &facts, &stages, &scope)?
 					}
 					(None, _) | (Some(_), None) => leaf,
@@ -1470,13 +1520,17 @@ impl Resolver<'_> {
 								.find(|f| f.name == name)
 								.and_then(|f| f.kind.as_ref())
 						}
-						super::enum_order::rewrite_stages(&mut stages, &|name| {
-							let first = declared(tables[0], name)?;
-							tables[1..]
-								.iter()
-								.all(|facts| declared(facts, name) == Some(first))
-								.then_some(first)
-						});
+						super::enum_order::rewrite_stages(
+							&mut stages,
+							&|name| {
+								let first = declared(tables[0], name)?;
+								tables[1..]
+									.iter()
+									.all(|facts| declared(facts, name) == Some(first))
+									.then_some(first)
+							},
+							&|name| self.snapshot.unions.get(name).cloned(),
+						);
 					}
 				}
 				LogicalOp::UnionAll(LogicalUnionAll {
@@ -1583,7 +1637,7 @@ impl Resolver<'_> {
 			}) => Ok(LogicalOp::Subquery(LogicalSubquery {
 				input: Box::new(self.resolve_pipeline(*input, &scope.reading())?),
 			})),
-			mut other @ (LogicalOp::Values(_)
+			other @ (LogicalOp::Values(_)
 			| LogicalOp::Match(_)
 			| LogicalOp::Write(_)
 			| LogicalOp::UnionAll(_)
@@ -1614,10 +1668,47 @@ impl Resolver<'_> {
 			| LogicalOp::Info(_)
 			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_)) => {
+				let mut other = self.order_branch_enums(other, scope);
 				self.resolve_scalars(&mut other, scope)?;
 				Ok(other)
 			}
 		}
+	}
+
+	/// `branch`, one query of a set operation, with the comparisons, sort keys and group
+	/// extremes of its own stages over the enum fields of the table it reads ordering by
+	/// declaration, as a pipeline's do ([`super::enum_order::rewrite_stages`]). A branch that is
+	/// not a pipeline over a table, or one already bound, is returned as it is.
+	fn order_branch_enums(&self, branch: LogicalOp, scope: &Scope) -> LogicalOp {
+		let (mut stages, leaf) = peel(branch);
+		let bound = stages
+			.iter()
+			.any(|stage| matches!(stage, LogicalOp::PermissionFilter(_)) || stage.is_layer());
+		let table = if let LogicalOp::Source(LogicalSource {
+			source,
+			..
+		}) = &leaf
+		{
+			match source {
+				SourceRef::Table(table) => Some(table.clone()),
+				SourceRef::RecordId(rid) => Some(rid.table.clone()),
+				SourceRef::Mock(_) | SourceRef::Param(_) | SourceRef::Dynamic(_) => None,
+			}
+		} else {
+			None
+		};
+		if !bound
+			&& !stages.is_empty()
+			&& let Some(table) = table
+			&& let Some(facts) = self.facts(&table, scope)
+		{
+			super::enum_order::rewrite_stages(
+				&mut stages,
+				&|name| facts.fields.iter().find(|f| f.name == name).and_then(|f| f.kind.as_ref()),
+				&|name| self.snapshot.unions.get(name).cloned(),
+			);
+		}
+		reassemble(stages, leaf)
 	}
 
 	/// The facts for `table` in `scope`, or `None` when the leaf is to stay
@@ -3000,7 +3091,7 @@ fn kind_at(schema: &Schema, prefix: &FieldPath) -> Kind {
 /// does a `set_field` applied to one.
 fn may_hold_array(kind: &Kind) -> bool {
 	match kind {
-		Kind::Any | Kind::Array(..) => true,
+		Kind::Any | Kind::Named(_) | Kind::Array(..) => true,
 		Kind::Either(kinds) => kinds.iter().any(may_hold_array),
 		Kind::Literal(literal) => match literal {
 			KindLiteral::Array(_) => true,
@@ -3054,7 +3145,7 @@ fn may_hold_array(kind: &Kind) -> bool {
 /// Whether a value of `kind` may be an object, whose values a `*` iterates.
 fn may_hold_object(kind: &Kind) -> bool {
 	match kind {
-		Kind::Any | Kind::Object => true,
+		Kind::Any | Kind::Named(_) | Kind::Object => true,
 		Kind::Either(kinds) => kinds.iter().any(may_hold_object),
 		Kind::Literal(literal) => match literal {
 			KindLiteral::Object(_) => true,
@@ -4970,5 +5061,39 @@ mod tests {
 		// caller may see of the record, so the guard is in the plan.
 		let plan = fixture.bind_as(&record_user(), "SELECT peek FROM reading").await;
 		assert!(plan.contains("@permission"), "{plan}");
+	}
+}
+
+/// The one table a mutation writes, where its subjects name one: the table its rows are read
+/// from, or the one table or record id it names.
+fn written_table(source: &crate::expr::logical::LogicalWriteSource) -> Option<TableName> {
+	use crate::expr::logical::LogicalWriteSource;
+	fn leaf(op: &LogicalOp) -> Option<TableName> {
+		if let LogicalOp::Source(LogicalSource {
+			source,
+			..
+		}) = op
+		{
+			return if let SourceRef::Table(table) = source {
+				Some(table.clone())
+			} else if let SourceRef::RecordId(rid) = source {
+				Some(rid.table.clone())
+			} else {
+				None
+			};
+		}
+		match op.children() {
+			[child] => leaf(child),
+			_ => None,
+		}
+	}
+	match source {
+		LogicalWriteSource::Rows(input) => leaf(input),
+		LogicalWriteSource::Targets(targets) => match targets.as_slice() {
+			[LogicalExpr::Table(table)] => Some(table.clone()),
+			[LogicalExpr::RecordId(rid)] => Some(rid.table.clone()),
+			_ => None,
+		},
+		LogicalWriteSource::Inserts(_) => None,
 	}
 }

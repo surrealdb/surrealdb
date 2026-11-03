@@ -912,17 +912,19 @@ fn public(out: &mut Vec<u8>, value: &Value, depth: usize, v2: bool) -> anyhow::R
 	clippy::needless_pass_by_value,
 	reason = "Number is not Copy; this takes its operand by value like the arithmetic it feeds"
 )]
-/// A bigdecimal as `rpc::format::cbor` writes it: tag 10 when it fits a decimal exactly, else
-/// tag 192 under `cbor.2` and plain text without it.
+/// A bigdecimal as `rpc::format::cbor` writes it: under `cbor.2` always tag 192 over its text,
+/// so its kind and scale survive; without it tag 10 when it fits a decimal exactly, else plain
+/// text.
 fn big_decimal(out: &mut Vec<u8>, v: &surrealdb_types::BigDecimal, v2: bool) {
+	if v2 {
+		tag(out, TAG_BIGDECIMAL);
+		text(out, &v.to_string());
+		return;
+	}
 	match rust_decimal::Decimal::try_from(v) {
 		Ok(d) => {
 			tag(out, TAG_STRING_DECIMAL);
 			decimal_text(out, d);
-		}
-		Err(_) if v2 => {
-			tag(out, TAG_BIGDECIMAL);
-			text(out, &v.to_string());
 		}
 		Err(_) => text(out, &v.to_string()),
 	}
@@ -2173,9 +2175,9 @@ mod tests {
 		}
 	}
 
-	/// A bigdecimal is written as the RPC layer writes it in each format: as a decimal when it
-	/// fits one exactly, and otherwise as tag 192 under `cbor.2`, plain text without it, and
-	/// text in JSON. Values at and beyond the decimal's 28 digits and scale take the second case.
+	/// A bigdecimal is written as the RPC layer writes it in each format: as tag 192 under
+	/// `cbor.2`; under `cbor` as a decimal when it fits one exactly and otherwise as plain text;
+	/// and as text in JSON. Values at and beyond the decimal's 28 digits and scale do not fit.
 	#[test]
 	fn a_bigdecimal_encodes_as_the_rpc_layer_encodes_it() {
 		for text in [

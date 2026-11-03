@@ -4,11 +4,11 @@ reason = "Only the bare field id may name the components of its tuple, not a pat
 
 [test.results]
 parsing-error = """
-Unexpected token `an identifier`, expected a kind name
-  --> [15:36]
+Unexpected token `:`, expected a kind name
+  --> [15:40]
    |
 15 | DEFINE FIELD id.x ON reading TYPE [city: string];
-   |                                    ^^^^
+   |                                        ^
 """
 
 */

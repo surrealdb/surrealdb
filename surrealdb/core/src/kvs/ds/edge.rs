@@ -30,7 +30,7 @@ use crate::dbs::executor::{
 use crate::dbs::{Options, QueryResult, QueryType, Session, TopLevelStatement};
 use crate::err::EngineError;
 use crate::exec::context::{
-	SessionEffect, SessionInfo, SessionSink, shape_statement_value, statement_context,
+	ContextLevel, SessionEffect, SessionInfo, SessionSink, shape_statement_value, statement_context,
 };
 use crate::exec::planner::plan_statement_inner;
 use crate::exec::surface::DML;
@@ -416,7 +416,7 @@ impl Datastore {
 		let exec_ctx = statement_context(
 			ctx,
 			opt,
-			session,
+			session.clone(),
 			txn,
 			&cancellation,
 			plan.access_mode() != AccessMode::ReadOnly,
@@ -451,15 +451,35 @@ impl Datastore {
 			ran => ran?,
 		};
 		let value = match kind {
-			Some(kind) => value
-				.coerce_to_kind(&kind)
-				.map_err(|error| {
-					anyhow::Error::new(ExecError::SetCoerce {
+			Some(kind) => {
+				let set_coerce = |error| {
+					ControlFlow::Err(anyhow::Error::new(ExecError::SetCoerce {
 						name: name.clone(),
 						error: Box::new(error),
-					})
-				})
-				.map_err(ControlFlow::Err)?,
+					}))
+				};
+				let value = value.coerce_to_kind(&kind).map_err(set_coerce)?;
+				if kind.has_named_type() {
+					// The named types the kind holds are judged against the catalog of the
+					// session's database, as a block-scoped `LET` judges them.
+					let exec_ctx = statement_context(
+						ctx,
+						opt,
+						session,
+						txn,
+						&cancellation,
+						false,
+						ContextLevel::Root,
+						None,
+					)
+					.await?;
+					crate::exec::vm::schema_host::check_types_held(&exec_ctx, &kind, value)
+						.await
+						.map_err(set_coerce)?
+				} else {
+					value
+				}
+			}
 			None => value,
 		};
 		// SECURITY: a top-level `LET` binds into the request context, which is not reset between

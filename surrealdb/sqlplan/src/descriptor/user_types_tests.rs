@@ -32,6 +32,7 @@ fn catalog() -> MemoryCatalog {
 			name: "address".to_owned(),
 			id: 2,
 			fields: vec![("street".to_owned(), Kind::String), ("zip".to_owned(), Kind::I32)],
+			declared: Vec::new(),
 		}]);
 	catalog.add_table(people);
 	catalog

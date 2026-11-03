@@ -231,3 +231,38 @@ fn test_translate_joins() {
 		"SELECT u.name, o.total FROM users AS u JOIN orders AS o ON (u.id = o.user_id);"
 	);
 }
+
+#[test]
+fn test_an_exponent_form_numeric_translates_to_an_exact_decimal() {
+	for (sql, expected) in [
+		("SELECT 1.234567890123456789e0", "1.234567890123456789dec"),
+		("SELECT 1.5e3", "1500dec"),
+		("SELECT 12.5E-3", "0.0125dec"),
+		("SELECT 1.5", "1.5dec"),
+	] {
+		let translated = translate_sql(sql).expect(sql);
+		assert!(translated.contains(expected), "{sql}: {translated}");
+	}
+}
+
+#[test]
+fn test_an_exponent_numeric_with_leading_fraction_zeros_translates() {
+	let translated = translate_sql("SELECT 0.0001e131075").expect("in range");
+	assert!(translated.contains("dec"), "{translated}");
+}
+
+#[test]
+fn test_a_numeric_beyond_the_fixed_decimal_translates_to_a_bigdecimal() {
+	for (sql, expected) in [
+		("SELECT 79228162514264337593543950335", "79228162514264337593543950335dec"),
+		("SELECT 79228162514264337593543950336", "79228162514264337593543950336bigdec"),
+		("SELECT 123456789012345678901234567890", "123456789012345678901234567890bigdec"),
+		("SELECT 0.1234567890123456789012345678", "0.1234567890123456789012345678dec"),
+		("SELECT 0.12345678901234567890123456789", "0.12345678901234567890123456789bigdec"),
+		("SELECT 1.5e40", "15000000000000000000000000000000000000000bigdec"),
+		("SELECT 1.50", "1.50dec"),
+	] {
+		let translated = translate_sql(sql).expect(sql);
+		assert!(translated.contains(&format!(" {expected}")), "{sql}: {translated}");
+	}
+}

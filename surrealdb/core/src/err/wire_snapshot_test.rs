@@ -913,8 +913,8 @@ fn every_catalog_variant() -> Vec<(&'static str, CatalogError)> {
 			},
 		),
 		(
-			"EnNotFound",
-			CatalogError::EnNotFound {
+			"TyNotFound",
+			CatalogError::TyNotFound {
 				name: "sample".to_string(),
 			},
 		),
@@ -1009,8 +1009,8 @@ fn every_catalog_variant() -> Vec<(&'static str, CatalogError)> {
 			},
 		),
 		(
-			"EnAlreadyExists",
-			CatalogError::EnAlreadyExists {
+			"TyAlreadyExists",
+			CatalogError::TyAlreadyExists {
 				value: "sample".to_string(),
 			},
 		),
@@ -1860,9 +1860,9 @@ fn snapshot_covers_every_variant() {
 // 173: idx::Error carries a `FileAccessDenied` twin of the buc variant with a
 // byte-identical message, so the mapper allowlist is enforced inside idx; the
 // wire output of the affected sites is unchanged.
-// 175: catalog::Error carries `EnNotFound` and `EnAlreadyExists` for the enum entity, as it
+// 175: catalog::Error carries `TyNotFound` and `TyAlreadyExists` for the type entity, as it
 // carries `BuNotFound` and `BuAlreadyExists` for buckets, mapped as those are: the public
-// `NotFoundError` and `AlreadyExistsError` name no enum, and a new public detail variant would
+// `NotFoundError` and `AlreadyExistsError` name no type, and a new public detail variant would
 // widen the wire for a condition a client reads from the message.
 const UNTYPED_INTERNAL_BUDGET: usize = 170;
 

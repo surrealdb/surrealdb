@@ -1,0 +1,28 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "a literal with a decimal point and no exponent is an exact DECIMAL and one with an exponent a DOUBLE; CAST to DECIMAL(p,s) rounds half away from zero to the scale and clamps a value beyond the precision, and a DECIMAL without a precision is DECIMAL(10,0)"
+
+[[test.results]]
+value = "[{ approximate: 1.5f, exact: true, kept: 1.5dec }]"
+
+[[test.results]]
+value = "[{ away: -3dec, clamped: 99.9dec, floor: -99.9dec, rounded: 1.26dec }]"
+
+[[test.results]]
+value = "[{ wide: 123456789012345678901234567891bigdec }]"
+
+[[test.results]]
+value = "[{ away: -3dec, clamped: 9999999999dec, whole: 2dec }]"
+*/
+
+SELECT 0.1 + 0.2 = 0.3 AS exact, 1.50 AS kept, 1.5e0 AS approximate;
+
+SELECT CAST(1.255 AS DECIMAL(10,2)) AS rounded, CAST(-2.5 AS DECIMAL(2,0)) AS away, CAST(1000 AS DECIMAL(3,1)) AS clamped, CAST(-1000 AS DECIMAL(3,1)) AS floor;
+
+SELECT 123456789012345678901234567890 + 1 AS wide;
+
+SELECT CAST(1.5 AS DECIMAL) AS whole, CAST(-2.5 AS DECIMAL) AS away, CAST(123456789012 AS DECIMAL) AS clamped;

@@ -230,6 +230,7 @@ impl Step {
 				matches!(self, Self::Element | Self::Index)
 			}
 			Kind::Any
+			| Kind::Named(_)
 			| Kind::None
 			| Kind::Null
 			| Kind::Bool
@@ -331,7 +332,7 @@ fn admits_anything(kind: &Kind) -> bool {
 /// its values.
 fn holds_elements_no_collection_describes(kind: &Kind) -> bool {
 	match kind {
-		Kind::Any | Kind::Object => true,
+		Kind::Any | Kind::Named(_) | Kind::Object => true,
 		Kind::Either(members) => members.iter().any(holds_elements_no_collection_describes),
 		Kind::Literal(literal) => match literal {
 			KindLiteral::Array(_) | KindLiteral::Object(_) => true,
@@ -705,6 +706,7 @@ pub(crate) fn define_field_statement_validate_reference_options(
 					outer && kinds.iter().all(|k| valid(k, false))
 				}
 				Kind::Any
+				| Kind::Named(_)
 				| Kind::Null
 				| Kind::Bool
 				| Kind::Bytes

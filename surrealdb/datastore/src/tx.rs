@@ -29,8 +29,8 @@ use roaring::RoaringTreemap;
 use surrealdb_catalog::node::{Node, NodeRelease, Timestamp};
 use surrealdb_catalog::providers::{
 	ApiProvider, AuthorisationProvider, BoxProviderFut, BucketProvider, CachePolicy,
-	CancellationProbe, CatalogProvider, DatabaseProvider, EnumProvider, NamespaceProvider,
-	NodeProvider, RootProvider, TableProvider, UserProvider, UserTypeProvider,
+	CancellationProbe, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider,
+	RootProvider, TableProvider, TypeProvider, UserProvider,
 };
 use surrealdb_catalog::stored::{CATALOG_MARKER, EntryError};
 use surrealdb_catalog::{
@@ -79,8 +79,8 @@ use crate::key::schema::{
 	CatalogVersionKey, CatalogVersionPrefix, ChangeFeedKey, ChangefeedFenceKey, DatabaseKey,
 	DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot, DbConfigKey,
 	DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix, DocLookupIdentityKey,
-	DocStatsBatchKey, EnumDefKey, EnumDefPrefix, EventKey, EventPrefix, FeatureLevelKey, FieldKey,
-	FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, GenerationMarkKey, GraphFoldKey,
+	DocStatsBatchKey, EventKey, EventPrefix, FeatureLevelKey, FieldKey, FieldPrefix,
+	ForeignTablePrefix, FunctionKey, FunctionPrefix, GenerationMarkKey, GraphFoldKey,
 	GraphPointerKey, IdxRoot, IndexBuildShapesKey, IndexCompactionKey, IndexCountKey, IndexDefKey,
 	IndexDefPrefix, IndexNameKey, IndexShapesKey, IndexShapesTrackedKey, LayoutKey, LayoutPrefix,
 	LiveEventsKey, MigrationKey, MigrationRunKey, MigrationRunPrefix, MlModelKey, MlModelPrefix,
@@ -16029,94 +16029,17 @@ impl BucketProvider for Transaction {
 }
 
 // --------------------------------------------------
-// Enum implementation functions
+// Type implementation functions
 // --------------------------------------------------
 
-impl EnumProvider for Transaction {
-	/// Retrieve all enum definitions for a specific database.
-	fn all_db_enums(
+impl TypeProvider for Transaction {
+	/// Retrieve every type of a database.
+	fn all_db_types(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		version: Option<u64>,
-	) -> BoxProviderFut<'_, Result<Arc<[catalog::EnumDefinition]>>> {
-		Box::pin(
-			async move {
-				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				let qey = cache::tx::Lookup::Ens(ns, db);
-				if version.is_none()
-					&& let Some(val) = self.cache.get(&qey)
-				{
-					return val.try_into_ens();
-				}
-				let range = EnumDefPrefix {
-					ns,
-					db,
-				}
-				.range()?;
-				let val = self.tr.getr(range.into_key_range(), version).await?;
-				let stored: Arc<[catalog::StoredEnumDefinition]> =
-					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-				let val = catalog::from_stored_all(&stored)?;
-				if version.is_none() {
-					let entry = cache::tx::Entry::Ens(Arc::clone(&val));
-					self.cache.insert(qey, entry);
-				}
-				Ok(val)
-			}
-			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_enums")),
-		)
-	}
-
-	/// Retrieve a specific enum definition from a database.
-	fn get_db_enum<'a>(
-		&'a self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		en: &'a str,
-		version: Option<u64>,
-	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::EnumDefinition>>>> {
-		Box::pin(
-			async move {
-				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				let qey = cache::tx::Lookup::En(ns, db, en);
-				if version.is_none()
-					&& let Some(val) = self.cache.get(&qey)
-				{
-					return val.try_into_type().map(Some);
-				}
-				let key = EnumDefKey {
-					ns,
-					db,
-					en: Cow::Borrowed(en),
-				};
-				let Some(val) = self.get_key(&key, version).await? else {
-					return Ok(None);
-				};
-				let def = Arc::new(catalog::EnumDefinition::from_stored(&val)?);
-				if version.is_none() {
-					let entr = cache::tx::Entry::Any(def.clone());
-					self.cache.insert(qey, entr);
-				}
-				Ok(Some(def))
-			}
-			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_enum")),
-		)
-	}
-}
-
-// --------------------------------------------------
-// User-defined SQL type implementation functions
-// --------------------------------------------------
-
-impl UserTypeProvider for Transaction {
-	/// Retrieve every domain and composite type of a database.
-	fn all_db_user_types(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		version: Option<u64>,
-	) -> BoxProviderFut<'_, Result<Arc<[catalog::UserTypeDefinition]>>> {
+	) -> BoxProviderFut<'_, Result<Arc<[catalog::TypeDefinition]>>> {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
@@ -16132,7 +16055,7 @@ impl UserTypeProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
-				let stored: Arc<[catalog::StoredUserTypeDefinition]> =
+				let stored: Arc<[catalog::StoredTypeDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
 				if version.is_none() {
@@ -16141,18 +16064,18 @@ impl UserTypeProvider for Transaction {
 				}
 				Ok(val)
 			}
-			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_user_types")),
+			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_types")),
 		)
 	}
 
-	/// Retrieve the domain or composite type `ty` of a database.
-	fn get_db_user_type<'a>(
+	/// Retrieve the type `ty` of a database.
+	fn get_db_type<'a>(
 		&'a self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		ty: &'a str,
 		version: Option<u64>,
-	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::UserTypeDefinition>>>> {
+	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::TypeDefinition>>>> {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
@@ -16170,14 +16093,14 @@ impl UserTypeProvider for Transaction {
 				let Some(val) = self.get_key(&key, version).await? else {
 					return Ok(None);
 				};
-				let def = Arc::new(catalog::UserTypeDefinition::from_stored(&val)?);
+				let def = Arc::new(catalog::TypeDefinition::from_stored(&val)?);
 				if version.is_none() {
 					let entr = cache::tx::Entry::Any(def.clone());
 					self.cache.insert(qey, entr);
 				}
 				Ok(Some(def))
 			}
-			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_user_type")),
+			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_type")),
 		)
 	}
 }

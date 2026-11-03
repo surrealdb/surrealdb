@@ -428,28 +428,35 @@ fn test_a_based_integer_literal_that_does_not_fit_64_bits_is_refused() {
 }
 
 #[test]
-fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_float() {
+fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_numeric() {
 	for literal in [
 		"9223372036854775808",
 		"18446744073709551616",
 		"10000000000000000000",
 		"123456789012345678901234567890",
 		"10_000_000_000_000_000_000",
-		"000000000000000000009223372036854775808",
 	] {
-		let expected = literal.replace('_', "").parse::<f64>().expect(literal);
 		let expr = parse_expr(literal).expect(literal);
 		let Expr::Literal {
-			lit: Literal::Float(parsed),
+			lit: Literal::Numeric(parsed),
 			..
 		} = expr
 		else {
-			panic!("{literal}: expected a float, got {expr:?}")
+			panic!("{literal}: expected a numeric, got {expr:?}")
 		};
-		assert_eq!(parsed, expected, "{literal}");
+		assert_eq!(parsed, literal.replace('_', ""), "{literal}");
 	}
 	let beyond_a_double = "9".repeat(400);
-	let err = parse_expr(&beyond_a_double).expect_err("a literal beyond a double has no value");
+	let Ok(Expr::Literal {
+		lit: Literal::Numeric(parsed),
+		..
+	}) = parse_expr(&beyond_a_double)
+	else {
+		panic!("a literal beyond a double is a numeric");
+	};
+	assert_eq!(parsed, beyond_a_double);
+	let beyond_numeric = "9".repeat(131_073);
+	let err = parse_expr(&beyond_numeric).expect_err("a literal beyond a numeric has no value");
 	assert!(err.to_string().contains("overflow"), "{err}");
 }
 
@@ -682,4 +689,36 @@ fn test_the_calls_of_the_keyword_forms_print_and_read_back() {
 			.unwrap_or_else(|e| panic!("{sql} printed {printed}: {e:?}"));
 		assert_eq!(again[0].to_pgsql_string(), printed, "{sql}");
 	}
+}
+
+#[test]
+fn test_a_decimal_literal_beyond_a_numeric_scale_has_no_value() {
+	let at_the_limit = format!("0.{}", "1".repeat(16_383));
+	assert!(parse_expr(&at_the_limit).is_ok(), "16383 fraction digits fit a numeric");
+	for literal in
+		[format!("0.{}", "1".repeat(16_384)), "1e131072".to_owned(), "1.5e-16383".to_owned()]
+	{
+		let err = parse_expr(&literal).expect_err("beyond a numeric");
+		assert!(err.to_string().contains("overflow"), "{err}");
+	}
+	assert!(parse_expr("1.5e3").is_ok());
+	assert!(parse_expr("12.5E-3").is_ok());
+}
+
+#[test]
+fn test_leading_zeros_do_not_count_towards_numeric_precision() {
+	let literal = format!("{}{}", "0".repeat(131_072), "9".repeat(20));
+	let Ok(Expr::Literal {
+		lit: Literal::Numeric(_),
+		..
+	}) = parse_expr(&literal)
+	else {
+		panic!("leading zeros are not significant digits");
+	};
+}
+
+#[test]
+fn test_leading_fraction_zeros_moved_by_an_exponent_are_not_integer_digits() {
+	assert!(parse_expr("0.0001e131075").is_ok());
+	assert!(parse_expr("0.0001e131076").is_err());
 }

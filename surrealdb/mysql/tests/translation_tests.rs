@@ -126,3 +126,18 @@ fn test_translate_ddl_unsupported_for_typed_lowering() {
 		Err(surrealdb_mysql::TranslationError::Unsupported(_))
 	));
 }
+
+#[test]
+fn test_a_decimal_beyond_the_fixed_decimal_translates_to_a_bigdecimal() {
+	for (sql, expected) in [
+		("SELECT 79228162514264337593543950335", "79228162514264337593543950335dec"),
+		("SELECT 79228162514264337593543950336", "79228162514264337593543950336bigdec"),
+		("SELECT 123456789012345678901234567890", "123456789012345678901234567890bigdec"),
+		("SELECT 0.1234567890123456789012345678", "0.1234567890123456789012345678dec"),
+		("SELECT 0.12345678901234567890123456789", "0.12345678901234567890123456789bigdec"),
+		("SELECT 1.5", "1.5dec"),
+	] {
+		let translated = translate_sql(sql).expect(sql);
+		assert!(translated.contains(&format!(" {expected}")), "{sql}: {translated}");
+	}
+}

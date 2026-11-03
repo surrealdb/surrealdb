@@ -128,9 +128,7 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}!ml                                                                                          MlModelPrefix ->  (range)
 /*{ns}*{db}!pa{pa}                                                                                           ParamKey ->  surrealdb_catalog::StoredParamDefinition
 /*{ns}*{db}!pa                                                                                            ParamPrefix ->  (range)
-/*{ns}*{db}!en{en}                                                                                         EnumDefKey ->  surrealdb_catalog::StoredEnumDefinition
-/*{ns}*{db}!en                                                                                          EnumDefPrefix ->  (range)
-/*{ns}*{db}!ty{ty}                                                                                        UserTypeKey ->  surrealdb_catalog::StoredUserTypeDefinition
+/*{ns}*{db}!ty{ty}                                                                                        UserTypeKey ->  surrealdb_catalog::StoredTypeDefinition
 /*{ns}*{db}!ty                                                                                         UserTypePrefix ->  (range)
 /*{ns}*{db}!eb{start}                                                                                    EnIdBatchKey ->  crate::sequences::BatchValue
 /*{ns}*{db}!eb                                                                                        EnIdBatchPrefix ->  (range)

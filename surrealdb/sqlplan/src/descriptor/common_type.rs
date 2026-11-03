@@ -29,6 +29,8 @@ impl SqlType {
 	/// - Alternatives that are all numbers but not of one type are described by the latest of their
 	///   types in [`NUMBER_TYPES`]: `Int2`, `Int4`, `Int8`, `Numeric`, `Float4`, `Float8`. A client
 	///   can read each of them as that type, and it is the one PostgreSQL gives such an expression.
+	/// - Alternatives that are `cidr` and `inet` are described by `inet`, which a `cidr` converts
+	///   to implicitly.
 	/// - Any other mixture, an alternative of unknown type, or no alternative at all is `Unknown`,
 	///   which a client reads as text. A text column holds a value of any kind.
 	///
@@ -45,6 +47,11 @@ impl SqlType {
 	fn widen(self, other: SqlType) -> SqlType {
 		if self == other {
 			return self;
+		}
+		// A `cidr` converts to `inet` implicitly, so the two networks have `inet` in common.
+		if matches!((self, other), (SqlType::Cidr, SqlType::Inet) | (SqlType::Inet, SqlType::Cidr))
+		{
+			return SqlType::Inet;
 		}
 		// A `UInt8` takes its place among the numbers as `Numeric`, the type that holds both it and
 		// every signed integer, so a mixture with one of them is `Numeric`.
@@ -281,7 +288,7 @@ mod tests {
 					"SELECT CASE WHEN true THEN 1 ELSE 2.5 END, CASE WHEN true THEN 1 ELSE 2 END"
 				),
 				[
-					Float8,
+					Numeric,
 					if dialect == SqlDialect::Postgres {
 						Int4
 					} else {
@@ -300,7 +307,7 @@ mod tests {
 			);
 			assert_eq!(
 				types(dialect, "SELECT CASE 1 WHEN 1 THEN 1.5 WHEN 2 THEN 2 ELSE 3 END"),
-				[Float8],
+				[Numeric],
 				"{dialect:?}"
 			);
 		}
@@ -315,13 +322,13 @@ mod tests {
 					"SELECT CASE WHEN true THEN 1 ELSE NULL END, CASE WHEN true THEN NULL ELSE 1.5 END, \
 					 CASE WHEN true THEN NULL ELSE NULL END, coalesce(NULL, 2.5)"
 				),
-				[Int8, Float8, Unknown, Float8],
+				[Int8, Numeric, Unknown, Numeric],
 				"{dialect:?}"
 			);
 		}
 		assert_eq!(
 			types(SqlDialect::MySql, "SELECT IF(true, 1, NULL), IF(true, NULL, 2.5)"),
-			[Int8, Float8]
+			[Int8, Numeric]
 		);
 	}
 
@@ -334,13 +341,13 @@ mod tests {
 					"SELECT floor(1.5), ceil(1.5), floor(1), greatest(1, 2.5), least(2, 1.5), \
 					 coalesce(1, 2.5), greatest(1, 2)"
 				),
-				[Float8, Float8, Int8, Float8, Float8, Float8, Int8],
+				[Numeric, Numeric, Int8, Numeric, Numeric, Numeric, Int8],
 				"{dialect:?}"
 			);
 		}
 		assert_eq!(
 			types(SqlDialect::MySql, "SELECT ifnull(1, 2.5), IF(true, 1, 2.5), IF(true, 1, 'x')"),
-			[Float8, Float8, Unknown]
+			[Numeric, Numeric, Unknown]
 		);
 	}
 
@@ -376,7 +383,7 @@ mod tests {
 				}
 				assert_eq!(
 					types(dialect, &format!("SELECT {case}")),
-					[Float8],
+					[Numeric],
 					"{dialect:?} {depth}"
 				);
 			}

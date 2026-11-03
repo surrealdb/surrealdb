@@ -135,6 +135,7 @@ pub(crate) fn kind_admits(class: KindClass, kind: &Kind) -> bool {
 		Kind::Array(..) => class == KindClass::Array,
 		Kind::Record(_) => class == KindClass::Record,
 		Kind::Any
+		| Kind::Named(_)
 		| Kind::None
 		| Kind::Null
 		| Kind::Bytes

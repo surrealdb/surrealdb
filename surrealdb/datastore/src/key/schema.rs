@@ -393,15 +393,11 @@ keyspace! {
 
 				param = ["!pa", @, pa: Str] => surrealdb_catalog::StoredParamDefinition;
 
-				/// An enum definition, keyed by name within its database.
-				enum_def = ["!en", @, en: Str] => surrealdb_catalog::StoredEnumDefinition;
+				/// A type declared by `DEFINE TYPE`, keyed by name within its database.
+				user_type = ["!ty", @, ty: Str] => surrealdb_catalog::StoredTypeDefinition;
 
-				/// A domain or composite type, keyed by name within its database. The two share a
-				/// name space, as PostgreSQL's do.
-				user_type = ["!ty", @, ty: Str] => surrealdb_catalog::StoredUserTypeDefinition;
-
-				/// The allocator of the ids of the database's enums, domains and composite types:
-				/// its reserved batch and its state.
+				/// The allocator of the ids of the database's types: its reserved batch and its
+				/// state.
 				en_id_batch = ["!eb", @, start: i64] => crate::sequences::BatchValue;
 				en_id_state = ["!es", @, nid: Uuid] => crate::sequences::SequenceState;
 

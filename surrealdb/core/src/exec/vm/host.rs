@@ -4632,6 +4632,9 @@ fn finish_in_place(step: anyhow::Result<Step>) -> anyhow::Result<bool> {
 		| Ok(Step::CallAllowed {
 			..
 		})
+		| Ok(Step::FieldTypes {
+			..
+		})
 		| Ok(Step::Access {
 			..
 		})
@@ -5421,6 +5424,39 @@ async fn run_body(
 									.check_allowed_function(&program.calls[call as usize].name)
 									.map_err(ControlFlow::Err)?;
 								pc = resume;
+							}
+							Step::FieldTypes {
+								at,
+							} => {
+								let Instr::CoerceField {
+									reg,
+									kind,
+									field,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a field-types step at a field coercion")
+								};
+								let value =
+									std::mem::replace(&mut regs[*reg as usize], Scalar::None)
+										.into_value();
+								let judged = super::schema_host::check_types_held(
+									ctx,
+									&program.kinds[*kind as usize],
+									value,
+								)
+								.await;
+								match judged {
+									Ok(value) => {
+										regs[*reg as usize] = Scalar::Value(Held::Owned(value));
+									}
+									Err(error) => {
+										return Err(ControlFlow::Err(
+											interp::field_coerce(program, reader, *field, error)
+												.map_err(ControlFlow::Err)?,
+										));
+									}
+								}
+								pc = at + 1;
 							}
 							Step::Call {
 								at,
@@ -7913,6 +7949,9 @@ pub(super) fn runs_nested_statement(program: &Program, pipeline: &Pipeline, step
 			..
 		}
 		| Step::CallAllowed {
+			..
+		}
+		| Step::FieldTypes {
 			..
 		}
 		| Step::Method {

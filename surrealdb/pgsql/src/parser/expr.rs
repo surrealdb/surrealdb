@@ -66,7 +66,7 @@ impl<'a> Parser<'a> {
 			expr = inner;
 		}
 		let Expr::Literal {
-			lit: Literal::Float(_),
+			lit: Literal::Numeric(_),
 			span,
 		} = expr
 		else {
@@ -475,17 +475,14 @@ impl<'a> Parser<'a> {
 				lit,
 				span: tok.span,
 			})
-		} else if let TokenKind::Float(f) = &tok.kind {
+		} else if let TokenKind::Float(_) | TokenKind::FloatRaw(_) = &tok.kind {
+			let text = tok.span.slice(self.src()).unwrap_or_default().replace('_', "");
+			if !numeric_in_range(&text) {
+				return Err(ParseError::new(tok.span, ErrorKind::NumericOverflow(text)));
+			}
 			self.bump()?;
 			Ok(Expr::Literal {
-				lit: Literal::Float(*f),
-				span: tok.span,
-			})
-		} else if let TokenKind::FloatRaw(s) = &tok.kind {
-			self.bump()?;
-			let val = s.replace('_', "").parse::<f64>().unwrap_or(0.0);
-			Ok(Expr::Literal {
-				lit: Literal::Float(val),
+				lit: Literal::Numeric(text),
 				span: tok.span,
 			})
 		} else if let TokenKind::StringConstant(s) = &tok.kind {
@@ -1731,13 +1728,52 @@ fn token_to_binary_op(tok: &TokenKind<'_>) -> ParseResult<BinaryOperator> {
 	}
 }
 
+/// The most digits PostgreSQL's `numeric` holds before the decimal point.
+const NUMERIC_MAX_INTEGER_DIGITS: usize = 131_072;
+
+/// The most digits PostgreSQL's `numeric` holds after the decimal point.
+const NUMERIC_MAX_FRACTION_DIGITS: usize = 16_383;
+
+/// Whether the decimal text `text` (optionally signed digits, with a decimal point, an exponent,
+/// or both) is a value a `numeric` holds: at most 131072 significant digits before the point and
+/// 16383 after it, once the exponent has moved the point.
+pub fn numeric_in_range(text: &str) -> bool {
+	let text = text.strip_prefix(['-', '+']).unwrap_or(text);
+	let (mantissa, exponent) = match text.split_once(['e', 'E']) {
+		Some((mantissa, exponent)) => match exponent.parse::<i64>() {
+			Ok(exponent) => (mantissa, exponent),
+			Err(_) => return false,
+		},
+		None => (text, 0),
+	};
+	let (integer, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+	let digits = format!("{integer}{fraction}");
+	let (Ok(leading_zeros), Ok(digit_count), Ok(integer_len)) = (
+		i64::try_from(digits.bytes().take_while(|b| *b == b'0').count()),
+		i64::try_from(digits.len()),
+		i64::try_from(integer.len()),
+	) else {
+		return false;
+	};
+	let (Ok(max_integer), Ok(max_fraction)) =
+		(i64::try_from(NUMERIC_MAX_INTEGER_DIGITS), i64::try_from(NUMERIC_MAX_FRACTION_DIGITS))
+	else {
+		return false;
+	};
+	// The point sits `point` digits into `digits` once the exponent has moved it; the integer
+	// part holds the significant digits before it and the fraction every digit after it.
+	let point = integer_len.saturating_add(exponent);
+	let integer_digits = point.saturating_sub(leading_zeros).max(0);
+	let fraction_digits = digit_count.saturating_sub(point).max(0);
+	integer_digits <= max_integer && fraction_digits <= max_fraction
+}
+
 /// The literal of an integer token that is not a plain 64-bit decimal, and `None` when it has no
 /// value.
 ///
 /// gram.y: Iconst, FCONST (scan.l: process_integer_literal). A literal with a base prefix (0x, 0o,
 /// 0b) is an integer that must fit 64 bits. A decimal integer beyond 64 bits is a numeric
-/// constant, which this front end reads as the float of its value, as it reads `1.5`; it has no
-/// value when that float is not finite.
+/// constant, held as its digits, up to the digits a numeric holds; a longer one has no value.
 fn raw_integer_literal(s: &str) -> Option<Literal> {
 	let clean = s.replace('_', "");
 	let based = [("0x", 16), ("0X", 16), ("0o", 8), ("0O", 8), ("0b", 2), ("0B", 2)]
@@ -1748,7 +1784,15 @@ fn raw_integer_literal(s: &str) -> Option<Literal> {
 	}
 	match clean.parse::<i64>() {
 		Ok(value) => Some(Literal::Integer(value)),
-		Err(_) => clean.parse::<f64>().ok().filter(|value| value.is_finite()).map(Literal::Float),
+		// A numeric holds up to 131072 significant digits before the decimal point.
+		Err(_)
+			if !clean.is_empty()
+				&& clean.trim_start_matches('0').len() <= NUMERIC_MAX_INTEGER_DIGITS
+				&& clean.bytes().all(|b| b.is_ascii_digit()) =>
+		{
+			Some(Literal::Numeric(clean))
+		}
+		Err(_) => None,
 	}
 }
 

@@ -508,7 +508,10 @@ fn written_name(expr: &Expr, item: Span, sql: &str) -> Option<String> {
 	) = atom
 	{
 		value.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c'])
-	} else if let Expr::Literal(Literal::Integer(0..) | Literal::Float(_), span)
+	} else if let Expr::Literal(
+		Literal::Integer(0..) | Literal::Unsigned(_) | Literal::Float(_) | Literal::Decimal(_),
+		span,
+	)
 	| Expr::Param(_, span) = atom
 	{
 		// A negative integer is the folded minimum 64-bit integer, which is written with its
@@ -683,22 +686,30 @@ pub fn shape_result_with_descriptor(
 		.map(|(c, report)| {
 			let tbl = c.table.as_deref().unwrap_or(table);
 			let mut column = column_definition(schema, tbl, c);
+			// MySQL announces an `ENUM` or `SET` column as a string, told apart by its flag; a
+			// client decodes the cells by the string type and its character set. An array of
+			// labels is no `SET`: it keeps its order and its repeats, and is announced as its
+			// cells are.
 			match &c.enum_type {
 				Some(surrealdb_sqlplan::ResultEnum {
 					shape: surrealdb_sqlplan::EnumShape::Scalar,
 					..
 				}) => {
-					column.column_type = MYSQL_TYPE_ENUM;
+					column.column_type = MYSQL_TYPE_STRING;
 					column.flags |= ENUM_FLAG;
 				}
 				Some(surrealdb_sqlplan::ResultEnum {
-					shape: surrealdb_sqlplan::EnumShape::Set | surrealdb_sqlplan::EnumShape::Array,
+					shape: surrealdb_sqlplan::EnumShape::Set,
 					..
 				}) => {
-					column.column_type = MYSQL_TYPE_SET;
+					column.column_type = MYSQL_TYPE_STRING;
 					column.flags |= SET_FLAG;
 				}
-				None => {}
+				Some(surrealdb_sqlplan::ResultEnum {
+					shape: surrealdb_sqlplan::EnumShape::Array,
+					..
+				})
+				| None => {}
 			}
 			if c.ty.mysql_unsigned() {
 				column.flags |= UNSIGNED_FLAG;
@@ -761,7 +772,7 @@ pub fn shape_result_with_descriptor(
 				let members = col
 					.enum_type
 					.as_ref()
-					.filter(|held| held.shape != surrealdb_sqlplan::EnumShape::Scalar);
+					.filter(|held| held.shape == surrealdb_sqlplan::EnumShape::Set);
 				let text = match (members, val) {
 					(Some(held), Some(v)) => member_list_text(&held.labels, v),
 					(Some(_), None) | (None, _) => val.and_then(|v| typed_text(col_type, v)),
@@ -2206,14 +2217,31 @@ mod tests {
 		]));
 		let shape =
 			shape_result_with_descriptor(&descriptor, "db", "t", Value::Array(vec![row].into()));
-		assert_eq!(shape.columns[0].column_type, MYSQL_TYPE_ENUM);
+		assert_eq!(shape.columns[0].column_type, MYSQL_TYPE_STRING);
 		assert_eq!(shape.columns[0].flags & ENUM_FLAG, ENUM_FLAG);
-		assert_eq!(shape.columns[1].column_type, MYSQL_TYPE_SET);
+		assert_eq!(shape.columns[1].column_type, MYSQL_TYPE_STRING);
 		assert_eq!(shape.columns[1].flags & SET_FLAG, SET_FLAG);
 		assert_eq!(shape.rows[0][0].as_deref(), Some("medium"));
 		// The members read back in declaration order, not the order the set holds them in.
 		assert_eq!(shape.rows[0][1].as_deref(), Some("small,large"));
 		assert_eq!(shape.raw_rows[0][1], Value::String("small,large".to_owned()));
+	}
+
+	#[test]
+	fn an_array_of_labels_keeps_its_order_and_repeats() {
+		let descriptor = surrealdb_sqlplan::ResultDescriptor {
+			columns: vec![enum_column("sizes", surrealdb_sqlplan::EnumShape::Array)],
+		};
+		let labels = ["large", "small", "large"].map(|l| Value::String(l.to_owned()));
+		let row = Value::Object(surrealdb_types::Object::from_iter([(
+			"sizes".to_owned(),
+			Value::Array(labels.to_vec().into()),
+		)]));
+		let shape =
+			shape_result_with_descriptor(&descriptor, "db", "t", Value::Array(vec![row].into()));
+		assert_eq!(shape.columns[0].flags & (SET_FLAG | ENUM_FLAG), 0);
+		assert_ne!(shape.columns[0].column_type, MYSQL_TYPE_SET);
+		assert_eq!(shape.rows[0][0].as_deref(), Some(r#"["large","small","large"]"#));
 	}
 
 	#[test]

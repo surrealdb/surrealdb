@@ -196,7 +196,9 @@ fn admitted(cx: &mut LoCx<'_>, op: OpId, region: RegionId) -> Option<Site> {
 				}
 			}
 			None => {
-				if !declared.can_be_none() {
+				// Whether a named type admits `NONE` is answered by the catalog when the call
+				// runs, so an omitted argument of one keeps the call.
+				if declared.has_named_type() || !declared.can_be_none() {
 					return None;
 				}
 			}

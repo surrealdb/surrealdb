@@ -44,6 +44,7 @@ mod sequence;
 mod session;
 mod set;
 mod sleep;
+mod sql;
 mod string;
 mod time;
 #[cfg(feature = "scripting")]
@@ -76,6 +77,7 @@ static EDGE_SCALARS: &[&[&dyn ScalarFunction]] = &[
 	schema::SCALARS,
 	session::SCALARS,
 	set::SCALARS,
+	sql::SCALARS,
 	string::SCALARS,
 	time::SCALARS,
 	r#type::SCALARS,

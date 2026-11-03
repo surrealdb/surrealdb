@@ -286,6 +286,7 @@ pub fn extract_tables_from_kind(sql: &str) -> Result<Vec<String>> {
 fn extract_tables_from_kind_impl(kind: &Kind, tables: &mut HashSet<String>) {
 	match kind {
 		Kind::Any
+		| Kind::Named(_)
 		| Kind::None
 		| Kind::Null
 		| Kind::Bool

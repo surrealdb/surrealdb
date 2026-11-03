@@ -142,6 +142,9 @@ pub(super) fn step(step: &Step) -> Class {
 		Step::CallAllowed {
 			..
 		} => Class::Kernel(&[Permissions]),
+		Step::FieldTypes {
+			..
+		} => Class::Kernel(&[Catalog]),
 		Step::Subquery {
 			..
 		} => Class::Kernel(&[Params]),
@@ -593,19 +596,22 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::CheckIndexColumns {
 			..
 		}
-		| StoreInstr::AlterEnum {
+		| StoreInstr::AlterType {
 			..
 		}
 		| StoreInstr::RewriteEnumLabels {
 			..
 		}
-		| StoreInstr::CheckEnumUnreferenced {
+		| StoreInstr::CheckTypeObject {
 			..
 		}
-		| StoreInstr::RaiseUserType {
+		| StoreInstr::CheckTypeUnreferenced {
 			..
 		}
-		| StoreInstr::CheckUserTypeRemovable {
+		| StoreInstr::CheckTypesDefined {
+			..
+		}
+		| StoreInstr::CheckTypeDefinition {
 			..
 		}
 		| StoreInstr::CheckTableAlter {
@@ -767,6 +773,12 @@ pub(super) fn instr(
 ) -> (Class, String) {
 	let named = |class: Class| (class, variant(instr));
 	match instr {
+		Instr::CoerceField {
+			kind,
+			..
+		} if program.kinds[*kind as usize].has_named_type() => named(step(&Step::FieldTypes {
+			at: 0,
+		})),
 		Instr::CoerceField {
 			..
 		}

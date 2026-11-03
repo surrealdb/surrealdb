@@ -24,7 +24,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ c: 'ab  ', id: dt:1, j: [1, 2], jb: 5, n: 123.46dec, ts: timestamp'2026-10-27T12:00:01', v: 'abc' }]"
+value = "[{ c: 'ab', id: dt:1, j: [1, 2], jb: 5, n: 123.46dec, ts: timestamp'2026-10-27T12:00:01', v: 'abc' }]"
 
 [[test.results]]
 error = "value too long for type character varying(3) (field `v` of `dt:1`, SQL TYPE varchar(3))"
@@ -42,10 +42,10 @@ error = "JSON cannot hold a record (field `j` of `dt:1`, SQL TYPE json)"
 error = "JSON cannot hold a record (field `jb` of `dt:1`, SQL TYPE jsonb)"
 
 [[test.results]]
-value = "[{ c: 'ab  ', id: dt:1, j: { a: 'x', b: 1 }, jb: 'text', n: 123.46dec, ts: timestamp'2026-10-27T12:00:01', v: 'abc' }]"
+value = "[{ c: 'ab', id: dt:1, j: { a: 'x', b: 1 }, jb: 'text', n: 123.46dec, ts: timestamp'2026-10-27T12:00:01', v: 'abc' }]"
 
 [[test.results]]
-value = "[{ c: 'ab  ', id: dt:1, j: { a: 'x', b: 1 }, jb: 'text', n: 123.46dec, ts: timestamp'2026-10-27T12:00:01', v: 'abc' }]"
+value = "[{ c: 'ab', id: dt:1, j: { a: 'x', b: 1 }, jb: 'text', n: 123.46dec, ts: timestamp'2026-10-27T12:00:01', v: 'abc' }]"
 */
 
 DEFINE TABLE dt SCHEMAFULL;

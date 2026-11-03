@@ -226,10 +226,10 @@ pub(super) async fn step(
 				}))
 			};
 			let coerced = read(regs, *value).coerce_to_kind(kind).map_err(set_coerce)?;
-			super::schema_host::check_enums_held(
+			let coerced = super::schema_host::check_types_held(
 				state.frame.as_ref().unwrap_or(ctx),
 				kind,
-				&coerced,
+				coerced,
 			)
 			.await
 			.map_err(set_coerce)?;

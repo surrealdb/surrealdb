@@ -74,6 +74,12 @@ pub enum PlanError {
 	#[error("bigint out of range")]
 	NumericValueOutOfRange,
 
+	/// A constant beyond the range of the type it is assigned to, with PostgreSQL's message for
+	/// that type: `smallint out of range`, `numeric field overflow`, `value out of range:
+	/// overflow`.
+	#[error("{0}")]
+	ValueOutOfRange(String),
+
 	#[error("invalid input syntax for type: {0}")]
 	InvalidTextRepresentation(String),
 
@@ -119,11 +125,17 @@ pub enum PlanError {
 		domain: String,
 	},
 
+	#[error("enum label \"{0}\" used more than once")]
+	DuplicateEnumLabel(String),
+
 	#[error("column \"{0}\" specified more than once")]
 	DuplicateColumn(String),
 
 	#[error("invalid parameter value: {0}")]
 	InvalidParameterValue(String),
+
+	#[error("{0}")]
+	DatatypeMismatch(String),
 
 	#[error("data exception: {0}")]
 	DataException(String),
@@ -180,7 +192,7 @@ impl PlanError {
 			Self::SubqueryMustHaveAlias => "42601",                               // syntax_error
 			Self::ParameterOutOfRange(_) => "22023", // invalid_parameter_value
 			Self::DivisionByZero => "22012",         // division_by_zero
-			Self::NumericValueOutOfRange => "22003", // numeric_value_out_of_range
+			Self::NumericValueOutOfRange | Self::ValueOutOfRange(_) => "22003", /* numeric_value_out_of_range */
 			Self::InvalidTextRepresentation(_) => "22P02", // invalid_text_representation
 			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => "0A000", /* feature_not_supported */
 			Self::NoActiveTransaction => "25P01", // no_active_sql_transaction
@@ -197,9 +209,11 @@ impl PlanError {
 			} => "42704", // undefined_object
 			Self::DuplicateDomainConstraint {
 				..
-			} => "42710", // duplicate_object
+			}
+			| Self::DuplicateEnumLabel(_) => "42710", // duplicate_object
 			Self::DuplicateColumn(_) => "42701",  // duplicate_column
 			Self::InvalidParameterValue(_) => "22023", // invalid_parameter_value
+			Self::DatatypeMismatch(_) => "42804", // datatype_mismatch
 			Self::DataException(_) => "22000",    // data_exception
 			Self::ProgramLimitExceeded(_) => "54000", // program_limit_exceeded
 			Self::UndefinedOperatorClass {
@@ -235,7 +249,7 @@ impl PlanError {
 			Self::SubqueryMustHaveAlias => 1248,      // ER_DERIVED_MUST_HAVE_ALIAS
 			Self::ParameterOutOfRange(_) => 1210,     // ER_WRONG_ARGUMENTS
 			Self::DivisionByZero => 1365,             // ER_DIVISION_BY_ZERO
-			Self::NumericValueOutOfRange => 1690,     // ER_DATA_OUT_OF_RANGE
+			Self::NumericValueOutOfRange | Self::ValueOutOfRange(_) => 1690, // ER_DATA_OUT_OF_RANGE
 			Self::InvalidTextRepresentation(_) => 1264, // ER_DATA_OUT_OF_RANGE
 			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => 1235, /* ER_NOT_SUPPORTED_YET */
 			Self::NoActiveTransaction => 1105,                                      /* ER_UNKNOWN_ERROR */
@@ -247,6 +261,7 @@ impl PlanError {
 				..
 			} => 1091, // ER_CANT_DROP_FIELD_OR_KEY
 			Self::InvalidParameterValue(_) => 1210, // ER_WRONG_ARGUMENTS
+			Self::DatatypeMismatch(_) => 1366,      // ER_TRUNCATED_WRONG_VALUE_FOR_FIELD
 			Self::DuplicateColumn(_) => 1060,       // ER_DUP_FIELDNAME
 			Self::UndefinedType(_)
 			| Self::UndefinedDomainConstraint {
@@ -255,6 +270,7 @@ impl PlanError {
 			| Self::DuplicateDomainConstraint {
 				..
 			}
+			| Self::DuplicateEnumLabel(_)
 			| Self::DataException(_)
 			| Self::ProgramLimitExceeded(_)
 			| Self::UndefinedOperatorClass {

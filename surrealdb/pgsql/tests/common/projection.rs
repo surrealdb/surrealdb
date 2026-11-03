@@ -825,6 +825,7 @@ impl ToPgQueryJson for Literal {
 		match self {
 			Self::Integer(i) => pg_node("A_Const", json!({ "ival": pg_int(*i)["Integer"] })),
 			Self::Float(f) => pg_node("A_Const", json!({ "fval": { "fval": f.to_string() } })),
+			Self::Numeric(text) => pg_node("A_Const", json!({ "fval": { "fval": text } })),
 			Self::String(s) => pg_node("A_Const", json!({ "sval": pg_str(s)["String"] })),
 			Self::Boolean(b) => pg_node("A_Const", json!({ "boolval": pg_bool(*b)["Boolean"] })),
 			Self::Null => pg_node("A_Const", json!({ "isnull": true })),

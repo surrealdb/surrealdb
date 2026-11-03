@@ -38,10 +38,8 @@ pub enum Entry {
 	Azs(Arc<[catalog::AnalyzerDefinition]>),
 	/// A slice of BucketDefinition specified on a database.
 	Bus(Arc<[catalog::BucketDefinition]>),
-	/// A slice of EnumDefinition specified on a database.
-	Ens(Arc<[catalog::EnumDefinition]>),
-	/// A slice of UserTypeDefinition specified on a database.
-	Tys(Arc<[catalog::UserTypeDefinition]>),
+	/// A slice of TypeDefinition specified on a database.
+	Tys(Arc<[catalog::TypeDefinition]>),
 	/// A slice of AccessDefinition specified on a database.
 	Das(Arc<[catalog::AccessDefinition]>),
 	/// A slice of AccessGrant specified at on a database.
@@ -222,22 +220,13 @@ impl Entry {
 			fail!("Unable to convert type into Entry::Bus")
 		}
 	}
-	/// Converts this cache entry into a slice of [`catalog::UserTypeDefinition`].
+	/// Converts this cache entry into a slice of [`catalog::TypeDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Tys`].
-	pub fn try_into_tys(self) -> Result<Arc<[catalog::UserTypeDefinition]>> {
+	pub fn try_into_tys(self) -> Result<Arc<[catalog::TypeDefinition]>> {
 		if let Entry::Tys(v) = self {
 			Ok(v)
 		} else {
 			fail!("Unable to convert type into Entry::Tys")
-		}
-	}
-	/// Converts this cache entry into a slice of [`catalog::EnumDefinition`].
-	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Ens`].
-	pub fn try_into_ens(self) -> Result<Arc<[catalog::EnumDefinition]>> {
-		if let Entry::Ens(v) = self {
-			Ok(v)
-		} else {
-			fail!("Unable to convert type into Entry::Ens")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::SequenceDefinition`].

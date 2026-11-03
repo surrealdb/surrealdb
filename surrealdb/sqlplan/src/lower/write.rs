@@ -746,6 +746,12 @@ fn link_comparand_with(
 	{
 		return record_named(table, &WriteKey::Int(value));
 	}
+	if preserve_value
+		&& let Expr::Literal(Literal::Decimal(value)) = &lowered
+		&& let Some(value) = surrealdb_expr::val::Number::Decimal(*value).as_int_lossless()
+	{
+		return record_named(table, &WriteKey::Int(value));
+	}
 
 	if matches!(lowered, Expr::Literal(_)) {
 		return lowered;
@@ -1440,6 +1446,7 @@ fn lower_pgsql_expr_as(
 			surrealdb_pgsql::ast::literal::Literal::Float(f) => {
 				Ok(Expr::Literal(Literal::Float(*f)))
 			}
+			surrealdb_pgsql::ast::literal::Literal::Numeric(text) => numeric_literal(text),
 			surrealdb_pgsql::ast::literal::Literal::String(s) => {
 				Ok(Expr::Literal(Literal::String(Strand::from(s.as_str()))))
 			}
@@ -2846,7 +2853,7 @@ fn lower_pgsql_conditional_upsert(
 		});
 	};
 	for (column, value) in insert.columns.iter().zip(row) {
-		let lowered = assigned_pgsql_value(&scope, column, lower_pgsql_expr(value)?)?;
+		let lowered = assigned_pgsql_value(&scope, column, lower_pgsql_row_value(value, &scope)?)?;
 		read_excluded(column, lowered);
 	}
 	for column in &omitted {
@@ -3106,6 +3113,7 @@ fn lower_mysql_expr_as(
 			surrealdb_mysql::ast::literal::Literal::Float(f) => {
 				Ok(Expr::Literal(Literal::Float(*f)))
 			}
+			surrealdb_mysql::ast::literal::Literal::Decimal(text) => numeric_literal(text),
 			surrealdb_mysql::ast::literal::Literal::String(s) => {
 				Ok(Expr::Literal(Literal::String(Strand::from(s.as_str()))))
 			}
@@ -4136,4 +4144,13 @@ pub fn lower_mysql_truncate(
 		output: None,
 		..Default::default()
 	})))
+}
+
+/// The literal of a numeric constant written to a column: a decimal or a bigdecimal, so that its
+/// digits reach the column exactly.
+fn numeric_literal(text: &str) -> Result<Expr, PlanError> {
+	Ok(Expr::Literal(match crate::lower::expr::numeric_value(text)? {
+		crate::lower::expr::NumericValue::Decimal(decimal) => Literal::Decimal(decimal),
+		crate::lower::expr::NumericValue::BigDecimal(big) => Literal::BigDecimal(Box::new(big)),
+	}))
 }

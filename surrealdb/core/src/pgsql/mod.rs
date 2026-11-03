@@ -387,10 +387,6 @@ impl surrealdb_sqlplan::BinderCatalog for BatchCatalog<'_> {
 		self.inner.composite_types()
 	}
 
-	fn domain_columns(&self, name: &str) -> Vec<surrealdb_sqlplan::DomainColumn> {
-		self.inner.domain_columns(name)
-	}
-
 	fn get_table(
 		&self,
 		schema: Option<&str>,
@@ -419,7 +415,16 @@ impl surrealdb_sqlplan::BinderCatalog for BatchCatalog<'_> {
 	) -> surrealdb_sqlplan::SqlType {
 		match self.vectors.get(table, column) {
 			Some(Some(_)) => surrealdb_sqlplan::SqlType::Vector,
-			Some(None) => surrealdb_sqlplan::SqlType::Unknown,
+			// The batch makes the column something other than a vector, so a vector type the
+			// catalog read before the batch holds for it is stale.
+			Some(None) => {
+				let ty = self.inner.column_type(schema, table, column);
+				if ty == surrealdb_sqlplan::SqlType::Vector {
+					surrealdb_sqlplan::SqlType::Unknown
+				} else {
+					ty
+				}
+			}
 			None => self.inner.column_type(schema, table, column),
 		}
 	}

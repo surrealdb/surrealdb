@@ -42,21 +42,21 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "the enum 'mood' is held by the field 'days.*.*' on the table 'pet', whose path a rename does not reach"
+error = "the type 'mood' is held by the field 'days.*.*' on the table 'pet', whose path a rename does not reach"
 
 [[test.results]]
 value = "[{ id: person:a, past: ['fine', NONE] }, { id: person:b, past: ['happy'] }]"
 */
 
-DEFINE ENUM mood VALUES 'sad', 'ok', 'happy';
+DEFINE TYPE mood AS 'sad' | 'ok' | 'happy';
 DEFINE TABLE person SCHEMAFULL CHANGEFEED 1h;
-DEFINE FIELD past ON person TYPE array<option<enum<mood>>>;
+DEFINE FIELD past ON person TYPE array<option<mood>>;
 CREATE person:a SET past = ['ok', NONE] RETURN NONE;
 CREATE person:b SET past = ['happy'] RETURN NONE;
-ALTER ENUM mood RENAME VALUE 'ok' TO 'fine';
+ALTER TYPE mood RENAME VALUE 'ok' TO 'fine';
 SHOW CHANGES FOR TABLE person SINCE 1;
 SELECT id, past FROM person ORDER BY id;
 DEFINE TABLE pet SCHEMAFULL;
-DEFINE FIELD days ON pet TYPE array<array<enum<mood>>>;
-ALTER ENUM mood RENAME VALUE 'fine' TO 'okay';
+DEFINE FIELD days ON pet TYPE array<array<mood>>;
+ALTER TYPE mood RENAME VALUE 'fine' TO 'okay';
 SELECT id, past FROM person ORDER BY id;

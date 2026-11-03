@@ -165,9 +165,17 @@ fn link_operand_with(
 			record_of(table, value)
 		}
 	};
-	if let BoundExpr::Literal(BoundLiteral::Float(value)) = other
-		&& let Some(value) = Number::Float(*value).as_int_lossless()
+	let integral = if let BoundExpr::Literal(BoundLiteral::Float(value)) = other {
+		Number::Float(*value).as_int_lossless()
+	} else if let BoundExpr::Literal(BoundLiteral::Numeric(text)) = other
+		&& let Ok(crate::lower::expr::NumericValue::Decimal(value)) =
+			crate::lower::expr::numeric_value(text)
 	{
+		Number::Decimal(value).as_int_lossless()
+	} else {
+		None
+	};
+	if let Some(value) = integral {
 		return Ok(LinkOperand::Record(record_of_operand(
 			table,
 			&crate::lower::id_key::KeyOperand::Int(value),

@@ -22,7 +22,7 @@ value = "[{ a: 1f, b: true, c: 0f, d: true }]"
 value = "[{ base10: true, base2: true, n: NULL }]"
 
 [[test.results]]
-value = "[{ a: 2.57dec, b: 3f, c: -3dec, d: 1200dec }]"
+value = "[{ a: 2.57dec, b: 3dec, c: -3dec, d: 1200dec }]"
 
 */
 

@@ -152,7 +152,8 @@ fn sample_value(kind: &Kind) -> Option<Value> {
 		| Kind::Range
 		| Kind::Literal(_)
 		| Kind::File(_)
-		| Kind::Enum(_) => return None,
+		| Kind::Enum(_)
+		| Kind::Named(_) => return None,
 	})
 }
 
@@ -198,7 +199,8 @@ fn kind_matches(value: &Value, kind: &Kind) -> bool {
 		| Kind::Range
 		| Kind::Literal(_)
 		| Kind::File(_)
-		| Kind::Enum(_) => true,
+		| Kind::Enum(_)
+		| Kind::Named(_) => true,
 	}
 }
 

@@ -529,19 +529,22 @@ pub(super) async fn step(
 		| StoreInstr::CheckIndexColumns {
 			..
 		}
-		| StoreInstr::AlterEnum {
+		| StoreInstr::AlterType {
 			..
 		}
 		| StoreInstr::RewriteEnumLabels {
 			..
 		}
-		| StoreInstr::CheckEnumUnreferenced {
+		| StoreInstr::CheckTypeObject {
 			..
 		}
-		| StoreInstr::RaiseUserType {
+		| StoreInstr::CheckTypeUnreferenced {
 			..
 		}
-		| StoreInstr::CheckUserTypeRemovable {
+		| StoreInstr::CheckTypesDefined {
+			..
+		}
+		| StoreInstr::CheckTypeDefinition {
 			..
 		}
 		| StoreInstr::CheckTableAlter {

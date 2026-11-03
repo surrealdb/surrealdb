@@ -313,22 +313,22 @@ async fn a_number_function_is_announced_as_the_type_its_results_have() {
 	let (addr, shutdown) = start().await;
 	let mut stream = connect(addr).await;
 	for (sql, column_type, rows) in [
-		("SELECT floor(1.5)", MYSQL_TYPE_DOUBLE, ["1"]),
-		("SELECT ceil(1.2)", MYSQL_TYPE_DOUBLE, ["2"]),
-		("SELECT ceiling(-1.2)", MYSQL_TYPE_DOUBLE, ["-1"]),
+		("SELECT floor(1.5)", MYSQL_TYPE_NEWDECIMAL, ["1"]),
+		("SELECT ceil(1.2)", MYSQL_TYPE_NEWDECIMAL, ["2"]),
+		("SELECT ceiling(-1.2)", MYSQL_TYPE_NEWDECIMAL, ["-1"]),
 		("SELECT floor(1)", MYSQL_TYPE_LONGLONG, ["1"]),
 		("SELECT ceil(7)", MYSQL_TYPE_LONGLONG, ["7"]),
-		("SELECT greatest(1, 2.5)", MYSQL_TYPE_DOUBLE, ["2.5"]),
-		("SELECT greatest(3, 2.5)", MYSQL_TYPE_DOUBLE, ["3"]),
-		("SELECT least(1, 2.5)", MYSQL_TYPE_DOUBLE, ["1"]),
-		("SELECT least(4, 2.5)", MYSQL_TYPE_DOUBLE, ["2.5"]),
+		("SELECT greatest(1, 2.5)", MYSQL_TYPE_NEWDECIMAL, ["2.5"]),
+		("SELECT greatest(3, 2.5)", MYSQL_TYPE_NEWDECIMAL, ["3"]),
+		("SELECT least(1, 2.5)", MYSQL_TYPE_NEWDECIMAL, ["1"]),
+		("SELECT least(4, 2.5)", MYSQL_TYPE_NEWDECIMAL, ["2.5"]),
 		("SELECT greatest(1, 2, 3)", MYSQL_TYPE_LONGLONG, ["3"]),
-		("SELECT coalesce(1, 2.5)", MYSQL_TYPE_DOUBLE, ["1"]),
-		("SELECT coalesce(NULL, 2.5)", MYSQL_TYPE_DOUBLE, ["2.5"]),
+		("SELECT coalesce(1, 2.5)", MYSQL_TYPE_NEWDECIMAL, ["1"]),
+		("SELECT coalesce(NULL, 2.5)", MYSQL_TYPE_NEWDECIMAL, ["2.5"]),
 		("SELECT coalesce(NULL, NULL, 7)", MYSQL_TYPE_LONGLONG, ["7"]),
 		("SELECT coalesce(NULL, 'a', 1)", MYSQL_TYPE_VAR_STRING, ["a"]),
-		("SELECT ifnull(1, 2.5)", MYSQL_TYPE_DOUBLE, ["1"]),
-		("SELECT ifnull(NULL, 2.5)", MYSQL_TYPE_DOUBLE, ["2.5"]),
+		("SELECT ifnull(1, 2.5)", MYSQL_TYPE_NEWDECIMAL, ["1"]),
+		("SELECT ifnull(NULL, 2.5)", MYSQL_TYPE_NEWDECIMAL, ["2.5"]),
 		("SELECT ifnull(NULL, 'a')", MYSQL_TYPE_VAR_STRING, ["a"]),
 	] {
 		assert_answer(&mut stream, sql, Some(column_type), &rows).await;
@@ -341,24 +341,24 @@ async fn an_if_or_a_case_is_announced_as_the_type_all_its_branches_have() {
 	let (addr, shutdown) = start().await;
 	let mut stream = connect(addr).await;
 	for (sql, column_type, rows) in [
-		("SELECT IF(false, 1, 2.5)", MYSQL_TYPE_DOUBLE, ["2.5"]),
-		("SELECT IF(true, 1, 2.5)", MYSQL_TYPE_DOUBLE, ["1"]),
-		("SELECT IF(false, 1.5, 2)", MYSQL_TYPE_DOUBLE, ["2"]),
+		("SELECT IF(false, 1, 2.5)", MYSQL_TYPE_NEWDECIMAL, ["2.5"]),
+		("SELECT IF(true, 1, 2.5)", MYSQL_TYPE_NEWDECIMAL, ["1"]),
+		("SELECT IF(false, 1.5, 2)", MYSQL_TYPE_NEWDECIMAL, ["2"]),
 		("SELECT IF(true, 1, 2)", MYSQL_TYPE_LONGLONG, ["1"]),
 		("SELECT IF(false, 1, 'a')", MYSQL_TYPE_VAR_STRING, ["a"]),
 		("SELECT IF(true, 1, 'a')", MYSQL_TYPE_VAR_STRING, ["1"]),
 		("SELECT IF(true, 1, NULL)", MYSQL_TYPE_LONGLONG, ["1"]),
 		("SELECT IF(false, 1, NULL)", MYSQL_TYPE_LONGLONG, ["NULL"]),
-		("SELECT IF(false, NULL, 2.5)", MYSQL_TYPE_DOUBLE, ["2.5"]),
-		("SELECT CASE WHEN false THEN 1 ELSE 2.5 END", MYSQL_TYPE_DOUBLE, ["2.5"]),
-		("SELECT CASE WHEN true THEN 1 ELSE 2.5 END", MYSQL_TYPE_DOUBLE, ["1"]),
-		("SELECT CASE WHEN false THEN 1.5 ELSE 2 END", MYSQL_TYPE_DOUBLE, ["2"]),
+		("SELECT IF(false, NULL, 2.5)", MYSQL_TYPE_NEWDECIMAL, ["2.5"]),
+		("SELECT CASE WHEN false THEN 1 ELSE 2.5 END", MYSQL_TYPE_NEWDECIMAL, ["2.5"]),
+		("SELECT CASE WHEN true THEN 1 ELSE 2.5 END", MYSQL_TYPE_NEWDECIMAL, ["1"]),
+		("SELECT CASE WHEN false THEN 1.5 ELSE 2 END", MYSQL_TYPE_NEWDECIMAL, ["2"]),
 		("SELECT CASE WHEN true THEN 1 ELSE 2 END", MYSQL_TYPE_LONGLONG, ["1"]),
-		("SELECT CASE 2 WHEN 1 THEN 1 WHEN 2 THEN 2.5 END", MYSQL_TYPE_DOUBLE, ["2.5"]),
+		("SELECT CASE 2 WHEN 1 THEN 1 WHEN 2 THEN 2.5 END", MYSQL_TYPE_NEWDECIMAL, ["2.5"]),
 		("SELECT CASE WHEN true THEN 1 ELSE 'a' END", MYSQL_TYPE_VAR_STRING, ["1"]),
 		("SELECT CASE WHEN false THEN 1 ELSE 'a' END", MYSQL_TYPE_VAR_STRING, ["a"]),
 		("SELECT CASE WHEN false THEN 1 ELSE NULL END", MYSQL_TYPE_LONGLONG, ["NULL"]),
-		("SELECT CASE WHEN false THEN NULL ELSE 1.5 END", MYSQL_TYPE_DOUBLE, ["1.5"]),
+		("SELECT CASE WHEN false THEN NULL ELSE 1.5 END", MYSQL_TYPE_NEWDECIMAL, ["1.5"]),
 	] {
 		assert_answer(&mut stream, sql, Some(column_type), &rows).await;
 	}

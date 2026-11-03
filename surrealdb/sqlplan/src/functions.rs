@@ -47,6 +47,9 @@ pub enum ReturnTypeStrategy {
 	/// The type of the second argument, with a `date` promoted to `timestamptz` as `date_trunc`
 	/// does, and unknown for a type that is not a date or time.
 	SecondArgTemporal,
+	/// The element type of the range the first argument is (e.g. `lower(int4range)` is `int4`),
+	/// and unknown for an argument that is not a range.
+	RangeElementOfFirstArg,
 	/// Numeric mathematical return type: Float8 if a float is involved, else the type of the first
 	/// argument, or Int8 when there is none.
 	NumericMath,
@@ -105,6 +108,18 @@ pub const BIT_AND: &str = "__sql_bitand";
 
 /// The internal function an array subscript (`array[index]`) binds to.
 pub const SUBSCRIPT: &str = "__sql_subscript";
+
+/// The internal function the range `&&` operator binds to.
+pub const RANGE_OVERLAPS: &str = "__sql_range_overlaps";
+
+/// The internal function a range `@>` range binds to, and `<@` with its operands swapped.
+pub const RANGE_CONTAINS: &str = "__sql_range_contains";
+
+/// The internal function `lower()` of a range binds to.
+pub const RANGE_LOWER: &str = "__sql_range_lower";
+
+/// The internal function `upper()` of a range binds to.
+pub const RANGE_UPPER: &str = "__sql_range_upper";
 
 /// Global registry of dialect-scoped SQL functions.
 pub struct FunctionRegistry;
@@ -1044,6 +1059,46 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		max_args: Some(2),
 		return_type: ReturnTypeStrategy::Fixed(SqlType::Int8),
 		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: RANGE_OVERLAPS,
+		kind: SqlFunctionKind::Scalar,
+		min_args: 2,
+		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Bool),
+		internal_name: Some("sql::range_overlaps"),
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: RANGE_CONTAINS,
+		kind: SqlFunctionKind::Scalar,
+		min_args: 2,
+		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Bool),
+		internal_name: Some("sql::range_contains"),
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: RANGE_LOWER,
+		kind: SqlFunctionKind::Scalar,
+		min_args: 1,
+		max_args: Some(1),
+		return_type: ReturnTypeStrategy::RangeElementOfFirstArg,
+		internal_name: Some("sql::range_lower"),
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: RANGE_UPPER,
+		kind: SqlFunctionKind::Scalar,
+		min_args: 1,
+		max_args: Some(1),
+		return_type: ReturnTypeStrategy::RangeElementOfFirstArg,
+		internal_name: Some("sql::range_upper"),
 		pgsql: true,
 		mysql: false,
 	},
@@ -2848,6 +2903,13 @@ impl FunctionRegistry {
 			}
 			ReturnTypeStrategy::FirstArg => {
 				arg_types.first().copied().flatten().unwrap_or(SqlType::Unknown)
+			}
+			ReturnTypeStrategy::RangeElementOfFirstArg => {
+				if let Some(Some(SqlType::Range(element))) = arg_types.first() {
+					SqlType::of_range_element(*element)
+				} else {
+					SqlType::Unknown
+				}
 			}
 			ReturnTypeStrategy::SecondArgTemporal => match arg_types.get(1).copied().flatten() {
 				Some(SqlType::Date) => SqlType::TimestampTz,

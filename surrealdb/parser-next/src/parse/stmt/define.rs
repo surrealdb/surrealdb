@@ -166,8 +166,8 @@ impl<'a, 's> Parser<'a, 's> {
 			DefineKind::Sequence
 		} else if t.kw == Kw::Extension || t.kw == Kw::Module {
 			DefineKind::Module
-		} else if self.ident_is(t, "ENUM", true) {
-			DefineKind::Enum
+		} else if t.kw == Kw::Type {
+			DefineKind::Type
 		} else {
 			return Err(self.unexpected("a define statement keyword"));
 		};
@@ -348,30 +348,9 @@ impl<'a, 's> Parser<'a, 's> {
 				}
 			}
 			DefineKind::Module => deprecated |= self.define_module(&mut rec)?,
-			DefineKind::Enum => {
+			DefineKind::Type => {
 				rec[define::NAME] = self.name()?;
-				let v = self.tok;
-				let first = self.ast.nodes.len();
-				self.expect_kw(Kw::Values, "VALUES")?;
-				let labels = self.vals.len() as u32;
-				loop {
-					let s = self.string_lit()?;
-					self.vals.push(s);
-					if !self.eat(T::Comma) {
-						break;
-					}
-				}
-				let list = self.list_from(labels).0;
-				self.push_clause(Cl::EnumValues, list, 0, v.start, first)?;
-				loop {
-					if self.tok.kw == Kw::Comment {
-						self.expr_clause(Cl::Comment)?;
-					} else if self.tok.kw == Kw::Permissions {
-						self.perm_value_clause()?;
-					} else {
-						break;
-					}
-				}
+				self.type_clauses()?;
 			}
 		}
 		rec[define::CLAUSES] = self.list_from(mark).0;
@@ -1219,6 +1198,43 @@ impl<'a, 's> Parser<'a, 's> {
 			return Err(self.diag(d));
 		}
 		Ok(())
+	}
+
+	/// The clauses of `DEFINE TYPE`: `AS kind` first, then in any order any number of
+	/// `[CONSTRAINT name] ASSERT expr`, kept in source order, and `DEFAULT expr`,
+	/// `SQL TYPE dialect 'text'`, `COMMENT expr` and `PERMISSIONS …`.
+	pub(crate) fn type_clauses(&mut self) -> R<()> {
+		let t = self.tok;
+		self.expect_kw(Kw::As, "AS")?;
+		let first = self.ast.nodes.len();
+		let k = self.kind()?;
+		self.push_clause(Cl::FieldType, k, 0, t.start, first)?;
+		loop {
+			let t = self.tok;
+			if self.tok.kw == Kw::Assert || self.is_word(t, "CONSTRAINT") {
+				self.bump();
+				let first = self.ast.nodes.len();
+				let name = if self.is_word(t, "CONSTRAINT") {
+					let name = self.name()?;
+					self.expect_kw(Kw::Assert, "ASSERT")?;
+					name
+				} else {
+					NONE
+				};
+				let e = self.expr(true)?;
+				self.push_clause(Cl::Check, e, name, t.start, first)?;
+			} else if self.tok.kw == Kw::Default {
+				self.expr_clause(Cl::Default)?;
+			} else if self.is_word(t, "SQL") {
+				self.sql_type_clause()?;
+			} else if self.tok.kw == Kw::Comment {
+				self.expr_clause(Cl::Comment)?;
+			} else if self.tok.kw == Kw::Permissions {
+				self.perm_value_clause()?;
+			} else {
+				return Ok(());
+			}
+		}
 	}
 
 	/// The clauses of `DEFINE FIELD`. `field_is_id` is whether the field is the

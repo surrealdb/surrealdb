@@ -278,10 +278,37 @@ impl CompiledClosure {
 		self.digest
 	}
 
-	/// Bind `args` to the declared parameters, coercing each to its kind.
-	fn bind_args(&self, args: Vec<Value>) -> anyhow::Result<Vec<(Strand, Value)>> {
+	/// Bind `args` to the declared parameters, coercing each to its kind and judging it against
+	/// the named types the kind holds where `ctx` reaches the catalog. A parameter the
+	/// invocation leaves out is judged as NONE, so it may be left out only where its kind, with
+	/// the named types it holds, admits NONE.
+	async fn bind_args(
+		&self,
+		ctx: &EvalContext<'_>,
+		args: Vec<Value>,
+	) -> anyhow::Result<Vec<(Strand, Value)>> {
 		let values = bind_closure_args(&self.args, args)?;
-		Ok(self.args.iter().map(|(param, _)| param.clone().into_strand()).zip(values).collect())
+		let refused = |param: &Param, e| ExprError::InvalidFunctionArguments {
+			name: "ANONYMOUS".to_string(),
+			message: format!("Failed to coerce argument {}: {e}", param.to_sql()),
+		};
+		let mut bound = Vec::with_capacity(values.len());
+		let mut declared = self.args.iter();
+		for value in values {
+			let Some((param, kind)) = declared.next() else {
+				break;
+			};
+			let value = crate::exec::vm::schema_host::check_types_held(ctx.exec_ctx, kind, value)
+				.await
+				.map_err(|e| refused(param, e))?;
+			bound.push((param.clone().into_strand(), value));
+		}
+		for (param, kind) in declared {
+			crate::exec::vm::schema_host::check_types_held(ctx.exec_ctx, kind, Value::None)
+				.await
+				.map_err(|e| refused(param, e))?;
+		}
+		Ok(bound)
 	}
 
 	/// Invoke the closure from a streaming expression.
@@ -307,7 +334,7 @@ impl CompiledClosure {
 		args: Vec<Value>,
 	) -> FlowResult<Value> {
 		let evaluated = self.evaluate_body(ctx, args).await;
-		self.returned(evaluated)
+		self.returned(ctx, evaluated).await
 	}
 
 	/// The body's own outcome for an invocation from `ctx` with `args`, as
@@ -319,7 +346,7 @@ impl CompiledClosure {
 		ctx: &EvalContext<'_>,
 		args: Vec<Value>,
 	) -> FlowResult<Value> {
-		let bound = self.bind_args(args)?;
+		let bound = self.bind_args(ctx, args).await?;
 		match crate::exec::vm::closure::run_unit(self, ctx, bound).await {
 			Invoked::Ran(ran) => ran,
 			// The unit the instruction handing the value over linked stopped
@@ -364,7 +391,7 @@ impl CompiledClosure {
 		args: Vec<Value>,
 		relinked: bool,
 	) -> Option<FlowResult<Value>> {
-		let bound = match self.bind_args(args) {
+		let bound = match self.bind_args(ctx, args).await {
 			Ok(bound) => bound,
 			Err(e) => return Some(Err(e.into())),
 		};
@@ -373,13 +400,18 @@ impl CompiledClosure {
 			Invoked::Unlinked(bound) if relinked => Box::pin(self.relinked(ctx, bound)).await,
 			Invoked::Unlinked(_) => return None,
 		};
-		Some(self.returned(evaluated))
+		Some(self.returned(ctx, evaluated).await)
 	}
 
 	/// The value of an invocation whose body evaluated to `evaluated`: a
 	/// `RETURN` is the value, a loop signal an error, and the value is
-	/// checked against the declared return kind.
-	fn returned(&self, evaluated: FlowResult<Value>) -> FlowResult<Value> {
+	/// checked against the declared return kind and the named types it holds where `ctx` reaches
+	/// the catalog.
+	async fn returned(
+		&self,
+		ctx: &EvalContext<'_>,
+		evaluated: FlowResult<Value>,
+	) -> FlowResult<Value> {
 		let result = match evaluated {
 			Ok(v) => v,
 			Err(ControlFlow::Return(v)) => v,
@@ -389,7 +421,18 @@ impl CompiledClosure {
 			Err(e) => return Err(e),
 		};
 
-		Ok(validate_return("ANONYMOUS", self.returns.as_ref(), result)?)
+		let value = validate_return("ANONYMOUS", self.returns.as_ref(), result)?;
+		let Some(kind) = self.returns.as_ref() else {
+			return Ok(value);
+		};
+		crate::exec::vm::schema_host::check_types_held(ctx.exec_ctx, kind, value).await.map_err(
+			|e| {
+				ControlFlow::from(anyhow::Error::new(ExecError::ReturnCoerce {
+					name: "ANONYMOUS".to_string(),
+					error: Box::new(e),
+				}))
+			},
+		)
 	}
 
 	/// The frame an invocation from `ctx` runs the body's unit in. It is an

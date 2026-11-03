@@ -797,10 +797,9 @@ impl Value {
 			Kind::File(bucket) => {
 				self.is_file_and(|f| bucket.is_empty() || bucket.contains(&f.bucket().to_string()))
 			}
-			Kind::Enum(reference) => match reference {
-				crate::EnumRef::Named(_) => self.is_string(),
-				crate::EnumRef::Inline(labels) => self.is_string_and(|s| labels.contains(s)),
-			},
+			Kind::Enum(labels) => self.is_string_and(|s| labels.contains(s)),
+			// What a named type admits is held by the catalog, which no value reaches.
+			Kind::Named(_) => true,
 			Kind::Function(_, _) => {
 				// Functions are not a value type
 				false

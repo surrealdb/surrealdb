@@ -82,30 +82,30 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Invalid statement: Cannot remove the enum 'tone': the function 'fn::cast' names it"
+error = "Invalid statement: Cannot remove the type 'tone': the function 'fn::cast' names it"
 */
 
-DEFINE ENUM mood VALUES 'sad', 'ok', 'happy';
+DEFINE TYPE mood AS 'sad' | 'ok' | 'happy';
 DEFINE TABLE person SCHEMAFULL CHANGEFEED 1h;
 DEFINE FIELD name ON person TYPE string;
-DEFINE FIELD mood ON person TYPE enum<mood> READONLY;
+DEFINE FIELD mood ON person TYPE mood READONLY;
 DEFINE FIELD writes ON person TYPE int VALUE ($before.writes ?? 0) + 1;
 CREATE person:a SET name = 'a', mood = 'ok' RETURN NONE;
 CREATE person:b SET name = 'b', mood = 'happy' RETURN NONE;
 DEFINE FIELD tag ON person TYPE option<string> DEFAULT ALWAYS 'stamped';
 DEFINE TABLE touched SCHEMALESS;
 DEFINE EVENT audit ON person THEN { CREATE touched SET who = $after.id };
-ALTER ENUM mood RENAME VALUE 'ok' TO 'fine';
+ALTER TYPE mood RENAME VALUE 'ok' TO 'fine';
 SELECT VALUE who FROM touched;
 SELECT name, mood, writes, tag FROM person ORDER BY name;
 SHOW CHANGES FOR TABLE person SINCE 1;
 UPDATE person:a SET mood = 'sad';
-ALTER ENUM mood RENAME VALUE 'fine' TO 'well' ADD VALUE 'fine' RENAME VALUE 'fine' TO 'great';
+ALTER TYPE mood RENAME VALUE 'fine' TO 'well' ADD VALUE 'fine' RENAME VALUE 'fine' TO 'great';
 enum::values('mood');
 SELECT name, mood FROM person ORDER BY name;
-DEFINE ENUM tone VALUES 'low', 'high';
-DEFINE FUNCTION fn::spell() { RETURN "enum<tone>" };
-REMOVE ENUM tone;
-DEFINE ENUM tone VALUES 'low', 'high';
-DEFINE FUNCTION fn::cast($v: any) { RETURN <option<enum<tone>>> $v };
-REMOVE ENUM tone;
+DEFINE TYPE tone AS 'low' | 'high';
+DEFINE FUNCTION fn::spell() { RETURN "tone" };
+REMOVE TYPE tone;
+DEFINE TYPE tone AS 'low' | 'high';
+DEFINE FUNCTION fn::cast($v: any) { RETURN <option<tone>> $v };
+REMOVE TYPE tone;

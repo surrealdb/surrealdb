@@ -3479,6 +3479,8 @@ fn leaf_table(mut op: &LogicalOp) -> Option<&TableName> {
 /// literal kind is not looked into.
 fn element_kind(kind: &Kind) -> Kind {
 	match kind {
+		// What a named type holds is the catalog's to say, which this does not read.
+		Kind::Named(_) => Kind::Any,
 		Kind::Array(inner, _) | Kind::Set(inner, _) => (**inner).clone(),
 		Kind::Either(kinds) => Kind::either(kinds.iter().map(element_kind).collect()),
 		Kind::Any | Kind::Literal(_) => Kind::Any,

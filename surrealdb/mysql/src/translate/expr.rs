@@ -345,11 +345,32 @@ pub fn translate_expr(
 	}
 }
 
+/// The suffix of a SurrealQL literal for the exact positional number `text` (digits with at most
+/// one point, no sign): `dec` when the fixed decimal type holds it exactly (at most 28 fraction
+/// digits once trailing zeros are dropped, and a coefficient within 96 bits), otherwise `bigdec`.
+fn exact_literal_suffix(text: &str) -> &'static str {
+	const MAX_SCALE: usize = 28;
+	const MAX_COEFFICIENT: &str = "79228162514264337593543950335";
+	let (integer, fraction) = text.split_once('.').unwrap_or((text, ""));
+	let fraction = fraction.trim_end_matches('0');
+	let coefficient = format!("{integer}{fraction}");
+	let coefficient = coefficient.trim_start_matches('0');
+	let fits = fraction.len() <= MAX_SCALE
+		&& (coefficient.len() < MAX_COEFFICIENT.len()
+			|| (coefficient.len() == MAX_COEFFICIENT.len() && coefficient <= MAX_COEFFICIENT));
+	if fits {
+		"dec"
+	} else {
+		"bigdec"
+	}
+}
+
 fn translate_literal(lit: &Literal, out: &mut String) -> Result<(), TranslationError> {
 	match lit {
 		Literal::Integer(n) => write!(out, "{n}")?,
 		Literal::Unsigned(n) => write!(out, "{n}u64")?,
 		Literal::Float(fl) => write!(out, "{fl}")?,
+		Literal::Decimal(text) => write!(out, "{text}{}", exact_literal_suffix(text))?,
 		Literal::String(s) => {
 			out.push('\'');
 			for ch in s.chars() {

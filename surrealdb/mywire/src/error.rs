@@ -129,6 +129,8 @@ fn plan_number(err: &PlanError) -> Number {
 		| PlanError::DuplicateDomainConstraint {
 			..
 		}
+		| PlanError::DuplicateEnumLabel(_)
+		| PlanError::ValueOutOfRange(_)
 		| PlanError::UndefinedOperator(_)
 		| PlanError::ParameterOutOfRange(_)
 		| PlanError::NoActiveTransaction
@@ -136,6 +138,7 @@ fn plan_number(err: &PlanError) -> Number {
 		| PlanError::SavepointDoesNotExist(_)
 		| PlanError::ActiveTransactionAlreadyInProgress
 		| PlanError::InvalidParameterValue(_)
+		| PlanError::DatatypeMismatch(_)
 		| PlanError::DataException(_)
 		| PlanError::ProgramLimitExceeded(_)
 		| PlanError::UndefinedOperatorClass {
@@ -222,6 +225,11 @@ fn message_number(message: &str) -> Option<Number> {
 	} else if message.starts_with("Found field '") {
 		// A write to a field a SCHEMAFULL table does not define.
 		Some(ER_BAD_FIELD_ERROR)
+	} else if message.starts_with("Found NULL for field `")
+		&& message.ends_with(" but field must conform to: $value != NONE AND $value != NULL")
+	{
+		// A NULL a `NOT NULL` column's assertion refuses, over a type that admits NULL.
+		Some(ER_BAD_NULL_ERROR)
 	} else if message.starts_with("Could not cast into `") {
 		// Text written to a typed column that does not read as the column's type.
 		Some(ER_TRUNCATED_WRONG_VALUE_FOR_FIELD)
@@ -702,6 +710,8 @@ mod tests {
 				constraint: name(),
 				domain: name(),
 			},
+			PlanError::DuplicateEnumLabel(name()),
+			PlanError::ValueOutOfRange("smallint out of range".to_string()),
 			PlanError::DuplicateColumn(name()),
 			PlanError::InvalidParameterValue("m".to_string()),
 			PlanError::DataException("expected 3 dimensions, not 2".to_string()),
@@ -762,6 +772,8 @@ mod tests {
 					| PlanError::DuplicateDomainConstraint {
 						..
 					}
+					| PlanError::DuplicateEnumLabel(_)
+					| PlanError::ValueOutOfRange(_)
 					| PlanError::UndefinedOperator(_)
 					| PlanError::ParameterOutOfRange(_)
 					| PlanError::NoActiveTransaction
@@ -769,6 +781,7 @@ mod tests {
 					| PlanError::SavepointDoesNotExist(_)
 					| PlanError::ActiveTransactionAlreadyInProgress
 					| PlanError::InvalidParameterValue(_)
+					| PlanError::DatatypeMismatch(_)
 					| PlanError::DataException(_)
 					| PlanError::ProgramLimitExceeded(_)
 					| PlanError::UndefinedOperatorClass {

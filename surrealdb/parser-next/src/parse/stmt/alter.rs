@@ -45,8 +45,8 @@ impl<'a, 's> Parser<'a, 's> {
 			DefineKind::Api as u8
 		} else if t.kw == Kw::Extension || t.kw == Kw::Module {
 			DefineKind::Module as u8
-		} else if self.ident_is(t, "ENUM", true) {
-			DefineKind::Enum as u8
+		} else if t.kw == Kw::Type {
+			DefineKind::Type as u8
 		} else {
 			return Err(self.unexpected("a alter statement keyword"));
 		};
@@ -182,10 +182,10 @@ impl<'a, 's> Parser<'a, 's> {
 		const ACCESS: u8 = DefineKind::Access as u8;
 		const CONFIG: u8 = DefineKind::Config as u8;
 		const MODULE: u8 = DefineKind::Module as u8;
-		const ENUM: u8 = DefineKind::Enum as u8;
+		const TYPE: u8 = DefineKind::Type as u8;
 		const BUCKET: u8 = DefineKind::Bucket as u8;
 		match kind {
-			ENUM => rec[1] = self.name()?,
+			TYPE => rec[1] = self.name()?,
 			TABLE => rec[1] = self.expr(false)?,
 			EVENT | INDEX | FIELD => {
 				rec[1] = self.expr(true)?;
@@ -545,9 +545,9 @@ impl<'a, 's> Parser<'a, 's> {
 			let first = self.ast.nodes.len();
 			self.expect_kw(Kw::Signatures, "SIGNATURES")?;
 			self.push_clause(Cl::RevokeSignatures, 0, 0, t.start, first)?;
-		} else if is(D::Enum) && self.ident_is(t, "ADD", true) {
+		} else if is(D::Type) && self.ident_is(t, "ADD", true) {
 			self.enum_add_clause()?;
-		} else if is(D::Enum) && self.ident_is(t, "RENAME", true) {
+		} else if is(D::Type) && self.ident_is(t, "RENAME", true) {
 			self.enum_rename_clause()?;
 		} else if t.kw == Kw::Function && is(D::Analyzer) {
 			self.analyzer_function_clause()?;

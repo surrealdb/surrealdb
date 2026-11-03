@@ -111,6 +111,10 @@ impl Ddl<'_, '_> {
 		let shown = self.load(shown)?;
 		let missing = self.exists(&attrs.mode, existing, StatementError::IxAlreadyExists, shown)?;
 		self.bind(missing)?;
+		let written: crate::catalog::IndexDefinition =
+			super::definition_of(&attrs.template.value, "StoredIndexDefinition")?;
+		let names = crate::exec::vm::schema_host::index_named_types(&written);
+		self.check_types_defined((ns, db), names, || format!("The index '{name_text}'"));
 
 		// Each column names a field the table defines, or a path beneath one whose type admits
 		// sub-fields, and no computed one, or a component of the table's record id; on a

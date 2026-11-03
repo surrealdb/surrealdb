@@ -1443,14 +1443,19 @@ async fn derive_fields(
 			Err(e) => return Err(e),
 		};
 
-		// A value that does not coerce fails naming the computed field.
+		// A value that does not coerce to the field's kind, or that a named type the kind holds
+		// does not admit, fails naming the computed field.
 		let final_value = if let Some(kind) = &cf.kind {
-			computed_value.coerce_to_kind(kind).map_err(|error| {
+			let refused = |error| {
 				ControlFlow::Err(
 					anyhow::Error::new(error)
 						.context(format!("Failed to coerce computed field '{}'", cf.field_name)),
 				)
-			})?
+			};
+			let coerced = computed_value.coerce_to_kind(kind).map_err(refused)?;
+			crate::exec::vm::schema_host::check_types_held(&field_ctx, kind, coerced)
+				.await
+				.map_err(refused)?
 		} else {
 			computed_value
 		};

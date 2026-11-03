@@ -314,7 +314,6 @@ async fn relate_enforced() -> Result<()> {
 	buckets: {},
 	compatibility: 4,
 	configs: {},
-	enums: {},
 	extensions: {},
 	functions: {},
 	models: {},
@@ -324,6 +323,7 @@ async fn relate_enforced() -> Result<()> {
 		a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE',
 		edge: 'DEFINE TABLE edge TYPE RELATION ENFORCED SCHEMALESS PERMISSIONS NONE'
 	},
+	types: {},
 	users: {}
 	}",
 	)

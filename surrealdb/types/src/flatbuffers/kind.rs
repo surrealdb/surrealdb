@@ -18,6 +18,8 @@ impl ToFlatbuffers for Kind {
 			Self::Date | Self::Timestamp => return Self::Datetime.to_fb(builder),
 			Self::Time => return Self::Duration.to_fb(builder),
 			Self::Interval | Self::Enum(_) => return Self::String.to_fb(builder),
+			// The wire carries no catalog, so a named type is sent as the type it may hold.
+			Self::Named(_) => return Self::Any.to_fb(builder),
 			Self::Any => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::Any,
 				kind: Some(

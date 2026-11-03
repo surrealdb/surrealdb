@@ -107,6 +107,20 @@ pub enum SqlType {
 pub use surrealdb_expr::expr::statements::define::sql_types::range::Element as RangeElement;
 
 /// The `pg_type` OIDs of a range of the element kind, of its multirange, and of an array of each.
+impl SqlType {
+	/// The type of a bound of a range of `element`.
+	pub fn of_range_element(element: RangeElement) -> SqlType {
+		match element {
+			RangeElement::Int4 => SqlType::Int4,
+			RangeElement::Int8 => SqlType::Int8,
+			RangeElement::Numeric => SqlType::Numeric,
+			RangeElement::Timestamp => SqlType::Timestamp,
+			RangeElement::Timestamptz => SqlType::TimestampTz,
+			RangeElement::Date => SqlType::Date,
+		}
+	}
+}
+
 fn range_oids(element: RangeElement) -> (i32, i32, i32, i32) {
 	match element {
 		RangeElement::Int4 => (3904, 4451, 3905, 6150),
@@ -1392,7 +1406,7 @@ impl BoundSelect {
 			} => None,
 		}?;
 		match &held.reference {
-			surrealdb_expr::expr::EnumRef::Named(name) => {
+			crate::catalog::EnumRef::Named(name) => {
 				let definition = catalog.enum_type(name)?;
 				Some(ResultEnum {
 					id: Some(definition.id),
@@ -1400,7 +1414,7 @@ impl BoundSelect {
 					shape: held.shape,
 				})
 			}
-			surrealdb_expr::expr::EnumRef::Inline(labels) => Some(ResultEnum {
+			crate::catalog::EnumRef::Inline(labels) => Some(ResultEnum {
 				id: None,
 				labels: labels.clone(),
 				shape: held.shape,
@@ -1423,11 +1437,7 @@ impl BoundSelect {
 			fields: definition
 				.fields
 				.iter()
-				.map(|(field, kind)| {
-					let name =
-						crate::catalog::kind_type_name(kind).unwrap_or_else(|| "text".to_owned());
-					(field.clone(), SqlType::from_name(&name))
-				})
+				.map(|(field, kind)| (field.clone(), definition.attribute_sql_type(field, kind)))
 				.collect(),
 		})
 	}
@@ -1440,6 +1450,7 @@ impl BoundSelect {
 				// An exact unsigned 64-bit value is announced as such, not as `numeric`.
 				BoundLiteral::Unsigned(_) => SqlType::UInt8,
 				BoundLiteral::Float(_) => SqlType::Float8,
+				BoundLiteral::Numeric(_) => SqlType::Numeric,
 				BoundLiteral::String(_) => SqlType::Text,
 				BoundLiteral::Boolean(_) => SqlType::Bool,
 				BoundLiteral::Null => SqlType::Unknown,
@@ -1703,10 +1714,10 @@ impl BoundSelect {
 		let enum_id = |expr: &BoundExpr| -> Option<u32> {
 			let reference = crate::lower::enum_rank::scalar_enum(expr)?;
 			match reference {
-				surrealdb_expr::expr::EnumRef::Named(name) => {
+				crate::catalog::EnumRef::Named(name) => {
 					catalog.enum_type(name).map(|definition| definition.id)
 				}
-				surrealdb_expr::expr::EnumRef::Inline(_) => None,
+				crate::catalog::EnumRef::Inline(_) => None,
 			}
 		};
 		match expr {
@@ -1846,6 +1857,92 @@ impl BoundSelect {
 		}
 	}
 
+	/// Gives each parameter among `peers` (the operand and bounds of a `BETWEEN`, the subject
+	/// and items of an `IN` list) the [common type](SqlType::common) of the peers whose type is
+	/// known, as PostgreSQL resolves the operands of these predicates to one type. A string
+	/// literal or `NULL` is of unknown type there, as a parameter is, and takes its type from the
+	/// others. Peers with no common type leave the parameters untyped. A parameter already typed
+	/// keeps its type.
+	fn type_peer_params<'e>(
+		&self,
+		peers: impl IntoIterator<Item = &'e BoundExpr> + Clone,
+		catalog: &dyn BinderCatalog,
+		params: &mut HashMap<usize, SqlType>,
+	) {
+		let typed = peers
+			.clone()
+			.into_iter()
+			.filter(|peer| {
+				!matches!(
+					peer,
+					BoundExpr::Param { .. }
+						| BoundExpr::Literal(BoundLiteral::String(_) | BoundLiteral::Null)
+				)
+			})
+			.map(|peer| self.infer_expr_type(peer, catalog))
+			.collect::<Vec<_>>();
+		let ty = SqlType::common(typed);
+		if ty == SqlType::Unknown {
+			return;
+		}
+		for peer in peers {
+			if let BoundExpr::Param {
+				index,
+				..
+			} = peer
+			{
+				params
+					.entry(*index)
+					.and_modify(|existing| {
+						if *existing == SqlType::Unknown {
+							*existing = ty;
+						}
+					})
+					.or_insert(ty);
+			}
+		}
+	}
+
+	/// Types a parameter operand of the comparison `left op right` from the other operand: its
+	/// inferred type, or for another parameter the type already collected for it. A parameter
+	/// that already has a known type keeps it.
+	fn type_comparison_params(
+		&self,
+		left: &BoundExpr,
+		right: &BoundExpr,
+		catalog: &dyn BinderCatalog,
+		params: &mut HashMap<usize, SqlType>,
+	) {
+		for (operand, other) in [(left, right), (right, left)] {
+			let BoundExpr::Param {
+				index,
+				..
+			} = operand
+			else {
+				continue;
+			};
+			let ty = if let BoundExpr::Param {
+				index: other_index,
+				..
+			} = other
+			{
+				params.get(other_index).copied().unwrap_or(SqlType::Unknown)
+			} else {
+				self.infer_expr_type(other, catalog)
+			};
+			if ty != SqlType::Unknown {
+				params
+					.entry(*index)
+					.and_modify(|existing| {
+						if *existing == SqlType::Unknown {
+							*existing = ty;
+						}
+					})
+					.or_insert(ty);
+			}
+		}
+	}
+
 	fn collect_param_types_from_expr(
 		&self,
 		expr: &BoundExpr,
@@ -1870,35 +1967,7 @@ impl BoundSelect {
 						}
 					}
 				}
-				match (&**left, &**right) {
-					(
-						BoundExpr::Param {
-							index,
-							..
-						},
-						other,
-					)
-					| (
-						other,
-						BoundExpr::Param {
-							index,
-							..
-						},
-					) => {
-						let ty = self.infer_expr_type(other, catalog);
-						if ty != SqlType::Unknown {
-							params
-								.entry(*index)
-								.and_modify(|existing| {
-									if *existing == SqlType::Unknown {
-										*existing = ty;
-									}
-								})
-								.or_insert(ty);
-						}
-					}
-					_ => {}
-				}
+				self.type_comparison_params(left, right, catalog, params);
 				self.collect_param_types_from_expr(left, catalog, params);
 				self.collect_param_types_from_expr(right, catalog, params);
 			}
@@ -1998,6 +2067,10 @@ impl BoundSelect {
 				high,
 				..
 			} => {
+				// `a BETWEEN b AND c` is typed as `a >= b` then `a <= c`, so a parameter takes its
+				// type from the first comparison that fixes it.
+				self.type_comparison_params(expr, low, catalog, params);
+				self.type_comparison_params(expr, high, catalog, params);
 				self.collect_param_types_from_expr(expr, catalog, params);
 				self.collect_param_types_from_expr(low, catalog, params);
 				self.collect_param_types_from_expr(high, catalog, params);
@@ -2007,6 +2080,7 @@ impl BoundSelect {
 				list,
 				..
 			} => {
+				self.type_peer_params(std::iter::once(&**expr).chain(list), catalog, params);
 				self.collect_param_types_from_expr(expr, catalog, params);
 				for item in list {
 					self.collect_param_types_from_expr(item, catalog, params);

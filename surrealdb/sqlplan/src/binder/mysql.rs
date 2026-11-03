@@ -467,6 +467,7 @@ pub fn bind_expr(
 			MyLiteral::Integer(i) => Ok(BoundExpr::Literal(BoundLiteral::Integer(*i))),
 			MyLiteral::Unsigned(u) => Ok(BoundExpr::Literal(BoundLiteral::Unsigned(*u))),
 			MyLiteral::Float(f) => Ok(BoundExpr::Literal(BoundLiteral::Float(*f))),
+			MyLiteral::Decimal(text) => Ok(BoundExpr::Literal(BoundLiteral::Numeric(text.clone()))),
 			MyLiteral::String(s) => Ok(BoundExpr::Literal(BoundLiteral::String(s.clone()))),
 			MyLiteral::IntroducedString {
 				value,

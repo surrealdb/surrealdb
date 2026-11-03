@@ -156,6 +156,7 @@ pub fn all_schemas() -> Vec<&'static TypeSchema> {
 	TableConformance::collect_schemas(&mut found);
 	MigrationRun::collect_schemas(&mut found);
 	ViewState::collect_schemas(&mut found);
+	crate::schema::retired::collect_retired_schemas(&mut found);
 	let mut seen: Vec<(&str, TypeLine)> = Vec::new();
 	let mut unique = Vec::new();
 	for schema in found {

@@ -243,7 +243,7 @@ fn is_identity_cast(expr: &LogicalExpr) -> bool {
 /// representation, so the cast has nothing to convert.
 fn checks_only(kind: &Kind) -> bool {
 	match kind {
-		Kind::Any | Kind::Either(_) | Kind::Literal(_) => false,
+		Kind::Any | Kind::Named(_) | Kind::Either(_) | Kind::Literal(_) => false,
 		Kind::Array(inner, _) | Kind::Set(inner, _) => checks_only(inner),
 		Kind::None
 		| Kind::Null

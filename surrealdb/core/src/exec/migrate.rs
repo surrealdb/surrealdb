@@ -406,7 +406,7 @@ fn kind_of(expr: &LogicalExpr, params: &HashMap<String, Kind>) -> Kind {
 /// step maps over may hold one.
 fn may_link(kind: &Kind) -> bool {
 	match kind {
-		Kind::Any | Kind::Record(_) => true,
+		Kind::Any | Kind::Named(_) | Kind::Record(_) => true,
 		Kind::Either(kinds) | Kind::Literal(KindLiteral::Array(kinds)) => {
 			kinds.iter().any(may_link)
 		}
@@ -463,6 +463,7 @@ fn field_kind(kind: &Kind, name: &str) -> Kind {
 			Kind::Either(kinds.iter().map(|kind| field_kind(kind, name)).collect())
 		}
 		Kind::Any
+		| Kind::Named(_)
 		| Kind::Object
 		| Kind::Record(_)
 		| Kind::Geometry(_)
@@ -511,6 +512,7 @@ fn element_kind(kind: &Kind) -> Kind {
 		Kind::Literal(KindLiteral::Array(kinds)) => Kind::Either(kinds.clone()),
 		Kind::Either(kinds) => Kind::Either(kinds.iter().map(element_kind).collect()),
 		kind @ (Kind::Any
+		| Kind::Named(_)
 		| Kind::None
 		| Kind::Null
 		| Kind::Bool
@@ -1668,7 +1670,7 @@ fn check_nesting(field: &FieldDefinition, fields: &[FieldDefinition]) -> Result<
 fn holds(kind: &Kind, segment: &Part, flexible: bool) -> bool {
 	use crate::expr::kind::KindLiteral;
 	match kind {
-		Kind::Any | Kind::Object => true,
+		Kind::Any | Kind::Named(_) | Kind::Object => true,
 		Kind::Either(arms) => arms.iter().any(|arm| holds(arm, segment, flexible)),
 		Kind::Array(inner, _) | Kind::Set(inner, _) => {
 			matches!(segment, Part::All) || holds(inner, segment, flexible)
@@ -1736,6 +1738,7 @@ fn literal_slot<'a>(kind: &'a Kind, segment: &Part) -> Option<&'a Kind> {
 			literal_slot(inner, segment)
 		}
 		Kind::Any
+		| Kind::Named(_)
 		| Kind::None
 		| Kind::Null
 		| Kind::Bool
@@ -1922,7 +1925,7 @@ fn fold_children(
 				Ok(Kind::Literal(KindLiteral::Object(shape)))
 			}
 		},
-		Kind::Any | Kind::Literal(_) => match element_name.or(key_name.as_ref()) {
+		Kind::Any | Kind::Named(_) | Kind::Literal(_) => match element_name.or(key_name.as_ref()) {
 			Some(name) => Err(name.clone()),
 			None => Ok(arm.clone()),
 		},

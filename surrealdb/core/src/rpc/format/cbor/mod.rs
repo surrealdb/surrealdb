@@ -539,15 +539,19 @@ mod tests {
 		);
 	}
 
-	/// A bigdecimal takes the form each protocol carries: tag 10 when it fits a decimal, and
-	/// otherwise tag 192 under `cbor.2` and plain text under `cbor`, which refuses tag 192.
+	/// A bigdecimal takes the form each protocol carries: tag 192 over its text under `cbor.2`,
+	/// keeping its scale; under `cbor`, which refuses tag 192, tag 10 when it fits a decimal and
+	/// plain text otherwise.
 	#[test]
 	fn bigdecimal_takes_the_form_each_protocol_carries() {
 		use surrealdb_types::{BigDecimal, Number};
 
 		let fits: BigDecimal = "1.50".parse().unwrap();
 		let fits = Value::Number(Number::BigDecimal(Box::new(fits)));
-		assert_eq!(encode(fits.clone()).unwrap(), encode_v2(fits.clone()).unwrap());
+		assert_eq!(
+			ciborium::from_reader::<Cbor, _>(encode_v2(fits.clone()).unwrap().as_slice()).unwrap(),
+			Cbor::Tag(TAG_BIGDECIMAL, Box::new(text("1.50")))
+		);
 		let decimal = Value::Number(Number::Decimal(rust_decimal::Decimal::new(15, 1)));
 		assert_eq!(encode(fits.clone()).unwrap(), encode(decimal).unwrap());
 		assert_eq!(decode_v2(&encode_v2(fits.clone()).unwrap(), 64).unwrap(), fits);

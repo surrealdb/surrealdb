@@ -118,6 +118,7 @@ use crate::expr::statements::access::PurgeKind;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::table::{TableMigrateAction, TableMigrateClause};
 use crate::expr::statements::define::{DefineKind, MigrateClause};
+use crate::expr::statements::remove::SqlTypeObject;
 use crate::expr::table_type::{Relation, TableType};
 use crate::expr::tokenizer::SegmentLanguage;
 use crate::expr::{
@@ -2691,8 +2692,7 @@ text_enum!(DefineObject {
 			comment: u16
 		},
 		Sequence { name: u16, batch: u16, start: u16, timeout: u16 },
-		Enum { name: Strand, labels: Box<[String]>, comment: u16, permissions: PermissionShape },
-		UserType { name: Strand }
+		Type { name: Strand, comment: u16, permissions: PermissionShape }
 	]
 });
 
@@ -2726,9 +2726,14 @@ text_enum!(RemoveObject {
 		Sequence { name: u16 },
 		Module { name: ModuleName },
 		Config { kind: ConfigKind },
-		Enum { name: Strand },
-		UserType { name: Strand, domain: bool }
+		Type { name: Strand, object: Option<SqlTypeObject> }
 	]
+});
+
+text_enum!(SqlTypeObject {
+	unit [Type, Domain]
+	tuple []
+	named []
 });
 
 text_enum!(AlterApiClauseShape {
@@ -2790,7 +2795,7 @@ text_enum!(AlterObject {
 			comment: AlterKind<String>,
 			permissions: Option<PermissionShape>
 		},
-		Enum { name: Strand, edits: Box<[EnumEdit]> }
+		Type { name: Strand, edits: Box<[EnumEdit]> }
 	]
 });
 

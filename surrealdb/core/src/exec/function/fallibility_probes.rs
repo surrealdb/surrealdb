@@ -178,7 +178,7 @@ fn corpus(kind: &Kind) -> Vec<String> {
 			}
 			all
 		}
-		Kind::Literal(_) | Kind::File(_) | Kind::Enum(_) => Vec::new(),
+		Kind::Literal(_) | Kind::File(_) | Kind::Enum(_) | Kind::Named(_) => Vec::new(),
 	}
 }
 

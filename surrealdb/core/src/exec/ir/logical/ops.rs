@@ -1675,8 +1675,8 @@ pub(crate) struct AlterAttrs {
 	/// The definition the statement forms and the fields of it that replace the stored
 	/// definition's, for a form whose replacement is an encoded stored value (`ALTER PARAM`,
 	/// `FUNCTION`, `BUCKET`, `MODULE` and `ANALYZER`); the whole config definition that
-	/// `ALTER CONFIG` writes; and, for `ALTER API`, one object of stored values per clause. `None`
-	/// for every other form.
+	/// `ALTER CONFIG` writes; and, for `ALTER API`, one object of stored values per clause and the
+	/// types the clauses name. `None` for every other form.
 	pub(crate) template: Option<AlterTemplate>,
 	/// What the statement checks against the catalog when it is planned, for the forms that
 	/// check: `ALTER FIELD`. [`DdlChecks::None`] for every other form.

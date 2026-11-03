@@ -282,7 +282,7 @@ fn a_link_in_an_expression_of_a_where_clause_is_its_key() {
 fn a_link_in_an_ordering_comparison_is_compared_by_its_key() {
 	for (sql, ordering) in [
 		("dept > 1", format!("ELSE {KEY} > 1 END")),
-		("dept >= 1.5", format!("ELSE {KEY} >= 1.5f END")),
+		("dept >= 1.5", format!("ELSE {KEY} >= 1.5dec END")),
 		("dept < 10", format!("ELSE {KEY} < 10 END")),
 		("dept <= 'ops'", format!("ELSE {KEY} <= 'ops' END")),
 		("1 < dept", format!("ELSE 1 < {KEY} END")),
@@ -368,7 +368,7 @@ fn a_link_that_is_a_join_key_is_the_link_as_stored() {
 	let op = pg_select("SELECT e.name FROM emp e JOIN task t USING (dept)");
 	assert_eq!(join_keys(&op), [("dept".to_string(), "_join0.dept".to_string())]);
 	let op = pg_select("SELECT e.name FROM emp e JOIN task t ON e.dept = 2.5");
-	assert_eq!(join_keys(&op), [("dept".to_string(), "2.5f".to_string())]);
+	assert_eq!(join_keys(&op), [("dept".to_string(), "2.5dec".to_string())]);
 }
 
 #[test]

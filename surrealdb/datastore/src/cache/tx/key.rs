@@ -37,9 +37,7 @@ pub enum Key {
 	Azs(NamespaceId, DatabaseId),
 	/// A cache key for buckets (on a database)
 	Bus(NamespaceId, DatabaseId),
-	/// A cache key for enums (on a database)
-	Ens(NamespaceId, DatabaseId),
-	/// A cache key for domains and composite types (on a database)
+	/// A cache key for types (on a database)
 	Tys(NamespaceId, DatabaseId),
 	/// A cache key for functions (on a database)
 	Fcs(NamespaceId, DatabaseId),
@@ -111,9 +109,7 @@ pub enum Key {
 	Az(NamespaceId, DatabaseId, String),
 	/// A cache key for a bucket (on a database)
 	Bu(NamespaceId, DatabaseId, String),
-	/// A cache key for an enum (on a database)
-	En(NamespaceId, DatabaseId, String),
-	/// A cache key for a domain or composite type (on a database)
+	/// A cache key for a type (on a database)
 	Ty(NamespaceId, DatabaseId, String),
 	/// A cache key for root buckets
 	RootBus,
@@ -169,7 +165,6 @@ impl Key {
 			Key::Aps(a, b) => Lookup::Aps(*a, *b),
 			Key::Azs(a, b) => Lookup::Azs(*a, *b),
 			Key::Bus(a, b) => Lookup::Bus(*a, *b),
-			Key::Ens(a, b) => Lookup::Ens(*a, *b),
 			Key::Tys(a, b) => Lookup::Tys(*a, *b),
 			Key::Fcs(a, b) => Lookup::Fcs(*a, *b),
 			Key::Mds(a, b) => Lookup::Mds(*a, *b),
@@ -205,7 +200,6 @@ impl Key {
 			Key::Ap(a, b, c) => Lookup::Ap(*a, *b, c),
 			Key::Az(a, b, c) => Lookup::Az(*a, *b, c),
 			Key::Bu(a, b, c) => Lookup::Bu(*a, *b, c),
-			Key::En(a, b, c) => Lookup::En(*a, *b, c),
 			Key::Ty(a, b, c) => Lookup::Ty(*a, *b, c),
 			Key::RootBus => Lookup::RootBus,
 			Key::RootBu(a) => Lookup::RootBu(a),
@@ -255,7 +249,6 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Aps(a, b) => Key::Aps(a, b),
 			Lookup::Azs(a, b) => Key::Azs(a, b),
 			Lookup::Bus(a, b) => Key::Bus(a, b),
-			Lookup::Ens(a, b) => Key::Ens(a, b),
 			Lookup::Tys(a, b) => Key::Tys(a, b),
 			Lookup::Fcs(a, b) => Key::Fcs(a, b),
 			Lookup::Mds(a, b) => Key::Mds(a, b),
@@ -292,7 +285,6 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Ap(a, b, c) => Key::Ap(a, b, c.to_string()),
 			Lookup::Az(a, b, c) => Key::Az(a, b, c.to_string()),
 			Lookup::Bu(a, b, c) => Key::Bu(a, b, c.to_string()),
-			Lookup::En(a, b, c) => Key::En(a, b, c.to_string()),
 			Lookup::Ty(a, b, c) => Key::Ty(a, b, c.to_string()),
 			Lookup::RootBus => Key::RootBus,
 			Lookup::RootBu(a) => Key::RootBu(a.to_string()),

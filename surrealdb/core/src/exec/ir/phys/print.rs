@@ -138,6 +138,7 @@ use crate::expr::module::ModuleName;
 use crate::expr::operator::{BooleanOperator, MatchRef, MatchesOperator};
 use crate::expr::part::Recurse;
 use crate::expr::statements::access::PurgeKind;
+use crate::expr::statements::remove::SqlTypeObject;
 use crate::expr::{
 	AssignOperator, Base, BinaryOperator, Dir, Explain, ExplainFormat, Idiom, KeyNames, Kind,
 	KindLiteral, RecordIdKeyGen, With,
@@ -1819,9 +1820,14 @@ text_enum!(RemoveObject {
 		Sequence { name: u16 },
 		Module { name: ModuleName },
 		Config { kind: ConfigKind },
-		Enum { name: Strand },
-		UserType { name: Strand, domain: bool }
+		Type { name: Strand, object: Option<SqlTypeObject> }
 	]
+});
+
+text_enum!(SqlTypeObject {
+	unit [Type, Domain]
+	tuple []
+	named []
 });
 
 text_enum!(ModuleName {

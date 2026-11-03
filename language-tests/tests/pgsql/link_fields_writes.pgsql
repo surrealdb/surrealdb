@@ -38,7 +38,7 @@ value = "[{ dept: dept:2, id: 5 }]"
 value = "[{ dept: dept:1, id: 21, name: 'Engineering' }]"
 
 [[test.results]]
-error = "Couldn't coerce value for field `dept` of `emp:12`: Expected `record<dept>` but found `1.5f`"
+error = "Couldn't coerce value for field `dept` of `emp:12`: Expected `record<dept>` but found `1.5dec`"
 
 [[test.results]]
 error = "Couldn't coerce value for field `dept` of `emp:12`: Expected `record<dept>` but found `NULL`"

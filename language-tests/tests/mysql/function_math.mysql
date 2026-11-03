@@ -16,7 +16,7 @@ value = "[{ a: -1, deg: 180f, e: 1f, ln0: NULL, lnneg: NULL, pi: true }]"
 value = "[{ base1: NULL, base2: true, natural: true, zero: NULL }]"
 
 [[test.results]]
-value = "[{ a: 1.9f, b: 1200f, c: -1.9f, d: 2.57dec }]"
+value = "[{ a: 1.9dec, b: 1200f, c: -1.9dec, d: 2.57dec }]"
 */
 
 SELECT mod(10, 3) AS a, mod(-7, 3) AS b, mod(7.5, 2) AS c, mod(1, 0) AS zero;

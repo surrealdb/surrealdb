@@ -217,6 +217,16 @@ impl Ddl<'_, '_> {
 		let name = self.load(cg)?;
 		let missing = self.exists(&attrs.mode, existing, StatementError::CgAlreadyExists, name)?;
 		self.bind(missing)?;
+		let written: crate::catalog::ConfigDefinition =
+			super::definition_of(&attrs.template.value, "StoredConfigDefinition")?;
+		let names = crate::exec::vm::schema_host::config_named_types(&written);
+		// A named type is a type of a database, so only a database's config can name one.
+		if !names.is_empty() && route == "DbConfigKey" {
+			let (ns, db) = (self.reg()?, self.reg()?);
+			self.get_field(key, "ns", ns)?;
+			self.get_field(key, "db", db)?;
+			self.check_types_defined((ns, db), names, || "The API config".to_owned());
+		}
 		let template = self.constant(attrs.template.value.clone())?;
 		let definition = self.load(template)?;
 		self.fill_config(definition, config, &attrs.template.value)?;
@@ -260,6 +270,12 @@ impl Ddl<'_, '_> {
 			self.answer_none()?;
 			self.bind(present)?;
 		}
+		self.check_altered_types(
+			template,
+			(ns, db),
+			crate::exec::vm::schema_host::config_named_types,
+			|| "The API config".to_owned(),
+		)?;
 		let constant = self.constant(template.value.clone())?;
 		let definition = self.load(constant)?;
 		self.fill_config(definition, config, &template.value)?;
@@ -310,6 +326,13 @@ impl Ddl<'_, '_> {
 		let name = self.load(given)?;
 		let missing = self.exists(&attrs.mode, existing, StatementError::ApAlreadyExists, name)?;
 		self.bind(missing)?;
+		let written: crate::catalog::ApiDefinition =
+			super::definition_of(&attrs.template.value, "StoredApiDefinition")?;
+		let names = crate::exec::vm::schema_host::api_named_types(&written);
+		if !names.is_empty() {
+			let subject = self.shown_subject("The API", api.path)?;
+			self.check_types_defined((ns, db), names, || subject);
+		}
 		let parsed = if parsed_path.is_none() {
 			let given = self.load(given)?;
 			let (text, rendered) = (self.reg()?, self.reg()?);
@@ -393,7 +416,7 @@ impl Ddl<'_, '_> {
 	/// the comment are replaced and the definition is stamped with the session's authority. The
 	/// template holds, per clause, the stored values the clause sets: the configuration and the
 	/// fallback of a `FOR ANY`, the methods and the action of a `FOR`, or the methods a `DROP`
-	/// removes.
+	/// removes; and the types the clauses name, which the database must define.
 	pub(super) fn alter_api(
 		&mut self,
 		attrs: &AlterAttrs,
@@ -426,6 +449,20 @@ impl Ddl<'_, '_> {
 		});
 		let detail = self.object(&[("value", ap)])?;
 		self.must_exist(attrs.if_exists, definition, StatementError::ApNotFound, detail)?;
+		// The types the clauses name, which the template lists under `types`.
+		let mut names = Vec::new();
+		if let Some(Value::Array(listed)) = child(&template.value, "types") {
+			for name in listed.iter() {
+				let Value::String(name) = name else {
+					return Err(IrError::Stale("ir_lower::ddl: an API alteration's type name"));
+				};
+				names.push(name.as_str().to_owned());
+			}
+		}
+		if !names.is_empty() {
+			let subject = self.shown_subject("The API", path)?;
+			self.check_types_defined((ns, db), names, || subject);
+		}
 		let actions = self.reg()?;
 		for (clause, set) in clauses.iter().zip(values.iter()) {
 			match clause {

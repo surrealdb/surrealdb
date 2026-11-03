@@ -87,6 +87,13 @@ fn literal_argument(arg: &Expr) -> Option<BoundLiteral> {
 			*value
 		}));
 	}
+	if let Literal::Decimal(value) = literal {
+		return Some(BoundLiteral::Numeric(if negated {
+			(-*value).to_string()
+		} else {
+			value.to_string()
+		}));
+	}
 	if negated {
 		return None;
 	}

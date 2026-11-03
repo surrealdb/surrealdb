@@ -19,7 +19,7 @@ value = "[{ addr: '192.168.1.5', id: 1, mac: '08:00:2b:01:02:03', mac8: '08:00:2
 value = "[{ addr: '192.168.1.5', mac: '08:00:2b:01:02:03' }]"
 
 [[test.results]]
-value = "[{ addr: '192.168.1.5' }]"
+value = "[{ addr: '192.168.1.5/32' }]"
 
 [[test.results]]
 value = "[{ id: 1 }]"

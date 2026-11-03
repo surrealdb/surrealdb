@@ -59,7 +59,7 @@ value = "[{ name: 'e' }, { name: 'b' }]"
 value = "[{ hi: 'ecstatic', lo: 'sad' }]"
 
 [[test.results]]
-error = "'nope' is not a value of the enum 'mood'; its values are 'sad', 'meh', 'ok', 'happy', 'ecstatic'"
+error = "'nope' is not a value of the type 'mood'; its values are 'sad', 'meh', 'ok', 'happy', 'ecstatic'"
 
 [[test.results]]
 value = "[{ id: 6, m: NULL, name: 'f' }]"

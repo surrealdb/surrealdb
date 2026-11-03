@@ -2,7 +2,7 @@ use common::fmt::{EscapeKwFreeIdent, QuoteStr};
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-/// Where `ALTER ENUM ... ADD VALUE` places a new label.
+/// Where `ALTER TYPE ... ADD VALUE` places a new label.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum EnumPosition {
 	/// Immediately before the named label.
@@ -11,9 +11,9 @@ pub enum EnumPosition {
 	After(String),
 }
 
-/// The change `ALTER ENUM` makes.
+/// A change `ALTER TYPE` makes to the labels of a union type.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum AlterEnumAction {
+pub enum AlterTypeAction {
 	/// `ADD VALUE [IF NOT EXISTS] 'x' [BEFORE 'y' | AFTER 'y']`; with no position the label is
 	/// appended.
 	AddValue {
@@ -28,24 +28,26 @@ pub enum AlterEnumAction {
 	},
 }
 
+/// `ALTER TYPE [IF EXISTS] name` with its `ADD VALUE` and `RENAME VALUE` changes, which apply
+/// only to a type whose body is a union of string literals.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct AlterEnumStatement {
+pub struct AlterTypeStatement {
 	pub name: Strand,
 	pub if_exists: bool,
 	/// The changes in source order.
-	pub actions: Vec<AlterEnumAction>,
+	pub actions: Vec<AlterTypeAction>,
 }
 
-impl ToSql for AlterEnumStatement {
+impl ToSql for AlterTypeStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "ALTER ENUM");
+		write_sql!(f, fmt, "ALTER TYPE");
 		if self.if_exists {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
 		write_sql!(f, fmt, " {}", EscapeKwFreeIdent(self.name.as_str()));
 		for action in &self.actions {
 			match action {
-				AlterEnumAction::AddValue {
+				AlterTypeAction::AddValue {
 					value,
 					position,
 					if_not_exists,
@@ -65,7 +67,7 @@ impl ToSql for AlterEnumStatement {
 						None => {}
 					}
 				}
-				AlterEnumAction::RenameValue {
+				AlterTypeAction::RenameValue {
 					from,
 					to,
 				} => {

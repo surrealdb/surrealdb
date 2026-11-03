@@ -324,6 +324,12 @@ impl Ddl<'_, '_> {
 		let shown = self.load(shown)?;
 		let missing = self.exists(&attrs.mode, existing, StatementError::FdAlreadyExists, shown)?;
 		self.bind(missing)?;
+		// The types the field names are judged only where it is defined: an `IF NOT EXISTS` that
+		// meets the field stores nothing.
+		let names = crate::exec::vm::schema_host::field_named_types(&definition);
+		self.check_types_defined((ns, db), names, || {
+			format!("The field '{}' on the table '{}'", name.to_raw_string(), table.as_str())
+		});
 		if let Some(refusal) = relation_refusal {
 			self.store(StoreInstr::RefuseField {
 				refusal,
@@ -750,7 +756,10 @@ impl Ddl<'_, '_> {
 		};
 		// The record id structure the statement gives the table, when it names components: the
 		// records are checked against it before it is written.
-		let scanned = field_definition_of(&template.value)?.live_key().cloned();
+		let altered = field_definition_of(&template.value)?;
+		let scanned = altered.live_key().cloned();
+		// The types the clauses the statement sets name; the kind is unchanged here.
+		let named = crate::exec::vm::schema_host::field_named_types(&altered);
 
 		self.guard()?;
 		let (ns, db) = self.session_ids()?;
@@ -779,6 +788,18 @@ impl Ddl<'_, '_> {
 					"a LIGHTWEIGHT relation's fields cannot be altered: its in/out contract is \
 					 managed by the table definition"
 						.to_owned(),
+				),
+			});
+		}
+		if !named.is_empty() {
+			self.store(StoreInstr::CheckTypesDefined {
+				ns,
+				db,
+				names: named.into(),
+				subject: format!(
+					"The field '{}' on the table '{}'",
+					path.to_raw_string(),
+					table_name.as_str()
 				),
 			});
 		}

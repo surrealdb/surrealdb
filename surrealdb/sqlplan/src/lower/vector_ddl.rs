@@ -119,6 +119,7 @@ fn integer_option(name: &str, value: &PgExpr, bounds: (i64, i64)) -> Result<i64,
 			PgLiteral::Integer(value) => Some(*value),
 			PgLiteral::String(text) => text.trim().parse::<i64>().ok(),
 			PgLiteral::Float(_)
+			| PgLiteral::Numeric(_)
 			| PgLiteral::Boolean(_)
 			| PgLiteral::Null
 			| PgLiteral::BitString {

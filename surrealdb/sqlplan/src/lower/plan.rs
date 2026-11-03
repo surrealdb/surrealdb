@@ -134,10 +134,9 @@ fn set_returning_values(
 	policy: &DialectPolicy,
 ) -> Result<LogicalExpr, PlanError> {
 	if let SetValues::Series(stop) = values {
-		if [argument, stop]
-			.iter()
-			.any(|bound| matches!(bound, BoundExpr::Literal(BoundLiteral::Float(_))))
-		{
+		if [argument, stop].iter().any(|bound| {
+			matches!(bound, BoundExpr::Literal(BoundLiteral::Float(_) | BoundLiteral::Numeric(_)))
+		}) {
 			return Err(PlanError::UnsupportedExpression(
 				"GENERATE_SERIES over bounds that are not integers".into(),
 			));

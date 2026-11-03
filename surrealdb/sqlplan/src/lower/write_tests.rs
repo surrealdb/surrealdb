@@ -47,7 +47,7 @@ fn a_literal_that_is_no_key_is_compared_with_the_key_in_the_condition_of_a_write
 		}
 	}
 	let text = where_sql(&pg_update("UPDATE emp SET name = 'z' WHERE id IN (1.5, 2)").cond);
-	assert!(text.contains("record::id(id)") && text.contains("1.5f"), "{text}");
+	assert!(text.contains("record::id(id)") && text.contains("1.5dec"), "{text}");
 }
 
 fn pg_delete(sql: &str) -> Result<DeleteStatement, crate::PlanError> {

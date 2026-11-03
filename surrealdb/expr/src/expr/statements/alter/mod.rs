@@ -7,7 +7,6 @@ pub mod api;
 pub mod bucket;
 pub mod config;
 pub mod database;
-pub mod enumeration;
 pub mod event;
 pub mod field;
 pub mod function;
@@ -18,6 +17,7 @@ pub mod param;
 pub mod sequence;
 pub mod system;
 pub mod table;
+pub mod type_definition;
 pub mod user;
 
 pub use access::AlterAccessStatement;
@@ -26,7 +26,6 @@ pub use api::{AlterApiClause, AlterApiStatement};
 pub use bucket::AlterBucketStatement;
 pub use config::AlterConfigStatement;
 pub use database::AlterDatabaseStatement;
-pub use enumeration::{AlterEnumAction, AlterEnumStatement, EnumPosition};
 pub use event::AlterEventStatement;
 pub use field::{AlterDefault, AlterFieldStatement};
 pub use function::AlterFunctionStatement;
@@ -37,6 +36,7 @@ pub use param::AlterParamStatement;
 pub use sequence::AlterSequenceStatement;
 pub use system::AlterSystemStatement;
 pub use table::AlterTableStatement;
+pub use type_definition::{AlterTypeAction, AlterTypeStatement, EnumPosition};
 pub use user::AlterUserStatement;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 /// Helper to express a tri‑state alteration:
@@ -123,7 +123,7 @@ pub enum AlterStatement {
 	User(AlterUserStatement),
 	Access(AlterAccessStatement),
 	Module(AlterModuleStatement),
-	Enum(AlterEnumStatement),
+	Type(AlterTypeStatement),
 }
 
 /// Written out and kept out of line so one copy serves every crate that clones an `AlterStatement`.
@@ -148,7 +148,7 @@ impl Clone for AlterStatement {
 			Self::User(v) => Self::User(v.clone()),
 			Self::Access(v) => Self::Access(v.clone()),
 			Self::Module(v) => Self::Module(v.clone()),
-			Self::Enum(v) => Self::Enum(v.clone()),
+			Self::Type(v) => Self::Type(v.clone()),
 		}
 	}
 }
@@ -173,7 +173,7 @@ impl ToSql for AlterStatement {
 			Self::User(v) => v.fmt_sql(f, fmt),
 			Self::Access(v) => v.fmt_sql(f, fmt),
 			Self::Module(v) => v.fmt_sql(f, fmt),
-			Self::Enum(v) => v.fmt_sql(f, fmt),
+			Self::Type(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

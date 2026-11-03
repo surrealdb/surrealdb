@@ -889,6 +889,7 @@ fn folded_mysql(sql: &str) -> Result<BoundLiteral, PlanError> {
 
 #[test]
 fn test_integer_arithmetic_that_fits_64_bits_is_exact() {
+	let numeric = |text: &str| BoundLiteral::Numeric(text.to_owned());
 	let two_pow_63 = 2f64.powi(63);
 	for (sql, expected) in [
 		("SELECT 9223372036854775806 + 1", BoundLiteral::Integer(i64::MAX)),
@@ -902,9 +903,9 @@ fn test_integer_arithmetic_that_fits_64_bits_is_exact() {
 		("SELECT -9223372036854775808 % -1", BoundLiteral::Integer(0)),
 		("SELECT 9223372036854775807 % -1", BoundLiteral::Integer(0)),
 		("SELECT -7 % 3", BoundLiteral::Integer(-1)),
-		("SELECT 9223372036854775807 + 1.0", BoundLiteral::Float(two_pow_63)),
-		("SELECT 10000000000000000000 + 1", BoundLiteral::Float(1e19)),
-		("SELECT 10000000000000000000 / 2", BoundLiteral::Float(5e18)),
+		("SELECT 9223372036854775807 + 1.0", numeric("9223372036854775808.0")),
+		// A constant beyond 64 bits is numeric, and its sum is exact.
+		("SELECT 10000000000000000000 + 1", numeric("10000000000000000001")),
 	] {
 		assert_eq!(folded_pgsql(sql), Ok(expected), "{sql}");
 	}
@@ -916,7 +917,7 @@ fn test_integer_arithmetic_that_fits_64_bits_is_exact() {
 		("SELECT 9223372036854775807 DIV -1", BoundLiteral::Integer(-i64::MAX)),
 		("SELECT -9223372036854775808 % -1", BoundLiteral::Integer(0)),
 		("SELECT -9223372036854775808 / -1", BoundLiteral::Float(two_pow_63)),
-		("SELECT 9223372036854775807 + 1.0", BoundLiteral::Float(two_pow_63)),
+		("SELECT 9223372036854775807 + 1.0", numeric("9223372036854775808.0")),
 	] {
 		assert_eq!(folded_mysql(sql), Ok(expected), "{sql}");
 	}
@@ -3166,4 +3167,831 @@ fn generate_series_over_fractional_bounds_is_refused_when_planned() {
 	assert!(lower("SELECT generate_series(1, 3)").is_ok());
 	assert!(lower("SELECT generate_series(1.5, 3.5)").is_err());
 	assert!(lower("SELECT generate_series(1, 3.5)").is_err());
+}
+
+#[test]
+fn a_network_column_casts_to_text_and_orders_by_its_declared_type() {
+	use surrealdb_expr::expr::statements::define::SqlTypeDialect;
+	use surrealdb_expr::expr::statements::define::declared_type::DeclaredSqlType;
+
+	let sql = "SELECT a::text AS shown FROM host ORDER BY a;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "a"]);
+	catalog.add_sql_type(
+		"host",
+		"a",
+		DeclaredSqlType::parse(SqlTypeDialect::PostgreSql, "inet").expect("inet parses"),
+	);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let op = lower_bound_select(&bound, &policy).expect("lower failed");
+	let plan = format!("{op:?}");
+	assert!(plan.contains("sql::text"), "{plan}");
+	assert!(plan.contains("sql::network_key"), "{plan}");
+}
+
+#[test]
+fn a_range_bound_is_described_by_the_range_element_type() {
+	use surrealdb_expr::expr::statements::define::SqlTypeDialect;
+	use surrealdb_expr::expr::statements::define::declared_type::DeclaredSqlType;
+
+	let sql = "SELECT lower(r) AS lo, upper('[2024-01-01,2024-02-01)'::daterange) AS hi FROM t;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "t", &["id", "r"]);
+	catalog.add_sql_type(
+		"t",
+		"r",
+		DeclaredSqlType::parse(SqlTypeDialect::PostgreSql, "int4range").expect("int4range parses"),
+	);
+	catalog.add_column_type("t", "r", SqlType::Range(crate::descriptor::RangeElement::Int4));
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let described = bound.describe(&catalog, &policy);
+	let types: Vec<SqlType> = described.columns.iter().map(|column| column.ty).collect();
+	assert_eq!(types, [SqlType::Int4, SqlType::Date]);
+}
+
+#[test]
+fn a_parameter_compared_with_a_network_column_reads_as_a_network() {
+	use surrealdb_expr::expr::statements::define::SqlTypeDialect;
+	use surrealdb_expr::expr::statements::define::declared_type::DeclaredSqlType;
+
+	let sql = "SELECT id FROM host WHERE a = $1;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "a"]);
+	catalog.add_sql_type(
+		"host",
+		"a",
+		DeclaredSqlType::parse(SqlTypeDialect::PostgreSql, "inet").expect("inet parses"),
+	);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+	assert!(plan.contains("sql::network_text"), "{plan}");
+	assert!(plan.contains("String(\"inet\")"), "{plan}");
+}
+
+#[test]
+fn a_parameter_opposite_a_range_is_described_as_that_range() {
+	for sql in [
+		"SELECT id FROM t WHERE r && $1;",
+		"SELECT id FROM t WHERE r @> $1;",
+		"SELECT id FROM t WHERE $1 <@ r;",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let mut catalog = MemoryCatalog::new();
+		catalog.define_table(None, "t", &["id", "r"]);
+		catalog.add_column_type("t", "r", SqlType::Range(crate::descriptor::RangeElement::Int4));
+		let policy = DialectPolicy::postgres();
+		let bound =
+			binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+		let params = format!("{:?}", bound.describe_parameters(&catalog));
+		assert!(params.contains("Range(Int4)"), "{sql}: {params}");
+		// The bound text is read as a value of the range type before the range function sees it.
+		let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+		assert!(plan.contains("sql::range_"), "{sql}: {plan}");
+		assert!(
+			plan.contains(
+				"Normal(\"sql::fit\"), args: [Param(Param(\"_1\")), Literal(String(\"int4range\"))"
+			),
+			"{sql}: {plan}"
+		);
+	}
+}
+
+#[test]
+fn a_blank_padded_cast_to_text_drops_its_padding() {
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "t", &["id", "v"]);
+	catalog.add_column_type("t", "v", SqlType::Varchar);
+	for sql in
+		["SELECT CAST(CAST(v AS character(4)) AS text) FROM t;", "SELECT v::bpchar::text FROM t;"]
+	{
+		let plan = format!("{:?}", lower_pgsql_select(&catalog, sql).expect("lower failed"));
+		assert!(plan.contains("sql::text"), "{sql}: {plan}");
+		assert!(plan.contains("String(\"bpchar\")"), "{sql}: {plan}");
+	}
+	// A literal is folded before lowering; its padding is dropped as the cast to text is folded.
+	let policy = DialectPolicy::postgres();
+	for sql in ["SELECT 'ab  '::bpchar::text;", "SELECT 'ab  '::char(4)::varchar;"] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let mut bound =
+			binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+		crate::semantics::fold_select(&mut bound, &policy).expect("fold failed");
+		let folded = format!("{:?}", bound.targets[0].expr);
+		assert!(folded.contains("String(\"ab\")"), "{sql}: {folded}");
+	}
+}
+
+#[test]
+fn lower_and_upper_of_a_computed_range_read_its_bounds() {
+	for sql in [
+		"SELECT lower(COALESCE(r, '[1,2)'::int4range)) FROM t;",
+		"SELECT upper(CASE WHEN id = 1 THEN r ELSE NULL END) FROM t;",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let mut catalog = MemoryCatalog::new();
+		catalog.define_table(None, "t", &["id", "r"]);
+		catalog.add_column_type("t", "r", SqlType::Range(crate::descriptor::RangeElement::Int4));
+		let policy = DialectPolicy::postgres();
+		let bound =
+			binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+		let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+		assert!(plan.contains("sql::range_"), "{sql}: {plan}");
+		assert!(!plan.contains("string::"), "{sql}: {plan}");
+	}
+}
+
+#[test]
+fn overlap_between_operands_that_are_not_ranges_is_not_a_range_overlap() {
+	let sql = "SELECT id FROM t WHERE a && b;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "t", &["id", "a", "b"]);
+	let policy = DialectPolicy::postgres();
+	let error = binder::pgsql::bind_select(select, &catalog, &policy, None)
+		.expect_err("&& between non-ranges is not supported");
+	assert!(matches!(error, PlanError::UnsupportedExpression(_)), "{error:?}");
+}
+
+#[test]
+fn a_cidr_literal_with_host_bits_is_refused() {
+	use surrealdb_expr::expr::statements::define::SqlTypeDialect;
+	use surrealdb_expr::expr::statements::define::declared_type::DeclaredSqlType;
+
+	let sql = "SELECT id FROM net WHERE c = '10.0.0.1/8';";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "net", &["id", "c"]);
+	catalog.add_sql_type(
+		"net",
+		"c",
+		DeclaredSqlType::parse(SqlTypeDialect::PostgreSql, "cidr").expect("cidr parses"),
+	);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let error = lower_bound_select(&bound, &policy).expect_err("host bits are refused");
+	assert!(matches!(error, PlanError::InvalidTextRepresentation(_)), "{error:?}");
+}
+
+#[test]
+fn range_operators_between_different_range_types_are_not_supported() {
+	for sql in [
+		"SELECT id FROM t WHERE r && d;",
+		"SELECT id FROM t WHERE r @> d;",
+		"SELECT id FROM t WHERE r <@ d;",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let mut catalog = MemoryCatalog::new();
+		catalog.define_table(None, "t", &["id", "r", "d"]);
+		catalog.add_column_type("t", "r", SqlType::Range(crate::descriptor::RangeElement::Int4));
+		catalog.add_column_type("t", "d", SqlType::Range(crate::descriptor::RangeElement::Date));
+		let policy = DialectPolicy::postgres();
+		let refused = binder::pgsql::bind_select(select, &catalog, &policy, None)
+			.and_then(|bound| lower_bound_select(&bound, &policy).map(|_| ()));
+		assert!(matches!(refused, Err(PlanError::UnsupportedExpression(_))), "{sql}: {refused:?}");
+	}
+}
+
+#[test]
+fn a_network_valued_coalesce_orders_by_network_key() {
+	let sql = "SELECT id FROM host ORDER BY COALESCE(addr, '0.0.0.0'::inet);";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "addr"]);
+	catalog.add_column_type("host", "addr", SqlType::Inet);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+	assert!(plan.contains("sql::network_key"), "{plan}");
+}
+
+#[test]
+fn a_network_in_list_reads_its_literals_as_networks() {
+	let sql = "SELECT id FROM host WHERE addr IN ('10.0.0.2/32', $1);";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "addr"]);
+	catalog.add_column_type("host", "addr", SqlType::Inet);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+	assert!(plan.contains("String(\"10.0.0.2\")"), "{plan}");
+	assert!(plan.contains("sql::network_text"), "{plan}");
+
+	let sql = "SELECT id FROM host WHERE addr IN ('not an address');";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let error = lower_bound_select(&bound, &policy).expect_err("the literal is refused");
+	assert!(matches!(error, PlanError::InvalidTextRepresentation(_)), "{error:?}");
+}
+
+#[test]
+fn a_cidr_ordered_against_a_literal_with_host_bits_is_refused() {
+	let sql = "SELECT id FROM net WHERE c < '10.1.2.3/24';";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "net", &["id", "c"]);
+	catalog.add_column_type("net", "c", SqlType::Cidr);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let error = lower_bound_select(&bound, &policy).expect_err("host bits are refused");
+	assert!(matches!(error, PlanError::InvalidTextRepresentation(_)), "{error:?}");
+}
+
+#[test]
+fn null_opposite_a_range_is_read_as_that_range() {
+	let sql = "SELECT id FROM t WHERE r && NULL;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "t", &["id", "r"]);
+	catalog.add_column_type("t", "r", SqlType::Range(crate::descriptor::RangeElement::Int4));
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+	assert!(plan.contains("sql::range_overlaps"), "{plan}");
+}
+
+#[test]
+fn cidr_bounds_and_mixed_in_list_items_are_read_as_cidr() {
+	for sql in [
+		"SELECT id FROM net WHERE c BETWEEN '10.1.2.3/24' AND '10.1.2.255/24';",
+		"SELECT id FROM net WHERE c IN (d, '10.1.2.3/24');",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let mut catalog = MemoryCatalog::new();
+		catalog.define_table(None, "net", &["id", "c", "d"]);
+		catalog.add_column_type("net", "c", SqlType::Cidr);
+		catalog.add_column_type("net", "d", SqlType::Cidr);
+		let policy = DialectPolicy::postgres();
+		let bound =
+			binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+		let error = lower_bound_select(&bound, &policy).expect_err("host bits are refused");
+		assert!(matches!(error, PlanError::InvalidTextRepresentation(_)), "{sql}: {error:?}");
+	}
+}
+
+#[test]
+fn an_untyped_in_subject_takes_the_network_type_of_an_item() {
+	let sql = "SELECT id FROM host WHERE '10.0.0.2/32' IN (addr);";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "addr"]);
+	catalog.add_column_type("host", "addr", SqlType::Inet);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+	assert!(plan.contains("String(\"10.0.0.2\")"), "{plan}");
+	assert!(plan.contains("sql::network_key"), "{plan}");
+}
+
+#[test]
+fn folded_numeric_arithmetic_beyond_a_numeric_overflows() {
+	let digits = BoundLiteral::Numeric("9".repeat(70_000));
+	let policy = DialectPolicy::postgres();
+	let product =
+		crate::semantics::eval_binary_op(&digits, BoundBinaryOp::Multiply, &digits, &policy);
+	assert!(matches!(product, Err(PlanError::NumericValueOutOfRange)), "{:?}", product.is_ok());
+	let sum = crate::semantics::eval_binary_op(&digits, BoundBinaryOp::Add, &digits, &policy);
+	assert!(sum.is_ok());
+}
+
+#[test]
+fn a_mixed_cidr_and_inet_coalesce_is_an_inet() {
+	let sql = "SELECT id FROM net WHERE COALESCE(c, a) = '10.1.2.3/24';";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "net", &["id", "c", "a"]);
+	catalog.add_column_type("net", "c", SqlType::Cidr);
+	catalog.add_column_type("net", "a", SqlType::Inet);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("an inet literal"));
+	assert!(plan.contains("String(\"10.1.2.3/24\")"), "{plan}");
+}
+
+#[test]
+fn parameters_in_a_network_in_list_or_between_are_described_as_networks() {
+	for sql in [
+		"SELECT id FROM host WHERE addr IN ($1, $2);",
+		"SELECT id FROM host WHERE addr BETWEEN $1 AND $2;",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let mut catalog = MemoryCatalog::new();
+		catalog.define_table(None, "host", &["id", "addr"]);
+		catalog.add_column_type("host", "addr", SqlType::Inet);
+		let policy = DialectPolicy::postgres();
+		let bound =
+			binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+		let params = format!("{:?}", bound.describe_parameters(&catalog));
+		assert_eq!(params.matches("Inet").count(), 2, "{sql}: {params}");
+	}
+}
+
+#[test]
+fn a_mixed_cidr_and_inet_in_list_reads_its_literals_as_inet() {
+	let sql = "SELECT id FROM net WHERE c IN (a, '10.1.2.3/24');";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "net", &["id", "c", "a"]);
+	catalog.add_column_type("net", "c", SqlType::Cidr);
+	catalog.add_column_type("net", "a", SqlType::Inet);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("an inet literal"));
+	assert!(plan.contains("String(\"10.1.2.3/24\")"), "{plan}");
+}
+
+#[test]
+fn an_untyped_literal_does_not_type_a_peer_parameter() {
+	let sql = "SELECT $1 IN ('01', 2::int4) AS hit;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let params = format!("{:?}", bound.describe_parameters(&catalog));
+	assert!(params.contains("Int4"), "{params}");
+}
+
+#[test]
+fn a_column_of_a_domain_over_inet_orders_as_a_network() {
+	use surrealdb_expr::expr::statements::define::SqlTypeDialect;
+	use surrealdb_expr::expr::statements::define::declared_type::DeclaredSqlType;
+
+	let sql = "SELECT id FROM host ORDER BY addr;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "addr"]);
+	catalog.add_sql_type(
+		"host",
+		"addr",
+		DeclaredSqlType::parse(SqlTypeDialect::PostgreSql, "address_t").expect("a domain name"),
+	);
+	catalog.add_column_type("host", "addr", SqlType::Inet);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+	assert!(plan.contains("sql::network_key"), "{plan}");
+}
+
+#[test]
+fn an_untyped_alternative_of_a_range_coalesce_is_read_as_that_range() {
+	let sql = "SELECT lower(COALESCE(r, '[5,9)')) FROM t;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "t", &["id", "r"]);
+	catalog.add_column_type("t", "r", SqlType::Range(crate::descriptor::RangeElement::Int4));
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+	assert!(plan.contains("sql::range_lower"), "{plan}");
+	assert!(plan.contains("op: Range"), "{plan}");
+}
+
+#[test]
+fn peer_parameters_take_the_common_type_of_their_typed_peers() {
+	let sql = "SELECT $1 IN (1::int4, 2147483648::int8) AS hit;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let params = format!("{:?}", bound.describe_parameters(&catalog));
+	assert!(params.contains("Int8") && !params.contains("Int4"), "{params}");
+}
+
+#[test]
+fn a_coalesce_of_different_range_types_is_not_a_range() {
+	let sql = "SELECT lower(COALESCE(r, d)) FROM t;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "t", &["id", "r", "d"]);
+	catalog.add_column_type("t", "r", SqlType::Range(crate::descriptor::RangeElement::Int4));
+	catalog.add_column_type("t", "d", SqlType::Range(crate::descriptor::RangeElement::Date));
+	let policy = DialectPolicy::postgres();
+	let plan = binder::pgsql::bind_select(select, &catalog, &policy, None)
+		.and_then(|bound| lower_bound_select(&bound, &policy))
+		.map(|plan| format!("{plan:?}"));
+	assert!(!plan.as_deref().is_ok_and(|plan| plan.contains("sql::range_lower")), "{plan:?}");
+}
+
+#[test]
+fn a_domain_column_casts_to_text_by_its_base_type() {
+	use surrealdb_expr::expr::statements::define::SqlTypeDialect;
+	use surrealdb_expr::expr::statements::define::declared_type::DeclaredSqlType;
+
+	let sql = "SELECT addr::text AS t FROM host;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "addr"]);
+	catalog.add_sql_type(
+		"host",
+		"addr",
+		DeclaredSqlType::parse(SqlTypeDialect::PostgreSql, "address_t").expect("a domain name"),
+	);
+	catalog.add_column_type("host", "addr", SqlType::Inet);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+	assert!(plan.contains("sql::text"), "{plan}");
+	assert!(plan.contains("String(\"inet\")"), "{plan}");
+}
+
+#[test]
+fn a_range_coalesce_with_a_typed_non_range_result_is_not_a_range() {
+	let sql = "SELECT lower(COALESCE(r, 5)) FROM t;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "t", &["id", "r"]);
+	catalog.add_column_type("t", "r", SqlType::Range(crate::descriptor::RangeElement::Int4));
+	let policy = DialectPolicy::postgres();
+	let plan = binder::pgsql::bind_select(select, &catalog, &policy, None)
+		.and_then(|bound| lower_bound_select(&bound, &policy))
+		.map(|plan| format!("{plan:?}"));
+	assert!(!plan.as_deref().is_ok_and(|plan| plan.contains("sql::range_lower")), "{plan:?}");
+}
+
+#[test]
+fn an_untyped_alternative_of_a_network_coalesce_is_read_as_that_network() {
+	let sql = "SELECT id FROM host WHERE COALESCE(addr, '10.0.0.2/32') = '10.0.0.2';";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "addr"]);
+	catalog.add_column_type("host", "addr", SqlType::Inet);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+	assert!(!plan.contains("10.0.0.2/32"), "{plan}");
+}
+
+#[test]
+fn a_network_coalesce_with_a_typed_non_network_result_is_not_a_network() {
+	let sql = "SELECT id FROM host ORDER BY COALESCE(addr, 5);";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "addr"]);
+	catalog.add_column_type("host", "addr", SqlType::Inet);
+	let policy = DialectPolicy::postgres();
+	let plan = binder::pgsql::bind_select(select, &catalog, &policy, None)
+		.and_then(|bound| lower_bound_select(&bound, &policy))
+		.map(|plan| format!("{plan:?}"));
+	assert!(!plan.as_deref().is_ok_and(|plan| plan.contains("sql::network_key")), "{plan:?}");
+}
+
+#[test]
+fn a_compound_network_in_subject_is_compared_by_key() {
+	let sql = "SELECT id FROM host WHERE COALESCE(addr, '10.0.0.2/32') IN ('10.0.0.2');";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "addr"]);
+	catalog.add_column_type("host", "addr", SqlType::Inet);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let plan = format!("{:?}", lower_bound_select(&bound, &policy).expect("lower failed"));
+	assert!(plan.contains("sql::network_key"), "{plan}");
+}
+
+#[test]
+fn a_parameter_among_cidr_and_inet_peers_is_an_inet() {
+	let sql = "SELECT id FROM net WHERE $1 IN (c, a);";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "net", &["id", "c", "a"]);
+	catalog.add_column_type("net", "c", SqlType::Cidr);
+	catalog.add_column_type("net", "a", SqlType::Inet);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let params = format!("{:?}", bound.describe_parameters(&catalog));
+	assert!(params.contains("Inet"), "{params}");
+}
+
+#[test]
+fn a_numeric_beyond_a_float_casts_out_of_range() {
+	let policy = DialectPolicy::postgres();
+	let wide = BoundLiteral::Numeric("9".repeat(400));
+	assert!(matches!(
+		crate::semantics::eval_cast(&wide, "float8", &policy),
+		Err(PlanError::NumericValueOutOfRange)
+	));
+	let beyond_real = BoundLiteral::Numeric(format!("1{}", "0".repeat(40)));
+	assert!(matches!(
+		crate::semantics::eval_cast(&beyond_real, "real", &policy),
+		Err(PlanError::NumericValueOutOfRange)
+	));
+	assert!(crate::semantics::eval_cast(&beyond_real, "float8", &policy).is_ok());
+}
+
+#[test]
+fn a_numeric_beyond_a_double_beside_a_float_is_out_of_range() {
+	let policy = DialectPolicy::postgres();
+	let wide = BoundLiteral::Numeric("1e400".to_owned());
+	let one = BoundLiteral::Float(1.0);
+	for op in [BoundBinaryOp::Add, BoundBinaryOp::Equal] {
+		assert!(
+			matches!(
+				crate::semantics::eval_binary_op(&wide, op, &one, &policy),
+				Err(PlanError::NumericValueOutOfRange)
+			),
+			"{op:?}"
+		);
+	}
+}
+
+#[test]
+fn numeric_underflow_and_hidden_float_comparisons_are_out_of_range() {
+	let policy = DialectPolicy::postgres();
+	let tiny = BoundLiteral::Numeric("1e-400".to_owned());
+	assert!(matches!(
+		crate::semantics::eval_cast(&tiny, "float8", &policy),
+		Err(PlanError::NumericValueOutOfRange)
+	));
+	assert!(matches!(
+		crate::semantics::eval_cast(&BoundLiteral::Numeric("1e-50".to_owned()), "real", &policy),
+		Err(PlanError::NumericValueOutOfRange)
+	));
+	assert!(
+		crate::semantics::eval_cast(&BoundLiteral::Numeric("0.0".to_owned()), "real", &policy)
+			.is_ok()
+	);
+	let wide = BoundLiteral::Numeric("1e400".to_owned());
+	let zero = BoundLiteral::Float(0.0);
+	assert!(matches!(
+		crate::semantics::eval_binary_op(&wide, BoundBinaryOp::DistinctFrom, &zero, &policy),
+		Err(PlanError::NumericValueOutOfRange)
+	));
+}
+
+#[test]
+fn an_order_by_cidr_compound_refuses_an_untyped_alternative_with_host_bits() {
+	let sql = "SELECT id FROM net ORDER BY COALESCE(c, '10.1.2.3/24');";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "net", &["id", "c"]);
+	catalog.add_column_type("net", "c", SqlType::Cidr);
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let error = lower_bound_select(&bound, &policy).expect_err("host bits are refused");
+	assert!(matches!(error, PlanError::InvalidTextRepresentation(_)), "{error:?}");
+}
+
+#[test]
+fn a_network_compared_with_a_declared_text_column_is_undefined() {
+	use surrealdb_expr::expr::statements::define::SqlTypeDialect;
+	use surrealdb_expr::expr::statements::define::declared_type::DeclaredSqlType;
+
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "addr", "note", "loose"]);
+	catalog.add_column_type("host", "addr", SqlType::Inet);
+	catalog.add_sql_type(
+		"host",
+		"note",
+		DeclaredSqlType::parse(SqlTypeDialect::PostgreSql, "text").expect("text parses"),
+	);
+	let policy = DialectPolicy::postgres();
+	for (sql, refused) in [
+		("SELECT id FROM host WHERE addr = note;", true),
+		("SELECT id FROM host WHERE addr < 5;", true),
+		("SELECT id FROM host WHERE addr = loose;", false),
+		("SELECT id FROM host WHERE addr = '10.0.0.1';", false),
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let bound =
+			binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+		let lowered = lower_bound_select(&bound, &policy);
+		assert_eq!(
+			matches!(lowered, Err(PlanError::UndefinedOperator(_))),
+			refused,
+			"{sql}: {lowered:?}"
+		);
+	}
+}
+
+#[test]
+fn subnormal_float_casts_are_held_and_typed_peers_of_a_network_predicate_are_refused() {
+	let policy = DialectPolicy::postgres();
+	for (text, ty) in [("1e-310", "float8"), ("1e-40", "real")] {
+		assert!(
+			crate::semantics::eval_cast(&BoundLiteral::Numeric(text.to_owned()), ty, &policy)
+				.is_ok(),
+			"{text}::{ty}"
+		);
+	}
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "host", &["id", "addr"]);
+	catalog.add_column_type("host", "addr", SqlType::Inet);
+	for sql in [
+		"SELECT id FROM host WHERE addr IN (1);",
+		"SELECT id FROM host WHERE addr BETWEEN 1 AND 2;",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let bound =
+			binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+		let lowered = lower_bound_select(&bound, &policy);
+		assert!(matches!(lowered, Err(PlanError::UndefinedOperator(_))), "{sql}: {lowered:?}");
+	}
+}
+
+#[test]
+fn a_between_parameter_is_typed_by_its_first_comparison() {
+	for (sql, expected) in [
+		("SELECT $1 BETWEEN 1::int4 AND 2147483648::int8 AS hit;", "[Int4]"),
+		("SELECT $1 BETWEEN 1::int4 AND $2 AS hit;", "[Int4, Int4]"),
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let catalog = MemoryCatalog::new();
+		let policy = DialectPolicy::postgres();
+		let bound =
+			binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+		let params = format!("{:?}", bound.describe_parameters(&catalog).param_types);
+		assert_eq!(params, expected, "{sql}");
+	}
+}
+
+#[test]
+fn a_numeric_divided_by_a_float_is_converted_to_a_double_first() {
+	for sql in ["SELECT 1e400 / 1::float8", "SELECT 1::float8 / 1e400", "SELECT 1e400 ^ 1::float8"]
+	{
+		assert_eq!(folded_pgsql(sql), Err(PlanError::NumericValueOutOfRange), "{sql}");
+	}
+	assert_eq!(folded_pgsql("SELECT 3.0 / 2::float8"), Ok(BoundLiteral::Float(1.5)));
+}
+
+#[test]
+fn an_exact_quotient_past_the_numeric_limit_is_out_of_range() {
+	let fold = |sql: &str| {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let policy = DialectPolicy::postgres();
+		let mut bound =
+			binder::pgsql::bind_select(select, &MemoryCatalog::new(), &policy, None).unwrap();
+		fold_select(&mut bound, &policy)
+	};
+	for sql in ["SELECT 9e131071 / 0.1", "SELECT 1e131071 / 0.05", "SELECT 9e131071 / 0.5"] {
+		assert_eq!(fold(sql).err(), Some(PlanError::NumericValueOutOfRange), "{sql}");
+	}
+	for sql in ["SELECT 9e131070 / 0.1", "SELECT 2e131071 / 0.25", "SELECT 1.5 / 3"] {
+		assert!(fold(sql).is_ok(), "{sql}");
+	}
+}
+
+#[test]
+fn mysql_div_over_a_decimal_truncates_exactly() {
+	for (sql, expected) in [
+		("SELECT 18446744073709551615 DIV 1", BoundLiteral::Unsigned(u64::MAX)),
+		("SELECT 2.9999999999999999999999999999999 DIV 1", BoundLiteral::Integer(2)),
+		("SELECT 9223372036854775807.9 DIV 1", BoundLiteral::Integer(i64::MAX)),
+		("SELECT -7.5 DIV 2", BoundLiteral::Integer(-3)),
+		("SELECT 7.5 DIV -2.5", BoundLiteral::Integer(-3)),
+	] {
+		assert_eq!(folded_mysql(sql), Ok(expected), "{sql}");
+	}
+	assert_eq!(
+		folded_mysql("SELECT 9223372036854775808.0 DIV 1"),
+		Err(PlanError::NumericValueOutOfRange)
+	);
+}
+
+#[test]
+fn mysql_exact_arithmetic_is_bounded_by_65_digits() {
+	let wide = format!("{}.0", "9".repeat(40));
+	let product = format!("SELECT {wide} * {wide}");
+	assert_eq!(folded_mysql(&product), Err(PlanError::NumericValueOutOfRange));
+	assert!(folded_pgsql(&product).is_ok(), "PostgreSQL's numeric holds the product");
+}
+
+#[test]
+fn a_numeric_power_past_the_numeric_integer_digits_is_out_of_range() {
+	for sql in [
+		"SELECT 9e1000 ^ 132",
+		"SELECT 0.1 ^ -131073.0",
+		"SELECT 10.0 ^ 131072",
+		"SELECT 0.99999999999999999 ^ -1e30",
+		"SELECT 1.000000000000000001 ^ 1e35",
+	] {
+		let err = folded_pgsql(sql).expect_err(sql);
+		assert_eq!(err, PlanError::NumericValueOutOfRange, "{sql}");
+	}
+	// A power in range is left for the engine, unfolded.
+	for sql in [
+		"SELECT 9e1000 ^ 2",
+		"SELECT 10.0 ^ 131071",
+		"SELECT 1.0 ^ 1e30",
+		"SELECT 2.5 ^ -3",
+		"SELECT 1.000000000000000001 ^ 1000",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect(sql);
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let policy = DialectPolicy::postgres();
+		let mut bound =
+			binder::pgsql::bind_select(select, &MemoryCatalog::new(), &policy, None).expect(sql);
+		fold_select(&mut bound, &policy).expect(sql);
+	}
 }

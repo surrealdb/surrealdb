@@ -11153,7 +11153,6 @@ impl Datastore {
 		let listing = recorder.asked_table_listing();
 		let deferred = recorder.deferred_schema_checks();
 		let enums_asked = recorder.asked_user_types();
-		let domain_columns_asked = recorder.asked_domain_columns();
 		let tables = recorder.into_tables();
 		if tables.is_empty() && !listing && !deferred && !enums_asked {
 			return first.map_err(invalid);
@@ -11197,8 +11196,7 @@ impl Datastore {
 			}
 		}
 		if enums_asked {
-			let (types, columns) =
-				self.user_types_of(session, database, transaction, domain_columns_asked).await?;
+			let types = self.user_types_of(session, database, transaction).await?;
 			if !types.enums.is_empty() || !types.domains.is_empty() || !types.composites.is_empty()
 			{
 				let mut types_catalog = catalog
@@ -11206,8 +11204,7 @@ impl Datastore {
 					.unwrap_or_default()
 					.with_enums(types.enums)
 					.with_domains(types.domains)
-					.with_composites(types.composites)
-					.with_domain_columns(columns);
+					.with_composites(types.composites);
 				types_catalog.set_database(active_db.map(str::to_owned));
 				catalog = Some(types_catalog);
 			}
@@ -11221,20 +11218,15 @@ impl Datastore {
 		}
 	}
 
-	/// The user-defined enum, domain and composite types of the selected database, and with
-	/// `with_columns` the columns declared with each domain, read as [`Self::listed_tables`] reads
-	/// the tables and for the same sessions.
+	/// The types of the selected database, as the enum, domain and composite types PostgreSQL
+	/// knows them by, read as [`Self::listed_tables`] reads the tables and for the same sessions.
 	#[cfg(any(feature = "postgres", feature = "mysql"))]
 	async fn user_types_of(
 		&self,
 		session: &Session,
 		database: Option<&str>,
 		transaction: Option<&Arc<Transaction>>,
-		with_columns: bool,
-	) -> std::result::Result<
-		(surrealdb_sqlplan::UserTypes, Vec<(String, surrealdb_sqlplan::DomainColumn)>),
-		TypesError,
-	> {
+	) -> std::result::Result<surrealdb_sqlplan::UserTypes, TypesError> {
 		self.check_session(session)?;
 		let (Some(ns), Some(db)) = (session.ns.as_deref(), database.or(session.db.as_deref()))
 		else {
@@ -11246,11 +11238,11 @@ impl Datastore {
 			return Ok(Default::default());
 		}
 		let types = match transaction {
-			Some(txn) => sql_links::user_types(txn, ns, db, with_columns).await,
+			Some(txn) => sql_links::user_types(txn, ns, db).await,
 			None => {
 				let txn =
 					self.transaction(Read).await.map_err(crate::err::anyhow_to_types_error)?;
-				let types = sql_links::user_types(&txn, ns, db, with_columns).await;
+				let types = sql_links::user_types(&txn, ns, db).await;
 				let _ = txn.cancel().await;
 				types
 			}
