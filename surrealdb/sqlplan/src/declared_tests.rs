@@ -140,6 +140,75 @@ fn a_column_a_subquery_table_lacks_belongs_to_the_enclosing_query() {
 }
 
 #[test]
+fn an_alias_hides_the_name_of_its_table() {
+	for sql in [
+		"SELECT emp.id FROM emp e",
+		"SELECT e.id FROM emp e WHERE emp.dept = 1",
+		"SELECT e.id FROM emp e ORDER BY emp.name",
+		"SELECT e.id FROM emp e JOIN dept d ON emp.dept = d.id",
+		"SELECT e.id FROM public.emp e WHERE public.emp.dept = 1",
+	] {
+		assert_eq!(
+			both(sql).map_err(|err| matches!(err, PlanError::MissingFromClauseEntry(_))),
+			Err(true),
+			"{sql}"
+		);
+	}
+	assert_eq!(
+		both("SELECT e.id FROM emp e JOIN dept d ON e.dept = d.id WHERE e.dept = 1"),
+		Ok(())
+	);
+}
+
+#[test]
+fn a_table_name_an_alias_frees_names_the_other_relation_that_has_it() {
+	let bound = pg("SELECT emp.name, e.name FROM emp e JOIN emp ON emp.id = e.dept").expect("bind");
+	assert_eq!(column_of(&bound.targets[0]), (1, "name", 0));
+	assert_eq!(column_of(&bound.targets[1]), (0, "name", 0));
+}
+
+/// The depth at which each column `expr` reads is bound, in the order the columns appear in a
+/// comparison tree of `AND`s.
+fn comparison_columns(expr: &BoundExpr, out: &mut Vec<(usize, String, usize)>) {
+	if let BoundExpr::Binary {
+		left,
+		right,
+		..
+	} = expr
+	{
+		comparison_columns(left, out);
+		comparison_columns(right, out);
+	} else if let BoundExpr::Column(col) = expr {
+		out.push((col.relation_index, col.column.clone(), col.correlation_depth));
+	}
+}
+
+#[test]
+fn a_subquery_alias_leaves_the_table_name_to_the_enclosing_query() {
+	let bound = pg("SELECT name FROM emp WHERE EXISTS \
+		(SELECT 1 FROM emp e2 WHERE emp.name = 'x' AND e2.id = emp.id)")
+	.expect("bind");
+	let Some(BoundExpr::Exists(sub)) = &bound.where_clause else {
+		panic!("expected EXISTS, got {:?}", bound.where_clause);
+	};
+	let mut columns = Vec::new();
+	comparison_columns(sub.where_clause.as_ref().expect("a WHERE clause"), &mut columns);
+	assert_eq!(
+		columns,
+		[(0, "name".to_string(), 1), (0, "id".to_string(), 0), (0, "id".to_string(), 1)]
+	);
+
+	let bound =
+		pg("SELECT (SELECT count(*) FROM emp e2 WHERE e2.name = emp.name) FROM emp").expect("bind");
+	let BoundExpr::ScalarSubquery(sub) = &bound.targets[0].expr else {
+		panic!("expected a scalar subquery");
+	};
+	let mut columns = Vec::new();
+	comparison_columns(sub.where_clause.as_ref().expect("a WHERE clause"), &mut columns);
+	assert_eq!(columns, [(0, "name".to_string(), 0), (0, "name".to_string(), 1)]);
+}
+
+#[test]
 fn a_column_that_no_query_has_is_an_error_whatever_the_nesting() {
 	assert_eq!(both("SELECT (SELECT nosuch FROM dept) FROM emp"), undefined("nosuch"));
 	assert_eq!(

@@ -369,6 +369,7 @@ impl QueryScope {
 		policy: &DialectPolicy,
 	) -> usize {
 		let relation_index = self.relations.len();
+		let aliased = alias.is_some();
 		// An unaliased relation is exposed under its unqualified name, so `columns.*` and
 		// `columns.column_name` resolve against `information_schema.columns`.
 		let exposed_name = alias.unwrap_or_else(|| match schema.as_deref() {
@@ -405,15 +406,18 @@ impl QueryScope {
 		let key_exposed = policy.fold_identifier(&exposed_name).into_owned();
 		self.name_to_relation.insert(key_exposed, relation_index);
 
-		// Also register under table_name if exposed_name was an alias
-		let key_table = policy.fold_identifier(table_name).into_owned();
-		self.name_to_relation.entry(key_table).or_insert(relation_index);
+		// An aliased relation is reachable only by its alias: the table's own name is then free to
+		// mean the same table of an enclosing query, or another relation of this one. A relation
+		// without an alias is also reachable by its table name and, qualified, by its schema.
+		if !aliased {
+			let key_table = policy.fold_identifier(table_name).into_owned();
+			self.name_to_relation.entry(key_table).or_insert(relation_index);
 
-		// If schema was provided, also register under "schema.table"
-		if let Some(s) = schema {
-			let full_name = format!("{s}.{table_name}");
-			let key_full = policy.fold_identifier(&full_name).into_owned();
-			self.name_to_relation.entry(key_full).or_insert(relation_index);
+			if let Some(s) = schema {
+				let full_name = format!("{s}.{table_name}");
+				let key_full = policy.fold_identifier(&full_name).into_owned();
+				self.name_to_relation.entry(key_full).or_insert(relation_index);
+			}
 		}
 
 		relation_index
