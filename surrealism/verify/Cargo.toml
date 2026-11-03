@@ -1,6 +1,6 @@
 [package]
 name = "surrealism-verify"
-version = "0.7.0-nightly"
+version = "0.7.0-beta.1"
 description = "Signature verification for Surrealism extension archives"
 edition.workspace = true
 authors.workspace = true
