@@ -92,13 +92,6 @@ pub(crate) async fn use_targets(
 		}
 	}
 
-	// A pinned session keeps its selection within the pin.
-	if let Some(pin) = &opt.pin
-		&& (use_ns.is_some() || use_db.is_some())
-	{
-		pin.check_selection(target_ns, target_db)?;
-	}
-
 	let create_ns = if let Some(ns_name) = use_ns.as_deref() {
 		txn.get_ns_by_name(ns_name, None).await?.is_some()
 			|| (!ctx.auth_enabled() && opt.auth.is_anon())

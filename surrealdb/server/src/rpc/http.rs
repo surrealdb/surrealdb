@@ -258,10 +258,6 @@ impl Http {
 		if !caller_may_use_session(&session.au, &request.au) {
 			return Err(session_not_found(id));
 		}
-		// The pin is a property of the request's URL, not of the stored session:
-		// a stored session runs pinned to the scope of each request that names
-		// it, and one that has selected another namespace or database is refused.
-		let session = pin_to_request(session, &request)?;
 		let before = session.clone();
 		let rid = Uuid::new_v4();
 		let private = self.register_private_session(rid, session);
@@ -661,27 +657,6 @@ fn session_changed(id: Uuid) -> TypesError {
 	))
 }
 
-/// Confines stored session `session` to the pin of `request`, the session
-/// the request's own URL, headers and credentials produced.
-///
-/// Without a pin the stored session runs as stored. With one, a level the
-/// stored session has not selected is taken from the pin, and a stored
-/// selection outside the pin is refused with `NsNotAllowed` or `DbNotAllowed`.
-fn pin_to_request(mut session: Session, request: &Session) -> Result<Session, TypesError> {
-	let Some(pin) = request.pin.clone() else {
-		return Ok(session);
-	};
-	if session.ns.is_none() {
-		session.ns = Some(pin.ns.clone());
-	}
-	if session.db.is_none() {
-		session.db.clone_from(&pin.db);
-	}
-	pin.check_session(&session).map_err(types_error_from_anyhow)?;
-	session.pin = Some(pin);
-	Ok(session)
-}
-
 /// Determine whether a caller presenting `caller_au` may operate on a
 /// session whose currently-bound principal is `session_au`.
 ///
@@ -736,7 +711,6 @@ fn renews_authentication(before: &Session, after: &Session) -> bool {
 		db,
 		variables,
 		redact_volatile_explain_attrs,
-		pin,
 	} = after;
 	after != before
 		&& same_identity(before, after)
@@ -748,7 +722,6 @@ fn renews_authentication(before: &Session, after: &Session) -> bool {
 		&& *db == before.db
 		&& *variables == before.variables
 		&& *redact_volatile_explain_attrs == before.redact_volatile_explain_attrs
-		&& *pin == before.pin
 }
 
 /// Apply the changes a request made to a session — `ours`, changed from
@@ -793,7 +766,6 @@ fn merge_session_changes(before: &Session, ours: Session, theirs: Session) -> Se
 		exp,
 		variables,
 		redact_volatile_explain_attrs,
-		pin,
 	} = ours;
 	let Session {
 		au: their_au,
@@ -810,8 +782,6 @@ fn merge_session_changes(before: &Session, ours: Session, theirs: Session) -> Se
 		exp: their_exp,
 		variables: their_variables,
 		redact_volatile_explain_attrs: their_redact_volatile_explain_attrs,
-		// The pin is the request's, never stored: the stored copy has none.
-		pin: _,
 	} = theirs;
 	let auth_changed = au != before.au
 		|| ac != before.ac
@@ -877,7 +847,6 @@ fn merge_session_changes(before: &Session, ours: Session, theirs: Session) -> Se
 		} else {
 			their_redact_volatile_explain_attrs
 		},
-		pin,
 	}
 }
 

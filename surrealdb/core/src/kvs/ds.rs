@@ -11894,14 +11894,6 @@ impl Datastore {
 				},
 			));
 		}
-
-		// A pinned session runs only within its pin. `USE` and the RPC methods
-		// refuse to leave it, but a caller may set the selection directly (the
-		// MCP tools take a namespace and database per call), so every query
-		// checks it here as well.
-		if let Some(pin) = &sess.pin {
-			pin.check_session(sess).map_err(crate::err::anyhow_to_types_error)?;
-		}
 		Ok(())
 	}
 
@@ -12463,7 +12455,6 @@ impl Datastore {
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_auth(Arc::clone(&sess.au))
-			.with_pin(sess.pin.clone().map(Arc::new))
 	}
 
 	pub fn setup_ctx(&self) -> Result<Context> {
@@ -12642,16 +12633,6 @@ impl Datastore {
 					return Err(TypesError::not_allowed(err.to_string(), None));
 				}
 			}
-		}
-		// A pinned session keeps its selection within the pin. An empty `USE`
-		// changes nothing on a pinned session, which always has a namespace.
-		if let Some(pin) = &session.pin
-			&& (namespace.is_some() || database.is_some())
-		{
-			let target_ns = namespace.as_deref().or(session.ns.as_deref());
-			let target_db = database.as_deref().or(session.db.as_deref());
-			pin.check_selection(target_ns, target_db)
-				.map_err(|err| TypesError::not_allowed(err.to_string(), None))?;
 		}
 		match (namespace, database) {
 			(Some(ns), Some(db)) => {
@@ -12934,14 +12915,6 @@ impl Datastore {
 		self: &Arc<Self>,
 		session: &Session,
 	) -> Result<async_graphql::dynamic::Schema, crate::graphql::GraphqlError> {
-		// A pinned session reaches only the schema of its pin. Every GraphQL
-		// transport takes its schema from here, and the `signIn`/`signUp`
-		// resolvers act on the schema's namespace and database, so this keeps
-		// GraphQL within the pin as the query preflight keeps SurrealQL.
-		if let Some(pin) = &session.pin {
-			pin.check_session(session)
-				.map_err(|err| crate::graphql::GraphqlError::AuthError(err.to_string()))?;
-		}
 		self.graphql_schema_cache.get_schema(self, session).await
 	}
 

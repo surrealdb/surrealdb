@@ -11,7 +11,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::*;
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, tool, tool_handler, tool_router};
-use surrealdb_core::dbs::{ScopePin, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_rpc::capabilities::McpToolTarget;
 use tokio::sync::OnceCell;
@@ -63,14 +63,6 @@ struct BoundHandshake {
 	/// handshake-bound session before `DURATION FOR SESSION` elapses. See
 	/// [`BoundSubject`].
 	subject: BoundSubject,
-	/// The URL scope (`/ns/{ns}[/db/{db}]/mcp`) the session was initialised
-	/// under, as the pin the server attached to that request's session.
-	///
-	/// An MCP session is bound to it: [`McpService::verify_request_subject`]
-	/// refuses a later request on the same session id whose URL names another
-	/// scope, or none where the session has one, or one where it has none.
-	/// `session` keeps this pin, so every query it runs stays within it.
-	pin: Option<ScopePin>,
 }
 
 /// The MCP server handler for SurrealDB.
@@ -429,7 +421,6 @@ impl McpService {
 	/// is a protocol error.
 	pub fn init_session(&self, session: Session) -> Result<(), McpError> {
 		let subject = BoundSubject::from_session(&session);
-		let pin = session.pin.clone();
 		let mcp_session =
 			McpSession::with_config(Arc::clone(&self.datastore), session, Arc::clone(&self.config));
 		// One `set` publishes the session and the subject together, so no
@@ -438,7 +429,6 @@ impl McpService {
 			.set(BoundHandshake {
 				session: mcp_session,
 				subject,
-				pin,
 			})
 			.map_err(|_| McpError::internal_error("Session already initialized", None))?;
 		// Bump the active-session gauge now that the session is bound.
@@ -527,22 +517,7 @@ impl McpService {
 			return Ok(());
 		}
 		let incoming = auth::incoming_subject(ctx);
-		auth::check_subject(&bound.subject, incoming)?;
-		// The session id is bound to the URL scope it was initialised under. A
-		// request that reuses it under another scope would otherwise run on the
-		// handshake session, pinned to the old scope or to none.
-		let incoming_pin = ctx
-			.extensions
-			.get::<http::request::Parts>()
-			.and_then(auth::extract_session_from_parts)
-			.and_then(|session| session.pin);
-		if incoming_pin != bound.pin {
-			return Err(McpError::invalid_params(
-				"This MCP session was initialised under another URL scope",
-				None,
-			));
-		}
-		Ok(())
+		auth::check_subject(&bound.subject, incoming)
 	}
 
 	/// Audit label for whoever is making this request.

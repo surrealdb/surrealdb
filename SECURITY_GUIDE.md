@@ -978,20 +978,11 @@ Flag for detailed review when changes touch:
   authentication against `surreal-auth-ns`/`surreal-auth-db` changes only the
   principal, so the principal is checked on its own. Credentials never redirect
   a scoped request to another namespace or database.
-- A session whose request or connection URL names a namespace carries a pin
-  (`Session::pin`). Every change of its selected namespace and database stays
-  within the pin: SurrealQL `USE`, RPC `use`, `process_use`, and the RPC
-  `signin`, `signup`, `authenticate` and `refresh` methods refuse a change that
-  leaves it, and `reset` returns to it. Every query preflight
-  (`Datastore::check_session`) refuses a pinned session whose selection or
-  principal is outside the pin, so a caller that sets the selection directly
-  (the MCP tools take a namespace and database per call) cannot leave it.
-  `Datastore::graphql_schema` applies the same check, so no GraphQL transport
-  or `signIn`/`signUp` resolver reaches a schema outside the pin. An
-  MCP session id is bound to the scope of its `initialize` request; a request
-  that reuses it under another URL scope, or none, is refused. Sessions attached to a pinned WebSocket
-  inherit the pin; a stored HTTP RPC session runs pinned to each request's
-  scope. The pin is never persisted; it is applied again from the URL.
+- The URL path scope is the session's starting selection, not a confinement.
+  It is checked only when the request or connection is authenticated
+  (`PathScope::admits`). A later `USE`, RPC `use`, or authentication method on
+  the same connection or stored session may select another namespace or
+  database, and is authorized exactly as on an unscoped connection.
 - Each connection must have an independent session. Session identifiers must not
   collide or be reusable across connections.
 - After a `reset`, the session must be in the most restrictive state. If auth is

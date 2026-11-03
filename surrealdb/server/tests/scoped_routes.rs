@@ -578,50 +578,32 @@ async fn scoped_signup_and_signin_take_the_access_method_from_the_path() {
 }
 
 #[tokio::test]
-async fn use_cannot_leave_the_scope_over_sql() {
+async fn use_can_leave_the_scope_over_sql() {
 	let server = TestServer::start().await;
 	let res = server
 		.sql(
 			"/ns/foo/db/bar/sql",
-			"USE NS other; USE DB other; USE NS foo DB bar; RETURN [session::ns(), session::db()]",
+			"RETURN [session::ns(), session::db()]; USE NS other DB other; RETURN [session::ns(), session::db()]",
 		)
 		.send()
 		.await
 		.expect("request");
 	assert_eq!(res.status(), StatusCode::OK);
 	let body: Value = serde_json::from_str(&res.text().await.expect("body")).expect("json");
-	assert_eq!(body[0]["status"], json!("ERR"), "body: {body}");
-	assert_eq!(body[1]["status"], json!("ERR"), "body: {body}");
-	assert_eq!(body[2]["status"], json!("OK"), "body: {body}");
-	assert_eq!(body[3]["result"], json!(["foo", "bar"]), "body: {body}");
-	// A namespace scope leaves the database free.
-	let res = server
-		.sql("/ns/foo/sql", "USE DB other; RETURN [session::ns(), session::db()]")
-		.send()
-		.await
-		.expect("request");
-	let body: Value = serde_json::from_str(&res.text().await.expect("body")).expect("json");
-	assert_eq!(body[1]["result"], json!(["foo", "other"]), "body: {body}");
+	assert_eq!(body[0]["result"], json!(["foo", "bar"]), "body: {body}");
+	assert_eq!(body[1]["status"], json!("OK"), "body: {body}");
+	assert_eq!(body[2]["result"], json!(["other", "other"]), "body: {body}");
 }
 
 #[tokio::test]
-async fn use_cannot_leave_the_scope_over_http_rpc() {
+async fn use_can_leave_the_scope_over_http_rpc() {
 	let server = TestServer::start().await;
-	let rpc = |body: Value| {
-		server
-			.request(Method::POST, "/ns/foo/db/bar/rpc")
-			.basic_auth(USER, Some(PASS))
-			.header("Content-Type", "application/json")
-			.header("Accept", "application/json")
-			.body(body.to_string())
-	};
-	let res = rpc(json!({"id": 1, "method": "use", "params": ["other", null]}))
-		.send()
-		.await
-		.expect("request");
-	let body: Value = serde_json::from_str(&res.text().await.expect("body")).expect("json");
-	assert!(body.get("error").is_some(), "body: {body}");
-	let res = rpc(json!({"id": 2, "method": "use", "params": ["foo", "bar"]}))
+	let res = server
+		.request(Method::POST, "/ns/foo/db/bar/rpc")
+		.basic_auth(USER, Some(PASS))
+		.header("Content-Type", "application/json")
+		.header("Accept", "application/json")
+		.body(json!({"id": 1, "method": "use", "params": ["other", "other"]}).to_string())
 		.send()
 		.await
 		.expect("request");
@@ -679,36 +661,23 @@ impl WsClient {
 }
 
 #[tokio::test]
-async fn websocket_connection_is_pinned_to_its_scope() {
+async fn websocket_connection_starts_in_its_scope() {
 	let server = TestServer::start().await;
 	let mut ws = WsClient::connect(&server, "/ns/foo/db/bar/rpc").await;
-	let selected = |id: &str, session: Option<&str>| {
-		let mut body = json!({"id": id, "method": "query", "params": [SELECTED]});
-		if let Some(session) = session {
-			body["session"] = json!(session);
-		}
-		body
-	};
-	let res = ws.request(selected("q1", None)).await;
+	let selected = |id: &str| json!({"id": id, "method": "query", "params": [SELECTED]});
+	// The connection starts in the namespace and database the URL names.
+	let res = ws.request(selected("q1")).await;
 	assert_eq!(res["result"][0]["result"], json!(["foo", "bar"]), "{res}");
-	// `use` cannot leave the scope.
-	let res = ws.request(json!({"id": "u1", "method": "use", "params": ["other", null]})).await;
-	assert!(res.get("error").is_some(), "{res}");
-	let res = ws.request(json!({"id": "u2", "method": "use", "params": [null, "other"]})).await;
-	assert!(res.get("error").is_some(), "{res}");
-	// `reset` returns to the scope, not to no selection.
-	let res = ws.request(json!({"id": "r1", "method": "reset"})).await;
+	// `use` selects another namespace and database for the rest of the connection.
+	let res = ws.request(json!({"id": "u1", "method": "use", "params": ["other", "other"]})).await;
 	assert!(res.get("error").is_none(), "{res}");
-	let res = ws.request(selected("q2", None)).await;
-	assert_eq!(res["result"][0]["result"], json!(["foo", "bar"]), "{res}");
-	// A session attached to the connection starts in, and is confined to, the scope.
-	let sid = "4f6c3a6e-0d5b-4c1e-9a43-2f1d0c7b8e10";
-	let res = ws.request(json!({"id": "a1", "method": "attach", "session": sid})).await;
-	assert!(res.get("error").is_none(), "{res}");
-	let res = ws.request(selected("q3", Some(sid))).await;
-	assert_eq!(res["result"][0]["result"], json!(["foo", "bar"]), "{res}");
+	let res = ws.request(selected("q2")).await;
+	assert_eq!(res["result"][0]["result"], json!(["other", "other"]), "{res}");
+	// So does SurrealQL `USE`.
 	let res = ws
-		.request(json!({"id": "u3", "method": "use", "session": sid, "params": ["other", "other"]}))
+		.request(
+			json!({"id": "q3", "method": "query", "params": [format!("USE NS foo DB baz; {SELECTED}")]}),
+		)
 		.await;
-	assert!(res.get("error").is_some(), "{res}");
+	assert_eq!(res["result"][1]["result"], json!(["foo", "baz"]), "{res}");
 }

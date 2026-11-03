@@ -1331,16 +1331,6 @@ impl RpcProtocol for Websocket {
 		}
 		let mut session = Session::default().with_rt(Self::LQ_SUPPORT);
 		session.id = Some(session_id);
-		// A session attached to a connection opened on a scoped URL is confined
-		// to the same scope, and starts in it.
-		if let Some(connection) = self.session_map().get(&self.id) {
-			let pin = connection.read().await.pin.clone();
-			if let Some(pin) = pin {
-				session.ns = Some(pin.ns.clone());
-				session.db.clone_from(&pin.db);
-				session.pin = Some(pin);
-			}
-		}
 		self.session_map().insert(session_id, Arc::new(RwLock::new(session)));
 		Ok(DbResult::Other(Value::None))
 	}

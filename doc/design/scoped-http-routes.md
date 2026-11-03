@@ -1,7 +1,6 @@
 # Scoped HTTP routes
 
-**Status:** Namespace, database and access-method scopes and the session pin
-implemented; `.well-known` documents planned ·
+**Status:** Namespace, database and access-method scopes implemented; `.well-known` documents planned ·
 **Scope:** `surrealdb/server/src/ntw/`, `surrealdb/core/src/dbs/session.rs`
 
 The HTTP server takes the namespace, database and access method from the URL
@@ -149,43 +148,28 @@ Namespace- and database-level credentials set the session's namespace and
 database themselves. With headers, the credentials win silently. With a path
 scope, the request is refused when the credentials select a different
 namespace or database than the path names, because the path states where the
-request runs.
+request starts.
 
-### The session pin
+### The scope is the starting selection
 
-A request with a namespace in its path runs on a session pinned to the scope
-(`Session::pin`, a `ScopePin { ns, db }`). While the pin is set, the session's
-namespace and database stay within it:
+The namespace and database in the path are the session's starting selection,
+as the `surreal-ns` and `surreal-db` headers are. They are checked once, when
+the request or connection is authenticated (`PathScope::admits`). They do not
+confine the session: `USE`, the RPC `use` method and the authentication
+methods change the selection as they do on an unscoped connection.
 
 ```
-connect /ns/foo/rpc
-use ["foo", "bar"]           ok
-use [null, "other"]          ok: the path leaves the database open
-use ["other", null]          error: NsNotAllowed
-
 connect /ns/foo/db/bar/rpc
-USE DB other;                error: DbNotAllowed
-reset                        ns=foo, db=bar (not none)
-attach <id>                  the new session starts in, and is pinned to, foo/bar
+query RETURN session::db()   bar
+use ["other", "other"]       ok
+USE NS foo DB baz;           ok
+reset                        ns=none, db=none
+attach <id>                  the new session starts with no selection
 ```
 
-| Change | Under a pin |
-|---|---|
-| SurrealQL `USE` (`exec::session::use_targets`) | refused when it leaves the pin |
-| RPC `use` (`rpc::protocol::yuse`), embedded `use` (`Datastore::process_use`) | refused when it leaves the pin; an empty `use` changes nothing |
-| RPC `signin`, `signup` | credentials that name another namespace or database are refused; credentials that name none sign in at the root |
-| RPC `signin`, `signup`, `authenticate`, `refresh` | run on a copy; the session takes the result only when it stays within the pin (`Session::settle_authentication`) |
-| RPC `reset` | returns to the pinned namespace and database |
-| WebSocket `attach` | the new session takes the connection's pin and starts in it |
-| HTTP RPC on an attached session | the stored session runs pinned to each request's scope; one that selected another namespace or database is refused |
-| MCP session id | bound to the URL scope of its `initialize`; a request on it under another scope, or none, is refused |
-| GraphQL schema (`Datastore::graphql_schema`) | refused when the session's selection or principal is outside the pin; every GraphQL transport, and the `signIn`/`signUp` resolvers, act through it |
-| Any query (`Datastore::check_session`) | refused when the session's selection or principal is outside the pin; this covers callers that set the selection directly, such as the MCP tools' per-call `namespace` and `database` |
-
-The pin is a property of the connection or request URL, not of stored state.
-It is not serialized and not part of the durable session (`DurableSession`),
-so it adds nothing to the persisted session format; the server applies it again
-from the URL on every connection and request.
+The scope is not stored on the session. It is not serialized and not part of
+the durable session (`DurableSession`), so it adds nothing to the persisted
+session format.
 
 ## 3. Implementation
 
@@ -222,7 +206,7 @@ A path that names no scoped route keeps its original URI, so the router answers
 
 The session builder in `auth.rs` reads `PathScope` next to the
 `SurrealNamespace` and `SurrealDatabase` headers, applies the rules in section
-2, and sets the session pin. The `signin` and `signup` handlers complete their
+2. The `signin` and `signup` handlers complete their
 credentials from `PathScope` (`scope::credentials`).
 
 ### Layers that match on the path
@@ -391,7 +375,7 @@ on the current proposals.
 
 1. **Scoped routes.** Implemented: the rewrite, `PathScope`, the resolution
    rules, namespace, database and access-method scopes, scoped `signin` and
-   `signup`, and the session pin.
+   `signup`.
 2. **`kid` on issued tokens.** Derived from the public key hash. Required
    before step 3.
 3. **`jwks.json`.** Behind the publication policy from section 5.

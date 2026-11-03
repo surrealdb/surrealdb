@@ -22,7 +22,9 @@
 //! route. The scope travels on as a [`PathScope`] request extension:
 //!
 //! - The auth layer selects the scope's namespace and database, reconciles them with the headers
-//!   and the credentials, and pins the session to them (see [`ScopePin`]).
+//!   and the credentials, and refuses credentials outside them (see [`PathScope::admits`]). The
+//!   scope is the session's starting selection: `USE` may still select another namespace or
+//!   database.
 //! - `signin` and `signup` complete their credentials' `NS`, `DB` and `AC` from it (see
 //!   [`credentials`]).
 //! - The bucket routes take the level of the bucket they serve from it.
@@ -41,7 +43,8 @@ use axum::response::Response;
 use futures_util::future::BoxFuture;
 use http::Uri;
 use http::uri::PathAndQuery;
-use surrealdb_core::dbs::{ScopePin, complete_credential};
+use surrealdb_core::dbs::{Session, complete_credential};
+use surrealdb_iam::Level;
 use surrealdb_types::Variables;
 use tower::{Service, ServiceExt};
 
@@ -70,13 +73,32 @@ pub(crate) struct PathScope {
 }
 
 impl PathScope {
-	/// The pin a session in this scope is confined to. A scope that names no
-	/// namespace (`/ac/{ac}/…`) pins nothing.
-	pub(crate) fn pin(&self) -> Option<ScopePin> {
-		self.ns.as_ref().map(|ns| ScopePin {
-			ns: ns.clone(),
-			db: self.db.clone(),
-		})
+	/// Whether the request's session belongs to this scope: its selected
+	/// namespace and database are the ones the path names, and its principal
+	/// belongs to that tenant. Root and anonymous principals carry no tenant.
+	/// A namespace principal must belong to the scope's namespace; a database or
+	/// record principal must also belong to its database when the path names
+	/// one. A scope that names no namespace (`/ac/{ac}/…`) admits any session.
+	///
+	/// This is checked once, when the request is authenticated. The scope is
+	/// the session's starting selection, not a confinement: a `USE` the request
+	/// or connection runs later may select another namespace or database, as it
+	/// may under the `surreal-ns` and `surreal-db` headers.
+	pub(crate) fn admits(&self, session: &Session) -> bool {
+		let Some(ns) = self.ns.as_deref() else {
+			return true;
+		};
+		let db = self.db.as_deref();
+		let selects = session.ns.as_deref() == Some(ns)
+			&& db.is_none_or(|db| session.db.as_deref() == Some(db));
+		let confines = match session.au.level() {
+			Level::Root | Level::No => true,
+			Level::Namespace(level_ns) => level_ns == ns,
+			Level::Database(level_ns, level_db) | Level::Record(level_ns, level_db, _) => {
+				level_ns == ns && db.is_none_or(|db| level_db == db)
+			}
+		};
+		selects && confines
 	}
 }
 
@@ -263,6 +285,7 @@ fn decode(segment: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_iam::Role;
 	use surrealdb_types::Value;
 
 	use super::*;
@@ -406,10 +429,21 @@ mod tests {
 	}
 
 	#[test]
-	fn pins_only_a_namespace_scope() {
-		let pin = scope(Some("foo"), Some("bar"), Some("users")).pin().expect("a pin");
-		assert_eq!((pin.ns.as_str(), pin.db.as_deref()), ("foo", Some("bar")));
-		assert_eq!(scope(None, None, Some("admins")).pin(), None);
+	fn admits_sessions_that_start_in_the_scope() {
+		let both = scope(Some("foo"), Some("bar"), None);
+		let session = |level| Session::for_level(level, Role::Viewer).with_ns("foo").with_db("bar");
+		assert!(both.admits(&session(Level::Root)));
+		assert!(both.admits(&session(Level::Database("foo".into(), "bar".into()))));
+		assert!(!both.admits(&session(Level::Database("foo".into(), "other".into()))));
+		assert!(!both.admits(&session(Level::Namespace("other".into()))));
+		assert!(!both.admits(&Session::owner().with_ns("foo").with_db("other")));
+		// Without a database in the path, any database in the namespace.
+		let ns = scope(Some("foo"), None, None);
+		assert!(
+			ns.admits(&session(Level::Database("foo".into(), "other".into())).with_db("other"))
+		);
+		// A root access-method scope names no tenant.
+		assert!(scope(None, None, Some("admins")).admits(&Session::default()));
 	}
 
 	#[test]

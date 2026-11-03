@@ -302,13 +302,12 @@ async fn check_auth(parts: &mut Parts, use_credentials: bool) -> Result<(Session
 	// A token selects its own namespace and database, and Basic authentication
 	// against `surreal-auth-ns`/`surreal-auth-db` yields a principal of another
 	// tenant; either way a mismatch is refused, because the path states where
-	// the request runs. The session is then pinned to the scope, so nothing it
-	// runs can select another namespace or database.
-	if let Some(pin) = scope.as_ref().and_then(PathScope::pin) {
-		if !pin.admits(&session) {
-			bail!(NetError::InvalidAuth);
-		}
-		session.pin = Some(pin);
+	// the request starts. The path does not confine the session: a `USE` may
+	// select another namespace or database afterwards.
+	if let Some(scope) = &scope
+		&& !scope.admits(&session)
+	{
+		bail!(NetError::InvalidAuth);
 	}
 
 	// SECURITY (GHSA-2v9j): the `Surreal-NS`/`Surreal-DB` headers select the

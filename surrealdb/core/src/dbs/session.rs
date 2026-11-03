@@ -252,124 +252,6 @@ pub struct Session {
 	/// When true, EXPLAIN ANALYZE output omits elapsed durations, making
 	/// output deterministic for testing.
 	pub redact_volatile_explain_attrs: bool,
-	/// The namespace, and optionally the database, this session is confined to.
-	///
-	/// Set by the HTTP server from a scoped URL (`/ns/{ns}[/db/{db}]/…`). It is
-	/// a property of the connection or request, never of stored state: it is
-	/// not serialized and not part of a durable session, and the server applies
-	/// it again from the URL on every connection and request.
-	///
-	/// While it is set, the selected namespace and database stay within it:
-	/// `USE`, the RPC `use` method, `reset`, and the authentication methods
-	/// (`signin`, `signup`, `authenticate`, `refresh`) refuse, or do not apply,
-	/// a change that leaves it. See [`ScopePin`].
-	#[serde(skip)]
-	pub pin: Option<ScopePin>,
-}
-
-/// The namespace, and optionally the database, a session is confined to.
-///
-/// A pin with a database fixes both levels. A pin without one fixes the
-/// namespace and leaves the database free.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ScopePin {
-	pub ns: String,
-	pub db: Option<String>,
-}
-
-impl ScopePin {
-	/// Whether selecting `ns` and `db` stays within the pin.
-	pub fn selects(&self, ns: Option<&str>, db: Option<&str>) -> bool {
-		ns == Some(self.ns.as_str()) && self.db.as_deref().is_none_or(|pinned| db == Some(pinned))
-	}
-
-	/// Whether a principal at `level` belongs within the pin. Root and anonymous
-	/// principals carry no tenant. A namespace principal must belong to the
-	/// pinned namespace; a database or record principal must also belong to the
-	/// pinned database when the pin has one.
-	pub fn confines(&self, level: &Level) -> bool {
-		match level {
-			Level::Root | Level::No => true,
-			Level::Namespace(ns) => *ns == self.ns,
-			Level::Database(ns, db) | Level::Record(ns, db, _) => {
-				*ns == self.ns && self.db.as_ref().is_none_or(|pinned| db == pinned)
-			}
-		}
-	}
-
-	/// Whether a session with this principal and selection stays within the pin.
-	pub fn admits(&self, session: &Session) -> bool {
-		self.selects(session.ns.as_deref(), session.db.as_deref())
-			&& self.confines(session.au.level())
-	}
-
-	/// Refuses a session outside the pin with the `NsNotAllowed` or
-	/// `DbNotAllowed` error a `USE` outside it gets: one whose selection leaves
-	/// the pin, or whose principal belongs to another tenant.
-	pub fn check_session(&self, session: &Session) -> Result<()> {
-		self.check_selection(session.ns.as_deref(), session.db.as_deref())?;
-		let level = session.au.level();
-		if !self.confines(level) {
-			// Name the narrowest level that fails: a principal in the pinned
-			// namespace fails on its database.
-			let err = match level.ns() {
-				Some(ns) if ns == self.ns => crate::exec::Error::DbNotAllowed {
-					db: level.db().unwrap_or_default().to_owned(),
-				},
-				ns => crate::exec::Error::NsNotAllowed {
-					ns: ns.unwrap_or_default().to_owned(),
-				},
-			};
-			return Err(anyhow::Error::new(err));
-		}
-		Ok(())
-	}
-
-	/// Refuses a selection of `ns` and `db` that leaves the pin, naming the
-	/// level it leaves.
-	pub(crate) fn check_selection(
-		&self,
-		ns: Option<&str>,
-		db: Option<&str>,
-	) -> std::result::Result<(), crate::exec::Error> {
-		if ns != Some(self.ns.as_str()) {
-			return Err(crate::exec::Error::NsNotAllowed {
-				ns: ns.unwrap_or_default().to_owned(),
-			});
-		}
-		if let Some(pinned) = &self.db
-			&& db != Some(pinned.as_str())
-		{
-			return Err(crate::exec::Error::DbNotAllowed {
-				db: db.unwrap_or_default().to_owned(),
-			});
-		}
-		Ok(())
-	}
-
-	/// Refuses signin or signup credentials whose `NS` or `DB` names another
-	/// namespace or database than the pin; `Err` carries the level. Credentials
-	/// that leave a level out are accepted as they are.
-	pub fn check_credentials(
-		&self,
-		vars: &PublicVariables,
-	) -> std::result::Result<(), &'static str> {
-		let mut vars = vars.clone();
-		self.complete_credentials(&mut vars)
-	}
-
-	/// Completes the `NS` and `DB` of signin or signup credentials from the pin.
-	///
-	/// A level the credentials leave out is taken from the pin. A level they
-	/// name must match it; `Err` carries the level that does not. Without a
-	/// pinned database, the credentials' database is left as it is.
-	pub fn complete_credentials(
-		&self,
-		vars: &mut PublicVariables,
-	) -> std::result::Result<(), &'static str> {
-		complete_credential(vars, "NS", "ns", Some(&self.ns), "namespace")?;
-		complete_credential(vars, "DB", "db", self.db.as_deref(), "database")
-	}
 }
 
 /// Completes one level of signin or signup credentials, which name it under
@@ -377,7 +259,7 @@ impl ScopePin {
 /// level that names something else under either alias is refused with
 /// `Err(level)`. Both aliases are checked, because an access method's
 /// `SIGNIN` and `SIGNUP` clauses can read either one. `None` leaves the
-/// credentials as they are. See [`ScopePin::complete_credentials`].
+/// credentials as they are.
 pub fn complete_credential(
 	vars: &mut PublicVariables,
 	upper: &str,
@@ -544,28 +426,7 @@ impl Session {
 			exp: None,
 			variables: Default::default(),
 			redact_volatile_explain_attrs: false,
-			pin: None,
 		}
-	}
-
-	/// Applies the outcome of an authentication step (`signin`, `signup`,
-	/// `authenticate`, `refresh`) that ran on `next`, a copy of this session.
-	///
-	/// Without a pin, the session becomes `next` whatever the outcome, as if the
-	/// step had run on it in place. With a pin, it becomes `next` only when the
-	/// step succeeded and `next` stays within the pin, and keeps the pin; a step
-	/// that left the pin fails with `NsNotAllowed` or `DbNotAllowed`, and a
-	/// failed or refused step leaves the session unchanged.
-	pub fn settle_authentication<T>(&mut self, mut next: Session, out: Result<T>) -> Result<T> {
-		let Some(pin) = self.pin.clone() else {
-			*self = next;
-			return out;
-		};
-		let value = out?;
-		pin.check_session(&next)?;
-		next.pin = Some(pin);
-		*self = next;
-		Ok(value)
 	}
 
 	/// Create a system session for the root level with Owner role
@@ -722,7 +583,6 @@ pub(crate) fn restore_session(durable: DurableSession) -> Result<Session> {
 			.map(|(k, v)| Ok((k.into_string(), convert_value_to_public_value(v)?)))
 			.collect::<Result<PublicVariables>>()?,
 		redact_volatile_explain_attrs: durable.redact_volatile_explain_attrs,
-		pin: None,
 	})
 }
 
@@ -934,165 +794,5 @@ mod tests {
 
 		session.data = None;
 		assert!(snapshot.differs_from(&session));
-	}
-
-	fn pin(ns: &str, db: Option<&str>) -> ScopePin {
-		ScopePin {
-			ns: ns.to_owned(),
-			db: db.map(str::to_owned),
-		}
-	}
-
-	#[test]
-	fn pin_selects_its_scope_only() {
-		let both = pin("foo", Some("bar"));
-		assert!(both.selects(Some("foo"), Some("bar")));
-		assert!(!both.selects(Some("foo"), Some("other")));
-		assert!(!both.selects(Some("foo"), None));
-		assert!(!both.selects(Some("other"), Some("bar")));
-		let ns = pin("foo", None);
-		assert!(ns.selects(Some("foo"), None));
-		assert!(ns.selects(Some("foo"), Some("any")));
-		assert!(!ns.selects(None, None));
-		assert!(matches!(
-			both.check_selection(Some("foo"), Some("other")),
-			Err(crate::exec::Error::DbNotAllowed { .. })
-		));
-		assert!(matches!(
-			both.check_selection(Some("other"), Some("bar")),
-			Err(crate::exec::Error::NsNotAllowed { .. })
-		));
-	}
-
-	#[test]
-	fn pin_confines_principals_to_its_tenant() {
-		let both = pin("foo", Some("bar"));
-		assert!(both.confines(&Level::Root));
-		assert!(both.confines(&Level::No));
-		assert!(both.confines(&Level::Namespace("foo".into())));
-		assert!(!both.confines(&Level::Namespace("other".into())));
-		assert!(both.confines(&Level::Database("foo".into(), "bar".into())));
-		assert!(!both.confines(&Level::Database("foo".into(), "other".into())));
-		assert!(!both.confines(&Level::Record("foo".into(), "other".into(), "ac".into())));
-		// Without a pinned database, any database in the namespace.
-		assert!(pin("foo", None).confines(&Level::Database("foo".into(), "other".into())));
-	}
-
-	#[test]
-	fn pin_completes_and_checks_credentials() {
-		let both = pin("foo", Some("bar"));
-		let mut vars = PublicVariables::new();
-		vars.insert("user", "alice");
-		both.complete_credentials(&mut vars).unwrap();
-		assert_eq!(vars.get("NS"), Some(&PublicValue::String("foo".into())));
-		assert_eq!(vars.get("DB"), Some(&PublicValue::String("bar".into())));
-
-		// Checking leaves the credentials as they are.
-		let mut vars = PublicVariables::new();
-		vars.insert("ns", "foo");
-		both.check_credentials(&vars).unwrap();
-		assert_eq!(vars.get("DB"), None);
-		vars.insert("db", "other");
-		assert_eq!(both.check_credentials(&vars), Err("database"));
-
-		// Both aliases must match, since a SIGNIN clause can read either.
-		let mut vars = PublicVariables::new();
-		vars.insert("NS", "foo");
-		vars.insert("ns", "other");
-		assert_eq!(both.check_credentials(&vars), Err("namespace"));
-	}
-
-	#[test]
-	fn settle_authentication_keeps_a_pinned_session_in_its_scope() {
-		let mut session = Session::default().with_ns("foo").with_db("bar");
-		session.pin = Some(pin("foo", Some("bar")));
-
-		// A step that stays within the pin is applied, and keeps the pin.
-		let mut next = session.clone();
-		next.au = Arc::new(Auth::for_db(Role::Viewer, "foo", "bar"));
-		next.pin = None;
-		session.settle_authentication(next, Ok(())).unwrap();
-		assert_eq!(session.au.level(), &Level::Database("foo".into(), "bar".into()));
-		assert_eq!(session.pin, Some(pin("foo", Some("bar"))));
-
-		// A step that leaves it is refused, and the session is unchanged.
-		let before = session.clone();
-		let next = Session::for_level(Level::Database("foo".into(), "other".into()), Role::Viewer)
-			.with_ns("foo")
-			.with_db("other");
-		assert!(session.settle_authentication(next, Ok(())).is_err());
-		assert_eq!(session, before);
-
-		// A failed step leaves a pinned session unchanged.
-		let mut next = session.clone();
-		next.au = Arc::new(Auth::default());
-		assert!(session.settle_authentication::<()>(next, Err(anyhow::anyhow!("failed"))).is_err());
-		assert_eq!(session, before);
-
-		// Without a pin, the session takes the step's result whatever it is.
-		let mut free = Session::default();
-		let next = Session::default().with_ns("other");
-		assert!(free.settle_authentication::<()>(next, Err(anyhow::anyhow!("failed"))).is_err());
-		assert_eq!(free.ns.as_deref(), Some("other"));
-	}
-
-	#[test]
-	fn reset_returns_a_pinned_session_to_its_scope() {
-		let mut session = Session::owner().with_ns("foo").with_db("other");
-		session.pin = Some(pin("foo", Some("bar")));
-		crate::iam::reset::reset(&mut session);
-		assert_eq!((session.ns.as_deref(), session.db.as_deref()), (Some("foo"), Some("bar")));
-		let mut free = Session::owner().with_ns("foo");
-		crate::iam::reset::reset(&mut free);
-		assert_eq!(free.ns, None);
-	}
-
-	#[tokio::test]
-	async fn a_query_runs_only_within_the_pin() {
-		let ds = crate::kvs::Datastore::new("memory").await.unwrap();
-		let mut session = Session::owner().with_ns("foo").with_db("bar");
-		session.pin = Some(pin("foo", Some("bar")));
-		let res = ds.execute("RETURN session::db()", &session, None).await.unwrap();
-		assert_eq!(res[0].result.as_ref().unwrap(), &PublicValue::String("bar".into()));
-
-		// A selection set directly, outside the pin, is refused before the query runs.
-		let mut moved = session.clone();
-		moved.db = Some("other".to_owned());
-		assert!(ds.execute("RETURN session::db()", &moved, None).await.is_err());
-		let mut moved = session.clone();
-		moved.ns = Some("other".to_owned());
-		assert!(ds.execute("RETURN session::ns()", &moved, None).await.is_err());
-	}
-
-	#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
-	#[tokio::test]
-	async fn a_graphql_schema_is_served_only_within_the_pin() {
-		let ds = Arc::new(crate::kvs::Datastore::new("memory").await.unwrap());
-		let mut session = Session::owner().with_ns("foo").with_db("bar");
-		session.pin = Some(pin("foo", Some("bar")));
-		let mut moved = session.clone();
-		moved.db = Some("other".to_owned());
-		assert!(matches!(
-			ds.graphql_schema(&moved).await,
-			Err(crate::graphql::GraphqlError::AuthError(_))
-		));
-	}
-
-	#[test]
-	fn a_principal_outside_the_pin_is_refused_at_the_level_it_leaves() {
-		let both = pin("foo", Some("bar"));
-		let session = |level| Session::for_level(level, Role::Viewer).with_ns("foo").with_db("bar");
-		let err = both
-			.check_session(&session(Level::Database("foo".into(), "other".into())))
-			.unwrap_err();
-		assert!(matches!(
-			err.downcast_ref::<crate::exec::Error>(),
-			Some(crate::exec::Error::DbNotAllowed { db }) if db == "other"
-		));
-		let err = both.check_session(&session(Level::Namespace("other".into()))).unwrap_err();
-		assert!(matches!(
-			err.downcast_ref::<crate::exec::Error>(),
-			Some(crate::exec::Error::NsNotAllowed { ns }) if ns == "other"
-		));
 	}
 }
