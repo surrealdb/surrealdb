@@ -1,7 +1,7 @@
 name: SDKs
 
 # Exercise external SDK repos against a freshly built surreal binary.
-# Runs on the org's amd64 spot runners against an amd64 surreal binary.
+# Runs on the org's amd64 runners against an amd64 surreal binary.
 # Not in PR required checks.
 
 on:
@@ -34,7 +34,7 @@ jobs:
   build:
     name: Build binary (amd64)
     if: ${{ github.event.pull_request.draft != true }}
-    runs-on: ${{ github.event_name == 'pull_request' && 'runner-amd-32-cores' || 'runner-amd-16-cores-spot' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'runner-amd-32-cores' || 'runner-amd-16-cores' }}
     permissions:
       contents: read
     steps:
@@ -487,7 +487,7 @@ jobs:
   # native dependencies or it resolves neither.
   sdk-javascript-embedded:
     name: SDK - JavaScript (embedded engines)
-    runs-on: runner-amd-16-cores-spot
+    runs-on: runner-amd-16-cores
     # Manual only until the two modules are published and surrealdb.js's packages
     # wrap them. Before then the guard below is the honest outcome on every run,
     # and a permanently red required check teaches people to ignore it. Run it by

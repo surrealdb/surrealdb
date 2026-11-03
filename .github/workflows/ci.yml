@@ -170,7 +170,7 @@ jobs:
     name: Build binary (${{ matrix.arch == 'arm' && 'arm64' || 'amd64' }})
     needs: changes
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.build == 'true' }}
-    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores
     strategy:
       matrix:
         arch: ${{ (github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
@@ -272,7 +272,7 @@ jobs:
     name: Check format
     needs: changes
     if: ${{ needs.changes.outputs.docs_only != 'true' }}
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -309,7 +309,7 @@ jobs:
     name: Check clippy (debug)
     needs: changes
     if: ${{ needs.changes.outputs.docs_only != 'true' }}
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -341,7 +341,7 @@ jobs:
     name: Check clippy (surrealism off)
     needs: changes
     if: ${{ needs.changes.outputs.docs_only != 'true' }}
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -370,7 +370,7 @@ jobs:
     name: Check clippy (release)
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && ((github.ref == 'refs/heads/main') && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -399,7 +399,7 @@ jobs:
     name: Test unsafe code with miri
     needs: changes
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.common == 'true' }}
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -426,7 +426,7 @@ jobs:
     name: Check workspace (debug)
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -459,7 +459,7 @@ jobs:
     name: Check workspace (release)
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && ((github.event_name == 'push') && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -488,7 +488,7 @@ jobs:
     name: Check workspace (MSRV)
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     env:
       msrv: "1.95" # This should be updated if the MSRV is updated.
     steps:
@@ -519,7 +519,7 @@ jobs:
     name: Check Wasm
     needs: changes
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -549,7 +549,7 @@ jobs:
     name: Wasm size budget
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -642,7 +642,7 @@ jobs:
     name: Check revision
     needs: changes
     if: (needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -671,7 +671,7 @@ jobs:
     name: Check catalog schema
     needs: changes
     if: (needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -713,7 +713,7 @@ jobs:
     name: Check docs
     needs: changes
     if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -750,7 +750,7 @@ jobs:
     name: Check SurrealQL parser golden corpus
     needs: changes
     if: ${{ needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.parser == 'true' }}
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -781,7 +781,7 @@ jobs:
     name: Check SurrealQL parser
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
     needs: changes
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -808,7 +808,7 @@ jobs:
   feature-check:
     name: Check feature combinations (${{ matrix.package }})
     needs: changes
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.docs_only != 'true'
     # Each package gets its own target directory/runner. The old aggregate
     # spawned nine Cargo processes against one target directory, serializing
@@ -851,7 +851,7 @@ jobs:
     name: Check unused dependencies
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -977,7 +977,7 @@ jobs:
     name: PostgreSQL front-end checks
     needs: changes
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.sql == 'true' }}
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1011,7 +1011,7 @@ jobs:
     name: MySQL front-end checks
     needs: changes
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.sql == 'true' }}
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1045,7 +1045,7 @@ jobs:
     name: SQL client tools (psql, mysql)
     needs: [build, changes]
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.sql == 'true' }}
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1093,7 +1093,7 @@ jobs:
     name: ORM compatibility (Prisma, Drizzle, TypeORM)
     needs: [build, changes]
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.orm == 'true' }}
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores
     timeout-minutes: 30
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1154,7 +1154,7 @@ jobs:
     name: Integration tests (${{ matrix.arch }})
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores
     strategy:
       fail-fast: false
       matrix:
@@ -1201,7 +1201,7 @@ jobs:
     name: Build workspace tests (${{ matrix.arch }})
     needs: changes
     if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores
     strategy:
       fail-fast: false
       matrix:
@@ -1249,7 +1249,7 @@ jobs:
       CI_SHARD: ${{ matrix.shard }}
       CI_SHARDS: "6"
     # ARM on every trigger; amd64 added on push and scheduled runs.
-    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores
     strategy:
       fail-fast: false
       matrix:
@@ -1293,7 +1293,7 @@ jobs:
     name: Test CJK segmentation
     needs: changes
     if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.idx == 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1321,7 +1321,7 @@ jobs:
     name: Test compile timers
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1351,7 +1351,7 @@ jobs:
     name: KVS - ${{ matrix.engine }} engine (${{ matrix.arch }})
     needs: changes
     if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.kvs == 'true')
-    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores
     strategy:
       fail-fast: false
       matrix:
@@ -1396,7 +1396,7 @@ jobs:
     name: Test SDK build
     needs: changes
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.sdk == 'true' }}
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1440,7 +1440,7 @@ jobs:
     name: Rust SDK - ${{ matrix.engine }} engine
     needs: changes
     if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.sdk == 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     strategy:
       fail-fast: false
       matrix:
@@ -1483,7 +1483,7 @@ jobs:
     name: Rust SDK - ${{ matrix.engine }} engine
     needs: [build, changes]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     strategy:
       fail-fast: false
       matrix:
@@ -1539,7 +1539,7 @@ jobs:
     name: Language tests - ${{ matrix.engine }} (${{ matrix.arch }})
     needs: changes
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores
     strategy:
       fail-fast: false
       matrix:
@@ -1591,7 +1591,7 @@ jobs:
     name: Language decline report - ${{ matrix.engine }}
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     # Reports statements the engine declines to run; it never gates a merge and
     # is not a required check.
     continue-on-error: true
@@ -1647,7 +1647,7 @@ jobs:
     name: Upgrade test harness - ${{ matrix.engine }} (${{ matrix.arch }})
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores
     strategy:
       fail-fast: false
       matrix:
@@ -1699,7 +1699,7 @@ jobs:
     name: Upgrade tests - ${{ matrix.engine }} (${{ matrix.arch }})
     needs: [build, upgrade-harness, changes]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-${{ matrix.arch }}-16-cores
     strategy:
       fail-fast: false
       matrix:
@@ -1812,7 +1812,7 @@ jobs:
     name: Check tokio-console feature
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     env:
       RUSTFLAGS: -D warnings --cfg tokio_unstable
     steps:
@@ -1849,7 +1849,7 @@ jobs:
     name: Check language-test bench harness
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1880,7 +1880,7 @@ jobs:
   conformance-tests:
     name: Conformance tests
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-4-cores
     needs: [build, changes]
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1940,7 +1940,7 @@ jobs:
   mcp-tests:
     name: MCP tests
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.mcp == 'true' }}
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     needs: [build, changes]
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -2009,7 +2009,7 @@ jobs:
     name: Node engine
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -2052,7 +2052,7 @@ jobs:
     name: Wasm engine
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: runner-arm-16-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
