@@ -74,6 +74,7 @@ jobs:
       common: ${{ steps.diff.outputs.common }}
       idx: ${{ steps.diff.outputs.idx }}
       opfs: ${{ steps.diff.outputs.opfs }}
+      diskann_wasm: ${{ steps.diff.outputs.diskann_wasm }}
       mcp: ${{ steps.diff.outputs.mcp }}
       build: ${{ steps.diff.outputs.build }}
     steps:
@@ -119,6 +120,7 @@ jobs:
           common=true
           idx=true
           opfs=true
+          diskann_wasm=true
           mcp=true
           build=true
           # Files every job is built from; a change to one of them reaches all of the outputs.
@@ -142,6 +144,7 @@ jobs:
                 touches 'surrealdb/(collections|common|parse-common|types)/' || common=false
                 touches 'surrealdb/(catalog|cnf|collections|common|datastore|expr|iam|idx|keyspace-macro|kvs|kvs-any|kvs-mem|kvs-surrealkv|observe|parse-common|parser-next|rpc|runtime|stored-derive|strand|types)/' || idx=false
                 touches 'surrealdb/(cnf|collections|common|kvs|kvs-surrealkv|kvs-test|parse-common|types)/' || opfs=false
+                touches "surrealdb/($engine)/|prototype/diskann-wasm-smoke/" || diskann_wasm=false
                 touches 'surrealdb/(mcp|rpc|iam|server|types)/|tests/mcp-js/|src/|surrealdb/core/src/(syn|dbs|graphql|gql|iam|rpc)/' || mcp=false
                 # The server build exists for the jobs that run it; it runs when any of them does.
                 if [[ "$sql" != true && "$orm" != true && "$mcp" != true ]]; then build=false; fi
@@ -158,6 +161,7 @@ jobs:
             echo "common=$common"
             echo "idx=$idx"
             echo "opfs=$opfs"
+            echo "diskann_wasm=$diskann_wasm"
             echo "mcp=$mcp"
             echo "build=$build"
           } >> "$GITHUB_OUTPUT"
@@ -637,6 +641,60 @@ jobs:
         env:
           WASM_BINDGEN_TEST_TIMEOUT: "300"
         run: wasm-pack test --headless --chrome
+
+  test-wasm-diskann:
+    name: Test Wasm (DiskANN in node)
+    needs: changes
+    if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.diskann_wasm == 'true')
+    runs-on: runner-arm-16-cores
+    timeout-minutes: 45
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      # The CLI and the wasm-bindgen crate share a bindgen schema that changes
+      # between patch releases, so the version comes from the smoke test's own
+      # lockfile, which is what the module is built against.
+      - name: Install wasm-bindgen-cli
+        run: |
+          set -euo pipefail
+          version=$(grep -A1 '^name = "wasm-bindgen"$' prototype/diskann-wasm-smoke/web/Cargo.lock | grep '^version' | cut -d'"' -f2)
+          if ! cargo install --list | grep -q "^wasm-bindgen-cli v$version:"; then
+            cargo install --locked -f wasm-bindgen-cli --version "$version"
+          fi
+
+      # `RUSTFLAGS` replaces `.cargo/config.toml`'s target rustflags, so the
+      # getrandom backend and the 4 MiB stack set there are repeated here.
+      - name: Build the smoke test for wasm32-unknown-unknown
+        working-directory: prototype/diskann-wasm-smoke/web
+        env:
+          RUSTFLAGS: -D warnings --cfg getrandom_backend="wasm_js" -C link-arg=-zstack-size=4194304
+        run: cargo build --locked --target wasm32-unknown-unknown
+
+      - name: Run the smoke test in node
+        working-directory: prototype/diskann-wasm-smoke/web
+        run: |
+          wasm-bindgen --target nodejs --out-dir pkg target/wasm32-unknown-unknown/debug/diskann_web_guest.wasm
+          node --stack-size=8000 run.cjs
 
   check-revision:
     name: Check revision
@@ -2133,6 +2191,7 @@ jobs:
       - check-wasm
       - wasm-size-budget
       - test-wasm
+      - test-wasm-diskann
       - check-revision
       - check-catalog-schema
       - check-docs
@@ -2198,6 +2257,7 @@ jobs:
             "${{ needs.check-wasm.result }}"
             "${{ needs.wasm-size-budget.result }}"
             "${{ needs.test-wasm.result }}"
+            "${{ needs.test-wasm-diskann.result }}"
             "${{ needs.check-revision.result }}"
             "${{ needs.check-catalog-schema.result }}"
             "${{ needs.check-docs.result }}"

@@ -23380,6 +23380,62 @@ async fn a_deferred_build_is_signalled_and_its_state_key_recognised() -> Result<
 	Ok(())
 }
 
+/// On a datastore that leaves its background work to its host, the writes to a built index stay
+/// queued for compaction until the host runs [`Datastore::run_index_compaction`]; each write
+/// wakes `index_compaction`, and calls run while they report more drain the queue. The full-text,
+/// `COUNT` and HNSW kinds are covered by `host_driven_compaction_drains_each_queued_kind`. `define`
+/// is the index's definition on table `t`, whose records carry a two-dimensional `vec`.
+#[cfg(feature = "kv-mem")]
+async fn host_passes_drain_the_compaction_queue(define: &str, index: &str) -> Result<()> {
+	let (ds, session) = new_index_pass_test_ds().await?;
+	execute_all(&ds, &session, define).await?;
+	while ds.run_index_builds(100).await?.more {}
+	assert_eq!(index_building_status(&ds, &session, "t", index).await?, "ready");
+	execute_all(
+		&ds,
+		&session,
+		"CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];
+		 CREATE t:3 SET vec = [1.0, 1.0];",
+	)
+	.await?;
+	timeout(Duration::from_secs(5), ds.commit_triggers().index_compaction.notified())
+		.await
+		.map_err(|_| anyhow::anyhow!("the writes did not wake index compaction"))?;
+	let building = index_building_json(&ds, &session, "t", index).await?;
+	assert_eq!(building.get("compacting").and_then(|v| v.as_bool()), Some(true), "{building}");
+
+	let mut passes = 0;
+	let mut calls = 0;
+	loop {
+		let run = ds.run_index_compaction(8, Duration::from_secs(60)).await?;
+		assert_eq!(run.retry_after, None, "{run:?}");
+		passes += run.passes;
+		calls += 1;
+		if !run.more {
+			break;
+		}
+		assert!(calls < 100, "the calls did not drain the queue: {run:?}");
+	}
+	assert!(passes > 0, "the calls ran no compaction pass");
+	let building = index_building_json(&ds, &session, "t", index).await?;
+	assert_eq!(building.get("compacting").and_then(|v| v.as_bool()), Some(false), "{building}");
+
+	let idle = ds.run_index_compaction(8, Duration::from_secs(60)).await?;
+	assert_eq!((idle.passes, idle.more), (0, false), "{idle:?}");
+	Ok(())
+}
+
+#[cfg(all(feature = "kv-mem", diskann))]
+#[test_log::test(tokio::test)]
+async fn host_passes_compact_a_diskann_index() -> Result<()> {
+	host_passes_drain_the_compaction_queue(
+		"DEFINE INDEX dx ON t FIELDS vec DISKANN DIMENSION 2 DIST EUCLIDEAN TYPE F32;",
+		"dx",
+	)
+	.await
+}
+
 /// A build whose statement is cancelled is not left for passes, and a datastore with nothing
 /// pending reads as such.
 #[cfg(feature = "kv-mem")]

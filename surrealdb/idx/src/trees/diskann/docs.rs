@@ -5,7 +5,6 @@
 //! and graph element document sets. It also coordinates the process-local doc-id and doc-set caches
 //! used to keep warm lookup paths away from repeated KV reads.
 
-#[cfg(not(target_family = "wasm"))]
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
@@ -17,17 +16,13 @@ pub(crate) use surrealdb_datastore::values::diskann::{
 };
 
 use crate::IndexKeyBase;
-#[cfg(not(target_family = "wasm"))]
 use crate::catalog::{
 	DatabaseId, IndexId, NamespaceId, TableId, keeps_element_docs, keeps_vector_doc_elements,
 };
 use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
-#[cfg(not(target_family = "wasm"))]
 use crate::trees::diskann::cache::{CacheView, DiskAnnCache};
-#[cfg(not(target_family = "wasm"))]
 use crate::trees::diskann::frame::FrameKv;
-#[cfg(not(target_family = "wasm"))]
 use crate::trees::diskann::index::{DiskAnnContext, DiskAnnGraph};
 use crate::trees::diskann::{DiskAnnElement, ElementId};
 use crate::trees::doc_elements;
@@ -83,7 +78,6 @@ impl DiskAnnDocs {
 		}
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	fn cache_index(
 		ikb: &IndexKeyBase,
 		table_id: TableId,
@@ -93,7 +87,6 @@ impl DiskAnnDocs {
 	}
 
 	/// Resolves one compact document ID through the shared batch/cache path.
-	#[cfg(not(target_family = "wasm"))]
 	pub(super) async fn get_thing_cached(
 		ikb: &IndexKeyBase,
 		format_version: u16,
@@ -123,7 +116,6 @@ impl DiskAnnDocs {
 	// fix would make `RecordId` hold `Arc<RecordIdKey>` / `Arc<Table>` so the per-result cost
 	// becomes a pair of ref-count bumps — that's a workspace-wide refactor (every consumer of
 	// `RecordId` would change), so it's deliberately scoped out of this PR.
-	#[cfg(not(target_family = "wasm"))]
 	pub(super) async fn get_things_batch(
 		ikb: &IndexKeyBase,
 		format_version: u16,
@@ -180,17 +172,12 @@ impl DiskAnnDocs {
 	/// The record ↔ doc-ID mapping is shared across the table's indexes and is
 	/// removed centrally at record purge (see `doc::index`'s `remove_doc_id`), so
 	/// this only drops the process-local cache entry. Doc-IDs are never recycled.
-	#[cfg(not(target_family = "wasm"))]
 	pub(super) fn remove(&self, doc_id: DocId, table_id: TableId, cache: &DiskAnnCache) {
 		cache.remove_doc_id(Self::cache_index(&self.ikb, table_id, self.format_version), doc_id);
 	}
-
-	#[cfg(target_family = "wasm")]
-	pub(super) fn remove(&self, _doc_id: DocId) {}
 }
 
 /// Manages vector-to-document mappings in the DiskANN index.
-#[cfg(not(target_family = "wasm"))]
 pub(crate) struct DiskAnnVecDocs {
 	/// Shared key builder for `!dq` and `!dh` mapping keys.
 	ikb: IndexKeyBase,
@@ -205,7 +192,6 @@ pub(crate) struct DiskAnnVecDocs {
 	format_version: u16,
 }
 
-#[cfg(not(target_family = "wasm"))]
 impl DiskAnnVecDocs {
 	pub(super) fn new(
 		ikb: IndexKeyBase,
@@ -698,7 +684,6 @@ impl DiskAnnVecDocs {
 		Ok(())
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	async fn remove_hashed(
 		&self,
 		ctx: &DiskAnnContext<'_>,
@@ -742,7 +727,6 @@ impl DiskAnnVecDocs {
 		Ok(())
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	pub(super) async fn remove(
 		&self,
 		ctx: &DiskAnnContext<'_>,
@@ -778,7 +762,6 @@ impl DiskAnnVecDocs {
 
 /// A distinct vector [`DiskAnnVecDocs::stage_inserts`] found absent from the vector → docs
 /// mapping, with every doc of the batch that carries it.
-#[cfg(not(target_family = "wasm"))]
 pub(super) struct StagedVector {
 	ser_vec: SerializedVector,
 	vector: Vector,
@@ -786,7 +769,6 @@ pub(super) struct StagedVector {
 	docs: Vec<DocId>,
 }
 
-#[cfg(not(target_family = "wasm"))]
 impl StagedVector {
 	/// The vector, as the graph inserts it.
 	pub(super) fn vector(&self) -> &Vector {
@@ -822,7 +804,6 @@ impl StagedVector {
 }
 
 /// Adds every doc of `docs` to `set`, returning the ones it did not already hold.
-#[cfg(not(target_family = "wasm"))]
 fn add_docs(set: &mut Ids64, docs: &[DocId]) -> Vec<DocId> {
 	let mut added = Vec::new();
 	for &doc in docs {

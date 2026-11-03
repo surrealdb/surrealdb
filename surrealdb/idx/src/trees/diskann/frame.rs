@@ -366,12 +366,14 @@ impl DiskAnnBuildFrame {
 	/// `max`, without waiting. Called at most once per frame; a later call answers `None`.
 	///
 	/// A frame asks whether or not it has a view: without one, its tasks read clean keys through
-	/// the write transaction. Without a runtime to spawn onto, nothing is asked for, since the
-	/// batch could spawn nothing.
+	/// the write transaction. Without an executor to spawn onto, nothing is asked for, since the
+	/// batch could spawn nothing. On `wasm32-unknown-unknown` the batch spawns onto the
+	/// JavaScript executor, which is always present; elsewhere it needs a Tokio runtime.
 	pub(crate) fn take_places(&self, max: usize) -> Option<NonZeroUsize> {
 		if self.asked.swap(true, Ordering::AcqRel) || self.is_cancelled() {
 			return None;
 		}
+		#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 		if tokio::runtime::Handle::try_current().is_err() {
 			return None;
 		}

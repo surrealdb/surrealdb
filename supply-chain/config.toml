@@ -656,20 +656,16 @@ criteria = "safe-to-deploy"
 version = "0.3.7"
 criteria = "safe-to-deploy"
 
-[[exemptions.diskann]]
-version = "0.60.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.diskann-utils]]
-version = "0.60.0"
+version = "0.61.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.diskann-vector]]
-version = "0.60.0"
+version = "0.61.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.diskann-wide]]
-version = "0.60.0"
+version = "0.61.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.displaydoc]]
@@ -1954,6 +1950,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.strum_macros]]
 version = "0.28.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealdb-diskann]]
+version = "0.61.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbol_table]]

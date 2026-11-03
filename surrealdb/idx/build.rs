@@ -1,9 +1,11 @@
 fn main() {
-	// DiskANN (Microsoft's `diskann` crate) is only available on non-WASM, 64-bit
-	// targets: its `IntoUsize` trait is implemented solely under
-	// `target_pointer_width = "64"` and panics otherwise. Expose a single `diskann`
-	// cfg so the gating predicate lives in one place instead of being repeated across
-	// the index code. The keyspace one layer down declares the DiskANN key families
+	// DiskANN (the `diskann` library of the `surrealdb-diskann` crate) is built for
+	// 64-bit targets and for wasm. On 32-bit wasm it relies on that crate's changes
+	// to Microsoft's `diskann`: `IntoUsize` for the lossless conversions only, and
+	// spawned futures run on the JavaScript event loop where there is no tokio runtime. Other
+	// 32-bit targets (i686, armv7, …) leave it out and keep HNSW as their vector index. Expose a
+	// single `diskann` cfg so the gating predicate lives in one place instead of being repeated
+	// across the index code. The keyspace one layer down declares the DiskANN key families
 	// behind the same cfg and sets it the same way; it is duplicated rather than
 	// shared because a build script cannot read another crate's.
 	//
@@ -16,7 +18,7 @@ fn main() {
 	let target_family = std::env::var("CARGO_CFG_TARGET_FAMILY").unwrap_or_default();
 	let is_wasm = target_family.split(',').any(|family| family == "wasm");
 	let is_64_bit = std::env::var("CARGO_CFG_TARGET_POINTER_WIDTH").as_deref() == Ok("64");
-	if !is_wasm && is_64_bit {
+	if is_wasm || is_64_bit {
 		println!("cargo:rustc-cfg=diskann");
 	}
 }

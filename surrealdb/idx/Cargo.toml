@@ -113,12 +113,11 @@ tokio = { workspace = true, default-features = false, features = [
 ] }
 
 # DISKANN DEPENDENCY CONFIGURATION
-# DiskANN (Microsoft's `diskann` crate) is 64-bit-only by design: its `IntoUsize`
-# trait is implemented only for `target_pointer_width = "64"` and panics on other
-# widths. Restrict the dependency to non-WASM 64-bit targets so `surrealdb-idx` still
-# compiles on 32-bit targets (i686, armv7, …); HNSW remains the portable vector index
-# there. The matching source gate is the `diskann` cfg set in build.rs.
-[target.'cfg(all(not(target_family = "wasm"), target_pointer_width = "64"))'.dependencies]
+# DiskANN (the `diskann` library of the `surrealdb-diskann` crate) is a dependency
+# on 64-bit targets and on wasm, which that crate supports on wasm32. Other 32-bit targets
+# (i686, armv7, …) leave it out, so `surrealdb-idx` still compiles there and HNSW is
+# their vector index. The matching source gate is the `diskann` cfg set in build.rs.
+[target.'cfg(any(target_family = "wasm", target_pointer_width = "64"))'.dependencies]
 diskann.workspace = true
 diskann-utils.workspace = true
 diskann-vector.workspace = true

@@ -7,12 +7,12 @@ fn main() {
 	// Target properties MUST be read from the `CARGO_CFG_*` env vars, which
 	// describe the compile *target*. `cfg!(...)` inside a build script reflects
 	// the *host* that runs it, so it would wrongly enable DiskANN when
-	// cross-compiling from a 64-bit host to a 32-bit target.
+	// cross-compiling from a 64-bit host to a 32-bit target such as i686.
 	println!("cargo::rustc-check-cfg=cfg(diskann)");
 	let target_family = std::env::var("CARGO_CFG_TARGET_FAMILY").unwrap_or_default();
 	let is_wasm = target_family.split(',').any(|family| family == "wasm");
 	let is_64_bit = std::env::var("CARGO_CFG_TARGET_POINTER_WIDTH").as_deref() == Ok("64");
-	if !is_wasm && is_64_bit {
+	if is_wasm || is_64_bit {
 		println!("cargo:rustc-cfg=diskann");
 	}
 }

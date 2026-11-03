@@ -1,0 +1,17 @@
+[package]
+name = "diskann-web-guest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[lib]
+crate-type = ["cdylib"]
+[dependencies]
+surrealdb-core = { path = "../../../surrealdb/core", default-features = false, features = ["kv-mem", "vector-index"] }
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4.79"
+tokio-util = "0.7"
+anyhow = "1"
+[profile.dev]
+debug = 0
+opt-level = 1
+[workspace]

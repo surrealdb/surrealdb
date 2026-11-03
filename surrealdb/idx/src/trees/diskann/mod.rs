@@ -11,16 +11,11 @@
 //! compaction generation (`!dg`), and — for the dual-read migration off the pre-sharding layout —
 //! the legacy unsharded pending operations (`!dr`) and their legacy guard (`!dp`).
 
-#[cfg(not(target_family = "wasm"))]
 pub(crate) mod cache;
 pub(crate) mod docs;
-#[cfg(not(target_family = "wasm"))]
 mod filter;
-#[cfg(not(target_family = "wasm"))]
 mod frame;
-#[cfg(not(target_family = "wasm"))]
 pub mod index;
-#[cfg(not(target_family = "wasm"))]
 mod provider;
 
 // Everything the persisted graph, its pending queue and their guard are made of is

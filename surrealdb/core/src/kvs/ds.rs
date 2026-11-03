@@ -964,6 +964,12 @@ pub struct Datastore {
 	/// than restarting it, which is what keeps a later-sorting index from
 	/// starving behind ones that keep refilling. See [`CompactionCursor`].
 	compaction_cursor: parking_lot::Mutex<CompactionCursor>,
+	/// Held for the whole of one index-compaction drain, so the drains this datastore runs —
+	/// its compaction task, [`Datastore::index_compaction`] and the passes a host runs — take
+	/// turns. The compaction lease cannot keep them apart, because a node holding it is granted
+	/// it again, and each drain reads `compaction_cursor` when it starts and writes it back when
+	/// it ends, so two at once would leave the cursor where the slower one stopped.
+	compaction_drain: tokio::sync::Mutex<()>,
 	/// As `compaction_cursor`, for the graph fold drain, together with whether
 	/// the rotation since it last began at the head has made progress. A
 	/// rotation over scopes that all fail spans as many slices as its budget
@@ -2000,6 +2006,7 @@ impl Datastore {
 			changefeed_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
 			live_event_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
 			compaction_cursor: parking_lot::Mutex::new(CompactionCursor::default()),
+			compaction_drain: tokio::sync::Mutex::new(()),
 			fold_cursor: parking_lot::Mutex::new(FoldCursor::default()),
 			adoption_rotation: parking_lot::Mutex::new(None),
 			event_laps: parking_lot::Mutex::new(HashMap::new()),
@@ -2111,6 +2118,7 @@ impl Datastore {
 			changefeed_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
 			live_event_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
 			compaction_cursor: parking_lot::Mutex::new(CompactionCursor::default()),
+			compaction_drain: tokio::sync::Mutex::new(()),
 			fold_cursor: parking_lot::Mutex::new(FoldCursor::default()),
 			adoption_rotation: parking_lot::Mutex::new(None),
 			event_laps: parking_lot::Mutex::new(HashMap::new()),
@@ -6710,6 +6718,12 @@ impl Datastore {
 	/// node. Outside one, they run one after another on the calling task
 	/// ([`Self::index_compaction_serial`]), and the pass reports
 	/// [`TaskLeaseState::NotLeased`].
+	///
+	/// Drains of one datastore take turns (`compaction_drain`): a call first
+	/// waits for any other drain this datastore is running to end, whether its
+	/// compaction task, [`Self::index_compaction`] or a host's
+	/// [`Self::run_index_compaction`], so two never share the drain's place in
+	/// the queue.
 	async fn index_compaction_drain(
 		dbs: Arc<Datastore>,
 		lh: Option<&LeaseHandler>,
@@ -6744,6 +6758,17 @@ impl Datastore {
 		// passes none of the requests the drain has kept so far again (see
 		// `CompactionDrain`). A call that fails leaves the drain where the
 		// previous call did.
+		// One drain at a time in this process: see `compaction_drain`. A drain
+		// queued behind another ends as soon as it is cancelled, so a shutdown
+		// that cancels the compaction task does not wait out a host's drain.
+		let _drain = {
+			let lock = std::pin::pin!(dbs.compaction_drain.lock());
+			let cancelled = std::pin::pin!(canceller.cancelled());
+			match futures::future::select(lock, cancelled).await {
+				futures::future::Either::Left((guard, _)) => guard,
+				futures::future::Either::Right(((), _)) => bail!(EngineError::QueryCancelled),
+			}
+		};
 		let mut cursor = dbs.compaction_cursor.lock().clone();
 		let mut window = match &cursor.resume_at {
 			Some(after) => queue.clone().resume_after(after, Direction::Forward),
@@ -15169,6 +15194,64 @@ pub(crate) mod test {
 		.await?;
 		assert_eq!(count_delta_len(&ds, &ikb).await?, 0, "one call must fold the whole backlog");
 		assert_eq!(index_compaction_queue_len(&ds, &ikb).await?, 0, "and leave nothing queued");
+		Ok(())
+	}
+
+	/// A host's call waits for a drain this datastore is already running, and runs once that drain
+	/// ends: a host's call takes no lease, and the compaction lease grants a node its own lease
+	/// again, so it is the datastore's drain lock that keeps two drains from sharing the cursor.
+	#[tokio::test]
+	async fn a_host_pass_waits_for_a_drain_already_running() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_total ON item COUNT;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "item", "idx_total").await?;
+		write_count_deltas(&ds, &ikb, 3).await?;
+
+		let running = ds.compaction_drain.lock().await;
+		let pass = tokio::spawn({
+			let ds = Arc::clone(&ds);
+			async move { ds.run_index_compaction(8, Duration::from_secs(60)).await }
+		});
+		tokio::time::sleep(Duration::from_millis(200)).await;
+		assert!(!pass.is_finished(), "the pass ran beside a drain already running");
+		assert_eq!(count_delta_len(&ds, &ikb).await?, 3, "and folded nothing while it waited");
+
+		drop(running);
+		let run = tokio::time::timeout(Duration::from_secs(10), pass).await???;
+		assert!(run.passes > 0, "{run:?}");
+		assert_eq!(count_delta_len(&ds, &ikb).await?, 0, "the pass folded the deltas once it ran");
+		Ok(())
+	}
+
+	/// A drain queued behind another ends as soon as it is cancelled, rather than when the drain
+	/// ahead of it releases the lock: a shutdown that cancels the compaction task does not wait out
+	/// a host's drain.
+	#[tokio::test]
+	async fn a_queued_drain_ends_when_it_is_cancelled() -> Result<()> {
+		let (ds, _session) = new_index_compaction_test_ds().await?;
+		let running = ds.compaction_drain.lock().await;
+		let canceller = CancellationToken::new();
+		let queued = tokio::spawn(Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			canceller.clone(),
+		));
+		tokio::time::sleep(Duration::from_millis(100)).await;
+		assert!(!queued.is_finished(), "the drain ran beside a drain already running");
+		canceller.cancel();
+		let ended = tokio::time::timeout(Duration::from_secs(5), queued).await?;
+		let err = ended?.expect_err("a cancelled drain reports its cancellation");
+		assert!(
+			matches!(err.downcast_ref::<EngineError>(), Some(EngineError::QueryCancelled)),
+			"{err:#}"
+		);
+		drop(running);
 		Ok(())
 	}
 

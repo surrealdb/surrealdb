@@ -1,13 +1,15 @@
 //! Distance kernels and a memory hint for the vector indexes.
 //!
-//! On 64-bit non-WASM targets (the `diskann` cfg) the kernels are
+//! On 64-bit targets and on wasm (the `diskann` cfg) the kernels are
 //! `diskann-vector`'s runtime-dispatched comparers: the first call for an
 //! element type picks the widest instruction set the CPU offers — AVX-512,
 //! AVX2, NEON — whatever the build targets, and every later call goes through
 //! that choice. (The `PureDistanceFunction` slice entry points would not: they
 //! run the architecture the build was compiled for, which on an x86-64 build
-//! without AVX target features is the scalar fallback.) Elsewhere the `f32`
-//! kernels are portable Rust and the narrow integer kernels do not exist. The
+//! without AVX target features is the scalar fallback.) `diskann-wide` has no
+//! wasm SIMD backend, so on wasm the comparers run its scalar emulation. On
+//! other targets the `f32` kernels are portable Rust and the narrow integer
+//! kernels do not exist. The
 //! `f32` kernels accumulate in `f32` and sum in different orders, so the same
 //! pair of vectors can differ in the low digits across targets and instruction
 //! sets; within one process a pair always scores the same.

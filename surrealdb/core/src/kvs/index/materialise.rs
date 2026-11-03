@@ -1401,21 +1401,45 @@ impl Materialiser {
 			if lease.is_some_and(|lease| lease.is_lost()) {
 				return Ok(CompactionPassOutcome::Budget);
 			}
-			let frame = {
+			#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+			let step = {
+				let frame = {
+					let this = self.clone();
+					let ikb = ikb.clone();
+					let canceller = canceller.clone();
+					let places = places.clone();
+					common::rt::spawn(
+						async move { this.diskann_frame(&ikb, &canceller, &places).await },
+					)
+				};
+				match frame.await {
+					Ok(step) => step,
+					Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
+					Err(e) => Err(DiskAnnFrameError::Plan(anyhow::anyhow!(
+						"DiskANN compaction frame for {ikb} did not complete: {e}"
+					))),
+				}
+			};
+			// The browser executor gives no join handle, so the detached frame sends its
+			// step back; it still runs to the end if this pass is dropped.
+			#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+			let step = {
+				let (done, wait) = tokio::sync::oneshot::channel();
 				let this = self.clone();
-				let ikb = ikb.clone();
+				let frame_ikb = ikb.clone();
 				let canceller = canceller.clone();
 				let places = places.clone();
-				common::rt::spawn(
-					async move { this.diskann_frame(&ikb, &canceller, &places).await },
-				)
-			};
-			let step = match frame.await {
-				Ok(step) => step,
-				Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
-				Err(e) => Err(DiskAnnFrameError::Plan(anyhow::anyhow!(
-					"DiskANN compaction frame for {ikb} did not complete: {e}"
-				))),
+				common::rt::spawn_detached(async move {
+					// The send fails only when this pass was dropped while the frame ran. The
+					// frame has finished its own transaction by then, and nobody is left to
+					// act on its step, so there is nothing to do with the error.
+					let _ = done.send(this.diskann_frame(&frame_ikb, &canceller, &places).await);
+				});
+				wait.await.unwrap_or_else(|_| {
+					Err(DiskAnnFrameError::Plan(anyhow::anyhow!(
+						"DiskANN compaction frame for {ikb} did not complete"
+					)))
+				})
 			};
 			let (has_more, keys_compacted, duration) = match step {
 				Ok(DiskAnnFrameStep::Applied {

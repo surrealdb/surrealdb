@@ -1318,10 +1318,7 @@ impl Drop for TxGuard {
 		if let Some(frame) = &frame {
 			frame.cancel();
 		}
-		let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-			return;
-		};
-		drop(runtime.spawn(async move {
+		spawn_cleanup(async move {
 			if let Some(frame) = &frame {
 				frame.drain_tasks().await;
 				frame.stats.tx_ended(frame.live_tasks());
@@ -1329,7 +1326,20 @@ impl Drop for TxGuard {
 			if !tx.closed() {
 				cancel_silently(&tx).await;
 			}
-		}));
+		});
+	}
+}
+
+/// Runs a drop guard's cleanup off the call that dropped it: on the ambient tokio runtime, or on
+/// `wasm32-unknown-unknown`, which has none, on the JavaScript event loop
+/// ([`common::rt::spawn_detached`]). A native drop outside any runtime, such as a datastore torn
+/// down after its runtime, runs no cleanup.
+fn spawn_cleanup(cleanup: impl std::future::Future<Output = ()> + Send + 'static) {
+	#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+	common::rt::spawn_detached(cleanup);
+	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+	if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+		drop(runtime.spawn(cleanup));
 	}
 }
 
@@ -1432,15 +1442,12 @@ impl Drop for FrameLock<'_> {
 		if view.is_none() {
 			return;
 		}
-		let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-			return;
-		};
-		drop(runtime.spawn(async move {
+		spawn_cleanup(async move {
 			if let Some(frame) = &frame {
 				frame.drain_tasks().await;
 			}
 			close_view(frame.as_deref(), view).await;
-		}));
+		});
 	}
 }
 

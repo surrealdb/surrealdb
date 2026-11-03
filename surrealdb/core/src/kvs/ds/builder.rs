@@ -776,6 +776,7 @@ impl Builder {
 			changefeed_sweep: parking_lot::Mutex::new(crate::cf::gc::ChangefeedSweep::default()),
 			live_event_sweep: parking_lot::Mutex::new(crate::cf::gc::ChangefeedSweep::default()),
 			compaction_cursor: parking_lot::Mutex::new(super::CompactionCursor::default()),
+			compaction_drain: tokio::sync::Mutex::new(()),
 			fold_cursor: parking_lot::Mutex::new(super::FoldCursor::default()),
 			adoption_rotation: parking_lot::Mutex::new(None),
 			event_laps: parking_lot::Mutex::new(std::collections::HashMap::new()),
