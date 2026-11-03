@@ -306,13 +306,24 @@ fn time_text(d: &surrealdb_types::Duration) -> String {
 	out
 }
 
+/// The JSON document of `value`: a string is a quoted JSON string and a boolean `true` or
+/// `false`, as a `JSON` column holds them.
+fn json_text(value: &Value) -> String {
+	let mut json = Vec::new();
+	value.write_sql_json(&mut json);
+	String::from_utf8_lossy(&json).into_owned()
+}
+
 /// The text of `value` in a column MySQL types `col_type`: a datetime in a `DATE` column is its
-/// date and in a `TIME` column its time of day; every other value is its usual text.
+/// date and in a `TIME` column its time of day, any value in a `JSON` column is its JSON document;
+/// every other value is its usual text.
 fn typed_text(col_type: u8, value: &Value) -> Option<String> {
 	if let Some(year) = crate::cells::year_cell(col_type, value) {
 		return Some(year);
 	}
 	match (col_type, value) {
+		(MYSQL_TYPE_JSON, Value::None | Value::Null) => None,
+		(MYSQL_TYPE_JSON, v) => Some(json_text(v)),
 		(MYSQL_TYPE_DATE, Value::Datetime(dt)) => {
 			datetime_parts(dt).map(|p| format!("{:04}-{:02}-{:02}", p.year, p.month, p.day))
 		}
@@ -418,9 +429,7 @@ pub fn value_to_text(value: &Value) -> Option<String> {
 		| Value::Table(_)) => Some(v.to_sql()),
 		Value::Bytes(b) => Some(String::from_utf8_lossy(b).into_owned()),
 		v @ (Value::Object(_) | Value::Array(_) | Value::Set(_) | Value::Geometry(_)) => {
-			let mut json = Vec::new();
-			v.write_sql_json(&mut json);
-			Some(String::from_utf8_lossy(&json).into_owned())
+			Some(json_text(v))
 		}
 	}
 }
@@ -900,11 +909,22 @@ fn with_fraction_digits(text: String, digits: usize) -> String {
 }
 
 /// The bytes a cell of `column` travels as in both protocols when its type is sent as bytes
-/// rather than text: a `BIT(n)` value as its `ceil(n / 8)` big-endian bytes, and a spatial value
-/// as its SRID and WKB. `None` for every other column, and for a value of another kind, which
-/// travels as its text.
+/// rather than text: a `BIT(n)` value as its `ceil(n / 8)` big-endian bytes, a spatial value as
+/// its SRID and WKB, and a byte string in a string or blob column as its bytes unchanged, since
+/// text would replace any byte sequence that is not UTF-8. `None` for every other column, and for
+/// a value of another kind, which travels as its text.
 pub(crate) fn raw_cell(column: &ColumnDefinition41, value: &Value) -> Option<Vec<u8>> {
 	match (column.column_type, value) {
+		(
+			MYSQL_TYPE_TINY_BLOB
+			| MYSQL_TYPE_MEDIUM_BLOB
+			| MYSQL_TYPE_LONG_BLOB
+			| MYSQL_TYPE_BLOB
+			| MYSQL_TYPE_VAR_STRING
+			| MYSQL_TYPE_STRING
+			| MYSQL_TYPE_VARCHAR,
+			Value::Bytes(bytes),
+		) => Some(bytes.to_vec()),
 		(MYSQL_TYPE_BIT, Value::Number(number)) => {
 			let bits = if let Number::U64(n) = number {
 				*n
@@ -1218,7 +1238,7 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 		MYSQL_TYPE_TIME => encode_binary_time(buf, val),
 		_ => {
 			// Length-encoded string for all other types (string, decimal, json, blob, etc.)
-			if let Some(text) = value_to_text(val) {
+			if let Some(text) = typed_text(col_type, val) {
 				write_lenenc_str(buf, &text);
 			} else {
 				buf.push(0x00);
@@ -1422,14 +1442,10 @@ pub fn decode_binary_param(cursor: &mut &[u8], type_code: u8, unsigned: bool) ->
 					"0000-00-00 00:00:00".to_string()
 				}));
 			}
-			// The protocol sends 4 (date), 7 (date and time) or 11 (with microseconds) bytes, and a
-			// `DATE` only the 4 of a date: time fields in a `DATE` would be dropped.
-			let valid = if type_code == MYSQL_TYPE_DATE {
-				len == 4
-			} else {
-				matches!(len, 4 | 7 | 11)
-			};
-			ensure!(valid, "invalid binary datetime length {len}");
+			// The protocol sends 4 (date), 7 (date and time) or 11 (with microseconds) bytes. A
+			// `DATE` keeps the date of the longer forms, as MySQL does when it stores a datetime
+			// in a `DATE`.
+			ensure!(matches!(len, 4 | 7 | 11), "invalid binary datetime length {len}");
 			let year = i64::from(u16::from_le_bytes([data[0], data[1]]));
 			let (month, day) = (data[2], data[3]);
 			let (hour, min, sec) = if len >= 7 {
@@ -1456,7 +1472,7 @@ pub fn decode_binary_param(cursor: &mut &[u8], type_code: u8, unsigned: bool) ->
 				if type_code != MYSQL_TYPE_DATE {
 					text.push_str(&format!(" {hour:02}:{min:02}:{sec:02}"));
 				}
-				if len == 11 {
+				if len == 11 && type_code != MYSQL_TYPE_DATE {
 					text.push_str(&format!(".{micro:06}"));
 				}
 				return Ok(Value::String(text));
@@ -1480,14 +1496,6 @@ pub fn decode_binary_param(cursor: &mut &[u8], type_code: u8, unsigned: bool) ->
 				),
 			})
 		}
-		MYSQL_TYPE_BIT => {
-			let bytes = read_lenenc_bytes(cursor).unwrap_or(&[]);
-			crate::cells::bit_param(bytes)
-		}
-		MYSQL_TYPE_GEOMETRY => {
-			let bytes = read_lenenc_bytes(cursor).unwrap_or(&[]);
-			crate::cells::geometry_param(bytes)
-		}
 		MYSQL_TYPE_TIME => {
 			ensure!(!cursor.is_empty(), "unexpected EOF reading time length");
 			let len = cursor[0] as usize;
@@ -1500,8 +1508,10 @@ pub fn decode_binary_param(cursor: &mut &[u8], type_code: u8, unsigned: bool) ->
 			if len == 0 {
 				return Ok(Value::Interval(surrealdb_types::Interval::ZERO));
 			}
-			// Each field within its unit, and the whole within the `838:59:59` a `TIME` holds,
-			// before anything is scaled: the day count alone can overflow the micros.
+			// Minutes, seconds and microseconds within their unit, and the whole within the
+			// `838:59:59` a `TIME` holds, before anything is scaled: the day count alone can
+			// overflow the micros. The hours may pass 23, as a client that writes the whole
+			// duration in them sends it.
 			ensure!(data[0] <= 1, "invalid binary time sign {}", data[0]);
 			let negative = data[0] == 1;
 			let days = u64::from(u32::from_le_bytes([data[1], data[2], data[3], data[4]]));
@@ -1512,7 +1522,7 @@ pub fn decode_binary_param(cursor: &mut &[u8], type_code: u8, unsigned: bool) ->
 				0
 			};
 			ensure!(
-				hours < 24 && minutes < 60 && seconds < 60 && micro < 1_000_000,
+				minutes < 60 && seconds < 60 && micro < 1_000_000,
 				"time parameter field out of range"
 			);
 			let secs = days
@@ -1532,13 +1542,42 @@ pub fn decode_binary_param(cursor: &mut &[u8], type_code: u8, unsigned: bool) ->
 			)))
 		}
 		_ => {
-			// String / Blob / JSON / Decimal (lenenc-string format)
+			// Every other type is a length-encoded string of bytes.
 			let bytes = read_lenenc_bytes(cursor).unwrap_or(&[]);
-			match String::from_utf8(bytes.to_vec()) {
-				Ok(s) => Ok(Value::String(s)),
-				Err(_) => Ok(Value::Bytes(bytes.to_vec().into())),
+			decode_string_param(bytes, type_code)
+		}
+	}
+}
+
+/// The value of a parameter that travels as the bytes `bytes`, read as its declared type
+/// `type_code`, never by what the bytes happen to look like.
+///
+/// A blob is always bytes; a `DECIMAL` is the number its text spells; a `BIT` and a spatial value
+/// are read from their binary forms. Any other type is text, except that bytes which are not
+/// UTF-8 stay bytes, since a client sends a binary value under a string type.
+pub fn decode_string_param(bytes: &[u8], type_code: u8) -> Result<Value> {
+	match type_code {
+		MYSQL_TYPE_BIT => crate::cells::bit_param(bytes),
+		MYSQL_TYPE_GEOMETRY => crate::cells::geometry_param(bytes),
+		MYSQL_TYPE_TINY_BLOB | MYSQL_TYPE_MEDIUM_BLOB | MYSQL_TYPE_LONG_BLOB | MYSQL_TYPE_BLOB => {
+			Ok(Value::Bytes(bytes.to_vec().into()))
+		}
+		MYSQL_TYPE_DECIMAL | MYSQL_TYPE_NEWDECIMAL => {
+			let text = std::str::from_utf8(bytes)
+				.map_err(|_| anyhow::anyhow!("a DECIMAL parameter is not text"))?
+				.trim();
+			if let Ok(decimal) = text.parse::<surrealdb_types::Decimal>() {
+				Ok(Value::Number(Number::Decimal(decimal)))
+			} else if let Ok(big) = text.parse::<surrealdb_types::BigDecimal>() {
+				Ok(Value::Number(Number::BigDecimal(Box::new(big))))
+			} else {
+				Err(anyhow::anyhow!("invalid DECIMAL parameter {text:?}"))
 			}
 		}
+		_ => Ok(match std::str::from_utf8(bytes) {
+			Ok(text) => Value::String(text.to_owned()),
+			Err(_) => Value::Bytes(bytes.to_vec().into()),
+		}),
 	}
 }
 
@@ -1736,8 +1775,12 @@ mod tests {
 		assert!(decode(&[0, 34, 0, 0, 0, 22, 59, 59, 1, 0, 0, 0]).is_err());
 		// A day count whose micros overflow an `i64`.
 		assert!(decode(&[0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0]).is_err());
-		// A field past its unit.
-		assert!(decode(&[0, 0, 0, 0, 0, 24, 0, 0]).is_err());
+		// A field past its unit; the hours alone may pass 23, within the range of a `TIME`.
+		assert_eq!(
+			decode(&[0, 0, 0, 0, 0, 200, 0, 0]).unwrap(),
+			Value::Interval(surrealdb_types::Interval::new(0, 0, 200 * 3_600_000_000))
+		);
+		assert!(decode(&[0, 34, 0, 0, 0, 24, 0, 0]).is_err());
 		assert!(decode(&[0, 0, 0, 0, 0, 0, 60, 0]).is_err());
 		assert!(decode(&[0, 0, 0, 0, 0, 0, 0, 0, 0x40, 0x42, 0x0F, 0]).is_err());
 	}
@@ -1961,16 +2004,69 @@ mod tests {
 	}
 
 	#[test]
-	fn a_binary_date_holds_only_a_date() {
-		let mut cursor: &[u8] = &[4, 0xe8, 0x07, 1, 15];
-		assert!(decode_binary_param(&mut cursor, MYSQL_TYPE_DATE, false).is_ok());
+	fn a_binary_date_sent_with_a_time_keeps_its_date() {
 		for body in [
-			&[7u8, 0xe8, 0x07, 1, 15, 12, 30, 45][..],
+			&[4u8, 0xe8, 0x07, 1, 15][..],
+			&[7, 0xe8, 0x07, 1, 15, 12, 30, 45],
 			&[11, 0xe8, 0x07, 1, 15, 0, 0, 0, 0, 0, 0, 0],
 		] {
 			let mut cursor = body;
-			assert!(decode_binary_param(&mut cursor, MYSQL_TYPE_DATE, false).is_err(), "{body:?}");
+			assert_eq!(
+				decode_binary_param(&mut cursor, MYSQL_TYPE_DATE, false).unwrap(),
+				date("2024-01-15"),
+				"{body:?}"
+			);
 		}
+		let mut cursor: &[u8] = &[5, 0xe8, 0x07, 1, 15, 12];
+		assert!(decode_binary_param(&mut cursor, MYSQL_TYPE_DATE, false).is_err());
+	}
+
+	#[test]
+	fn a_string_parameter_is_read_as_its_declared_type() {
+		let text = |bytes: &[u8], ty: u8| decode_string_param(bytes, ty).unwrap();
+		// Bytes that are valid text stay bytes under a blob type.
+		assert_eq!(
+			text(b"abc", MYSQL_TYPE_BLOB),
+			Value::Bytes(surrealdb_types::Bytes::from(b"abc".to_vec()))
+		);
+		// Text that reads as a number stays text under a string type.
+		assert_eq!(text(b"42", MYSQL_TYPE_VAR_STRING), Value::String("42".to_string()));
+		assert_eq!(text(b"{\"a\":1}", MYSQL_TYPE_JSON), Value::String("{\"a\":1}".to_string()));
+		// Bytes that are not UTF-8 stay bytes under a string type.
+		assert_eq!(
+			text(&[0xff, 0xfe], MYSQL_TYPE_STRING),
+			Value::Bytes(surrealdb_types::Bytes::from(vec![0xff, 0xfe]))
+		);
+		// A DECIMAL is the number its text spells.
+		assert!(matches!(
+			text(b"12.50", MYSQL_TYPE_NEWDECIMAL),
+			Value::Number(Number::Decimal(d)) if d.to_string() == "12.50"
+		));
+		assert!(decode_string_param(b"abc", MYSQL_TYPE_NEWDECIMAL).is_err());
+	}
+
+	#[test]
+	fn a_byte_string_cell_travels_as_its_bytes() {
+		let bytes = Value::Bytes(surrealdb_types::Bytes::from(vec![0xff, 0x00, 0x41]));
+		let blob = ColumnDefinition41::new("db", "t", "c", MYSQL_TYPE_BLOB);
+		assert_eq!(raw_cell(&blob, &bytes), Some(vec![0xff, 0x00, 0x41]));
+		let number = ColumnDefinition41::new("db", "t", "c", MYSQL_TYPE_LONGLONG);
+		assert_eq!(raw_cell(&number, &bytes), None);
+	}
+
+	#[test]
+	fn a_json_column_holds_a_scalar_as_a_json_document() {
+		assert_eq!(
+			typed_text(MYSQL_TYPE_JSON, &Value::String("a\"b".into())).as_deref(),
+			Some("\"a\\\"b\"")
+		);
+		assert_eq!(typed_text(MYSQL_TYPE_JSON, &Value::Bool(true)).as_deref(), Some("true"));
+		assert_eq!(typed_text(MYSQL_TYPE_JSON, &Value::Null), None);
+		let mut binary = Vec::new();
+		encode_binary_value(&mut binary, MYSQL_TYPE_JSON, &Value::Bool(false));
+		let mut expected = Vec::new();
+		write_lenenc_str(&mut expected, "false");
+		assert_eq!(binary, expected);
 	}
 
 	#[test]

@@ -43,7 +43,7 @@ fn a_postgres_varchar_refuses_a_value_over_its_length() {
 #[test]
 fn a_postgres_char_drops_trailing_spaces_beyond_its_length() {
 	let stored = check(Dialect::PostgreSql, "char(3)", text("ab   ")).unwrap();
-	assert_eq!(as_text(stored), "ab ");
+	assert_eq!(as_text(stored), "ab");
 	let refused = check(Dialect::PostgreSql, "char(3)", text("abcd")).unwrap_err();
 	assert_eq!(refused.code, "22001");
 }
@@ -495,4 +495,38 @@ fn an_interval_is_truncated_below_the_finest_field_of_its_qualifier() {
 		panic!("expected an interval");
 	};
 	assert_eq!(interval.months, -12);
+}
+
+#[test]
+fn a_numeric_scale_beyond_its_precision_bounds_the_magnitude() {
+	// numeric(2,5) holds magnitudes below 10^-3 and rounds to five fractional digits.
+	assert_eq!(
+		as_decimal(&check(Dialect::PostgreSql, "numeric(2,5)", decimal("0.00099")).unwrap()),
+		"0.00099"
+	);
+	assert_eq!(
+		as_decimal(&check(Dialect::PostgreSql, "numeric(2,5)", decimal("-0.000994")).unwrap()),
+		"-0.00099"
+	);
+	assert!(check(Dialect::PostgreSql, "numeric(2,5)", decimal("0")).is_ok());
+	for value in ["0.001", "0.0009951", "1", "-0.5"] {
+		let refused = check(Dialect::PostgreSql, "numeric(2,5)", decimal(value)).unwrap_err();
+		assert_eq!(refused.code, "22003", "{value}");
+	}
+	assert!(check(Dialect::PostgreSql, "numeric(2,5)", bigdecimal("0.00099")).is_ok());
+	let refused = check(Dialect::PostgreSql, "numeric(2,5)", bigdecimal("0.001")).unwrap_err();
+	assert_eq!(refused.code, "22003");
+}
+
+#[test]
+fn a_mysql_float_with_a_width_and_decimals_rounds_and_bounds_its_magnitude() {
+	let float = |f: f64| Value::Number(crate::val::Number::Float(f));
+	assert_eq!(check(Dialect::MySql, "double(7,4)", float(1.234_56)).unwrap(), float(1.2346));
+	assert_eq!(check(Dialect::MySql, "double(7,4)", float(-999.999_94)).unwrap(), float(-999.9999));
+	for refused in [1000.0, 999.999_96, -1000.5] {
+		let error = check(Dialect::MySql, "double(7,4)", float(refused)).unwrap_err();
+		assert_eq!(error.code, "22003", "{refused}");
+	}
+	// A float with no decimals written is left as it is.
+	assert_eq!(check(Dialect::MySql, "double", float(1000.123456)).unwrap(), float(1000.123456));
 }

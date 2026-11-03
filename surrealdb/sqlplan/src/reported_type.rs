@@ -283,6 +283,16 @@ fn pg_scalar(declared: &DeclaredSqlType) -> Option<PgScalar> {
 	} else {
 		pg_base(name)?
 	};
+	// A `bpchar` without a length is unbounded, where `char` and `character` without one are
+	// `char(1)`.
+	let base = if name == "bpchar" && modifier(0).is_none() {
+		PgBase {
+			modifiers: PgModifiers::VarLength,
+			..base
+		}
+	} else {
+		base
+	};
 	let (length, scale) = match base.modifiers {
 		PgModifiers::None => (None, None),
 		PgModifiers::Numeric => {
@@ -348,7 +358,8 @@ fn mysql_as_pg(declared: &DeclaredSqlType) -> Option<PgScalar> {
 		"bit" if my.bit_width.is_some_and(|width| width <= 63) => pg("int8", None, None),
 		"bit" => pg("numeric", Some(20), Some(0)),
 		"json" => pg("jsonb", None, None),
-		"point" => pg("point", None, None),
+		// A MySQL geometry value travels as its GeoJSON object, which the wire types `json`.
+		"point" => pg("json", None, None),
 		"vector" => pg("vector", declared.modifiers().first().and_then(|m| m.parse().ok()), None),
 		_ => None,
 	}
@@ -496,7 +507,12 @@ fn pg_format(base: PgBase, typmod: i32) -> String {
 		| PgModifiers::Dimensions => format!("{}({modifier})", base.name),
 	};
 	if typmod < 0 {
-		return base.name.to_owned();
+		// `format_type` spells the unbounded blank-padded type `bpchar`.
+		return if base.typname == "bpchar" {
+			"bpchar".to_owned()
+		} else {
+			base.name.to_owned()
+		};
 	}
 	match base.modifiers {
 		PgModifiers::None => base.name.to_owned(),
@@ -689,8 +705,13 @@ fn mysql_chars(code: u8, name: &str, chars: i64) -> MySqlReportedType {
 /// A `TEXT` type of MySQL holding `bytes` bytes at most.
 /// The class a MySQL `TEXT(n)` or `BLOB(n)` selects, as the prefix of its name (`tiny`, none,
 /// `medium`, `long`) and its capacity in bytes: the class the column is enforced as.
-fn storage_class(modifier: Option<i64>) -> (&'static str, i64) {
-	let bytes = declared_type::storage_class(modifier.and_then(|n| u64::try_from(n).ok()));
+fn storage_class(modifier: Option<i64>, is_text: bool) -> (&'static str, i64) {
+	let modifier = modifier.and_then(|n| u64::try_from(n).ok());
+	let bytes = if is_text {
+		declared_type::text_storage_class(modifier)
+	} else {
+		declared_type::storage_class(modifier)
+	};
 	let prefix = match bytes {
 		255 => "tiny",
 		16_777_215 => "medium",
@@ -843,7 +864,7 @@ fn mysql_native(declared: &DeclaredSqlType) -> Option<MySqlReportedType> {
 			"varchar" | "nvarchar" => mysql_chars(mysql_code::VAR_STRING, "varchar", modifier(0)?),
 			"tinytext" => mysql_text("tinytext", 255),
 			"text" => {
-				let (prefix, bytes) = storage_class(modifier(0));
+				let (prefix, bytes) = storage_class(modifier(0), true);
 				mysql_text(&format!("{prefix}text"), bytes)
 			}
 			"mediumtext" => mysql_text("mediumtext", 16_777_215),
@@ -858,7 +879,7 @@ fn mysql_native(declared: &DeclaredSqlType) -> Option<MySqlReportedType> {
 			}
 			"tinyblob" => mysql_bytes(mysql_code::BLOB, "tinyblob", 255, "tinyblob".to_owned()),
 			"blob" => {
-				let (prefix, bytes) = storage_class(modifier(0));
+				let (prefix, bytes) = storage_class(modifier(0), false);
 				let name = format!("{prefix}blob");
 				mysql_bytes(mysql_code::BLOB, &name, bytes, name.clone())
 			}

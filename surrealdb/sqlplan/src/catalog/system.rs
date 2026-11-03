@@ -146,13 +146,22 @@ pub fn is_system_catalog_table(schema: Option<&str>, name: &str) -> bool {
 
 const ATTRDEF_OID_BASE: i64 = 3_000_000;
 
-/// The oid of the composite row type of the table at `position` among the user tables: the
-/// `reltype` of its `pg_class` row and the `oid` of its `pg_type` row.
 /// The oid of the first sequence relation `pg_class` lists, in a range of its own beside those
 /// of the indexes, constraints, defaults and row types.
 const SEQUENCE_OID_BASE: i64 = 5_000_000;
 
-const TABLE_TYPE_OID_BASE: i64 = 4_000_000;
+/// The end of the oids the user enum types and their array types take.
+const ENUM_OID_RANGE_END: i64 =
+	(crate::descriptor::ENUM_TYPE_OID_BASE + 2 * crate::descriptor::ENUM_ARRAY_OID_OFFSET) as i64;
+
+/// The oid of the first table row type: the oid of the composite row type of the table at
+/// `position` among the user tables is this plus `position`, in its `pg_class` row's `reltype` and
+/// its `pg_type` row's `oid`. Row types share `pg_type` with the user enum types and their arrays,
+/// so the range starts where theirs ends.
+const TABLE_TYPE_OID_BASE: i64 = ENUM_OID_RANGE_END;
+
+// The table row types, which start past the enum types and their arrays, end below the sequences.
+const _: () = assert!(TABLE_TYPE_OID_BASE < SEQUENCE_OID_BASE);
 
 /// The sort-key stride `EnumDefinition` leaves between labels declared together, so that
 /// `enumsortorder` of such labels counts 1, 2, 3, and a label inserted between two takes a
@@ -1480,6 +1489,42 @@ pub fn get_system_table_rows_in(
 				(3926, "int8range", -1, false, 'r', 'R', 20, 3927),
 				// The `vector` type of the pgvector extension, which clients find by its name.
 				(vector_oid, "vector", -1, false, 'b', 'U', 0, vector_array_oid),
+				// The types the wire layer names with an OID of their own, each with the array
+				// type of it.
+				(790, "money", 8, true, 'b', 'N', 0, 791),
+				(1560, "bit", -1, false, 'b', 'V', 0, 1561),
+				(1562, "varbit", -1, false, 'b', 'V', 0, 1563),
+				(142, "xml", -1, false, 'b', 'U', 0, 143),
+				(3614, "tsvector", -1, false, 'b', 'U', 0, 3643),
+				(3615, "tsquery", -1, false, 'b', 'U', 0, 3645),
+				(4072, "jsonpath", -1, false, 'b', 'U', 0, 4073),
+				(774, "macaddr8", 8, false, 'b', 'U', 0, 775),
+				(2202, "regprocedure", 4, true, 'b', 'N', 0, 2207),
+				(2203, "regoper", 4, true, 'b', 'N', 0, 2208),
+				(2204, "regoperator", 4, true, 'b', 'N', 0, 2209),
+				(2206, "regtype", 4, true, 'b', 'N', 0, 2211),
+				(4089, "regnamespace", 4, true, 'b', 'N', 0, 4090),
+				(4096, "regrole", 4, true, 'b', 'N', 0, 4097),
+				(3734, "regconfig", 4, true, 'b', 'N', 0, 3735),
+				(3769, "regdictionary", 4, true, 'b', 'N', 0, 3770),
+				(4191, "regcollation", 4, true, 'b', 'N', 0, 4192),
+				(5069, "xid8", 8, true, 'b', 'U', 0, 271),
+				(3220, "pg_lsn", 8, true, 'b', 'U', 0, 3221),
+				(5038, "pg_snapshot", -1, false, 'b', 'U', 0, 5039),
+				(2970, "txid_snapshot", -1, false, 'b', 'U', 0, 2949),
+				(600, "point", 16, false, 'b', 'G', 0, 1017),
+				(601, "lseg", 32, false, 'b', 'G', 0, 1018),
+				(602, "path", -1, false, 'b', 'G', 0, 1019),
+				(603, "box", 32, false, 'b', 'G', 0, 1020),
+				(604, "polygon", -1, false, 'b', 'G', 0, 1027),
+				(628, "line", 24, false, 'b', 'G', 0, 629),
+				(718, "circle", 24, false, 'b', 'G', 0, 719),
+				(4451, "int4multirange", -1, false, 'm', 'R', 0, 6150),
+				(4532, "nummultirange", -1, false, 'm', 'R', 0, 6151),
+				(4533, "tsmultirange", -1, false, 'm', 'R', 0, 6152),
+				(4534, "tstzmultirange", -1, false, 'm', 'R', 0, 6153),
+				(4535, "datemultirange", -1, false, 'm', 'R', 0, 6155),
+				(4536, "int8multirange", -1, false, 'm', 'R', 0, 6157),
 				// Array types
 				(1000, "_bool", -1, false, 'b', 'A', 16, 0),
 				(1001, "_bytea", -1, false, 'b', 'A', 17, 0),
@@ -1503,6 +1548,57 @@ pub fn get_system_table_rows_in(
 				(2951, "_uuid", -1, false, 'b', 'A', 2950, 0),
 				(3807, "_jsonb", -1, false, 'b', 'A', 3802, 0),
 				(vector_array_oid, "_vector", -1, false, 'b', 'A', vector_oid, 0),
+				(1010, "_tid", -1, false, 'b', 'A', 27, 0),
+				(1011, "_xid", -1, false, 'b', 'A', 28, 0),
+				(1012, "_cid", -1, false, 'b', 'A', 29, 0),
+				(199, "_json", -1, false, 'b', 'A', 114, 0),
+				(651, "_cidr", -1, false, 'b', 'A', 650, 0),
+				(1040, "_macaddr", -1, false, 'b', 'A', 829, 0),
+				(1041, "_inet", -1, false, 'b', 'A', 869, 0),
+				(1187, "_interval", -1, false, 'b', 'A', 1186, 0),
+				(1270, "_timetz", -1, false, 'b', 'A', 1266, 0),
+				(2210, "_regclass", -1, false, 'b', 'A', 2205, 0),
+				(2287, "_record", -1, false, 'p', 'P', 2249, 0),
+				(3905, "_int4range", -1, false, 'b', 'A', 3904, 0),
+				(3907, "_numrange", -1, false, 'b', 'A', 3906, 0),
+				(3909, "_tsrange", -1, false, 'b', 'A', 3908, 0),
+				(3911, "_tstzrange", -1, false, 'b', 'A', 3910, 0),
+				(3913, "_daterange", -1, false, 'b', 'A', 3912, 0),
+				(3927, "_int8range", -1, false, 'b', 'A', 3926, 0),
+				(791, "_money", -1, false, 'b', 'A', 790, 0),
+				(1561, "_bit", -1, false, 'b', 'A', 1560, 0),
+				(1563, "_varbit", -1, false, 'b', 'A', 1562, 0),
+				(143, "_xml", -1, false, 'b', 'A', 142, 0),
+				(3643, "_tsvector", -1, false, 'b', 'A', 3614, 0),
+				(3645, "_tsquery", -1, false, 'b', 'A', 3615, 0),
+				(4073, "_jsonpath", -1, false, 'b', 'A', 4072, 0),
+				(775, "_macaddr8", -1, false, 'b', 'A', 774, 0),
+				(2207, "_regprocedure", -1, false, 'b', 'A', 2202, 0),
+				(2208, "_regoper", -1, false, 'b', 'A', 2203, 0),
+				(2209, "_regoperator", -1, false, 'b', 'A', 2204, 0),
+				(2211, "_regtype", -1, false, 'b', 'A', 2206, 0),
+				(4090, "_regnamespace", -1, false, 'b', 'A', 4089, 0),
+				(4097, "_regrole", -1, false, 'b', 'A', 4096, 0),
+				(3735, "_regconfig", -1, false, 'b', 'A', 3734, 0),
+				(3770, "_regdictionary", -1, false, 'b', 'A', 3769, 0),
+				(4192, "_regcollation", -1, false, 'b', 'A', 4191, 0),
+				(271, "_xid8", -1, false, 'b', 'A', 5069, 0),
+				(3221, "_pg_lsn", -1, false, 'b', 'A', 3220, 0),
+				(5039, "_pg_snapshot", -1, false, 'b', 'A', 5038, 0),
+				(2949, "_txid_snapshot", -1, false, 'b', 'A', 2970, 0),
+				(1017, "_point", -1, false, 'b', 'A', 600, 0),
+				(1018, "_lseg", -1, false, 'b', 'A', 601, 0),
+				(1019, "_path", -1, false, 'b', 'A', 602, 0),
+				(1020, "_box", -1, false, 'b', 'A', 603, 0),
+				(1027, "_polygon", -1, false, 'b', 'A', 604, 0),
+				(629, "_line", -1, false, 'b', 'A', 628, 0),
+				(719, "_circle", -1, false, 'b', 'A', 718, 0),
+				(6150, "_int4multirange", -1, false, 'b', 'A', 4451, 0),
+				(6151, "_nummultirange", -1, false, 'b', 'A', 4532, 0),
+				(6152, "_tsmultirange", -1, false, 'b', 'A', 4533, 0),
+				(6153, "_tstzmultirange", -1, false, 'b', 'A', 4534, 0),
+				(6155, "_datemultirange", -1, false, 'b', 'A', 4535, 0),
+				(6157, "_int8multirange", -1, false, 'b', 'A', 4536, 0),
 			];
 
 			let rows = types

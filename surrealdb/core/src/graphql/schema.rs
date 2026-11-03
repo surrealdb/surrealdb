@@ -481,9 +481,10 @@ pub(crate) fn sql_value_to_graphql_value(v: SurValue) -> Result<GraphqlValue, Gr
 				Some(n) => GraphqlValue::Number(n),
 				None => GraphqlValue::Null,
 			},
-			num @ (SurNumber::Decimal(_) | SurNumber::BigDecimal(_)) => {
-				GraphqlValue::String(num.to_string())
-			}
+			num @ SurNumber::Decimal(_) => GraphqlValue::String(num.to_string()),
+			// A bigdecimal is sent as its plain decimal text, without the literal suffix that its
+			// `Display` form carries.
+			SurNumber::BigDecimal(d) => GraphqlValue::String(d.to_string()),
 		},
 		SurValue::String(s) => GraphqlValue::String(s.into_string()),
 		SurValue::Duration(d) => GraphqlValue::String(d.to_string()),
@@ -2181,6 +2182,17 @@ mod tests {
 
 		let literal = GraphqlValue::String("19.99dec".to_owned());
 		assert_eq!(graphql_to_sql_kind(&literal, Kind::Decimal).unwrap(), decimal);
+	}
+
+	#[test]
+	fn bigdecimal_string_round_trips() {
+		let big = SurValue::Number(SurNumber::BigDecimal(Box::new(
+			"123456789012345678901234567890.5".parse().unwrap(),
+		)));
+
+		let serialized = sql_value_to_graphql_value(big.clone()).unwrap();
+		assert_eq!(serialized, GraphqlValue::String("123456789012345678901234567890.5".to_owned()));
+		assert_eq!(graphql_to_sql_kind(&serialized, Kind::BigDecimal).unwrap(), big);
 	}
 
 	#[test]

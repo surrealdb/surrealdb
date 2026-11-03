@@ -6,7 +6,8 @@
 //! `ts` bounds are timestamps, `tstz` bounds are datetimes, and `date` bounds are dates. A bound of
 //! any other kind is refused. The discrete element kinds (`int4`, `int8`, `date`) store a range as
 //! `[lower, upper)`, as PostgreSQL does. An empty range is stored with equal bounds and an
-//! exclusive end, `Included(v)` to `Excluded(v)`. A multirange is a [`Value::Array`] of ranges,
+//! exclusive end at the element's zero, `Included(zero)` to `Excluded(zero)`, so that every empty
+//! range of an element kind is one value. A multirange is a [`Value::Array`] of ranges,
 //! kept sorted, with overlapping and adjacent ranges merged and empty ranges dropped.
 
 use std::cmp::Ordering;
@@ -15,7 +16,7 @@ use std::ops::Bound;
 use super::super::declared_type::{DeclaredSqlType, TypeViolation};
 use super::super::field::SqlTypeDialect;
 use super::Validated;
-use crate::val::{Array, Date, Number, Range, Value};
+use crate::val::{Array, Date, Datetime, Number, Range, Timestamp, Value};
 
 /// The element kind of a range, read from the declared base.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -38,6 +39,25 @@ impl Element {
 			Element::Timestamp => "timestamp without time zone",
 			Element::Timestamptz => "timestamp with time zone",
 			Element::Date => "date",
+		}
+	}
+
+	/// The zero of the element kind: the number zero, or the Unix epoch. An empty range is stored
+	/// at it.
+	pub fn zero(self) -> Value {
+		match self {
+			Element::Int4 => Value::Number(Number::I32(0)),
+			Element::Int8 => Value::Number(Number::Int(0)),
+			Element::Numeric => Value::Number(Number::Decimal(rust_decimal::Decimal::ZERO)),
+			Element::Timestamp => Value::Timestamp(Timestamp::from(
+				chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.naive_utc(),
+			)),
+			Element::Timestamptz => {
+				Value::Datetime(Datetime(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH))
+			}
+			Element::Date => {
+				Value::Date(Date::from(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive()))
+			}
 		}
 	}
 
@@ -150,7 +170,7 @@ fn violation(error: RangeError, element: Element, base: &str, column: &str) -> T
 }
 
 /// A range in canonical form: the discrete form for a discrete element, and an empty range as
-/// equal bounds with an exclusive end.
+/// equal bounds with an exclusive end at the element's zero.
 fn canonical_range(element: Element, range: Range) -> Result<Range, RangeError> {
 	let lower = convert_bound(element, range.start)?;
 	let upper = convert_bound(element, range.end)?;
@@ -180,28 +200,27 @@ fn canonical_range(element: Element, range: Range) -> Result<Range, RangeError> 
 	} else {
 		(lower, upper)
 	};
-	let empty_at = match (bound_value(&lower), bound_value(&upper)) {
+	let is_empty = match (bound_value(&lower), bound_value(&upper)) {
 		(Some(lo), Some(hi)) => match lo.cmp(hi) {
-			Ordering::Greater => Some(lo.clone()),
-			Ordering::Equal
-				if !(matches!(lower, Bound::Included(_))
-					&& matches!(upper, Bound::Included(_))) =>
-			{
-				Some(lo.clone())
+			Ordering::Greater => true,
+			Ordering::Equal => {
+				!(matches!(lower, Bound::Included(_)) && matches!(upper, Bound::Included(_)))
 			}
-			Ordering::Less | Ordering::Equal => None,
+			Ordering::Less => false,
 		},
-		_ => None,
+		_ => false,
 	};
-	Ok(match empty_at {
-		Some(point) => Range {
-			start: Bound::Included(point.clone()),
-			end: Bound::Excluded(point),
-		},
-		None => Range {
+	Ok(if is_empty {
+		let zero = element.zero();
+		Range {
+			start: Bound::Included(zero.clone()),
+			end: Bound::Excluded(zero),
+		}
+	} else {
+		Range {
 			start: lower,
 			end: upper,
-		},
+		}
 	})
 }
 
@@ -425,16 +444,11 @@ mod tests {
 
 	#[test]
 	fn an_empty_range_is_equal_bounds_with_an_exclusive_end() {
-		let empty = discrete_form(3, 3);
+		let empty = discrete_form(0, 0);
 		assert_eq!(store_as("int4range", span(included(3), excluded(3))).unwrap(), empty);
-		assert_eq!(
-			store_as("int4range", span(excluded(3), included(3))).unwrap(),
-			discrete_form(4, 4)
-		);
-		assert_eq!(
-			store_as("int4range", span(excluded(3), excluded(4))).unwrap(),
-			discrete_form(4, 4)
-		);
+		assert_eq!(store_as("int4range", span(excluded(3), included(3))).unwrap(), empty);
+		assert_eq!(store_as("int4range", span(excluded(3), excluded(4))).unwrap(), empty);
+		assert_eq!(store_as("int4range", span(included(7), excluded(7))).unwrap(), empty);
 	}
 
 	#[test]
@@ -456,7 +470,7 @@ mod tests {
 		assert_eq!(stored, span(Bound::Excluded(decimal(1)), Bound::Included(decimal(5))));
 		let empty =
 			store_as("numrange", span(Bound::Excluded(int(3)), Bound::Included(int(3)))).unwrap();
-		assert_eq!(empty, span(Bound::Included(decimal(3)), Bound::Excluded(decimal(3))));
+		assert_eq!(empty, span(Bound::Included(decimal(0)), Bound::Excluded(decimal(0))));
 		let point =
 			store_as("numrange", span(Bound::Included(int(3)), Bound::Included(int(3)))).unwrap();
 		assert_eq!(point, span(Bound::Included(decimal(3)), Bound::Included(decimal(3))));

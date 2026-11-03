@@ -896,26 +896,9 @@ fn lower_pg_date_part(field: &str, value: LogicalExpr) -> Result<LogicalExpr, Pl
 			failure(&format!("unit \"{field}\" not recognized for type timestamp"))
 		}));
 	}
-	let interval_part = match field {
-		"year" => Some("interval::years"),
-		"month" => Some("interval::months"),
-		"day" => Some("interval::days"),
-		"hour" => Some("interval::hours"),
-		"minute" => Some("interval::mins"),
-		"second" => Some("interval::secs"),
-		_ => None,
-	};
-	Ok(strict(vec![value], |v| {
-		let temporal = call("time::extract", vec![v[0].clone(), text(field)]);
-		match interval_part {
-			Some(function) => when(
-				call("type::is_interval", vec![v[0].clone()]),
-				call(function, vec![v[0].clone()]),
-				temporal,
-			),
-			None => temporal,
-		}
-	}))
+	// `time::extract` reads the interval and duration kinds as well as the temporal ones, so every
+	// operand kind takes the same call and the same field set.
+	Ok(strict(vec![value], |v| call("time::extract", vec![v[0].clone(), text(field)])))
 }
 
 /// MySQL `WEEK(d)` in its default mode 0: weeks start on Sunday, week 1 holds the first Sunday of

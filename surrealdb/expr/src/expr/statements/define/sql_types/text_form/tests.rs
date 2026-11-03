@@ -73,6 +73,19 @@ fn ranges_read_their_bounds_as_the_element_kind_and_print_canonically() {
 }
 
 #[test]
+fn a_numeric_range_bound_keeps_its_written_scale() {
+	assert_eq!(round_trip("numrange", "[1.50,2.00)"), "[1.50,2.00)");
+}
+
+#[test]
+fn a_timestamptz_range_bound_with_a_non_ascii_offset_is_refused_not_a_panic() {
+	assert!(
+		read(&declared("tstzrange"), "[\"2024-01-01 10:00:00+\u{e9}\u{e9}\",)").unwrap().is_err()
+	);
+	assert!(read(&declared("tstzrange"), "[\"2024-01-01 10:00:00+\u{e9}\",)").unwrap().is_err());
+}
+
+#[test]
 fn a_range_bound_that_is_not_its_element_is_refused() {
 	assert_eq!(read(&declared("int4range"), "[a,5)").unwrap().unwrap_err().code, "22P02");
 	assert!(read(&declared("int4range"), "[1,5").unwrap().is_err());

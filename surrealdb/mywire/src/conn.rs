@@ -2112,14 +2112,16 @@ impl Connection {
 		let descriptor = descriptor.or_else(|| self.show_descriptor(trimmed));
 
 		let schema = self.current_db.clone().unwrap_or_else(|| "test".to_string());
+		// The columns are shaped exactly as an execution shapes them, so that what a client reads
+		// at prepare time is what the result set it executes announces.
 		let column_defs: Vec<ColumnDefinition41> = if let Some(desc) = descriptor {
-			desc.columns
-				.iter()
-				.map(|c| {
-					let tbl = c.table.as_deref().unwrap_or("");
-					column_definition(&schema, tbl, c)
-				})
-				.collect()
+			crate::typing::shape_result_with_descriptor(
+				&desc,
+				&schema,
+				"",
+				surrealdb_types::Value::Array(surrealdb_types::Array::new()),
+			)
+			.columns
 		} else {
 			Vec::new()
 		};
@@ -2318,9 +2320,20 @@ impl Connection {
 				if is_null {
 					params.push(surrealdb_types::Value::Null);
 				} else if let Some(long_bytes) = stmt.long_data.remove(&(i as u16)) {
-					match String::from_utf8(long_bytes.clone()) {
-						Ok(s) => params.push(surrealdb_types::Value::String(s)),
-						Err(_) => params.push(surrealdb_types::Value::Bytes(long_bytes.into())),
+					let ty = stmt.param_types.get(i).map_or(MYSQL_TYPE_VAR_STRING, |(ty, _)| *ty);
+					match decode_string_param(&long_bytes, ty) {
+						Ok(val) => params.push(val),
+						Err(e) => {
+							let err_pkt = ErrPacket::general(
+								1064,
+								b"42000",
+								format!("Failed to decode parameter {i}: {e}"),
+							);
+							self.writer
+								.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+								.await?;
+							return Ok(());
+						}
 					}
 				} else {
 					let (ty, fl) =

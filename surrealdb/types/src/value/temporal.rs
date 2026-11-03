@@ -21,6 +21,12 @@ const MICROS_PER_HOUR: i128 = 60 * MICROS_PER_MINUTE;
 const MICROS_PER_DAY: i128 = 24 * MICROS_PER_HOUR;
 const MICROS_PER_MONTH: i128 = 30 * MICROS_PER_DAY;
 
+/// The seconds and nanoseconds with whole seconds of the nanoseconds carried into the seconds.
+fn fold_leap_second(seconds: i64, nanos: u32) -> (i64, u32) {
+	let carry = u64::from(nanos) / NANOS_PER_SECOND;
+	(seconds.saturating_add(carry as i64), (u64::from(nanos) % NANOS_PER_SECOND) as u32)
+}
+
 fn push_fraction(out: &mut String, nanos: u32) {
 	use std::fmt::Write;
 	if nanos == 0 {
@@ -307,8 +313,10 @@ pub struct Timestamp(NaiveDateTime);
 
 impl Timestamp {
 	/// Creates a timestamp from seconds and nanoseconds since 1970-01-01T00:00:00, or `None`
-	/// if it is out of range.
+	/// if it is out of range. Nanoseconds of one second or more carry into the seconds, so a
+	/// leap second is the first instant of the next second.
 	pub fn from_parts(seconds: i64, nanos: u32) -> Option<Self> {
+		let (seconds, nanos) = fold_leap_second(seconds, nanos);
 		DateTime::from_timestamp(seconds, nanos).map(|d| Self(d.naive_utc()))
 	}
 
@@ -386,14 +394,16 @@ impl FromStr for Timestamp {
 		}
 		let (date, time) =
 			v.split_once(['T', ' ']).ok_or_else(|| anyhow!("Invalid timestamp: {s:?}"))?;
-		let date = date.parse::<Date>().map_err(|_| anyhow!("Invalid timestamp: {s:?}"))?;
+		if !matches!(date.chars().next(), Some('-' | '+' | '0'..='9')) {
+			bail!("Invalid timestamp: {s:?}");
+		}
+		let date = NaiveDate::from_str(date).map_err(|_| anyhow!("Invalid timestamp: {s:?}"))?;
 		let nanos = parse_time_nanos(time).map_err(|_| anyhow!("Invalid timestamp: {s:?}"))?;
 		if nanos >= NANOS_PER_DAY {
 			bail!("Invalid timestamp: {s:?}");
 		}
 		let time = Time(nanos).into_inner().ok_or_else(|| anyhow!("Invalid timestamp: {s:?}"))?;
-		Self::finite(date.into_inner().and_time(time))
-			.ok_or_else(|| anyhow!("Timestamp out of range: {s:?}"))
+		Self::finite(date.and_time(time)).ok_or_else(|| anyhow!("Timestamp out of range: {s:?}"))
 	}
 }
 
@@ -405,8 +415,12 @@ impl Display for Timestamp {
 		if *self == Self::neg_infinity() {
 			return f.write_str("-infinity");
 		}
-		let mut out = self.0.format("%Y-%m-%dT%H:%M:%S").to_string();
-		push_fraction(&mut out, self.0.nanosecond());
+		// A leap second held in the wall time is written as the first instant of the next
+		// second, the form `from_parts` reads it as.
+		let (seconds, nanos) = fold_leap_second(self.seconds(), self.nanos());
+		let at = DateTime::from_timestamp(seconds, nanos).map_or(self.0, |d| d.naive_utc());
+		let mut out = at.format("%Y-%m-%dT%H:%M:%S").to_string();
+		push_fraction(&mut out, at.nanosecond());
 		f.write_str(&out)
 	}
 }
@@ -1087,6 +1101,27 @@ mod tests {
 		let t = Timestamp::from_parts(-1, 5).unwrap();
 		assert_eq!((t.seconds(), t.nanos()), (-1, 5));
 		assert!(Timestamp::from_parts(-1, 5).unwrap() < Timestamp::from_parts(0, 0).unwrap());
+	}
+
+	#[test]
+	fn a_leap_second_is_the_first_instant_of_the_next_second() {
+		let leap = Timestamp::from_parts(59, 1_500_000_000).unwrap();
+		assert_eq!(leap, Timestamp::from_parts(60, 500_000_000).unwrap());
+		assert_eq!(leap.to_string(), "1970-01-01T00:01:00.500");
+		assert_eq!(leap.to_string().parse::<Timestamp>().unwrap(), leap);
+		let max = Timestamp::infinity();
+		assert!(Timestamp::from_parts(max.seconds(), 1_500_000_000).is_none());
+	}
+
+	#[test]
+	fn a_timestamp_on_the_first_or_last_day_reads_back() {
+		let last = NaiveDate::MAX.to_string();
+		let text = format!("{last}T12:00:00");
+		let t: Timestamp = text.parse().unwrap();
+		assert!(!t.is_infinite());
+		assert_eq!(t.to_string().parse::<Timestamp>().unwrap(), t);
+		assert!("infinity 12:00:00".parse::<Timestamp>().is_err());
+		assert!("epoch 10:00:00".parse::<Timestamp>().is_err());
 	}
 
 	#[test]

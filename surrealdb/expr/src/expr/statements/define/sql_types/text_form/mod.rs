@@ -365,7 +365,7 @@ fn range_value(element: Element, range: range::Range<Value>) -> Value {
 		// An empty range is stored as equal bounds with an exclusive end. Any value of the element
 		// kind serves; the text `empty` takes the element's zero.
 		range::Range::Empty => {
-			let zero = element_zero(element);
+			let zero = element.zero();
 			Range {
 				start: Bound::Included(zero.clone()),
 				end: Bound::Excluded(zero),
@@ -380,24 +380,6 @@ fn range_value(element: Element, range: range::Range<Value>) -> Value {
 		},
 	};
 	Value::Range(Box::new(range))
-}
-
-/// The zero of an element kind: the number zero, or the Unix epoch.
-fn element_zero(element: Element) -> Value {
-	match element {
-		Element::Int4 => Value::Number(Number::I32(0)),
-		Element::Int8 => Value::Number(Number::Int(0)),
-		Element::Numeric => Value::Number(Number::Decimal(Decimal::ZERO)),
-		Element::Timestamp => Value::Timestamp(Timestamp::from(
-			chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.naive_utc(),
-		)),
-		Element::Timestamptz => {
-			Value::Datetime(Datetime(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH))
-		}
-		Element::Date => {
-			Value::Date(Date::from(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive()))
-		}
-	}
 }
 
 /// A stored range as the text codec's range: empty when it holds no value.
@@ -422,8 +404,12 @@ fn read_element(element: Element, text: &str) -> Option<Value> {
 	match element {
 		Element::Int4 => text.parse::<i32>().ok().map(|n| Value::Number(Number::I32(n))),
 		Element::Int8 => text.parse::<i64>().ok().map(|n| Value::Number(Number::Int(n))),
+		// A numeric bound keeps the scale it is written with, as PostgreSQL prints it back.
 		Element::Numeric => {
-			Decimal::from_str_normalized_exact(text).ok().map(|d| Value::Number(Number::Decimal(d)))
+			let decimal = Decimal::from_str_exact_scale(text)
+				.or_else(|_| Decimal::from_scientific(text).map(|d| d.normalize()))
+				.ok()?;
+			Some(Value::Number(Number::Decimal(decimal)))
 		}
 		Element::Timestamp => Timestamp::from_str(text).ok().map(Value::Timestamp),
 		Element::Timestamptz => read_timestamptz(text).map(Value::Datetime),
@@ -448,7 +434,7 @@ fn read_timestamptz(text: &str) -> Option<Datetime> {
 	let zone = match zone {
 		"Z" | "z" => "Z".to_string(),
 		offset if offset.len() == 3 => format!("{offset}:00"),
-		offset if offset.len() == 5 && !offset.contains(':') => {
+		offset if offset.len() == 5 && offset.is_ascii() && !offset.contains(':') => {
 			format!("{}:{}", &offset[..3], &offset[3..])
 		}
 		offset => offset.to_string(),

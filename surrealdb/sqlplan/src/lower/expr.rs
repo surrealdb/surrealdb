@@ -97,6 +97,32 @@ pub(crate) fn cast_kind(target_type: &str, dialect: SqlDialect) -> Kind {
 	}
 }
 
+/// The operand of a MySQL cast to `TIME`, which is an interval: a datetime or timestamp is its time
+/// of day, and any other value is left for the cast to read. The operand is evaluated once.
+fn mysql_time_operand(value: LogicalExpr) -> LogicalExpr {
+	let call = |name: &str, arg: LogicalExpr| {
+		LogicalExpr::Call(Box::new(LogicalCall {
+			receiver: Function::Normal(name.to_string()),
+			args: vec![arg],
+		}))
+	};
+	let time_of_day = LogicalExpr::Prefix {
+		op: PrefixOperator::Cast(Kind::Time),
+		expr: Box::new(LogicalExpr::Current),
+	};
+	LogicalExpr::Optional {
+		base: Box::new(value),
+		then: Box::new(LogicalExpr::If(Box::new(LogicalIf {
+			branches: vec![(
+				call("type::is_datetime", LogicalExpr::Current)
+					.or(call("type::is_timestamp", LogicalExpr::Current)),
+				call("type::interval", time_of_day),
+			)],
+			otherwise: Some(LogicalExpr::Current),
+		}))),
+	}
+}
+
 /// Lower a `BoundExpr` to a SurrealDB `LogicalExpr`.
 pub fn lower_bound_expr(
 	expr: &BoundExpr,
@@ -676,25 +702,34 @@ pub fn lower_bound_expr(
 						let name = PG_TYPES
 							.iter()
 							.find(|(type_oid, ..)| type_oid == oid)
-							.map_or("text", |(_, _, name)| name);
+							.map(|(_, _, name)| (*name).to_owned())
+							.or_else(|| crate::reported_type::pg_format_type(*oid, -1))
+							.unwrap_or_else(|| "text".to_owned());
 						return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
-							name,
+							name.as_str(),
 						))));
 					}
 					// A NULL or unknown oid matches no branch and yields NULL.
 					let oid = lower_bound_expr(&args[0], policy)?;
-					let branches = PG_TYPES
+					let known = PG_TYPES.iter().map(|(type_oid, _, name)| (*type_oid, *name));
+					let others = other_builtin_type_names()
 						.iter()
-						.map(|(type_oid, _, name)| {
+						.filter(|(type_oid, _)| {
+							PG_TYPES.iter().all(|(listed, ..)| listed != type_oid)
+						})
+						.map(|(type_oid, name)| (*type_oid, name.as_str()));
+					let branches = known
+						.chain(others)
+						.map(|(type_oid, name)| {
 							(
 								LogicalExpr::Binary {
 									left: Box::new(oid.clone()),
 									op: BinaryOperator::Equal,
 									right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(
-										*type_oid,
+										type_oid,
 									))),
 								},
-								LogicalExpr::Literal(LogicalLiteral::String(Strand::from(*name))),
+								LogicalExpr::Literal(LogicalLiteral::String(Strand::from(name))),
 							)
 						})
 						.collect();
@@ -1074,10 +1109,12 @@ pub fn lower_bound_expr(
 			high,
 			negated,
 		} => {
+			let promoted =
+				super::temporal::promoted_group(&[&**expr, &**low, &**high], policy.dialect);
 			let (value, low_bound, high_bound) = (
-				lower_bound_expr(expr, policy)?,
-				lower_bound_expr(low, policy)?,
-				lower_bound_expr(high, policy)?,
+				lower_bound_expr(super::temporal::operand_at(&promoted, 0, expr), policy)?,
+				lower_bound_expr(super::temporal::operand_at(&promoted, 1, low), policy)?,
+				lower_bound_expr(super::temporal::operand_at(&promoted, 2, high), policy)?,
 			);
 			Ok(match scalar_enum(expr).or_else(|| scalar_enum(low)).or_else(|| scalar_enum(high)) {
 				Some(reference) => sql_between(
@@ -1107,8 +1144,13 @@ pub fn lower_bound_expr(
 			if let Some((col, table)) = link_column(expr) {
 				return lower_link_membership(col, table, list, *negated, policy);
 			}
-			let val = lower_bound_expr(expr, policy)?;
-			let items = list
+			let operands: Vec<&BoundExpr> = std::iter::once(&**expr).chain(list.iter()).collect();
+			let promoted = super::temporal::promoted_group(&operands, policy.dialect);
+			let operands = promoted
+				.as_ref()
+				.map_or_else(|| operands.clone(), |promoted| promoted.iter().collect());
+			let val = lower_bound_expr(operands[0], policy)?;
+			let items = operands[1..]
 				.iter()
 				.map(|item| lower_bound_expr(item, policy))
 				.collect::<Result<Vec<_>, _>>()?;
@@ -1219,6 +1261,14 @@ pub fn lower_bound_expr(
 			let lowered = crate::lower::functions::timetz_cast_operand(&clean_type, lowered);
 			let lowered = if matches!(kind, Kind::Time) {
 				crate::lower::functions::time_of_timestamp_text(lowered)
+			} else {
+				lowered
+			};
+			let lowered = if policy.dialect == SqlDialect::MySql
+				&& matches!(kind, Kind::Interval)
+				&& !matches!(lowered, LogicalExpr::Literal(_))
+			{
+				mysql_time_operand(lowered)
 			} else {
 				lowered
 			};
@@ -3064,6 +3114,19 @@ const PG_TYPES: &[(i64, &str, &str)] = &[
 	(crate::descriptor::VECTOR_OID as i64, "vector", "vector"),
 	(crate::descriptor::VECTOR_ARRAY_OID as i64, "_vector", "vector[]"),
 ];
+
+/// The largest oid of a built-in type `format_type` names.
+const MAX_BUILTIN_TYPE_OID: i64 = 6200;
+
+/// Each built-in type oid with the name `format_type` gives it without a modifier.
+fn other_builtin_type_names() -> &'static [(i64, String)] {
+	static NAMES: std::sync::OnceLock<Vec<(i64, String)>> = std::sync::OnceLock::new();
+	NAMES.get_or_init(|| {
+		(1..=MAX_BUILTIN_TYPE_OID)
+			.filter_map(|oid| crate::reported_type::pg_format_type(oid, -1).map(|name| (oid, name)))
+			.collect()
+	})
+}
 
 /// The oid of the type `name` names: a type name, optionally schema-qualified and quoted, or one of
 /// the SQL spellings of the integer types.

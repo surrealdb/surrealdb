@@ -324,3 +324,20 @@ fn a_mysql_text_or_blob_length_reports_the_class_it_selects() {
 		}
 	}
 }
+
+#[test]
+fn a_bare_bpchar_is_unbounded_where_a_bare_char_is_char_one() {
+	let bare = pg_report(&pg("bpchar"));
+	assert_eq!((bare.oid, bare.typmod), (1042, -1));
+	assert_eq!(bare.format, "bpchar");
+	assert_eq!(bare.character_maximum_length, None);
+	assert_eq!(bare.blank_padded_to, None);
+	let one = pg_report(&pg("char"));
+	assert_eq!((one.oid, one.typmod), (1042, 5));
+	assert_eq!(one.character_maximum_length, Some(1));
+}
+
+#[test]
+fn a_mysql_point_is_reported_as_the_json_the_wire_sends() {
+	assert_eq!(pg_report(&my("point")).oid, 114);
+}

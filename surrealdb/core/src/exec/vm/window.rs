@@ -1270,7 +1270,7 @@ impl WindowRun {
 				}
 				match (&state.sum, spec.function) {
 					(None, _) => Value::Null,
-					(Some(sum), WindowFunction::Avg) => mean(sum, state.count),
+					(Some(sum), WindowFunction::Avg) => mean(sum, state.count)?,
 					(Some(sum), _) => Value::Number(sum.clone()),
 				}
 			}
@@ -1444,10 +1444,16 @@ fn bucket(index: u64, size: u64, buckets: u64) -> u64 {
 	}
 }
 
-/// The mean of `count` values whose sum is `sum`: a float, whatever the values' kind, as the
-/// `math::mean` aggregate answers, so integers do not divide as integers.
-fn mean(sum: &Number, count: u64) -> Value {
-	Value::Number(Number::Float(sum.to_float() / count as f64))
+/// The mean of `count` values whose sum is `sum`, as the `math::mean` aggregate answers: a float,
+/// whatever the values' kind, so integers do not divide as integers, except that a sum which
+/// reached a bigdecimal has an exact mean, a bigdecimal rounded half away from zero.
+fn mean(sum: &Number, count: u64) -> FlowResult<Value> {
+	Ok(Value::Number(if let Number::BigDecimal(sum) = sum {
+		let count = surrealdb_types::BigDecimal::from(count);
+		Number::BigDecimal(Box::new(sum.div_default(&count).map_err(|e| err(e.into()))?))
+	} else {
+		Number::Float(sum.to_float() / count as f64)
+	}))
 }
 
 fn count_value(n: u64) -> Value {

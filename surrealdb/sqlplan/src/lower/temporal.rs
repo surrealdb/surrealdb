@@ -88,7 +88,7 @@ pub(crate) fn static_type(expr: &BoundExpr, dialect: SqlDialect) -> SqlType {
 
 /// The type a cast to the SQL type `target` produces. MySQL `TIME` is an interval and
 /// `DATETIME` a timestamp.
-fn cast_type(target: &str, dialect: SqlDialect) -> SqlType {
+pub(crate) fn cast_type(target: &str, dialect: SqlDialect) -> SqlType {
 	let lower = target.to_ascii_lowercase();
 	let base = lower.split('(').next().unwrap_or(&lower).trim();
 	if dialect == SqlDialect::MySql {
@@ -103,7 +103,7 @@ fn cast_type(target: &str, dialect: SqlDialect) -> SqlType {
 }
 
 /// The SQL type name a cast to `ty` is written with in `dialect`.
-fn cast_name(ty: SqlType, dialect: SqlDialect) -> &'static str {
+pub(crate) fn cast_name(ty: SqlType, dialect: SqlDialect) -> &'static str {
 	match (ty, dialect) {
 		(SqlType::Date, _) => "date",
 		(SqlType::Time | SqlType::Timetz, SqlDialect::Postgres) => "time",
@@ -202,6 +202,58 @@ pub(crate) fn promoted_operands(
 	None
 }
 
+/// The operands of a test that compares a value with several others at once (`BETWEEN`, `IN`)
+/// with the conversions the dialect applies written as casts, or `None` when it applies none.
+///
+/// - Operands that are dates and timestamps of different widths are cast to the widest.
+/// - A text literal among them is cast to the temporal type of the other operands: the widest
+///   instant type if there is one, else the first date, time or interval type.
+pub(crate) fn promoted_group(
+	operands: &[&BoundExpr],
+	dialect: SqlDialect,
+) -> Option<Vec<BoundExpr>> {
+	let types: Vec<SqlType> = operands.iter().map(|expr| static_type(expr, dialect)).collect();
+	let widest = types
+		.iter()
+		.copied()
+		.filter(|ty| instant_rank(*ty).is_some())
+		.max_by_key(|ty| instant_rank(*ty));
+	let literal_type = widest.or_else(|| types.iter().copied().find(|ty| ty.is_temporal()))?;
+	let mut changed = false;
+	let promoted = operands
+		.iter()
+		.zip(&types)
+		.map(|(expr, ty)| {
+			let target = if is_text_literal(expr) {
+				Some(literal_type)
+			} else {
+				match (widest, instant_rank(*ty)) {
+					(Some(wide), Some(rank)) if instant_rank(wide) > Some(rank) => Some(wide),
+					_ => None,
+				}
+			};
+			match target.filter(|target| !cast_name(*target, dialect).is_empty()) {
+				Some(target) => {
+					changed = true;
+					cast(expr, target, dialect)
+				}
+				None => (*expr).clone(),
+			}
+		})
+		.collect();
+	changed.then_some(promoted)
+}
+
+/// The operand at `index` of the promoted operands [`promoted_group`] answered, or `original`
+/// when it answered none.
+pub(crate) fn operand_at<'a>(
+	promoted: &'a Option<Vec<BoundExpr>>,
+	index: usize,
+	original: &'a BoundExpr,
+) -> &'a BoundExpr {
+	promoted.as_ref().map_or(original, |operands| &operands[index])
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -289,6 +341,21 @@ mod tests {
 			promoted_operands(&cast_to("datetime"), BoundBinaryOp::Equal, &text("2024-01-01"), my)
 				.expect("a cast");
 		assert_eq!(static_type(&r, my), SqlType::Timestamp);
+	}
+
+	#[test]
+	fn operands_tested_together_are_promoted_to_the_widest_instant() {
+		let pg = SqlDialect::Postgres;
+		let date = cast_to("date");
+		let wide = cast_to("timestamptz");
+		let operands =
+			promoted_group(&[&date, &wide, &text("2024-01-01")], pg).expect("a promotion");
+		assert_eq!(operands.len(), 3);
+		for operand in &operands {
+			assert_eq!(static_type(operand, pg), SqlType::TimestampTz);
+		}
+		assert!(promoted_group(&[&date, &date], pg).is_none());
+		assert!(promoted_group(&[&text("a"), &text("b")], pg).is_none());
 	}
 
 	#[test]

@@ -123,24 +123,31 @@ fn store(declared: &DeclaredSqlType, value: Value, column: &str) -> Result<Value
 				// A float is owned by an unsigned type, which refuses a negative one, and by a
 				// MySQL floating-point type; MySQL refuses NaN and the infinities in either.
 				Number::Float(float) => {
-					return check_float(
-						declared,
-						float.is_finite(),
-						float < 0.0,
-						Number::Float(float),
-					)
-					.map(Value::Number)
-					.map_err(|violation| in_dialect(declared, column, violation));
+					return fit_float(declared, float)
+						.and_then(|float| {
+							check_float(
+								declared,
+								float.is_finite(),
+								float < 0.0,
+								Number::Float(float),
+							)
+						})
+						.map(Value::Number)
+						.map_err(|violation| in_dialect(declared, column, violation));
 				}
 				Number::F32(float) => {
-					return check_float(
-						declared,
-						float.is_finite(),
-						float < 0.0,
-						Number::F32(float),
-					)
-					.map(Value::Number)
-					.map_err(|violation| in_dialect(declared, column, violation));
+					return fit_float(declared, f64::from(float))
+						.and_then(|fitted| {
+							let float = fitted as f32;
+							check_float(
+								declared,
+								float.is_finite(),
+								float < 0.0,
+								Number::F32(float),
+							)
+						})
+						.map(Value::Number)
+						.map_err(|violation| in_dialect(declared, column, violation));
 				}
 				Number::F16(float) => {
 					return check_float(
@@ -252,6 +259,41 @@ fn is_mysql_float(declared: &DeclaredSqlType) -> bool {
 		)
 }
 
+/// The display width `M` and decimals `D` of a MySQL `FLOAT(M,D)` or `DOUBLE(M,D)`.
+fn mysql_float_digits(declared: &DeclaredSqlType) -> Option<(u32, u32)> {
+	if !is_mysql_float(declared) {
+		return None;
+	}
+	let modifiers = declared.modifiers();
+	let width = modifiers.first()?.parse::<u32>().ok()?;
+	let decimals = modifiers.get(1)?.parse::<u32>().ok()?;
+	(decimals <= width).then_some((width, decimals))
+}
+
+/// A float rounded half away from zero to the `D` decimals of a MySQL `FLOAT(M,D)` or
+/// `DOUBLE(M,D)`, and refused when its magnitude reaches `10^(M-D)`, which the `M - D` integer
+/// digits cannot hold. Any other float, and a NaN or infinity, is returned as it is.
+fn fit_float(declared: &DeclaredSqlType, value: f64) -> Result<f64, TypeViolation> {
+	let Some((width, decimals)) = mysql_float_digits(declared) else {
+		return Ok(value);
+	};
+	if !value.is_finite() {
+		return Ok(value);
+	}
+	let overflow = || TypeViolation {
+		code: NUMERIC_OVERFLOW,
+		message: "numeric field overflow".to_string(),
+	};
+	let decimals = i32::try_from(decimals).map_err(|_| overflow())?;
+	let integer_digits = i32::try_from(width).map_err(|_| overflow())? - decimals;
+	let scale = 10f64.powi(decimals);
+	let rounded = (value * scale).round() / scale;
+	if !rounded.is_finite() || rounded.abs() >= 10f64.powi(integer_digits) {
+		return Err(overflow());
+	}
+	Ok(rounded)
+}
+
 /// A float owned by a MySQL `unsigned` or floating-point type: refused when it is NaN or infinite,
 /// which MySQL does not store, or negative under `unsigned`.
 fn check_float<T>(
@@ -322,6 +364,23 @@ fn fit_bigdecimal(
 		return Ok(value.clone());
 	};
 	let rounded = value.round(scale).map_err(|_| overflow())?;
+	let allowed = i64::try_from(precision).unwrap_or(i64::MAX).saturating_sub(scale);
+	if allowed < 0 {
+		// A scale beyond the precision leaves no integer digits and `-allowed` leading zeros of
+		// the fraction: the value must stay below `10^allowed` in magnitude.
+		let limit = usize::try_from(-allowed)
+			.ok()
+			.and_then(|zeros| format!("0.{}1", "0".repeat(zeros - 1)).parse::<BigDecimal>().ok());
+		let within = match limit {
+			Some(limit) => rounded.abs() < limit,
+			None => rounded.is_zero(),
+		};
+		return if within {
+			Ok(rounded)
+		} else {
+			Err(overflow())
+		};
+	}
 	let integer = rounded.trunc(0).map_err(|_| overflow())?;
 	let integer_digits = if integer.is_zero() {
 		0
@@ -329,7 +388,6 @@ fn fit_bigdecimal(
 		integer.abs().to_string().len()
 	};
 	let integer_digits = i64::try_from(integer_digits).unwrap_or(i64::MAX);
-	let allowed = i64::try_from(precision).unwrap_or(i64::MAX).saturating_sub(scale);
 	if integer_digits > allowed {
 		return Err(overflow());
 	}
@@ -386,9 +444,26 @@ fn check_dynamodb_number(value: &BigDecimal) -> Result<(), TypeViolation> {
 
 /// Refuse a decimal whose integer digits exceed `precision - scale`.
 fn check_integer_digits(decimal: Decimal, precision: u64, scale: i64) -> Result<(), TypeViolation> {
+	let allowed = i64::try_from(precision).unwrap_or(i64::MAX).saturating_sub(scale);
+	if allowed < 0 {
+		// A scale beyond the precision leaves no integer digits and `-allowed` leading zeros of
+		// the fraction: the value must stay below `10^allowed` in magnitude.
+		let within =
+			match u32::try_from(-allowed).ok().and_then(|zeros| Decimal::try_new(1, zeros).ok()) {
+				Some(limit) => decimal.abs() < limit,
+				None => decimal.is_zero(),
+			};
+		return if within {
+			Ok(())
+		} else {
+			Err(TypeViolation {
+				code: NUMERIC_OVERFLOW,
+				message: "numeric field overflow".to_string(),
+			})
+		};
+	}
 	let integer = decimal.trunc().abs().to_string();
 	let digits = integer.split('.').next().unwrap_or("");
-	let allowed = i64::try_from(precision).unwrap_or(i64::MAX).saturating_sub(scale);
 	let significant = if digits == "0" {
 		0
 	} else {

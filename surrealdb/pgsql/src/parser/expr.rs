@@ -656,17 +656,37 @@ impl<'a> Parser<'a> {
 			};
 			// gram.y: c_expr: '(' a_expr ')' opt_indirection, where `.name` selects a field of a
 			// composite value.
-			while self.eat(&TokenKind::Dot)? {
-				let (field, field_span) = self.parse_col_label()?;
-				let span = expr.span().merge(field_span);
-				expr = Expr::FieldSelect {
-					expr: Box::new(expr),
-					field,
-					span,
-				};
-			}
+			let mut entered: u32 = 0;
+			let res = self.parse_field_selects(&mut expr, &mut entered);
+			self.leave_recursion_by(entered);
+			res?;
 			Ok(expr)
 		}
+	}
+
+	/// The `.field` selections that follow a parenthesised expression, each wrapping `expr`.
+	/// Every selection deepens the tree, so each one counts against the recursion limit; the
+	/// caller releases the `entered` levels it holds.
+	fn parse_field_selects(&mut self, expr: &mut Expr, entered: &mut u32) -> ParseResult<()> {
+		while self.eat(&TokenKind::Dot)? {
+			self.enter_recursion(self.peek().span)?;
+			*entered += 1;
+			let (field, field_span) = self.parse_col_label()?;
+			let span = expr.span().merge(field_span);
+			let inner = std::mem::replace(
+				expr,
+				Expr::Row {
+					fields: Vec::new(),
+					span,
+				},
+			);
+			*expr = Expr::FieldSelect {
+				expr: Box::new(inner),
+				field,
+				span,
+			};
+		}
+		Ok(())
 	}
 
 	/// An `ARRAY[...]` constructor or an `ARRAY(subquery)`. Out of line so the frame of
@@ -1211,6 +1231,7 @@ impl<'a> Parser<'a> {
 				name.span = end_span;
 				last_mut.push_str(" precision");
 			} else if (last_mut.eq_ignore_ascii_case("character")
+				|| last_mut.eq_ignore_ascii_case("char")
 				|| last_mut.eq_ignore_ascii_case("bit"))
 				&& let Some(tok_text) = self.peek().span.slice(self.src())
 				&& tok_text.eq_ignore_ascii_case("varying")
@@ -1218,6 +1239,11 @@ impl<'a> Parser<'a> {
 				let var_tok = self.bump()?;
 				end_span = end_span.merge(var_tok.span);
 				name.span = end_span;
+				// `CHAR VARYING` is `CHARACTER VARYING`.
+				if last_mut.eq_ignore_ascii_case("char") {
+					last_mut.clear();
+					last_mut.push_str("character");
+				}
 				last_mut.push_str(" varying");
 			}
 		}
@@ -1225,9 +1251,16 @@ impl<'a> Parser<'a> {
 		// Check for modifiers e.g. `(255)` or `(10, 2)`
 		if self.eat(&TokenKind::LParen)? {
 			while self.peek().kind != TokenKind::RParen {
+				// A numeric scale may be negative (`numeric(5,-2)`).
+				let sign = if self.peek().kind == TokenKind::Operator("-") {
+					self.bump()?;
+					"-"
+				} else {
+					""
+				};
 				let tok = self.bump()?;
 				let mod_str = tok.span.slice(self.src()).unwrap_or("");
-				modifiers.push(mod_str.to_string());
+				modifiers.push(format!("{sign}{mod_str}"));
 				if !self.eat(&TokenKind::Comma)? {
 					break;
 				}
@@ -1294,6 +1327,26 @@ impl<'a> Parser<'a> {
 				if let Some(last) = name.parts.last_mut() {
 					last.push_str(suffix);
 				}
+			}
+		}
+
+		// `integer ARRAY` and `integer ARRAY[4]` are the array types `integer[]` and
+		// `integer[4]`.
+		if self.peek().kind == TokenKind::Keyword(Keyword::Array) {
+			let array_tok = self.bump()?;
+			end_span = end_span.merge(array_tok.span);
+			if self.eat(&TokenKind::LBracket)? {
+				let bound = if let TokenKind::Integer(n) = self.peek().kind {
+					self.bump()?;
+					Some(n)
+				} else {
+					None
+				};
+				let r_bracket = self.expect(&TokenKind::RBracket, "']'")?;
+				end_span = end_span.merge(r_bracket.span);
+				array_bounds.push(bound);
+			} else {
+				array_bounds.push(None);
 			}
 		}
 

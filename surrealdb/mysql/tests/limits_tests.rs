@@ -165,3 +165,15 @@ fn test_number_validation_rejected() {
 	assert!(parse_expr("0xZZ").is_err());
 	assert!(parse_expr("123abc").is_err());
 }
+
+#[test]
+fn test_unsupported_column_attributes_are_refused() {
+	for attribute in
+		["CHARACTER SET utf8mb4", "CHARSET utf8mb4", "COLLATE utf8mb4_bin", "SRID 4326"]
+	{
+		let sql = format!("CREATE TABLE t (c VARCHAR(10) {attribute})");
+		let err = parse_statement(&sql).expect_err("the attribute must be refused");
+		assert!(matches!(err.kind, ErrorKind::Custom(_)), "{attribute}: {err:?}");
+	}
+	assert!(parse_statement("CREATE TABLE t (c VARCHAR(10) NOT NULL)").is_ok());
+}

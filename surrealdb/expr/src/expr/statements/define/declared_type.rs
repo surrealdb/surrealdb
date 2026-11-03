@@ -356,7 +356,8 @@ impl DeclaredSqlType {
 	}
 
 	/// The maximum length the type admits, if it has one. A PostgreSQL `char` without a length is
-	/// `char(1)`, and a MySQL `TEXT` without one is the 64 KiB limit.
+	/// `char(1)`, a `bpchar` without one is unbounded, and a MySQL `TEXT` without one is the 64 KiB
+	/// limit.
 	pub fn max_length(&self) -> Option<Length> {
 		if !self.array_dimensions.is_empty() {
 			return None;
@@ -384,9 +385,9 @@ impl DeclaredSqlType {
 			(SqlTypeDialect::PostgreSql, "varchar" | "character varying") => {
 				modifier.and_then(chars)
 			}
-			(SqlTypeDialect::PostgreSql, "char" | "character" | "bpchar") => {
-				chars(modifier.unwrap_or(1))
-			}
+			(SqlTypeDialect::PostgreSql, "char" | "character") => chars(modifier.unwrap_or(1)),
+			// A `bpchar` without a length is unbounded.
+			(SqlTypeDialect::PostgreSql, "bpchar") => modifier.and_then(chars),
 			(SqlTypeDialect::PostgreSql, "bit") => bits(modifier.unwrap_or(1)),
 			(SqlTypeDialect::PostgreSql, "varbit" | "bit varying") => modifier.and_then(bits),
 			(SqlTypeDialect::MySql, "char" | "nchar" | "national char" | "national character") => {
@@ -403,9 +404,9 @@ impl DeclaredSqlType {
 				| "national character varying",
 			) => modifier.and_then(chars),
 			(SqlTypeDialect::MySql, "tinytext") => bytes(255),
-			// `TEXT(n)` and `BLOB(n)` pick the smallest class that holds `n` bytes, and hold
-			// what that class holds.
-			(SqlTypeDialect::MySql, "text") => bytes(storage_class(modifier)),
+			// `BLOB(n)` picks the smallest class that holds `n` bytes, and `TEXT(n)` the smallest
+			// that holds `n` characters of four bytes each; the column holds what that class holds.
+			(SqlTypeDialect::MySql, "text") => bytes(text_storage_class(modifier)),
 			(SqlTypeDialect::MySql, "mediumtext") => bytes(16_777_215),
 			(SqlTypeDialect::MySql, "longtext") => bytes(4_294_967_295),
 			(SqlTypeDialect::MySql, "binary") => bytes(modifier.unwrap_or(1)),
@@ -425,7 +426,8 @@ impl DeclaredSqlType {
 			return Padding::None;
 		}
 		match (self.dialect, self.base.as_str()) {
-			(SqlTypeDialect::PostgreSql, "char" | "character" | "bpchar") => Padding::Blank,
+			(SqlTypeDialect::PostgreSql, "char" | "character") => Padding::Blank,
+			(SqlTypeDialect::PostgreSql, "bpchar") if !self.modifiers.is_empty() => Padding::Blank,
 			(SqlTypeDialect::MySql, "binary") => Padding::Zero,
 			_ => Padding::None,
 		}
@@ -519,8 +521,9 @@ impl DeclaredSqlType {
 
 	/// Check a text value against the declared length. A text longer than a character length
 	/// (`char(n)`, `varchar(n)` and their MySQL forms) whose excess is all spaces drops the excess
-	/// and is accepted, as both dialects store it; any other excess is an error. A MySQL `CHAR(n)`
-	/// drops every trailing space, as MySQL reads a `CHAR` value back. A MySQL `TEXT` family limit
+	/// and is accepted, as both dialects store it; any other excess is an error. A `CHAR(n)` of
+	/// either dialect drops every trailing space, which is insignificant in it, so `'ab'` and
+	/// `'ab '` are one value. A MySQL `TEXT` family limit
 	/// counts bytes. `column` names the column in MySQL's message.
 	pub fn check_text<'a>(
 		&self,
@@ -534,7 +537,7 @@ impl DeclaredSqlType {
 			LengthUnit::Chars => {
 				let limit = usize::try_from(length.max).unwrap_or(usize::MAX);
 				let mut kept = value;
-				if self.dialect == SqlTypeDialect::MySql && self.base_is_fixed_width_text() {
+				if self.base_is_fixed_width_text() {
 					kept = kept.trim_end_matches(' ');
 				}
 				let mut count = kept.chars().count();
@@ -891,6 +894,15 @@ pub fn storage_class(modifier: Option<u64>) -> u64 {
 	}
 }
 
+/// The bytes a `character` of a MySQL `TEXT(n)` is sized as: the widest character of `utf8mb4`.
+const MYSQL_BYTES_PER_CHARACTER: u64 = 4;
+
+/// [`storage_class`] of a MySQL `TEXT(n)`, whose `n` counts characters: the class that holds `n`
+/// characters of [`MYSQL_BYTES_PER_CHARACTER`] bytes.
+pub fn text_storage_class(modifier: Option<u64>) -> u64 {
+	storage_class(modifier.map(|n| n.saturating_mul(MYSQL_BYTES_PER_CHARACTER)))
+}
+
 /// Lower case, with each run of whitespace collapsed to one space and none at either end. A
 /// quoted literal, such as an `ENUM` or `SET` member, is kept as written: its case and spacing are
 /// its value.
@@ -1071,10 +1083,15 @@ mod tests {
 		let max = |text: &str| {
 			DeclaredSqlType::parse(SqlTypeDialect::MySql, text).unwrap().max_length().unwrap().max
 		};
+		// `TEXT(n)` counts characters of four bytes.
 		assert_eq!(max("text(10)"), 255);
-		assert_eq!(max("text(255)"), 255);
-		assert_eq!(max("text(256)"), 65_535);
+		assert_eq!(max("text(63)"), 255);
+		assert_eq!(max("text(64)"), 65_535);
+		assert_eq!(max("text(16383)"), 65_535);
+		assert_eq!(max("text(16384)"), 16_777_215);
 		assert_eq!(max("text"), 65_535);
+		assert_eq!(max("blob(255)"), 255);
+		assert_eq!(max("blob(256)"), 65_535);
 		assert_eq!(max("blob(70000)"), 16_777_215);
 		assert_eq!(max("blob(16777216)"), 4_294_967_295);
 	}
@@ -1214,6 +1231,7 @@ mod tests {
 		assert_eq!(pg("character varying(7)").max_length(), chars(7));
 		assert_eq!(pg("char").max_length(), chars(1));
 		assert_eq!(pg("bpchar(4)").max_length(), chars(4));
+		assert_eq!(pg("bpchar").max_length(), None);
 		assert_eq!(pg("text").max_length(), None);
 		assert_eq!(pg("varchar(4)[]").max_length(), None);
 		assert_eq!(my("varchar(20)").max_length(), chars(20));
@@ -1275,7 +1293,8 @@ mod tests {
 	#[test]
 	fn padding_is_blank_for_pg_char_and_zero_for_mysql_binary() {
 		assert_eq!(pg("char(3)").padded(), Padding::Blank);
-		assert_eq!(pg("bpchar").padded(), Padding::Blank);
+		assert_eq!(pg("bpchar(3)").padded(), Padding::Blank);
+		assert_eq!(pg("bpchar").padded(), Padding::None);
 		assert_eq!(pg("varchar(3)").padded(), Padding::None);
 		assert_eq!(my("binary(3)").padded(), Padding::Zero);
 		assert_eq!(my("varbinary(3)").padded(), Padding::None);
@@ -1335,7 +1354,7 @@ mod tests {
 	#[test]
 	fn check_text_drops_trailing_spaces_of_a_char_beyond_its_length() {
 		let ty = pg("char(3)");
-		assert_eq!(ty.check_text("ab ", "c").unwrap(), "ab ", "a space within the length is kept");
+		assert_eq!(ty.check_text("ab ", "c").unwrap(), "ab", "a trailing space is insignificant");
 		assert_eq!(ty.check_text("abc", "c").unwrap(), "abc");
 		assert_eq!(ty.check_text("abc  ", "c").unwrap(), "abc");
 		let err = ty.check_text("abcd", "c").unwrap_err();

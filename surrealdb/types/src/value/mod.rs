@@ -542,6 +542,8 @@ impl Value {
 	/// ISO 8601 text. Every other value is returned unchanged.
 	pub fn degrade_temporal(&self) -> Value {
 		match self {
+			Value::Date(v) if *v == Date::infinity() => Value::Datetime(Datetime::MAX_UTC),
+			Value::Date(v) if *v == Date::neg_infinity() => Value::Datetime(Datetime::MIN_UTC),
 			Value::Date(v) => {
 				Value::Datetime(Datetime(v.into_inner().and_time(chrono::NaiveTime::MIN).and_utc()))
 			}

@@ -1282,15 +1282,16 @@ pub fn lower_pgsql_alter_table_with(
 						domain.name
 					)));
 				}
-				let field_def = DefineFieldStatement {
-					name: Expr::Idiom(Idiom::field(name.as_str())),
-					what: Expr::Table(TableName::from(tbl_name)),
-					field_kind: Some(map_pgsql_type_in(data_type, catalog)),
-					kind: DefineKind::Overwrite,
-					sql_type: Some(pgsql_declared_type(data_type)?),
-					..Default::default()
-				};
-				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
+				// ALTER FIELD changes the type alone, so the column keeps its DEFAULT, its
+				// assertion and its permissions. A column that took NULL keeps taking it.
+				let not_null = staged
+					.column_shape(schema.as_deref(), tbl_name, name)
+					.and_then(|shape| shape.kind)
+					.is_some_and(|kind| !kind_admits_none(&kind));
+				let mut field = alter_column(tbl_name, name);
+				field.kind = AlterKind::Set(column_kind(data_type, not_null, catalog));
+				field.sql_type = AlterKind::Set(pgsql_declared_type(data_type)?);
+				exprs.push(alter_field(field));
 			}
 			AlterTableAction::SetDefault {
 				column,
@@ -1892,17 +1893,14 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 				..
 			} => {
 				for col in columns {
-					let field_def = DefineFieldStatement {
-						name: Expr::Idiom(Idiom::field(col.as_str())),
-						what: Expr::Table(TableName::from(tbl_name)),
-						reference: Some(Reference {
-							on_delete: ReferenceDeleteStrategy::Reject,
-							materialize: None,
-						}),
-						kind: DefineKind::Overwrite,
-						..Default::default()
-					};
-					exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
+					// ALTER FIELD adds the reference to the column the table defines, which keeps
+					// its type, default and assertion.
+					let mut field = alter_column(tbl_name, col);
+					field.reference = AlterKind::Set(Reference {
+						on_delete: ReferenceDeleteStrategy::Reject,
+						materialize: None,
+					});
+					exprs.push(alter_field(field));
 				}
 			}
 		}

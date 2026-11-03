@@ -789,22 +789,14 @@ fn float32_text(f: f32) -> Vec<u8> {
 	float32_display(f).into_bytes()
 }
 
-/// Render a float for a `numeric` column. Non-finite values fall back to
-/// `NaN`, matching how Postgres stores a non-finite numeric.
+/// Render a float for a `numeric` column. A `numeric` holds `NaN`, `Infinity` and `-Infinity`,
+/// which are rendered as a float renders them.
 fn numeric_float_text(f: f64) -> Vec<u8> {
-	if f.is_finite() {
-		float_display(f).into_bytes()
-	} else {
-		b"NaN".to_vec()
-	}
+	float_display(f).into_bytes()
 }
 
 fn numeric_float32_text(f: f32) -> Vec<u8> {
-	if f.is_finite() {
-		float32_display(f).into_bytes()
-	} else {
-		b"NaN".to_vec()
-	}
+	float32_display(f).into_bytes()
 }
 
 /// Render a duration in the Postgres default interval output style, e.g.
@@ -850,12 +842,52 @@ fn parse_time(text: &str) -> Option<chrono::NaiveTime> {
 	if let Some(pos) = clean.rfind(['+', '-']).filter(|&p| p > 0) {
 		clean = &clean[..pos];
 	}
-	for fmt in ["%H:%M:%S%.f", "%H:%M:%S"] {
+	for fmt in ["%H:%M:%S%.f", "%H:%M:%S", "%H:%M"] {
 		if let Ok(t) = chrono::NaiveTime::parse_from_str(clean.trim(), fmt) {
 			return Some(t);
 		}
 	}
 	None
+}
+
+/// The seconds of a zone offset written without its sign: `h`, `hh`, `hhmm`, `hhmmss`, or the
+/// colon forms `hh:mm` and `hh:mm:ss`. PostgreSQL accepts offsets up to 15:59:59.
+fn parse_zone_offset(text: &str) -> Option<i32> {
+	let two = |part: &str| -> Option<i32> {
+		if part.len() == 2 && part.bytes().all(|b| b.is_ascii_digit()) {
+			part.parse().ok()
+		} else {
+			None
+		}
+	};
+	let (hours, minutes, seconds) = if text.contains(':') {
+		let mut parts = text.split(':');
+		let hours = parts.next()?;
+		let minutes = parts.next()?;
+		let seconds = parts.next();
+		if parts.next().is_some() {
+			return None;
+		}
+		let hours = if hours.len() == 1 {
+			hours.parse::<i32>().ok()?
+		} else {
+			two(hours)?
+		};
+		(hours, two(minutes)?, seconds.map(two).unwrap_or(Some(0))?)
+	} else if !text.bytes().all(|b| b.is_ascii_digit()) {
+		return None;
+	} else {
+		match text.len() {
+			1 | 2 => (text.parse().ok()?, 0, 0),
+			4 => (two(&text[..2])?, two(&text[2..])?, 0),
+			6 => (two(&text[..2])?, two(&text[2..4])?, two(&text[4..])?),
+			_ => return None,
+		}
+	};
+	if hours > 15 || minutes > 59 || seconds > 59 {
+		return None;
+	}
+	Some(hours * 3600 + minutes * 60 + seconds)
 }
 
 fn parse_timetz(text: &str) -> Option<(chrono::NaiveTime, i32)> {
@@ -867,16 +899,7 @@ fn parse_timetz(text: &str) -> Option<(chrono::NaiveTime, i32)> {
 		} else {
 			1
 		};
-		let op_val = op.trim_start_matches(['+', '-']);
-		let secs = if let Some((h, m)) = op_val.split_once(':') {
-			let hours: i32 = h.parse().ok()?;
-			let mins: i32 = m.parse().ok()?;
-			sign * (hours * 3600 + mins * 60)
-		} else {
-			let hours: i32 = op_val.parse().ok()?;
-			sign * hours * 3600
-		};
-		(tp, secs)
+		(tp, sign * parse_zone_offset(op.trim_start_matches(['+', '-']))?)
 	} else {
 		(clean, 0)
 	};
@@ -1099,12 +1122,15 @@ fn record_text(obj: &surrealdb_types::Object) -> Result<Vec<u8>, PgError> {
 fn push_record_field(out: &mut Vec<u8>, text: &[u8]) -> Result<(), PgError> {
 	let s =
 		std::str::from_utf8(text).map_err(|_| PgError::internal("invalid utf8 in record field"))?;
-	let needs_quotes = s.is_empty() || s.contains(['(', ')', ',', '"', '\\', ' ', '\t']);
+	let needs_quotes = s.is_empty()
+		|| s.contains(['(', ')', ',', '"', '\\'])
+		|| s.chars().any(char::is_whitespace);
 	if needs_quotes {
 		out.push(b'"');
 		for b in s.bytes() {
+			// A quote or a backslash is doubled, as `record_out` writes it.
 			if b == b'"' || b == b'\\' {
-				out.push(b'\\');
+				out.push(b);
 			}
 			out.push(b);
 		}
@@ -1610,13 +1636,14 @@ fn bigdecimal_binary(d: &surrealdb_types::BigDecimal) -> Result<Vec<u8>, PgError
 
 /// Encode a decimal string (e.g. `-123.45`, `0.001`, `42`) into the Postgres
 /// `numeric` binary wire format: ndigits, weight, sign, dscale, then the
-/// base-10000 digit groups (most significant first). Non-finite forms
-/// (`NaN`/`Infinity`) fall back to the NaN sign, matching how Postgres stores
-/// a non-finite numeric.
+/// base-10000 digit groups (most significant first). `NaN`, `Infinity` and
+/// `-Infinity` are written with the sign word Postgres uses for each.
 fn encode_numeric_binary(s: &str) -> Vec<u8> {
 	const NUMERIC_POS: u16 = 0x0000;
 	const NUMERIC_NEG: u16 = 0x4000;
 	const NUMERIC_NAN: u16 = 0xC000;
+	const NUMERIC_PINF: u16 = 0xD000;
+	const NUMERIC_NINF: u16 = 0xF000;
 
 	let mut out = Vec::new();
 	let mut emit = |ndigits: i16, weight: i16, sign: u16, dscale: i16, digits: &[i16]| {
@@ -1630,8 +1657,17 @@ fn encode_numeric_binary(s: &str) -> Vec<u8> {
 	};
 
 	let lower = s.to_ascii_lowercase();
-	if lower.contains("nan") || lower.contains("inf") {
+	if lower.contains("nan") {
 		emit(0, 0, NUMERIC_NAN, 0, &[]);
+		return out;
+	}
+	if lower.contains("inf") {
+		let sign = if lower.starts_with('-') {
+			NUMERIC_NINF
+		} else {
+			NUMERIC_PINF
+		};
+		emit(0, 0, sign, 0, &[]);
 		return out;
 	}
 
@@ -1687,6 +1723,45 @@ fn encode_numeric_binary(s: &str) -> Vec<u8> {
 	};
 	emit(digits.len() as i16, weight as i16, sign, dscale, &digits);
 	out
+}
+
+/// A decoded temporal parameter, declared as `declared`, as the value of the temporal type
+/// `target` it is compared with or stored into, so it matches the values of a column of that
+/// type. A `date` becomes the midnight of its day and a `timestamp` and a `timestamptz` convert
+/// as PostgreSQL converts them with a UTC session zone. Any other value or pair of types is
+/// returned as it is, and a conversion down to a `date` is never made, since it would drop the
+/// time of day a comparison uses.
+pub(super) fn coerce_temporal_param(value: Value, declared: i32, target: i32) -> Value {
+	let temporal = |oid: i32| matches!(oid, OID_DATE | OID_TIMESTAMP | OID_TIMESTAMPTZ);
+	if declared == target || !temporal(declared) || !temporal(target) {
+		return value;
+	}
+	let midnight = |date: Date| date.into_inner().and_time(chrono::NaiveTime::MIN);
+	match (value, target) {
+		(Value::Timestamp(t), OID_TIMESTAMPTZ) => {
+			Value::Datetime(Datetime::from(t.into_inner().and_utc()))
+		}
+		(Value::Date(d), OID_TIMESTAMP) if d.is_infinite() => {
+			Value::Timestamp(if d == Date::infinity() {
+				Timestamp::infinity()
+			} else {
+				Timestamp::neg_infinity()
+			})
+		}
+		(Value::Date(d), OID_TIMESTAMPTZ) if d.is_infinite() => {
+			Value::Datetime(if d == Date::infinity() {
+				Datetime::MAX_UTC
+			} else {
+				Datetime::MIN_UTC
+			})
+		}
+		(Value::Date(d), OID_TIMESTAMP) => Value::Timestamp(Timestamp::from(midnight(d))),
+		(Value::Date(d), OID_TIMESTAMPTZ) => Value::Datetime(Datetime::from(midnight(d).and_utc())),
+		(Value::Datetime(dt), OID_TIMESTAMP) => {
+			Value::Timestamp(Timestamp::from(dt.into_inner().naive_utc()))
+		}
+		(other, _) => other,
+	}
 }
 
 /// Decode one Bind parameter into a [`Value`]. `format` is 0 (text) or 1
@@ -2071,8 +2146,19 @@ fn decode_numeric_binary(bytes: &[u8], oid: i32) -> Result<Value, PgError> {
 	let ndigits = rd16(0);
 	let weight = rd16(2);
 	let sign = u16::from_be_bytes([bytes[4], bytes[5]]);
-	if sign == 0xC000 || sign == 0xD000 || sign == 0xF000 {
+	if sign == 0xC000 {
 		return Err(param_err(oid, "NaN is not representable"));
+	}
+	if sign == 0xD000 || sign == 0xF000 {
+		if ndigits != 0 {
+			return Err(param_err(oid, "a non-finite numeric has no digits"));
+		}
+		let infinity = if sign == 0xD000 {
+			f64::INFINITY
+		} else {
+			f64::NEG_INFINITY
+		};
+		return Ok(Value::Number(Number::Float(infinity)));
 	}
 	if sign != 0x0000 && sign != 0x4000 {
 		return Err(param_err(oid, "invalid numeric sign"));
@@ -3078,6 +3164,82 @@ mod tests {
 	}
 
 	#[test]
+	fn temporal_params_take_the_type_they_are_compared_with() {
+		let ts = Value::Timestamp("2024-01-15T12:34:56".parse().unwrap());
+		let tz = coerce_temporal_param(ts.clone(), OID_TIMESTAMP, OID_TIMESTAMPTZ);
+		assert_eq!(tz, Value::Datetime("2024-01-15T12:34:56Z".parse().unwrap()));
+		assert_eq!(coerce_temporal_param(tz, OID_TIMESTAMPTZ, OID_TIMESTAMP), ts);
+		let date = Value::Date(Date::from(chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()));
+		assert_eq!(
+			coerce_temporal_param(date.clone(), OID_DATE, OID_TIMESTAMP),
+			Value::Timestamp("2024-01-15T00:00:00".parse().unwrap())
+		);
+		assert_eq!(
+			coerce_temporal_param(date.clone(), OID_DATE, OID_TIMESTAMPTZ),
+			Value::Datetime("2024-01-15T00:00:00Z".parse().unwrap())
+		);
+		assert_eq!(
+			coerce_temporal_param(Value::Date(Date::infinity()), OID_DATE, OID_TIMESTAMPTZ),
+			Value::Datetime(Datetime::MAX_UTC)
+		);
+		// No conversion down to a date, and none for a type that is not temporal.
+		assert_eq!(coerce_temporal_param(ts.clone(), OID_TIMESTAMP, OID_DATE), ts);
+		assert_eq!(coerce_temporal_param(date.clone(), OID_DATE, OID_DATE), date);
+		assert_eq!(coerce_temporal_param(int(1), OID_INT8, OID_TIMESTAMP), int(1));
+	}
+
+	#[test]
+	fn a_time_without_seconds_is_a_time() {
+		assert_eq!(
+			decode_text("09:30", OID_TIME).unwrap(),
+			Value::Time(surrealdb_types::Time::from_nanos(34_200_000_000_000).unwrap())
+		);
+	}
+
+	#[test]
+	fn a_timetz_offset_reads_in_every_spelling() {
+		let utc_nanos = |text: &str| {
+			let Value::Time(t) = decode_text(text, OID_TIMETZ).unwrap() else {
+				panic!("expected a time");
+			};
+			t.nanos()
+		};
+		let hour = 3_600_000_000_000u64;
+		let noon = 12 * hour;
+		for offset in ["+0530", "+05:30"] {
+			assert_eq!(utc_nanos(&format!("12:00:00{offset}")), noon - 5 * hour - hour / 2);
+		}
+		assert_eq!(utc_nanos("12:00:00+05"), noon - 5 * hour);
+		assert_eq!(utc_nanos("12:00:00-0530"), noon + 5 * hour + hour / 2);
+		assert!(decode_text("12:00:00+9999999999", OID_TIMETZ).is_err());
+		assert!(decode_text("12:00:00+1600", OID_TIMETZ).is_err());
+	}
+
+	#[test]
+	fn record_fields_double_their_quotes_and_backslashes() {
+		let mut out = Vec::new();
+		push_record_field(&mut out, b"a\"b\\c").unwrap();
+		assert_eq!(out, b"\"a\"\"b\\\\c\"");
+		let mut out = Vec::new();
+		push_record_field(&mut out, b"a\nb").unwrap();
+		assert_eq!(out, b"\"a\nb\"");
+	}
+
+	#[test]
+	fn numeric_binary_infinity_round_trips() {
+		let pos = encode_numeric_binary("Infinity");
+		assert_eq!(
+			decode_param(Some(&pos), OID_NUMERIC, 1).unwrap(),
+			Value::Number(Number::Float(f64::INFINITY))
+		);
+		let neg = encode_numeric_binary("-Infinity");
+		assert_eq!(
+			decode_param(Some(&neg), OID_NUMERIC, 1).unwrap(),
+			Value::Number(Number::Float(f64::NEG_INFINITY))
+		);
+	}
+
+	#[test]
 	fn numeric_binary_nan_is_rejected() {
 		let wire = encode_numeric_binary("NaN");
 		assert!(decode_param(Some(&wire), OID_NUMERIC, 1).is_err());
@@ -3097,10 +3259,12 @@ mod tests {
 	}
 
 	#[test]
-	fn numeric_column_renders_non_finite_as_nan() {
-		// Postgres `numeric` accepts only `NaN` among non-finite forms.
-		assert_eq!(text(Value::Number(Number::Float(f64::INFINITY)), PgType::Numeric), "NaN");
-		assert_eq!(text(Value::Number(Number::Float(f64::NEG_INFINITY)), PgType::Numeric), "NaN");
+	fn numeric_column_renders_non_finite_forms() {
+		assert_eq!(text(Value::Number(Number::Float(f64::INFINITY)), PgType::Numeric), "Infinity");
+		assert_eq!(
+			text(Value::Number(Number::Float(f64::NEG_INFINITY)), PgType::Numeric),
+			"-Infinity"
+		);
 		assert_eq!(text(Value::Number(Number::Float(f64::NAN)), PgType::Numeric), "NaN");
 		// Finite floats still render normally in a numeric column.
 		assert_eq!(text(Value::Number(Number::Float(1.5)), PgType::Numeric), "1.5");

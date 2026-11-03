@@ -361,11 +361,9 @@ pub(crate) fn decode_binary(family: &Family, bytes: &[u8], ty: &PgType) -> Resul
 	match family {
 		Family::Inet | Family::Cidr => {
 			let net = net_binary::decode(bytes).map_err(|error| invalid(ty, error))?;
-			// The header says which type it holds; a `cidr` also has no bits set past its prefix.
+			// The header's own type flag is ignored, as PostgreSQL ignores it and clients leave it
+			// clear; a `cidr` still has no bits set past its prefix, which the text parse checks.
 			let cidr = *family == Family::Cidr;
-			if net.is_cidr != cidr {
-				return Err(invalid(ty, "the network type does not match the parameter"));
-			}
 			let written = format!(
 				"{}/{}",
 				address_text(&net.address).ok_or_else(|| invalid(ty, "bad address"))?,

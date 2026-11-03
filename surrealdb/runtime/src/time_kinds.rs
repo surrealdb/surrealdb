@@ -316,8 +316,15 @@ pub fn make_date((year, month, day): (Number, Number, Number)) -> Result<Value> 
 		int_arg(name, "month", &month)?,
 		int_arg(name, "day", &day)?,
 	);
-	i32::try_from(y)
-		.ok()
+	// A negative year counts years before the common era with no year zero, so -1 is 1 BC, the
+	// astronomical year 0. The year 0 does not exist.
+	let astronomical = match y {
+		0 => None,
+		y if y < 0 => Some(y + 1),
+		y => Some(y),
+	};
+	astronomical
+		.and_then(|y| i32::try_from(y).ok())
 		.zip(u32::try_from(m).ok())
 		.zip(u32::try_from(d).ok())
 		.and_then(|((y, m), d)| NaiveDate::from_ymd_opt(y, m, d))
@@ -464,10 +471,119 @@ fn iso_year(d: NaiveDate) -> i64 {
 	i64::from(d.iso_week().year())
 }
 
-/// The PostgreSQL `extract` field set, over `date`, `time`, `timestamp` and `datetime`.
+/// The interval a value of the interval kinds stands for: a duration is a count of microseconds
+/// with no months or days.
+fn as_interval(name: &str, v: &Value) -> Result<Option<Interval>> {
+	match v {
+		Value::Interval(i) => Ok(Some(*i)),
+		Value::Duration(d) => {
+			let micros = i64::try_from(d.micros())
+				.map_err(|_| invalid(name, "The duration is out of range."))?;
+			Ok(Some(Interval::new(0, 0, micros)))
+		}
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_) => Ok(None),
+	}
+}
+
+/// One field of an interval, as PostgreSQL's `extract` reads it. The calendar fields of a date
+/// are not fields of an interval.
+fn extract_interval(name: &str, f: &str, iv: Interval) -> Result<Value> {
+	const MICROS_PER_SEC: i64 = 1_000_000;
+	const MICROS_PER_MIN: i64 = 60 * MICROS_PER_SEC;
+	const MICROS_PER_HOUR: i64 = 60 * MICROS_PER_MIN;
+	let (months, days, micros) = (i64::from(iv.months), i64::from(iv.days), iv.micros);
+	let (years, month) = (months / 12, months % 12);
+	let int = |v: i64| Ok(Value::from(v));
+	match f {
+		"year" => int(years),
+		"month" => int(month),
+		"day" => int(days),
+		"quarter" => int(month / 3 + 1),
+		"decade" => int(years / 10),
+		"century" => int(years / 100),
+		"millennium" => int(years / 1000),
+		"hour" => int(micros / MICROS_PER_HOUR),
+		"minute" => int((micros / MICROS_PER_MIN) % 60),
+		"second" => Ok(decimal_value(
+			Decimal::from(micros % MICROS_PER_MIN) / Decimal::from(MICROS_PER_SEC),
+		)),
+		"milliseconds" => {
+			Ok(decimal_value(Decimal::from(micros % MICROS_PER_MIN) / Decimal::from(1_000)))
+		}
+		"microseconds" => int(micros % MICROS_PER_MIN),
+		// A year is 365.25 days and a month a twelfth of it.
+		"epoch" => Ok(decimal_value(
+			Decimal::from(31_557_600 * years + 2_629_800 * month + 86_400 * days)
+				+ Decimal::from(micros) / Decimal::from(MICROS_PER_SEC),
+		)),
+		"week" => int(days / 7),
+		"dow" | "isodow" | "doy" | "isoyear" | "julian" => {
+			Err(invalid(name, format!("`{f}` cannot be read from an interval.")))
+		}
+		_ => Err(invalid(name, UNKNOWN_EXTRACT_FIELD)),
+	}
+}
+
+/// Truncates an interval to the start of `unit`, as PostgreSQL's `date_trunc`.
+fn trunc_interval(name: &str, u: &str, iv: Interval) -> Result<Interval> {
+	const MICROS_PER_HOUR: i64 = 3_600_000_000;
+	let (months, days, micros) = (iv.months, iv.days, iv.micros);
+	let (years, month) = (months / 12, months % 12);
+	let out_of_range = || invalid(name, "The result is out of range.");
+	// The years kept, in whole multiples of `by`, with no months, days or time.
+	let by_years = |by: i32| {
+		(years / by).checked_mul(by).and_then(|y| y.checked_mul(12)).ok_or_else(out_of_range)
+	};
+	Ok(match u {
+		"millennium" => Interval::new(by_years(1000)?, 0, 0),
+		"century" => Interval::new(by_years(100)?, 0, 0),
+		"decade" => Interval::new(by_years(10)?, 0, 0),
+		"year" => Interval::new(by_years(1)?, 0, 0),
+		"quarter" => Interval::new(years * 12 + month / 3 * 3, 0, 0),
+		"month" => Interval::new(months, 0, 0),
+		"day" => Interval::new(months, days, 0),
+		"hour" => Interval::new(months, days, micros - micros % MICROS_PER_HOUR),
+		"minute" => Interval::new(months, days, micros - micros % 60_000_000),
+		"second" => Interval::new(months, days, micros - micros % 1_000_000),
+		"milliseconds" | "millisecond" => Interval::new(months, days, micros - micros % 1_000),
+		"microseconds" | "microsecond" => iv,
+		"week" => return Err(invalid(name, "A week cannot be truncated from an interval.")),
+		_ => return Err(invalid(name, UNKNOWN_TRUNC_UNIT)),
+	})
+}
+
+const UNKNOWN_EXTRACT_FIELD: &str = "The field must be one of century, day, decade, dow, doy, epoch, hour, isodow, isoyear, julian, microseconds, millennium, milliseconds, minute, month, quarter, second, week or year.";
+
+const UNKNOWN_TRUNC_UNIT: &str = "The unit must be one of microseconds, milliseconds, second, minute, hour, day, week, month, quarter, year, decade, century or millennium.";
+
+/// The PostgreSQL `extract` field set, over `date`, `time`, `timestamp`, `datetime`, `interval`
+/// and `duration`.
 pub fn extract((val, field): (Value, String)) -> Result<Value> {
 	let name = "time::extract";
 	let f = field.to_ascii_lowercase();
+	if let Some(iv) = as_interval(name, &val)? {
+		return extract_interval(name, &f, iv);
+	}
 	let given =
 		temporal(&val).ok_or_else(|| reject(name, "a date, time, timestamp or datetime", &val))?;
 	// `infinity` and `-infinity` are not instants, so their fields are not read from the
@@ -575,10 +691,7 @@ pub fn extract((val, field): (Value, String)) -> Result<Value> {
 					+ Decimal::from(d.timestamp_subsec_nanos()) / Decimal::from(NANOS_PER_SEC),
 			)),
 		},
-		_ => Err(invalid(
-			name,
-			"The field must be one of century, day, decade, dow, doy, epoch, hour, isodow, isoyear, julian, microseconds, millennium, milliseconds, minute, month, quarter, second, week or year.",
-		)),
+		_ => Err(invalid(name, UNKNOWN_EXTRACT_FIELD)),
 	}
 }
 
@@ -586,6 +699,39 @@ pub fn extract((val, field): (Value, String)) -> Result<Value> {
 pub fn trunc((val, unit): (Value, String)) -> Result<Value> {
 	let name = "time::trunc";
 	let u = unit.to_ascii_lowercase();
+	match &val {
+		Value::Interval(iv) => return trunc_interval(name, &u, *iv).map(Value::Interval),
+		Value::Duration(_) => {
+			let Some(iv) = as_interval(name, &val)? else {
+				unreachable!("a duration is an interval");
+			};
+			let out = trunc_interval(name, &u, iv)?;
+			let micros = u64::try_from(out.micros)
+				.map_err(|_| invalid(name, "The result is out of range."))?;
+			return Ok(Value::Duration(Duration::from_micros(micros)));
+		}
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_) => {}
+	}
 	if let Value::Time(t) = &val {
 		let n = t.nanos();
 		let step = match u.as_str() {
@@ -629,9 +775,12 @@ pub fn trunc((val, unit): (Value, String)) -> Result<Value> {
 			"minute" => date.and_hms_opt(t.hour(), t.minute(), 0).unwrap_or(d),
 			"hour" => date.and_hms_opt(t.hour(), 0, 0).unwrap_or(d),
 			"day" => midnight(date),
-			"week" => {
-				midnight(date - TimeDelta::days(i64::from(date.weekday().num_days_from_monday())))
-			}
+			"week" => midnight(
+				date.checked_sub_signed(TimeDelta::days(i64::from(
+					date.weekday().num_days_from_monday(),
+				)))
+				.ok_or_else(|| invalid(name, "The result is out of range."))?,
+			),
 			"month" => midnight(date.with_day(1).unwrap_or(date)),
 			"quarter" => midnight(
 				NaiveDate::from_ymd_opt(date.year(), (date.month() - 1) / 3 * 3 + 1, 1)
@@ -664,12 +813,7 @@ pub fn trunc((val, unit): (Value, String)) -> Result<Value> {
 						.ok_or_else(|| invalid(name, "The result is out of range."))?,
 				)
 			}
-			_ => {
-				return Err(invalid(
-					name,
-					"The unit must be one of microseconds, milliseconds, second, minute, hour, day, week, month, quarter, year, decade, century or millennium.",
-				));
-			}
+			_ => return Err(invalid(name, UNKNOWN_TRUNC_UNIT)),
 		};
 		Ok(Datetime(out.and_utc()))
 	})
@@ -729,5 +873,57 @@ mod tests {
 		assert_eq!(seconds_arg("t", &n).unwrap(), (2, 0));
 		let max = Number::Decimal(Decimal::from(u32::MAX) + Decimal::new(9_999_999_999, 10));
 		assert!(seconds_arg("t", &max).is_err());
+	}
+
+	#[test]
+	fn truncating_the_week_at_the_start_of_the_calendar_returns() {
+		// Some of these days have a Monday before the calendar begins; the call errors for them
+		// and never panics.
+		let mut day = NaiveDate::MIN;
+		for _ in 0..7 {
+			let at = Value::Datetime(Datetime(day.and_time(NaiveTime::MIN).and_utc()));
+			let _ = trunc((at, "week".to_string()));
+			day = day.succ_opt().unwrap();
+		}
+	}
+
+	#[test]
+	fn make_date_reads_a_negative_year_as_before_the_common_era() {
+		let n = |v: i64| Number::Int(v);
+		let at = |y| make_date((n(y), n(6), n(15))).unwrap();
+		let expect = |y: i32| Value::Date(NaiveDate::from_ymd_opt(y, 6, 15).unwrap().into());
+		assert_eq!(at(-1), expect(0));
+		assert_eq!(at(-44), expect(-43));
+		assert_eq!(at(1), expect(1));
+		assert!(make_date((n(0), n(6), n(15))).is_err());
+	}
+
+	#[test]
+	fn an_interval_is_extracted_and_truncated() {
+		let iv = Value::Interval(Interval::new(14, 3, 3_723_500_000));
+		let field = |f: &str| extract((iv.clone(), f.to_string())).unwrap();
+		assert_eq!(field("year"), Value::from(1i64));
+		assert_eq!(field("month"), Value::from(2i64));
+		assert_eq!(field("day"), Value::from(3i64));
+		assert_eq!(field("hour"), Value::from(1i64));
+		assert_eq!(field("minute"), Value::from(2i64));
+		assert_eq!(field("microseconds"), Value::from(3_500_000i64));
+		assert_eq!(
+			extract((Value::Interval(Interval::new(0, 13, 0)), "week".to_string())).unwrap(),
+			Value::from(1i64)
+		);
+		assert!(extract((iv.clone(), "dow".to_string())).is_err());
+		let hour = trunc((iv.clone(), "hour".to_string())).unwrap();
+		assert_eq!(hour, Value::Interval(Interval::new(14, 3, 3_600_000_000)));
+		let year = trunc((iv, "year".to_string())).unwrap();
+		assert_eq!(year, Value::Interval(Interval::new(12, 0, 0)));
+	}
+
+	#[test]
+	fn a_duration_is_extracted_as_microseconds() {
+		let d = Value::Duration(Duration::from_secs(90_000));
+		assert_eq!(extract((d, "hour".to_string())).unwrap(), Value::from(25i64));
+		let hour = trunc((Value::Duration(Duration::from_secs(5_400)), "hour".to_string()));
+		assert_eq!(hour.unwrap(), Value::Duration(Duration::from_secs(3_600)));
 	}
 }

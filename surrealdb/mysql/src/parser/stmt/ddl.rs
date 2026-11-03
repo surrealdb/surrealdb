@@ -67,6 +67,14 @@ impl<'a> Parser<'a> {
 					self.bump();
 				}
 				unique = true;
+			} else if let Some(attribute) = self.unsupported_column_attribute() {
+				// A column's character set, collation and spatial reference system change what it
+				// stores or how it compares, and the engine honours none of them, so they are
+				// refused rather than ignored.
+				return Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::Custom(format!("the column attribute {attribute} is not supported")),
+				));
 			} else {
 				break;
 			}
@@ -86,6 +94,23 @@ impl<'a> Parser<'a> {
 			unique: unique || serial,
 			span: c_start.merge(c_end),
 		})
+	}
+
+	/// The column attribute that starts at the next token when it is one the engine cannot honour:
+	/// `CHARACTER SET`, `CHARSET`, `COLLATE` or `SRID`.
+	fn unsupported_column_attribute(&self) -> Option<&'static str> {
+		let keyword = self.peek_keyword();
+		if keyword == Some(Keyword::Character) && self.peek_nth_keyword(1) == Some(Keyword::Set) {
+			return Some("CHARACTER SET");
+		}
+		if keyword == Some(Keyword::Charset) {
+			return Some("CHARSET");
+		}
+		if keyword == Some(Keyword::Collate) {
+			return Some("COLLATE");
+		}
+		let is_srid = matches!(&self.peek().kind, TokenKind::Ident(word) if word.eq_ignore_ascii_case("srid"));
+		is_srid.then_some("SRID")
 	}
 
 	/// Parse a CREATE statement.

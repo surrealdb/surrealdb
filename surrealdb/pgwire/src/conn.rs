@@ -197,6 +197,15 @@ impl StatementKind {
 	}
 }
 
+/// The type OID of a parameter type the planner inferred, `0` for one it could not.
+fn inferred_oid(ty: &surrealdb_sqlplan::SqlType) -> i32 {
+	if *ty == surrealdb_sqlplan::SqlType::Unknown {
+		0
+	} else {
+		PgType::from_sql_type(*ty).oid()
+	}
+}
+
 /// A parsed, not-yet-bound prepared statement.
 struct PreparedStatement {
 	/// The (positional-rewritten) query text; used for GQL, and as the source
@@ -208,6 +217,10 @@ struct PreparedStatement {
 	/// Client-declared parameter type OIDs (`0` = unspecified); may be shorter
 	/// than the number of `$n` placeholders in the query.
 	param_types: Vec<i32>,
+	/// The type OID the planner infers for each parameter from the column or expression it is
+	/// compared with or stored into (`0` = none), so a bound temporal parameter can take that
+	/// type. May be shorter than `param_count`.
+	inferred_param_types: Vec<i32>,
 	/// Highest positional parameter index (`$n`) referenced by the query, so
 	/// ParameterDescription reports the true parameter count.
 	param_count: usize,
@@ -1432,6 +1445,7 @@ impl Connection {
 					query: query.to_string(),
 					cached_plan: None,
 					param_types,
+					inferred_param_types: Vec::new(),
 					param_count,
 					empty: false,
 					described: false,
@@ -1446,6 +1460,7 @@ impl Connection {
 			return Ok(());
 		}
 		let mut wildcard_types = WildcardTypes::default();
+		let mut inferred_param_types = Vec::new();
 		let (query, cached_plan, param_count, param_types, empty, descriptor, kind, returns_rows) =
 			match self.dialect {
 				Dialect::SurrealQl => return Err(not_over_pgwire(Dialect::SurrealQl)),
@@ -1489,6 +1504,8 @@ impl Connection {
 									let param_desc = bound.describe_parameters(&catalog);
 									param_count = param_count.max(param_desc.param_types.len());
 									param_types.resize(param_count, 0);
+									inferred_param_types =
+										param_desc.param_types.iter().map(inferred_oid).collect();
 									descriptor = bound.describe_static(&catalog, &policy);
 									wildcard_types = WildcardTypes::of(
 										&bound.wildcard_column_types(&catalog),
@@ -1735,6 +1752,8 @@ impl Connection {
 					{
 						param_count = param_count.max(metadata.parameters.param_types.len());
 						param_types.resize(param_count, 0);
+						inferred_param_types =
+							metadata.parameters.param_types.iter().map(inferred_oid).collect();
 						for (slot, id) in
 							param_types.iter_mut().zip(&metadata.parameters.enum_params)
 						{
@@ -1806,6 +1825,7 @@ impl Connection {
 				cached_plan,
 				param_count,
 				param_types,
+				inferred_param_types,
 				empty,
 				described: false,
 				control: None,
@@ -1852,6 +1872,8 @@ impl Connection {
 			let oid = stmt.param_types.get(i).copied().unwrap_or(0);
 			let format = format_at(param_formats, i);
 			let value = encode::decode_param(raw.as_deref(), oid, format)?;
+			let inferred = stmt.inferred_param_types.get(i).copied().unwrap_or(0);
+			let value = encode::coerce_temporal_param(value, oid, inferred);
 			// Positional `$1..$n` were rewritten to `$_1..$_n`, so bind to the
 			// matching `_1.._n` variable names.
 			let param_num = i + 1;

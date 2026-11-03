@@ -300,3 +300,29 @@ fn test_not_in_and_not_between_roundtrip() {
 		}
 	));
 }
+
+#[test]
+fn test_field_select_chain_exceeding_default_limit() {
+	run_on_2mib_stack(|| {
+		let sql = format!("(a){}", ".b".repeat(100_000));
+		let err = parse_expr(&sql).expect_err("expected recursion limit error");
+		assert_eq!(err.kind, ErrorKind::RecursionLimitExceeded);
+	});
+}
+
+#[test]
+fn test_field_select_chain_within_default_limit() {
+	assert!(parse_expr(&format!("(a){}", ".b".repeat(20))).is_ok());
+}
+
+#[test]
+fn test_type_name_forms() {
+	for sql in [
+		"CAST(x AS numeric(5,-2))",
+		"CAST(x AS integer ARRAY[4])",
+		"CAST(x AS integer ARRAY)",
+		"CAST(x AS char varying(3))",
+	] {
+		assert!(parse_expr(sql).is_ok(), "{sql}");
+	}
+}

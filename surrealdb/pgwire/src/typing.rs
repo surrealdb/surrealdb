@@ -772,12 +772,22 @@ pub(super) struct DeclaredWireType {
 /// another dialect. A type is carried when the encoders write the values the column's kind holds
 /// in that type's text form: the built-in scalar types, the text-shaped types whose values are
 /// their canonical text, and the object identifier and transaction id types, whose values are
-/// their numbers. `money`, `pg_lsn`, the geometric types and the ranges are not, and their columns
-/// are typed by their kind.
+/// their numbers. `money`, `pg_lsn`, the geometric types, the ranges, and the types that have a
+/// text form only (`tsvector`, `tsquery`, `tid` and the snapshots) are not, and their columns are
+/// typed by their kind.
+///
+/// A column declared with several array dimensions is an array nested once per dimension, the
+/// shape its values have.
 pub(super) fn declared_wire_type(declared: &DeclaredSqlType) -> Option<DeclaredWireType> {
 	let reported = pg_reported_type(declared)?;
-	let ty = PgType::from_oid(reported.oid)?;
-	carries_declared_values(&ty).then_some(DeclaredWireType {
+	let mut ty = PgType::from_oid(reported.oid)?;
+	if !carries_declared_values(&ty) {
+		return None;
+	}
+	for _ in 1..declared.array_dimensions().len() {
+		ty = PgType::Array(Box::new(ty));
+	}
+	Some(DeclaredWireType {
 		ty,
 		typmod: reported.typmod,
 	})
@@ -819,8 +829,6 @@ fn carries_declared_values(ty: &PgType) -> bool {
 		| PgType::Bit
 		| PgType::Varbit
 		| PgType::Xml
-		| PgType::Tsvector
-		| PgType::Tsquery
 		| PgType::Jsonpath
 		| PgType::Macaddr8
 		| PgType::Regproc
@@ -835,11 +843,13 @@ fn carries_declared_values(ty: &PgType) -> bool {
 		| PgType::Regcollation
 		| PgType::Xid
 		| PgType::Cid
-		| PgType::Xid8
+		| PgType::Xid8 => true,
+		PgType::Tsvector
+		| PgType::Tsquery
 		| PgType::Tid
 		| PgType::PgSnapshot
-		| PgType::TxidSnapshot => true,
-		PgType::Record
+		| PgType::TxidSnapshot
+		| PgType::Record
 		| PgType::Void
 		| PgType::Money
 		| PgType::PgLsn
@@ -1778,6 +1788,19 @@ mod tests {
 			// A type whose values the wire does not carry in its own form keeps the kind's type.
 			(declared_column("m", SqlType::Numeric, pg_declared("money")), PgType::Numeric, -1),
 			(declared_column("r", SqlType::Unknown, pg_declared("int4range")), PgType::Text, -1),
+			// A type with no binary form is described as text, which every format carries.
+			(declared_column("v", SqlType::Unknown, pg_declared("tsvector")), PgType::Text, -1),
+			(declared_column("g", SqlType::Unknown, pg_declared("tid")), PgType::Text, -1),
+			// Every dimension of a declared array nests the type once.
+			(
+				declared_column(
+					"m",
+					SqlType::Array(&SqlType::Array(&SqlType::Int4)),
+					pg_declared("int[][]"),
+				),
+				PgType::Array(Box::new(PgType::Array(Box::new(PgType::Int4)))),
+				-1,
+			),
 		];
 		for (column, ty, typmod) in cases {
 			let described = PgColumn::of_result_column(&column);

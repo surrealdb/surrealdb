@@ -42,6 +42,7 @@ fn skip_space(chars: &mut Peekable<Chars<'_>>) {
 /// - An unquoted `{` at the start of an element opens a sub-array. The elements of one array are
 ///   all sub-arrays or none are, sub-arrays at one level have the same shape, and there are at most
 ///   [`MAX_ARRAY_DIMENSIONS`] levels.
+/// - A literal with an empty dimension, such as `{{}}` or `{{},{}}`, is the empty array.
 /// - An element that has no text and no quote or escape, as in `{a,,b}`, is malformed, and so is an
 ///   unquoted brace inside an element, a quote that is not closed and text after the closing brace.
 pub fn parse_array_literal(text: &str) -> Option<Vec<ArrayElement>> {
@@ -55,7 +56,10 @@ pub fn parse_array_literal(text: &str) -> Option<Vec<ArrayElement>> {
 	if chars.next().is_some() {
 		return None;
 	}
-	shape(&items)?;
+	// An array with an empty dimension holds no element, however many levels it nests.
+	if shape(&items)?.contains(&0) {
+		return Some(Vec::new());
+	}
 	Some(items)
 }
 
@@ -194,7 +198,9 @@ mod tests {
 				ArrayElement::Array(vec![text("}"), text("NULL")]),
 			])
 		);
-		assert_eq!(parse_array_literal("{{}}"), Some(vec![ArrayElement::Array(Vec::new())]));
+		assert_eq!(parse_array_literal("{{}}"), Some(Vec::new()));
+		assert_eq!(parse_array_literal("{{},{}}"), Some(Vec::new()));
+		assert_eq!(parse_array_literal("{{},{1}}"), None);
 	}
 
 	#[test]

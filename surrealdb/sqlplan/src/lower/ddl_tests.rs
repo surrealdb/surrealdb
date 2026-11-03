@@ -3,6 +3,7 @@
 #![allow(clippy::wildcard_enum_match_arm)]
 
 use surrealdb_expr::expr::reference::ReferenceDeleteStrategy;
+use surrealdb_expr::expr::statements::alter::{AlterKind, AlterStatement};
 use surrealdb_expr::expr::statements::define::{DefineDefault, DefineKind, DefineStatement};
 use surrealdb_expr::expr::statements::remove::RemoveStatement;
 use surrealdb_expr::expr::{Expr, Kind};
@@ -766,8 +767,8 @@ fn test_lower_pgsql_alter_table_multiple_actions() {
 	assert!(matches!(&exprs[0], Expr::Define(d) if matches!(&**d, DefineStatement::Field(_))));
 	// Action 2: Drop column old_status (RemoveField)
 	assert!(matches!(&exprs[1], Expr::Remove(r) if matches!(&**r, RemoveStatement::Field(_))));
-	// Action 3: Alter balance type (DefineField)
-	assert!(matches!(&exprs[2], Expr::Define(d) if matches!(&**d, DefineStatement::Field(_))));
+	// Action 3: Alter balance type (AlterField: the rest of the field is kept)
+	assert!(matches!(&exprs[2], Expr::Alter(_)));
 	// Action 4: Set balance default (AlterField: the rest of the field is kept)
 	assert!(matches!(&exprs[3], Expr::Alter(_)));
 	// Action 5: Set user_id NOT NULL (AlterField)
@@ -1146,14 +1147,23 @@ fn json_columns_of_a_created_table_hold_any_json_value_and_are_not_flexible() {
 fn declared_sql_types(exprs: &[Expr]) -> Vec<(String, Option<String>)> {
 	exprs
 		.iter()
-		.filter_map(|expr| {
-			let Expr::Define(define) = expr else {
-				return None;
-			};
-			let DefineStatement::Field(field) = &**define else {
-				return None;
-			};
-			Some((field.name.to_sql(), field.sql_type.as_ref().map(|t| t.text.clone())))
+		.filter_map(|expr| match expr {
+			Expr::Define(define) => {
+				let DefineStatement::Field(field) = &**define else {
+					return None;
+				};
+				Some((field.name.to_sql(), field.sql_type.as_ref().map(|t| t.text.clone())))
+			}
+			Expr::Alter(alter) => {
+				let AlterStatement::Field(field) = &**alter else {
+					return None;
+				};
+				let AlterKind::Set(sql_type) = &field.sql_type else {
+					return None;
+				};
+				Some((field.name.to_sql(), Some(sql_type.text.clone())))
+			}
+			_ => None,
 		})
 		.collect()
 }

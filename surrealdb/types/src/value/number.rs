@@ -613,8 +613,21 @@ fn cmp_big_float(b: &BigDecimal, f: f64) -> Ordering {
 		};
 	}
 	let (coefficient, scale) = b.parts();
+	let sign = coefficient.cmp(&BigInt::zero());
 	if f == 0.0 {
-		return coefficient.cmp(&BigInt::zero());
+		return sign;
+	}
+	// Operands of different signs, or a zero decimal, are ordered without the exact comparison.
+	let f_sign = if f < 0.0 {
+		Ordering::Less
+	} else {
+		Ordering::Greater
+	};
+	if sign == Ordering::Equal {
+		return f_sign.reverse();
+	}
+	if sign != f_sign {
+		return sign;
 	}
 	let (a, e) = float_parts(f.abs());
 	let lhs = coefficient << (-e).max(0).unsigned_abs() as usize;

@@ -1143,16 +1143,18 @@ pub fn eval_cast(
 		"unsigned" => match lit {
 			BoundLiteral::Integer(i) => Ok(BoundLiteral::Unsigned(*i as u64)),
 			BoundLiteral::Unsigned(u) => Ok(BoundLiteral::Unsigned(*u)),
-			BoundLiteral::Float(f) => Ok(BoundLiteral::Unsigned(*f as u64)),
+			BoundLiteral::Float(f) => Ok(BoundLiteral::Unsigned(unsigned_of_float(*f))),
 			BoundLiteral::Boolean(b) => Ok(BoundLiteral::Unsigned(u64::from(*b))),
 			BoundLiteral::String(s) => match s.trim().parse::<u64>() {
 				Ok(u) => Ok(BoundLiteral::Unsigned(u)),
 				Err(_) => {
 					if policy.dialect == SqlDialect::Postgres {
 						Err(PlanError::InvalidTextRepresentation(format!("integer: \"{s}\"")))
+					} else if let Ok(signed) = s.trim().parse::<i64>() {
+						Ok(BoundLiteral::Unsigned(signed as u64))
 					} else {
 						let (num, _) = mysql_parse_leading_number(s);
-						Ok(BoundLiteral::Unsigned(num as u64))
+						Ok(BoundLiteral::Unsigned(unsigned_of_float(num)))
 					}
 				}
 			},
@@ -1276,6 +1278,16 @@ fn regex_escape_char(c: char) -> String {
 			format!("\\{c}")
 		}
 		other => other.to_string(),
+	}
+}
+
+/// The unsigned 64-bit value MySQL gives a number cast to `UNSIGNED`: a negative number is
+/// rounded and read as the unsigned value with the same bits, as an integer is.
+fn unsigned_of_float(value: f64) -> u64 {
+	if value < 0.0 {
+		value.round() as i64 as u64
+	} else {
+		value as u64
 	}
 }
 

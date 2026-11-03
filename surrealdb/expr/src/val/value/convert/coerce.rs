@@ -620,9 +620,15 @@ impl Coerce for Datetime {
 	}
 }
 
+/// The date of a datetime that is exactly midnight UTC, or the infinite date of an infinite
+/// datetime, which the same-signed infinite date widens to.
+fn exact_or_infinite_date(x: &Datetime) -> Option<Date> {
+	x.exact_date().or_else(|| (*x == Datetime::from(Date::infinity())).then(Date::infinity))
+}
+
 impl Coerce for Date {
 	fn can_coerce(v: &Value) -> bool {
-		matches!(v, Value::Date(_)) || v.is_datetime_and(|x| x.exact_date().is_some())
+		matches!(v, Value::Date(_)) || v.is_datetime_and(|x| exact_or_infinite_date(x).is_some())
 	}
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
@@ -630,7 +636,7 @@ impl Coerce for Date {
 			return Ok(x);
 		}
 		if let Value::Datetime(x) = v {
-			return x.exact_date().ok_or(CoerceError::InvalidKind {
+			return exact_or_infinite_date(&x).ok_or(CoerceError::InvalidKind {
 				from: v,
 				into: "date (a datetime that is not midnight UTC needs the cast `<date>`)".into(),
 			});
@@ -746,7 +752,8 @@ impl Value {
 			| (Value::Number(Number::U32(_)), Kind::U32)
 			| (Value::Number(Number::U64(_)), Kind::U64)
 			| (Value::Number(Number::F16(_)), Kind::F16)
-			| (Value::Number(Number::F32(_)), Kind::F32) => false,
+			| (Value::Number(Number::F32(_)), Kind::F32)
+			| (Value::Number(Number::BigDecimal(_)), Kind::BigDecimal) => false,
 			(
 				Value::Number(_),
 				Kind::Int

@@ -1534,9 +1534,6 @@ fn bind_quantified_array(
 	})
 }
 
-/// A cast, `expr::type` or `CAST(expr AS type)`. Out of line from [`bind_expr`], whose frame every
-/// level of a nested expression holds, so that frame does not carry this arm's temporaries.
-#[inline(never)]
 /// The attributes of the composite type `data_type` names, each paired with the value of `expr`
 /// at its position, when `expr` is a row constructor (`ROW(...)` or `(a, b, ...)`) and the type
 /// is a composite type of `catalog`. A row of another number of values than the type has
@@ -1583,6 +1580,9 @@ pub(crate) fn composite_row<'e>(
 	Ok(Some(composite.fields.into_iter().map(|(field, _)| field).zip(fields.iter()).collect()))
 }
 
+/// A cast, `expr::type` or `CAST(expr AS type)`. Out of line from [`bind_expr`], whose frame every
+/// level of a nested expression holds, so that frame does not carry this arm's temporaries.
+#[inline(never)]
 fn bind_type_cast(
 	expr: &Expr,
 	data_type: &surrealdb_pgsql::ast::expr::TypeName,
@@ -1625,10 +1625,11 @@ fn bind_type_cast(
 		}
 	} else {
 		// A `numeric` keeps its precision and scale, which choose a `decimal` or a `bigdecimal`.
+		// An array of them is cast as the array, whose elements the modifiers do not change.
 		let numeric = data_type.name.parts.last().is_some_and(|name| {
 			matches!(name.to_ascii_lowercase().as_str(), "numeric" | "decimal" | "dec")
 		});
-		if numeric && !data_type.modifiers.is_empty() {
+		if numeric && !data_type.modifiers.is_empty() && data_type.array_bounds.is_empty() {
 			target_type = format!("{target_type}({})", data_type.modifiers.join(","));
 		}
 		// An interval keeps its field qualifier and its precision, written as the declared type

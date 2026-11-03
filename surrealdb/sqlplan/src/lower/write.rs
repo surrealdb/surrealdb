@@ -149,6 +149,25 @@ impl<'a> IdScope<'a> {
 		)
 	}
 
+	/// The date or time type of the column of the target table that the column reference `fields`
+	/// names, or [`SqlType::Unknown`] when it names no such column.
+	fn temporal_column(&self, fields: &[String], dialect: SqlDialect) -> SqlType {
+		let Some((column, prefix)) = fields.split_last() else {
+			return SqlType::Unknown;
+		};
+		if !prefix.is_empty() && !self.is_qualifier(&prefix.join(".")) {
+			return SqlType::Unknown;
+		}
+		let declared = self.catalog.column_type(self.schema.as_deref(), &self.table, column);
+		if declared.is_temporal() || dialect == SqlDialect::Postgres {
+			return declared;
+		}
+		self.catalog
+			.get_table(self.schema.as_deref(), &self.table)
+			.and_then(|table| table.find_column(column, false).and_then(|c| c.data_type.clone()))
+			.map_or(SqlType::Unknown, |name| crate::lower::temporal::cast_type(&name, dialect))
+	}
+
 	/// Whether the link column `column` of the target table admits `NONE`.
 	fn link_admits_none(&self, column: &str) -> bool {
 		self.catalog.link_admits_none(self.schema.as_deref(), &self.table, column)
@@ -284,6 +303,83 @@ fn returns_instant(name: &str, dialect: SqlDialect) -> bool {
 		FunctionRegistry::infer_return_type(&name.to_ascii_lowercase(), dialect, &[]),
 		crate::SqlType::Date | crate::SqlType::Timestamp | crate::SqlType::TimestampTz
 	)
+}
+
+/// A text literal beside an operand of the date or time type `other`: the literal cast to that
+/// type, so that it compares as the value it spells. Any other operand is left as it is.
+fn temporal_text_operand(value: Expr, other: SqlType, dialect: SqlDialect) -> (Expr, bool) {
+	let name = crate::lower::temporal::cast_name(other, dialect);
+	if name.is_empty()
+		|| other == SqlType::Timetz
+		|| !matches!(value, Expr::Literal(Literal::String(_)))
+	{
+		return (value, false);
+	}
+	let kind = crate::lower::expr::cast_kind(name, dialect);
+	let value = datetime_text_literal(&kind, value);
+	(
+		Expr::Prefix {
+			op: PrefixOperator::Cast(kind),
+			expr: Box::new(value),
+		},
+		true,
+	)
+}
+
+/// The comparison `l op r` where an operand is a date, timestamp or datetime by its syntax
+/// (`instant`) or a column of the target table of a date or time type (`lt` and `rt`, `Unknown`
+/// for an operand that is not one).
+///
+/// A text literal beside such a column is read as the column's type. Otherwise an operand of
+/// another instant type, a parameter or an expression is promoted at run time by
+/// [`sql_null::promoting_comparison`], since SurrealQL orders values of different kinds by kind.
+fn temporal_comparison(
+	(l, lt): (Expr, SqlType),
+	op: BinaryOperator,
+	(r, rt): (Expr, SqlType),
+	instant: bool,
+	dialect: SqlDialect,
+) -> Expr {
+	let (l, left_cast) = temporal_text_operand(l, rt, dialect);
+	let (r, right_cast) = temporal_text_operand(r, lt, dialect);
+	let column = lt.is_temporal() || rt.is_temporal();
+	let sql_nulls = dialect == SqlDialect::Postgres;
+	if instant || (column && !left_cast && !right_cast) {
+		sql_null::promoting_comparison(l, op, r, sql_nulls)
+	} else if sql_nulls {
+		sql_null::binary(l, op, r)
+	} else {
+		Expr::Binary {
+			left: Box::new(l),
+			op,
+			right: Box::new(r),
+		}
+	}
+}
+
+/// The date or time type of the target table's column that `expr` names, by its syntax.
+fn pgsql_temporal_column(
+	expr: &surrealdb_pgsql::ast::expr::Expr,
+	scope: Option<&IdScope<'_>>,
+) -> SqlType {
+	match (expr, scope) {
+		(surrealdb_pgsql::ast::expr::Expr::ColumnRef(col), Some(scope)) => {
+			scope.temporal_column(&col.fields, SqlDialect::Postgres)
+		}
+		_ => SqlType::Unknown,
+	}
+}
+
+fn mysql_temporal_column(
+	expr: &surrealdb_mysql::ast::expr::Expr,
+	scope: Option<&IdScope<'_>>,
+) -> SqlType {
+	match (expr, scope) {
+		(surrealdb_mysql::ast::expr::Expr::ColumnRef(col), Some(scope)) => {
+			scope.temporal_column(&col.fields, SqlDialect::MySql)
+		}
+		_ => SqlType::Unknown,
+	}
 }
 
 /// Whether the expression is, by its syntax, a date, timestamp or datetime: a call of a function
@@ -799,15 +895,38 @@ fn assigned_value(scope: &IdScope<'_>, column: &str, value: Expr) -> Expr {
 			link_assignment(&table, read_as_key(scope, &table, value), admits_none)
 		}
 		None if scope.holds_label_set(column) => label_set_value(value),
-		None if scope.json_column(column) => json_value(value),
+		None if scope.json_column(column) => json_value(scope, value),
 		None => text_assignment(scope.write_type(column), value),
+	}
+}
+
+/// Whether `value` reads a value that is JSON already: a `json` or `jsonb` column of the target
+/// table, or the same column of the proposed row `$excluded`, whose values have been written as the
+/// columns hold them.
+fn reads_stored_json(scope: &IdScope<'_>, value: &Expr) -> bool {
+	let Expr::Idiom(Idiom(parts)) = value else {
+		return false;
+	};
+	match parts.as_slice() {
+		[Part::Field(column)] => scope.json_column(column.as_str()),
+		[Part::Start(Expr::Param(param)), Part::Field(column)] => {
+			scope.excluded == "excluded"
+				&& *param == Param::from("excluded".to_string())
+				&& scope.json_column(column.as_str())
+		}
+		_ => false,
 	}
 }
 
 /// The `value` written to a `json` or `jsonb` column: text is JSON text, parsed into the value it
 /// spells, with the last of duplicate keys kept. Any other value is a JSON value already and is
-/// written as it is, for the column's declared type to judge.
-fn json_value(value: Expr) -> Expr {
+/// written as it is, for the column's declared type to judge. A value read from a stored JSON
+/// value (see [`reads_stored_json`]) is written as it is whatever it holds, since a string there
+/// is a JSON string, not JSON text.
+fn json_value(scope: &IdScope<'_>, value: Expr) -> Expr {
+	if reads_stored_json(scope, &value) {
+		return value;
+	}
 	evaluated_once(value, |value| {
 		Expr::IfElse(Box::new(IfelseStatement {
 			exprs: vec![(
@@ -1467,9 +1586,21 @@ fn lower_pgsql_expr_as(
 					)));
 				}
 			};
-			if is_comparison(&bin_op) && (pgsql_is_instant(left_ast) || pgsql_is_instant(right_ast))
-			{
-				return Ok(sql_null::promoting_comparison(l, bin_op, r, true));
+			if is_comparison(&bin_op) {
+				let (lt, rt) = (
+					pgsql_temporal_column(left_ast, scope),
+					pgsql_temporal_column(right_ast, scope),
+				);
+				let instant = pgsql_is_instant(left_ast) || pgsql_is_instant(right_ast);
+				if instant || lt.is_temporal() || rt.is_temporal() {
+					return Ok(temporal_comparison(
+						(l, lt),
+						bin_op,
+						(r, rt),
+						instant,
+						SqlDialect::Postgres,
+					));
+				}
 			}
 			Ok(sql_null::binary(l, bin_op, r))
 		}
@@ -3098,8 +3229,19 @@ fn lower_mysql_expr_as(
 					)));
 				}
 			};
-			if is_comparison(&bin_op) && (mysql_is_instant(left) || mysql_is_instant(right)) {
-				return Ok(sql_null::promoting_comparison(l, bin_op, r, false));
+			if is_comparison(&bin_op) {
+				let (lt, rt) =
+					(mysql_temporal_column(left, scope), mysql_temporal_column(right, scope));
+				let instant = mysql_is_instant(left) || mysql_is_instant(right);
+				if instant || lt.is_temporal() || rt.is_temporal() {
+					return Ok(temporal_comparison(
+						(l, lt),
+						bin_op,
+						(r, rt),
+						instant,
+						SqlDialect::MySql,
+					));
+				}
 			}
 			Ok(Expr::Binary {
 				left: Box::new(l),

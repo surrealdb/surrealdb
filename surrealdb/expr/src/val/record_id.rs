@@ -333,7 +333,8 @@ fn bound_key_encoding_is_exact(bound: &Bound<RecordIdKey>) -> bool {
 
 /// [`RecordIdKey::key_encoding_is_exact`] over a value nested in a key.
 ///
-/// Floats and decimals are normalised by the key encoding; a geometry or closure is not held
+/// Floats, decimals and intervals are normalised by the key encoding (an interval is kept as its
+/// total, so `1 month` and `30 days` are one key); a geometry or closure is not held
 /// losslessly by it; an int is exact. Containers, record ids and ranges are exact when what they
 /// hold is. Every other variant is encoded as it is.
 fn value_key_encoding_is_exact(value: &Value) -> bool {
@@ -361,6 +362,7 @@ fn value_key_encoding_is_exact(value: &Value) -> bool {
 			| Number::F16(_)
 			| Number::F32(_),
 		)
+		| Value::Interval(_)
 		| Value::Geometry(_)
 		| Value::Closure(_) => false,
 		Value::Array(a) => a.iter().all(value_key_encoding_is_exact),
@@ -377,7 +379,6 @@ fn value_key_encoding_is_exact(value: &Value) -> bool {
 		| Value::Date(_)
 		| Value::Time(_)
 		| Value::Timestamp(_)
-		| Value::Interval(_)
 		| Value::Uuid(_)
 		| Value::Bytes(_)
 		| Value::Table(_)
@@ -391,9 +392,9 @@ impl RecordIdKey {
 	/// key exactly.
 	///
 	/// The key encoding normalises numbers (`-0.0` and `0.0`, `1.0` and `1`, a decimal's scale),
-	/// so a key that holds a float, a decimal, a geometry or a closure anywhere inside it is not
-	/// exact. Ints, strings and uuids are. Arrays, objects and ranges are exact when everything
-	/// they hold is.
+	/// and an interval is held as its total, so a key that holds a float, a decimal, an interval, a
+	/// geometry or a closure anywhere inside it is not exact. Ints, strings and uuids are. Arrays,
+	/// objects and ranges are exact when everything they hold is.
 	pub fn key_encoding_is_exact(&self) -> bool {
 		match self {
 			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,

@@ -775,14 +775,15 @@ fn from_value_inner(val: PublicValue, v2: bool) -> Result<CborValue> {
 			PublicNumber::Decimal(v) => {
 				Ok(CborValue::Tag(TAG_STRING_DECIMAL, Box::new(CborValue::Text(v.to_string()))))
 			}
-			// A bigdecimal that fits a decimal is written as one. Any other value is written as
-			// tag 192 under cbor.2, and as plain text without it.
+			// Under cbor.2 a bigdecimal is always tag 192 over its text, so its kind and scale
+			// survive the round trip. Without it, a bigdecimal that fits a decimal is written as
+			// one and any other value as plain text.
+			PublicNumber::BigDecimal(v) if v2 => {
+				Ok(CborValue::Tag(TAG_BIGDECIMAL, Box::new(CborValue::Text(v.to_string()))))
+			}
 			PublicNumber::BigDecimal(v) => match rust_decimal::Decimal::try_from(v.as_ref()) {
 				Ok(d) => {
 					Ok(CborValue::Tag(TAG_STRING_DECIMAL, Box::new(CborValue::Text(d.to_string()))))
-				}
-				Err(_) if v2 => {
-					Ok(CborValue::Tag(TAG_BIGDECIMAL, Box::new(CborValue::Text(v.to_string()))))
 				}
 				Err(_) => Ok(CborValue::Text(v.to_string())),
 			},
@@ -859,10 +860,14 @@ fn from_value_inner(val: PublicValue, v2: bool) -> Result<CborValue> {
 			if v2 {
 				Ok(CborValue::Tag(TAG_DATE, Box::new(CborValue::Integer(v.days().into()))))
 			} else {
-				datetime_tag(
-					v.into_inner().and_time(chrono::NaiveTime::MIN).and_utc().timestamp(),
-					0,
-				)
+				let at = if v == PublicDate::infinity() {
+					PublicDatetime::MAX_UTC
+				} else if v == PublicDate::neg_infinity() {
+					PublicDatetime::MIN_UTC
+				} else {
+					PublicDatetime::from(v.into_inner().and_time(chrono::NaiveTime::MIN).and_utc())
+				};
+				datetime_tag(at.timestamp(), at.timestamp_subsec_nanos())
 			}
 		}
 		PublicValue::Time(v) => {

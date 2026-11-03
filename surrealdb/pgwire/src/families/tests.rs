@@ -70,9 +70,11 @@ fn a_binary_cidr_has_the_cidr_flag_and_no_host_bits() {
 	let refused = |bytes: &[u8], ty: &PgType| decode_param(Some(bytes), ty.oid(), 1).is_err();
 	// 10.0.0.1/8 has a host bit set past the prefix.
 	assert!(refused(&[2, 8, 1, 4, 10, 0, 0, 1], &PgType::Cidr));
-	// A header marked `inet` in a `cidr` parameter, and the reverse.
-	assert!(refused(&[2, 8, 0, 4, 10, 0, 0, 0], &PgType::Cidr));
-	assert!(refused(&[2, 24, 1, 4, 192, 168, 1, 0], &PgType::Inet));
+	// The header's type flag is not read: clients send it clear for a `cidr` and set for an
+	// `inet`, and the parameter's own type decides.
+	assert!(!refused(&[2, 8, 0, 4, 10, 0, 0, 0], &PgType::Cidr));
+	assert!(!refused(&[2, 24, 1, 4, 192, 168, 1, 0], &PgType::Inet));
+	assert!(refused(&[2, 8, 0, 4, 10, 0, 0, 1], &PgType::Cidr));
 	assert!(!refused(&[2, 24, 0, 4, 192, 168, 1, 5], &PgType::Inet));
 }
 
