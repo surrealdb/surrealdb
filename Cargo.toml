@@ -64,7 +64,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "4.0.0-beta.1"
+version = "4.0.0"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -79,54 +79,54 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # SurrealDB crates
-surrealdb = { version = "4.0.0-beta.1", path = "surrealdb", default-features = false }
-surrealdb-catalog = { version = "4.0.0-beta.1", path = "surrealdb/catalog" }
-surrealdb-expr = { version = "4.0.0-beta.1", path = "surrealdb/expr", default-features = false }
-surrealdb-gql = { version = "4.0.0-beta.1", path = "surrealdb/gql" }
-surrealdb-parser-next = { version = "4.0.0-beta.1", path = "surrealdb/parser-next" }
-surrealdb-strand = { version = "4.0.0-beta.1", path = "surrealdb/strand", default-features = false }
-surrealdb-core = { version = "4.0.0-beta.1", path = "surrealdb/core", default-features = false }
-surrealdb-embedded = { version = "4.0.0-beta.1", path = "surrealdb/embedded", default-features = false }
-surrealdb-datastore = { version = "4.0.0-beta.1", path = "surrealdb/datastore" }
-surrealdb-engine-api = { version = "4.0.0-beta.1", path = "surrealdb/engine-api" }
-surrealdb-engine-local = { version = "4.0.0-beta.1", path = "surrealdb/engine-local", default-features = false }
-surrealdb-server = { version = "4.0.0-beta.1", path = "surrealdb/server", default-features = false }
-surrealdb-mcp = { version = "4.0.0-beta.1", path = "surrealdb/mcp", default-features = false }
-surrealdb-mywire = { version = "4.0.0-beta.1", path = "surrealdb/mywire", default-features = false }
-surrealdb-pgwire = { version = "4.0.0-beta.1", path = "surrealdb/pgwire", default-features = false }
-surrealdb-types = { version = "4.0.0-beta.1", path = "surrealdb/types", default-features = false }
-surrealdb-types-derive = { version = "4.0.0-beta.1", path = "surrealdb/types/derive" }
-parse-common = { version = "4.0.0-beta.1", package = "surrealdb-parse-common", path = "surrealdb/parse-common" }
-sqon = { version = "4.0.0-beta.1", package = "surrealdb-sqon", path = "surrealdb/sqon" }
-common = { version = "4.0.0-beta.1", package = "surrealdb-common", path = "surrealdb/common" }
-surrealdb-cnf = { version = "4.0.0-beta.1", path = "surrealdb/cnf" }
-surrealdb-runtime = { version = "4.0.0-beta.1", path = "surrealdb/runtime", default-features = false }
-surrealdb-rpc = { version = "4.0.0-beta.1", path = "surrealdb/rpc" }
-surrealdb-iam = { version = "4.0.0-beta.1", path = "surrealdb/iam" }
-surrealdb-idx = { version = "4.0.0-beta.1", path = "surrealdb/idx", default-features = false }
-surrealdb-observe = { version = "4.0.0-beta.1", path = "surrealdb/observe" }
-surrealdb-keyspace-macro = { version = "4.0.0-beta.1", path = "surrealdb/keyspace-macro" }
-surrealdb-stored-derive = { version = "4.0.0-beta.1", path = "surrealdb/stored-derive" }
-surrealdb-kvs = { version = "4.0.0-beta.1", path = "surrealdb/kvs" }
-surrealdb-kvs-any = { version = "4.0.0-beta.1", path = "surrealdb/kvs-any", default-features = false }
-surrealdb-kvs-mem = { version = "4.0.0-beta.1", path = "surrealdb/kvs-mem" }
-surrealdb-kvs-surrealkv = { version = "4.0.0-beta.1", path = "surrealdb/kvs-surrealkv" }
+surrealdb = { version = "4.0.0", path = "surrealdb", default-features = false }
+surrealdb-catalog = { version = "4.0.0", path = "surrealdb/catalog" }
+surrealdb-expr = { version = "4.0.0", path = "surrealdb/expr", default-features = false }
+surrealdb-gql = { version = "4.0.0", path = "surrealdb/gql" }
+surrealdb-parser-next = { version = "4.0.0", path = "surrealdb/parser-next" }
+surrealdb-strand = { version = "4.0.0", path = "surrealdb/strand", default-features = false }
+surrealdb-core = { version = "4.0.0", path = "surrealdb/core", default-features = false }
+surrealdb-embedded = { version = "4.0.0", path = "surrealdb/embedded", default-features = false }
+surrealdb-datastore = { version = "4.0.0", path = "surrealdb/datastore" }
+surrealdb-engine-api = { version = "4.0.0", path = "surrealdb/engine-api" }
+surrealdb-engine-local = { version = "4.0.0", path = "surrealdb/engine-local", default-features = false }
+surrealdb-server = { version = "4.0.0", path = "surrealdb/server", default-features = false }
+surrealdb-mcp = { version = "4.0.0", path = "surrealdb/mcp", default-features = false }
+surrealdb-mywire = { version = "4.0.0", path = "surrealdb/mywire", default-features = false }
+surrealdb-pgwire = { version = "4.0.0", path = "surrealdb/pgwire", default-features = false }
+surrealdb-types = { version = "4.0.0", path = "surrealdb/types", default-features = false }
+surrealdb-types-derive = { version = "4.0.0", path = "surrealdb/types/derive" }
+parse-common = { version = "4.0.0", package = "surrealdb-parse-common", path = "surrealdb/parse-common" }
+sqon = { version = "4.0.0", package = "surrealdb-sqon", path = "surrealdb/sqon" }
+common = { version = "4.0.0", package = "surrealdb-common", path = "surrealdb/common" }
+surrealdb-cnf = { version = "4.0.0", path = "surrealdb/cnf" }
+surrealdb-runtime = { version = "4.0.0", path = "surrealdb/runtime", default-features = false }
+surrealdb-rpc = { version = "4.0.0", path = "surrealdb/rpc" }
+surrealdb-iam = { version = "4.0.0", path = "surrealdb/iam" }
+surrealdb-idx = { version = "4.0.0", path = "surrealdb/idx", default-features = false }
+surrealdb-observe = { version = "4.0.0", path = "surrealdb/observe" }
+surrealdb-keyspace-macro = { version = "4.0.0", path = "surrealdb/keyspace-macro" }
+surrealdb-stored-derive = { version = "4.0.0", path = "surrealdb/stored-derive" }
+surrealdb-kvs = { version = "4.0.0", path = "surrealdb/kvs" }
+surrealdb-kvs-any = { version = "4.0.0", path = "surrealdb/kvs-any", default-features = false }
+surrealdb-kvs-mem = { version = "4.0.0", path = "surrealdb/kvs-mem" }
+surrealdb-kvs-surrealkv = { version = "4.0.0", path = "surrealdb/kvs-surrealkv" }
 # The shared behaviour suite for key-value store backends. Published so that backends outside
 # this repository can run it against themselves.
-surrealdb-kvs-test = { version = "4.0.0-beta.1", path = "surrealdb/kvs-test" }
-surrealdb-mysql = { version = "4.0.0-beta.1", path = "surrealdb/mysql" }
-surrealdb-pgsql = { version = "4.0.0-beta.1", path = "surrealdb/pgsql" }
-surrealdb-sqlplan = { version = "4.0.0-beta.1", path = "surrealdb/sqlplan" }
-surrealdb-sqlfront-derive = { version = "4.0.0-beta.1", path = "surrealdb/sqlfront-derive" }
+surrealdb-kvs-test = { version = "4.0.0", path = "surrealdb/kvs-test" }
+surrealdb-mysql = { version = "4.0.0", path = "surrealdb/mysql" }
+surrealdb-pgsql = { version = "4.0.0", path = "surrealdb/pgsql" }
+surrealdb-sqlplan = { version = "4.0.0", path = "surrealdb/sqlplan" }
+surrealdb-sqlfront-derive = { version = "4.0.0", path = "surrealdb/sqlfront-derive" }
 surrealdb-sqlfront-spec = { path = "surrealdb/sqlfront-spec" }
-surrealdb-collections = { version = "4.0.0-beta.1", path = "surrealdb/collections" }
+surrealdb-collections = { version = "4.0.0", path = "surrealdb/collections" }
 
 # Surrealism crates
-surrealism = { version = "0.7.0-beta.1", path = "surrealism" }
-surrealism-macros = { version = "0.7.0-beta.1", path = "surrealism/macros", default-features = false }
-surrealism-runtime = { version = "0.7.0-beta.1", path = "surrealism/runtime" }
-surrealism-types = { version = "0.7.0-beta.1", path = "surrealism/types", default-features = false }
-surrealism-verify = { version = "0.7.0-beta.1", path = "surrealism/verify" }
+surrealism = { version = "0.7.0", path = "surrealism" }
+surrealism-macros = { version = "0.7.0", path = "surrealism/macros", default-features = false }
+surrealism-runtime = { version = "0.7.0", path = "surrealism/runtime" }
+surrealism-types = { version = "0.7.0", path = "surrealism/types", default-features = false }
+surrealism-verify = { version = "0.7.0", path = "surrealism/verify" }
 
 
 # External surreal crates
