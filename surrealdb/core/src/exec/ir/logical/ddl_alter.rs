@@ -1166,6 +1166,8 @@ pub(super) fn plan_alter<'e>(
 				signer: None,
 				unsigned: false,
 				capabilities: None,
+				bindings: Default::default(),
+				auth_limit: Default::default(),
 				comment,
 				permissions_body: crate::catalog::LogicalPermissionBody::of(&permission),
 				permissions: permission,

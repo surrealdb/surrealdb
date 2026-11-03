@@ -504,6 +504,9 @@ type StoredEventDefinition struct since=4.0 reserved=[] revision_embedded
   8 then list<text:expr> critical since=4.0 absent=required
   10 auth_limit AuthLimit critical since=4.0 absent=required
   12 kind EventKind critical since=4.0 absent=required
+type StoredExtensionBinding struct since=4.0 reserved=[]
+  2 name string critical since=4.0 absent=required
+  4 value text:expr critical since=4.0 absent=required
 type StoredFeatureLevel struct since=4.0 reserved=[] floor_fixed
   2 level release critical since=4.0 absent=required
   4 in_use release critical since=4.0 absent=required
@@ -566,6 +569,8 @@ type StoredModuleDefinition struct since=4.0 reserved=[]
   10 digest option<ManifestDigest> critical since=4.0 absent=none
   12 signer option<ExtensionSigner> critical since=4.0 absent=none
   14 capabilities option<ExtensionCapabilities> critical since=4.0 absent=none
+  16 bindings list<StoredExtensionBinding> critical since=4.0 absent=default(Vec::new)
+  18 auth_limit AuthLimit critical since=4.0 absent=default(AuthLimit::default)
 type StoredParamDefinition struct since=4.0 reserved=[]
   1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
   2 name string critical since=4.0 absent=required

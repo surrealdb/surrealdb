@@ -47,6 +47,8 @@ pub struct Options {
 	/// `--allow-package-change`: an upgrade may move to another organisation
 	/// or package.
 	pub allow_package_change: bool,
+	/// `--bind`, and whether a name nothing answers is asked for.
+	pub bindings: super::bindings::BindingAnswers,
 }
 
 /// How the capabilities to grant are decided.
@@ -128,11 +130,20 @@ pub struct UpgradePlan {
 }
 
 impl UpgradePlan {
-	/// The new definition records exactly what is installed.
+	/// The new definition records exactly what is installed. Bindings compare
+	/// by name and expression text, in any order; an expression the server
+	/// renders differently from how it was given counts as a change, so the
+	/// definition is written again rather than a requested change skipped.
 	pub fn is_noop(&self) -> bool {
+		let sorted = |bindings: &[(String, String)]| {
+			let mut bindings = bindings.to_vec();
+			bindings.sort();
+			bindings
+		};
 		self.installed.digest.as_deref() == Some(self.decision.digest.as_str())
 			&& self.installed.source == self.decision.source
 			&& self.installed.capabilities == self.decision.capabilities
+			&& sorted(&self.installed.bindings) == sorted(&self.decision.bindings)
 			&& matches!(self.signer_match, SignerMatch::Same | SignerMatch::BothUnsigned)
 	}
 }
@@ -400,6 +411,7 @@ pub async fn prepare_install(
 		digest: inspected.facts.digest.to_string(),
 		signer: inspected.signer.clone(),
 		capabilities,
+		bindings: super::bindings::resolve(&inspected.facts.bindings, &opts.bindings, &[])?,
 		permissions: None,
 		comment: None,
 	};
@@ -462,6 +474,11 @@ pub async fn prepare_upgrade(
 		digest: inspected.facts.digest.to_string(),
 		signer: inspected.signer.clone(),
 		capabilities,
+		bindings: super::bindings::resolve(
+			&inspected.facts.bindings,
+			&opts.bindings,
+			&installed.bindings,
+		)?,
 		permissions: Some(installed.permissions.clone()),
 		comment: installed.comment.clone(),
 	};
@@ -582,6 +599,7 @@ mod tests {
 
 	fn facts(declared: Option<PackageSigner>) -> ArchiveFacts {
 		ArchiveFacts {
+			bindings: Default::default(),
 			digest: digest(),
 			signature: None,
 			organisation: "acme".into(),

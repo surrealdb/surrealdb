@@ -1668,6 +1668,8 @@ pub fn module_surrealism() -> StoredModuleDefinition {
 		digest: None,
 		signer: None,
 		capabilities: None,
+		bindings: Vec::new(),
+		auth_limit: Default::default(),
 	}
 }
 
@@ -1688,6 +1690,8 @@ pub fn module_silo() -> StoredModuleDefinition {
 		digest: None,
 		signer: None,
 		capabilities: None,
+		bindings: Vec::new(),
+		auth_limit: Default::default(),
 	}
 }
 
@@ -1705,6 +1709,8 @@ pub fn module_no_name() -> StoredModuleDefinition {
 		digest: None,
 		signer: None,
 		capabilities: None,
+		bindings: Vec::new(),
+		auth_limit: Default::default(),
 	}
 }
 

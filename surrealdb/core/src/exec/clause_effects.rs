@@ -70,6 +70,9 @@ pub(crate) const REFUSED_FIELD_WRITE: EffectSet =
 pub(crate) fn refused_by(clause: &str) -> EffectSet {
 	match clause {
 		"VALUE" | "DEFAULT" => REFUSED_FIELD_WRITE,
+		// Every caller's invocation evaluates them with permissions off, so an
+		// external write in one would be any caller's to trigger.
+		"BINDINGS" => REFUSED.union(EffectSet::WRITES_EXTERNAL),
 		_ => REFUSED,
 	}
 }
@@ -82,7 +85,9 @@ pub(crate) fn refused_by(clause: &str) -> EffectSet {
 /// A `LIVE` clause also refuses a builtin that writes to an external system
 /// (`http::post`, `file::put`). It is evaluated at notification time inside the
 /// triggering write's transaction, so such a call would let a subscriber inject
-/// an external side effect into another user's write (GHSA-pvv9-h693-m8r4). The
+/// an external side effect into another user's write (GHSA-pvv9-h693-m8r4). An
+/// extension's `BINDINGS` refuse it too: they run with permissions off on
+/// every caller's invocation, so any caller could trigger the write. The
 /// other clauses leave an external write unrefused here: they are stored by a
 /// definer who may author one through a `DEFINE EVENT`, and a read of an
 /// external system (`http::get`) is left to every clause, so a notification may
@@ -90,7 +95,7 @@ pub(crate) fn refused_by(clause: &str) -> EffectSet {
 pub(crate) fn refused_builtin_by(clause: &str) -> EffectSet {
 	match clause {
 		"VALUE" | "DEFAULT" => EffectSet::BLOCKING,
-		"LIVE" => {
+		"LIVE" | "BINDINGS" => {
 			EffectSet::WRITES_EXTERNAL.union(EffectSet::ADVANCES_STATE).union(EffectSet::BLOCKING)
 		}
 		_ => EffectSet::ADVANCES_STATE.union(EffectSet::BLOCKING),

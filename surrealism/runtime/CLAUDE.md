@@ -41,6 +41,11 @@ share its memory.
 - `run(fnc, version, args)` — call another surrealism function by FQN
 - `stdout_callback` / `stderr_callback` — WASI stdio logging
 
+The `binding(name)` import (ABI 5, `Features::BINDINGS`) is not on the handle. It answers from the
+`Bindings` an invocation's `InstanceSettings::bindings` carries into
+`StoreData::bindings`, so a function lent no transaction can still read one,
+and a value never outlives the store it was read in. `None` refuses every read.
+
 Methods take `&self` and the trait is shared as `Arc<dyn InvocationContext>`,
 because a guest may hold several host calls in flight and the store is handed
 back to the guest while any is pending.
@@ -105,6 +110,7 @@ The invocation's `InstanceSettings::strict_timeout` picks the engine (default `t
 | `host.rs` | `InvocationContext`, `Transaction`, `implement_host_functions` |
 | `epoch.rs` | `Engines` (pooled fast + guarded), `EngineSettings`, slots, epoch ticker |
 | `capabilities.rs` | `SurrealismCapabilities`, `FunctionTargets` |
+| `abi.rs` | `Abi` (supported ABIs), `Features`, the imports each feature gates |
 | `config.rs` | `SurrealismConfig`, `AbiVersion` |
 | `package.rs` | `SurrealismPackage`, pack/unpack `.surli` |
 | `exports.rs` | `ExportsManifest`, `FunctionExport` |

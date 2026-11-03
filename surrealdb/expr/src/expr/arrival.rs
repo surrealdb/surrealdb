@@ -1133,6 +1133,7 @@ impl Visitor for ArrivalVisitor {
 			signer: _,
 			unsigned: _,
 			capabilities: _,
+			bindings: _,
 			comment: _,
 			permissions: _,
 		} []

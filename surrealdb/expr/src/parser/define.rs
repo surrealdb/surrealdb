@@ -838,6 +838,7 @@ impl Lower<'_> {
 					signer: None,
 					unsigned: false,
 					capabilities: Some(Default::default()),
+					bindings: Default::default(),
 					comment: Expr::Literal(Literal::None),
 					permissions: Permission::default(),
 				};
@@ -851,6 +852,8 @@ impl Lower<'_> {
 						s.digest = Some(self.digest(c.a)?);
 					} else if kind == Cl::Capabilities {
 						s.capabilities = Some(self.capabilities(c.a)?);
+					} else if kind == Cl::Bindings {
+						s.bindings = self.bindings(c.a)?;
 					} else if kind == Cl::Comment {
 						s.comment = self.expr(c.a)?;
 					} else {

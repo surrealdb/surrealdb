@@ -2,19 +2,34 @@ use anyhow::{Context as _, bail};
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::catalog::auth::AuthLimit;
 use crate::catalog::{
-	FromStored, LogicalPermissionBody, ModuleExecutable, Permission, StoredPermission,
+	ExprText, FromStored, LogicalPermissionBody, ModuleExecutable, Permission, StoredPermission,
 };
 use crate::expr::logical::LogicalPermission;
 use crate::expr::statements::DefineModuleStatement;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{ExtensionCapabilities, ExtensionSigner, ManifestDigest};
+use crate::expr::{
+	ExtensionBinding, ExtensionBindings, ExtensionCapabilities, ExtensionSigner, ManifestDigest,
+};
 use crate::stored::Stored;
 use crate::val::Value;
 use crate::{expr as runtime, impl_kv_value_catalog};
 
-#[revisioned(revision = 3)]
+/// One entry of a stored `BINDINGS` clause: the name and the canonical text of
+/// its expression.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub struct StoredExtensionBinding {
+	#[stored(n = 2)]
+	pub name: String,
+	#[stored(n = 4)]
+	pub value: ExprText,
+}
+
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
 #[stored(since = "4.0")]
 pub struct StoredModuleDefinition {
@@ -50,11 +65,25 @@ pub struct StoredModuleDefinition {
 	#[revision(start = 3)]
 	#[stored(n = 14)]
 	pub capabilities: Option<ExtensionCapabilities>,
+	/// See [`ModuleDefinition::bindings`].
+	#[revision(start = 4)]
+	#[stored(n = 16, default = "Vec::new")]
+	pub bindings: Vec<StoredExtensionBinding>,
+	/// See [`ModuleDefinition::auth_limit`]. A definition stored before
+	/// revision 4 has no bindings, so the limit is never read for it; it
+	/// decodes as the limit that grants nothing.
+	#[revision(start = 4, default_fn = "default_auth_limit")]
+	#[stored(n = 18, default = "AuthLimit::default")]
+	pub auth_limit: AuthLimit,
 }
 
 impl StoredModuleDefinition {
 	fn default_unsigned(_revision: u16) -> Result<bool, revision::Error> {
 		Ok(true)
+	}
+
+	fn default_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
+		Ok(AuthLimit::default())
 	}
 }
 
@@ -91,6 +120,7 @@ impl ModuleDefinition {
 			signer: self.signer.clone(),
 			unsigned: self.unsigned,
 			capabilities: self.capabilities.clone(),
+			bindings: self.bindings.clone(),
 			permissions: self.permissions.clone(),
 			comment: self
 				.comment
@@ -143,6 +173,13 @@ impl InfoStructure for ModuleDefinition {
 			"signer", if let Some(v) = self.signer => v.structure(),
 			"unsigned", if self.unsigned => true.into(),
 			"capabilities", if let Some(v) = self.capabilities => v.structure(),
+			"bindings", if !self.bindings.is_empty() => Value::from(crate::val::Object::from(
+				self.bindings
+					.0
+					.iter()
+					.map(|b| (b.name.clone(), Value::from(crate::expr::CoverStmts(&b.value).to_sql())))
+					.collect::<std::collections::BTreeMap<String, Value>>(),
+			)),
 			"permissions" => self.permissions.structure(),
 			"comment", if let Some(v) = self.comment => v.to_sql().into(),
 			"warnings", if let Some(v) = warnings => v,
@@ -176,6 +213,12 @@ pub struct ModuleDefinition {
 	/// `CAPABILITIES`. `None` only for a definition without `DIGEST`, which
 	/// grants nothing and does not run; see [`Self::needs_reinstall`].
 	pub capabilities: Option<ExtensionCapabilities>,
+	/// `BINDINGS`: values the extension reads by name, each evaluated with
+	/// permissions off and the caller capped at [`Self::auth_limit`].
+	pub bindings: ExtensionBindings,
+	/// The level and role of the session that wrote the definition. A
+	/// binding's expression runs with the caller's system level capped at it.
+	pub auth_limit: AuthLimit,
 	pub permissions: Permission,
 	/// The `PERMISSIONS` clause in logical form; see
 	/// [`Self::permissions_logical`].
@@ -211,6 +254,19 @@ impl FromStored for ModuleDefinition {
 				signer: stored.signer.clone(),
 				unsigned: stored.unsigned,
 				capabilities: stored.capabilities.clone(),
+				bindings: ExtensionBindings(
+					stored
+						.bindings
+						.iter()
+						.map(|b| {
+							Ok(ExtensionBinding {
+								name: b.name.clone(),
+								value: b.value.compile()?,
+							})
+						})
+						.collect::<anyhow::Result<_>>()?,
+				),
+				auth_limit: stored.auth_limit.clone(),
 				permissions: Permission::from_stored(&stored.permissions)?,
 				permissions_body: LogicalPermissionBody::from_stored(&stored.permissions),
 				comment: stored.comment.clone(),
@@ -236,6 +292,16 @@ impl ModuleDefinition {
 			digest: self.digest.clone(),
 			signer: self.signer.clone(),
 			capabilities: self.capabilities.clone(),
+			bindings: self
+				.bindings
+				.0
+				.iter()
+				.map(|b| StoredExtensionBinding {
+					name: b.name.clone(),
+					value: ExprText::new(&b.value),
+				})
+				.collect(),
+			auth_limit: self.auth_limit.clone(),
 		}
 	}
 }

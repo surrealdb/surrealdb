@@ -16,8 +16,9 @@
 //! - randomness and the clock work and are recorded. Their values are frozen into the image, which
 //!   is the author's choice, so the build lists them for information and does not fail.
 //!
-//! Imports the snapshot store has no use for — the guest's `transaction`
-//! resource, which `init` is never lent — trap if called.
+//! Imports the snapshot store has no use for trap if called: the guest's
+//! `transaction` resource, which `init` is never lent, and `binding`, whose
+//! values belong to a definition that does not exist at build time.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -470,6 +471,15 @@ fn transaction(linker: &mut Linker<InitStore>, interface: &str) -> Result<()> {
 			})
 			.map_err(wasmtime_err)?;
 	}
+	instance
+		.func_new_concurrent("binding", |_: &Accessor<InitStore>, _, _, _| {
+			Box::pin(async {
+				Err(wasmtime::Error::msg(
+					"`init` cannot read a binding: bindings belong to a definition, which does not exist at build time",
+				))
+			})
+		})
+		.map_err(wasmtime_err)?;
 	Ok(())
 }
 

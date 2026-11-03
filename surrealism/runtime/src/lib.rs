@@ -7,6 +7,7 @@
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
 
+pub mod abi;
 pub mod capabilities;
 pub mod config;
 pub mod controller;

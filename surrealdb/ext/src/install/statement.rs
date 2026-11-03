@@ -6,8 +6,8 @@
 //! changes only `COMMENT` and `PERMISSIONS`.
 //!
 //! Both carry the full decision: the exact source, the `DIGEST` that pins the
-//! code, the `SIGNER` (or `UNSIGNED`) the person accepted, and the
-//! `CAPABILITIES` they approved. The server re-fetches the archive from its own
+//! code, the `SIGNER` (or `UNSIGNED`) the person accepted, the `CAPABILITIES`
+//! they approved and the `BINDINGS` they gave. The server re-fetches the archive from its own
 //! source and refuses the statement when the digest or signer does not hold.
 
 use anyhow::{Result, bail};
@@ -27,6 +27,9 @@ pub struct Decision {
 	/// `None` writes `UNSIGNED`.
 	pub signer: Option<Signer>,
 	pub capabilities: Capabilities,
+	/// `BINDINGS`: each name and its SurrealQL expression; empty leaves the
+	/// clause out.
+	pub bindings: Vec<(String, String)>,
 	/// `PERMISSIONS`. An install leaves it out, so the server's default
 	/// applies; an upgrade writes back what the installed definition has,
 	/// because `OVERWRITE` replaces every clause.
@@ -88,6 +91,9 @@ fn body(d: &Decision) -> String {
 		super::sql::quote(&d.digest),
 		d.capabilities.to_sql(),
 	);
+	if !d.bindings.is_empty() {
+		out.push_str(&format!("\n    BINDINGS {}", super::bindings::to_sql(&d.bindings)));
+	}
 	if let Some(comment) = &d.comment {
 		out.push_str(&format!("\n    COMMENT {}", super::sql::quote(comment)));
 	}
@@ -118,6 +124,7 @@ mod tests {
 
 	fn silo_decision() -> Decision {
 		Decision {
+			bindings: Default::default(),
 			name: "color".into(),
 			source: DefinedSource::Silo {
 				org: "acme".into(),
@@ -161,6 +168,7 @@ mod tests {
 	#[test]
 	fn define_bucket_key_signed() {
 		let d = Decision {
+			bindings: Default::default(),
 			name: "geo".into(),
 			source: DefinedSource::Bucket(BucketFile {
 				bucket: "modules".into(),

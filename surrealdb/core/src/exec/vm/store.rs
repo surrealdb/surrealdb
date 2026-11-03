@@ -2913,6 +2913,27 @@ async fn step_inner(
 			}
 			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
 			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
+			// A binding runs with permissions off on every caller's invocation,
+			// so it is judged as a schema clause: no write, external write,
+			// state advance, blocking call or code whose effects are unknown. An
+			// import restores what an export held, as for every clause.
+			if !md.bindings.is_empty() && !ctx.options().is_some_and(|options| options.import) {
+				use crate::catalog::FromStored as _;
+				let definition =
+					crate::catalog::ModuleDefinition::from_stored(&md).map_err(ControlFlow::Err)?;
+				let txn = ctx.txn();
+				let check = crate::exec::clause_effects::ClauseCheck {
+					txn: &txn,
+					ns,
+					db,
+					registry: ctx.function_registry(),
+				};
+				for binding in &definition.bindings.0 {
+					super::descriptor::schema(check.refuse_clause("BINDINGS", &binding.value))
+						.await
+						.map_err(ControlFlow::Err)?;
+				}
+			}
 			let given = md.digest.is_some();
 			// Reading the archive's bucket reads the bucket's definition: a
 			// load this instruction makes at run time, so it is unsealed.
@@ -2940,7 +2961,7 @@ async fn step_inner(
 				let definition =
 					crate::catalog::ModuleDefinition::from_stored(&md).map_err(ControlFlow::Err)?;
 				let lookup = surrealism_lookup(&ns, &db, &definition.executable);
-				let _ = crate::kvs::catalog_reads::sealed(
+				let loaded = crate::kvs::catalog_reads::sealed(
 					false,
 					ctx.ctx().get_surrealism_module_from(
 						lookup,
@@ -2949,6 +2970,14 @@ async fn step_inner(
 					),
 				)
 				.await;
+				// The archive declares the names `BINDINGS` must answer.
+				if let Ok(module) = loaded {
+					crate::surrealism::bindings::check_definition(
+						&definition,
+						module.prepared.package(),
+					)
+					.map_err(ControlFlow::Err)?;
+				}
 			}
 			#[cfg(not(feature = "surrealism"))]
 			let _ = archive;

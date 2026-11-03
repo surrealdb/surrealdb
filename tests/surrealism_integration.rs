@@ -665,6 +665,53 @@ mod surrealism_integration {
 	// Filesystem attach tests
 	// -------------------------------------------------------------------
 
+	/// The guest reads a definition's `BINDINGS` through its `binding` import:
+	/// the bound expression's value, or `NONE` for the optional name the
+	/// definition leaves out. The expression reads a table the export has no
+	/// transaction to reach.
+	async fn check_bindings(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		// The demo imports `binding`, so the build stamps the ABI that has it.
+		let surli = std::fs::read(bucket_dir.join("demo.surli"))?;
+		let package = SurrealismPackage::from_reader(
+			std::io::Cursor::new(surli),
+			&surrealism_runtime::package::UnpackOptions::default(),
+		)?;
+		assert_eq!(package.config.abi, surrealism_runtime::abi::Abi::V5.version());
+
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		let dir = bucket_dir.to_string_lossy();
+		let setup = format!(
+			"DEFINE BUCKET test BACKEND \"file:{dir}\";\
+			 DEFINE TABLE greetings PERMISSIONS NONE;\
+			 CREATE greetings:en SET text = 'hello';\
+			 DEFINE EXTENSION ext::bound FROM f\"test:/demo.surli\" UNSIGNED \
+			 BINDINGS {{ greeting: (SELECT VALUE text FROM ONLY greetings:en) }};\
+			 DEFINE EXTENSION ext::unbound FROM f\"test:/demo.surli\" UNSIGNED;"
+		);
+		for (i, r) in sql_query(&addr, &ns, &db, &setup).await.iter().enumerate() {
+			assert_eq!(r.status, "OK", "setup statement {i}: {:?}", r.result);
+		}
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::bound::bound_greeting();").await;
+		assert_eq!(results[0].status, "OK", "bound: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!("hello"));
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::unbound::bound_greeting();").await;
+		assert_eq!(results[0].status, "OK", "unbound: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::Value::Null);
+
+		let refused =
+			"DEFINE EXTENSION ext::other FROM f\"test:/demo.surli\" UNSIGNED BINDINGS { nope: 1 };";
+		let results = sql_query(&addr, &ns, &db, refused).await;
+		assert_eq!(results[0].status, "ERR", "an undeclared binding was accepted");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_bindings() -> Result<(), Box<dyn std::error::Error>> {
+		check_bindings(&DEMO_DIR.canonical).await
+	}
+
 	async fn check_fs_read(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
 		let ns = Ulid::new().to_string();
@@ -2943,11 +2990,12 @@ mod surrealism_integration {
 				repository: None,
 			},
 			capabilities: Default::default(),
-			abi: AbiVersion::CURRENT,
+			abi: AbiVersion::LATEST,
 			attach: SurrealismAttach {
 				fs: Some(surrealism_runtime::config::FsMounts::root("fs")),
 			},
 			signer: None,
+			bindings: Default::default(),
 		};
 
 		// Component preamble (layer 1, version 0x0d)

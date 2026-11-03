@@ -2886,6 +2886,9 @@ impl Ddl<'_, '_> {
 		self.check_types_defined((ns, db), names, || format!("The module '{storage}'"));
 		let comment = self.comment(comment)?;
 		self.set_comment(definition, &comment)?;
+		// `BINDINGS` are evaluated with the rights of the session that wrote
+		// the definition.
+		self.session_auth_limit(definition)?;
 		self.store(StoreInstr::VerifyModule {
 			ns,
 			db,

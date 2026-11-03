@@ -34,6 +34,11 @@ pub struct StoreData {
 	/// traps; `None` lets it run until it returns. Read on every epoch tick of
 	/// the guarded engine ([`crate::epoch::yield_until_deadline`]).
 	pub(crate) deadline: Option<u64>,
+	/// What the guest's `binding` import answers from; `None` refuses it.
+	pub(crate) bindings: Option<Arc<dyn crate::host::Bindings>>,
+	/// The `binding` reads in flight, bounded like the calls through a
+	/// `transaction` handle.
+	pub(crate) binding_reads: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl WasiView for StoreData {

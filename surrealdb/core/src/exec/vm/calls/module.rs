@@ -163,6 +163,20 @@ pub(crate) async fn run_module_export(
 	use crate::doc::CursorDoc;
 
 	let fnc_name = crate::catalog::extension_name(&export_name(mod_name, sub)).into_owned();
+	// An extension reaches outside the transaction through its own grant,
+	// which no frame narrows, so a frame that refuses external effects refuses
+	// the call. Judged here, where the call is made, it holds however the call
+	// was reached: through a stored function redefined after the clause was
+	// written, or one an import restored unchecked.
+	if let Some(frame) = ctx.exec_ctx.root().no_write
+		&& frame.refuses_extension_call()
+	{
+		let construct = format!(
+			"it calls `{fnc_name}`, {}",
+			crate::exec::clause_effects::effect_text(crate::expr::logical::EffectSet::OPAQUE_BODY)
+		);
+		return Err(anyhow::Error::from(frame.side_effect_error(&construct)).into());
+	}
 	let signature = &export.signature;
 	// Validate argument count against signature
 	if args.len() != signature.args.len() {
@@ -222,6 +236,7 @@ pub(crate) async fn run_module_export(
 		crate::fnc::module::CalledDefinition {
 			trust: export.trust(),
 			capabilities,
+			definition: &export.definition,
 		},
 		ctx.exec_ctx.ctx(),
 		&opt,

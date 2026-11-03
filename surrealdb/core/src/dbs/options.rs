@@ -130,6 +130,11 @@ pub(crate) enum NoWriteFrame {
 	/// transaction, so a write reached from it would let a subscriber inject
 	/// side effects into another user's write (GHSA-pvv9-h693-m8r4).
 	LiveClause,
+	/// An extension definition's `BINDINGS` expression. It runs with
+	/// permissions off whenever a caller's invocation reads it, so a write or an
+	/// external effect reached from it would be one any caller could trigger
+	/// past the table and field permissions.
+	ExtensionBinding,
 }
 
 impl NoWriteFrame {
@@ -144,6 +149,7 @@ impl NoWriteFrame {
 			Self::FieldAssert => Some("ASSERT"),
 			Self::Migration => Some("MIGRATE"),
 			Self::LiveClause => Some("LIVE"),
+			Self::ExtensionBinding => Some("BINDINGS"),
 			Self::SurrealismReadOnly => None,
 		}
 	}
@@ -171,6 +177,14 @@ impl NoWriteFrame {
 			}
 			None => crate::expr::method::mutates_state_builtin(name),
 		}
+	}
+
+	/// Whether this frame refuses every call into an extension. An extension
+	/// acts through its own grant, network included, which no frame narrows,
+	/// so a frame whose clause refuses external writes refuses the call.
+	#[cfg(feature = "surrealism")]
+	pub(crate) fn refuses_extension_call(self) -> bool {
+		matches!(self, Self::ExtensionBinding)
 	}
 
 	/// The error a refused effect raises under this frame. `construct` names
@@ -445,6 +459,18 @@ impl Options {
 		}
 	}
 
+	/// Create a new Options object for evaluating an extension definition's
+	/// `BINDINGS` expression: reads unchecked, as the definition's auth limit
+	/// allows, and no write or external effect.
+	pub fn new_for_extension_binding(&self) -> Self {
+		Self {
+			perms: false,
+			caller_perms: false,
+			no_write: Some(NoWriteFrame::ExtensionBinding),
+			..self.clone()
+		}
+	}
+
 	/// Create a new Options object for evaluating a `COMPUTED` field body.
 	///
 	/// Unlike [`Self::new_for_permission_predicate`] this leaves `perms`
@@ -599,6 +625,7 @@ mod tests {
 			NoWriteFrame::SurrealismReadOnly,
 			NoWriteFrame::Migration,
 			NoWriteFrame::LiveClause,
+			NoWriteFrame::ExtensionBinding,
 		];
 		for frame in frames {
 			let expected = match frame {
@@ -611,6 +638,7 @@ mod tests {
 				NoWriteFrame::FieldAssert => Some("ASSERT"),
 				NoWriteFrame::Migration => Some("MIGRATE"),
 				NoWriteFrame::LiveClause => Some("LIVE"),
+				NoWriteFrame::ExtensionBinding => Some("BINDINGS"),
 				NoWriteFrame::SurrealismReadOnly => None,
 			};
 			let raised = frame.side_effect_error("`CREATE` writes data");
@@ -646,6 +674,7 @@ mod tests {
 			(NoWriteFrame::FieldAssert, true),
 			(NoWriteFrame::Migration, true),
 			(NoWriteFrame::LiveClause, true),
+			(NoWriteFrame::ExtensionBinding, true),
 			(NoWriteFrame::FieldValue, false),
 			(NoWriteFrame::FieldDefault, false),
 		];
@@ -665,13 +694,16 @@ mod tests {
 				),
 				"{frame:?}"
 			);
-			// Only a LIVE clause refuses a builtin that writes to an external
-			// system: it runs inside another user's triggering write, so such a
-			// call would exfiltrate that write (GHSA-pvv9-h693-m8r4). Every
+			// Only a LIVE clause and an extension's BINDINGS refuse a builtin
+			// that writes to an external system: the first runs inside another
+			// user's triggering write, so such a call would exfiltrate that
+			// write (GHSA-pvv9-h693-m8r4); the second runs with its definer's
+			// rights on every caller's invocation. Every
 			// other clause, `VALUE` and `DEFAULT` included, leaves an external
 			// write to be judged elsewhere, and no clause refuses a read of an
 			// external system, which may enrich a value without a side effect.
-			let external = frame == NoWriteFrame::LiveClause;
+			let external =
+				matches!(frame, NoWriteFrame::LiveClause | NoWriteFrame::ExtensionBinding);
 			assert_eq!(
 				frame.refuses_builtin_call(
 					"http::post",

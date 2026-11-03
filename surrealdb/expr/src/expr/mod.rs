@@ -89,7 +89,8 @@ pub use self::error::Error;
 pub use self::explain::Explain;
 pub use self::expression::{ExplainFormat, Expr};
 pub use self::extension::{
-	CapabilityTargets, ExtensionCapabilities, ExtensionSigner, ManifestDigest, SigstoreSigner,
+	CapabilityTargets, ExtensionBinding, ExtensionBindings, ExtensionCapabilities, ExtensionSigner,
+	ManifestDigest, SigstoreSigner,
 };
 pub use self::fetch::{Fetch, Fetchs};
 pub use self::field::{Field, Fields};

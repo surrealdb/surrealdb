@@ -28,6 +28,8 @@ mod export_legacy_extension_test;
 mod export_user_types_test;
 #[cfg(feature = "kv-mem")]
 mod export_views_test;
+#[cfg(all(feature = "kv-mem", feature = "surrealism"))]
+mod extension_bindings_test;
 #[cfg(all(feature = "search", feature = "kv-mem"))]
 mod fulltext_nodes_test;
 #[cfg(feature = "kv-mem")]

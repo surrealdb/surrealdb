@@ -18,7 +18,7 @@ use tar::Archive;
 use tempfile::TempDir;
 use zstd::stream::read::Decoder;
 
-use crate::config::{AbiVersion, LEGACY_PACKAGE_FILE, PACKAGE_FILE, SurrealismConfig};
+use crate::config::{LEGACY_PACKAGE_FILE, PACKAGE_FILE, SurrealismConfig};
 use crate::exports::ExportsManifest;
 pub use crate::manifest::{Digest, MANIFEST_PATH, Manifest, SIGNATURE_PATH, validate_path};
 
@@ -216,7 +216,7 @@ pub fn trust_files_from_reader<R: Read>(
 	let Some(manifest) = manifest else {
 		return Err(archive_err(format!(
 			"{MANIFEST_PATH} not found; an archive built with an SDK older than ABI {} must be rebuilt",
-			AbiVersion::CURRENT.0
+			crate::abi::Abi::OLDEST.version().0
 		)));
 	};
 	Ok(TrustFiles {
@@ -609,13 +609,8 @@ impl SurrealismPackage {
 
 		let Some(manifest) = manifest else {
 			// An archive from an older SDK has no manifest; its ABI says why.
-			if let Some(config) = &config
-				&& config.abi != AbiVersion::CURRENT
-			{
-				return Err(SurrealismError::UnsupportedAbi {
-					expected: AbiVersion::CURRENT.0,
-					got: config.abi.0,
-				});
+			if let Some(config) = &config {
+				crate::abi::Abi::try_from(config.abi)?;
 			}
 			return Err(archive_err(format!("{MANIFEST_PATH} not found")));
 		};
@@ -1088,8 +1083,9 @@ mod tests {
 		let raws: Vec<Raw> = files.iter().map(|(p, b)| file(p, b)).collect();
 		match load(&archive(&raws)) {
 			Err(SurrealismError::UnsupportedAbi {
-				expected: 4,
 				got: 3,
+				oldest: 4,
+				latest: _,
 			}) => {}
 			other => panic!("unexpected result: {:?}", other.map(|_| ())),
 		}

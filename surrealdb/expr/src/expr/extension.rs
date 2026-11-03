@@ -15,7 +15,7 @@
 
 use std::fmt::{self, Display};
 
-use common::fmt::QuoteStr;
+use common::fmt::{EscapeObjectKey, QuoteStr};
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -410,6 +410,63 @@ pub fn check_ssh_key_line(line: &str) -> Result<(), &'static str> {
 	match parts.next() {
 		Some(key) if is_base64(key) => Ok(()),
 		_ => Err("The key type must be followed by a space and the base64 public key"),
+	}
+}
+
+/// `BINDINGS { name: expression, … }`: values an extension reads by name.
+///
+/// Each expression is evaluated when the extension first asks for its name
+/// during an invocation, with permissions off and the caller's system level
+/// capped at the definer's, so a definer can hand the extension a value the
+/// caller may not read — a secret, a row of a locked table. The caller's own
+/// parameters are not in scope. The extension's `package.toml` declares the
+/// names and their kinds; the definition must give every name whose kind is
+/// not `option<…>`, and no name the package does not declare.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub struct ExtensionBindings(pub Vec<ExtensionBinding>);
+
+/// One entry of [`ExtensionBindings`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct ExtensionBinding {
+	pub name: String,
+	pub value: crate::expr::Expr,
+}
+
+impl ExtensionBindings {
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+
+	/// The expression bound to `name`, if the definition binds it.
+	pub fn get(&self, name: &str) -> Option<&crate::expr::Expr> {
+		self.0.iter().find(|b| b.name == name).map(|b| &b.value)
+	}
+
+	pub fn names(&self) -> impl Iterator<Item = &str> {
+		self.0.iter().map(|b| b.name.as_str())
+	}
+}
+
+impl ToSql for ExtensionBindings {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		if self.0.is_empty() {
+			f.push_str("{}");
+			return;
+		}
+		f.push_str("{ ");
+		for (i, binding) in self.0.iter().enumerate() {
+			if i > 0 {
+				f.push_str(", ");
+			}
+			write_sql!(
+				f,
+				fmt,
+				"{}: {}",
+				EscapeObjectKey(&binding.name),
+				crate::expr::CoverStmts(&binding.value)
+			);
+		}
+		f.push_str(" }");
 	}
 }
 

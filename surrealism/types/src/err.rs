@@ -39,12 +39,13 @@ pub enum SurrealismError {
 		slots: usize,
 	},
 	#[error(
-		"Unsupported ABI version: expected {expected}, got {got}. Rebuild the extension with the \
-		 SurrealDB 4.0 SDK"
+		"Unsupported ABI version {got}: this server runs ABI {oldest} to {latest}. Rebuild the \
+		 extension with an SDK for one of them"
 	)]
 	UnsupportedAbi {
-		expected: u32,
 		got: u32,
+		oldest: u32,
+		latest: u32,
 	},
 	#[error("Integer conversion error: {0}")]
 	IntConversion(#[from] TryFromIntError),

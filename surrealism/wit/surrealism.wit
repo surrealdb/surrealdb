@@ -77,6 +77,23 @@ interface host {
         /// the latest. Cross-module calls are subject to the caller's grants.
         run: async func(fnc: string, version: option<string>, args: serialized-args) -> result<serialized-value, host-error>;
     }
+
+    /// The value the extension's definition binds to `name` in its `BINDINGS`.
+    ///
+    /// The host evaluates the definition's expression for `name` on the first
+    /// read in an invocation, with permissions off and the caller's system
+    /// level capped at the definer's, and coerces it to the kind `name` has under `[bindings]` in
+    /// `package.toml`. Later reads in the same invocation return that value.
+    /// `none` is a name of kind `option<…>` that the definition leaves out. A
+    /// name that `package.toml` does not declare is `invalid-request`.
+    ///
+    /// Answered only inside `invoke`, whether or not the function declared a
+    /// transaction. `init` runs at build time, before any definition exists,
+    /// and fails if it asks.
+    ///
+    /// ABI 5 and later: a component that imports it is stamped ABI 5, and a
+    /// server that runs only ABI 4 refuses it.
+    binding: async func(name: string) -> result<option<serialized-value>, host-error>;
 }
 
 /// The `extension` world is the top-level contract that every surrealism guest

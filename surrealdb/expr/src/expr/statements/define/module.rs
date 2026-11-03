@@ -4,8 +4,8 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::DefineKind;
 use crate::expr::permission::Permission;
 use crate::expr::{
-	CoverStmts, Expr, ExtensionCapabilities, ExtensionSigner, Literal, ManifestDigest,
-	ModuleExecutable,
+	CoverStmts, Expr, ExtensionBindings, ExtensionCapabilities, ExtensionSigner, Literal,
+	ManifestDigest, ModuleExecutable,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -25,6 +25,8 @@ pub struct DefineModuleStatement {
 	/// nothing. `None` only renders a definition stored before the clause
 	/// existed, which must be reinstalled.
 	pub capabilities: Option<ExtensionCapabilities>,
+	/// `BINDINGS`; empty when the statement has none.
+	pub bindings: ExtensionBindings,
 	pub comment: Expr,
 	pub permissions: Permission,
 }
@@ -51,6 +53,9 @@ impl ToSql for DefineModuleStatement {
 		}
 		if let Some(capabilities) = &self.capabilities {
 			write_sql!(f, sql_fmt, " CAPABILITIES {}", capabilities);
+		}
+		if !self.bindings.is_empty() {
+			write_sql!(f, sql_fmt, " BINDINGS {}", self.bindings);
 		}
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
 			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));

@@ -1,8 +1,10 @@
-//! Lowering of a module definition's `DIGEST`, `SIGNER` and `CAPABILITIES`
-//! clauses.
+//! Lowering of a module definition's `DIGEST`, `SIGNER`, `CAPABILITIES` and
+//! `BINDINGS` clauses.
 //!
-//! The parser takes `SIGNER` and `CAPABILITIES` as expressions; here each must
-//! be an object literal of literal values with exactly the documented fields.
+//! The parser takes `SIGNER`, `CAPABILITIES` and `BINDINGS` as expressions;
+//! here each must be an object literal. `SIGNER` and `CAPABILITIES` hold
+//! literal values with exactly the documented fields; `BINDINGS` holds any
+//! expression under any name.
 //! The checks are syntactic: a well-formed `SIGNER` says nothing about whether
 //! any archive satisfies it.
 
@@ -15,7 +17,8 @@ use surrealdb_parser_next::lex::decode_duration;
 use super::{Lower, R, Reject};
 use crate::expr::extension::{check_ssh_key_line, is_base64};
 use crate::expr::{
-	CapabilityTargets, ExtensionCapabilities, ExtensionSigner, ManifestDigest, SigstoreSigner,
+	CapabilityTargets, ExtensionBinding, ExtensionBindings, ExtensionCapabilities, ExtensionSigner,
+	ManifestDigest, SigstoreSigner,
 };
 
 const SIGSTORE_FIELDS: &[&str] =
@@ -108,6 +111,20 @@ impl Lower<'_> {
 				.transpose()?,
 			owner_id: owner_id.map(|v| self.numeric_id(v, "`owner_id`")).transpose()?,
 		}))
+	}
+
+	/// `BINDINGS { name: expression, … }`, in the order written. Which names
+	/// the extension declares is checked against its archive, not here.
+	pub(super) fn bindings(&self, id: NodeId) -> R<ExtensionBindings> {
+		let entries = self.lit_object(id, "`BINDINGS`")?;
+		let mut out = Vec::with_capacity(entries.0.len());
+		for (name, _, value) in entries.0 {
+			out.push(ExtensionBinding {
+				name,
+				value: self.expr(value)?,
+			});
+		}
+		Ok(ExtensionBindings(out))
 	}
 
 	/// `CAPABILITIES { … }`. Absent fields keep their defaults, which grant

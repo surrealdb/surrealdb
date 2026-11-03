@@ -25,6 +25,8 @@ pub struct Installed {
 	/// `PERMISSIONS`: who may call it.
 	pub permissions: Permissions,
 	pub comment: Option<String>,
+	/// `BINDINGS`: each name and the expression it is bound to.
+	pub bindings: Vec<(String, String)>,
 }
 
 /// `INFO FOR DB STRUCTURE`, then [`installed_from_info`].
@@ -119,6 +121,19 @@ pub fn installed_from_info(info: &Value, name: &str) -> Result<Installed> {
 		Some(Value::String(c)) => Some(c.clone()),
 		_ => None,
 	};
+	let bindings = match def.get("bindings") {
+		None | Some(Value::None) | Some(Value::Null) => Vec::new(),
+		Some(Value::Object(o)) => o
+			.iter()
+			.map(|(binding, expr)| {
+				let Value::String(e) = expr else {
+					bail!("the BINDINGS of ext::{name} are not readable: `{binding}` is not text");
+				};
+				Ok((binding.clone(), e.clone()))
+			})
+			.collect::<Result<_>>()?,
+		Some(other) => bail!("the BINDINGS of ext::{name} are not readable: {}", other.kind()),
+	};
 	Ok(Installed {
 		source,
 		digest,
@@ -126,6 +141,7 @@ pub fn installed_from_info(info: &Value, name: &str) -> Result<Installed> {
 		capabilities,
 		permissions,
 		comment,
+		bindings,
 	})
 }
 
@@ -155,6 +171,7 @@ mod tests {
 		assert_eq!(
 			installed,
 			Installed {
+				bindings: Default::default(),
 				source: DefinedSource::Silo {
 					org: "acme".into(),
 					pkg: "color".into(),

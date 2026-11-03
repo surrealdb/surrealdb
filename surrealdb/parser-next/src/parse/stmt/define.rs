@@ -1760,10 +1760,11 @@ impl<'a, 's> Parser<'a, 's> {
 			return Err(self.unexpected("an extension executable"));
 		};
 		// The token of the first `SIGNER` or `UNSIGNED`, and of the first
-		// `DIGEST` and `CAPABILITIES`: each may appear once.
+		// `DIGEST`, `CAPABILITIES` and `BINDINGS`: each may appear once.
 		let mut trust: Option<Tok> = None;
 		let mut digest: Option<Tok> = None;
 		let mut capabilities: Option<Tok> = None;
+		let mut bindings: Option<Tok> = None;
 		loop {
 			let t = self.tok;
 			if t.kw == Kw::Unsigned || t.kw == Kw::Signer {
@@ -1800,6 +1801,16 @@ impl<'a, 's> Parser<'a, 's> {
 				}
 				capabilities = Some(t);
 				self.expr_clause(Cl::Capabilities)?
+			} else if t.kw == Kw::Bindings {
+				if let Some(first) = bindings {
+					return Err(self.repeated_clause(
+						t,
+						first,
+						"An extension definition takes one `BINDINGS` object",
+					));
+				}
+				bindings = Some(t);
+				self.expr_clause(Cl::Bindings)?
 			} else if t.kw == Kw::Comment {
 				self.expr_clause(Cl::Comment)?
 			} else if t.kw == Kw::Permissions {

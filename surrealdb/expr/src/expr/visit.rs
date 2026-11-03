@@ -1140,6 +1140,9 @@ implement_visitor! {
 	}
 
 	fn visit_define_module(this, d: &DefineModuleStatement) {
+		for binding in &d.bindings.0 {
+			this.visit_expr(&binding.value)?;
+		}
 		this.visit_permission(&d.permissions)?;
 		this.visit_expr(&d.comment)?;
 		Ok(())
@@ -2751,6 +2754,9 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_define_module(this, d: &mut DefineModuleStatement) {
+		for binding in &mut d.bindings.0 {
+			this.visit_mut_expr(&mut binding.value)?;
+		}
 		this.visit_mut_permission(&mut d.permissions)?;
 		this.visit_mut_expr(&mut d.comment)?;
 		Ok(())

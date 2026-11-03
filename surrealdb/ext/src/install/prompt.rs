@@ -237,6 +237,19 @@ fn withheld(out: &mut String, requests: &Capabilities, granted: &Capabilities) -
 	any
 }
 
+/// One row per binding: its name and the expression the server evaluates for
+/// it, never a value.
+fn binding_rows(out: &mut String, bindings: &[(String, String)]) {
+	for (n, (name, expr)) in bindings.iter().enumerate() {
+		let first = if n == 0 {
+			"Binds"
+		} else {
+			""
+		};
+		row(out, first, &format!("{name:<12}{expr}"));
+	}
+}
+
 pub fn render_install(plan: &InstallPlan) -> String {
 	let mut out = String::new();
 	let i = &plan.inspected;
@@ -257,6 +270,7 @@ pub fn render_install(plan: &InstallPlan) -> String {
 		row(&mut out, first, &format!("{label:<12}{value}"));
 	}
 	withheld(&mut out, &i.facts.requests, &plan.decision.capabilities);
+	binding_rows(&mut out, &plan.decision.bindings);
 	out
 }
 
@@ -345,6 +359,7 @@ pub fn render_upgrade(plan: &UpgradePlan) -> String {
 			"(the installed archive could not be read again, so no request counts as new)",
 		);
 	}
+	binding_rows(&mut out, &plan.decision.bindings);
 	out
 }
 
@@ -387,6 +402,7 @@ mod tests {
 	fn inspected(version: Version, signer: Option<Signer>, requests: Capabilities) -> Inspected {
 		Inspected {
 			facts: ArchiveFacts {
+				bindings: Default::default(),
 				digest: surrealism_runtime::package::Digest([0x5d; 32]),
 				signature: None,
 				organisation: "acme".into(),
@@ -450,6 +466,7 @@ mod tests {
 	fn install_prompt() {
 		let i = inspected(Version::new(1, 0, 0), Some(signer(GH)), requests());
 		let decision = Decision {
+			bindings: Default::default(),
 			name: "color".into(),
 			source: silo(Version::new(1, 0, 0)),
 			digest: "sha256:5d1a".into(),
@@ -488,6 +505,7 @@ mod tests {
 	fn upgrade(new_identity: &str, new_caps: Capabilities) -> UpgradePlan {
 		let i = inspected(Version::new(1, 1, 0), Some(signer(new_identity)), new_caps.clone());
 		let decision = Decision {
+			bindings: Default::default(),
 			name: "color".into(),
 			source: silo(Version::new(1, 1, 0)),
 			digest: "sha256:77f0".into(),
@@ -497,6 +515,7 @@ mod tests {
 			comment: None,
 		};
 		let installed = Installed {
+			bindings: Default::default(),
 			source: silo(Version::new(1, 0, 0)),
 			digest: Some("sha256:5d1a".into()),
 			signer: Some(signer(GH)),
@@ -513,6 +532,21 @@ mod tests {
 			inspected: i,
 			decision,
 		}
+	}
+
+	/// An upgrade to the installed archive that changes a binding is not a
+	/// no-op; the same bindings in another order are.
+	#[test]
+	fn a_changed_binding_is_not_a_noop() {
+		let mut plan = upgrade(GH, requests());
+		plan.installed.digest = Some(plan.decision.digest.clone());
+		plan.installed.source = plan.decision.source.clone();
+		let pair = |name: &str, expr: &str| (name.to_owned(), expr.to_owned());
+		plan.installed.bindings = vec![pair("a", "1"), pair("b", "'x'")];
+		plan.decision.bindings = vec![pair("b", "'x'"), pair("a", "1")];
+		assert!(plan.is_noop());
+		plan.decision.bindings[0] = pair("b", "'y'");
+		assert!(!plan.is_noop());
 	}
 
 	#[test]
@@ -556,6 +590,7 @@ mod tests {
 		let mut i = inspected(Version::new(1, 0, 0), Some(signer(GH)), caps.clone());
 		i.facts.organisation = "ac\u{202e}me".into();
 		let decision = Decision {
+			bindings: Default::default(),
 			name: "color".into(),
 			source: silo(Version::new(1, 0, 0)),
 			digest: "sha256:5d1a".into(),

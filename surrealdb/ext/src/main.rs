@@ -99,6 +99,12 @@ enum Command {
 		#[arg(long = "arg", value_parser = parse_value)]
 		args: Vec<surrealdb_types::Value>,
 
+		/// The value of a name the package declares under [bindings]:
+		/// NAME=VALUE, a SurrealQL value (repeatable). A name left out reads
+		/// as NONE.
+		#[arg(long = "bind", value_name = "NAME=VALUE", value_parser = parse_binding)]
+		bindings: Vec<(String, surrealdb_types::Value)>,
+
 		/// Required name
 		#[arg(long)]
 		fnc: Option<String>,
@@ -168,6 +174,18 @@ pub(crate) fn parse_value(s: &str) -> Result<surrealdb_types::Value, String> {
 	parser::value(s).map_err(|e| format!("Invalid value: {e}"))
 }
 
+/// `NAME=VALUE` from `run --bind`.
+fn parse_binding(s: &str) -> Result<(String, surrealdb_types::Value), String> {
+	let (name, value) = s
+		.split_once('=')
+		.ok_or_else(|| "--bind takes NAME=VALUE, as in --bind 'api_key=\"k\"'".to_owned())?;
+	let name = name.trim();
+	if name.is_empty() {
+		return Err("--bind: the name is empty".to_owned());
+	}
+	Ok((name.to_owned(), parse_value(value.trim())?))
+}
+
 /// The name this executable goes by: the Surreal CLI's command line when it
 /// ran this executable (`surreal ext`), else [`BIN_NAME`]. An empty or blank
 /// [`INVOKED_AS_ENV`] counts as unset.
@@ -217,9 +235,10 @@ async fn execute(command: Command) -> Result<()> {
 		} => init_cmd::init(path, org, name, headless).await,
 		Command::Run {
 			args,
+			bindings,
 			fnc,
 			file,
-		} => run::init(file, fnc, args).await,
+		} => run::init(file, fnc, args, bindings).await,
 		Command::Sig {
 			fnc,
 			file,

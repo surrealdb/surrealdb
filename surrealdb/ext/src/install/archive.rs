@@ -52,6 +52,8 @@ pub struct ArchiveFacts {
 	pub declared_signer: Option<PackageSigner>,
 	/// `[capabilities]` from `package.toml`, plus `write` when an export writes.
 	pub requests: Capabilities,
+	/// `[bindings]` from `package.toml`: the names `BINDINGS` must answer.
+	pub bindings: std::collections::BTreeMap<String, surrealism_runtime::config::BindingSpec>,
 	pub exports: Vec<Export>,
 }
 
@@ -156,6 +158,7 @@ pub fn preview_bytes(bytes: &[u8]) -> Result<ArchiveFacts> {
 		repository: meta.repository.clone(),
 		declared_signer: config.signer.clone(),
 		requests: Capabilities::from_request(&config.capabilities, any_writes),
+		bindings: config.bindings.clone(),
 		exports,
 	})
 }

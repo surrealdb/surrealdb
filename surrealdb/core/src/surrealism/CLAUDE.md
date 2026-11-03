@@ -54,11 +54,18 @@ A silo fetch is first-party package resolution, not user-directed traffic, so it
 
 ## Definition clauses
 
-`DEFINE EXTENSION` takes three trailing clauses beside `COMMENT` and `PERMISSIONS`, in any order, each at most once (`StoredModuleDefinition` revision 3):
+`DEFINE EXTENSION` takes four trailing clauses beside `COMMENT` and `PERMISSIONS`, in any order, each at most once (`StoredModuleDefinition` revision 4):
 
 - `DIGEST "sha256:…"` pins the code. When the statement leaves it out, executing the statement fetches the archive and records `sha256(surrealism/MANIFEST)` (`extension::archive::fetch_manifest_digest`) before the definition is written. A build without the `surrealism` feature cannot read archives, so there the statement must give `DIGEST`. Nothing is recorded at load time.
 - `SIGNER { sigstore: { … } }` or `SIGNER { key: "…" }` names the anchor and identity rule a signature must satisfy; `UNSIGNED` waives the check. Every definition has exactly one of the two. The parser checks their shape; `extension/trust.rs` checks a signature against them.
 - `CAPABILITIES { … }` is everything the module may do; an absent clause grants nothing. `extension::effective_capabilities` intersects it with the server's capabilities.
+- `BINDINGS { name: expression, … }` gives the values the guest reads through its `binding` import. The definition also records the `auth_limit` of the session that wrote it (a template hole, `session_auth_limit`). See *Bindings* below.
+
+## Bindings (`bindings.rs`)
+
+`StoreInstr::VerifyModule` runs `check_definition` against the prepared archive's `package.toml` when it has the archive. An archive whose ABI lacks `Features::BINDINGS` (ABI 4) takes no `BINDINGS`, and its `[bindings]` table is not read. Otherwise, against that table: a bound name the package does not declare, or a declared name whose kind cannot be `NONE` left unbound, refuses the statement. A definition restored before its archive exists is not checked there.
+
+`run_on_runtime` lends every invocation a `DefinitionBindings`. On the first read of a name in that invocation it evaluates the definition's expression through `exec::entry` in `Context::new_isolated` of the caller's context (so `LET` bindings, request parameters and the row are out of scope; `$auth`, `$session`, `$token`, `$access` are in), with `opt.limited_by(auth_limit).new_for_extension_binding()`: permissions off, the caller's level capped at the definer's (never raised), and `NoWriteFrame::ExtensionBinding`, which refuses writes, external writes, state-advancing and blocking builtins, and every call into an extension (`NoWriteFrame::refuses_extension_call`, judged where the call is made, so a stored function redefined after the `DEFINE` cannot reach one). `DEFINE` also judges each binding as a schema clause (`ClauseCheck::refuse_clause("BINDINGS", …)`). The value is coerced to the declared kind and kept for the rest of the invocation. Every failure names the binding and the extension only, never the value or the evaluation's error.
 
 ## Trust: DIGEST and SIGNER
 
@@ -80,6 +87,7 @@ A definition stored before revision 3 decodes with all three fields `None`. It i
 | File | Purpose |
 |------|---------|
 | `host.rs` | `Host` struct, `InvocationContext` impl, `runner_capabilities` |
+| `bindings.rs` | `DefinitionBindings` (the `binding` import's answers), `check_definition` |
 | `runner.rs` | `ExtensionRunner`, `PreparedExtension`, `Invocation`, `RunnerCapabilities`, `SurrealismRunner` |
 | `cache.rs` | `SurrealismCache`: prepared by digest, sources by tenant, grants by `CAPABILITIES` |
 | `silo.rs` | Package URL construction and the `.surli` download |

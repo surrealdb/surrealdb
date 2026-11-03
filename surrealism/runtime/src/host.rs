@@ -21,6 +21,7 @@ use async_trait::async_trait;
 use surrealism_types::err::{HostCallError, HostCallResult, PrefixErr, SurrealismResult};
 use wasmtime::component::{Accessor, Resource};
 
+use crate::abi::Features;
 use crate::store::StoreData;
 
 // ============================================================================
@@ -70,6 +71,21 @@ pub trait InvocationContext: Send + Sync {
 	fn stderr_callback(&self) -> Arc<dyn Fn(&str) + Send + Sync> {
 		Arc::new(|output| eprint!("{}", output))
 	}
+}
+
+// ============================================================================
+// Bindings
+// ============================================================================
+
+/// The values a definition binds, answered by name for one invocation.
+///
+/// Held in the invocation's store, so a value never outlives the instance it
+/// was read in. `init` runs with none.
+#[async_trait]
+pub trait Bindings: Send + Sync {
+	/// The value bound to `name`, coerced to the kind the package declares for
+	/// it. `None` for an `option<…>` name the definition does not bind.
+	async fn get(&self, name: String) -> HostCallResult<Option<surrealdb_types::Value>>;
 }
 
 // ============================================================================
@@ -124,7 +140,8 @@ pub(crate) struct Transaction {
 	pub(crate) in_flight: Arc<AtomicUsize>,
 }
 
-/// The most host calls one lent handle may have in flight at once.
+/// The most host calls one lent handle, or the `binding` reads of one
+/// invocation, may have in flight at once.
 ///
 /// Far above what a module doing legitimate concurrent work holds — the point
 /// is to bound a guest that spawns subtasks faster than the host retires them,
@@ -141,15 +158,16 @@ impl Drop for CallSlot {
 }
 
 /// Take a place among the calls in flight through one handle, or refuse.
-fn admit(counter: &Arc<AtomicUsize>) -> HostCallResult<CallSlot> {
+/// Take a place among the calls `counter` counts, which `through` names in the
+/// error refusing a call past the limit.
+fn admit(counter: &Arc<AtomicUsize>, through: &str) -> HostCallResult<CallSlot> {
 	let in_flight = counter.fetch_add(1, Ordering::AcqRel) + 1;
 	// Constructed before the check so the place is released whichever way this
 	// returns.
 	let slot = CallSlot(Arc::clone(counter));
 	if in_flight > MAX_IN_FLIGHT_HOST_CALLS {
 		return Err(HostCallError::InvalidRequest(format!(
-			"too many host calls in flight through one transaction handle: {in_flight}, \
-			 limit {MAX_IN_FLIGHT_HOST_CALLS}"
+			"too many host calls in flight {through}: {in_flight}, limit {MAX_IN_FLIGHT_HOST_CALLS}"
 		)));
 	}
 	Ok(slot)
@@ -184,7 +202,7 @@ fn resolve(accessor: &Accessor<StoreData>, this: &Resource<Transaction>) -> Host
 		// A handle the host has already revoked lands here. It is the guest
 		// reaching outside the invocation it was lent to, not a datastore fault.
 		let tx = data.table.get(this).map_err(|e| HostCallError::PermissionDenied(stringify(e)))?;
-		let slot = admit(&tx.in_flight)?;
+		let slot = admit(&tx.in_flight, "through one transaction handle")?;
 		Ok(Lent {
 			context: Arc::clone(&tx.context),
 			_slot: slot,
@@ -204,13 +222,15 @@ struct Lent {
 // Component model host functions (FlatBuffers serialization)
 // ============================================================================
 
+/// Define the host instance for a guest whose ABI has `features`: every
+/// import those features give, and none they do not.
 pub fn implement_host_functions(
 	linker: &mut wasmtime::component::Linker<StoreData>,
+	features: Features,
 ) -> SurrealismResult<()> {
 	let mut root = linker.root();
-	let mut host = root
-		.instance("surrealism:extension/host")
-		.prefix_err(|| "failed to define host instance")?;
+	let mut host =
+		root.instance(crate::abi::HOST_INSTANCE).prefix_err(|| "failed to define host instance")?;
 
 	// The guest only ever holds `borrow<transaction>`, which the canonical ABI
 	// revokes at return, so this destructor is not reached in practice. It is
@@ -271,6 +291,39 @@ pub fn implement_host_functions(
 		},
 	)
 	.prefix_err(|| "failed to register transaction.run")?;
+
+	if features.contains(Features::BINDINGS) {
+		host.func_wrap_concurrent(
+			"binding",
+			|accessor: &Accessor<StoreData>, (name,): (String,)| {
+				// Admitted before the first await, as the `transaction` methods
+				// are, so a guest holds no more reads in flight than the limit.
+				let (bindings, slot) = accessor.with(|mut access| {
+					let data = access.get();
+					(data.bindings.clone(), admit(&data.binding_reads, "reading bindings"))
+				});
+				Box::pin(async move {
+					let inner: HostCallResult<Option<Vec<u8>>> = async {
+						let _slot = slot?;
+						let bindings = bindings.ok_or_else(|| {
+							HostCallError::InvalidRequest(
+								"this invocation has no bindings".to_owned(),
+							)
+						})?;
+						match bindings.get(name).await? {
+							Some(value) => surrealdb_types::encode(&value)
+								.map(Some)
+								.map_err(|e| HostCallError::Other(stringify(e))),
+							None => Ok(None),
+						}
+					}
+					.await;
+					Ok((inner.map_err(lower),))
+				})
+			},
+		)
+		.prefix_err(|| "failed to register binding")?;
+	}
 
 	Ok(())
 }

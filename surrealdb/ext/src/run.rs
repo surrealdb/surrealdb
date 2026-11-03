@@ -9,12 +9,40 @@ use surrealism_runtime::{NetDeny, NetPolicy, PrefixErr};
 
 use crate::host::DemoHost;
 
+/// What `run --bind` gives the guest's `binding` import: each value as given,
+/// for a name the package declares; `NONE` for a declared name left out.
+/// Unlike the server, it checks no kind: the value is the author's own.
+struct LocalBindings {
+	declared: Vec<String>,
+	given: Vec<(String, surrealdb_types::Value)>,
+}
+
+#[async_trait::async_trait]
+impl surrealism_runtime::host::Bindings for LocalBindings {
+	async fn get(
+		&self,
+		name: String,
+	) -> surrealism_runtime::HostCallResult<Option<surrealdb_types::Value>> {
+		if !self.declared.contains(&name) {
+			return Err(surrealism_runtime::HostCallError::InvalidRequest(format!(
+				"`{name}` is not declared under [bindings] in package.toml"
+			)));
+		}
+		Ok(self.given.iter().rev().find(|(n, _)| *n == name).map(|(_, v)| v.clone()))
+	}
+}
+
 pub async fn init(
 	file: PathBuf,
 	fnc: Option<String>,
 	args: Vec<surrealdb_types::Value>,
+	bindings: Vec<(String, surrealdb_types::Value)>,
 ) -> Result<()> {
 	let package = SurrealismPackage::from_file(file)?;
+	let declared: Vec<String> = package.config.bindings.keys().cloned().collect();
+	if let Some((name, _)) = bindings.iter().find(|(n, _)| !declared.contains(n)) {
+		anyhow::bail!("--bind {name}: package.toml declares no binding `{name}`");
+	}
 
 	// A local run grants the module what its own manifest asks for; there is
 	// no server deny list to apply.
@@ -24,6 +52,10 @@ pub async fn init(
 		max_memory_bytes: requested.max_memory_bytes,
 		max_execution_time: requested.max_execution_time,
 		strict_timeout: requested.strict_timeout,
+		bindings: Some(std::sync::Arc::new(LocalBindings {
+			declared,
+			given: bindings,
+		})),
 		..InstanceSettings::local()
 	};
 	let runtime = Runtime::new(

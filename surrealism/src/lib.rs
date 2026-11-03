@@ -25,6 +25,7 @@
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
 
+mod binding;
 #[allow(clippy::all, unused)]
 pub mod bindings;
 mod dispatch;
@@ -32,6 +33,7 @@ pub mod register;
 pub mod registry;
 pub mod tx;
 
+pub use binding::binding;
 pub use inventory;
 pub use register::{FunctionMeta, register};
 pub use registry::{SurrealismEntry, SurrealismInit};

@@ -48,6 +48,7 @@ Every definition pins `DIGEST` (`sha256(surrealism/MANIFEST)`, computed at `DEFI
 - **`init` cannot query:** `surreal ext build` runs it once and ships the memory it leaves as the module's initial state, so it runs before any datastore or request exists. It is lent no handle, and the macro rejects `async fn` on it. The build runs it against a stub WASI: the attached `fs/` is preopened, network use fails the build, a WASI resource still open when it returns fails the build (writing to stdout or stderr from `init` is one), and reads of randomness or the clock are allowed and listed in the build output. Every value `init` reads is frozen into the archive and so into every instance: a random seed, a clock reading, and the random keys of a `HashMap` built in `init` are the same in every invocation and on every server. The server refuses a component that still exports `init`.
 - **Deny-by-default for functions:** `functions` defaults to none. Use `true` for whatever the server allows, or patterns like `["http::*", "fn::user_exists"]`.
 - **Fresh memory per invocation:** every invocation instantiates afresh from the compiled component into a pooling-allocator slot and drops the instance on return. Statics, heap and WASI handles never survive a call, so compiled code is shared across tenants by archive digest while state is not. `SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS` is the slot count; a nested invocation (`tx.run` into an extension) never waits for a slot, and nesting stops at depth 8.
+- **Bindings:** `DEFINE EXTENSION … BINDINGS { name: expression, … }` gives the extension values it reads by name with `surrealism::binding("name")` (the `binding` host import), whether or not the function declared a transaction. The archive declares the names and their SurrealQL kinds under `[bindings]` in `package.toml` (`name = "string"`, or `name = { type = "string", description = "…", sensitive = true }`), and the server reads that table: `DEFINE` refuses a name it does not declare and a missing name whose kind is not `option<…>`. The host evaluates a name's expression on its first read in an invocation, with permissions off and the caller's system level capped at the level of the session that wrote the definition (as `DEFINE API … SECURITY DEFINER` runs), in a context that holds none of the caller's variables, under a frame that refuses writes and external effects; then it coerces the value to the declared kind. Errors name the binding, never its value. `init` cannot read a binding. `INFO` and an export show the expressions, never the values, which is why a secret is bound as an expression that reads it (`secret::get(…)`) and not as a literal.
 - **`strict_timeout: false`:** Disables epoch-based timeout enforcement entirely. The module can run indefinitely and monopolise a thread. A definition can ask for it, but it takes effect only when the operator sets `SURREAL_SURREALISM_ALLOW_UNBOUNDED_EXECUTION=true`; otherwise every invocation runs on the guarded engine.
 
 ## Archive Format
@@ -88,17 +89,26 @@ The package file has a legacy name, `surrealism.toml`. Both names resolve the sa
 
 ## ABI Versioning
 
-ABI version 4 is current: WIT package `surrealism:extension`, world `extension`, and an archive with a `MANIFEST`. Stored in `package.toml`. Build tool stamps `abi = 4`; user values are ignored. Older `p1`/`1` for Preview 1 is legacy.
+The runtime runs every ABI in `Abi::SUPPORTED` (`surrealism/runtime/src/abi.rs`), currently 4 and 5. The WIT package is `surrealism:extension`, world `extension`, for both; each ABI is the set of `Features` a guest built for it may use:
 
-An archive whose `abi` does not match is rejected at load with `UnsupportedAbi`, which tells the user to rebuild with the 4.0 SDK, rather than failing later with a missing-import error from the linker.
+| ABI | Features | Adds |
+|-----|----------|------|
+| 4 | `BASE` | The `transaction` resource with `sql` and `run`, the `extension` exports, an archive with a `MANIFEST` |
+| 5 | `BASE` + `BINDINGS` | The `binding` import, and the `[bindings]` table a definition's `BINDINGS` answers |
 
-The number moves at most once per release that changes the world, not once per
-change. Inside a release cycle the world may move several times under one ABI
-number, and an archive built earlier in that cycle passes the version gate and
-then fails in `instantiate_pre` with a linker import mismatch — rebuild it. That
-window is between unreleased commits only, which is the whole point of spending
-one number rather than one per change: the gate exists for archives that exist
-in the world, and only a release puts one there.
+The `abi` in `package.toml` selects one. An archive naming an ABI outside the supported range is rejected at load with `UnsupportedAbi`, which names the range. Older `p1`/`p2` (1, 2) are legacy and unsupported.
+
+- **Linking:** `implement_host_functions` defines only the imports the archive's ABI has. A component importing a gated import its ABI lacks is refused before linking (`Abi::check_imports`), naming the import.
+- **Stamping:** `surreal ext build` stamps the oldest supported ABI that covers what the component imports and the package declares (`Features::needed_by`, `Abi::oldest_with`); the file's own value is ignored. An extension that reads no binding stays on ABI 4 and runs on every server that knows ABI 4.
+- **Server checks:** a feature, never a version number, decides behaviour. `DEFINE EXTENSION` refuses `BINDINGS` for an archive whose ABI lacks `BINDINGS`.
+
+Changing the world:
+
+- **Add an import:** a new `Features` constant, an entry in `Features::GATED_IMPORTS`, a new `AbiN` whose `FEATURES` is the previous ABI's plus it, a variant in `Abi`, and the import's registration behind `features.contains(…)`.
+- **Change an import or export:** a feature for the new shape; the old shape stays registered, usually as an adapter over the new one, for as long as an ABI without the feature is supported.
+- **Drop an ABI:** remove it from `Abi::SUPPORTED` with the adapters only it used. Archives built for it stop loading, so this is a release-noted break.
+
+The number moves at most once per release that changes the world. Inside a release cycle the world may move several times under one ABI number; an archive built earlier in that cycle names an ABI whose features no longer match its imports, and is refused with the import named — rebuild it. Only a release puts archives in the world, so only a release needs a number of its own.
 
 ## Registering functions at run time
 

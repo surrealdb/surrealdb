@@ -86,7 +86,7 @@ const USER_HOLES: &[TemplateHole] = &[
 	TemplateHole::Other("session_duration"),
 ];
 const MODEL_HOLES: &[TemplateHole] = &[TemplateHole::Comment];
-const MODULE_HOLES: &[TemplateHole] = &[TemplateHole::Comment];
+const MODULE_HOLES: &[TemplateHole] = &[TemplateHole::Comment, TemplateHole::AuthLimit];
 const ACCESS_HOLES: &[TemplateHole] = &[
 	TemplateHole::Name,
 	TemplateHole::Comment,
@@ -666,6 +666,9 @@ pub(super) fn plan_define<'e>(
 				signer: stmt.signer.clone(),
 				unsigned: stmt.unsigned,
 				capabilities: stmt.capabilities.clone(),
+				bindings: stmt.bindings.clone(),
+				// A hole the session's limit fills when the statement runs.
+				auth_limit: crate::catalog::auth::AuthLimit::default(),
 				comment: comment_text(&stmt.comment),
 				permissions: stmt.permissions.clone(),
 				permissions_body: crate::catalog::LogicalPermissionBody::of(&stmt.permissions),

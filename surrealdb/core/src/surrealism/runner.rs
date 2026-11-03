@@ -133,6 +133,9 @@ pub struct Invocation<'a> {
 	/// Lent for this call only; `None` for a function that declared no
 	/// transaction parameter.
 	pub tx: Option<TransactionHandle>,
+	/// What the guest's `binding` import answers from, lent for this call
+	/// whether or not the function declared a transaction.
+	pub bindings: Option<Arc<dyn surrealism_runtime::host::Bindings>>,
 	pub stdio: Stdio,
 	pub capabilities: &'a RunnerCapabilities,
 	pub limits: Limits,
@@ -323,6 +326,7 @@ impl PreparedExtension for PreparedSurrealism {
 						strict_timeout: caps.strict_timeout,
 						stdout: call.stdio.stdout,
 						stderr: call.stdio.stderr,
+						bindings: call.bindings,
 					},
 					deadline: call.limits.deadline,
 					nested: call.limits.depth > 0,

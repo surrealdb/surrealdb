@@ -44,7 +44,8 @@ use surrealism_types::err::{PrefixErr, SurrealismError, SurrealismResult};
 use wasmtime::*;
 use web_time::Instant;
 
-use crate::config::{AbiVersion, SurrealismConfig};
+use crate::abi::Abi;
+use crate::config::SurrealismConfig;
 use crate::controller::Controller;
 use crate::epoch::{Engines, SlotWait};
 use crate::exports::ExportsManifest;
@@ -84,6 +85,9 @@ struct ExportIndices {
 /// One compiled extension. Thread-safe; share it as `Arc<Runtime>`.
 pub struct Runtime {
 	engines: Arc<Engines>,
+	/// The ABI the package names, which decides the host imports it is linked
+	/// against.
+	abi: Abi,
 	/// The component bytes, kept to compile the second engine flavour should
 	/// an invocation ask for it.
 	wasm: Arc<[u8]>,
@@ -133,6 +137,8 @@ pub struct InstanceSettings {
 	pub strict_timeout: bool,
 	pub stdout: StdioCallback,
 	pub stderr: StdioCallback,
+	/// What the guest's `binding` import answers from; `None` refuses it.
+	pub bindings: Option<Arc<dyn crate::host::Bindings>>,
 }
 
 impl InstanceSettings {
@@ -145,6 +151,7 @@ impl InstanceSettings {
 			strict_timeout: true,
 			stdout: Arc::new(|output| print!("{output}")),
 			stderr: Arc::new(|output| eprint!("{output}")),
+			bindings: None,
 		}
 	}
 }
@@ -185,15 +192,11 @@ impl Runtime {
 		}: SurrealismPackage,
 		engines: Arc<Engines>,
 	) -> SurrealismResult<Self> {
-		if config.abi != AbiVersion::CURRENT {
-			return Err(SurrealismError::UnsupportedAbi {
-				expected: AbiVersion::CURRENT.0,
-				got: config.abi.0,
-			});
-		}
+		let abi = Abi::try_from(config.abi)?;
 		let wasi = WasiTemplate::new(fs.as_ref().map(|fs| fs.path()))?;
 		let runtime = Self {
 			engines,
+			abi,
 			wasm: wasm.into(),
 			guarded: tokio::sync::OnceCell::new(),
 			fast: tokio::sync::OnceCell::new(),
@@ -212,6 +215,11 @@ impl Runtime {
 	/// Returns the size of the original WASM binary in bytes.
 	pub fn wasm_size(&self) -> usize {
 		self.wasm.len()
+	}
+
+	/// The ABI the package names.
+	pub fn abi(&self) -> Abi {
+		self.abi
 	}
 
 	/// Returns the package configuration.
@@ -247,7 +255,7 @@ impl Runtime {
 			return Ok(());
 		}
 		let engine = self.engines.engine(guarded)?;
-		let linked = Self::build(&engine, &self.wasm)?;
+		let linked = Self::build(&engine, &self.wasm, self.abi)?;
 		// A compile that raced this one produced the same thing.
 		let _ = cell.set(linked);
 		Ok(())
@@ -261,11 +269,14 @@ impl Runtime {
 			.get_or_try_init(|| async {
 				let engines = Arc::clone(&self.engines);
 				let wasm = Arc::clone(&self.wasm);
-				tokio::task::spawn_blocking(move || Self::build(&engines.engine(guarded)?, &wasm))
-					.await
-					.map_err(|e| {
-						SurrealismError::Other(anyhow::anyhow!("WASM compile task aborted: {e}"))
-					})?
+				let abi = self.abi;
+				tokio::task::spawn_blocking(move || {
+					Self::build(&engines.engine(guarded)?, &wasm, abi)
+				})
+				.await
+				.map_err(|e| {
+					SurrealismError::Other(anyhow::anyhow!("WASM compile task aborted: {e}"))
+				})?
 			})
 			.await?;
 		Ok(())
@@ -281,7 +292,7 @@ impl Runtime {
 		self.guarded.get().or_else(|| self.fast.get()).is_some_and(|l| l.dns_filtered)
 	}
 
-	fn build(engine: &Engine, wasm: &[u8]) -> SurrealismResult<Linked> {
+	fn build(engine: &Engine, wasm: &[u8], abi: Abi) -> SurrealismResult<Linked> {
 		let t0 = Instant::now();
 
 		let comp = component::Component::new(engine, wasm)
@@ -300,6 +311,7 @@ impl Runtime {
 		}
 
 		refuse_unbound_imports(engine, &comp)?;
+		abi.check_imports(engine, &comp)?;
 
 		let mut linker: component::Linker<StoreData> = component::Linker::new(engine);
 		wasmtime_wasi::p2::add_to_linker_async(&mut linker)
@@ -315,7 +327,7 @@ impl Runtime {
 		// built against.
 		let dns_filtered = crate::dns::add_to_linker(engine, &comp, &mut linker)
 			.prefix_err(|| "failed to add the filtering DNS resolver")?;
-		implement_host_functions(&mut linker)
+		implement_host_functions(&mut linker, abi.features())
 			.prefix_err(|| "failed to implement host functions")?;
 
 		let instance_pre = linker
@@ -458,6 +470,8 @@ impl Runtime {
 			net,
 			limiter: limits.build(),
 			deadline: None,
+			bindings: settings.bindings.clone(),
+			binding_reads: Default::default(),
 		};
 		let mut store = Store::new(linked.instance_pre.engine(), store_data);
 		store.limiter(|data| &mut data.limiter);
@@ -547,6 +561,7 @@ mod tests {
 	use web_time::Instant;
 
 	use super::{InstanceSettings, Runtime};
+	use crate::abi::Abi;
 	use crate::epoch::{EngineSettings, engines};
 
 	/// Instantiating runs a core module's `start` function, and that is
@@ -562,7 +577,7 @@ mod tests {
 		)
 		.unwrap()
 		.into_config();
-		config.abi = crate::config::AbiVersion::CURRENT;
+		config.abi = crate::config::AbiVersion::LATEST;
 		let package = crate::package::SurrealismPackage {
 			config,
 			wasm: br#"(component
@@ -614,11 +629,13 @@ mod tests {
 					(func (export "{export}") (canon lift (core func $i "f"))))"#
 			)
 		};
-		let err = Runtime::build(&engine, component("init").as_bytes()).err().expect("refused");
+		let err = Runtime::build(&engine, component("init").as_bytes(), Abi::LATEST)
+			.err()
+			.expect("refused");
 		assert!(err.to_string().contains("surreal ext build"), "{err}");
 		// The same component under another export name gets past the check
 		// and fails only where it lacks what a module needs.
-		let other = Runtime::build(&engine, component("other").as_bytes());
+		let other = Runtime::build(&engine, component("other").as_bytes(), Abi::LATEST);
 		assert!(other.err().is_none_or(|e| !e.to_string().contains("`init`")));
 	}
 
@@ -637,7 +654,7 @@ mod tests {
 			(core module $m (func (export "f")))
 			(core instance $i (instantiate $m))
 			(func (export "invoke") (canon lift (core func $i "f"))))"#;
-		let err = Runtime::build(&engine, wasm).err().expect("refused");
+		let err = Runtime::build(&engine, wasm, Abi::LATEST).err().expect("refused");
 		let err = err.to_string();
 		assert!(err.contains("`wasi:http/types@0.2.9`"), "{err}");
 		assert!(err.contains("`http::*`"), "{err}");

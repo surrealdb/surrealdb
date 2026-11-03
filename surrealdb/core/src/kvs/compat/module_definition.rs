@@ -1,5 +1,5 @@
 //! Backwards-compatibility coverage for [`StoredModuleDefinition`] revisions
-//! 2 and 3.
+//! 2, 3 and 4.
 //!
 //! Revision 3 records what a module may do and which code it may run:
 //! `digest`, `signer` and `capabilities`. Revision 2's `unsigned` flag stays,
@@ -22,9 +22,10 @@
 use revision::revisioned;
 use surrealdb_kvs::value::EncodeContext;
 
+use crate::catalog::auth::{AuthLevel, AuthLimit};
 use crate::catalog::{
-	FromStored, ModuleDefinition, ModuleExecutable, SiloExecutable, StoredModuleDefinition,
-	StoredPermission, SurrealismExecutable,
+	ExprText, FromStored, ModuleDefinition, ModuleExecutable, SiloExecutable,
+	StoredExtensionBinding, StoredModuleDefinition, StoredPermission, SurrealismExecutable,
 };
 use crate::expr::{
 	CapabilityTargets, ExtensionCapabilities, ExtensionSigner, ManifestDigest, SigstoreSigner,
@@ -108,6 +109,8 @@ fn module_v3_sigstore() -> StoredModuleDefinition {
 			timeout: Some(Duration::from_secs(5)),
 			strict_timeout: false,
 		}),
+		bindings: Vec::new(),
+		auth_limit: AuthLimit::default(),
 	}
 }
 
@@ -151,6 +154,8 @@ fn module_v3_key() -> StoredModuleDefinition {
 			"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK0w release@acme".to_owned(),
 		)),
 		capabilities: Some(ExtensionCapabilities::default()),
+		bindings: Vec::new(),
+		auth_limit: AuthLimit::default(),
 	}
 }
 
@@ -186,6 +191,8 @@ fn module_v3_unsigned() -> StoredModuleDefinition {
 			functions: CapabilityTargets::Some(vec!["geo::*".to_owned()]),
 			..Default::default()
 		}),
+		bindings: Vec::new(),
+		auth_limit: AuthLimit::default(),
 	}
 }
 
@@ -199,6 +206,53 @@ const MODULE_V3_UNSIGNED: &[u8] = &[
 	11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 0, 1, 1, 1,
 	0, 1, 2, 1, 6, 103, 101, 111, 58, 58, 42, 0, 0, 0, 0, 0,
 	1,
+];
+
+/// A revision-4 definition with `BINDINGS` and the definer's auth limit.
+fn module_v4_bindings() -> StoredModuleDefinition {
+	StoredModuleDefinition {
+		name: Some("mailer".to_owned()),
+		comment: None,
+		permissions: StoredPermission::Full,
+		executable: ModuleExecutable::Surrealism(SurrealismExecutable {
+			bucket: "modules".to_owned(),
+			key: "/mailer.surli".to_owned(),
+		}),
+		unsigned: true,
+		digest: Some(ManifestDigest::sha256([0x4e; 32])),
+		signer: None,
+		capabilities: Some(ExtensionCapabilities::default()),
+		bindings: vec![
+			StoredExtensionBinding {
+				name: "api_key".to_owned(),
+				value: ExprText::from_raw("string::uppercase('mailgun')"),
+			},
+			StoredExtensionBinding {
+				name: "author".to_owned(),
+				value: ExprText::from_raw("'noreply@acme.com'"),
+			},
+		],
+		auth_limit: AuthLimit::new(
+			AuthLevel::Database("acme".to_owned(), "app".to_owned()),
+			Some("Editor".to_owned()),
+		),
+	}
+}
+
+/// FROZEN. Revision-4 bytes of [`module_v4_bindings`].
+#[rustfmt::skip]
+const MODULE_V4_BINDINGS: &[u8] = &[
+	4, 1, 6, 109, 97, 105, 108, 101, 114, 0, 1, 1, 1, 0, 1, 7,
+	109, 111, 100, 117, 108, 101, 115, 13, 47, 109, 97, 105, 108, 101, 114, 46,
+	115, 117, 114, 108, 105, 1, 1, 1, 0, 32, 78, 78, 78, 78, 78, 78,
+	78, 78, 78, 78, 78, 78, 78, 78, 78, 78, 78, 78, 78, 78, 78, 78,
+	78, 78, 78, 78, 78, 78, 78, 78, 78, 78, 0, 1, 1, 1, 0, 1,
+	0, 0, 0, 0, 0, 0, 1, 2, 1, 7, 97, 112, 105, 95, 107, 101,
+	121, 28, 115, 116, 114, 105, 110, 103, 58, 58, 117, 112, 112, 101, 114, 99,
+	97, 115, 101, 40, 39, 109, 97, 105, 108, 103, 117, 110, 39, 41, 1, 6,
+	97, 117, 116, 104, 111, 114, 18, 39, 110, 111, 114, 101, 112, 108, 121, 64,
+	97, 99, 109, 101, 46, 99, 111, 109, 39, 1, 1, 3, 4, 97, 99, 109,
+	101, 3, 97, 112, 112, 1, 6, 69, 100, 105, 116, 111, 114,
 ];
 
 /// Revision-2 bytes decode as a definition that records no digest, signer or
@@ -226,26 +280,36 @@ fn v2_module_decodes_as_a_definition_to_reinstall() {
 			digest: None,
 			signer: None,
 			capabilities: None,
+			bindings: Vec::new(),
+			auth_limit: AuthLimit::default(),
 		}
 	);
 	assert!(ModuleDefinition::from_stored(&decoded).unwrap().needs_reinstall());
 }
 
-/// Writing a decoded revision-2 definition back produces revision 3 and reads
-/// back unchanged.
+/// Writing a decoded revision-2 or revision-3 definition back produces the
+/// current revision and reads back unchanged.
 #[test]
-fn re_encoding_a_v2_module_writes_revision_3() {
-	let decoded = StoredModuleDefinition::kv_decode_value(MODULE_V2, ()).expect("decode");
-	let re_encoded = decoded.kv_encode_value().expect("encode");
-	assert_eq!(re_encoded.first(), Some(&3), "an upgraded node must write revision 3");
-	let round_tripped = StoredModuleDefinition::kv_decode_value(&re_encoded, ()).expect("decode");
-	assert_eq!(round_tripped, decoded);
+fn re_encoding_an_older_module_writes_revision_4() {
+	for (name, bytes) in [
+		("v2", MODULE_V2),
+		("sigstore", MODULE_V3_SIGSTORE),
+		("key", MODULE_V3_KEY),
+		("unsigned", MODULE_V3_UNSIGNED),
+	] {
+		let decoded = StoredModuleDefinition::kv_decode_value(bytes, ()).expect("decode");
+		let re_encoded = decoded.kv_encode_value().expect("encode");
+		assert_eq!(re_encoded.first(), Some(&4), "{name}: an upgraded node must write revision 4");
+		let round_tripped =
+			StoredModuleDefinition::kv_decode_value(&re_encoded, ()).expect("decode");
+		assert_eq!(round_tripped, decoded, "{name}");
+	}
 }
 
-/// Revision-3 bytes decode to exactly the value they were captured from, and
-/// the current encoder reproduces them byte for byte.
+/// Revision-3 bytes decode to exactly the value they were captured from: no
+/// bindings, and the auth limit that grants nothing.
 #[test]
-fn v3_modules_decode_and_encode_byte_exact() {
+fn v3_modules_decode_exact() {
 	for (name, bytes, expected) in [
 		("sigstore", MODULE_V3_SIGSTORE, module_v3_sigstore()),
 		("key", MODULE_V3_KEY, module_v3_key()),
@@ -260,12 +324,29 @@ fn v3_modules_decode_and_encode_byte_exact() {
 		});
 		assert_eq!(decoded, expected, "{name}");
 		assert!(!ModuleDefinition::from_stored(&decoded).unwrap().needs_reinstall(), "{name}");
-		assert_eq!(
-			expected.kv_encode_value().expect("encode"),
-			bytes,
-			"WIRE STABILITY BROKEN: {name} no longer encodes to its frozen revision-3 bytes"
-		);
 	}
+}
+
+/// Revision-4 bytes decode to exactly the value they were captured from, and
+/// the current encoder reproduces them byte for byte.
+#[test]
+fn v4_module_decodes_and_encodes_byte_exact() {
+	assert_eq!(MODULE_V4_BINDINGS.first(), Some(&4), "the frozen fixture must be revision 4");
+	let decoded =
+		StoredModuleDefinition::kv_decode_value(MODULE_V4_BINDINGS, ()).unwrap_or_else(|e| {
+			panic!(
+				"BACKWARDS COMPATIBILITY BROKEN: revision-4 StoredModuleDefinition bytes no \
+				 longer decode.\nError: {e}"
+			)
+		});
+	assert_eq!(decoded, module_v4_bindings());
+	let definition = ModuleDefinition::from_stored(&decoded).unwrap();
+	assert_eq!(definition.bindings.names().collect::<Vec<_>>(), ["api_key", "author"]);
+	assert_eq!(
+		module_v4_bindings().kv_encode_value().expect("encode"),
+		MODULE_V4_BINDINGS,
+		"WIRE STABILITY BROKEN: revision 4 no longer encodes to its frozen bytes"
+	);
 }
 
 /// Every frozen revision, once decoded, round-trips through the stored-value
@@ -280,6 +361,7 @@ fn every_revision_round_trips_through_the_stored_grammar_and_the_vm() {
 		("sigstore", MODULE_V3_SIGSTORE),
 		("key", MODULE_V3_KEY),
 		("unsigned", MODULE_V3_UNSIGNED),
+		("bindings", MODULE_V4_BINDINGS),
 	] {
 		let decoded = StoredModuleDefinition::kv_decode_value(bytes, ()).expect("decode");
 		let entry = decoded.kv_encode_value_at(&EncodeContext::CURRENT).expect("encode").bytes;
@@ -314,6 +396,18 @@ fn print_fixture(name: &str, bytes: &[u8]) {
 #[ignore = "prints the frozen fixture; run by hand when the revision-2 shape is restated"]
 fn generate_v2() {
 	print_fixture("MODULE_V2", &revision::to_vec(&module_v2()).expect("encode"));
+}
+
+/// Regenerate [`MODULE_V4_BINDINGS`]. Run it only on a checkout that writes
+/// revision 4:
+///
+/// ```text
+/// cargo test -p surrealdb-core --lib kvs::compat::module_definition::generate_v4 -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "prints the frozen fixture; run by hand on a checkout that writes revision 4"]
+fn generate_v4() {
+	print_fixture("MODULE_V4_BINDINGS", &module_v4_bindings().kv_encode_value().expect("encode"));
 }
 
 /// Regenerate the revision-3 constants from the type as revision 3 declares

@@ -15,3 +15,7 @@ allow_net = ["localhost", "127.0.0.1"]
 
 [attach]
 fs = "fs"
+
+# Read by `bound_greeting`. Optional, so a definition need not bind it.
+[bindings]
+greeting = { type = "option<string>", description = "What bound_greeting returns" }

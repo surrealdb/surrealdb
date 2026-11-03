@@ -32,7 +32,8 @@ impl std::fmt::Display for Target {
 pub struct AbiVersion(pub u32);
 
 impl AbiVersion {
-	pub const CURRENT: Self = Self(4);
+	/// The newest ABI this runtime runs, which a fresh package names.
+	pub const LATEST: Self = crate::abi::Abi::LATEST.version();
 }
 
 impl Serialize for AbiVersion {
@@ -135,6 +136,66 @@ pub struct SurrealismConfig {
 	/// to sign as anyone else.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub signer: Option<PackageSigner>,
+	/// The names a definition's `BINDINGS` answers, each with the SurrealQL
+	/// kind its value is coerced to. The server reads this table from the
+	/// archive: a definition must bind every name whose kind is not
+	/// `option<…>`, and no name absent from it.
+	#[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+	pub bindings: BTreeMap<String, BindingSpec>,
+}
+
+/// One name under `[bindings]`.
+///
+/// Written as the kind alone, or as a table that also describes the name to
+/// whoever installs the extension:
+///
+/// ```toml
+/// [bindings]
+/// author = "option<string>"
+/// api_key = { type = "string", description = "Mailgun API key", sensitive = true }
+/// ```
+///
+/// `sensitive` marks a value that must not be written into the definition as
+/// a literal, since `INFO` and an export show the definition's text; the
+/// install tool warns when it is.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum BindingSpec {
+	Kind(String),
+	Described(DescribedBinding),
+}
+
+/// The table form of a [`BindingSpec`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DescribedBinding {
+	#[serde(rename = "type")]
+	pub kind: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub description: Option<String>,
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub sensitive: bool,
+}
+
+impl BindingSpec {
+	/// The SurrealQL kind, as written.
+	pub fn kind(&self) -> &str {
+		match self {
+			Self::Kind(kind) => kind,
+			Self::Described(d) => &d.kind,
+		}
+	}
+
+	pub fn description(&self) -> Option<&str> {
+		match self {
+			Self::Kind(_) => None,
+			Self::Described(d) => d.description.as_deref(),
+		}
+	}
+
+	pub fn sensitive(&self) -> bool {
+		matches!(self, Self::Described(d) if d.sensitive)
+	}
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -429,7 +490,7 @@ fs = "static"
 "#;
 		let config = SurrealismConfig::parse(toml).unwrap();
 		assert_eq!(config.meta.name, "widget");
-		assert_eq!(config.abi, AbiVersion::CURRENT);
+		assert_eq!(config.abi, AbiVersion(4));
 		assert!(config.capabilities.allow_scripting);
 		assert!(config.capabilities.allow_arbitrary_queries);
 		assert!(config.capabilities.allow_functions.allows("http::get"));
@@ -492,11 +553,12 @@ version = "0.1.0"
 				repository: None,
 			},
 			capabilities: Default::default(),
-			abi: AbiVersion::CURRENT,
+			abi: AbiVersion::LATEST,
 			attach: SurrealismAttach {
 				fs: Some(FsMounts::root("data")),
 			},
 			signer: None,
+			bindings: Default::default(),
 		};
 
 		let toml_str = config.to_toml().unwrap();
@@ -504,7 +566,7 @@ version = "0.1.0"
 		assert_eq!(parsed.target, Target::Rust);
 		assert_eq!(parsed.meta.organisation, "test");
 		assert_eq!(parsed.meta.name, "roundtrip");
-		assert_eq!(parsed.abi, AbiVersion::CURRENT);
+		assert_eq!(parsed.abi, AbiVersion::LATEST);
 		assert_eq!(parsed.attach, config.attach);
 		assert!(toml_str.contains("fs = \"data\""), "a root mount is written as a string");
 	}
@@ -520,9 +582,10 @@ version = "0.1.0"
 				repository: None,
 			},
 			capabilities: Default::default(),
-			abi: AbiVersion::CURRENT,
+			abi: AbiVersion::LATEST,
 			attach: Default::default(),
 			signer: None,
+			bindings: Default::default(),
 		};
 		assert_eq!(config.file_name(), "surrealdb-demo-1.2.3.surli");
 	}

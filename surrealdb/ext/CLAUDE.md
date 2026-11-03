@@ -79,8 +79,8 @@ Pipeline:
 4. Validate the `surrealism` SDK version matches the server's expected version.
 5. Run `wasm-opt` to optimize the binary (skip in debug mode).
 6. Pre-initialise (`snapshot.rs`): run `init` once under `wasmtime-wizer` with the attached `fs/` preopened, write the resulting memory back as initial data, and remove the `init` export. Runs in debug builds too. Network use, a WASI resource left open, or an `init` error or trap fails the build; randomness and clock reads are printed as notes.
-7. Instantiate the snapshot with a `DemoHost` to extract the exports manifest (function signatures).
-8. Stamp `abi = 4` into the config.
+7. Stamp the oldest supported ABI that covers the snapshot's host imports and the package's `[bindings]` (`Abi::oldest_with`): 4 unless the extension reads bindings, then 5.
+8. Instantiate the snapshot with a `DemoHost`, linked for that ABI, to extract the exports manifest (function signatures).
 9. Pack into a `.surli` archive via `SurrealismPackage`, which writes `surrealism/MANIFEST`, and print the archive digest. The snapshot precedes this step, so the digest covers the pre-initialised `mod.wasm`.
 
 ### `run` (`run.rs`)
@@ -89,6 +89,7 @@ Loads a `.surli` archive and invokes a function.
 
 - Uses `DemoHost` (see below) as the `InvocationContext`.
 - If `--fnc` is not specified, uses the first (or only) export.
+- `--bind NAME=VALUE` answers the guest's `binding` import with a SurrealQL value, for a name `package.toml` declares; a declared name left out reads as `NONE`. No kind is checked.
 - Prints the return value as SurrealQL.
 
 ### `info` (`info.rs`)
@@ -138,6 +139,7 @@ Reads and changes the project's `package.toml`, only through `surrealism_runtime
 | `silo.rs` | `SiloClient`: resolve a version, describe it from the package API or the archive, download it (contract: `surrealism/SILO.md`) |
 | `installed.rs` | Reads an installed definition from the `extensions` key of `INFO FOR DB STRUCTURE` |
 | `capabilities.rs` | The `CAPABILITIES` object: request, `--with-capability` tokens, upgrade carry-over, diff, high-risk set |
+| `bindings.rs` | The `BINDINGS` clause: one SurrealQL expression per `[bindings]` name, from `--bind NAME=EXPR`, else (upgrade) the installed expression, else asked; a required name nothing answers fails; a `sensitive` name given as a literal warns |
 | `signer.rs` | The `SIGNER` clause, same-signer comparison, labels and fingerprints |
 | `statement.rs` | `DEFINE EXTENSION` text; `OVERWRITE` for an upgrade |
 | `prompt.rs` | The install and upgrade prompts |

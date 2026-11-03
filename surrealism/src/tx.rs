@@ -192,7 +192,7 @@ impl<M: Mode> Transaction<M> {
 /// The variant is kept in the message so a plugin that only logs still sees
 /// whether the call was denied, malformed, or refused by the datastore. Plugins
 /// that need to branch can match [`host::HostError`] directly.
-fn host_err(op: &str, e: &host::HostError) -> anyhow::Error {
+pub(crate) fn host_err(op: &str, e: &host::HostError) -> anyhow::Error {
 	match e {
 		host::HostError::PermissionDenied(m) => {
 			anyhow::anyhow!("host {op}: permission denied: {m}")

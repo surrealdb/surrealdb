@@ -283,6 +283,8 @@ mod tests {
 			digest: None,
 			signer: None,
 			capabilities: None,
+			bindings: Vec::new(),
+			auth_limit: Default::default(),
 		}
 	}
 
@@ -301,6 +303,8 @@ mod tests {
 			digest: None,
 			signer: None,
 			capabilities: None,
+			bindings: Vec::new(),
+			auth_limit: Default::default(),
 		}
 	}
 
@@ -608,6 +612,8 @@ mod tests {
 				digest: None,
 				signer: None,
 				capabilities: None,
+				bindings: Vec::new(),
+				auth_limit: Default::default(),
 			};
 			assert!(nameless.get_storage_name().is_err());
 			write_at(&ds, ns, db, "mod::anonymous", &nameless).await;

@@ -584,6 +584,9 @@ pub enum Cl {
 	/// `[CONSTRAINT name] ASSERT a` of `DEFINE TYPE`: `a` the expression; `b` the constraint
 	/// `Name`, or `NONE`.
 	Check,
+	/// `BINDINGS` on an extension: `a` expression, which lowering requires to
+	/// be an object literal.
+	Bindings,
 }
 
 /// Slots of an HNSW or DiskANN record in `extra`. Absent parts are `NONE`.

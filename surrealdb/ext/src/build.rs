@@ -4,6 +4,7 @@ use std::{fs, mem};
 
 use anyhow::Result;
 use surrealism_runtime::PrefixErr;
+use surrealism_runtime::abi::{Abi, Features};
 use surrealism_runtime::config::{AbiVersion, FsMounts, PACKAGE_FILE, SurrealismConfig, Target};
 use surrealism_runtime::epoch::{EngineSettings, engines};
 use surrealism_runtime::exports::{ExportsManifest, FunctionExport};
@@ -23,7 +24,7 @@ pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> R
 		Some(p) => p,
 		None => std::env::current_dir().prefix_err(|| "Failed to determine current directory")?,
 	};
-	let config = load_config(&path)?;
+	let mut config = load_config(&path)?;
 
 	if config.target != Target::Rust {
 		anyhow::bail!(
@@ -73,6 +74,8 @@ pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> R
 		None => wasm,
 	};
 
+	config.abi = oldest_abi(&wasm, &config)?.version();
+
 	println!("Extracting function signatures...");
 	let exports = extract_exports(&wasm, &config).await?;
 
@@ -91,6 +94,20 @@ pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> R
 	println!("Packed {} (digest {digest})", out.display());
 
 	Ok(())
+}
+
+/// The oldest ABI that has every feature the component imports and the package
+/// declares, so the archive runs on every server that knows that ABI.
+/// Signature extraction then links the component against exactly that ABI.
+fn oldest_abi(wasm: &[u8], config: &SurrealismConfig) -> Result<Abi> {
+	let engine = engines(EngineSettings {
+		max_concurrent_invocations: 1,
+		max_memory_bytes: None,
+	})
+	.engine(true)?;
+	let component = wasmtime::component::Component::new(&engine, wasm)
+		.prefix_err(|| "Failed to read the component's imports")?;
+	Ok(Abi::oldest_with(Features::needed_by(&engine, &component, config)))
 }
 
 /// Instantiate the compiled WASM temporarily to extract function signatures
@@ -175,8 +192,8 @@ async fn extract_exports(wasm: &[u8], config: &SurrealismConfig) -> Result<Expor
 /// naming a `surrealism.toml` that was not read because a `package.toml`
 /// exists.
 ///
-/// The ABI version is always stamped to `AbiVersion::CURRENT` because the
-/// build toolchain targets the current SDK; user-supplied values are ignored.
+/// The ABI is stamped to `AbiVersion::LATEST`, whatever the file says, and
+/// lowered once the component is built to the oldest ABI that covers it.
 fn load_config(path: &Path) -> Result<SurrealismConfig> {
 	let mut package = PackageConfig::open(path)?;
 	if let Some(ignored) = package.ignored() {
@@ -185,7 +202,7 @@ fn load_config(path: &Path) -> Result<SurrealismConfig> {
 			ignored.display()
 		);
 	}
-	package.set_abi(AbiVersion::CURRENT);
+	package.set_abi(AbiVersion::LATEST);
 	Ok(package.into_config())
 }
 
@@ -629,7 +646,7 @@ mod tests {
 		fs::write(dir.path().join(PACKAGE_FILE), package_toml("current")).unwrap();
 		let config = load_config(dir.path()).unwrap();
 		assert_eq!(config.meta.name, "current");
-		assert_eq!(config.abi, AbiVersion::CURRENT);
+		assert_eq!(config.abi, AbiVersion::LATEST);
 	}
 
 	#[test]

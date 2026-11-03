@@ -6,6 +6,7 @@
 //! OVERWRITE` for an upgrade. The server needs no install method of its own.
 
 mod archive;
+mod bindings;
 /// The archive fixture, for the tests of the commands that read an archive.
 #[cfg(test)]
 pub(crate) use archive::fixture;
@@ -118,6 +119,12 @@ pub struct CommonArgs {
 	/// grant more than the archive requests.
 	#[arg(long = "with-capability", value_name = "CAP")]
 	with_capability: Vec<String>,
+	/// The SurrealQL expression for a name the archive declares under
+	/// [bindings]: NAME=EXPRESSION. Repeat it for each. A name it leaves out
+	/// is asked for in a terminal, or on upgrade keeps its installed
+	/// expression.
+	#[arg(long = "bind", value_name = "NAME=EXPR")]
+	bind: Vec<String>,
 	/// A Sigstore trusted_root.json to verify a Sigstore signature against,
 	/// instead of the trust root the signature carries. For a private
 	/// Sigstore or an air-gapped install.
@@ -223,8 +230,8 @@ pub struct UpgradeArgs {
 	common: CommonArgs,
 }
 
-fn options(common: &CommonArgs) -> Options {
-	Options {
+fn options(common: &CommonArgs) -> Result<Options> {
+	Ok(Options {
 		silo_endpoint: silo::endpoint(),
 		trust_root: common.trust_root.clone(),
 		public_root: if common.offline {
@@ -242,7 +249,11 @@ fn options(common: &CommonArgs) -> Options {
 		},
 		allow_downgrade: false,
 		allow_package_change: false,
-	}
+		bindings: bindings::BindingAnswers {
+			given: common.bind.iter().map(|b| bindings::parse_flag(b)).collect::<Result<_>>()?,
+			ask: interactive(),
+		},
+	})
 }
 
 async fn open(common: &CommonArgs) -> Result<Surreal<Any>> {
@@ -423,7 +434,7 @@ fn confirm_capabilities(grant: &Grant, question: &str, risks: &[HighRisk]) -> Re
 pub async fn install(args: InstallArgs) -> Result<()> {
 	let source = Source::parse(&args.source)?;
 	let db = open(&args.common).await?;
-	let opts = options(&args.common);
+	let opts = options(&args.common)?;
 	let plan = flow::prepare_install(&db, &source, &args.name, &opts).await?;
 
 	println!("{}", prompt::render_install(&plan));
@@ -451,7 +462,7 @@ pub async fn upgrade(args: UpgradeArgs) -> Result<()> {
 	let opts = Options {
 		allow_downgrade: args.allow_downgrade,
 		allow_package_change: args.allow_package_change,
-		..options(&args.common)
+		..options(&args.common)?
 	};
 	let plan = flow::prepare_upgrade(&db, &args.name, source.as_ref(), &opts).await?;
 

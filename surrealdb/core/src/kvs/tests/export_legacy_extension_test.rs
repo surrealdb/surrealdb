@@ -98,6 +98,8 @@ async fn with_legacy_row() -> (Arc<Datastore>, Session) {
 		digest: None,
 		signer: None,
 		capabilities: None,
+		bindings: Vec::new(),
+		auth_limit: Default::default(),
 	};
 	txn.set_key(&ModuleKey::new(db.namespace_id, db.database_id, Cow::Borrowed(LEGACY)), &row)
 		.await

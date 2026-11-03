@@ -59,6 +59,7 @@ keywords! {
 	Backend = "BACKEND",
 	Batch = "BATCH",
 	Bearer = "BEARER",
+	Bindings = "BINDINGS",
 	Before = "BEFORE",
 	Begin = "BEGIN",
 	Blank = "BLANK",

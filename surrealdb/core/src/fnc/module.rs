@@ -60,6 +60,8 @@ pub(crate) struct CalledDefinition<'a> {
 	pub trust: Trust<'a>,
 	/// `CAPABILITIES`, intersected with the datastore's on every invocation.
 	pub capabilities: &'a ExtensionCapabilities,
+	/// The definition itself, whose `BINDINGS` the invocation reads.
+	pub definition: &'a Arc<crate::catalog::ModuleDefinition>,
 }
 
 #[cfg(feature = "surrealism")]
@@ -133,7 +135,7 @@ pub(crate) async fn surrealism_executable_run(
 	let cached =
 		crate::exec::vm::descriptor::object(ctx.get_surrealism_module(lookup, definition.trust))
 			.await?;
-	run_on_runtime(cached, definition.capabilities, ctx, opt, doc, args, sub).await
+	run_on_runtime(cached, definition, ctx, opt, doc, args, sub).await
 }
 
 #[cfg(feature = "surrealism")]
@@ -184,7 +186,7 @@ pub(crate) async fn silo_executable_run(
 	let cached =
 		crate::exec::vm::descriptor::object(ctx.get_surrealism_module(lookup, definition.trust))
 			.await?;
-	run_on_runtime(cached, definition.capabilities, ctx, opt, doc, args, sub).await
+	run_on_runtime(cached, definition, ctx, opt, doc, args, sub).await
 }
 
 #[cfg(feature = "surrealism")]
@@ -228,14 +230,15 @@ pub(crate) async fn extension_grant(
 /// Invoke one export of a loaded definition, in fresh memory.
 ///
 /// The invocation is lent a transaction only when the export declared one,
-/// and runs with `capabilities`, the definition's `CAPABILITIES`, intersected
-/// with the datastore's. A call made from inside another extension (through
+/// and runs with the definition's `CAPABILITIES` intersected with the
+/// datastore's. It reads the definition's `BINDINGS` whether or not it was lent
+/// a transaction. A call made from inside another extension (through
 /// `tx.run`) counts one level deeper; it fails past [`MAX_EXTENSION_DEPTH`]
 /// and never waits for capacity.
 #[cfg(feature = "surrealism")]
 pub(crate) async fn run_on_runtime(
 	cached: SurrealismCachedModule,
-	capabilities: &ExtensionCapabilities,
+	definition: CalledDefinition<'_>,
 	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
@@ -263,7 +266,7 @@ pub(crate) async fn run_on_runtime(
 		module_display_name,
 		..
 	} = cached;
-	let capabilities = extension_grant(ctx, capabilities).await?;
+	let capabilities = extension_grant(ctx, definition.capabilities).await?;
 	// The declared mode decides whether writes are permitted for this call, and
 	// whether a handle is lent at all. Read both before building the host, from
 	// the same manifest entry the planner used to pick the statement's access
@@ -279,6 +282,13 @@ pub(crate) async fn run_on_runtime(
 	let declares_transaction = signature.declares_transaction;
 	// `Arc`, not `Box`: the guest may hold several host calls in flight, and each
 	// one resolves the shared context out of the store's resource table.
+	let bindings = Arc::new(crate::surrealism::bindings::DefinitionBindings::new(
+		ctx,
+		opt,
+		Arc::clone(definition.definition),
+		Arc::clone(&prepared),
+		Arc::clone(&module_display_name),
+	));
 	let host = Arc::new(Host::new(
 		ctx,
 		opt,
@@ -306,6 +316,7 @@ pub(crate) async fn run_on_runtime(
 			function: sub,
 			rows: vec![args],
 			tx,
+			bindings: Some(bindings),
 			stdio,
 			capabilities: &capabilities,
 			limits: Limits {

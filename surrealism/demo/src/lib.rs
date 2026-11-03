@@ -84,6 +84,15 @@ async fn concurrent_runs(tx: Transaction, millis: i64) -> Result<i64> {
 	Ok(2)
 }
 
+/// The definition's binding for `greeting`, or `NONE` when it binds none.
+///
+/// Declares no transaction: a binding is read through its own host import,
+/// not through the handle.
+#[surrealism]
+async fn bound_greeting() -> Result<Option<String>> {
+	surrealism::binding("greeting").await
+}
+
 /// Advance a sequence through a read-only transaction.
 ///
 /// `sequence::nextval` modifies durable state without any statement appearing

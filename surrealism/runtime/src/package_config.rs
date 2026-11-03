@@ -119,9 +119,10 @@ impl PackageConfig {
 			target: Target::Rust,
 			meta,
 			capabilities: SurrealismCapabilities::default(),
-			abi: AbiVersion::CURRENT,
+			abi: AbiVersion::LATEST,
 			attach: SurrealismAttach::default(),
 			signer: None,
+			bindings: Default::default(),
 		})?;
 		package.path = Some(dir.join(PACKAGE_FILE));
 		Ok(package)
@@ -895,7 +896,7 @@ attach = { fs = { "/" = "fs", "/models" = "../m" } }
 		package.save().unwrap();
 		let reopened = PackageConfig::open(dir.path()).unwrap();
 		assert_eq!(reopened.config(), package.config());
-		assert_eq!(reopened.config().abi, AbiVersion::CURRENT);
+		assert_eq!(reopened.config().abi, AbiVersion::LATEST);
 		assert_eq!(saved(&dir), package.config().to_toml().unwrap());
 	}
 }
