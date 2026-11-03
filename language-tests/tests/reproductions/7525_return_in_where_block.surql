@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "RETURN inside a block in a WHERE clause yields the block's value for that row's filter"
+reason = "RETURN inside a block in a WHERE clause ends that row's WHERE with its value: the first RETURN reached decides the row"
 issue = 7525
 
 [[test.results]]
@@ -30,7 +30,7 @@ value = "[2]"
 value = "[3]"
 
 [[test.results]]
-value = "[2]"
+value = "[2, 3]"
 
 [[test.results]]
 value = "[2]"
@@ -53,7 +53,8 @@ value = "{ after: true, r: [2] }"
 
 SELECT a FROM [{ a: 1 }, { a: 2 }] WHERE { return a > 1 };
 
--- Over a table: RETURN ends only the block, for each row, whatever reads the rows.
+-- Over a table: RETURN ends only the WHERE of its row, whatever reads the rows. In
+-- `{ RETURN a > 1 } AND { RETURN a < 3 }` the first RETURN decides the row.
 CREATE t:1 SET a = 1 RETURN NONE;
 CREATE t:2 SET a = 2 RETURN NONE;
 CREATE t:3 SET a = 3 RETURN NONE;

@@ -325,16 +325,16 @@ SELECT [1].map(|$x| $x + 'a') AS x FROM s;
 SELECT array::group([1].map(|$x| $x + 'a')) AS x FROM s GROUP ALL;
 
 -- A block that succeeds, then the expression around it fails
-SELECT { RETURN 1; } + 'a' AS x FROM s;
-SELECT { RETURN 1; } + 'a' AS x FROM s GROUP ALL;
-SELECT { RETURN 1; } + 'a' AS x FROM s GROUP BY x;
-SELECT array::group({ RETURN 1; } + 'a') AS x FROM s GROUP ALL;
+SELECT { LET $v = 1; $v } + 'a' AS x FROM s;
+SELECT { LET $v = 1; $v } + 'a' AS x FROM s GROUP ALL;
+SELECT { LET $v = 1; $v } + 'a' AS x FROM s GROUP BY x;
+SELECT array::group({ LET $v = 1; $v } + 'a') AS x FROM s GROUP ALL;
 
 -- The same in a closure a method calls
-SELECT [1].map(|$x| { RETURN $x; } + 'a') AS x FROM s;
-SELECT [1].map(|$x| { RETURN $x; } + 'a') AS x FROM s GROUP ALL;
-SELECT [1].map(|$x| { RETURN $x; } + 'a') AS x FROM s GROUP BY x;
-SELECT array::group([1].map(|$x| { RETURN $x; } + 'a')) AS x FROM s GROUP ALL;
+SELECT [1].map(|$x| { LET $v = $x; $v } + 'a') AS x FROM s;
+SELECT [1].map(|$x| { LET $v = $x; $v } + 'a') AS x FROM s GROUP ALL;
+SELECT [1].map(|$x| { LET $v = $x; $v } + 'a') AS x FROM s GROUP BY x;
+SELECT array::group([1].map(|$x| { LET $v = $x; $v } + 'a')) AS x FROM s GROUP ALL;
 
 -- The same in the body of a closure the expression calls
 SELECT (|| { RETURN 1; })() + 'a' AS x FROM s;

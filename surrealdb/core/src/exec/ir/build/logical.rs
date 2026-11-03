@@ -1214,8 +1214,9 @@ fn bind_let_as(cx: &mut BindCx<'_>, statement: &LogicalLet, local: bool) -> Resu
 		return Ok(Flow::Diverged);
 	}
 	// The value of a block's `LET` that is a statement runs as a group of its own. A `RETURN` that
-	// is the value of a block-local `LET` is a parenthesised subquery, the value scope its `RETURN`
-	// ends. A session `LET` at statement level keeps the `RETURN` as its statement's value.
+	// is the value of a block-local `LET` is bound as a parenthesised subquery, which is no
+	// context: the `RETURN` ends the context the block stands in, as it ends the statement of a
+	// session `LET`.
 	let flow = match let_of(&statement.value) {
 		Some(valued) => bind_valued_let(cx, valued)?,
 		None if binding == LetBinding::Local

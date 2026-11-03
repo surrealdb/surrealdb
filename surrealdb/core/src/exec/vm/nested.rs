@@ -437,16 +437,6 @@ fn paged_reads(pipeline: &Pipeline, state: &State) -> Option<u32> {
 		.map(|reads| u32::try_from(reads.max(1)).unwrap_or(u32::MAX))
 }
 
-/// The value of a `FROM` source from the host's run of it: a `RETURN` inside it
-/// is its value, and a `BREAK` or `CONTINUE` passes outwards to the loop the
-/// statement is written in.
-fn source_value(ran: FlowResult<Value>) -> FlowResult<Value> {
-	match ran {
-		Err(ControlFlow::Return(value)) => Ok(value),
-		ran => ran,
-	}
-}
-
 /// The rows `value` yields, read as `read` says; see
 /// [`ValuesRead`](super::payload::ValuesRead). Under `zeroed`, a record id or
 /// table a dynamic read finds, and a record range or table any read finds,
@@ -455,7 +445,8 @@ fn source_value(ran: FlowResult<Value>) -> FlowResult<Value> {
 /// value is evaluated as `read` says and the records it names are read as
 /// storage holds them ([`stored_records`]), whatever the limit. The records
 /// an array names are read through the windows of `links`, where given
-/// ([`records_of`]).
+/// ([`records_of`]). A `FROM` source is no context, so a `RETURN` evaluating
+/// it signals passes out of the statement.
 #[allow(clippy::too_many_arguments)]
 async fn values(
 	program: &Program,
@@ -475,7 +466,7 @@ async fn values(
 			// reads it as its current value and as its document.
 			let (this, forbidding) = ctx.enclosing_row();
 			let ctx = forbidding.as_ref().unwrap_or(ctx);
-			let value = source_value(host_scalar(program, value, ctx, this).await)?;
+			let value = host_scalar(program, value, ctx, this).await?;
 			if subjects {
 				return stored_records(value, written, ctx).await;
 			}
@@ -549,7 +540,7 @@ async fn values(
 			Ok(Values::Rows(rows, None))
 		}
 		ValuesRead::Locked => {
-			let value = source_value(host_scalar(program, value, ctx, None).await)?;
+			let value = host_scalar(program, value, ctx, None).await?;
 			// A locked read is of the record id the value is, which the units
 			// serving the table do not lock.
 			let Value::RecordId(rid) = value else {
@@ -578,7 +569,7 @@ async fn values(
 			Ok(Values::Rows(rows, None))
 		}
 		ValuesRead::Dynamic => {
-			let value = source_value(host_scalar(program, value, ctx, None).await)?;
+			let value = host_scalar(program, value, ctx, None).await?;
 			if subjects {
 				return stored_records(value, false, ctx).await;
 			}

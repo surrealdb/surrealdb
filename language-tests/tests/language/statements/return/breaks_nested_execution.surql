@@ -1,18 +1,17 @@
 /**
 [test]
 reason = """
-A RETURN ends the innermost value scope it stands in: a function body's inner
-block, a statement of a transaction, a block expression, or a conditional in a
-projection. A RETURN directly inside BEGIN … COMMIT is a value statement, so the
-statements after it run (register #8). The function case needs the value-scope
-RETURN lowering of lane L9 and passes only once it merges.
+A RETURN ends the context it stands in: a function body, whatever block in it
+holds the RETURN, a statement of a transaction, a top-level statement that is a
+block, or the projection of a row. A RETURN directly inside BEGIN … COMMIT ends
+its own statement, so the statements after it run.
 """
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "2"
+value = "1"
 
 [[test.results]]
 value = "NONE"
@@ -37,7 +36,7 @@ value = "[2, 2, 4, 4]"
 
 */
 
--- Test RETURN in function definition - the inner block catches its RETURN, so the function returns 2
+-- Test RETURN in function definition - a block is no context, so the inner RETURN ends the function with 1
 DEFINE FUNCTION fn::test() {
     {
         RETURN 1;

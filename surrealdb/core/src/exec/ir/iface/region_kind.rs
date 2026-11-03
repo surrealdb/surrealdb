@@ -219,11 +219,18 @@ impl RegionKind {
 	}
 }
 
+/// Whether a `Statement` region whose owner stands in a region of kind `outer` passes a `RETURN`
+/// outward: it does when it is a statement of a statement list, and catches it when it is a
+/// statement of the request or of a transaction. `None` is a statement that is the top region of
+/// its container, which catches.
+pub(crate) fn statement_passes_return(outer: Option<RegionKind>) -> bool {
+	outer.is_some_and(|outer| !matches!(outer, RegionKind::Request | RegionKind::Transaction(_)))
+}
+
 /// What a `RETURN` does on reaching a region.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ReturnRule {
-	/// A value scope, or a statement: the walk of a `RETURN` stops here and its value is the
-	/// region's.
+	/// A context: the walk of a `RETURN` stops here and its value is the region's.
 	CatchesReturn,
 	PassesOutward,
 	/// No `RETURN` walk reaches it: the request, the transactions and the catalog unit sit above
@@ -307,6 +314,21 @@ pub(crate) enum Section4bRow {
 /// The properties of a region, each a function of its kind.
 pub(crate) trait RegionProperties: Copy {
 	/// What a `RETURN` does on reaching the region.
+	///
+	/// A `RETURN` sets the value of the context it stands in and ends it. The contexts are a
+	/// statement, a function or closure body, the stored code a write or a subscription runs, and
+	/// each evaluation a statement makes over one row or one value it produces: a filter, a
+	/// projection, an order, group or split key, a value a write stores, a write's `RETURN`
+	/// clause, and the clauses a write maintains (an index column, a view clause, a reference
+	/// repair). Every other region passes a `RETURN` outward: a block, an arm of an `IF`, the body
+	/// of a `FOR`, a parenthesised statement, an operand, and the clauses a statement evaluates
+	/// once rather than per row (`FROM`, `LIMIT`, `START`, `TIMEOUT`, the rows an `INSERT`
+	/// writes).
+	///
+	/// A statement written in a statement list (a block, a body, an arm), rather than directly in
+	/// a request or a transaction, is no context either. That depends on where the region stands
+	/// and not on its kind, so a walk asks [`statement_passes_return`] of a `Statement` region
+	/// before it reads this rule.
 	fn return_rule(self) -> ReturnRule;
 	/// What a `BREAK` or `CONTINUE` does on reaching the region.
 	fn loop_rule(self) -> LoopRule;
@@ -330,11 +352,6 @@ impl RegionProperties for RegionKind {
 		match self {
 			Self::Request | Self::Transaction(_) | Self::CatalogUnit => ReturnRule::NeverReached,
 			Self::Statement(_)
-			| Self::Block
-			| Self::ValueBlock
-			| Self::ValueIf
-			| Self::ValueFor
-			| Self::Subquery
 			| Self::FunctionBody
 			| Self::ClosureBody
 			| Self::PermissionFrame
@@ -343,10 +360,34 @@ impl RegionProperties for RegionKind {
 			| Self::SubscriberFrame
 			| Self::WriteStage
 			| Self::StoredClause(_) => ReturnRule::CatchesReturn,
-			Self::StatementIf
+			Self::Clause(role) => match role {
+				ClauseRole::Where
+				| ClauseRole::WriteCond
+				| ClauseRole::OrderKey
+				| ClauseRole::GroupKey
+				| ClauseRole::Split
+				| ClauseRole::Projection
+				| ClauseRole::SetValue
+				| ClauseRole::Content
+				| ClauseRole::DuplicateUpdate
+				| ClauseRole::ReturnClause
+				| ClauseRole::IndexColumn
+				| ClauseRole::ViewClause
+				| ClauseRole::ReferenceRepair => ReturnRule::CatchesReturn,
+				ClauseRole::InsertValues
+				| ClauseRole::From
+				| ClauseRole::Limit
+				| ClauseRole::Start
+				| ClauseRole::Timeout => ReturnRule::PassesOutward,
+			},
+			Self::Block
+			| Self::ValueBlock
+			| Self::StatementIf
+			| Self::ValueIf
 			| Self::StatementFor
+			| Self::ValueFor
+			| Self::Subquery
 			| Self::Loop
-			| Self::Clause(_)
 			| Self::LazyOperand
 			| Self::ErrorScope(_)
 			| Self::ChooseArm
@@ -570,6 +611,48 @@ mod tests {
 			RegionKind::Transaction(TxnKind::Explicit).return_rule(),
 			ReturnRule::NeverReached
 		);
+	}
+
+	#[test]
+	fn a_return_ends_a_context_and_passes_every_other_region() {
+		for context in [
+			RegionKind::FunctionBody,
+			RegionKind::ClosureBody,
+			RegionKind::Clause(ClauseRole::Where),
+			RegionKind::Clause(ClauseRole::WriteCond),
+			RegionKind::Clause(ClauseRole::Projection),
+			RegionKind::Clause(ClauseRole::SetValue),
+			RegionKind::Clause(ClauseRole::Content),
+			RegionKind::Clause(ClauseRole::ReturnClause),
+		] {
+			assert_eq!(context.return_rule(), ReturnRule::CatchesReturn, "{context:?}");
+		}
+		for passing in [
+			RegionKind::Block,
+			RegionKind::ValueBlock,
+			RegionKind::StatementIf,
+			RegionKind::ValueIf,
+			RegionKind::StatementFor,
+			RegionKind::ValueFor,
+			RegionKind::Subquery,
+			RegionKind::LazyOperand,
+			RegionKind::Clause(ClauseRole::From),
+			RegionKind::Clause(ClauseRole::Limit),
+			RegionKind::Clause(ClauseRole::Start),
+			RegionKind::Clause(ClauseRole::Timeout),
+			RegionKind::Clause(ClauseRole::InsertValues),
+		] {
+			assert_eq!(passing.return_rule(), ReturnRule::PassesOutward, "{passing:?}");
+		}
+	}
+
+	#[test]
+	fn only_a_statement_of_the_request_or_a_transaction_is_a_context() {
+		assert!(!statement_passes_return(None));
+		assert!(!statement_passes_return(Some(RegionKind::Request)));
+		assert!(!statement_passes_return(Some(RegionKind::Transaction(TxnKind::Explicit))));
+		assert!(statement_passes_return(Some(RegionKind::FunctionBody)));
+		assert!(statement_passes_return(Some(RegionKind::Block)));
 	}
 
 	#[test]

@@ -1308,6 +1308,7 @@ c80777c638ce288e language-tests/tests/language/control_flow/dependence/the_first
 77b28ce73154d929 language-tests/tests/language/control_flow/loop/break_within_range.surql
 406da52b8a28e432 language-tests/tests/language/control_flow/loop/continue_within_expression.surql
 ae2cb82d03d992ce language-tests/tests/language/control_flow/misplaced.surql
+54db95517ab3d4b3 language-tests/tests/language/control_flow/transaction/a_return_in_a_let_block_ends_its_statement.surql
 75a9aa6c103d35f4 language-tests/tests/language/control_flow/transaction/bare_return_let_in_a_block.surql
 7ad8874e6a60077d language-tests/tests/language/control_flow/transaction/basic.surql
 b1fb32f5e13878db language-tests/tests/language/control_flow/transaction/cancel_behaviour.surql
@@ -1343,7 +1344,6 @@ e1b344f9c374f934 language-tests/tests/language/control_flow/transaction/return_t
 ab92afdc32f4654c language-tests/tests/language/control_flow/transaction/transaction_returns_no_value.surql
 4342cf0ba06c21d6 language-tests/tests/language/control_flow/transaction/unterminated_block.surql
 4e51f47f21d091c0 language-tests/tests/language/control_flow/transaction/use_survives_cancel.surql
-54db95517ab3d4b3 language-tests/tests/language/control_flow/transaction/value_scope_return_in_a_block_binds.surql
 00906778feac5bea language-tests/tests/language/control_flow/transaction/with_return.surql
 2e702b28596e9d4c language-tests/tests/language/control_flow/unreachable_statements.surql
 ef5782fe5e136b64 language-tests/tests/language/enums/aggregates.surql
@@ -1955,7 +1955,7 @@ acdcbfa74fe30876 language-tests/tests/language/ir/break_in_closure_in_for.surql
 fdbae16f1b968e2a language-tests/tests/language/ir/sleep_needs_edit.surql
 5c47af1dd9639456 language-tests/tests/language/ir/statement_error_scope.surql
 618423475d949dad language-tests/tests/language/ir/two_raising_subexpressions_report_the_first.surql
-10ecfa3fb08630e8 language-tests/tests/language/ir/value_if_catches_return.surql
+10ecfa3fb08630e8 language-tests/tests/language/ir/value_if_passes_return.surql
 7c4de1da0ef5244e language-tests/tests/language/mock/count.surql
 6e696fe7c427883e language-tests/tests/language/mock/outside_from.surql
 24a38a4572b7cc20 language-tests/tests/language/mock/range.surql
@@ -2525,6 +2525,10 @@ fb3f8bea70e46a61 language-tests/tests/language/statements/define/event/when_even
 8e091497e3c29999 language-tests/tests/language/statements/define/event/when_logic.surql
 932fc635704cf92d language-tests/tests/language/statements/define/event/with_relations.surql
 70a3daa3de022437 language-tests/tests/language/statements/define/event/write_back_to_own_table.surql
+610186c176cc1ac2 language-tests/tests/language/statements/define/extension/bindings.surql
+3c0149e069e2398d language-tests/tests/language/statements/define/extension/bindings_duplicate_name.surql
+923f872aa090fb6b language-tests/tests/language/statements/define/extension/bindings_not_object.surql
+d30e0c8512a11dba language-tests/tests/language/statements/define/extension/bindings_twice.surql
 0196c980b785735e language-tests/tests/language/statements/define/extension/capabilities.surql
 ee7bf7bd54034455 language-tests/tests/language/statements/define/extension/capabilities_bad_value.surql
 86fa9a294ddf529a language-tests/tests/language/statements/define/extension/capabilities_duplicate_field.surql
@@ -3168,10 +3172,11 @@ c288e12b3d36a53b language-tests/tests/language/statements/remove/sequence.surql
 a7704506d81e2450 language-tests/tests/language/statements/remove/table/not_exists.surql
 eeffa72be1b4d8ff language-tests/tests/language/statements/remove/user/not_exists.surql
 b05b14ee6e44ece0 language-tests/tests/language/statements/remove/users.surql
+78ccbc6b2a321bd6 language-tests/tests/language/statements/return/a_return_ends_its_context.surql
 0bc16ee5c4fd0090 language-tests/tests/language/statements/return/breaks_nested_execution.surql
-2adbb2875ba55d41 language-tests/tests/language/statements/return/caught_by_let_and_return_values.surql
-b4dd0078ad7bf50d language-tests/tests/language/statements/return/caught_by_let_and_return_values_plan.surql
 e423fa132bdafc71 language-tests/tests/language/statements/return/fetch_in_blocks.surql
+2adbb2875ba55d41 language-tests/tests/language/statements/return/let_values_pass_return.surql
+b4dd0078ad7bf50d language-tests/tests/language/statements/return/let_values_pass_return_plan.surql
 ebb7e9b0e528ed0f language-tests/tests/language/statements/return/object_recordid_fetch_destructuring.surql
 fa0f3d05306b9307 language-tests/tests/language/statements/return/returns.surql
 df9191a9c73aa7ec language-tests/tests/language/statements/return/subquery_only.surql
@@ -3239,7 +3244,7 @@ efa6e2fb13a4fadb language-tests/tests/language/statements/select/from_none.surql
 604f29a8da268257 language-tests/tests/language/statements/select/graph_field_no_flatten.surql
 815bb828f0adfda3 language-tests/tests/language/statements/select/graph_multi_table_origins.surql
 92d25030e3b029f2 language-tests/tests/language/statements/select/group/a_failing_nested_statement_fails_a_grouped_query.surql
-56ed57a8ca06c28c language-tests/tests/language/statements/select/group/a_value_that_ran_a_nested_statement_fails_a_grouped_query.surql
+962ad41b63e24d31 language-tests/tests/language/statements/select/group/a_value_that_ran_a_nested_statement_fails_a_grouped_query.surql
 8103cbd2572ded8e language-tests/tests/language/statements/select/group/accumulate.surql
 125f5f70b32a0595 language-tests/tests/language/statements/select/group/accumulate_function.surql
 d2a3e856e2e3c587 language-tests/tests/language/statements/select/group/aggregate_data_shape_streaming.surql
@@ -3724,6 +3729,7 @@ bf8fa46830d38cdf language-tests/tests/mysql/_intersect_except_tables.surql
 672e447f7324a349 language-tests/tests/mysql/_link_fields.surql
 2ff24470727214ec language-tests/tests/mysql/_link_fields_case.surql
 548f5189b3658825 language-tests/tests/mysql/_native.surql
+95621f4b609ac68d language-tests/tests/mysql/_nested_correlation.surql
 2b067e0be1fba40a language-tests/tests/mysql/_omitted_column.surql
 50ce4b4ed83c8932 language-tests/tests/mysql/_output_keys.surql
 23da7fef8e12c0b6 language-tests/tests/mysql/_pg_declared_columns.surql
@@ -3879,6 +3885,8 @@ e70d232d39a3acec language-tests/tests/pgsql/_json_shapes.surql
 2badb96301107f4e language-tests/tests/pgsql/_native_join_indexes.surql
 8c0d5e0fd0601ab7 language-tests/tests/pgsql/_native_perms.surql
 84533dcf9a098358 language-tests/tests/pgsql/_native_schemafull.surql
+95621f4b609ac68d language-tests/tests/pgsql/_nested_correlation.surql
+3fac261e237dc5d6 language-tests/tests/pgsql/_nested_correlation_declared.surql
 c1fee9ce3063eedd language-tests/tests/pgsql/_omitted_column.surql
 50ce4b4ed83c8932 language-tests/tests/pgsql/_output_keys.surql
 3750683d176712f7 language-tests/tests/pgsql/_pgvector_indexed.surql
@@ -4262,7 +4270,7 @@ ca80f7b25ea0b3e3 language-tests/tests/reproductions/7565_delete_event_upsert_und
 4fa6ba7ffe336730 language-tests/tests/reproductions/7586_compound_unique_after_concurrent_indexes.surql
 a73027c35b787e16 language-tests/tests/reproductions/7592_closure_where_evaluates_unreferenced_computed.surql
 5df5a007117a552f language-tests/tests/reproductions/7592_where_in_closure_evaluates_unreferenced_computed.surql
-e8d794dc49b06735 language-tests/tests/reproductions/7593_write_with_in_matches_a_table_scan.surql
+64969ab5d292539b language-tests/tests/reproductions/7593_write_with_in_matches_a_table_scan.surql
 1ac6b5ccbd4ce701 language-tests/tests/reproductions/7593_write_with_in_over_compound_unique_index.surql
 3ba62c34a86ad23d language-tests/tests/reproductions/7600_viewer_write_defines_no_table.surql
 7ff3459f7c3c865c language-tests/tests/reproductions/7601_versioned_table_read_returns_deleted_record.surql
@@ -4351,7 +4359,6 @@ cdc9ea84611b09f8 language-tests/tests/reproductions/a_filtered_hnsw_search_walks
 2fcb0df42b32d788 language-tests/tests/reproductions/a_float_record_id_component_reads_back_at_any_magnitude.surql
 e53a8a23a4ea6e21 language-tests/tests/reproductions/a_float_record_id_component_reads_back_to_the_last_digit.surql
 f24837c4dfa20270 language-tests/tests/reproductions/a_for_in_value_position_inside_an_expression_runs.surql
-5894e518c28b365a language-tests/tests/reproductions/a_from_source_contains_its_control_flow.surql
 17ef184ea817655d language-tests/tests/reproductions/a_function_argument_the_host_evaluates_runs_in_the_call_frame.surql
 a7260c933bc4d214 language-tests/tests/reproductions/a_function_call_with_no_database_asks_for_one.surql
 edd97148aac0052e language-tests/tests/reproductions/a_function_call_with_no_namespace_asks_for_one.surql
@@ -4424,7 +4431,7 @@ bd228bd68495bdbc language-tests/tests/reproductions/a_permission_derives_the_com
 526f746f00b88c90 language-tests/tests/reproductions/a_permission_reads_computed_fields_through_a_function_import.surql
 8176fa7032c25364 language-tests/tests/reproductions/a_permission_reads_computed_fields_through_a_function_late_bound.surql
 c2bc0a1e07a86147 language-tests/tests/reproductions/a_projected_effect_happens_once_per_row.surql
-af4338e0ad165663 language-tests/tests/reproductions/a_projection_function_in_a_method_argument_closure_reads_the_current_value_of_its_position.surql
+fea0ec3ff351d9b6 language-tests/tests/reproductions/a_projection_function_in_a_method_argument_closure_reads_the_current_value_of_its_position.surql
 759d5b6be1ef43f9 language-tests/tests/reproductions/a_protected_let_in_an_if_arm_is_refused_whether_or_not_it_runs.surql
 f6f9ede350261590 language-tests/tests/reproductions/a_pushed_conjunct_keeps_its_place_behind_a_raising_one.surql
 3515baa771201325 language-tests/tests/reproductions/a_raising_conjunct_stays_above_a_join.surql
@@ -4447,6 +4454,8 @@ ca05d00eb1c8f64c language-tests/tests/reproductions/a_refused_statement_in_an_ar
 187810c26ea2f172 language-tests/tests/reproductions/a_registered_method_can_still_reach_a_closure_import.surql
 edfd057022ca100a language-tests/tests/reproductions/a_relate_in_a_nested_for_reads_the_loop_and_let_bindings.surql
 cb9095bd67daa370 language-tests/tests/reproductions/a_rerun_top_k_keeps_every_row.surql
+2751e92f77a2b4bb language-tests/tests/reproductions/a_return_in_a_clause_ends_its_context.surql
+5894e518c28b365a language-tests/tests/reproductions/a_return_in_a_from_source_ends_the_statement.surql
 1c0a323c0cc38b0d language-tests/tests/reproductions/a_return_in_a_permission_block_is_its_value.surql
 921ce0c41a536716 language-tests/tests/reproductions/a_return_in_a_permission_block_is_its_value_import.surql
 0c10926c20927d93 language-tests/tests/reproductions/a_retyped_field_still_broadcasts.surql

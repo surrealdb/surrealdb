@@ -129,12 +129,12 @@ use super::super::payload::Spill;
 use super::super::program::{
 	AggregateSink, DeferredVector, Enforce, FrontierRowsSpec, GroupSpec, HostScalar, Instr,
 	JoinSpec, KeyOrder, KnnQuery, KnnRank, KnnVector, Label, LimitSpec, Operand, Pipeline, Program,
-	ROW, Reg, RowsAheadSpec, SortSpec, Source, SplitKind, SplitSpec, TailSpec,
+	ROW, Reg, ReturnCatch, RowsAheadSpec, SortSpec, Source, SplitKind, SplitSpec, TailSpec,
 };
 use super::closure::wrapped_value_loop;
 use super::dispatch::{apply_needs, check_claims, lowers_where_read, phys_refusal};
 use super::emit::Emitter;
-use super::expr::{Claim, Lowerer, Needs, ReturnScope};
+use super::expr::{Claim, Lowerer, Needs, ends_context};
 use super::place::{Lowered, Provenance, parallel_of};
 use super::read::{host_scalar_of, is_source, lower_source_under, producer_of, schema_of};
 use super::stage::{StageRun, Stages};
@@ -3670,17 +3670,6 @@ impl Body<'_, '_, '_> {
 
 	/// The value the clause region `region` yields, evaluated against the row in `row`.
 	fn clause_value(&mut self, region: RegionId, row: Reg) -> Result<Operand, IrError> {
-		self.clause_value_under(region, row, None)
-	}
-
-	/// [`Body::clause_value`], with a statement held in the clause taking a `RETURN` it signals
-	/// as its own value where `scope` is given.
-	fn clause_value_under(
-		&mut self,
-		region: RegionId,
-		row: Reg,
-		scope: Option<ReturnScope>,
-	) -> Result<Operand, IrError> {
 		let ir = self.ir;
 		let (objects, schema) = (self.objects && row == ROW, self.schema.clone());
 		let mut lowerer = Lowerer::in_context(&mut *self.em, ir, self.cx)
@@ -3692,10 +3681,7 @@ impl Body<'_, '_, '_> {
 				lowerer.bind_row(arg, objects);
 			}
 		}
-		let value = match scope {
-			Some(scope) => lowerer.catching(scope, |lowerer| lowerer.region_value(region))?,
-			None => lowerer.region_value(region)?,
-		};
+		let value = lowerer.region_value(region)?;
 		self.claims.extend(lowerer.take_claims());
 		self.needs = self.needs.merged(&lowerer.needs());
 		Ok(value)
@@ -3746,7 +3732,20 @@ impl Body<'_, '_, '_> {
 			lowerer.bind_row(arg, objects);
 		}
 		let jumps = &mut self.jumps;
+		// A predicate a `RETURN` held in it ends is judged by the value of the context, which the
+		// `RETURN` may set before the predicate's own branches are reached.
+		let context = ends_context(ir, region);
 		let mut branch = |lowerer: &mut Lowerer<'_>| match predicate {
+			Some(_) if context => {
+				let cond = lowerer.region_value(region)?;
+				Branching {
+					lowerer,
+					ir,
+					end,
+					jumps,
+				}
+				.jump(cond, false, target, false)
+			}
 			Some(predicate) => Branching {
 				lowerer,
 				ir,
@@ -4210,14 +4209,14 @@ impl projection::ProjectionSite for Body<'_, '_, '_> {
 			Some(fetched) if row == ROW => fetched,
 			_ => row,
 		};
-		Body::clause_value_under(self, region, row, Some(projection::PROJECTED))
+		Body::clause_value(self, region, row)
 	}
 
 	fn call_operands(
 		&mut self,
 		region: RegionId,
 		args: &[ValueId],
-	) -> Result<Vec<Operand>, IrError> {
+	) -> Result<(Vec<Operand>, Option<ReturnCatch>), IrError> {
 		let ir = self.ir;
 		let mut lowerer =
 			Lowerer::in_context(&mut *self.em, ir, self.cx).with_reads(&mut *self.reads);
@@ -4228,10 +4227,7 @@ impl projection::ProjectionSite for Body<'_, '_, '_> {
 				lowerer.bind_row(arg, self.objects);
 			}
 		}
-		let mut operands = Vec::with_capacity(args.len());
-		for arg in args {
-			operands.push(lowerer.value(*arg)?);
-		}
+		let operands = projection::operands_in(&mut lowerer, region, args)?;
 		self.claims.extend(lowerer.take_claims());
 		self.needs = self.needs.merged(&lowerer.needs());
 		Ok(operands)

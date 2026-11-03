@@ -38,7 +38,7 @@ use super::{effects, multiplicity};
 use crate::exec::ir::core::fxhash::{FxHashMap, FxHashSet};
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::value::ValueDef;
-use crate::exec::ir::core::walk::ops_in;
+use crate::exec::ir::core::walk::{ops_in, region_return_rule};
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{LoopRule, RegionKind, RegionProperties, ReturnRule};
 use crate::exec::ir::logical::ops::LogTag;
@@ -243,7 +243,7 @@ fn escapes(ir: &Ir, op: OpId, inside: &FxHashSet<RegionId>) -> bool {
 			return true;
 		};
 		if is_return {
-			match info.kind.return_rule() {
+			match region_return_rule(ir, region) {
 				ReturnRule::CatchesReturn => return !inside.contains(&region),
 				ReturnRule::PassesOutward => {}
 				ReturnRule::NeverReached => return true,

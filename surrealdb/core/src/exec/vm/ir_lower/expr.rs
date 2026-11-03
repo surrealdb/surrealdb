@@ -66,8 +66,8 @@ use super::super::plain::ValueData;
 use super::super::program::{
 	ArithOp, CallSpec, Catch, CompareOp, ExternalCallee, ExternalSpec, FrameMode, GroupSpec,
 	HostScalar, Instr, KeyShape as RecordKey, Label, MatchesSpec, MethodSpec, NavOp, Operand,
-	ParamSpec, Pipeline, RecordIdSpec, Reg, Source, StoreInstr, UnaryOp, UnitFrame, UnitId,
-	is_permission_frame, unit_input_name,
+	ParamSpec, Pipeline, RecordIdSpec, Reg, ReturnCatch, Source, StoreInstr, UnaryOp, UnitFrame,
+	UnitId, is_permission_frame, unit_input_name,
 };
 use super::block::Groups;
 use super::closure::{wrapped_value_loop, wraps_value_for};
@@ -86,19 +86,21 @@ use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::analysis::cx::builtin_registry;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::fxhash::FxHashMap;
-use crate::exec::ir::core::ir::Ir;
+use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::value::ValueDef;
-use crate::exec::ir::core::walk::{ancestors, ops_in};
+use crate::exec::ir::core::walk::{ControlTarget, ancestors, control_target, ops_in};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::{
 	CallAttrs, ConvertMode, DispatchTarget, ExprOp, KeyBound, KeyShape, NowWhich, OnFail,
 	RaiseKind, ShortCircuitOp,
 };
 use crate::exec::ir::iface::ids::{FrameId, OpId, RegionId, ValueId};
-use crate::exec::ir::op_kind::OpKind;
+use crate::exec::ir::iface::region_kind::{RegionProperties, ReturnRule};
+use crate::exec::ir::logical::ops::LogTag;
+use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::ir::phys::matches::{QueryOperand, query_operand};
-use crate::exec::ir::phys::ops::PhysOp;
+use crate::exec::ir::phys::ops::{PhysOp, PhysTag};
 use crate::exec::vm::matches::MatchProbe;
 use crate::exec::{AccessMode, ContextLevel};
 use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalPostfixOperator, Schema};
@@ -246,28 +248,59 @@ pub(super) struct LoopPads {
 	pub(super) on_continue: Label,
 }
 
-/// Where a `RETURN` that a statement held in an expression signals is taken.
+/// Where a `RETURN` that a statement held in an expression signals is taken, and what a `BREAK` or
+/// `CONTINUE` it signals does.
 ///
-/// A statement in an expression takes the signal for its own value where the expression's owner
-/// says so, by lowering the expression inside [`Lowerer::catching`]. Elsewhere the signal
-/// propagates to the scope that catches it.
+/// A `RETURN` sets the value of the context it stands in and ends it
+/// ([`RegionProperties::return_rule`]). Where the code being lowered evaluates that context, the
+/// context is [`ReturnScope::context`]; elsewhere the signal propagates to the run that holds the
+/// code, which takes it for the context it evaluates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ReturnScope {
-	/// Whether the signal is taken in any authority frame. Otherwise it is taken only outside a
-	/// permission frame, whose own statement owns the signals raised in it.
-	pub(super) any_frame: bool,
-	/// Whether a `BREAK` or `CONTINUE` signalled there is an error, as it is in a record-id key
-	/// element, which no loop encloses.
+	/// Where the context being lowered takes a `RETURN`: the register its value is left in and the
+	/// label past the rest of its evaluation. `None` where no context of the code being lowered
+	/// encloses it.
+	pub(super) context: Option<ReturnCatch>,
+	/// The authority frame the context is evaluated in. A signal raised in a permission frame
+	/// other than it belongs to the statement that owns that frame.
+	pub(super) frame: Option<u16>,
+	/// Whether a `BREAK` or `CONTINUE` signalled there is an error.
 	pub(super) loops_fail: bool,
 }
 
-/// Where a `RETURN` a statement in an element of a record id's array or object key signals is
-/// taken: at the statement, in any frame, so the element is the returned value. A loop signal
-/// passes to the loop the key is written in.
-const KEY_ELEMENT: ReturnScope = ReturnScope {
-	any_frame: true,
-	loops_fail: false,
-};
+/// Whether `region` is a context a `RETURN` held in it ends: a `RETURN` in the region, or in a
+/// region nested in it that passes the `RETURN` outward, lands on it.
+pub(super) fn ends_context(ir: &Ir, region: RegionId) -> bool {
+	if ir.region(region).is_none_or(|held| held.kind.return_rule() != ReturnRule::CatchesReturn) {
+		return false;
+	}
+	let mut ends = false;
+	ir.walk(region, WalkOrder::PreOrder, &mut |op| {
+		let lands = ir.op(op).is_some_and(|data| {
+			matches!(data.kind.tag(), OpTag::Logical(LogTag::Return) | OpTag::Phys(PhysTag::Return))
+		}) && control_target(ir, op) == ControlTarget::Region(region);
+		if lands {
+			ends = true;
+			return Walk::Stop;
+		}
+		Walk::Continue
+	});
+	ends
+}
+
+/// The region the op that defines `value` stands in, or the region whose block argument it is.
+pub(super) fn defining_region(ir: &Ir, value: ValueId) -> Option<RegionId> {
+	match ir.value(value)?.def {
+		ValueDef::OpResult {
+			op,
+			..
+		} => Some(ir.enclosing_region(op)),
+		ValueDef::BlockArg {
+			block,
+			..
+		} => ir.block(block).map(|held| held.parent),
+	}
+}
 
 /// An instruction an op emitted for itself: the op and the instruction's index in the code of the
 /// emitter at that time.
@@ -1264,13 +1297,7 @@ impl<'a> Lowerer<'a> {
 		self.closure_root = beside.closure_root;
 	}
 
-	/// Runs `body` with a `RETURN` signalled by a statement held in the code it lowers taken as
-	/// that statement's own value, under `scope`. The scope that held before is back afterwards,
-	/// on every path out.
-	///
-	/// The owner of an expression says whether its statements take the signal: a projected
-	/// field's root, the value a `RETURN` evaluates and the clauses of a definition do. A
-	/// statement in an expression nothing wraps leaves the signal to propagate.
+	/// Runs `body` under `scope`. The scope that held before is back afterwards, on every path out.
 	pub(super) fn catching<T>(
 		&mut self,
 		scope: ReturnScope,
@@ -1288,42 +1315,80 @@ impl<'a> Lowerer<'a> {
 		self.catch = Some(scope);
 	}
 
+	/// The value of one evaluation of a context, which `body` lowers: the value it yields, or the
+	/// value of a `RETURN` a statement held in it signals, which ends the evaluation there. The
+	/// context's value is left in a register of its own, past a label the `RETURN` jumps to.
+	///
+	/// A `RETURN` skips whatever of the evaluation follows it, so the values lowered in `body` are
+	/// forgotten afterwards, and a later reader lowers its own.
+	pub(super) fn context_value(
+		&mut self,
+		body: impl FnOnce(&mut Self) -> Result<Operand, IrError>,
+	) -> Result<Operand, IrError> {
+		let (value, catch) = self.context_catch(body)?;
+		self.emit(Instr::Load {
+			dst: catch.value,
+			src: value,
+		});
+		self.em.bind(catch.label)?;
+		Ok(Operand::Reg(catch.value))
+	}
+
+	/// Lowers what `body` lowers as the evaluation of a context, and answers it with where a
+	/// `RETURN` a statement held in it signals is taken: the register the `RETURN`'s value is left
+	/// in, and a label the caller binds past the rest of the evaluation, which the `RETURN` skips.
+	///
+	/// The values lowered in `body` are forgotten afterwards, as in [`Self::context_value`].
+	pub(super) fn context_catch<T>(
+		&mut self,
+		body: impl FnOnce(&mut Self) -> Result<T, IrError>,
+	) -> Result<(T, ReturnCatch), IrError> {
+		let catch = ReturnCatch {
+			value: self.em.reg()?,
+			label: self.em.label()?,
+		};
+		let scope = ReturnScope {
+			context: Some(catch),
+			frame: self.frame.program,
+			loops_fail: self.loops_fail(),
+		};
+		let held = self.scope.clone();
+		let lowered = self.catching(scope, body);
+		self.scope = held;
+		Ok((lowered?, catch))
+	}
+
 	/// Whether a `BREAK` or `CONTINUE` signalled in the code being lowered is an error, as the
 	/// [`ReturnScope`] it is lowered under says.
 	pub(super) fn loops_fail(&self) -> bool {
 		self.catch.is_some_and(|scope| scope.loops_fail)
 	}
 
-	/// The catch of the statement whose instruction is emitted next, its value stored in `dst`
-	/// and the body resuming at `resume`, which the caller binds to the instruction after it.
+	/// The catch of the statement whose instruction is emitted next: a `RETURN` it signals ends
+	/// the context of the code being lowered, and a `BREAK` or `CONTINUE` is an error where the
+	/// scope says so, and otherwise jumps to the loop pads the code being lowered holds, if any.
 	///
 	/// `None` where the code being lowered holds no [`ReturnScope`], and in a permission frame
-	/// when the scope does not reach into frames: a signal raised in a permission frame belongs
-	/// to the statement that owns the frame.
-	pub(super) fn own_catch(&self, dst: Reg, resume: Label) -> Option<Catch> {
+	/// other than the one the context is evaluated in: a signal raised in a permission frame
+	/// belongs to the statement that owns the frame.
+	pub(super) fn own_catch(&self) -> Option<Catch> {
 		let scope = self.catch?;
-		(scope.any_frame || !is_permission_frame(self.frame.program))
-			.then(|| self.catch_of(dst, resume, scope.loops_fail))
-	}
-
-	/// The catch of a statement whose `RETURN` is stored in `dst` before the body resumes at
-	/// `resume`, and whose `BREAK` or `CONTINUE` is an error where `loops_fail` says so, and
-	/// otherwise jumps to the loop pads the code being lowered holds, if any.
-	pub(super) fn catch_of(&self, dst: Reg, resume: Label, loops_fail: bool) -> Catch {
-		let pads = match loops_fail {
+		if is_permission_frame(self.frame.program) && scope.frame != self.frame.program {
+			return None;
+		}
+		let pads = match scope.loops_fail {
 			true => None,
 			false => self.loop_pads,
 		};
 		if pads.is_some() {
 			self.loop_pads_taken.set(true);
 		}
-		Catch {
-			root: dst,
-			label: resume,
-			loops_fail,
+		Some(Catch {
+			on_return: scope.context,
+			loops_fail: scope.loops_fail,
 			on_break: pads.map(|pads| pads.on_break),
 			on_continue: pads.map(|pads| pads.on_continue),
-		}
+		})
 	}
 
 	/// Makes `pads` where a `BREAK` or `CONTINUE` signalled by a statement held in the code lowered
@@ -2116,10 +2181,16 @@ impl<'a> Lowerer<'a> {
 	///
 	/// A block argument of the region is read from where [`Lowerer::bind_arg`] and
 	/// [`Lowerer::bind_row`] said before the call.
+	///
+	/// A region that a `RETURN` held in it ends ([`ends_context`]) is lowered as the evaluation of
+	/// a context ([`Lowerer::context_value`]): its value is the `RETURN`'s where one is signalled.
 	pub(super) fn region_value(&mut self, region: RegionId) -> Result<Operand, IrError> {
 		let held = self.scope.clone();
 		let outer = self.region.replace(region);
-		let lowered = self.region_body(region);
+		let lowered = match ends_context(self.ir, region) {
+			true => self.context_value(|lowerer| lowerer.region_body(region)),
+			false => self.region_body(region),
+		};
 		self.region = outer;
 		self.scope = held;
 		lowered
@@ -2173,6 +2244,9 @@ impl<'a> Lowerer<'a> {
 	/// The value `value`, lowered as a value of `region`: the ops of the region it depends on are
 	/// lowered where they are read, and the ones it does not depend on are not lowered. A block
 	/// argument of the region is read from where [`Lowerer::bind_arg`] said before the call.
+	///
+	/// A region that a `RETURN` held in it ends ([`ends_context`]) is lowered as the evaluation of
+	/// a context ([`Lowerer::context_value`]), as [`Lowerer::region_value`] lowers one.
 	pub(super) fn region_operand(
 		&mut self,
 		region: RegionId,
@@ -2180,7 +2254,10 @@ impl<'a> Lowerer<'a> {
 	) -> Result<Operand, IrError> {
 		let held = self.scope.clone();
 		let outer = self.region.replace(region);
-		let lowered = self.value(value);
+		let lowered = match ends_context(self.ir, region) {
+			true => self.context_value(|lowerer| lowerer.value(value)),
+			false => self.value(value),
+		};
 		self.region = outer;
 		self.scope = held;
 		lowered
@@ -2370,14 +2447,6 @@ impl<'a> Lowerer<'a> {
 			(OpKind::Expr(ExprOp::Yield) | OpKind::Phys(PhysOp::Yield), [yielded]) => {
 				self.value(*yielded)?
 			}
-			// A value block takes the `RETURN` that ends it as its value.
-			(OpKind::Phys(PhysOp::Return), [returned])
-				if ir.region(region).is_some_and(|held| {
-					held.kind == crate::exec::ir::iface::region_kind::RegionKind::ValueBlock
-				}) =>
-			{
-				self.value(*returned)?
-			}
 			(OpKind::Expr(ExprOp::Throw | ExprOp::Raise(_)), _) => {
 				self.raise_terminator(*last)?;
 				Operand::Reg(self.em.reg()?)
@@ -2489,7 +2558,7 @@ impl<'a> Lowerer<'a> {
 					let item = operands.next().ok_or(IrError::Stale(
 						"ir_lower::expr: a record id key lacks an element",
 					))?;
-					let value = self.catching(KEY_ELEMENT, |lowerer| lowerer.value(item))?;
+					let value = self.value(item)?;
 					self.emit(Instr::ArrayPush {
 						array,
 						value,
@@ -2508,7 +2577,7 @@ impl<'a> Lowerer<'a> {
 					let item = operands
 						.next()
 						.ok_or(IrError::Stale("ir_lower::expr: a record id key lacks a value"))?;
-					let value = self.catching(KEY_ELEMENT, |lowerer| lowerer.value(item))?;
+					let value = self.value(item)?;
 					let path = self.em.path(FieldPath::field(key.as_str()))?;
 					self.emit(Instr::SetField {
 						object,

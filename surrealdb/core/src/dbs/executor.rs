@@ -2823,12 +2823,10 @@ impl Executor {
 		start: &Instant,
 	) -> FlowResult<Value> {
 		if let LogicalOp::Let(binding) = stmt.plan {
-			let bare_return = matches!(*binding.value, LogicalOp::Return(_));
 			// Boxed, as every statement's run is: the binding's run is a large future.
 			return Box::pin(self.run_binding(
 				binding.name,
 				binding.kind,
-				bare_return,
 				&stmt.text,
 				|| Ok(*binding.value),
 				txn,
@@ -2962,12 +2960,10 @@ impl Executor {
 		}
 		let name = stm.name.to_string();
 		let kind = stm.kind.clone();
-		let bare_return = matches!(stm.what, Expr::Return(_));
 		let statement = TopLevelStatement::Ast(TopLevelExpr::Expr(Expr::Let(Box::new(stm))));
 		self.run_binding(
 			name,
 			kind,
-			bare_return,
 			&statement,
 			|| {
 				let TopLevelStatement::Ast(TopLevelExpr::Expr(Expr::Let(stm))) = &statement else {
@@ -2988,19 +2984,12 @@ impl Executor {
 	/// Bind an evaluated right-hand side into request scope, enforcing
 	/// protected names, coercion, and the bound value's depth before publication.
 	///
-	/// The value is a value scope: a RETURN in it ends the value with what it
-	/// returns, which the name is bound to. A value that is itself a RETURN
-	/// (`bare_return`) stands in no value scope, so its RETURN ends the
-	/// statement with its value and binds nothing.
-	#[expect(
-		clippy::too_many_arguments,
-		reason = "the binding, how its value is planned and the statement's transaction"
-	)]
+	/// The value is no context of its own: a RETURN in it ends the statement
+	/// with its value, and the name is not bound.
 	async fn run_binding(
 		&mut self,
 		name: String,
 		kind: Option<crate::expr::Kind>,
-		bare_return: bool,
 		statement: &impl ToSql,
 		lower_value: impl FnOnce() -> FlowResult<LogicalOp>,
 		txn: Arc<Transaction>,
@@ -3039,10 +3028,7 @@ impl Executor {
 		let res = self.execute_operator_plan(plan, Arc::clone(&txn), false).await;
 		self.binds_rows = false;
 
-		let res = match res {
-			Err(ControlFlow::Return(value)) if !bare_return => value,
-			res => res?,
-		};
+		let res = res?;
 		let result = match &kind {
 			Some(kind) => {
 				let set_coerce = |e| {

@@ -9,7 +9,7 @@ A RETURN in a permission block is the permission's value. A block that ends in a
 without a LET beside it, grants the read when the value it returns is truthy and denies it when it
 is not, by a scan and by a dereference alike. The value is computed with the predicate's unchecked
 reads and never becomes the value of the statement the permission guards. A statement-level IF in
-the block passes its RETURN to the block. A RETURN taken inside the predicate by a subquery's
+the block passes its RETURN to the permission. A RETURN taken inside the predicate by a subquery's
 projection, and a BREAK taken by a loop, are ordinary. A field permission a scan applies, and a
 write's gate, take a RETURN as the verdict, and a field the verdict denies reads NONE. A COMPUTED
 field and a field VALUE take a RETURN as their value, also where a permission derives the field, so

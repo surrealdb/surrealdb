@@ -6,7 +6,7 @@ auth = { level = "owner" }
 
 [test]
 reason = """
-Plan companion to caught_by_let_and_return_values: a LET whose value is a block
+Plan companion to let_values_pass_return: a LET whose value is a block
 holding an IF with a RETURN in it plans as a Let over a Sequence, with the IF
 folded to its taken branch, so the RETURN is a step of the nested Sequence.
 """

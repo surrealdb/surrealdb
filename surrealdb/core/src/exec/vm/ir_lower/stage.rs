@@ -109,7 +109,7 @@ use super::super::write::{
 	TableRepairs, ViewClause, ViewRows,
 };
 use super::emit::Emitter;
-use super::expr::{LowerLimits, Lowerer, Needs, ReturnScope, invariant};
+use super::expr::{LowerLimits, Lowerer, Needs, ends_context, invariant};
 use super::pipe::{
 	first_arg, key_parts, lower_layers, lower_stored_guards, project_image, region_frame,
 	yielded_value,
@@ -3491,22 +3491,14 @@ fn condition_pipeline(lowerer: &mut Lowerer<'_>, region: RegionId) -> Result<Pip
 	emit_clause(lowerer, out)
 }
 
-/// Where a `RETURN` a statement in a value of a data clause signals is taken: at the statement,
-/// outside a permission frame, so the value is the returned value. A loop signal passes to the
-/// loop around the write.
-const DATA_VALUE: ReturnScope = ReturnScope {
-	any_frame: false,
-	loops_fail: false,
-};
-
 /// The host pipeline over the snapshot that evaluates the data clause region `region`.
 ///
 /// With `many` it emits one array holding the value of each assignment of the region, in written
 /// order, all over the one snapshot; otherwise it emits the one value the region's content op
 /// stores. A region that ends in a raise, a value of the clause that throws, raises there and
-/// stores nothing past it. A statement in a value takes a `RETURN` it signals as its own value
-/// ([`DATA_VALUE`]). The subscripts and filters of a place are not evaluated here: the places a
-/// clause writes at are the write's own steps.
+/// stores nothing past it. Each value the clause stores is a context of its own: a `RETURN` a
+/// statement in it signals is that value ([`Lowerer::context_value`]). The subscripts and filters
+/// of a place are not evaluated here: the places a clause writes at are the write's own steps.
 fn data_pipeline(
 	lowerer: &mut Lowerer<'_>,
 	region: RegionId,
@@ -3522,6 +3514,7 @@ fn data_pipeline(
 	}
 	let mut stored = false;
 	let mut raised = false;
+	let context = ends_context(ir, region);
 	for op in ops_in(ir, region) {
 		let data = ir.op(op).ok_or(IrError::Stale("ir_lower::stage: an op of a clause is gone"))?;
 		let value = match &data.kind {
@@ -3543,7 +3536,10 @@ fn data_pipeline(
 				.ok_or(IrError::Stale("ir_lower::stage: a clause op holds no value"))?,
 			OpKind::Logical(_) | OpKind::Expr(_) | OpKind::Phys(_) => continue,
 		};
-		let operand = lowerer.catching(DATA_VALUE, |lowerer| lowerer.value(value))?;
+		let operand = match context {
+			true => lowerer.context_value(|lowerer| lowerer.value(value))?,
+			false => lowerer.value(value)?,
+		};
 		if many {
 			lowerer.emit(Instr::ArrayPush {
 				array: out,

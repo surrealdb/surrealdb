@@ -59,7 +59,7 @@ use crate::exec::ir::logical::ops::{
 use crate::exec::ir::logical::seam::invariant;
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::vm::ir_lower::emit::Emitter;
-use crate::exec::vm::ir_lower::expr::{Lowerer, Needs};
+use crate::exec::vm::ir_lower::expr::{Lowerer, Needs, defining_region, ends_context};
 use crate::exec::vm::ir_lower::stage::{Derive, derive_fields};
 use crate::exec::vm::ir_lower::units::LowerCx;
 use crate::exec::vm::program::{
@@ -533,8 +533,21 @@ impl Body<'_, '_, '_> {
 		if let Some(judged) = judged_arg(ir, column.region) {
 			lowerer.bind_arg(judged, Operand::Reg(value));
 		}
+		// A guard a `RETURN` held in it ends is judged by the value of its context, which the
+		// `RETURN` may set before the guard's own branches are reached.
+		let context = defining_region(ir, guard).is_some_and(|region| ends_context(ir, region));
 		let jumps = &mut self.jumps;
 		lowerer.in_frame(column.container, frame, |lowerer| {
+			if context {
+				let cond = lowerer.context_value(|lowerer| lowerer.value(guard))?;
+				return Branching {
+					lowerer,
+					ir,
+					end,
+					jumps,
+				}
+				.jump(cond, false, cut, false);
+			}
 			Branching {
 				lowerer,
 				ir,

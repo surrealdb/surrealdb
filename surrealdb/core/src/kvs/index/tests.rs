@@ -2249,7 +2249,7 @@ async fn define_index_blocking_past_a_timeout_leaves_no_index() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn define_index_with_writing_operands_rolls_them_back_with_its_build() -> Result<()> {
 	for comment in
-		["{ DELETE audit; RETURN 'unique emails' }", "array::first(array::map([0], $delete_audit))"]
+		["{ DELETE audit; 'unique emails' }", "array::first(array::map([0], $delete_audit))"]
 	{
 		let (ds, session) = new_index_test_ds().await?;
 		execute_all(

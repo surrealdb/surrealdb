@@ -7,22 +7,34 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use crate::exec::ir::iface::region_kind::{LoopRule, RegionKind, RegionProperties, ReturnRule};
+use crate::exec::ir::iface::region_kind::{
+	LoopRule, RegionKind, RegionProperties, ReturnRule, statement_passes_return,
+};
 
 /// The index in `stack` of the region a `RETURN` written at the top of the stack ends: the
 /// innermost region whose return rule catches.
 ///
-/// `None` when a region that no `RETURN` walk reaches is met first, or when no region catches.
-/// Either case breaks an invariant: every op stands inside a statement, and the statement catches.
+/// A `RETURN` that passes every region of a stack whose outermost region passes it lands on that
+/// region, the top of a unit. `None` when a region that no `RETURN` walk reaches is met first, or
+/// when the stack is empty. Either case breaks an invariant: every op stands inside a statement or
+/// a unit.
 pub(crate) fn return_target(stack: &[RegionKind]) -> Option<usize> {
 	for (index, kind) in stack.iter().enumerate().rev() {
+		if let RegionKind::Statement(_) = kind {
+			let outer = index.checked_sub(1).and_then(|outer| stack.get(outer)).copied();
+			if statement_passes_return(outer) {
+				continue;
+			}
+		}
 		match kind.return_rule() {
 			ReturnRule::CatchesReturn => return Some(index),
 			ReturnRule::NeverReached => return None,
 			ReturnRule::PassesOutward => {}
 		}
 	}
-	None
+	// A unit whose top region passes a `RETURN` outward (a parenthesised statement or a block
+	// compiled as a unit of its own) ends with it: the run that holds the unit takes it.
+	stack.first().is_some_and(|top| top.return_rule() == ReturnRule::PassesOutward).then_some(0)
 }
 
 /// Where a `BREAK` or `CONTINUE` written at the top of a stack goes.

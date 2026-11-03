@@ -5,7 +5,9 @@ use std::iter::successors;
 use super::location::LocOrigin;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::iface::ids::{BlockId, OpId, RegionId};
-use crate::exec::ir::iface::region_kind::{LoopRule, RegionKind, RegionProperties, ReturnRule};
+use crate::exec::ir::iface::region_kind::{
+	LoopRule, RegionKind, RegionProperties, ReturnRule, statement_passes_return,
+};
 use crate::exec::ir::logical::ops::LogTag;
 use crate::exec::ir::op_kind::OpTag;
 use crate::exec::ir::phys::ops::PhysTag;
@@ -70,6 +72,27 @@ pub(crate) fn enclosing_statement(ir: &Ir, op: OpId) -> Option<OpId> {
 	})
 }
 
+/// What a `RETURN` does on reaching `region`: the return rule of its kind, except that a statement
+/// of a statement list passes it outward ([`statement_passes_return`]). A region that does not
+/// exist passes it.
+pub(crate) fn region_return_rule(ir: &Ir, region: RegionId) -> ReturnRule {
+	let Some(kind) = ir.region(region).map(|held| held.kind) else {
+		return ReturnRule::PassesOutward;
+	};
+	if let RegionKind::Statement(_) = kind {
+		let outer = ir
+			.parent_op(region)
+			.and_then(|owner| ir.op(owner))
+			.and_then(|owner| ir.block(owner.parent))
+			.and_then(|block| ir.region(block.parent))
+			.map(|outer| outer.kind);
+		if statement_passes_return(outer) {
+			return ReturnRule::PassesOutward;
+		}
+	}
+	kind.return_rule()
+}
+
 /// Where a `RETURN`, `BREAK` or `CONTINUE` lands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ControlTarget {
@@ -87,16 +110,19 @@ pub(crate) enum ControlTarget {
 ///
 /// This is the only derivation of a target: the binder and the verifier both read it here.
 ///
-/// - A `return` ends the nearest enclosing region whose return rule catches it. A region no return
-///   reaches, found first, answers [`ControlTarget::Escapes`].
+/// - A `return` ends the nearest enclosing region whose return rule catches it
+///   ([`region_return_rule`]). A region no return reaches, found first, answers
+///   [`ControlTarget::Escapes`].
 /// - A `break` or `next` leaves, or continues, the nearest enclosing region whose loop rule is a
 ///   target. A barrier found first answers [`ControlTarget::Barrier`].
 /// - A `break` or `next` whose location is [`LocOrigin::Synthesized`] is a loop exit a pass made.
 ///   It lands in the nearest `Loop`, `StatementFor` or `ValueFor` region, and barriers are not
 ///   consulted.
 ///
-/// A walk that leaves the container's top region without a landing answers `Escapes` for a
-/// `return` and `Barrier` for a loop exit, naming the top region. Any other op answers
+/// A `return` that leaves a top region that passes it outward lands on that region: the container
+/// is a unit, and the run that holds it takes the `return`. Any other walk that leaves the
+/// container's top region without a landing answers `Escapes` for a `return` and `Barrier` for a
+/// loop exit, naming the top region. Any other op answers
 /// [`ControlTarget::NotControl`].
 pub(crate) fn control_target(ir: &Ir, op: OpId) -> ControlTarget {
 	let Some(data) = ir.op(op) else {
@@ -106,16 +132,23 @@ pub(crate) fn control_target(ir: &Ir, op: OpId) -> ControlTarget {
 	match data.kind.tag() {
 		OpTag::Logical(LogTag::Return) | OpTag::Phys(PhysTag::Return) => {
 			for (region, _) in ancestors(ir, op) {
-				let Some(kind) = ir.region(region).map(|held| held.kind) else {
+				if ir.region(region).is_none() {
 					continue;
-				};
-				match kind.return_rule() {
+				}
+				match region_return_rule(ir, region) {
 					ReturnRule::CatchesReturn => return ControlTarget::Region(region),
 					ReturnRule::NeverReached => return ControlTarget::Escapes(region),
 					ReturnRule::PassesOutward => {}
 				}
 			}
-			ControlTarget::Escapes(top)
+			// A unit whose top region passes a `RETURN` outward (a parenthesised statement or a
+			// block run as a unit of its own) ends with it: the run that holds the unit takes it.
+			match ir.region(top).map(|held| held.kind.return_rule()) {
+				Some(ReturnRule::PassesOutward) => ControlTarget::Region(top),
+				Some(ReturnRule::CatchesReturn | ReturnRule::NeverReached) | None => {
+					ControlTarget::Escapes(top)
+				}
+			}
 		}
 		OpTag::Logical(LogTag::Break | LogTag::Next)
 		| OpTag::Phys(PhysTag::Break | PhysTag::Next) => {

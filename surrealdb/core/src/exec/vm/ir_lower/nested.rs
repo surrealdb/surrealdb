@@ -31,11 +31,12 @@
 //!
 //! # Where a `RETURN` goes
 //!
-//! A `RETURN` the unit signals is the statement's value where the expression's owner lowers it
-//! under [`Lowerer::catching`], and propagates to the enclosing scope otherwise. A block's unit
-//! takes its own `RETURN` as its value in every frame, as a block is a value scope, and a block
-//! always evaluates against the row of the statement that holds it. The instruction's catch
-//! resumes at the instruction after it.
+//! Neither a parenthesised statement nor a block is a context, so a `RETURN` the unit signals ends
+//! the context the code holding the instruction evaluates: its value is stored where that context
+//! takes it and the code resumes past the rest of the context's evaluation
+//! ([`Lowerer::context_value`]). Where that context is outside the code being lowered, the signal
+//! propagates to the run that holds the code. A block always evaluates against the row of the
+//! statement that holds it.
 //!
 //! # Strategies
 //!
@@ -116,8 +117,8 @@
 use surrealdb_strand::Strand;
 
 use super::super::program::{
-	BlockInstr, CallDepth, Catch, DefHash, FunctionSpec, GuardCode, Instr, Label, NestedSpec,
-	Operand, Reg, SubquerySpec, UnitFrame, UnitInput, unit_input_name,
+	BlockInstr, CallDepth, Catch, DefHash, FunctionSpec, GuardCode, Instr, NestedSpec, Operand,
+	Reg, SubquerySpec, UnitFrame, UnitInput, unit_input_name,
 };
 use super::expr::{Lowerer, call_args, exactly, invariant, region_at};
 use super::pipe::ReadScope;
@@ -333,8 +334,7 @@ impl Lowerer<'_> {
 			None => None,
 		};
 		let dst = self.em.reg()?;
-		let resume = self.em.label()?;
-		let caught = self.own_catch(dst, resume);
+		let caught = self.own_catch();
 		let frame = self.frame.program;
 		self.emit(Instr::Block(match member {
 			Some((probe, negate)) => BlockInstr::Member {
@@ -352,7 +352,6 @@ impl Lowerer<'_> {
 				caught,
 			},
 		}));
-		self.em.bind(resume)?;
 		if access_mode == AccessMode::ReadWrite {
 			self.writes();
 		}
@@ -387,8 +386,8 @@ impl Lowerer<'_> {
 
 	/// The value the statement region `region` holds, run as a unit of its own in the frame being
 	/// lowered: its one value where the unit's value is one row, and an array of its rows
-	/// otherwise. A `RETURN` the unit signals is caught where the code being lowered catches one,
-	/// and propagates otherwise.
+	/// otherwise. A `RETURN` the unit signals ends the context the code being lowered evaluates,
+	/// and propagates where that context is outside it ([`Lowerer::own_catch`]).
 	pub(super) fn subquery_region(&mut self, region: RegionId) -> Result<Operand, IrError> {
 		if holds_let(self.ir, region)? {
 			return Err(IrError::Rejected(Box::new(Refusal::InvalidStatement {
@@ -396,22 +395,23 @@ impl Lowerer<'_> {
 			})));
 		}
 		let inherits_row = inherits_row(self.ir, region)?;
-		self.run_unit(region, inherits_row, |lowerer, dst, resume| lowerer.own_catch(dst, resume))
+		let caught = self.own_catch();
+		self.run_unit(region, inherits_row, caught)
 	}
 
 	/// The value of the `{ ... }` block `data` in value position.
 	///
-	/// A block whose region holds only expressions, ending in the yield of its value, in a raise
-	/// or in a `RETURN`, which the block takes as its value, binds no name and signals nothing
-	/// past itself, so it lowers in place, where it stands
-	/// ([`Lowerer::eager_region_value`]), after a [`BlockInstr::Enter`] that counts it as a
+	/// A block whose region holds only expressions, ending in the yield of its value or in a
+	/// raise, binds no name and signals nothing past itself, so it lowers in place, where it
+	/// stands ([`Lowerer::eager_region_value`]), after a [`BlockInstr::Enter`] that counts it as a
 	/// nested statement when it is entered: a failure of the block, or of the expression around
 	/// it, is one an aggregate does not read as `NONE`, as for a block run as a unit. It is not
-	/// folded, since a folded raise would no longer be the block's. Any other
-	/// block runs as the unit its region is, in the frame being lowered: a `LET` binds in it, and
-	/// a `RETURN` it signals is its own value in any frame. A `BREAK` or `CONTINUE` passes to the
-	/// loop around it, and is an error where the code being lowered says one is. Its expressions
-	/// are evaluated against the row of the statement that holds it.
+	/// folded, since a folded raise would no longer be the block's. Any other block runs as the
+	/// unit its region is, in the frame being lowered: a `LET` binds in it. A block is no context,
+	/// so a `RETURN` it signals ends the context the code being lowered evaluates, as one a
+	/// subquery signals does ([`Lowerer::own_catch`]). A `BREAK` or `CONTINUE` passes to the loop
+	/// around it, and is an error where the code being lowered says one is. Its expressions are
+	/// evaluated against the row of the statement that holds it.
 	pub(super) fn value_block(&mut self, data: &OpData) -> Result<Operand, IrError> {
 		exactly::<0>(data)?;
 		let region = region_at(data, 0, 1)?;
@@ -422,26 +422,25 @@ impl Lowerer<'_> {
 		}
 		self.refuse_in_fold("ir_lower::fold: phys.block")?;
 		self.require_frame(data)?;
-		let loops_fail = self.loops_fail();
-		self.run_unit(region, true, |lowerer, root, label| {
-			Some(lowerer.catch_of(root, label, loops_fail))
-		})
+		let caught = self.own_catch();
+		self.run_unit(region, true, caught)
 	}
 
 	/// The value of the `FOR` the `phys.pipeline` `data` wraps in value position, run as the unit
-	/// the pipeline's region is, in the frame being lowered. A `RETURN` its body signals is taken
-	/// as a statement held in an expression takes one ([`Lowerer::subquery_region`]), and its
-	/// expressions are evaluated against the row of the statement that holds it.
+	/// the pipeline's region is, in the frame being lowered. A `FOR` is no context, so a `RETURN`
+	/// its body signals ends the context the code being lowered evaluates
+	/// ([`Lowerer::own_catch`]), and its expressions are evaluated against the row of the
+	/// statement that holds it.
 	pub(super) fn value_for(&mut self, data: &OpData) -> Result<Operand, IrError> {
 		let region = region_at(data, 0, 1)?;
 		self.refuse_in_fold("ir_lower::fold: a FOR in value position")?;
 		self.require_frame(data)?;
-		self.run_unit(region, true, |lowerer, dst, resume| lowerer.own_catch(dst, resume))
+		let caught = self.own_catch();
+		self.run_unit(region, true, caught)
 	}
 
 	/// Runs the region `region` as a unit of its own in the frame being lowered, and answers the
-	/// register that holds its value. `catch` names where a `RETURN` the unit signals is taken,
-	/// from the instruction's destination and the label it resumes at.
+	/// register that holds its value. `caught` names where a signal the unit raises is taken.
 	///
 	/// The spec states nothing of what the unit does: the compile driver writes the access mode,
 	/// required context and row-order flag of the lowered unit into it and into this program.
@@ -449,7 +448,7 @@ impl Lowerer<'_> {
 		&mut self,
 		region: RegionId,
 		inherits_row: bool,
-		catch: impl FnOnce(&Self, Reg, Label) -> Option<Catch>,
+		caught: Option<Catch>,
 	) -> Result<Operand, IrError> {
 		let inputs = self.unit_inputs(region)?;
 		let doc = self.statement_document()?;
@@ -465,8 +464,6 @@ impl Lowerer<'_> {
 			inputs,
 		})?;
 		let dst = self.em.reg()?;
-		let resume = self.em.label()?;
-		let caught = catch(self, dst, resume);
 		let frame = self.frame.program;
 		self.emit(Instr::Subquery {
 			subquery,
@@ -475,7 +472,6 @@ impl Lowerer<'_> {
 			caught,
 			doc,
 		});
-		self.em.bind(resume)?;
 		Ok(Operand::Reg(dst))
 	}
 
@@ -750,15 +746,12 @@ fn lies_within(ir: &Ir, region: RegionId, op: OpId) -> bool {
 /// Whether the ops of `region` hold a `LET` of a local name, which is refused where it is
 /// written as the statement of an expression.
 /// Whether the ops of `region` are expressions alone: ops of the `expr` dialect, which end the
-/// region in a yield or a raise, and the loops and blocks that stand in value position. A
-/// `RETURN` that ends the region is the region's value.
+/// region in a yield or a raise, and the loops and blocks that stand in value position.
 fn holds_only_values(ir: &Ir, region: RegionId) -> Result<bool, IrError> {
-	let last = ops_in(ir, region).last();
 	for op in ops_in(ir, region) {
 		let data = ir.op(op).ok_or(IrError::Stale("ir_lower::nested: op"))?;
 		let value = match &data.kind {
 			OpKind::Expr(_) | OpKind::Phys(PhysOp::Block | PhysOp::Pipeline(_)) => true,
-			OpKind::Phys(PhysOp::Return) => Some(op) == last,
 			OpKind::Phys(PhysOp::Loop {
 				kind,
 				..
@@ -1427,15 +1420,17 @@ mod tests {
 	}
 
 	#[test]
-	fn a_return_is_the_statements_value_where_the_expression_catches_one() {
+	fn a_return_ends_the_context_it_is_lowered_in() {
 		let mut b = Builder::new();
 		let value = one(&mut b, NestedStrategy::Apply);
-		let scope = ReturnScope {
-			any_frame: false,
-			loops_fail: true,
-		};
-		let (program, _, _) = lower_in(&mut LowerCx::detached(), &b.ir, value, Some(scope))
-			.expect("the subquery lowers");
+		let mut em = Emitter::new();
+		let mut cx = LowerCx::detached();
+		let mut lowerer = Lowerer::in_context(&mut em, &b.ir, &mut cx);
+		let context =
+			lowerer.context_value(|lowerer| lowerer.value(value)).expect("the subquery lowers");
+		em.emit(Instr::EndRow);
+		let pipeline = em.finish_pipeline(Source::Once).expect("the pipeline ends");
+		let program = em.finish_program(vec![pipeline], AccessMode::ReadOnly).expect("a program");
 		let (
 			at,
 			Instr::Subquery {
@@ -1447,13 +1442,14 @@ mod tests {
 		else {
 			panic!("the subquery is emitted");
 		};
-		let catch = caught.expect("the signal is taken");
-		assert_eq!(catch.root, *dst);
-		assert!(catch.loops_fail);
-		// The body resumes at the instruction after the statement's.
-		assert_eq!(catch.label as usize, at + 1);
+		let on_return = caught.and_then(|catch| catch.on_return).expect("the signal is taken");
+		// The RETURN's value is the context's, not the statement's that signals it, and the code
+		// resumes past the context's evaluation.
+		assert_ne!(on_return.value, *dst);
+		assert_eq!(Operand::Reg(on_return.value), context);
+		assert!(on_return.label as usize > at + 1);
 
-		// Without a scope the signal propagates.
+		// Without a context the signal propagates.
 		let (program, _, _) =
 			lower_in(&mut LowerCx::detached(), &b.ir, value, None).expect("the subquery lowers");
 		let (
@@ -1470,23 +1466,23 @@ mod tests {
 	}
 
 	#[test]
-	fn a_permission_frame_owns_the_signals_raised_in_it_unless_the_scope_reaches_into_frames() {
-		for (any_frame, taken) in [(false, false), (true, true)] {
+	fn a_permission_frame_owns_the_signals_raised_in_it_unless_the_context_is_its_own() {
+		for inside in [false, true] {
 			let mut b = Builder::new();
 			let frame = b.frame(EvalFrame::permission(None));
 			let value = b.in_frame(frame, |b| one(b, NestedStrategy::Apply));
 			let mut em = Emitter::new();
 			let mut cx = LowerCx::detached();
 			let mut lowerer = Lowerer::in_context(&mut em, &b.ir, &mut cx);
-			let scope = ReturnScope {
-				any_frame,
-				loops_fail: false,
+			let lowered = match inside {
+				true => lowerer.in_frame(frame, 0, |lowerer| {
+					lowerer.context_value(|lowerer| lowerer.value(value))
+				}),
+				false => lowerer.context_value(|lowerer| {
+					lowerer.in_frame(frame, 0, |lowerer| lowerer.value(value))
+				}),
 			};
-			lowerer
-				.in_frame(frame, 0, |lowerer| {
-					lowerer.catching(scope, |lowerer| lowerer.value(value))
-				})
-				.expect("the subquery lowers");
+			lowered.expect("the subquery lowers");
 			em.emit(Instr::EndRow);
 			let pipeline = em.finish_pipeline(Source::Once).expect("the pipeline ends");
 			let program =
@@ -1503,7 +1499,7 @@ mod tests {
 				panic!("the subquery is emitted");
 			};
 			assert_eq!(*frame, Some(0), "the unit runs in the frame it was lowered for");
-			assert_eq!(caught.is_some(), taken, "any_frame = {any_frame}");
+			assert_eq!(caught.is_some(), inside, "context in the frame = {inside}");
 		}
 	}
 

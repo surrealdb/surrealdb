@@ -2357,53 +2357,81 @@ const EXPLICIT: RegionKind = RegionKind::Transaction(TxnKind::Explicit);
 const SHAPE_TO_NONE: RegionKind = RegionKind::ErrorScope(ErrorScope::ShapeToNone);
 const WHERE: RegionKind = RegionKind::Clause(ClauseRole::Where);
 
-/// A `RETURN` ends the innermost value scope around it, else its statement, whatever statement
-/// bodies, clauses and error scopes stand between; a stack that reaches the request or a
-/// transaction first, or holds nothing that catches, has no target.
+/// A `RETURN` ends the innermost context around it: a statement of the request or of a
+/// transaction, a body, stored code, or a clause a statement evaluates per row or per value. Every
+/// block, arm, `FOR` body, parenthesised statement, operand and statement of a list between passes
+/// it; a stack that reaches the request or a transaction first, or holds nothing that catches, has
+/// no target.
 #[test]
 fn return_target_walk() {
 	use RegionKind::{
 		Block, CatalogUnit, ClosureBody, Deadline, FunctionBody, LazyOperand, Loop,
-		PermissionFrame, Request, StatementFor, StatementIf, ValueBlock, ValueFor, ValueIf,
-		WriteStage,
+		PermissionFrame, Request, StatementFor, StatementIf, Subquery, ValueBlock, ValueFor,
+		ValueIf, WriteStage,
 	};
 
-	// The cases of `region_kind_by_position`.
-	assert_eq!(return_target(&[Request, AUTO, ValueIf]), Some(2), "LET $d = IF c {{ RETURN 1 }}");
+	// A block, an arm, a FOR body and a parenthesised statement pass a RETURN to the statement.
+	assert_eq!(return_target(&[Request, AUTO, ValueIf]), Some(1), "LET $d = IF c {{ RETURN 1 }}");
 	assert_eq!(
 		return_target(&[Request, AUTO, ValueBlock, StatementIf]),
-		Some(2),
+		Some(1),
 		"LET $w = {{ IF c {{ RETURN 5 }}; 6 }}"
 	);
 	assert_eq!(return_target(&[Request, AUTO, StatementIf]), Some(1), "IF c {{ RETURN 5 }}");
 	assert_eq!(return_target(&[Request, AUTO]), Some(1), "RETURN 6");
+	assert_eq!(return_target(&[Request, AUTO, Subquery]), Some(1), "RETURN 1 + (RETURN 2)");
+	assert_eq!(return_target(&[Request, AUTO, Block, ValueBlock]), Some(1));
 	assert_eq!(return_target(&[Request, EXPLICIT, IN_TXN]), Some(2), "BEGIN; RETURN 6");
 	assert_eq!(
 		return_target(&[Request, EXPLICIT, IN_TXN, StatementIf]),
 		Some(2),
 		"BEGIN; IF c {{ RETURN 5 }}"
 	);
-
-	// `RETURN { RETURN 9; 10 } + 1`: the inner RETURN ends the value block, the outer its
-	// statement.
-	assert_eq!(return_target(&[Request, AUTO, ValueBlock]), Some(2));
-	assert_eq!(return_target(&[Request, AUTO]), Some(1));
-	// `LET $x = RETURN 5` and `SELECT * FROM t WHERE RETURN false` end their statement.
-	assert_eq!(return_target(&[Request, AUTO]), Some(1));
-	assert_eq!(return_target(&[Request, AUTO, Loop, WHERE]), Some(1));
-
-	// A FOR body standing as a statement passes; standing as a value it catches.
 	assert_eq!(return_target(&[Request, AUTO, StatementFor]), Some(1));
-	assert_eq!(return_target(&[Request, AUTO, ValueFor]), Some(2));
-	assert_eq!(return_target(&[Request, AUTO, ValueFor, StatementIf]), Some(2));
+	assert_eq!(return_target(&[Request, AUTO, ValueFor]), Some(1));
+	assert_eq!(return_target(&[Request, AUTO, ValueFor, StatementIf]), Some(1));
 
-	// A lazy operand passes a RETURN; the nearest region that catches is its target.
-	assert_eq!(return_target(&[Request, AUTO, ValueBlock, LazyOperand]), Some(2));
-	assert_eq!(return_target(&[Request, AUTO, ValueBlock, ValueIf, LazyOperand]), Some(3));
-	assert_eq!(
-		return_target(&[Request, AUTO, ValueBlock, ValueIf, LazyOperand, SHAPE_TO_NONE]),
-		Some(3)
-	);
+	// A statement of a statement list is no context: the body around it is.
+	assert_eq!(return_target(&[Request, AUTO, FunctionBody, IN_TXN, Subquery]), Some(2));
+	assert_eq!(return_target(&[Request, AUTO, ValueBlock, IN_TXN, Subquery]), Some(1));
+
+	// A clause evaluated per row or per value is a context; one evaluated once is not.
+	assert_eq!(return_target(&[Request, AUTO, Loop, WHERE]), Some(3), "WHERE (RETURN true)");
+	assert_eq!(return_target(&[Request, AUTO, Loop, WHERE, LazyOperand, Subquery]), Some(3));
+	assert_eq!(return_target(&[Request, AUTO, Loop, WHERE, ValueBlock, ValueIf]), Some(3));
+	for role in [
+		ClauseRole::WriteCond,
+		ClauseRole::Projection,
+		ClauseRole::SetValue,
+		ClauseRole::Content,
+		ClauseRole::DuplicateUpdate,
+		ClauseRole::ReturnClause,
+		ClauseRole::OrderKey,
+		ClauseRole::GroupKey,
+		ClauseRole::Split,
+	] {
+		assert_eq!(
+			return_target(&[Request, AUTO, Loop, RegionKind::Clause(role), Subquery]),
+			Some(3),
+			"{role:?}"
+		);
+	}
+	for role in [
+		ClauseRole::From,
+		ClauseRole::Limit,
+		ClauseRole::Start,
+		ClauseRole::Timeout,
+		ClauseRole::InsertValues,
+	] {
+		assert_eq!(
+			return_target(&[Request, AUTO, RegionKind::Clause(role), Subquery]),
+			Some(1),
+			"{role:?}"
+		);
+	}
+
+	// A lazy operand, an error scope and a deadline pass a RETURN.
+	assert_eq!(return_target(&[Request, AUTO, ValueBlock, LazyOperand]), Some(1));
 	assert_eq!(return_target(&[Request, AUTO, SHAPE_TO_NONE]), Some(1));
 	assert_eq!(
 		return_target(&[Request, AUTO, RegionKind::ErrorScope(ErrorScope::MethodBody)]),
@@ -2414,15 +2442,9 @@ fn return_target_walk() {
 		Some(1)
 	);
 	assert_eq!(return_target(&[Request, AUTO, Deadline, LazyOperand]), Some(1));
-	assert_eq!(
-		return_target(&[Request, AUTO, Loop, RegionKind::Clause(ClauseRole::SetValue)]),
-		Some(1)
-	);
 
-	// Every region that holds a value scope of its own catches.
+	// Every body and every frame of stored code catches.
 	for scope in [
-		Block,
-		RegionKind::Subquery,
 		FunctionBody,
 		ClosureBody,
 		PermissionFrame,
@@ -2433,26 +2455,28 @@ fn return_target_walk() {
 		RegionKind::StoredClause(StoredRole::Body),
 	] {
 		assert_eq!(
-			return_target(&[Request, AUTO, scope, StatementIf, WHERE]),
+			return_target(&[Request, AUTO, scope, StatementIf, ValueBlock]),
 			Some(2),
 			"{scope:?}"
 		);
 	}
 	assert_eq!(return_target(&[Request, AUTO, FunctionBody, StatementFor, Loop]), Some(2));
 
-	// The request, a transaction and a catalog unit are never reached; a stack that holds nothing
-	// that catches has no target either.
+	// The request, a transaction and a catalog unit are never reached, and an empty stack has no
+	// target.
 	assert_eq!(return_target(&[]), None);
 	assert_eq!(return_target(&[Request]), None);
 	assert_eq!(return_target(&[Request, EXPLICIT]), None);
-	assert_eq!(return_target(&[Request, EXPLICIT, WHERE]), None);
+	assert_eq!(return_target(&[Request, EXPLICIT, Block]), None);
 	assert_eq!(
 		return_target(&[Request, RegionKind::Transaction(TxnKind::Session), StatementIf]),
 		None
 	);
 	assert_eq!(return_target(&[CatalogUnit]), None);
-	assert_eq!(return_target(&[CatalogUnit, WHERE]), None);
-	assert_eq!(return_target(&[Loop, WHERE]), None);
+	assert_eq!(return_target(&[CatalogUnit, Subquery]), None);
+	// The top of a unit that passes a RETURN is where it lands: the unit's run takes it.
+	assert_eq!(return_target(&[Loop, ValueBlock]), Some(0));
+	assert_eq!(return_target(&[Subquery, ValueIf, LazyOperand]), Some(0));
 	assert_eq!(return_target(&[Request, EXPLICIT, StatementIf, CatalogUnit, StatementIf]), None);
 }
 
@@ -4325,7 +4349,8 @@ mod binding {
 	#[test]
 	fn an_if_holding_only_its_else_arm_binds_as_an_if_region() {
 		let env = Env::new();
-		let mut ir = Ir::new(request_scope(), RegionKind::Request);
+		// The value binds as the top of a unit, which takes the `RETURN` that ends it.
+		let mut ir = Ir::new(request_scope(), RegionKind::Subquery);
 		let mut facts = FactCache::new();
 		let arm = LogicalOp::Sequence(crate::expr::logical::LogicalSequence {
 			stmts: vec![LogicalOp::Return(crate::expr::logical::LogicalReturn {
@@ -5877,7 +5902,8 @@ mod binding {
 	#[test]
 	fn return_fetch_of_a_read_fetches_into_each_row() {
 		let env = Env::new();
-		let mut ir = Ir::new(request_scope(), RegionKind::Request);
+		// The value binds as the top of a unit, which takes the `RETURN` that ends it.
+		let mut ir = Ir::new(request_scope(), RegionKind::Subquery);
 		let mut facts = FactCache::new();
 		let plan = LogicalOp::Return(crate::expr::logical::LogicalReturn {
 			what: Box::new(LogicalOp::Source(LogicalSource {
@@ -6487,7 +6513,7 @@ mod binding {
 		for block in blocks {
 			let kinds = region_kinds_of(&ir, block);
 			assert_eq!(kinds, vec![RegionKind::Block]);
-			assert_eq!(kinds[0].return_rule(), ReturnRule::CatchesReturn);
+			assert_eq!(kinds[0].return_rule(), ReturnRule::PassesOutward);
 		}
 
 		let ir = bind("{ LET $x = { RETURN 1 }; $x }").await;

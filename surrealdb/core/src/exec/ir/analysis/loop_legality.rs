@@ -32,7 +32,7 @@ use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::Provenance;
 use crate::exec::ir::core::value::ValueDef;
-use crate::exec::ir::core::walk::ops_in;
+use crate::exec::ir::core::walk::{ops_in, region_return_rule};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::{ExprOp, ExprTag};
 use crate::exec::ir::iface::catalog::EffectCx;
@@ -1375,7 +1375,7 @@ fn terminator_target(ir: &Ir, op: OpId, is_return: bool) -> Option<RegionId> {
 	for _ in 0..MAX_HOPS {
 		let info = ir.region(region)?;
 		if is_return {
-			match info.kind.return_rule() {
+			match region_return_rule(ir, region) {
 				ReturnRule::CatchesReturn => return Some(region),
 				ReturnRule::PassesOutward => {}
 				ReturnRule::NeverReached => return None,

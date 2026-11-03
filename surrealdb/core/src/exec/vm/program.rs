@@ -47,17 +47,14 @@ pub(super) type Label = u32;
 pub(super) const ROW: Reg = 0;
 
 /// Where a signal a nested statement raises is taken, by the instruction that
-/// runs the statement: a `RETURN` is the statement's own value.
+/// runs the statement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Catch {
-	/// The register a `RETURN`'s value is stored in: the instruction's own
-	/// destination.
-	pub(super) root: Reg,
-	/// Where the body resumes once the value is stored: the instruction after
-	/// the statement's.
-	pub(super) label: Label,
-	/// Whether a `BREAK` or `CONTINUE` is an error there, as it is in a
-	/// record-id key element, which no loop encloses.
+	/// Where a `RETURN` is taken: the context the instruction is evaluated in,
+	/// whose value the `RETURN` sets and whose evaluation it ends. `None` lets
+	/// the signal propagate to the run that holds the program.
+	pub(super) on_return: Option<ReturnCatch>,
+	/// Whether a `BREAK` or `CONTINUE` is an error there.
 	pub(super) loops_fail: bool,
 	/// Where the body jumps on a `BREAK` and on a `CONTINUE`, when a `FOR` of
 	/// the program's own code takes them; `None` lets the signal propagate.
@@ -65,9 +62,8 @@ pub(super) struct Catch {
 	pub(super) on_continue: Option<Label>,
 }
 
-/// Where a `RETURN` a block statement raises is taken, by the `LET` or
-/// `RETURN` whose value the statement is part of: the register the `RETURN`'s
-/// value is stored in, and where the program resumes.
+/// Where a `RETURN` is taken: the register its value is stored in, and where
+/// the program resumes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ReturnCatch {
 	pub(super) value: Reg,
@@ -979,7 +975,8 @@ pub(super) enum BlockInstr {
 	/// pipelines, which are this program's, over this program's state, in the
 	/// current frame; `dst` = its value as `collect` gathers it. A `BREAK` or
 	/// `CONTINUE` it raises jumps to `on_break` or `on_continue` when set, and
-	/// otherwise leaves the program.
+	/// otherwise leaves the program, as a `RETURN` it raises and its `collect`
+	/// does not take always does.
 	RunEmbedded {
 		/// The statement's group, [`Program::groups`]`[statement]`.
 		statement: u16,
@@ -987,10 +984,6 @@ pub(super) enum BlockInstr {
 		collect: Collect,
 		on_break: Option<Label>,
 		on_continue: Option<Label>,
-		/// A `RETURN` the statement raises and its `collect` does not take is
-		/// stored in `value`, and the program jumps to `label`; otherwise it
-		/// leaves the program.
-		on_return: Option<ReturnCatch>,
 		/// For a late-bound statement, or one after a schema statement of the
 		/// program, the context it requires: the session's namespace and
 		/// database are resolved again as far as that before it runs, since a
@@ -1102,10 +1095,6 @@ pub(super) enum BlockInstr {
 		collect: Collect,
 		on_break: Option<Label>,
 		on_continue: Option<Label>,
-		/// A `RETURN` the statement raises and its `collect` does not take is
-		/// stored in `value`, and the program jumps to `label`; otherwise it
-		/// leaves the program.
-		on_return: Option<ReturnCatch>,
 		/// The context it requires: the session's namespace and database are
 		/// resolved again as far as that before it runs, since a statement
 		/// before it may have removed or replaced either.
@@ -3705,7 +3694,11 @@ impl Instr {
 			) => caught
 				.iter_mut()
 				.flat_map(|catch| {
-					std::iter::once(&mut catch.label)
+					catch
+						.on_return
+						.as_mut()
+						.map(|on_return| &mut on_return.label)
+						.into_iter()
 						.chain(catch.on_break.as_mut())
 						.chain(catch.on_continue.as_mut())
 				})
@@ -3718,20 +3711,14 @@ impl Instr {
 				BlockInstr::RunEmbedded {
 					on_break,
 					on_continue,
-					on_return,
 					..
 				}
 				| BlockInstr::RunServed {
 					on_break,
 					on_continue,
-					on_return,
 					..
 				},
-			) => on_break
-				.iter_mut()
-				.chain(on_continue.iter_mut())
-				.chain(on_return.iter_mut().map(|catch| &mut catch.label))
-				.collect(),
+			) => on_break.iter_mut().chain(on_continue.iter_mut()).collect(),
 			Instr::Block(BlockInstr::IterNext {
 				done,
 				..

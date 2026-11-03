@@ -13,17 +13,27 @@ Total rows: 1''''
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Sequence [ctx: Rt] [statements: 1]
-        Return [ctx: Rt]
-            ExprPlan [ctx: Rt] [expr: 9]
+    ExprPlan [ctx: Rt] [expr: IF true THEN (
+  Sequence
+    Return
+      Eval[9]
+) ELSE (
+  Sequence
+    Eval[10]
+) END]
 ''''
 
 [[test.results]]
 value = '''
 'Return [ctx: Rt] {rows: 0}
-    Sequence [ctx: Rt] [statements: 1] {rows: 0}
-        Return [ctx: Rt] {rows: 0}
-            ExprPlan [ctx: Rt] [expr: 9] {rows: 0}
+    ExprPlan [ctx: Rt] [expr: IF true THEN (
+  Sequence
+    Return
+      Eval[9]
+) ELSE (
+  Sequence
+    Eval[10]
+) END] {rows: 0}
 
 Total rows: 0''''
 

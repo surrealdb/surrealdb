@@ -8,11 +8,9 @@ auth = { level = "owner" }
 reason = """
 A statement in the value of an IF arm, closure body or function body that is a parenthesised FOR,
 IF or subquery stands in an expression and yields its value, NONE for a FOR, as a subquery does. A
-RETURN written in parentheses as the value of a LET in a block is caught by that subquery: the LET
-binds the caught value and the block continues, so `RETURN { LET $x = (RETURN 'a'); RETURN 'after' }`
-answers 'after'. A block-local LET of a parenthesised RETURN binds its value in the block, and a
-later LET of the block binds its own. A top-level LET of a parenthesised RETURN answers that value as
-the statement's result, and the next statement runs.
+RETURN written in parentheses as the value of a LET is no context: it ends the context the LET
+stands in, so `RETURN { LET $x = (RETURN 'a'); RETURN 'after' }` answers 'a'. A top-level LET of a
+parenthesised RETURN answers that value as the statement's result, and the next statement runs.
 """
 
 [[test.results]]
@@ -46,19 +44,20 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "'after'"
+value = "'a'"
 
 [[test.results]]
 value = "'a'"
 
 [[test.results]]
-value = "['a', 'b']"
+value = "'a'"
 
 [[test.results]]
 value = "'a'"
 
 [[test.results]]
 value = "'after'"
+
 */
 
 RETURN [1].map(|$i| IF true THEN (FOR $j IN [5] { }) END);

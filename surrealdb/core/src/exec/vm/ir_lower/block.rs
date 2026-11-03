@@ -5,8 +5,7 @@
 //! A statement program is one pipeline over [`Source::Once`]. Its statements are the ops of the
 //! top region in the order they were written, and its value is the value the region yields. The
 //! control flow is the program's own instructions: a `FOR` is a jump back to its head, `BREAK`
-//! and `CONTINUE` are jumps to its exit and to its next element, a `RETURN` is a jump to the end
-//! of the value scope it ends, and a `RETURN` that no value scope of the program catches is
+//! and `CONTINUE` are jumps to its exit and to its next element, and a `RETURN` is
 //! [`BlockInstr::Return`], which leaves the program with the value.
 //!
 //! # Statements and values
@@ -49,9 +48,8 @@
 //! through the frame. Its region stands for nothing. A program that serves none refuses it.
 //!
 //! A statement after one that changes the catalog resolves the session's namespace and database
-//! again before it runs, and a `BREAK`, `CONTINUE` or `RETURN` a statement signals goes to the
-//! loop or the value scope that takes it, through a pad that restores the frames the list saved
-//! since.
+//! again before it runs, and a `BREAK` or `CONTINUE` a statement signals goes to the loop that
+//! takes it, through a pad that restores the frames the list saved since.
 //!
 //! # Raises
 //!
@@ -61,22 +59,23 @@
 //! transaction control is a step of the request driver, so one reaching a program answers
 //! [`IrError::Invariant`].
 //!
-//! # Value scopes
+//! # Scopes
 //!
 //! A scope runs in a frame of its own ([`BlockInstr::Save`], [`BlockInstr::Restore`]), so the
 //! names it binds in the frame end with it. The scopes are:
 //!
-//! - a `{ ... }` block (`RegionKind::Block` and `ValueBlock`), which catches a `RETURN`;
-//! - an arm of an `IF` that holds a statement other than an evaluation or a further `IF`. An arm of
-//!   a value-position `IF` catches a `RETURN` and an arm of a statement-position `IF` passes it
-//!   outward. An arm that holds nothing else binds no name and holds no `RETURN` of its own, so it
-//!   runs in the frame of the `IF`; the arms of a further `IF` in it are scopes in their own right;
-//! - a `FOR` whose body is a value scope (`RegionKind::ValueFor`): the `RETURN` ends the whole loop
-//!   with its value, and the loop's value is that value instead of `NONE`;
+//! - a `{ ... }` block (`RegionKind::Block` and `ValueBlock`);
+//! - an arm of an `IF` that holds a statement other than an evaluation or a further `IF`. An arm
+//!   that holds nothing else binds no name and holds no `RETURN` of its own, so it runs in the
+//!   frame of the `IF`; the arms of a further `IF` in it are scopes in their own right;
 //! - each iteration of any `FOR`, which saves the frame before its body and restores it after.
 //!
-//! A `RETURN`, `BREAK` or `CONTINUE` restores the frames saved since its target was entered
-//! before it jumps, so the target finds the frame it saved.
+//! None of them is a context a `RETURN` ends (`RegionProperties::return_rule`), and no region a
+//! statement list holds is one: a `RETURN` leaves the program with its value
+//! ([`BlockInstr::Return`]), for the run that holds the program to take it, which is the
+//! statement, the function or closure call, or the evaluation of a context the program is a unit
+//! of. A `BREAK` or `CONTINUE` restores the frames saved since its loop's iteration began before
+//! it jumps, so the loop finds the frame it saved.
 //!
 //! # Names
 //!
@@ -94,7 +93,7 @@ use surrealdb_strand::Strand;
 
 use super::super::program::{
 	AggregateSink, Analysis, BlockInstr, Collect, GroupSpec, Instr, JoinSpec, Label, LimitSpec,
-	Operand, Pipeline, Reg, ReturnCatch, ServedSpec, SortSpec, Source, SplitSpec, StoreInstr,
+	Operand, Pipeline, Reg, ServedSpec, SortSpec, Source, SplitSpec, StoreInstr,
 };
 use super::ddl::{Reservations, lower_guard, schema_op};
 use super::dispatch::{Coverage, check_write_region, coverage_of, timed_write_in, write_of};
@@ -120,11 +119,12 @@ use crate::exec::vm::dispatch::Reach;
 use crate::exec::{AccessMode, ContextLevel};
 use crate::val::Value;
 
-/// Where a `RETURN` that a statement held in an expression of a list signals is taken: at the
-/// statement, whose value it is, outside a permission frame; a loop signal passes to the loop
-/// around the list.
+/// What a statement held in an expression of a list does with a signal: a statement list holds
+/// no context, so a `RETURN` propagates out of the program to the run that holds it, and a loop
+/// signal passes to the loop around the list.
 const IN_A_LIST: ReturnScope = ReturnScope {
-	any_frame: false,
+	context: None,
+	frame: None,
 	loops_fail: false,
 };
 
@@ -480,16 +480,6 @@ enum Exit {
 	Diverges,
 }
 
-/// A value scope whose own `RETURN`s jump to its end.
-struct ReturnTarget {
-	/// How many frames are saved inside the scope's own frame.
-	depth: usize,
-	/// The register the scope's value is left in.
-	value: Reg,
-	/// The label bound where the scope ends.
-	end: Label,
-}
-
 /// A loop being lowered: where its `BREAK` and `CONTINUE` jump to.
 struct LoopTargets {
 	/// How many frames are saved when its body starts.
@@ -535,7 +525,6 @@ struct Blocks<'a> {
 	iterators: u16,
 	/// How many frames are saved at this point of the program.
 	saved: usize,
-	returns: Vec<ReturnTarget>,
 	loops: Vec<LoopTargets>,
 	scopes: Vec<SlotScope>,
 	/// Whether anything lowered writes: a `SLEEP`.
@@ -560,7 +549,6 @@ impl<'a> Blocks<'a> {
 			slots: 0,
 			iterators: 0,
 			saved: 0,
-			returns: Vec::new(),
 			loops: Vec::new(),
 			scopes: Vec::new(),
 			writes: false,
@@ -820,7 +808,7 @@ impl<'a> Blocks<'a> {
 			OpKind::Phys(PhysOp::Block) => {
 				let [region] = Self::regions::<1>(data)?;
 				let dst = self.reg()?;
-				self.scope(region, dst, true)?;
+				self.scope(region, dst)?;
 				self.define(data, Operand::Reg(dst));
 				Ok(None)
 			}
@@ -1494,7 +1482,7 @@ impl<'a> Blocks<'a> {
 	/// `analysis` over what the run measured, and the program's analyses hold `analysis`.
 	///
 	/// A `BREAK`, `CONTINUE` or `RETURN` the statement signals ends it and is not raised, so no
-	/// loop or value scope takes it.
+	/// loop or context takes it.
 	fn run_analyzed(
 		&mut self,
 		statement: u16,
@@ -1518,9 +1506,9 @@ impl<'a> Blocks<'a> {
 
 	/// Emits the run of the statement `runner` names, its value left in `dst`.
 	///
-	/// A `BREAK`, `CONTINUE` or `RETURN` the statement signals goes to the loop or the value scope
-	/// that takes it, through a pad that restores the frames saved since that target was entered:
-	/// the statement runs in whatever frames the list has saved at this point.
+	/// A `BREAK` or `CONTINUE` the statement signals goes to the loop that takes it, through a pad
+	/// that restores the frames saved since that loop's iteration began: the statement runs in
+	/// whatever frames the list has saved at this point. A `RETURN` it signals leaves the program.
 	fn run_group(
 		&mut self,
 		runner: Runner,
@@ -1529,16 +1517,8 @@ impl<'a> Blocks<'a> {
 		resolve: Option<ContextLevel>,
 	) -> Result<(), IrError> {
 		let looped = self.loops.last().map(|loop_| (loop_.depth, loop_.broken, loop_.continued));
-		let returned = self.returns.last().map(|target| (target.depth, target.value, target.end));
 		let pads = match looped {
 			Some(_) => Some((self.label()?, self.label()?)),
-			None => None,
-		};
-		let catch = match returned {
-			Some((_, value, _)) => Some(ReturnCatch {
-				value,
-				label: self.label()?,
-			}),
 			None => None,
 		};
 		let on_break = pads.map(|(on_break, _)| on_break);
@@ -1550,7 +1530,6 @@ impl<'a> Blocks<'a> {
 				collect,
 				on_break,
 				on_continue,
-				on_return: catch,
 				resolve,
 			},
 			Runner::Served(served) => BlockInstr::RunServed {
@@ -1559,11 +1538,10 @@ impl<'a> Blocks<'a> {
 				collect,
 				on_break,
 				on_continue,
-				on_return: catch,
 				resolve,
 			},
 		});
-		if pads.is_none() && catch.is_none() {
+		if pads.is_none() {
 			return Ok(());
 		}
 		let over = self.label()?;
@@ -1579,13 +1557,6 @@ impl<'a> Blocks<'a> {
 				self.block(BlockInstr::Restore);
 			}
 			self.jump(continued);
-		}
-		if let (Some((depth, _, end)), Some(catch)) = (returned, catch) {
-			self.bind(catch.label)?;
-			for _ in depth..self.saved {
-				self.block(BlockInstr::Restore);
-			}
-			self.jump(end);
 		}
 		self.bind(over)
 	}
@@ -1996,25 +1967,12 @@ impl<'a> Blocks<'a> {
 		Ok(())
 	}
 
-	/// A value scope: the statements of `region` run in a frame of their own. A scope that
-	/// `catches` a `RETURN` is left by it with the value in `dst`, and ends with the value the
-	/// region yields otherwise.
-	fn scope(&mut self, region: RegionId, dst: Reg, catches: bool) -> Result<Exit, IrError> {
+	/// A scope: the statements of `region` run in a frame of their own, and its value, the value
+	/// the region yields, is left in `dst`. A `RETURN` in it ends the context the scope stands in.
+	fn scope(&mut self, region: RegionId, dst: Reg) -> Result<Exit, IrError> {
 		self.block(BlockInstr::Save);
 		self.saved += 1;
-		let end = self.label()?;
-		if catches {
-			self.returns.push(ReturnTarget {
-				depth: self.saved,
-				value: dst,
-				end,
-			});
-		}
-		let exit = self.statements(region, false);
-		if catches {
-			self.returns.pop();
-		}
-		let exit = exit?;
+		let exit = self.statements(region, false)?;
 		match exit {
 			Exit::Yields(Some(value)) => self.load(dst, value),
 			Exit::Yields(None) => {
@@ -2023,7 +1981,6 @@ impl<'a> Blocks<'a> {
 			}
 			Exit::Diverges => {}
 		}
-		self.bind(end)?;
 		self.saved -= 1;
 		self.block(BlockInstr::Restore);
 		Ok(exit)
@@ -2065,9 +2022,8 @@ impl<'a> Blocks<'a> {
 			}
 			return Ok(());
 		}
-		let catches = match self.kind_of(region)? {
-			RegionKind::ValueIf => true,
-			RegionKind::StatementIf => false,
+		match self.kind_of(region)? {
+			RegionKind::ValueIf | RegionKind::StatementIf => {}
 			RegionKind::Request
 			| RegionKind::Transaction(_)
 			| RegionKind::Statement(_)
@@ -2095,15 +2051,15 @@ impl<'a> Blocks<'a> {
 			| RegionKind::StoredClause(_) => {
 				return Err(IrError::Stale("ir_lower::block: an arm of another region kind"));
 			}
-		};
-		self.scope(region, dst, catches)?;
+		}
+		self.scope(region, dst)?;
 		Ok(())
 	}
 
 	/// `FOR`: the range is evaluated once, then the body runs for each element with the element
 	/// bound in a slot, the frame saved before and restored after each iteration. `CONTINUE`
-	/// moves to the next element and `BREAK` leaves. The loop's value is `NONE`, or the value of
-	/// the `RETURN` that ended it where the body is a value scope.
+	/// moves to the next element and `BREAK` leaves. The loop's value is `NONE`: a `RETURN` in its
+	/// body ends the context the loop stands in.
 	///
 	/// A loop with a first body runs it for its first element and the other body for the rest, a
 	/// register noting that the first has run.
@@ -2120,29 +2076,9 @@ impl<'a> Blocks<'a> {
 			_ => return Err(IrError::Stale("ir_lower::block: region arity")),
 		};
 		let dst = self.reg()?;
-		let catches = self.kind_of(body)? == RegionKind::ValueFor;
-		let end = self.label()?;
-		if catches {
-			self.block(BlockInstr::Save);
-			self.saved += 1;
-			self.returns.push(ReturnTarget {
-				depth: self.saved,
-				value: dst,
-				end,
-			});
-		}
-		let lowered = self.iterate(source, body, first_body, param);
-		if catches {
-			self.returns.pop();
-		}
-		lowered?;
+		self.iterate(source, body, first_body, param)?;
 		let none = self.none()?;
 		self.load(dst, none);
-		if catches {
-			self.bind(end)?;
-			self.saved -= 1;
-			self.block(BlockInstr::Restore);
-		}
 		self.define(data, Operand::Reg(dst));
 		Ok(())
 	}
@@ -2279,25 +2215,13 @@ impl<'a> Blocks<'a> {
 		Ok(())
 	}
 
-	/// `RETURN` of `value`: the innermost value scope of the program takes it, and a `RETURN` no
-	/// scope catches leaves the program with it.
+	/// `RETURN` of `value`: no region a statement list holds is a context, so the `RETURN` leaves
+	/// the program with its value, for the run that holds the program to take it.
 	fn leave_scope(&mut self, value: Operand) -> Result<(), IrError> {
-		match self.returns.last() {
-			Some(target) => {
-				let (caught, depth, end) = (target.value, target.depth, target.end);
-				self.load(caught, value);
-				for _ in depth..self.saved {
-					self.block(BlockInstr::Restore);
-				}
-				self.jump(end);
-			}
-			None => {
-				let value = self.reg_of(value)?;
-				self.block(BlockInstr::Return {
-					value,
-				});
-			}
-		}
+		let value = self.reg_of(value)?;
+		self.block(BlockInstr::Return {
+			value,
+		});
 		Ok(())
 	}
 
@@ -2743,9 +2667,9 @@ mod tests {
 	}
 
 	#[test]
-	fn a_return_inside_a_block_jumps_to_the_end_of_the_block() {
-		// { RETURN 1 }: the value is stored in the block's register, the frame is restored by the
-		// block's own end, and no `Return` leaves the program.
+	fn a_return_inside_a_block_leaves_the_program() {
+		// { RETURN 1 }: a block is no context, so the `RETURN` leaves the program with its value
+		// rather than ending the block.
 		let mut b = Builder::new();
 		let block = statement(&mut b, PhysOp::Block, &[]);
 		b.open(block, RegionKind::Block, &[]);
@@ -2755,19 +2679,9 @@ mod tests {
 		let value = b.result_of(block);
 		b.add_phys(PhysOp::Yield, &[value]);
 		let program = lowered(&mut b);
-		assert!(!blocks(&program).iter().any(|block| matches!(block, BlockInstr::Return { .. })));
+		assert!(blocks(&program).iter().any(|block| matches!(block, BlockInstr::Return { .. })));
 		assert_eq!(saves(&program), 1);
-		assert_eq!(restores(&program), 1);
-		let code = code(&program);
-		let jump = code
-			.iter()
-			.position(|instr| matches!(instr, Instr::Jump { .. }))
-			.expect("the return jumps");
-		let restore = code
-			.iter()
-			.position(|instr| matches!(instr, Instr::Block(BlockInstr::Restore)))
-			.expect("the block restores");
-		assert!(matches!(&code[jump], Instr::Jump { target } if *target as usize == restore));
+		assert!(!code(&program).iter().any(|instr| matches!(instr, Instr::Jump { .. })));
 	}
 
 	#[test]
@@ -2849,7 +2763,7 @@ mod tests {
 	}
 
 	#[test]
-	fn a_value_position_for_catches_a_return_for_the_whole_loop() {
+	fn a_return_in_a_value_position_for_leaves_the_program() {
 		let mut b = Builder::new();
 		let one = b.literal(Value::from(1_i64));
 		let range = b.add(ExprOp::Array, &[one]);
@@ -2861,12 +2775,11 @@ mod tests {
 		let value = b.result_of(looped);
 		b.add_phys(PhysOp::Yield, &[value]);
 		let program = lowered(&mut b);
-		assert!(!blocks(&program).iter().any(|block| matches!(block, BlockInstr::Return { .. })));
-		// The scope of the loop and the iteration are saved. The return restores the iteration's
-		// frame before it jumps; the loop restores at the end of its body, at each of its two
-		// landings, and the scope restores where it ends.
-		assert_eq!(saves(&program), 2);
-		assert_eq!(restores(&program), 5);
+		assert!(blocks(&program).iter().any(|block| matches!(block, BlockInstr::Return { .. })));
+		// Only the iteration is saved; the loop restores at the end of its body and at each of
+		// its two landings.
+		assert_eq!(saves(&program), 1);
+		assert_eq!(restores(&program), 3);
 	}
 
 	#[test]
@@ -3293,7 +3206,7 @@ mod tests {
 		assert!(!program.groups[0].scalar);
 		assert!(program.groups[0].timeout.is_none() && program.groups[0].version.is_none());
 		assert_eq!(program.required_context, ContextLevel::Database);
-		// The run catches a `RETURN` the statement signals, which ends the list with its value.
+		// A `RETURN` the statement signals leaves the program: a block is no context.
 		match runs(&program).as_slice() {
 			[
 				BlockInstr::RunEmbedded {
@@ -3301,7 +3214,6 @@ mod tests {
 					collect: Collect::Block,
 					on_break: None,
 					on_continue: None,
-					on_return: Some(_),
 					resolve: None,
 					..
 				},
@@ -3446,7 +3358,6 @@ mod tests {
 				collect: Collect::Discard,
 				on_break: Some(_),
 				on_continue: Some(_),
-				on_return: None,
 				..
 			},
 		] = run.as_slice()
@@ -3461,30 +3372,6 @@ mod tests {
 			.position(|instr| matches!(instr, Instr::Block(BlockInstr::RunEmbedded { .. })))
 			.expect("the statement runs");
 		assert!(matches!(code[at + 1], Instr::Jump { .. }));
-	}
-
-	#[test]
-	fn a_statement_in_a_value_scope_hands_its_return_to_the_scope() {
-		let program = lowered_placed(block_of_statements(|b| {
-			let scope = statement(b, PhysOp::Block, &[]);
-			b.open(scope, RegionKind::ValueBlock, &[]);
-			let rows = read_statement(b, 0, false);
-			let value = b.result_of(rows);
-			b.yield_phys(value);
-			b.close();
-			scope
-		}));
-		let run = runs(&program);
-		let [
-			BlockInstr::RunEmbedded {
-				on_return: Some(_),
-				on_break: None,
-				..
-			},
-		] = run.as_slice()
-		else {
-			panic!("one run that hands its RETURN to the scope, found {run:?}");
-		};
 	}
 
 	fn store_names(program: &Program, group: Option<u16>) -> Vec<String> {

@@ -151,9 +151,9 @@ async fn observer_sees_each_consumed_fold() {
 	assert_eq!(observer.defined, [true, true]);
 }
 
-/// An arm holding a `BREAK` that leaves it is not collapsed, because inlining it would move the
-/// place the `BREAK` lands. A value arm catches a `RETURN` written in it, so an arm whose `RETURN`
-/// lands in a nested arm is collapsed.
+/// An arm holding a `BREAK` or a `RETURN` that leaves it is not collapsed, because inlining it
+/// would move the place the signal lands. No arm is a context, so a `RETURN` in a nested arm leaves
+/// both.
 #[tokio::test]
 async fn an_arm_with_escaping_control_keeps_its_if() {
 	let mut ir = bind("FOR $i IN [1, 2] { IF true { IF $p { BREAK }; 4 } }").await;
@@ -165,7 +165,7 @@ async fn an_arm_with_escaping_control_keeps_its_if() {
 	let mut ir = bind("LET $r = IF true { IF $p { RETURN 3 }; 4 }; RETURN $r").await;
 	assert_eq!(ifs(&ir), 2);
 	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
-	assert_eq!(ifs(&ir), 1, "the `RETURN` lands on the nested arm, inside the collapsed one");
+	assert_eq!(ifs(&ir), 2, "the `RETURN` lands on the statement, beyond the arm");
 }
 
 /// A conjunct that folds to `true` leaves the `AND` chain and one that folds to `false` stays as

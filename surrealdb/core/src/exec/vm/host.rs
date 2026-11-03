@@ -6193,8 +6193,14 @@ async fn run_body(
 										regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 										pc = at + 1;
 									}
-									(Err(ControlFlow::Return(value)), Some(catch)) => {
-										regs[catch.root as usize] =
+									(
+										Err(ControlFlow::Return(value)),
+										Some(super::program::Catch {
+											on_return: Some(catch),
+											..
+										}),
+									) => {
+										regs[catch.value as usize] =
 											Scalar::Value(Held::Owned(value));
 										pc = catch.label as usize;
 									}
@@ -6643,8 +6649,14 @@ async fn run_body(
 											regs[*dst as usize] = value;
 											pc = at + 1;
 										}
-										(Err(ControlFlow::Return(value)), Some(catch)) => {
-											regs[catch.root as usize] =
+										(
+											Err(ControlFlow::Return(value)),
+											Some(super::program::Catch {
+												on_return: Some(catch),
+												..
+											}),
+										) => {
+											regs[catch.value as usize] =
 												Scalar::Value(Held::Owned(value));
 											pc = catch.label as usize;
 										}

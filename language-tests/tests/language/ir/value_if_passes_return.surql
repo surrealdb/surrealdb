@@ -6,23 +6,16 @@ auth = { level = "owner" }
 
 [test]
 reason = """
-A RETURN ends the innermost value scope: a block, a subquery, a function or closure body, or a
-value-position IF or FOR. A LET whose value is such a scope binds the returned value and answers
-NONE, and a RETURN taken inside an operand, an array element, a function argument, an IF condition
-or a WHERE block is that scope's value, which the expression around it goes on to use. A block
-written as a statement of a block is a value scope too, so `{ { RETURN 1 }; RETURN 2 }` answers 2,
-in a function body and in a closure body alike. A statement-level IF or FOR pushes no scope, so its
-RETURN passes outwards and ends the top-level statement it stands in; a RETURN that reaches the
-top-level statement ends that statement with its value, as in `LET $bare = RETURN 5` and
-`WHERE RETURN false`. Parentheses alone open no value scope, so `LET $v = (RETURN 8)` ends its
-statement with 8 as `LET $bare = RETURN 5` does. A statement in scalar position that is a value scope takes its own RETURN into
-its own destination and resumes after itself.
+A RETURN sets the value of the context it stands in and ends it. A context is a statement of the
+request or of a transaction, a function or closure body, or an evaluation a statement makes per row
+(a WHERE, a projection). A block, an IF or FOR in value or statement position, a parenthesised
+statement, an operand, an array element, a function argument, an IF condition and a LET's value
+are no context: a RETURN in any of them ends the nearest context around it with its value, so
+`RETURN { IF true { RETURN 5 }; 6 } + 1` answers 5 and a LET whose value returns binds nothing.
+In a WHERE, a RETURN decides the row it is evaluated for.
 """
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
 value = "1"
 
 [[test.results]]
@@ -30,6 +23,9 @@ value = "NONE"
 
 [[test.results]]
 value = "1"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "8"
@@ -38,16 +34,16 @@ value = "8"
 value = "NONE"
 
 [[test.results]]
-value = "6"
+value = "5"
 
 [[test.results]]
-value = "[1, 11, 3]"
+value = "11"
 
 [[test.results]]
-value = "1"
+value = "-1"
 
 [[test.results]]
-value = "'a'"
+value = "true"
 
 [[test.results]]
 value = "[]"
@@ -56,13 +52,13 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
-value = "2"
+value = "1"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "2"
+value = "1"
 
 [[test.results]]
 value = "'if'"
@@ -86,7 +82,8 @@ value = "5"
 value = "NONE"
 
 [[test.results]]
-value = "false"
+value = "[]"
+
 */
 
 LET $d = IF true { RETURN 1 } ELSE { 2 };

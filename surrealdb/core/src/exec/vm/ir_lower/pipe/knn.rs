@@ -32,7 +32,7 @@ use crate::exec::ir::error::IrError;
 use crate::exec::ir::iface::ids::{FrameId, RegionId};
 use crate::exec::ir::phys::ops::KnnPermissionShape;
 use crate::exec::vm::ir_lower::emit::Emitter;
-use crate::exec::vm::ir_lower::expr::{Lowerer, Needs};
+use crate::exec::vm::ir_lower::expr::{Lowerer, Needs, ends_context};
 use crate::exec::vm::ir_lower::units::LowerCx;
 use crate::exec::vm::program::{Instr, KnnRank, Label, Operand, ROW, Source};
 use crate::val::Value;
@@ -132,14 +132,27 @@ fn judge(
 		lowerer.bind_arg(arg, Operand::Reg(ROW));
 		lowerer.bind_row(arg, false);
 	}
-	let mut branch = |lowerer: &mut Lowerer<'_>| {
-		Branching {
+	// A predicate a `RETURN` held in it ends is judged by the value of the context, which the
+	// `RETURN` may set before the predicate's own branches are reached.
+	let context = ends_context(ir, region);
+	let mut branch = |lowerer: &mut Lowerer<'_>| match context {
+		true => {
+			let cond = lowerer.region_value(region)?;
+			Branching {
+				lowerer,
+				ir,
+				end,
+				jumps,
+			}
+			.jump(cond, false, end, false)
+		}
+		false => Branching {
 			lowerer,
 			ir,
 			end,
 			jumps,
 		}
-		.branch(predicate, false, end)
+		.branch(predicate, false, end),
 	};
 	match frame {
 		Some((container, program)) => lowerer.in_frame(container, program, branch)?,

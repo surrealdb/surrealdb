@@ -1073,8 +1073,9 @@ fn control_target_return_stops_at_the_statement() {
 			add_located(rw, inner, yield_kind(), LocOrigin::Query),
 		)
 	});
-	assert_eq!(control_target(&ir, ret), ControlTarget::Region(regions[2]));
-	assert_eq!(control_target(&ir, phys_ret), ControlTarget::Region(regions[2]));
+	// A block is no context: the `RETURN` passes it and the loop, and ends the statement.
+	assert_eq!(control_target(&ir, ret), ControlTarget::Region(regions[0]));
+	assert_eq!(control_target(&ir, phys_ret), ControlTarget::Region(regions[0]));
 	assert_eq!(control_target(&ir, plain), ControlTarget::NotControl);
 	assert_eq!(enclosing_statement(&ir, ret), Some(statement));
 	assert_eq!(enclosing_statement(&ir, statement), None);

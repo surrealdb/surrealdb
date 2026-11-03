@@ -28,18 +28,11 @@ use crate::exec::ir::phys::ops::{
 	OmissionShape, ProjectedFieldShape, ProjectionShape, WalkActionShape, WalkStepShape,
 };
 use crate::exec::vm::ir_lower::emit::Emitter;
-use crate::exec::vm::ir_lower::expr::{Lowerer, ReturnScope, call_args};
+use crate::exec::vm::ir_lower::expr::{Lowerer, call_args, ends_context};
 use crate::exec::vm::payload::{Walk, WalkAction, WalkStep};
-use crate::exec::vm::program::{CallSpec, Instr, Operand, ROW, Reg};
+use crate::exec::vm::program::{CallSpec, Instr, Operand, ROW, Reg, ReturnCatch};
 use crate::expr::Function;
 use crate::expr::logical::{LogicalDestructureField, LogicalExpr, LogicalLiteral};
-
-/// Where a `RETURN` a statement in a projected value signals is taken: at the statement, outside a
-/// permission frame, and a loop signal passes to the loop around the projection.
-pub(super) const PROJECTED: ReturnScope = ReturnScope {
-	any_frame: false,
-	loops_fail: false,
-};
 
 /// What lowering a projection needs of the code that holds the row it projects.
 pub(super) trait ProjectionSite {
@@ -58,11 +51,16 @@ pub(super) trait ProjectionSite {
 
 	/// The operands for `args`, the values the call that the region `region` yields is applied
 	/// to, read from the row in [`ROW`].
+	///
+	/// Where a `RETURN` held in the region ends it ([`ends_context`]), the operands are lowered as
+	/// the evaluation of a context, and the catch they are lowered under is answered with them: a
+	/// `RETURN` leaves its value in the catch's register and jumps to its label, which the caller
+	/// binds past the call.
 	fn call_operands(
 		&mut self,
 		region: RegionId,
 		args: &[ValueId],
-	) -> Result<Vec<Operand>, IrError>;
+	) -> Result<(Vec<Operand>, Option<ReturnCatch>), IrError>;
 
 	/// Records that the projection calls a function that needs at least `context`, and keeps the
 	/// order of the rows it is applied to.
@@ -108,7 +106,7 @@ impl ProjectionSite for ImageSite<'_, '_> {
 				self.lowerer.bind_row(arg, self.objects);
 			}
 		}
-		self.lowerer.catching(PROJECTED, |lowerer| lowerer.region_value(region))
+		self.lowerer.region_value(region)
 	}
 
 	/// The operands are lowered in a scope of their own, which is forgotten once they are read:
@@ -117,13 +115,13 @@ impl ProjectionSite for ImageSite<'_, '_> {
 		&mut self,
 		region: RegionId,
 		args: &[ValueId],
-	) -> Result<Vec<Operand>, IrError> {
+	) -> Result<(Vec<Operand>, Option<ReturnCatch>), IrError> {
 		let held = self.lowerer.scope();
 		if let Some(arg) = first_arg(self.lowerer.ir, region) {
 			self.lowerer.bind_arg(arg, Operand::Reg(ROW));
 			self.lowerer.bind_row(arg, self.objects);
 		}
-		let operands = args.iter().map(|arg| self.lowerer.value(*arg)).collect();
+		let operands = operands_in(self.lowerer, region, args);
 		self.lowerer.restore_scope(held);
 		operands
 	}
@@ -449,15 +447,47 @@ fn write_projection(
 		index: None,
 		closure_args: Vec::new(),
 	})?;
-	let args = site.call_operands(region, args)?;
-	site.emitter().emit(Instr::WriteProjection {
+	let (args, returned) = site.call_operands(region, args)?;
+	let em = site.emitter();
+	em.emit(Instr::WriteProjection {
 		call,
 		args,
 		object,
 		path,
 		aliased,
 	});
+	// A `RETURN` in an argument ends the field's evaluation: its value is the field's, and the
+	// call is not made.
+	if let Some(catch) = returned {
+		let past = em.label()?;
+		em.emit(Instr::Jump {
+			target: past,
+		});
+		em.bind(catch.label)?;
+		em.emit(Instr::SetField {
+			object,
+			path,
+			value: Operand::Reg(catch.value),
+		});
+		em.bind(past)?;
+	}
 	Ok(())
+}
+
+/// The operands for `args`, lowered by `lowerer` in the region `region`, as
+/// [`ProjectionSite::call_operands`] answers them.
+pub(super) fn operands_in(
+	lowerer: &mut Lowerer<'_>,
+	region: RegionId,
+	args: &[ValueId],
+) -> Result<(Vec<Operand>, Option<ReturnCatch>), IrError> {
+	let lower = |lowerer: &mut Lowerer<'_>| {
+		args.iter().map(|arg| lowerer.value(*arg)).collect::<Result<Vec<_>, _>>()
+	};
+	match ends_context(lowerer.ir, region) {
+		true => lowerer.context_catch(lower).map(|(operands, catch)| (operands, Some(catch))),
+		false => lower(lowerer).map(|operands| (operands, None)),
+	}
 }
 
 /// Removes each omission from the value in `object`, which is an object when `object_only`.
