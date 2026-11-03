@@ -61,6 +61,8 @@ mod link_tests;
 #[cfg(test)]
 mod link_write_tests;
 #[cfg(test)]
+mod nested_correlation_tests;
+#[cfg(test)]
 mod null_join_keys_tests;
 #[cfg(test)]
 mod omitted_column_tests;

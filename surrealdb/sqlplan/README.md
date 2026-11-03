@@ -412,6 +412,26 @@ PostgreSQL write casts now convert their operands, preserving NULL. UPDATE FROM 
 are rejected until join-based write lowering is implemented; source tables must never become
 additional mutation targets.
 
+## Correlated subqueries
+
+A subquery reads the columns of the query that contains it through `$parent`, the row that query is
+on. The engine's `$parent` names that row and no row further up, so a column of a query two or more
+levels above the subquery that reads it (the outermost table's column read from an `EXISTS` inside
+an `EXISTS`) is carried down instead.
+
+Binding a column reference finds the query it belongs to and the query one level below it, whose
+parent that is. That query is entered with the row of the query above as its `$parent`, so it reads
+the column there, once, and binds the value to a parameter (`__sql_outer_<level>_<n>`, `level` being
+the depth of the column's query). It is lowered as a block that first binds each parameter and then
+runs the select (`BoundSelect::carried`). Every query nested in it, however deep and wherever the
+column stands in it (the `WHERE`, `HAVING`, `ORDER BY` or select list, a derived table or a common
+table expression), reads the parameter (`BoundColumnRef::carried_as`). A column that stands in the
+query directly above is read from `$parent` and binds nothing. Each column a query binds
+is bound once, however many times it is read.
+
+A carried column of a joined relation is read from the field the row of the join holds that
+relation's columns under (`$parent._join0.<column>` for the first joined relation).
+
 ## `LIKE` patterns
 
 `LIKE` and `ILIKE` read a pattern as both databases do. `%` stands for any run of characters,

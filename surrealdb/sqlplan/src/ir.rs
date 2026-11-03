@@ -38,6 +38,22 @@ pub struct BoundSelect {
 	pub database: Option<String>,
 	/// The HNSW indexes over the table the select reads, when it reads one table.
 	pub hnsw_indexes: Vec<BoundHnswIndex>,
+	/// The columns of the query directly above this one that the queries nested inside this one
+	/// read ([`BoundColumnRef::carried_as`]); those queries stand two or more levels below the
+	/// query that holds the columns. The select evaluates each once, when it is entered, and
+	/// binds the value to the parameter that names it.
+	pub carried: Vec<CarriedColumn>,
+}
+
+/// A column of a query that the queries nested two or more levels below it read, bound to a
+/// parameter by the query one level below it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CarriedColumn {
+	/// The name of the parameter.
+	pub name: String,
+	/// The column as the query that binds the parameter reads it: one level up
+	/// (`correlation_depth` 1), as the row of the query above is that query's `$parent`.
+	pub column: BoundColumnRef,
 }
 
 /// An HNSW index over a column of a table, and the distance it ranks by.
@@ -253,6 +269,14 @@ pub struct BoundColumnRef {
 	/// relation and the `id` column have none, and a column of an outer query
 	/// (`correlation_depth` above 0) is read from the outer row by name, whatever this holds.
 	pub also_in: Vec<usize>,
+	/// The parameter that holds the value of this column, when it belongs to a query two or more
+	/// levels above the reference (`correlation_depth` above 1).
+	///
+	/// The engine reaches the row of the query directly above a subquery (`$parent`) and no row
+	/// further up. The query one level below the column's query reads the value instead
+	/// ([`BoundSelect::carried`]) and binds it to this parameter, which every query nested in it
+	/// reads by name. `None` for a column of the query itself or of the query directly above it.
+	pub carried_as: Option<String>,
 }
 
 impl BoundColumnRef {
@@ -280,6 +304,7 @@ impl BoundColumnRef {
 			&& self.column == other.column
 			&& self.declared_type == other.declared_type
 			&& self.correlation_depth == other.correlation_depth
+			&& self.carried_as == other.carried_as
 			&& self.id_table == other.id_table
 			&& self.key_read == other.key_read
 			&& self.link_table == other.link_table

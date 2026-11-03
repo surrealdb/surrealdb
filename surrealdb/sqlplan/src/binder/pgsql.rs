@@ -357,6 +357,7 @@ pub fn bind_select(
 		user_types: crate::catalog::UserTypes::of_catalog(catalog),
 		database: catalog.current_database().map(str::to_owned),
 		hnsw_indexes,
+		carried: scope.carried_columns(),
 	})
 }
 
@@ -518,6 +519,7 @@ fn bind_lateral(
 		user_types: crate::catalog::UserTypes::default(),
 		database: None,
 		hnsw_indexes: Vec::new(),
+		carried: Vec::new(),
 	}));
 	Ok(BoundTableSource::Lateral {
 		targets,
@@ -936,6 +938,7 @@ fn bind_table_ref(
 				user_types: crate::catalog::UserTypes::default(),
 				database: None,
 				hnsw_indexes: Vec::new(),
+				carried: Vec::new(),
 			};
 			let relation_index =
 				scope.register_subquery_with_columns(&exposed, Some(columns), policy);
@@ -1830,6 +1833,7 @@ fn bind_function_call(
 			aggregate_output: false,
 			key_read: crate::ir::KeyRead::None,
 			also_in: Vec::new(),
+			carried_as: None,
 		})]
 	} else {
 		args.iter().map(|a| bind_expr(a, scope, catalog, policy)).collect::<Result<Vec<_>, _>>()?

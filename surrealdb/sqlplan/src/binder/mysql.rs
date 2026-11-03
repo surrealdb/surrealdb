@@ -286,6 +286,7 @@ pub fn bind_select(
 		user_types: crate::catalog::UserTypes::default(),
 		database: catalog.current_database().map(str::to_owned),
 		hnsw_indexes: Vec::new(),
+		carried: scope.carried_columns(),
 	})
 }
 
@@ -634,6 +635,7 @@ pub fn bind_expr(
 					aggregate_output: false,
 					key_read: crate::ir::KeyRead::None,
 					also_in: Vec::new(),
+					carried_as: None,
 				})]
 			} else {
 				args.iter()

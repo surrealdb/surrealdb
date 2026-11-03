@@ -3,10 +3,11 @@
 use std::borrow::Cow;
 
 use surrealdb_expr::expr::logical::{
-	EvalFrame, JoinKind, LogicalAggregate, LogicalCall, LogicalDistinct, LogicalExpr, LogicalField,
-	LogicalFields, LogicalFilter, LogicalIf, LogicalJoin, LogicalLimit, LogicalLiteral, LogicalOp,
-	LogicalOrdering, LogicalProject, LogicalSort, LogicalSource, LogicalSplit, LogicalSubquery,
-	LogicalUnionAll, LogicalValues, OutputPath, RelationAlias, SourceRef,
+	EvalFrame, JoinKind, LogicalAggregate, LogicalCall, LogicalDistinct, LogicalEval, LogicalExpr,
+	LogicalField, LogicalFields, LogicalFilter, LogicalIf, LogicalJoin, LogicalLet, LogicalLimit,
+	LogicalLiteral, LogicalOp, LogicalOrdering, LogicalProject, LogicalSequence, LogicalSort,
+	LogicalSource, LogicalSplit, LogicalSubquery, LogicalUnionAll, LogicalValues, OutputPath,
+	RelationAlias, SourceRef,
 };
 use surrealdb_expr::expr::{BinaryOperator, Function};
 use surrealdb_strand::TableName;
@@ -20,7 +21,7 @@ use crate::ir::{
 };
 use crate::lower::expr::{
 	bound_expr_contains_aggregate, lower_bound_expr, lower_bound_order, lower_bound_target,
-	lower_column_raw, lower_lookup_predicate, pg_bool_spelling,
+	lower_column_raw, lower_lookup_predicate, lower_parent_column, pg_bool_spelling,
 };
 use crate::lower::id_key::{id_column, is_key_or_link, key_of, key_read_as, record_of};
 use crate::lower::link::{LinkOperand, link_column, link_operand, lower_stored, same_table_pair};
@@ -329,6 +330,7 @@ fn replace_set_returning<'a>(
 			aggregate_output: false,
 			key_read: crate::ir::KeyRead::None,
 			also_in: Vec::new(),
+			carried_as: None,
 		})
 	};
 	match expr {
@@ -587,7 +589,47 @@ fn lower_lateral(
 	}))
 }
 
+/// Lower `select`, binding first the columns of the enclosing query that queries nested in it read
+/// ([`BoundSelect::carried`]).
 fn lower_bound_select_internal(
+	select: &BoundSelect,
+	as_value: bool,
+	keyed: bool,
+	policy: &DialectPolicy,
+) -> Result<LogicalOp, PlanError> {
+	let op = lower_bound_select_pipeline(select, as_value, keyed, policy)?;
+	Ok(bind_carried_columns(select, op))
+}
+
+/// `op`, the lowering of `select`, as a block that first binds each column `select` carries to its
+/// parameter. The block is evaluated where `select` is, so a column is read once from the row of
+/// the query above, as `$parent` reads it, and `op` and every query nested in it read the
+/// parameter.
+fn bind_carried_columns(select: &BoundSelect, op: LogicalOp) -> LogicalOp {
+	if select.carried.is_empty() {
+		return op;
+	}
+	let mut stmts: Vec<LogicalOp> = select
+		.carried
+		.iter()
+		.map(|carried| {
+			LogicalOp::Let(LogicalLet {
+				name: carried.name.clone(),
+				kind: None,
+				value: Box::new(LogicalOp::Eval(LogicalEval {
+					expr: lower_parent_column(&carried.column),
+				})),
+				synthetic: true,
+			})
+		})
+		.collect();
+	stmts.push(op);
+	LogicalOp::Sequence(LogicalSequence {
+		stmts,
+	})
+}
+
+fn lower_bound_select_pipeline(
 	select: &BoundSelect,
 	as_value: bool,
 	keyed: bool,
@@ -1322,6 +1364,7 @@ fn output_column(name: &str) -> BoundExpr {
 		aggregate_output: false,
 		key_read: crate::ir::KeyRead::None,
 		also_in: Vec::new(),
+		carried_as: None,
 		declared_type: crate::SqlType::Unknown,
 	})
 }
@@ -1709,6 +1752,7 @@ fn rewrite_aggregates_to_columns(
 				aggregate_output: keep_id,
 				key_read: crate::ir::KeyRead::None,
 				also_in: Vec::new(),
+				carried_as: None,
 				declared_type: match agg {
 					BoundExpr::Column(col) => col.declared_type,
 					BoundExpr::Literal(_)

@@ -497,6 +497,7 @@ fn only_a_row_every_row_holds_is_counted_as_a_row() {
 		aggregate_output: false,
 		key_read: crate::ir::KeyRead::None,
 		also_in: Vec::new(),
+		carried_as: None,
 		declared_type: crate::SqlType::Unknown,
 	};
 	assert!(crate::lower::expr::counts_every_row(&star(0, "")));

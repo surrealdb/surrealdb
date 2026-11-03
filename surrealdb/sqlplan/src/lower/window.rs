@@ -882,6 +882,7 @@ fn replace_calls(expr: &BoundExpr, windows: &Windows) -> BoundExpr {
 				aggregate_output: false,
 				key_read: crate::ir::KeyRead::None,
 				also_in: Vec::new(),
+				carried_as: None,
 			}),
 			None => expr.clone(),
 		},

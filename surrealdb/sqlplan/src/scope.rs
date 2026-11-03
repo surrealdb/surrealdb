@@ -1,19 +1,24 @@
 //! Scopes and name resolution for SQL binding.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::catalog::{BinderCatalog, EnumColumn};
 use crate::dialect::DialectPolicy;
 use crate::error::PlanError;
 use crate::ir::{
 	BoundColumnRef, BoundCte, BoundExpr, BoundSelect, BoundTableSource, BoundTarget,
-	BoundWindowSpec,
+	BoundWindowSpec, CarriedColumn,
 };
 
 /// The most relations an unqualified column of a join may be read from. Each is a level of the
 /// lowered expression, so a FROM clause cannot make the expression arbitrarily deep.
 const MAX_COLUMN_HOLDERS: usize = 64;
+
+/// The start of the name of a parameter that holds a column of an enclosing query
+/// ([`BoundColumnRef::carried_as`]). A client's positional parameters are bound as `_<n>` and a
+/// MySQL user variable as `user_var_<name>`, so no name a client binds starts with it.
+pub const CARRIED_PREFIX: &str = "__sql_outer_";
 
 /// A single relation registered in the current query scope (from a FROM clause or JOIN).
 #[derive(Debug, Clone)]
@@ -129,6 +134,7 @@ impl RelationEntry {
 			aggregate_output: false,
 			key_read,
 			also_in: Vec::new(),
+			carried_as: None,
 		}
 	}
 }
@@ -285,6 +291,12 @@ pub struct QueryScope {
 	pub windows: HashMap<String, BoundWindowSpec>,
 	/// The columns a `JOIN ... USING` merges, folded: one column each, whichever side holds it.
 	using_columns: Vec<String>,
+	/// How many scopes enclose this one: 0 for the outermost query.
+	level: usize,
+	/// The columns of the enclosing query that queries nested in this one read, which this query
+	/// binds to parameters when it is entered ([`BoundSelect::carried`]). The list is shared by
+	/// every copy of the scope: a subquery is bound against a copy of the scope it stands in.
+	carried: Arc<Mutex<Vec<CarriedColumn>>>,
 }
 
 impl Default for QueryScope {
@@ -304,12 +316,15 @@ impl QueryScope {
 			ctes: HashMap::new(),
 			windows: HashMap::new(),
 			using_columns: Vec::new(),
+			level: 0,
+			carried: Arc::default(),
 		}
 	}
 
 	/// Create a child scope with a parent (for subqueries).
 	pub fn with_parent(parent: Arc<QueryScope>) -> Self {
 		Self {
+			level: parent.level + 1,
 			parent: Some(parent),
 			relations: Vec::new(),
 			name_to_relation: HashMap::new(),
@@ -317,6 +332,7 @@ impl QueryScope {
 			ctes: HashMap::new(),
 			windows: HashMap::new(),
 			using_columns: Vec::new(),
+			carried: Arc::default(),
 		}
 	}
 
@@ -468,7 +484,70 @@ impl QueryScope {
 
 	/// Resolve a column reference given identifier parts (e.g. `["col"]` or `["tbl", "col"]` or
 	/// `["schema", "tbl", "col"]`). `catalog` says which columns of a base table hold record links.
+	///
+	/// A column of an enclosing query is read from the row of the query directly above (`$parent`)
+	/// and from no row further up. The column of a query two or more levels above the reference
+	/// is therefore carried: the query one level below the column's query reads it when it is
+	/// entered and binds it to a parameter ([`CarriedColumn`]), and the reference reads the
+	/// parameter ([`BoundColumnRef::carried_as`]).
 	pub fn resolve_column(
+		&self,
+		parts: &[String],
+		policy: &DialectPolicy,
+		catalog: &dyn BinderCatalog,
+	) -> Result<BoundColumnRef, PlanError> {
+		let mut col = self.resolve_column_in_scopes(parts, policy, catalog)?;
+		if col.correlation_depth > 1 {
+			col.carried_as = Some(self.carry(&col)?);
+		}
+		Ok(col)
+	}
+
+	/// The columns of the enclosing query that queries nested in this one read, in the order they
+	/// were first read.
+	pub fn carried_columns(&self) -> Vec<CarriedColumn> {
+		self.carried.lock().unwrap_or_else(PoisonError::into_inner).clone()
+	}
+
+	/// Have the query one level below the query `col` belongs to read `col`, and answer the name
+	/// of the parameter it binds the value to. `col` was resolved from this scope at a
+	/// `correlation_depth` above 1.
+	///
+	/// A column the query reads already keeps its parameter, so each is read once however many
+	/// references name it. The name holds the level of the column's query and the position of the
+	/// column among those the binding query carries, so the queries on one chain of enclosing
+	/// queries bind parameters of different names.
+	fn carry(&self, col: &BoundColumnRef) -> Result<String, PlanError> {
+		let binder = (1..col.correlation_depth)
+			.try_fold(self, |scope, _| scope.parent.as_deref())
+			.ok_or_else(|| {
+				PlanError::Custom(format!(
+					"column \"{}\" belongs to a query {} levels above a query that has fewer",
+					col.column, col.correlation_depth
+				))
+			})?;
+		let mut carried = binder.carried.lock().unwrap_or_else(PoisonError::into_inner);
+		let source = BoundColumnRef {
+			correlation_depth: 1,
+			carried_as: None,
+			..col.clone()
+		};
+		let same = |held: &BoundColumnRef| {
+			held.relation_index == source.relation_index && held.column == source.column
+		};
+		if let Some(held) = carried.iter().find(|held| same(&held.column)) {
+			return Ok(held.name.clone());
+		}
+		let name = format!("{CARRIED_PREFIX}{}_{}", binder.level.saturating_sub(1), carried.len());
+		carried.push(CarriedColumn {
+			name: name.clone(),
+			column: source,
+		});
+		Ok(name)
+	}
+
+	/// Resolve a column reference through this scope and the scopes of the enclosing queries.
+	fn resolve_column_in_scopes(
 		&self,
 		parts: &[String],
 		policy: &DialectPolicy,
@@ -764,6 +843,7 @@ impl QueryScope {
 				aggregate_output: false,
 				key_read: crate::ir::KeyRead::None,
 				also_in: Vec::new(),
+				carried_as: None,
 			}))
 		} else if let BoundExpr::FunctionCall {
 			name,
@@ -784,6 +864,7 @@ impl QueryScope {
 				aggregate_output: false,
 				key_read: crate::ir::KeyRead::None,
 				also_in: Vec::new(),
+				carried_as: None,
 			}))
 		} else {
 			Ok(target.expr.clone())
@@ -810,6 +891,7 @@ impl QueryScope {
 					aggregate_output: false,
 					key_read: crate::ir::KeyRead::None,
 					also_in: Vec::new(),
+					carried_as: None,
 				}));
 			}
 		}
@@ -865,6 +947,7 @@ impl QueryScope {
 					aggregate_output: false,
 					key_read: crate::ir::KeyRead::None,
 					also_in: Vec::new(),
+					carried_as: None,
 				}),
 				alias: None,
 				is_wildcard: true,
@@ -921,6 +1004,7 @@ impl QueryScope {
 					aggregate_output: false,
 					key_read: crate::ir::KeyRead::None,
 					also_in: Vec::new(),
+					carried_as: None,
 				}),
 				alias: None,
 				is_wildcard: true,

@@ -1585,17 +1585,16 @@ pub(crate) fn counts_every_row(col: &BoundColumnRef) -> bool {
 }
 
 /// Lower a column reference to the stored field it names, with no key extraction.
+///
+/// A column of the query directly above is read from `$parent`, the row of that query. A column of
+/// a query further up is read from the parameter the query below it binds to its value
+/// ([`BoundColumnRef::carried_as`]), as `$parent` names no row beyond the one above.
 pub(crate) fn lower_column_raw(col: &BoundColumnRef) -> LogicalExpr {
-	if col.correlation_depth > 0 {
-		let mut expr = LogicalExpr::Param(Param::from("parent".to_string()));
-		for _ in 1..col.correlation_depth {
-			expr = LogicalExpr::Access {
-				base: Box::new(expr),
-				field: Strand::from("parent"),
-			};
-		}
+	if let Some(carried) = &col.carried_as {
+		LogicalExpr::Param(Param::from(carried.clone()))
+	} else if col.correlation_depth > 0 {
 		LogicalExpr::Access {
-			base: Box::new(expr),
+			base: Box::new(LogicalExpr::Param(Param::from("parent".to_string()))),
 			field: Strand::from(col.column.as_str()),
 		}
 	} else if col.column == "*" && col.relation_index > 0 {
@@ -1614,6 +1613,27 @@ pub(crate) fn lower_column_raw(col: &BoundColumnRef) -> LogicalExpr {
 				right: Box::new(relation_field(*relation, &col.column)),
 			},
 		)
+	}
+}
+
+/// Lower a read of `col`, a column of the query directly above, from the row of that query
+/// (`$parent`): the stored field of a base table, and for a joined relation the field under the
+/// relation's alias, as the row of a join holds it.
+pub(crate) fn lower_parent_column(col: &BoundColumnRef) -> LogicalExpr {
+	if col.relation_index == 0 {
+		return lower_column_raw(col);
+	}
+	let joined = LogicalExpr::Access {
+		base: Box::new(LogicalExpr::Param(Param::from("parent".to_string()))),
+		field: RelationAlias::new(col.relation_index - 1).name().clone(),
+	};
+	if col.column == "*" {
+		joined
+	} else {
+		LogicalExpr::Access {
+			base: Box::new(joined),
+			field: Strand::from(col.column.as_str()),
+		}
 	}
 }
 
