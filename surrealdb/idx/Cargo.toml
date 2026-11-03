@@ -66,6 +66,11 @@ cjk-embed-japanese = ["cjk-tokenizer", "lindera?/embed-ipadic"]
 cjk-embed-korean = ["cjk-tokenizer", "lindera?/embed-ko-dic"]
 cjk-embed-all = ["cjk-embed-chinese", "cjk-embed-japanese", "cjk-embed-korean"]
 
+[package.metadata.docs.rs]
+# docs.rs builds with the latest nightly, whose trait solver rejects the `diskann`
+# crate (`Arc<B>: Batch` not satisfied); `-Znext-solver=no` keeps it compiling there.
+rustc-args = ["-Znext-solver=no"]
+
 [dependencies]
 ahash.workspace = true
 anyhow.workspace = true

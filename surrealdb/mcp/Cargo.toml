@@ -17,6 +17,11 @@ server-http = [
 ]
 transport-io = ["rmcp/transport-io"]
 
+[package.metadata.docs.rs]
+# docs.rs builds with the latest nightly, whose trait solver rejects the `diskann`
+# crate (`Arc<B>: Batch` not satisfied); `-Znext-solver=no` keeps it compiling there.
+rustc-args = ["-Znext-solver=no"]
+
 [dependencies]
 rmcp = { workspace = true, features = ["server", "macros"] }
 surrealdb-core = { workspace = true, features = ["graphql", "gql"] }

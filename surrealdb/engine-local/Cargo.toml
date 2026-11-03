@@ -29,6 +29,11 @@ cjk = ["surrealdb-core/cjk"]
 jwks = ["surrealdb-core/jwks"]
 scripting = ["surrealdb-core/scripting"]
 
+[package.metadata.docs.rs]
+# docs.rs builds with the latest nightly, whose trait solver rejects the `diskann`
+# crate (`Arc<B>: Batch` not satisfied); `-Znext-solver=no` keeps it compiling there.
+rustc-args = ["-Znext-solver=no"]
+
 [dependencies]
 # workspace internal dependencies
 # The optional function families stay on: an embedded engine runs the same
