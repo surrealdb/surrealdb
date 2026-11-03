@@ -49,19 +49,19 @@ value = "[]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: ti, index: ti_ts, access: >=timestamp'2026-10-27T12:00:00', direction: Forward]
+        IndexScan [ctx: Db] [table: ti, index: ti_ts, access: >=ts'2026-10-27T12:00:00', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [table: ti, index: ti_ts, access: = timestamp'2026-10-27T12:00:00', direction: Forward]
+    IndexScan [ctx: Db] [table: ti, index: ti_ts, access: = ts'2026-10-27T12:00:00', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [table: tu, index: tu_ts, access: = timestamp'2026-10-27T12:00:00', direction: Forward]
+    IndexScan [ctx: Db] [table: tu, index: tu_ts, access: = ts'2026-10-27T12:00:00', direction: Forward]
 "'''
 */
 DEFINE FIELD OVERWRITE ts ON ti TYPE timestamp;
@@ -72,6 +72,6 @@ EXPLAIN SELECT VALUE id FROM tu WHERE ts = d'2026-10-27T12:00:00Z';
 UPDATE ti SET ts = <timestamp> ts RETURN NONE;
 UPDATE tu SET ts = <timestamp> ts RETURN NONE;
 -- Over the entries the backfill wrote.
-EXPLAIN SELECT VALUE id FROM ti WHERE ts >= timestamp'2026-10-27T12:00:00';
-EXPLAIN SELECT VALUE id FROM ti WHERE ts = timestamp'2026-10-27T12:00:00';
-EXPLAIN SELECT VALUE id FROM tu WHERE ts = timestamp'2026-10-27T12:00:00';
+EXPLAIN SELECT VALUE id FROM ti WHERE ts >= ts'2026-10-27T12:00:00';
+EXPLAIN SELECT VALUE id FROM ti WHERE ts = ts'2026-10-27T12:00:00';
+EXPLAIN SELECT VALUE id FROM tu WHERE ts = ts'2026-10-27T12:00:00';

@@ -7,7 +7,7 @@ database = true
 reason = "date_trunc, extract, date_part, age, make_interval, make_date, make_time, make_timestamp, to_date and to_char over date, time, timestamp and interval values"
 
 [[test.results]]
-value = "[{ d: d'2026-01-01T00:00:00Z', h: timestamp'2026-10-27T12:00:00', ts: timestamp'2026-10-01T00:00:00', tz: d'2026-10-26T00:00:00Z' }]"
+value = "[{ d: d'2026-01-01T00:00:00Z', h: ts'2026-10-27T12:00:00', ts: ts'2026-10-01T00:00:00', tz: d'2026-10-26T00:00:00Z' }]"
 
 [[test.results]]
 value = "[{ century: 21, decade: 202, epoch: 1793104200.5dec, isoyear: 2026, julian: 2461341, millennium: 3, year: 2026 }]"
@@ -16,16 +16,16 @@ value = "[{ century: 21, decade: 202, epoch: 1793104200.5dec, isoyear: 2026, jul
 value = "[{ days: 3, hour: 12, hours: 4, minute: 30, second: 45.25dec }]"
 
 [[test.results]]
-value = "[{ a: interval'P6Y7M27D', clock: interval'PT12H30M', negative: interval'P-6Y-7M-27D' }]"
+value = "[{ a: ivl'P6Y7M27D', clock: ivl'PT12H30M', negative: ivl'P-6Y-7M-27D' }]"
 
 [[test.results]]
-value = "[{ d: date'2026-10-27', iv: interval'P1Y2M3DT4H5M6.5S', t: time'12:30:45.500', ts: timestamp'2026-10-27T12:30:45.500', week: interval'P7D' }]"
+value = "[{ d: pd'2026-10-27', iv: ivl'P1Y2M3DT4H5M6.5S', t: pt'12:30:45.500', ts: ts'2026-10-27T12:30:45.500', week: ivl'P7D' }]"
 
 [[test.results]]
 value = "[{ d: 'date', iv: 'interval', t: 'time without time zone', to_date: 'date', ts: 'timestamp without time zone' }]"
 
 [[test.results]]
-value = "[{ compact: date'2024-03-15', d: date'2024-03-15', short_year: date'2024-03-15' }]"
+value = "[{ compact: pd'2024-03-15', d: pd'2024-03-15', short_year: pd'2024-03-15' }]"
 
 [[test.results]]
 value = "[{ d: '2026-10-27', t: '01:45 PM', ts: '15:04:05' }]"

@@ -9,13 +9,13 @@ error = 'Failed to compute: "interval::make", as the operation results in an ari
 error = 'Failed to compute: "interval::make", as the operation results in an arithmetic overflow.'
 
 [[test.results]]
-value = "interval'PT1H30M'"
+value = "ivl'PT1H30M'"
 
 [[test.results]]
 error = "Incorrect arguments for function time::make_time(). The seconds are out of range."
 
 [[test.results]]
-value = "time'12:00:30.500'"
+value = "pt'12:00:30.500'"
 
 */
 

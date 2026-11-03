@@ -3,19 +3,19 @@
 reason = "The interval:: namespace builds intervals, extracts their fields, and justifies them"
 
 [[test.results]]
-value = "interval'P1Y2M10DT4H5M6.5S'"
+value = "ivl'P1Y2M10DT4H5M6.5S'"
 
 [[test.results]]
-value = "interval'PT0S'"
+value = "ivl'PT0S'"
 
 [[test.results]]
-value = "interval'P1Y'"
+value = "ivl'P1Y'"
 
 [[test.results]]
 error = "Incorrect arguments for function interval::make(). The years must be an integer."
 
 [[test.results]]
-value = "interval'PT1H30M'"
+value = "ivl'PT1H30M'"
 
 [[test.results]]
 value = "4"
@@ -39,22 +39,22 @@ value = "15.5dec"
 value = "15500000"
 
 [[test.results]]
-value = "interval'P3DT2H'"
+value = "ivl'P3DT2H'"
 
 [[test.results]]
-value = "interval'P1M15DT2H'"
+value = "ivl'P1M15DT2H'"
 
 [[test.results]]
-value = "interval'P1M17DT2H'"
+value = "ivl'P1M17DT2H'"
 
 [[test.results]]
-value = "interval'P29D'"
+value = "ivl'P29D'"
 
 [[test.results]]
-value = "interval'PT22H'"
+value = "ivl'PT22H'"
 
 [[test.results]]
-value = "interval'P3DT2H'"
+value = "ivl'P3DT2H'"
 
 [[test.results]]
 value = "3"
@@ -67,18 +67,18 @@ interval::make();
 interval::make(1);
 interval::make(0.5);
 interval::make(0, 0, 0, 0, 1.5);
-interval::years(interval'3 years 14 mons');
-interval::months(interval'3 years 14 mons');
-interval::days(interval'1 mon 5 days');
-interval::hours(interval'50:30:15.5');
-interval::mins(interval'50:30:15.5');
-interval::secs(interval'50:30:15.5');
-interval::micros(interval'50:30:15.5');
-interval::justify_hours(interval'1 day 50:00:00');
-interval::justify_days(interval'45 days 02:00:00');
-interval::justify_interval(interval'45 days 50:00:00');
-interval::justify_interval(interval'1 mon -1 day');
-interval::justify_interval(interval'1 day -02:00:00');
-interval'1 day 50:00:00'.justify_hours();
-interval'3 years'.years();
+interval::years(ivl'3 years 14 mons');
+interval::months(ivl'3 years 14 mons');
+interval::days(ivl'1 mon 5 days');
+interval::hours(ivl'50:30:15.5');
+interval::mins(ivl'50:30:15.5');
+interval::secs(ivl'50:30:15.5');
+interval::micros(ivl'50:30:15.5');
+interval::justify_hours(ivl'1 day 50:00:00');
+interval::justify_days(ivl'45 days 02:00:00');
+interval::justify_interval(ivl'45 days 50:00:00');
+interval::justify_interval(ivl'1 mon -1 day');
+interval::justify_interval(ivl'1 day -02:00:00');
+ivl'1 day 50:00:00'.justify_hours();
+ivl'3 years'.years();
 interval::years(1);

@@ -7,22 +7,22 @@ database = true
 reason = "A cast to an interval with a field qualifier or a precision truncates toward zero below the finest field and rounds the seconds half away from zero, as PostgreSQL's AdjustIntervalForTypmod does; NULL stays NULL and the column reads as interval"
 
 [[test.results]]
-value = "[{ d: interval'P1Y2M3D', ds: interval'P1DT2H3M4.56S', h: interval'P1DT2H', hm: interval'P1DT2H3M', m: interval'P1Y2M', ms1: interval'P1DT2H3M4.6S', s0: interval'PT7S', y: interval'P1Y' }]"
+value = "[{ d: ivl'P1Y2M3D', ds: ivl'P1DT2H3M4.56S', h: ivl'P1DT2H', hm: ivl'P1DT2H3M', m: ivl'P1Y2M', ms1: ivl'P1DT2H3M4.6S', s0: ivl'PT7S', y: ivl'P1Y' }]"
 
 [[test.results]]
-value = "[{ h: interval'PT-4H', mi: interval'PT-5M', p1: interval'PT-1.3S', s0: interval'PT-7S', y: interval'P-1Y' }]"
+value = "[{ h: ivl'PT-4H', mi: ivl'PT-5M', p1: ivl'PT-1.3S', s0: ivl'PT-7S', y: ivl'P-1Y' }]"
 
 [[test.results]]
-value = "[{ d: interval'P3D', h: interval'PT2H', n: NULL }]"
+value = "[{ d: ivl'P3D', h: ivl'PT2H', n: NULL }]"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: 1, iv: interval'P1DT2H3M4.567S' }, { id: 2, iv: interval'PT-2H-59M' }]"
+value = "[{ id: 1, iv: ivl'P1DT2H3M4.567S' }, { id: 2, iv: ivl'PT-2H-59M' }]"
 
 [[test.results]]
-value = "[{ h: interval'P1DT2H', id: 1, p: interval'P1DT2H3M4.6S' }, { h: interval'PT-2H', id: 2, p: interval'PT-2H-59M' }]"
+value = "[{ h: ivl'P1DT2H', id: 1, p: ivl'P1DT2H3M4.6S' }, { h: ivl'PT-2H', id: 2, p: ivl'PT-2H-59M' }]"
 */
 
 SELECT CAST('1 year 2 months 3 days 04:05:06.789' AS INTERVAL YEAR) AS y, CAST('1 year 2 months 3 days 04:05:06.789' AS INTERVAL MONTH) AS m, CAST('1 year 2 months 3 days 04:05:06.789' AS INTERVAL DAY) AS d, CAST('1 day 02:03:04' AS INTERVAL HOUR) AS h, CAST('1 day 02:03:04' AS INTERVAL HOUR TO MINUTE) AS hm, CAST('1 day 02:03:04.56' AS INTERVAL DAY TO SECOND) AS ds, CAST('1 day 02:03:04.56' AS INTERVAL MINUTE TO SECOND(1)) AS ms1, CAST('00:00:06.5' AS INTERVAL SECOND(0)) AS s0;

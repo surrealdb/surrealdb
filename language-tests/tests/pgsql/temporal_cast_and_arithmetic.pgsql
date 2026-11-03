@@ -7,7 +7,7 @@ database = true
 reason = "CAST to date, time, timestamp and interval yields those kinds, and the PostgreSQL arithmetic and promotions over them hold"
 
 [[test.results]]
-value = "[{ d: date'2026-10-27', iv: interval'P1Y2M', t: time'12:30:00', ts: timestamp'2026-10-27T00:00:00' }]"
+value = "[{ d: pd'2026-10-27', iv: ivl'P1Y2M', t: pt'12:30:00', ts: ts'2026-10-27T00:00:00' }]"
 
 [[test.results]]
 value = "[{ d: 'date', t: 'time without time zone', ts: 'timestamp without time zone' }]"
@@ -16,16 +16,16 @@ value = "[{ d: 'date', t: 'time without time zone', ts: 'timestamp without time 
 value = "[{ ttz: '08:00:00' }]"
 
 [[test.results]]
-value = "[{ diff: 3, minus: date'2026-10-24', plus: date'2026-10-30' }]"
+value = "[{ diff: 3, minus: pd'2026-10-24', plus: pd'2026-10-30' }]"
 
 [[test.results]]
-value = "[{ clamp: timestamp'2026-02-28T10:00:00', d_plus: timestamp'2026-11-27T00:00:00', gap: interval'P1DT1H30M' }]"
+value = "[{ clamp: ts'2026-02-28T10:00:00', d_plus: ts'2026-11-27T00:00:00', gap: ivl'P1DT1H30M' }]"
 
 [[test.results]]
-value = "[{ combined: timestamp'2026-10-27T12:30:00', span: interval'PT1H30M', wrap: time'01:00:00' }]"
+value = "[{ combined: ts'2026-10-27T12:30:00', span: ivl'PT1H30M', wrap: pt'01:00:00' }]"
 
 [[test.results]]
-value = "[{ doubled: interval'P2D', equal: true, halved: interval'P1DT12H', less: true }]"
+value = "[{ doubled: ivl'P2D', equal: true, halved: ivl'P1DT12H', less: true }]"
 
 [[test.results]]
 value = "[{ date_eq_timestamp: true, date_lt_timestamptz: false, timestamp_gt_timestamptz: true }]"

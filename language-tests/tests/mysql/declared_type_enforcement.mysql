@@ -13,10 +13,10 @@ value = "NONE"
 error = "Data too long for column 'v' at row 1 (field `v` of `dt:1`, SQL TYPE varchar(3))"
 
 [[test.results]]
-value = "[{ c: 'ab', id: 1, n: 123.46dec, ts: timestamp'2026-10-27T12:00:01', v: 'abc' }]"
+value = "[{ c: 'ab', id: 1, n: 123.46dec, ts: ts'2026-10-27T12:00:01', v: 'abc' }]"
 
 [[test.results]]
-value = "[{ c: 'ab', id: 1, n: 123.46dec, ts: timestamp'2026-10-27T12:00:01', v: 'abc' }]"
+value = "[{ c: 'ab', id: 1, n: 123.46dec, ts: ts'2026-10-27T12:00:01', v: 'abc' }]"
 
 [[test.results]]
 error = "Out of range value for column 'n' at row 1 (field `n` of `dt:2`, SQL TYPE decimal(5,2))"

@@ -181,7 +181,7 @@ impl Display for Date {
 impl ToSql for Date {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		use crate as surrealdb_types;
-		write_sql!(f, fmt, "date{}", QuoteStr(&self.to_string()));
+		write_sql!(f, fmt, "pd{}", QuoteStr(&self.to_string()));
 	}
 }
 
@@ -299,7 +299,7 @@ impl Display for Time {
 impl ToSql for Time {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		use crate as surrealdb_types;
-		write_sql!(f, fmt, "time{}", QuoteStr(&self.to_string()));
+		write_sql!(f, fmt, "pt{}", QuoteStr(&self.to_string()));
 	}
 }
 
@@ -428,7 +428,7 @@ impl Display for Timestamp {
 impl ToSql for Timestamp {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		use crate as surrealdb_types;
-		write_sql!(f, fmt, "timestamp{}", QuoteStr(&self.to_string()));
+		write_sql!(f, fmt, "ts{}", QuoteStr(&self.to_string()));
 	}
 }
 
@@ -920,7 +920,7 @@ impl Display for Interval {
 impl ToSql for Interval {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		use crate as surrealdb_types;
-		write_sql!(f, fmt, "interval{}", QuoteStr(&self.to_string()));
+		write_sql!(f, fmt, "ivl{}", QuoteStr(&self.to_string()));
 	}
 }
 

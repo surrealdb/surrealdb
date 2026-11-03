@@ -8,7 +8,7 @@ imports = ["pgsql/sql_types/_ranges.surql"]
 reason = "an untyped literal opposite a range in &&, @> or <@ is read as a range of the same type, as PostgreSQL infers it"
 
 [[test.results]]
-value = "[{ days: date'2024-01-01'..date'2024-02-01', id: 1, seats: 1i32..6i32 }, { days: date'1970-01-01'..date'1970-01-01', id: 2, seats: 11i32..20i32 }]"
+value = "[{ days: pd'2024-01-01'..pd'2024-02-01', id: 1, seats: 1i32..6i32 }, { days: pd'1970-01-01'..pd'1970-01-01', id: 2, seats: 11i32..20i32 }]"
 
 [[test.results]]
 value = "[{ id: 1 }]"

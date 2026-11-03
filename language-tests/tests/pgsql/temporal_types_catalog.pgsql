@@ -14,13 +14,13 @@ value = "[{ column_name: 'id', data_type: 'text' }, { column_name: 'd', data_typ
 value = "NONE"
 
 [[test.results]]
-value = "[{ d: date'2026-10-27', id: 1, iv: interval'P1Y2D', t: time'12:30:00', ts: timestamp'2026-10-27T12:30:00', tstz: d'2026-10-27T12:30:00Z', ttz: time'10:30:00' }]"
+value = "[{ d: pd'2026-10-27', id: 1, iv: ivl'P1Y2D', t: pt'12:30:00', ts: ts'2026-10-27T12:30:00', tstz: d'2026-10-27T12:30:00Z', ttz: pt'10:30:00' }]"
 
 [[test.results]]
 value = "[{ d: 'date', iv: 'interval', t: 'time without time zone', ts: 'timestamp without time zone', tstz: 'timestamp with time zone', ttz: 'time without time zone' }]"
 
 [[test.results]]
-value = "[{ d: date'2026-10-27', iv: interval'P1Y2D', t: time'12:30:00', ts: timestamp'2026-10-27T12:30:00', tstz: d'2026-10-27T12:30:00Z', ttz: time'10:30:00' }]"
+value = "[{ d: pd'2026-10-27', iv: ivl'P1Y2D', t: pt'12:30:00', ts: ts'2026-10-27T12:30:00', tstz: d'2026-10-27T12:30:00Z', ttz: pt'10:30:00' }]"
 
 [[test.results]]
 value = "[{ oid: 1082, typname: 'date' }, { oid: 1083, typname: 'time' }, { oid: 1114, typname: 'timestamp' }, { oid: 1184, typname: 'timestamptz' }, { oid: 1186, typname: 'interval' }]"

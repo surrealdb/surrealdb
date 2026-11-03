@@ -8,16 +8,16 @@ imports = ["pgsql/_temporal_columns.surql"]
 reason = "A datetime column accepts date and timestamp values and keeps reading them as datetimes, a date column accepts a datetime at exactly midnight UTC and refuses any other with the cast to use, and a timestamp column accepts a datetime"
 
 [[test.results]]
-value = "[{ at: d'2026-10-27T00:00:00Z', day: date'2026-10-27', id: 1, wall: timestamp'2026-10-27T12:30:00' }]"
+value = "[{ at: d'2026-10-27T00:00:00Z', day: pd'2026-10-27', id: 1, wall: ts'2026-10-27T12:30:00' }]"
 
 [[test.results]]
-value = "[{ at: d'2026-10-27T12:30:00Z', day: date'2026-10-28', id: 2, wall: timestamp'2026-10-27T00:00:00' }]"
+value = "[{ at: d'2026-10-27T12:30:00Z', day: pd'2026-10-28', id: 2, wall: ts'2026-10-27T00:00:00' }]"
 
 [[test.results]]
 error = "Couldn't coerce value for field `day` of `temporal_compat:3`: Expected `date (a datetime that is not midnight UTC needs the cast `<date>`)` but found `d'2026-10-27T12:30:00Z'`"
 
 [[test.results]]
-value = "[{ at: d'2026-10-27T00:00:00Z', day: date'2026-10-27', wall: timestamp'2026-10-27T12:30:00' }, { at: d'2026-10-27T12:30:00Z', day: date'2026-10-28', wall: timestamp'2026-10-27T00:00:00' }]"
+value = "[{ at: d'2026-10-27T00:00:00Z', day: pd'2026-10-27', wall: ts'2026-10-27T12:30:00' }, { at: d'2026-10-27T12:30:00Z', day: pd'2026-10-28', wall: ts'2026-10-27T00:00:00' }]"
 
 [[test.results]]
 value = "[{ at: 'timestamp with time zone', day: 'date', wall: 'timestamp without time zone' }, { at: 'timestamp with time zone', day: 'date', wall: 'timestamp without time zone' }]"

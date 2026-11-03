@@ -15,14 +15,14 @@ value = "true"
 value = "true"
 
 [[test.results]]
-value = "date'2026-10-27'"
+value = "pd'2026-10-27'"
 
 [[test.results]]
-value = "time'12:30:00'"
+value = "pt'12:30:00'"
 */
-[type::of(date'2026-10-27'), type::of(time'12:30:00'), type::of(timestamp'2026-10-27T12:30:00'), type::of(interval'1 day'), type::of(d'2026-10-27')];
-[type::is_date(date'2026-10-27'), type::is_date(d'2026-10-27'), type::is_time(time'12:30:00'), type::is_time(d'2026-10-27'), type::is_timestamp(timestamp'2026-10-27T12:30:00'), type::is_timestamp(date'2026-10-27'), type::is_interval(interval'1 day'), type::is_interval(1d)];
-date'2026-10-27'.is_date();
-interval'1 day'.is_interval();
+[type::of(pd'2026-10-27'), type::of(pt'12:30:00'), type::of(ts'2026-10-27T12:30:00'), type::of(ivl'1 day'), type::of(d'2026-10-27')];
+[type::is_date(pd'2026-10-27'), type::is_date(d'2026-10-27'), type::is_time(pt'12:30:00'), type::is_time(d'2026-10-27'), type::is_timestamp(ts'2026-10-27T12:30:00'), type::is_timestamp(pd'2026-10-27'), type::is_interval(ivl'1 day'), type::is_interval(1d)];
+pd'2026-10-27'.is_date();
+ivl'1 day'.is_interval();
 '2026-10-27'.to_date();
 '12:30:00'.to_time();

@@ -30,25 +30,25 @@ value = "Infinity"
 value = "2026"
 
 [[test.results]]
-value = "timestamp'infinity'"
+value = "ts'infinity'"
 
 [[test.results]]
-value = "date'-infinity'"
+value = "pd'-infinity'"
 
 [[test.results]]
 value = "d'+262142-12-31T23:59:59.999999999Z'"
 
 */
 
-time::extract(timestamp'infinity', 'year');
-time::extract(timestamp'-infinity', 'epoch');
-time::extract(timestamp'infinity', 'month');
-time::extract(timestamp'infinity', 'hour');
-time::extract(date'infinity', 'century');
-time::extract(date'-infinity', 'dow');
-time::extract(date'infinity', 'hour');
+time::extract(ts'infinity', 'year');
+time::extract(ts'-infinity', 'epoch');
+time::extract(ts'infinity', 'month');
+time::extract(ts'infinity', 'hour');
+time::extract(pd'infinity', 'century');
+time::extract(pd'-infinity', 'dow');
+time::extract(pd'infinity', 'hour');
 time::extract(<datetime> 'infinity', 'year');
-time::extract(timestamp'2026-10-27T12:30:45.5', 'year');
-time::trunc(timestamp'infinity', 'year');
-time::trunc(date'-infinity', 'month');
+time::extract(ts'2026-10-27T12:30:45.5', 'year');
+time::trunc(ts'infinity', 'year');
+time::trunc(pd'-infinity', 'month');
 time::trunc(<datetime> 'infinity', 'day');

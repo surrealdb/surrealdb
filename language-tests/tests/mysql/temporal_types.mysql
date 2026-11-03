@@ -8,19 +8,19 @@ imports = ["mysql/_temporal_columns.surql"]
 reason = "MySQL DATE is a date, TIME an interval, DATETIME a timestamp, TIMESTAMP a datetime and YEAR a u16, and CAST and date_add follow them"
 
 [[test.results]]
-value = "[{ d: date'2026-10-27', dt: timestamp'2026-10-27T12:30:00', id: 1, t: interval'PT12H30M', ts: d'2026-10-27T12:30:00Z', y: 2026u16 }]"
+value = "[{ d: pd'2026-10-27', dt: ts'2026-10-27T12:30:00', id: 1, t: ivl'PT12H30M', ts: d'2026-10-27T12:30:00Z', y: 2026u16 }]"
 
 [[test.results]]
-value = "[{ d: date'1999-12-31', dt: timestamp'1999-12-31T23:59:59', id: 2, t: interval'PT-838H-59M-59S', ts: d'1999-12-31T23:59:59Z', y: 1999u16 }]"
+value = "[{ d: pd'1999-12-31', dt: ts'1999-12-31T23:59:59', id: 2, t: ivl'PT-838H-59M-59S', ts: d'1999-12-31T23:59:59Z', y: 1999u16 }]"
 
 [[test.results]]
-value = "[{ d: date'2026-10-27', dt: timestamp'2026-10-27T12:30:00', t: interval'PT12H30M', ts: d'2026-10-27T12:30:00Z', y: 2026u16 }, { d: date'1999-12-31', dt: timestamp'1999-12-31T23:59:59', t: interval'PT-838H-59M-59S', ts: d'1999-12-31T23:59:59Z', y: 1999u16 }]"
+value = "[{ d: pd'2026-10-27', dt: ts'2026-10-27T12:30:00', t: ivl'PT12H30M', ts: d'2026-10-27T12:30:00Z', y: 2026u16 }, { d: pd'1999-12-31', dt: ts'1999-12-31T23:59:59', t: ivl'PT-838H-59M-59S', ts: d'1999-12-31T23:59:59Z', y: 1999u16 }]"
 
 [[test.results]]
-value = "[{ d: date'2026-10-27', dt: timestamp'2026-10-27T00:00:00', t: interval'PT12H30M' }]"
+value = "[{ d: pd'2026-10-27', dt: ts'2026-10-27T00:00:00', t: ivl'PT12H30M' }]"
 
 [[test.results]]
-value = "[{ next_day: date'2026-10-28', next_hour: timestamp'2026-10-27T01:00:00', next_month: timestamp'2026-11-27T12:30:00' }]"
+value = "[{ next_day: pd'2026-10-28', next_hour: ts'2026-10-27T01:00:00', next_month: ts'2026-11-27T12:30:00' }]"
 
 [[test.results]]
 value = "[{ id: 1 }]"

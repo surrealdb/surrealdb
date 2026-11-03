@@ -7,13 +7,13 @@ database = true
 reason = "MySQL date_add, date_sub and the interval operators move a datetime by an interval, keeping the day of the month or the last day of a shorter month"
 
 [[test.results]]
-value = "[{ a: timestamp'2024-03-16T10:20:30', b: timestamp'2024-03-13T22:20:30', c: timestamp'2024-03-22T10:20:30' }]"
+value = "[{ a: ts'2024-03-16T10:20:30', b: ts'2024-03-13T22:20:30', c: ts'2024-03-22T10:20:30' }]"
 
 [[test.results]]
-value = "[{ a: timestamp'2024-02-29T10:20:30', b: timestamp'2025-02-28T10:20:30', c: timestamp'2024-06-15T10:20:30', d: timestamp'2024-02-29T00:00:00', e: timestamp'2025-02-15T00:00:00' }]"
+value = "[{ a: ts'2024-02-29T10:20:30', b: ts'2025-02-28T10:20:30', c: ts'2024-06-15T10:20:30', d: ts'2024-02-29T00:00:00', e: ts'2025-02-15T00:00:00' }]"
 
 [[test.results]]
-value = "[{ a: timestamp'2024-03-15T12:20:30', b: timestamp'2024-03-15T08:50:30', c: timestamp'2024-03-16T10:20:30', d: NULL }]"
+value = "[{ a: ts'2024-03-15T12:20:30', b: ts'2024-03-15T08:50:30', c: ts'2024-03-16T10:20:30', d: NULL }]"
 */
 
 SELECT date_add(CAST('2024-03-15T10:20:30Z' AS datetime), INTERVAL 1 DAY) AS a, date_add(CAST('2024-03-15T10:20:30Z' AS datetime), INTERVAL -36 HOUR) AS b, date_add(CAST('2024-03-15T10:20:30Z' AS datetime), INTERVAL 1 WEEK) AS c;

@@ -18,5 +18,5 @@ DEFINE FIELD starts ON shift TYPE time;
 DEFINE FIELD at ON shift TYPE timestamp;
 DEFINE FIELD length ON shift TYPE interval;
 
-CREATE shift:early SET label = 'early', day = date'2026-10-26', starts = time'06:30:00', at = timestamp'2026-10-26T06:30:00', length = interval'8 hours';
-CREATE shift:late SET label = 'late', day = date'2026-10-28', starts = time'14:00:00.5', at = timestamp'2026-10-28T14:00:00.5', length = interval'1 day 2 hours';
+CREATE shift:early SET label = 'early', day = pd'2026-10-26', starts = pt'06:30:00', at = ts'2026-10-26T06:30:00', length = ivl'8 hours';
+CREATE shift:late SET label = 'late', day = pd'2026-10-28', starts = pt'14:00:00.5', at = ts'2026-10-28T14:00:00.5', length = ivl'1 day 2 hours';

@@ -11,7 +11,7 @@ Every decision below is accepted as recommended, including the `surrealdb-protoc
 | # | Decision | Recommendation |
 |---|---|---|
 | D1 | Value layer: new `Value` variants or a tag on `Datetime`/`Duration` | Four new `Value` variants (`Date`, `Time`, `Timestamp`, `Interval`) appended after `Closure`. A tag on `Datetime` cannot carry months or days, cannot sort correctly, and makes round-trip typing depend on side data. |
-| D2 | Literal syntax | Keyword-prefixed literals `date'2026-10-27'`, `time'12:30:00'`, `timestamp'2026-10-27T12:30:00'`, `interval'1 year 2 days'`. `d'2026-10-27'` keeps meaning a midnight-UTC datetime. Alternatives in section 2. |
+| D2 | Literal syntax | Keyword-prefixed literals `pd'2026-10-27'`, `pt'12:30:00'`, `ts'2026-10-27T12:30:00'`, `ivl'1 year 2 days'`. `d'2026-10-27'` keeps meaning a midnight-UTC datetime. Alternatives in section 2. |
 | D3 | Precision | Nanoseconds for `time` and `timestamp`, microseconds for the `interval` time part, truncated to microseconds at the PostgreSQL and MySQL wire. |
 | D4 | Cross-kind comparison | Kinds stay distinct at the `Value` level (`Ord` is by rank, not by instant). The SQL front ends insert promotions (`date` to `timestamp` to `timestamptz`). SurrealQL operators do not promote implicitly. |
 | D5 | Interval equality | PostgreSQL semantics: `Eq`, `Ord`, `Hash` use the normalised value (a month is 30 days, a day is 24 hours), so `1 mon = 30 days`. Display and storage keep the triple. |
@@ -75,10 +75,10 @@ ORM harnesses (Prisma, Drizzle, TypeORM) list type modifiers and enums among the
 
 **The recommended literal forms are keyword-prefixed strings.**
 
-- `date'2026-10-27'`
-- `time'12:30:00.123456789'`
-- `timestamp'2026-10-27T12:30:00'` (also `timestamp'2026-10-27 12:30:00'`)
-- `interval'1 year 2 mons 3 days 04:05:06.5'` and `interval'P1Y2M3DT4H5M6.5S'`
+- `pd'2026-10-27'`
+- `pt'12:30:00.123456789'`
+- `ts'2026-10-27T12:30:00'` (also `ts'2026-10-27 12:30:00'`)
+- `ivl'1 year 2 mons 3 days 04:05:06.5'` and `ivl'P1Y2M3DT4H5M6.5S'`
 
 `parser-next` lexes a single `r`, `u`, `d`, `b`, `f`, or `s` immediately followed by a quote as a prefixed string (`lex.rs`). A longer identifier followed by a quote lexes today as an identifier then a string, which no production accepts, so the new forms change the meaning of no program that parses today. The golden corpus (`cargo make ci-parser`) confirms this in PR 2. Leaves are decoded at lowering time, as for `d'…'`.
 
@@ -88,6 +88,7 @@ ORM harnesses (Prisma, Drizzle, TypeORM) list type modifiers and enums among the
 
 Alternatives considered:
 
+- **Kind-name prefixes** `date'…'`, `time'…'`, `timestamp'…'`, `interval'…'`. Each reads as a longer spelling of a kind name, and `date'…'` looks like an alias of `d'…'` while producing a different kind. Rejected in favour of `pd`, `pt`, `ts`, and `ivl`.
 - **Single-letter prefixes.** `t'…'` and `i'…'` are free, but `date` has no free letter (`d` is `datetime`), so the set is inconsistent. Rejected.
 - **Cast form `<date>'2026-10-27'`.** Valid today with no grammar change, and it remains the way to convert a string at runtime. It is an expression, not a literal, so it does not fold in the kind-literal and `DEFAULT` paths and renders back as a cast. Kept as the interim spelling for tests before PR 2 lands, not the canonical form.
 - **Reuse `d'…'` and decide by body shape.** `d'2026-10-27'` is already valid and means a datetime. Changing it breaks stored `DEFAULT` clauses and exports. Rejected.

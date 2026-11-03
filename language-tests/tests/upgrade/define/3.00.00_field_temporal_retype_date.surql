@@ -71,5 +71,5 @@ UPDATE rd SET f = <date> f, o = <option<date>> o RETURN NONE;
 SELECT id, <string> f AS f, <string> o AS o FROM rd ORDER BY id;
 SELECT VALUE type::of(f) FROM rd ORDER BY id;
 -- The retyped field accepts a date and refuses a datetime off midnight.
-CREATE rd:5 SET f = date'2026-11-01' RETURN VALUE type::of(f);
+CREATE rd:5 SET f = pd'2026-11-01' RETURN VALUE type::of(f);
 CREATE rd:6 SET f = d'2026-11-01T01:00:00Z';

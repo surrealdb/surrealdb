@@ -8,10 +8,10 @@ imports = ["pgsql/sql_types/_ranges.surql"]
 reason = "range and multirange columns read their PostgreSQL text on write and on a cast from text, a discrete range is canonical, @> and <@ test an element, and a range compares equal to a cast literal"
 
 [[test.results]]
-value = "[{ days: date'2024-01-01'..date'2024-02-01', id: 1, seats: 1i32..6i32, spans: [1i32..6i32] }, { days: date'1970-01-01'..date'1970-01-01', id: 2, seats: 11i32..20i32, spans: [] }]"
+value = "[{ days: pd'2024-01-01'..pd'2024-02-01', id: 1, seats: 1i32..6i32, spans: [1i32..6i32] }, { days: pd'1970-01-01'..pd'1970-01-01', id: 2, seats: 11i32..20i32, spans: [] }]"
 
 [[test.results]]
-value = "[{ days: date'2024-01-01'..date'2024-02-01', id: 1, seats: 1i32..6i32, spans: [1i32..6i32] }, { days: date'1970-01-01'..date'1970-01-01', id: 2, seats: 11i32..20i32, spans: [] }]"
+value = "[{ days: pd'2024-01-01'..pd'2024-02-01', id: 1, seats: 1i32..6i32, spans: [1i32..6i32] }, { days: pd'1970-01-01'..pd'1970-01-01', id: 2, seats: 11i32..20i32, spans: [] }]"
 
 [[test.results]]
 value = "[{ id: 1 }]"

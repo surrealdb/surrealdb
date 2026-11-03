@@ -1659,13 +1659,13 @@ mod tests {
 	#[test]
 	fn temporal_values_render_as_keyword_prefixed_literals() {
 		let cases = [
-			(Value::Date(Date::from_days(0).unwrap()), "date'1970-01-01'"),
-			(Value::Time(Time::from_nanos(45_000_000_000_000).unwrap()), "time'12:30:00'"),
+			(Value::Date(Date::from_days(0).unwrap()), "pd'1970-01-01'"),
+			(Value::Time(Time::from_nanos(45_000_000_000_000).unwrap()), "pt'12:30:00'"),
 			(
 				Value::Timestamp(Timestamp::from_parts(1, 500_000_000).unwrap()),
-				"timestamp'1970-01-01T00:00:01.500'",
+				"ts'1970-01-01T00:00:01.500'",
 			),
-			(Value::Interval(Interval::new(14, 3, 14_706_500_000)), "interval'P1Y2M3DT4H5M6.5S'"),
+			(Value::Interval(Interval::new(14, 3, 14_706_500_000)), "ivl'P1Y2M3DT4H5M6.5S'"),
 		];
 		for (value, expected) in cases {
 			assert_eq!(value.to_sql(), expected);

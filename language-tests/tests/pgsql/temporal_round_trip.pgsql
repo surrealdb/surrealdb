@@ -8,13 +8,13 @@ imports = ["pgsql/_temporal_columns.surql"]
 reason = "date, time, timestamp and interval values read back as their own kinds, their text form is the PostgreSQL one, a value written through INSERT is read back the same, and comparisons promote date to timestamp to timestamptz and read a quoted literal as the column's type"
 
 [[test.results]]
-value = "[{ d: date'2026-10-27', iv: interval'P1Y2M3DT4H5M6.5S', t: time'12:30:00.500', ts: timestamp'2026-10-27T12:30:00.500' }, { d: date'1999-12-31', iv: interval'P-1DT-2H', t: time'24:00:00', ts: timestamp'1999-12-31T23:59:59' }]"
+value = "[{ d: pd'2026-10-27', iv: ivl'P1Y2M3DT4H5M6.5S', t: pt'12:30:00.500', ts: ts'2026-10-27T12:30:00.500' }, { d: pd'1999-12-31', iv: ivl'P-1DT-2H', t: pt'24:00:00', ts: ts'1999-12-31T23:59:59' }]"
 
 [[test.results]]
-value = "[{ d: date'2030-01-02', id: 3, iv: interval'P2M-3D', t: time'01:02:03.000004', ts: timestamp'2030-01-02T01:02:03.000004' }]"
+value = "[{ d: pd'2030-01-02', id: 3, iv: ivl'P2M-3D', t: pt'01:02:03.000004', ts: ts'2030-01-02T01:02:03.000004' }]"
 
 [[test.results]]
-value = "[{ d: date'2030-01-02', iv: interval'P2M-3D', t: time'01:02:03.000004', ts: timestamp'2030-01-02T01:02:03.000004' }]"
+value = "[{ d: pd'2030-01-02', iv: ivl'P2M-3D', t: pt'01:02:03.000004', ts: ts'2030-01-02T01:02:03.000004' }]"
 
 [[test.results]]
 value = "[{ id: 1 }]"
@@ -32,7 +32,7 @@ value = "[{ id: 2 }]"
 value = "[{ id: 1 }, { id: 3 }]"
 
 [[test.results]]
-value = "[{ id: 1, next_day: date'2026-10-28', tomorrow: timestamp'2026-10-28T12:30:00.500' }, { id: 2, next_day: date'2000-01-01', tomorrow: timestamp'2000-01-01T23:59:59' }, { id: 3, next_day: date'2030-01-03', tomorrow: timestamp'2030-01-03T01:02:03.000004' }]"
+value = "[{ id: 1, next_day: pd'2026-10-28', tomorrow: ts'2026-10-28T12:30:00.500' }, { id: 2, next_day: pd'2000-01-01', tomorrow: ts'2000-01-01T23:59:59' }, { id: 3, next_day: pd'2030-01-03', tomorrow: ts'2030-01-03T01:02:03.000004' }]"
 
 */
 

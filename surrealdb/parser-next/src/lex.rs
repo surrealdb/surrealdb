@@ -112,10 +112,10 @@ pub const PREFIX_INTERVAL: u8 = b'I';
 /// The [`Tok::aux`] of the multi-letter string prefix `word`, or `None` if it is not one.
 fn long_prefix(word: &[u8]) -> Option<u8> {
 	match word {
-		b"date" => Some(PREFIX_DATE),
-		b"time" => Some(PREFIX_TIME),
-		b"timestamp" => Some(PREFIX_TIMESTAMP),
-		b"interval" => Some(PREFIX_INTERVAL),
+		b"pd" => Some(PREFIX_DATE),
+		b"pt" => Some(PREFIX_TIME),
+		b"ts" => Some(PREFIX_TIMESTAMP),
+		b"ivl" => Some(PREFIX_INTERVAL),
 		_ => None,
 	}
 }

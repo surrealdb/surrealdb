@@ -8,7 +8,7 @@ imports = ["pgsql/sql_types/_ranges.surql"]
 reason = "&& tests whether two ranges overlap, @> and <@ between two ranges test containment, and lower() and upper() give a range's bounds, NULL for an empty range or a missing bound"
 
 [[test.results]]
-value = "[{ days: date'2024-01-01'..date'2024-02-01', id: 1, seats: 1i32..6i32 }, { days: date'1970-01-01'..date'1970-01-01', id: 2, seats: 11i32..20i32 }, { days: date'2024-01-20'.., id: 3, seats: 4i32..12i32 }]"
+value = "[{ days: pd'2024-01-01'..pd'2024-02-01', id: 1, seats: 1i32..6i32 }, { days: pd'1970-01-01'..pd'1970-01-01', id: 2, seats: 11i32..20i32 }, { days: pd'2024-01-20'.., id: 3, seats: 4i32..12i32 }]"
 
 [[test.results]]
 value = "[{ id: 1 }, { id: 3 }]"
@@ -26,7 +26,7 @@ value = "[{ id: 1 }, { id: 3 }]"
 value = "[{ hi: 6i32, id: 1, lo: 1i32 }, { hi: 20i32, id: 2, lo: 11i32 }, { hi: 12i32, id: 3, lo: 4i32 }]"
 
 [[test.results]]
-value = "[{ hi: date'2024-02-01', id: 1, lo: date'2024-01-01' }, { hi: NULL, id: 2, lo: NULL }, { hi: NULL, id: 3, lo: date'2024-01-20' }]"
+value = "[{ hi: pd'2024-02-01', id: 1, lo: pd'2024-01-01' }, { hi: NULL, id: 2, lo: NULL }, { hi: NULL, id: 3, lo: pd'2024-01-20' }]"
 
 [[test.results]]
 value = "[{ sharing: true, touching: false }]"

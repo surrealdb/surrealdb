@@ -11,13 +11,13 @@ reason = "An interval column declared with a field qualifier keeps a written int
 value = "NONE"
 
 [[test.results]]
-value = "[{ d: interval'P1Y2M3D', dh: interval'P1Y2M3DT4H', ds: interval'P1Y2M3DT4H5M6.789S', ds3: interval'P1Y2M3DT4H5M6.79S', full_iv: interval'P1Y2M3DT4H5M6.789S', h: interval'P1Y2M3DT4H', hm: interval'P1Y2M3DT4H5M', id: 1, m: interval'P1Y2M', mi: interval'P1Y2M3DT4H5M', ms: interval'P1Y2M3DT4H5M7S', s: interval'P1Y2M3DT4H5M6.8S', y: interval'P1Y', ym: interval'P1Y2M' }]"
+value = "[{ d: ivl'P1Y2M3D', dh: ivl'P1Y2M3DT4H', ds: ivl'P1Y2M3DT4H5M6.789S', ds3: ivl'P1Y2M3DT4H5M6.79S', full_iv: ivl'P1Y2M3DT4H5M6.789S', h: ivl'P1Y2M3DT4H', hm: ivl'P1Y2M3DT4H5M', id: 1, m: ivl'P1Y2M', mi: ivl'P1Y2M3DT4H5M', ms: ivl'P1Y2M3DT4H5M7S', s: ivl'P1Y2M3DT4H5M6.8S', y: ivl'P1Y', ym: ivl'P1Y2M' }]"
 
 [[test.results]]
-value = "[{ d: NULL, dh: NULL, ds: NULL, ds3: NULL, full_iv: NULL, h: interval'PT-4H', hm: NULL, id: 2, m: NULL, mi: interval'PT-5M', ms: interval'PT-7S', s: NULL, y: interval'P-1Y', ym: NULL }]"
+value = "[{ d: NULL, dh: NULL, ds: NULL, ds3: NULL, full_iv: NULL, h: ivl'PT-4H', hm: NULL, id: 2, m: NULL, mi: ivl'PT-5M', ms: ivl'PT-7S', s: NULL, y: ivl'P-1Y', ym: NULL }]"
 
 [[test.results]]
-value = "[{ d: interval'P1Y2M3D', dh: interval'P1Y2M3DT4H', ds: interval'P1Y2M3DT4H5M6.789S', ds3: interval'P1Y2M3DT4H5M6.79S', full_iv: interval'P1Y2M3DT4H5M6.789S', h: interval'P1Y2M3DT4H', hm: interval'P1Y2M3DT4H5M', id: 1, m: interval'P1Y2M', mi: interval'P1Y2M3DT4H5M', ms: interval'P1Y2M3DT4H5M7S', s: interval'P1Y2M3DT4H5M6.8S', y: interval'P1Y', ym: interval'P1Y2M' }, { d: NULL, dh: NULL, ds: NULL, ds3: NULL, full_iv: NULL, h: interval'PT-4H', hm: NULL, id: 2, m: NULL, mi: interval'PT-5M', ms: interval'PT-7S', s: NULL, y: interval'P-1Y', ym: NULL }]"
+value = "[{ d: ivl'P1Y2M3D', dh: ivl'P1Y2M3DT4H', ds: ivl'P1Y2M3DT4H5M6.789S', ds3: ivl'P1Y2M3DT4H5M6.79S', full_iv: ivl'P1Y2M3DT4H5M6.789S', h: ivl'P1Y2M3DT4H', hm: ivl'P1Y2M3DT4H5M', id: 1, m: ivl'P1Y2M', mi: ivl'P1Y2M3DT4H5M', ms: ivl'P1Y2M3DT4H5M7S', s: ivl'P1Y2M3DT4H5M6.8S', y: ivl'P1Y', ym: ivl'P1Y2M' }, { d: NULL, dh: NULL, ds: NULL, ds3: NULL, full_iv: NULL, h: ivl'PT-4H', hm: NULL, id: 2, m: NULL, mi: ivl'PT-5M', ms: ivl'PT-7S', s: NULL, y: ivl'P-1Y', ym: NULL }]"
 
 [[test.results]]
 value = "[{ attname: 'ds', atttypid: 1186, atttypmod: 470286339, formatted: 'interval day to second(3)' }, { attname: 'f', atttypid: 1186, atttypmod: -1, formatted: 'interval' }, { attname: 'h', atttypid: 1186, atttypmod: 67174399, formatted: 'interval hour' }, { attname: 'p', atttypid: 1186, atttypmod: 2147418114, formatted: 'interval(2)' }, { attname: 'ym', atttypid: 1186, atttypmod: 458751, formatted: 'interval year to month' }]"

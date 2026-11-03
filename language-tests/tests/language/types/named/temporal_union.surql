@@ -13,10 +13,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ f: date'2024-01-01', g: d'2024-01-01T10:00:00Z', id: t:1 }]"
+value = "[{ f: pd'2024-01-01', g: d'2024-01-01T10:00:00Z', id: t:1 }]"
 
 [[test.results]]
-value = "[{ f: d'2024-01-01T10:00:00Z', g: timestamp'2024-01-01T00:00:00', id: t:2 }]"
+value = "[{ f: d'2024-01-01T10:00:00Z', g: ts'2024-01-01T00:00:00', id: t:2 }]"
 */
 
 DEFINE FIELD f ON t TYPE datetime | date;

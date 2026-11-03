@@ -37,9 +37,9 @@ value = "[sq:2, sq:3]"
 value = "[sq:3]"
 */
 -- A date widens to midnight UTC.
-CREATE sq:2 SET created = date'2026-10-28';
+CREATE sq:2 SET created = pd'2026-10-28';
 -- A timestamp widens to a datetime read as UTC, through the option too.
-CREATE sq:3 SET created = timestamp'2026-10-29T10:20:30', seen = timestamp'2026-10-29T11:00:00.5';
+CREATE sq:3 SET created = ts'2026-10-29T10:20:30', seen = ts'2026-10-29T11:00:00.5';
 -- Strings and numbers are not coerced.
 CREATE sq:4 SET created = '2026-10-30T00:00:00Z';
 CREATE sq:5 SET created = 1761782400;

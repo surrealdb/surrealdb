@@ -3,34 +3,34 @@
 reason = "Keyword-prefixed date, time, timestamp and interval literals render back as the same literal, and d'..' stays a datetime"
 
 [[test.results]]
-value = "date'2026-10-27'"
+value = "pd'2026-10-27'"
 
 [[test.results]]
-value = "date'2026-10-27'"
+value = "pd'2026-10-27'"
 
 [[test.results]]
-value = "time'12:30:00'"
+value = "pt'12:30:00'"
 
 [[test.results]]
-value = "time'12:30:00.123456789'"
+value = "pt'12:30:00.123456789'"
 
 [[test.results]]
-value = "time'24:00:00'"
+value = "pt'24:00:00'"
 
 [[test.results]]
-value = "timestamp'2026-10-27T12:30:00'"
+value = "ts'2026-10-27T12:30:00'"
 
 [[test.results]]
-value = "timestamp'2026-10-27T12:30:00.500'"
+value = "ts'2026-10-27T12:30:00.500'"
 
 [[test.results]]
-value = "interval'P1Y2M3DT4H5M6.5S'"
+value = "ivl'P1Y2M3DT4H5M6.5S'"
 
 [[test.results]]
-value = "interval'P1Y2M3DT4H5M6.5S'"
+value = "ivl'P1Y2M3DT4H5M6.5S'"
 
 [[test.results]]
-value = "interval'P-1D'"
+value = "ivl'P-1D'"
 
 [[test.results]]
 value = "d'2026-10-27T00:00:00Z'"
@@ -39,10 +39,10 @@ value = "d'2026-10-27T00:00:00Z'"
 value = "'datetime'"
 
 [[test.results]]
-value = "[date'2026-10-27', time'12:30:00', timestamp'2026-10-27T12:30:00', interval'P1D']"
+value = "[pd'2026-10-27', pt'12:30:00', ts'2026-10-27T12:30:00', ivl'P1D']"
 
 [[test.results]]
-value = "{ a: date'2026-10-27', b: interval'P1M' }"
+value = "{ a: pd'2026-10-27', b: ivl'P1M' }"
 
 [[test.results]]
 value = "true"
@@ -53,20 +53,20 @@ value = "true"
 [[test.results]]
 value = "'interval'"
 */
-date'2026-10-27';
-date"2026-10-27";
-time'12:30:00';
-time'12:30:00.123456789';
-time'24:00:00';
-timestamp'2026-10-27T12:30:00';
-timestamp'2026-10-27 12:30:00.5';
-interval'1 year 2 mons 3 days 04:05:06.5';
-interval'P1Y2M3DT4H5M6.5S';
-interval'-1 day';
+pd'2026-10-27';
+pd"2026-10-27";
+pt'12:30:00';
+pt'12:30:00.123456789';
+pt'24:00:00';
+ts'2026-10-27T12:30:00';
+ts'2026-10-27 12:30:00.5';
+ivl'1 year 2 mons 3 days 04:05:06.5';
+ivl'P1Y2M3DT4H5M6.5S';
+ivl'-1 day';
 d'2026-10-27';
 type::of(d'2026-10-27');
-[date'2026-10-27', time'12:30:00', timestamp'2026-10-27T12:30:00', interval'1 day'];
-{ a: date'2026-10-27', b: interval'1 month' };
-date'2026-10-27' = date'2026-10-27';
-interval'1 mon' = interval'30 days';
-type::of(interval'1 mon');
+[pd'2026-10-27', pt'12:30:00', ts'2026-10-27T12:30:00', ivl'1 day'];
+{ a: pd'2026-10-27', b: ivl'1 month' };
+pd'2026-10-27' = pd'2026-10-27';
+ivl'1 mon' = ivl'30 days';
+type::of(ivl'1 mon');

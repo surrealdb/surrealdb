@@ -19,5 +19,5 @@ DEFINE FIELD r ON v TYPE option<range> SQL TYPE POSTGRESQL 'int4range';
 DEFINE FIELD a ON v TYPE option<string> SQL TYPE POSTGRESQL 'inet';
 DEFINE FIELD b ON v TYPE option<bool> SQL TYPE POSTGRESQL 'boolean';
 
-CREATE v:1 SET d = date'2026-10-27', t = time'12:30:05.5', ts = timestamp'2026-10-27T12:30:00.25', tz = d'2026-10-27T12:30:00Z', iv = interval'1 year 2 mons 3 days 04:05:06', n = 1.50dec, big = <bigdecimal> '12345678901234567890123456789012345.12345', m = 'ok', r = 1i32..6i32, a = '192.168.1.5', b = true RETURN NONE;
-CREATE v:2 SET iv = interval'-1 days +00:00:05', n = -0.50dec, big = <bigdecimal> '0.00000', m = 'sad', r = 0i32..0i32, a = '10.0.0.0/8', b = false RETURN NONE;
+CREATE v:1 SET d = pd'2026-10-27', t = pt'12:30:05.5', ts = ts'2026-10-27T12:30:00.25', tz = d'2026-10-27T12:30:00Z', iv = ivl'1 year 2 mons 3 days 04:05:06', n = 1.50dec, big = <bigdecimal> '12345678901234567890123456789012345.12345', m = 'ok', r = 1i32..6i32, a = '192.168.1.5', b = true RETURN NONE;
+CREATE v:2 SET iv = ivl'-1 days +00:00:05', n = -0.50dec, big = <bigdecimal> '0.00000', m = 'sad', r = 0i32..0i32, a = '10.0.0.0/8', b = false RETURN NONE;

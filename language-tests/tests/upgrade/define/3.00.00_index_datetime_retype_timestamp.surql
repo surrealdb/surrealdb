@@ -67,7 +67,7 @@ value = "[ti:3]"
 value = "[tu:2]"
 
 [[test.results]]
-error = "Database index `tu_ts` already contains timestamp'2026-10-27T12:00:00', with record `tu:2`"
+error = "Database index `tu_ts` already contains ts'2026-10-27T12:00:00', with record `tu:2`"
 */
 -- Retype the column; the index and its entries are not touched.
 DEFINE FIELD OVERWRITE ts ON ti TYPE timestamp;
@@ -79,15 +79,15 @@ SELECT VALUE id FROM ti WHERE ts = d'2026-10-27T12:00:00Z';
 SELECT VALUE id FROM tu WHERE ts = d'2026-10-27T12:00:00Z';
 -- A write maintains the index across the retype: the row is found at its new key and no longer at the old one.
 UPDATE ti:2 SET ts = ts;
-SELECT VALUE id FROM ti WHERE ts = timestamp'2026-10-27T00:00:00';
+SELECT VALUE id FROM ti WHERE ts = ts'2026-10-27T00:00:00';
 SELECT VALUE id FROM ti WHERE ts = d'2026-10-27T00:00:00Z';
 -- Backfill rewrites every entry as a timestamp.
 UPDATE ti SET ts = <timestamp> ts RETURN NONE;
 UPDATE tu SET ts = <timestamp> ts RETURN NONE;
-SELECT VALUE id FROM ti WHERE ts >= timestamp'2026-10-27T12:00:00' ORDER BY id;
-SELECT VALUE id FROM ti WHERE ts < timestamp'2026-10-27T12:00:00' ORDER BY id;
-SELECT VALUE id FROM ti WHERE ts > timestamp'1969-12-31T23:59:59.5' AND ts <= timestamp'2026-10-28T00:00:00' ORDER BY id;
-SELECT VALUE id FROM ti WHERE ts = timestamp'2026-10-27T12:00:00';
-SELECT VALUE id FROM tu WHERE ts = timestamp'2026-10-27T12:00:00';
+SELECT VALUE id FROM ti WHERE ts >= ts'2026-10-27T12:00:00' ORDER BY id;
+SELECT VALUE id FROM ti WHERE ts < ts'2026-10-27T12:00:00' ORDER BY id;
+SELECT VALUE id FROM ti WHERE ts > ts'1969-12-31T23:59:59.5' AND ts <= ts'2026-10-28T00:00:00' ORDER BY id;
+SELECT VALUE id FROM ti WHERE ts = ts'2026-10-27T12:00:00';
+SELECT VALUE id FROM tu WHERE ts = ts'2026-10-27T12:00:00';
 -- The unique index still refuses a duplicate.
-CREATE tu:4 SET ts = timestamp'2026-10-27T12:00:00';
+CREATE tu:4 SET ts = ts'2026-10-27T12:00:00';

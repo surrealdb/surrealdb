@@ -8,10 +8,10 @@ imports = ["pgsql/_temporal_infinity.surql"]
 reason = "infinity and -infinity are the greatest and least date, timestamp and timestamptz values: they are written and read back in their columns, order after and before every finite value, isfinite tells them apart, an interval leaves them unchanged, and the difference of an infinite timestamp is an error"
 
 [[test.results]]
-value = "[{ d: date'infinity', id: 1, ts: timestamp'infinity', tz: d'+262142-12-31T23:59:59.999999999Z' }, { d: date'-infinity', id: 2, ts: timestamp'-infinity', tz: d'-262143-01-01T00:00:00Z' }, { d: date'2026-10-27', id: 3, ts: timestamp'2026-10-27T12:00:00', tz: d'2026-10-27T12:00:00Z' }]"
+value = "[{ d: pd'infinity', id: 1, ts: ts'infinity', tz: d'+262142-12-31T23:59:59.999999999Z' }, { d: pd'-infinity', id: 2, ts: ts'-infinity', tz: d'-262143-01-01T00:00:00Z' }, { d: pd'2026-10-27', id: 3, ts: ts'2026-10-27T12:00:00', tz: d'2026-10-27T12:00:00Z' }]"
 
 [[test.results]]
-value = "[{ d: date'infinity', id: 1, ts: timestamp'infinity' }, { d: date'-infinity', id: 2, ts: timestamp'-infinity' }, { d: date'2026-10-27', id: 3, ts: timestamp'2026-10-27T12:00:00' }]"
+value = "[{ d: pd'infinity', id: 1, ts: ts'infinity' }, { d: pd'-infinity', id: 2, ts: ts'-infinity' }, { d: pd'2026-10-27', id: 3, ts: ts'2026-10-27T12:00:00' }]"
 
 [[test.results]]
 value = "[{ id: 2 }]"
@@ -23,13 +23,13 @@ value = "[{ id: 2 }, { id: 3 }, { id: 1 }]"
 value = "[{ d_finite: false, id: 1, ts_finite: false, tz_finite: false }, { d_finite: false, id: 2, ts_finite: false, tz_finite: false }, { d_finite: true, id: 3, ts_finite: true, tz_finite: true }]"
 
 [[test.results]]
-value = "[{ a: date'infinity', b: timestamp'-infinity', c: timestamp'infinity' }]"
+value = "[{ a: pd'infinity', b: ts'-infinity', c: ts'infinity' }]"
 
 [[test.results]]
 value = "[{ after: true, before: true }]"
 
 [[test.results]]
-value = "[{ e: date'1970-01-01', t: timestamp'1970-01-01T00:00:00' }]"
+value = "[{ e: pd'1970-01-01', t: ts'1970-01-01T00:00:00' }]"
 
 */
 
