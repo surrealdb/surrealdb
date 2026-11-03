@@ -162,9 +162,8 @@ async fn ds() -> Arc<Datastore> {
 
 /// [`ds`], with the archive built for `abi`.
 async fn ds_for(abi: Abi) -> Arc<Datastore> {
-	let caps = Capabilities::all().with_experimental(Targets::Some(
-		[ExperimentalTarget::Surrealism, ExperimentalTarget::Files].into(),
-	));
+	let caps = Capabilities::all()
+		.with_experimental(Targets::Some([ExperimentalTarget::Surrealism].into()));
 	let ds = Datastore::builder()
 		.without_maintenance_tasks()
 		.with_capabilities(caps)

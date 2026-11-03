@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [env.capabilities]
-allow-experimental = ["surrealism", "files"]
+allow-experimental = ["surrealism"]
 
 [test]
 reason = """BINDINGS is an object of expressions, kept as written: a subquery stays parenthesised so the definition parses back, and INFO STRUCTURE shows each expression as text, never its value. With a DIGEST and no archive to fetch, the definition is stored unchecked, so the names are checked against the package when the extension reads them."""
