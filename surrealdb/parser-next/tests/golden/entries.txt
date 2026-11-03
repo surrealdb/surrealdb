@@ -2245,7 +2245,7 @@ ea554481973b832b language-tests/tests/language/primitive/files/info.surql
 3b546f8a2385d332 language-tests/tests/language/primitive/files/metadata.surql
 b1cb9d28928a18e8 language-tests/tests/language/primitive/files/pointer_functions.surql
 95db539674e3321b language-tests/tests/language/primitive/files/pointer_methods.surql
-6ce624144995b2dc language-tests/tests/language/primitive/files/presign.surql
+3c78a90d18caa81f language-tests/tests/language/primitive/files/presign.surql
 d90e68733c38917b language-tests/tests/language/primitive/files/presign_no_secret.surql
 6181ff3e465c913a language-tests/tests/language/primitive/files/presign_permissions.surql
 e5f4822df22eb472 language-tests/tests/language/primitive/files/presign_readonly.surql

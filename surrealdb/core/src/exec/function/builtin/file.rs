@@ -15,7 +15,9 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 
-use crate::buc::presign::{self, BucketScope, PresignOp, PresignOptions, PresignRequest};
+use crate::buc::presign::{
+	self, BucketScope, PresignOp, PresignOptions, PresignRequest, ScopeLevel,
+};
 use crate::buc::store::{
 	ListOptions, ObjectKey, ObjectStore, PutCondition, put_bytes, put_content_type,
 };
@@ -199,8 +201,7 @@ impl<'a> StreamingBucketOps<'a> {
 			.and_then(|b| b.presign_secret())
 			.cloned()
 			.ok_or(BucError::PresignNoSecret)?;
-		let (ns_id, db_id) = self.frozen_ctx.expect_ns_db_ids(self.opt).await?;
-		let (ns_name, db_name) = self.opt.ns_db()?;
+		let level = ScopeLevel::of(self.level, self.opt)?;
 		let origin =
 			self.frozen_ctx.get_buckets().and_then(|b| b.public_origin()).map(str::to_owned);
 
@@ -208,10 +209,7 @@ impl<'a> StreamingBucketOps<'a> {
 			&secret,
 			origin.as_deref(),
 			BucketScope {
-				ns_id,
-				db_id,
-				ns_name,
-				db_name,
+				level,
 				bucket: self.bucket.name.as_str(),
 				nonce: self.bucket.presign_nonce,
 			},

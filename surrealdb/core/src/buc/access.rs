@@ -12,13 +12,13 @@
 //!
 //! Each step guards the next, and the order is load-bearing:
 //!
-//! 1. Resolve the bucket from the names given. This yields the namespace and database **ids** and
-//!    the nonce, which is what a signature is checked against — never anything the caller asserts.
+//! 1. Resolve the bucket from the location and name given. This yields the **ids** of the level it
+//!    is defined at and the nonce, which is what a signature is checked against — never anything
+//!    the caller asserts.
 //! 2. Authenticate. A signature wins over a session when both are present. A session must
-//!    additionally be in scope for the namespace and database named in the path, because those came
-//!    from the caller and have already replaced whatever the session had selected. An anonymous
-//!    session is a guest, admitted only where the node allows guest access, exactly as on every
-//!    other route.
+//!    additionally be in scope for the location, because it came from the caller and has already
+//!    replaced whatever the session had selected. An anonymous session is a guest, admitted only
+//!    where the node allows guest access, exactly as on every other route.
 //! 3. Check expiry, *after* the signature. `exp` is inside the signed blob, so a URL that verifies
 //!    is one whose expiry has not been edited.
 //! 4. Normalise the key and reject traversal. A valid signature proves that SurrealDB authorised
@@ -32,7 +32,7 @@ use anyhow::{Result, bail, ensure};
 use bytes::Bytes;
 use futures::stream::BoxStream;
 
-use super::presign::{self, BucketScope, PresignGrant, PresignOp, PresignParams};
+use super::presign::{self, BucketScope, PresignGrant, PresignOp, PresignParams, ScopeLevel};
 use super::store::{
 	ByteRange, ListEntry, ListOptions, ObjectKey, ObjectMeta, ObjectStore, ObjectStream,
 	PutCondition, PutError, PutOptions, PutResult,
@@ -41,7 +41,48 @@ use super::{BucketController, BucketOperation, Error};
 use crate::catalog::BucketDefinition;
 use crate::catalog::providers::BucketProvider;
 use crate::dbs::Session;
+use crate::iam::{Auth, Level};
 use crate::kvs::Datastore;
+
+/// Where a request addresses a bucket: the level it is defined at, by name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BucketLocation<'a> {
+	Root,
+	Namespace(&'a str),
+	Database(&'a str, &'a str),
+}
+
+impl<'a> BucketLocation<'a> {
+	fn ns(self) -> Option<&'a str> {
+		match self {
+			BucketLocation::Root => None,
+			BucketLocation::Namespace(ns) | BucketLocation::Database(ns, _) => Some(ns),
+		}
+	}
+
+	fn db(self) -> Option<&'a str> {
+		match self {
+			BucketLocation::Database(_, db) => Some(db),
+			BucketLocation::Root | BucketLocation::Namespace(_) => None,
+		}
+	}
+
+	/// Whether a principal may address a bucket here at all: a root principal
+	/// anywhere, a namespace principal in its namespace, a database or record
+	/// principal in its database. An anonymous principal is a guest, judged by
+	/// the guest rule instead.
+	fn admits(self, au: &Auth) -> bool {
+		match self {
+			BucketLocation::Root => matches!(au.level(), Level::Root | Level::No),
+			BucketLocation::Namespace(ns) => match au.level() {
+				Level::Root | Level::No => true,
+				Level::Namespace(n) => n == ns,
+				Level::Database(..) | Level::Record(..) => false,
+			},
+			BucketLocation::Database(ns, db) => au.can_access_ns_db(ns, db),
+		}
+	}
+}
 
 /// The signed parameters a request presented.
 ///
@@ -183,9 +224,9 @@ pub struct BucketAccess {
 impl Datastore {
 	/// Resolve and authorise one bucket request.
 	///
-	/// The argument list is wide because a bucket request is addressed by four
-	/// path components, and grouping them into a struct would hide which of
-	/// them a signature is bound to.
+	/// The argument list is wide because a bucket request is addressed by its
+	/// location, its name and its key, and grouping them into a struct would
+	/// hide which of them a signature is bound to.
 	///
 	/// `key` is the percent-decoded trailing path. It is normalised here, and
 	/// the normalised form is what both the signature check and the store see.
@@ -204,15 +245,14 @@ impl Datastore {
 	pub async fn bucket_access(
 		&self,
 		session: &Session,
-		ns: &str,
-		db: &str,
+		location: BucketLocation<'_>,
 		bucket: &str,
 		key: &str,
 		op: BucketOperation,
 		target: Option<&str>,
 		auth: BucketAuth,
 	) -> Result<BucketAccess, BucketAccessError> {
-		self.bucket_access_inner(session, ns, db, bucket, key, op, target, auth)
+		self.bucket_access_inner(session, location, bucket, key, op, target, auth)
 			.await
 			.map_err(BucketAccessError::classify)
 	}
@@ -221,8 +261,7 @@ impl Datastore {
 	async fn bucket_access_inner(
 		&self,
 		session: &Session,
-		ns: &str,
-		db: &str,
+		location: BucketLocation<'_>,
 		bucket: &str,
 		key: &str,
 		op: BucketOperation,
@@ -232,7 +271,10 @@ impl Datastore {
 		// The same rule as every other route: an anonymous caller is a guest,
 		// and is admitted only where the node allows guests.
 		let guests_allowed = self.check_anon(session).is_ok();
-		let opt = self.setup_options(session).with_ns(Some(ns.into())).with_db(Some(db.into()));
+		let opt = self
+			.setup_options(session)
+			.with_ns(location.ns().map(Into::into))
+			.with_db(location.db().map(Into::into));
 		let mut ctx = self.setup_ctx()?;
 		let txn = Arc::new(self.transaction(crate::kvs::TransactionType::Read).await?);
 		ctx.set_transaction(Arc::clone(&txn));
@@ -251,8 +293,7 @@ impl Datastore {
 			&opt,
 			&txn,
 			session,
-			ns,
-			db,
+			location,
 			bucket,
 			key,
 			op,
@@ -272,8 +313,7 @@ impl Datastore {
 		opt: &crate::dbs::Options,
 		txn: &Arc<crate::kvs::Transaction>,
 		session: &Session,
-		ns: &str,
-		db: &str,
+		location: BucketLocation<'_>,
 		bucket: &str,
 		key: &str,
 		op: BucketOperation,
@@ -282,8 +322,9 @@ impl Datastore {
 		guests_allowed: bool,
 		now: i64,
 	) -> Result<BucketAccess> {
-		let (ns_id, db_id) = ctx.expect_ns_db_ids(opt).await?;
-		let level = crate::catalog::BucketLevel::Db(ns_id, db_id);
+		// The options select the location's namespace and database, so the
+		// level they resolve to is the location's.
+		let level = ctx.expect_bucket_level(opt).await?;
 		let definition = txn.expect_bucket(level, bucket).await?;
 		let store = ctx.get_bucket_store(level, bucket).await?;
 
@@ -357,10 +398,7 @@ impl Datastore {
 				presign::verify(
 					&secret,
 					BucketScope {
-						ns_id,
-						db_id,
-						ns_name: ns,
-						db_name: db,
+						level: ScopeLevel::of(level, opt)?,
 						bucket: definition.name.as_str(),
 						nonce: definition.presign_nonce,
 					},
@@ -388,20 +426,22 @@ impl Datastore {
 				// a presigned URL, which is what they are for.
 				ensure!(!session.au.is_anon() || guests_allowed, Error::PresignBadSignature);
 
-				// The namespace and database were taken from the request path
-				// and have already replaced whatever the session had selected,
-				// so the authenticated level is the only trustworthy scope. A
+				// The location was taken from the request path and has already
+				// replaced whatever the session had selected, so the
+				// authenticated level is the only trustworthy scope. A
 				// principal authenticated for one tenant must not reach
-				// another's bucket, and `PERMISSIONS FULL` would allow exactly
-				// that -- the clause says "any authenticated caller" and cannot
-				// see which tenant was asked for. The same gate guards
-				// `/api/{ns}/{db}` for the same reason (GHSA-848m-r628-vrxw).
+				// another's bucket, nor one above its own level, and
+				// `PERMISSIONS FULL` would allow exactly that -- the clause says
+				// "any authenticated caller" and cannot see which tenant was
+				// asked for. The same gate guards `/api/{ns}/{db}` for the same
+				// reason (GHSA-848m-r628-vrxw).
 				//
-				// A signature needs no equivalent check: the nonce and the ids
-				// are inside its key derivation, so one minted for another
-				// tenant derives a different key and fails to verify.
+				// A signature needs no equivalent check: the nonce and the
+				// level's ids are inside its key derivation, so one minted for
+				// another tenant or level derives a different key and fails to
+				// verify.
 				ensure!(
-					session.au.can_access_ns_db(ns, db),
+					location.admits(&session.au),
 					Error::BucketPermissions {
 						name: definition.name.to_string(),
 						op,
@@ -416,8 +456,7 @@ impl Datastore {
 					opt,
 					Arc::clone(&definition),
 					Arc::clone(&store),
-					ns_id,
-					db_id,
+					level,
 				);
 				controller.check_permission(op, Some(&key), target.as_ref()).await?;
 

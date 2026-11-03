@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use super::PresignError;
 use crate::buc::PresignSecret;
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{BucketLevel, DatabaseId, NamespaceId};
+use crate::dbs::Options;
 
 /// Separates URL signing from any other use the secret is ever put to.
 const PURPOSE: &[u8] = b"surrealdb/bucket-presign/v1";
@@ -16,17 +17,57 @@ pub(super) type SigningKey = [u8; 32];
 
 /// Everything a presigned URL is scoped to.
 ///
-/// The ids and the nonce bind the key; the names appear in the URL path. Both
-/// are needed because the path is what a browser presents and the ids are what
-/// the node resolves it to.
+/// The level's ids and the nonce bind the key; the level's names appear in
+/// the URL path. Both are needed because the path is what a browser presents
+/// and the ids are what the node resolves it to.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct BucketScope<'a> {
-	pub ns_id: NamespaceId,
-	pub db_id: DatabaseId,
-	pub ns_name: &'a str,
-	pub db_name: &'a str,
+	pub level: ScopeLevel<'a>,
 	pub bucket: &'a str,
 	pub nonce: Uuid,
+}
+
+/// The level a bucket is defined at, by id and by name.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ScopeLevel<'a> {
+	Root,
+	Namespace {
+		id: NamespaceId,
+		name: &'a str,
+	},
+	Database {
+		ns_id: NamespaceId,
+		db_id: DatabaseId,
+		ns_name: &'a str,
+		db_name: &'a str,
+	},
+}
+
+impl<'a> ScopeLevel<'a> {
+	/// The level `level` names, with its names taken from `opt`.
+	///
+	/// `level` must be the one [`expect_bucket_level`] resolved from `opt`, so
+	/// the names in the options are the names of its ids.
+	///
+	/// [`expect_bucket_level`]: crate::ctx::Context::expect_bucket_level
+	pub(crate) fn of(level: BucketLevel, opt: &'a Options) -> anyhow::Result<Self> {
+		Ok(match level {
+			BucketLevel::Root => ScopeLevel::Root,
+			BucketLevel::Ns(id) => ScopeLevel::Namespace {
+				id,
+				name: opt.ns()?,
+			},
+			BucketLevel::Db(ns_id, db_id) => {
+				let (ns_name, db_name) = opt.ns_db()?;
+				ScopeLevel::Database {
+					ns_id,
+					db_id,
+					ns_name,
+					db_name,
+				}
+			}
+		})
+	}
 }
 
 impl BucketScope<'_> {
@@ -44,14 +85,35 @@ impl BucketScope<'_> {
 	/// one, so URLs issued for the old bucket cannot verify against the new
 	/// one. It is carried across an `OVERWRITE`, which is the one redefinition
 	/// that keeps the same bucket.
+	///
+	/// The tenant link covers the ids of the bucket's level followed by the
+	/// nonce: 16 bytes at the root, 20 in a namespace, 24 in a database. The
+	/// lengths differ, so buckets at two levels never derive from one input.
 	pub(super) fn signing_key(&self, secret: &PresignSecret) -> Result<SigningKey, PresignError> {
 		let mut ids = [0u8; 24];
-		ids[0..4].copy_from_slice(&self.ns_id.0.to_be_bytes());
-		ids[4..8].copy_from_slice(&self.db_id.0.to_be_bytes());
-		ids[8..24].copy_from_slice(self.nonce.as_bytes());
+		let len = match self.level {
+			ScopeLevel::Root => 0,
+			ScopeLevel::Namespace {
+				id,
+				..
+			} => {
+				ids[0..4].copy_from_slice(&id.0.to_be_bytes());
+				4
+			}
+			ScopeLevel::Database {
+				ns_id,
+				db_id,
+				..
+			} => {
+				ids[0..4].copy_from_slice(&ns_id.0.to_be_bytes());
+				ids[4..8].copy_from_slice(&db_id.0.to_be_bytes());
+				8
+			}
+		};
+		ids[len..len + 16].copy_from_slice(self.nonce.as_bytes());
 
 		let purpose = derive(secret.as_bytes(), PURPOSE)?;
-		let tenant = derive(&purpose, &ids)?;
+		let tenant = derive(&purpose, &ids[..len + 16])?;
 		derive(&tenant, self.bucket.as_bytes())
 	}
 }
@@ -113,15 +175,28 @@ mod tests {
 		// in the wild, so it must be a deliberate edit of this constant and not
 		// a side effect of touching the derivation.
 		let secret = PresignSecret::for_test(&[0u8; 32]);
-		let scope = BucketScope {
-			ns_id: NamespaceId(7),
-			db_id: DatabaseId(12),
-			ns_name: "test",
-			db_name: "app",
+		let scope = |level| BucketScope {
+			level,
 			bucket: "images",
 			nonce: Uuid::from_u128(1),
 		};
-		let key = scope.signing_key(&secret).unwrap();
-		assert_eq!(STANDARD.encode(key), "FFCJyCqk8D5Iex+AVJdFVCz0jFUfP3s52XcxESV2/yk=");
+		let key = |level| STANDARD.encode(scope(level).signing_key(&secret).unwrap());
+		assert_eq!(
+			key(ScopeLevel::Database {
+				ns_id: NamespaceId(7),
+				db_id: DatabaseId(12),
+				ns_name: "test",
+				db_name: "app",
+			}),
+			"FFCJyCqk8D5Iex+AVJdFVCz0jFUfP3s52XcxESV2/yk="
+		);
+		assert_eq!(
+			key(ScopeLevel::Namespace {
+				id: NamespaceId(7),
+				name: "test",
+			}),
+			"c78lKyFULlSkXrE6K/zoPynE2mFIVDnrrqj1N4t1yVU="
+		);
+		assert_eq!(key(ScopeLevel::Root), "LCNb6hwh6PVArm/N+uWG9HdN13Sp4wN4qYN24x/94No=");
 	}
 }

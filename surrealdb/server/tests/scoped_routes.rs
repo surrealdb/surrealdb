@@ -13,9 +13,10 @@ use std::net::SocketAddr;
 
 use reqwest::{Client, Method, StatusCode};
 use serde_json::{Value, json};
+use surrealdb_cnf::ConfigMap;
 use surrealdb_core::CommunityComposer;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_rpc::capabilities::Capabilities;
+use surrealdb_rpc::capabilities::{Capabilities, Targets};
 use surrealdb_server::ntw::{RouterOptions, SurrealRouter};
 use tokio_util::sync::CancellationToken;
 
@@ -39,7 +40,11 @@ impl TestServer {
 	async fn start() -> Self {
 		let (send, recv) = surrealdb_core::channel::bounded(128);
 		let datastore = Datastore::builder()
-			.with_capabilities(Capabilities::all())
+			.with_capabilities(Capabilities::all().with_experimental(Targets::All))
+			.with_config(
+				ConfigMap::empty()
+					.with_key_value("bucket_presign_secret", "scoped-routes-presign-secret-0000"),
+			)
 			.with_notify(send)
 			.with_auth(true)
 			.build_with_path("memory")
@@ -229,6 +234,177 @@ async fn api_answers_in_both_forms() {
 		assert_eq!(res.status(), StatusCode::OK, "{path}");
 		assert_eq!(res.text().await.expect("body"), "pong", "{path}");
 	}
+}
+
+/// Defines a bucket `img` on the root, on namespace `foo` and on database
+/// `foo`/`bar`, each holding `a.txt` with the name of its level.
+async fn define_buckets(server: &TestServer) {
+	for (path, level) in
+		[("/sql", "ROOT"), ("/ns/foo/sql", "NAMESPACE"), ("/ns/foo/db/bar/sql", "DATABASE")]
+	{
+		server
+			.selected(server.sql(
+				path,
+				&format!(
+					"DEFINE BUCKET img ON {level} BACKEND \"memory\" PERMISSIONS FULL; \
+					 f\"img:/a.txt\".put(\"{}\")",
+					level.to_lowercase()
+				),
+			))
+			.await;
+	}
+}
+
+#[tokio::test]
+async fn buckets_are_served_at_the_level_the_url_names() {
+	let server = TestServer::start().await;
+	server.selected(server.sql("/sql", "DEFINE NAMESPACE foo")).await;
+	server.selected(server.sql("/ns/foo/sql", "DEFINE DATABASE bar")).await;
+	define_buckets(&server).await;
+	let get = |path: &str| server.request(Method::GET, path).basic_auth(USER, Some(PASS));
+	for (path, body) in [
+		("/bucket/img/a.txt", "root"),
+		("/ns/foo/bucket/img/a.txt", "namespace"),
+		("/ns/foo/db/bar/bucket/img/a.txt", "database"),
+	] {
+		let res = get(path).send().await.expect("request");
+		assert_eq!(res.status(), StatusCode::OK, "{path}");
+		assert_eq!(res.text().await.expect("body"), body, "{path}");
+	}
+	for path in ["/bucket/img/", "/ns/foo/bucket/img/", "/ns/foo/db/bar/bucket/img/"] {
+		let res = get(path).header("Accept", "application/json").send().await.expect("request");
+		assert_eq!(res.status(), StatusCode::OK, "{path}");
+		let body: Value = serde_json::from_str(&res.text().await.expect("body")).expect("json");
+		assert!(body.to_string().contains("a.txt"), "{path}: {body}");
+	}
+	// The headers never move a request to another level's bucket.
+	let res = get("/bucket/img/a.txt")
+		.header("surreal-ns", "foo")
+		.header("surreal-db", "bar")
+		.send()
+		.await
+		.expect("request");
+	assert_eq!(res.text().await.expect("body"), "root");
+	// A header that names another database than the path is refused.
+	let res = get("/ns/foo/db/bar/bucket/img/a.txt")
+		.header("surreal-db", "other")
+		.send()
+		.await
+		.expect("request");
+	assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+	// `/bucket/{ns}/{db}/{name}/…` is not a route: it names root bucket `foo`.
+	let res = get("/bucket/foo/bar/img/a.txt").send().await.expect("request");
+	assert_ne!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_principal_reaches_no_bucket_above_its_level() {
+	let server = TestServer::start().await;
+	server.selected(server.sql("/sql", "DEFINE NAMESPACE foo")).await;
+	server.selected(server.sql("/ns/foo/sql", "DEFINE DATABASE bar")).await;
+	define_buckets(&server).await;
+	server
+		.selected(server.sql(
+			"/ns/foo/db/bar/sql",
+			"DEFINE USER carol ON DATABASE PASSWORD 'secret' ROLES OWNER",
+		))
+		.await;
+	let get = |path: &str| {
+		server
+			.request(Method::GET, path)
+			.basic_auth("carol", Some("secret"))
+			.header("surreal-auth-ns", "foo")
+			.header("surreal-auth-db", "bar")
+	};
+	let res = get("/ns/foo/db/bar/bucket/img/a.txt").send().await.expect("request");
+	assert_eq!(res.status(), StatusCode::OK);
+	assert_eq!(res.text().await.expect("body"), "database");
+	// The namespace scope refuses a database principal outright; the root
+	// bucket refuses it in the bucket route.
+	for path in ["/ns/foo/bucket/img/a.txt", "/bucket/img/a.txt"] {
+		let res = get(path).send().await.expect("request");
+		assert!(
+			matches!(res.status(), StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN),
+			"{path}: {}",
+			res.status()
+		);
+	}
+}
+
+#[tokio::test]
+async fn a_namespace_principal_reaches_its_namespace_and_below() {
+	let server = TestServer::start().await;
+	server.selected(server.sql("/sql", "DEFINE NAMESPACE foo")).await;
+	server.selected(server.sql("/ns/foo/sql", "DEFINE DATABASE bar")).await;
+	define_buckets(&server).await;
+	server
+		.selected(
+			server
+				.sql("/ns/foo/sql", "DEFINE USER dave ON NAMESPACE PASSWORD 'secret' ROLES OWNER"),
+		)
+		.await;
+	let get = |path: &str| {
+		server
+			.request(Method::GET, path)
+			.basic_auth("dave", Some("secret"))
+			.header("surreal-auth-ns", "foo")
+	};
+	for (path, body) in
+		[("/ns/foo/bucket/img/a.txt", "namespace"), ("/ns/foo/db/bar/bucket/img/a.txt", "database")]
+	{
+		let res = get(path).send().await.expect("request");
+		assert_eq!(res.status(), StatusCode::OK, "{path}");
+		assert_eq!(res.text().await.expect("body"), body, "{path}");
+	}
+	// The root bucket is above its level.
+	let res = get("/bucket/img/a.txt").send().await.expect("request");
+	assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn presigned_urls_name_their_level_and_ignore_ambient_credentials() {
+	let server = TestServer::start().await;
+	server.selected(server.sql("/sql", "DEFINE NAMESPACE foo")).await;
+	server.selected(server.sql("/ns/foo/sql", "DEFINE DATABASE bar")).await;
+	server.selected(server.sql("/sql", "DEFINE NAMESPACE other")).await;
+	server
+		.selected(
+			server
+				.sql("/ns/other/sql", "DEFINE USER bob ON NAMESPACE PASSWORD 'secret' ROLES OWNER"),
+		)
+		.await;
+	define_buckets(&server).await;
+	const PRESIGN: &str = "RETURN file::presign_get(f\"img:/a.txt\").path";
+	for (sql, prefix, body) in [
+		("/sql", "/bucket/img/a.txt?", "root"),
+		("/ns/foo/sql", "/ns/foo/bucket/img/a.txt?", "namespace"),
+		("/ns/foo/db/bar/sql", "/ns/foo/db/bar/bucket/img/a.txt?", "database"),
+	] {
+		let url = server.selected(server.sql(sql, PRESIGN)).await;
+		let url = url.as_str().expect("a presigned path").to_owned();
+		assert!(url.starts_with(prefix), "{url}");
+		// With no credential, with credentials for another namespace, and
+		// with a bearer token that does not verify: the signature decides.
+		let requests = [
+			server.request(Method::GET, &url),
+			server
+				.request(Method::GET, &url)
+				.basic_auth("bob", Some("secret"))
+				.header("surreal-auth-ns", "other"),
+			server.request(Method::GET, &url).bearer_auth("not-a-token"),
+		];
+		for request in requests {
+			let res = request.send().await.expect("request");
+			assert_eq!(res.status(), StatusCode::OK, "{url}");
+			assert_eq!(res.text().await.expect("body"), body, "{url}");
+		}
+	}
+	// A URL minted for one level does not verify at another.
+	let url = server.selected(server.sql("/ns/foo/db/bar/sql", PRESIGN)).await;
+	let url = url.as_str().expect("a presigned path");
+	let moved = url.replacen("/ns/foo/db/bar/bucket/", "/ns/foo/bucket/", 1);
+	let res = server.request(Method::GET, &moved).send().await.expect("request");
+	assert_eq!(res.status(), StatusCode::FORBIDDEN, "{moved}");
 }
 
 #[tokio::test]

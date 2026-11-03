@@ -92,7 +92,10 @@ where
 		let mut inner = std::mem::replace(&mut self.inner, clone);
 		Box::pin(async move {
 			let (mut parts, body) = request.into_parts();
-			let mut checked = check_auth(&mut parts, true).await;
+			// A presigned bucket URL is its own credential. The browser's
+			// ambient ones are not read, so they cannot refuse it.
+			let use_credentials = !super::bucket::presents_signature(&parts.uri);
+			let mut checked = check_auth(&mut parts, use_credentials).await;
 			// The credential-exchange routes are how a client replaces an
 			// expired token, so an expired bearer token on one of them is
 			// ignored and the request is authenticated as a fresh, anonymous

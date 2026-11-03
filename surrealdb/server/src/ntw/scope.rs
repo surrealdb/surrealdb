@@ -5,13 +5,15 @@
 //! with the scope taken from the path instead of the request headers or body:
 //!
 //! ```text
-//! POST /ns/foo/db/bar/sql            → POST /sql             + PathScope { ns: foo, db: bar }
-//! GET  /ns/foo/rpc                   → GET  /rpc             + PathScope { ns: foo }
-//! GET  /ns/foo/db/bar/key/person     → GET  /key/person      + PathScope { ns: foo, db: bar }
-//! ANY  /ns/foo/db/bar/api/a/b        → ANY  /api/foo/bar/a/b + PathScope { ns: foo, db: bar }
-//! POST /ns/foo/db/bar/signin         → POST /signin          + PathScope { ns: foo, db: bar }
-//! POST /ns/foo/db/bar/ac/users/signup → POST /signup         + PathScope { ns: foo, db: bar, ac: users }
-//! POST /ac/admin/signin              → POST /signin          + PathScope { ac: admin }
+//! POST /ns/foo/db/bar/sql             → POST /sql                  + PathScope { ns: foo, db: bar }
+//! GET  /ns/foo/rpc                    → GET  /rpc                  + PathScope { ns: foo }
+//! GET  /ns/foo/db/bar/key/person      → GET  /key/person           + PathScope { ns: foo, db: bar }
+//! ANY  /ns/foo/db/bar/api/a/b         → ANY  /api/foo/bar/a/b      + PathScope { ns: foo, db: bar }
+//! GET  /ns/foo/db/bar/bucket/img/a    → GET  /bucket/img/a         + PathScope { ns: foo, db: bar }
+//! GET  /ns/foo/bucket/img/a           → GET  /bucket/img/a         + PathScope { ns: foo }
+//! POST /ns/foo/db/bar/signin          → POST /signin               + PathScope { ns: foo, db: bar }
+//! POST /ns/foo/db/bar/ac/users/signup → POST /signup               + PathScope { ns: foo, db: bar, ac: users }
+//! POST /ac/admin/signin               → POST /signin               + PathScope { ac: admin }
 //! ```
 //!
 //! [`mount`] rewrites the URI before the request enters the router, so every
@@ -23,6 +25,7 @@
 //!   and the credentials, and pins the session to them (see [`ScopePin`]).
 //! - `signin` and `signup` complete their credentials' `NS`, `DB` and `AC` from it (see
 //!   [`credentials`]).
+//! - The bucket routes take the level of the bucket they serve from it.
 //!
 //! `ns`, `db` and `ac` are reserved path segments. A method outside the scoped
 //! sets, an access method on a route other than `signin` or `signup`, an empty
@@ -47,7 +50,7 @@ use crate::ntw::error::Error as NetError;
 /// Routes that run in the session's namespace and database, and so accept a
 /// namespace and database scope.
 const SESSION_METHODS: &[&str] =
-	&["sql", "rpc", "import", "export", "key", "ml", "gql", "graphql", "mcp", "api"];
+	&["sql", "rpc", "import", "export", "key", "ml", "gql", "graphql", "mcp", "api", "bucket"];
 
 /// Routes that exchange credentials, and so accept a namespace, database and
 /// access method scope. Their sub-routes (`/signin/cookie`, `/signup/cookie`)
@@ -336,6 +339,37 @@ mod tests {
 		);
 		// `/api` needs a database.
 		assert_eq!(ns("/foo/api/x"), None);
+	}
+
+	#[test]
+	fn bucket_is_scoped_at_every_level() {
+		assert_eq!(
+			ns("/foo/db/bar/bucket/images/a/b.png"),
+			Some((scope(Some("foo"), Some("bar"), None), "/bucket/images/a/b.png".into()))
+		);
+		assert_eq!(
+			ns("/foo/bucket/images/a/b.png"),
+			Some((scope(Some("foo"), None, None), "/bucket/images/a/b.png".into()))
+		);
+		// The listing routes, with and without the trailing slash.
+		assert_eq!(
+			ns("/foo/db/bar/bucket/images"),
+			Some((scope(Some("foo"), Some("bar"), None), "/bucket/images".into()))
+		);
+		assert_eq!(
+			ns("/foo/bucket/images/"),
+			Some((scope(Some("foo"), None, None), "/bucket/images/".into()))
+		);
+		// The bucket and key keep their raw segments; the route's `Path`
+		// extractor decodes them.
+		assert_eq!(
+			ns("/a%2Fb/db/c%20d/bucket/img/x%3Ay"),
+			Some((scope(Some("a/b"), Some("c d"), None), "/bucket/img/x%3Ay".into()))
+		);
+		// No access method, and no access-method-only scope.
+		assert_eq!(ns("/foo/db/bar/ac/users/bucket/images/x"), None);
+		assert_eq!(rewrite(Prefix::Ac, "/admins/bucket/images/x"), None);
+		assert_eq!(ns("/foo/db/bar/bucketx/images/x"), None);
 	}
 
 	#[test]

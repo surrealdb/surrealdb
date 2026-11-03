@@ -31,7 +31,9 @@ GET  /ns/foo/db/bar/key/person/tobie
 POST /ns/foo/db/bar/signin                   (database user)
 POST /ns/foo/db/bar/ac/users/signup          (record access method)
 POST /ac/admins/signin                       (root access method)
-GET  /ns/foo/db/bar/file/{bucket}/{path}     (when the file routes exist)
+GET  /ns/foo/db/bar/bucket/{bucket}/{path}  (a database's bucket)
+GET  /ns/foo/bucket/{bucket}/{path}         (a namespace's bucket)
+GET  /bucket/{bucket}/{path}                (a root bucket)
 ```
 
 `ns`, `db` and `ac` are reserved. No top-level method can use these names.
@@ -45,10 +47,9 @@ Segments are percent-decoded once. Namespace and database names can contain
 
 | Method | `ns`, `db` | `ac` |
 |---|---|---|
-| `sql`, `rpc`, `import`, `export`, `key`, `ml`, `gql`, `graphql`, `mcp`, `api` | yes | no, 404 |
+| `sql`, `rpc`, `import`, `export`, `key`, `ml`, `gql`, `graphql`, `mcp`, `api`, `bucket` | yes | no, 404 |
 | `signin`, `signup` (and their `/cookie` forms) | yes | yes |
 | `signout`, `refresh` | no, 404 | no, 404 |
-| `file` | when the file routes exist | no |
 | `.well-known` | planned, see section 5 | planned |
 | `health`, `version`, `status`, `ready`, `metrics`, `kvexport`, `sync` | no, 404 | no, 404 |
 
@@ -89,6 +90,38 @@ form (`/api/foo/bar/{*path}`). A plain prefix strip to `/api/{*path}` would
 match `/api/{ns}/{db}/{*path}` and read the first two segments of the API path
 as the namespace and database. A scoped `/api` path without a database returns
 404.
+
+### `/bucket` has one form per level
+
+A bucket is defined on the root, a namespace or a database, and the URL names
+which:
+
+```
+/bucket/{name}/{*path}                    a bucket on the root
+/ns/{ns}/bucket/{name}/{*path}            a bucket on a namespace
+/ns/{ns}/db/{db}/bucket/{name}/{*path}    a bucket on a database
+```
+
+The scoped forms are rewritten to `/bucket/{name}/{*path}` like any other
+session route, and the bucket route takes the level from the `PathScope` alone:
+no scope is the root, and the `surreal-ns` and `surreal-db` headers never move a
+request to another level. There is no `/bucket/{ns}/{db}/…` form;
+`/bucket/a/b/c/d` is object `b/c/d` in root bucket `a`.
+
+A session reaches a bucket at its own level or below: a root principal any
+bucket, a namespace principal its namespace's and its databases', a database or
+record principal its database's. A guest is judged by the guest rules, which
+admit it to no bucket above a database.
+
+`file::presign_get` and `file::presign_put` mint the form for the bucket's
+level, and the signature covers that path. The signing key derives from the
+level's ids, so a URL moved to another level fails to verify even where a
+bucket of the same name exists there.
+
+A bucket request that presents a signature (an `exp` or `sig` query parameter)
+is authenticated without its `Authorization` header or session cookie. The
+signature authorises it; an ambient credential (a browser's cookie for another
+tenant, an expired token) would otherwise refuse a URL that needs none.
 
 ## 2. Resolution rules
 

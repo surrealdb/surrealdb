@@ -82,13 +82,13 @@ DEFINE BUCKET images BACKEND "memory" PERMISSIONS FULL;
 RETURN object::keys(file::presign_get(type::file("images", "/a.png")));
 
 RETURN file::presign_get(type::file("images", "/a.png")).origin IS NONE
-	AND file::presign_get(type::file("images", "/a.png")).href.starts_with("/bucket/");
+	AND file::presign_get(type::file("images", "/a.png")).href.starts_with("/ns/test/db/test/bucket/");
 
 RETURN file::presign_get(type::file("images", "/a.png")).path
-	.starts_with("/bucket/test/test/images/a.png?");
+	.starts_with("/ns/test/db/test/bucket/images/a.png?");
 
 RETURN file::presign_get(type::file("images", "/u/user:tobie/a.png")).path
-	.starts_with("/bucket/test/test/images/u/user%3Atobie/a.png?");
+	.starts_with("/ns/test/db/test/bucket/images/u/user%3Atobie/a.png?");
 
 RETURN file::presign_get(type::file("images", "/a.png")).method;
 

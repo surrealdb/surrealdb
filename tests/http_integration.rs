@@ -5245,7 +5245,7 @@ mod http_integration {
 		)
 		.await?;
 		assert_all_sql_ok(&body, "bucket route setup");
-		let base = format!("http://{addr}/bucket/test/app");
+		let base = format!("http://{addr}/ns/test/db/app/bucket");
 		Ok((addr, base, server, client, dir))
 	}
 

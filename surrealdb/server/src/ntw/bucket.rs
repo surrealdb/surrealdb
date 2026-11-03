@@ -1,21 +1,33 @@
-//! The `/bucket/{ns}/{db}/{name}` routes: redeeming a presigned URL, and
-//! serving a bucket to an ordinary session or a guest.
+//! The bucket routes: redeeming a presigned URL, and serving a bucket to an
+//! ordinary session or a guest.
 //!
-//! - `GET | HEAD | PUT | DELETE /bucket/{ns}/{db}/{name}/{*path}` reads, writes and removes one
-//!   object, as `file::get`, `file::put` and `file::delete` do.
-//! - `POST /bucket/{ns}/{db}/{name}/{*path}` copies or renames it; the body names the action and
-//!   the target.
-//! - `GET /bucket/{ns}/{db}/{name}/` lists the bucket, taking `file::list`'s options as query
-//!   parameters.
+//! The URL names the level the bucket is defined at, as every scoped route
+//! does (see `ntw/scope.rs`):
+//!
+//! ```text
+//! /bucket/{name}/{*path}                    a bucket on the root
+//! /ns/{ns}/bucket/{name}/{*path}            a bucket on a namespace
+//! /ns/{ns}/db/{db}/bucket/{name}/{*path}    a bucket on a database
+//! ```
+//!
+//! The scoped forms reach these routes as `/bucket/{name}/…` with a
+//! [`PathScope`], which is the only source of the level: the `surreal-ns` and
+//! `surreal-db` headers never move a request to another bucket.
+//!
+//! - `GET | HEAD | PUT | DELETE …/bucket/{name}/{*path}` reads, writes and removes one object, as
+//!   `file::get`, `file::put` and `file::delete` do.
+//! - `POST …/bucket/{name}/{*path}` copies or renames it; the body names the action and the target.
+//! - `GET …/bucket/{name}/` lists the bucket, taking `file::list`'s options as query parameters.
 //!
 //! Every request is judged by the bucket's `PERMISSIONS` clause, as the
 //! function it mirrors is. Structured bodies and answers are JSON or CBOR, by
 //! `Content-Type` and `Accept`.
 //!
-//! The namespace and database are in the path rather than in headers because a
-//! presigned URL arrives from a browser with no session to carry them. The path
-//! is the resource identifier; a session, when there is one, is only a
-//! credential.
+//! The level is in the path rather than in headers because a presigned URL
+//! arrives from a browser with no session to carry it. The path is the
+//! resource identifier; a session, when there is one, is only a credential.
+//! A request that presents a signature is authenticated without its ambient
+//! credentials at all (see [`presents_signature`]).
 //!
 //! Every decision about whether a request is allowed lives in
 //! `surrealdb_core::buc::access`. This module owns HTTP and nothing else: it does
@@ -27,16 +39,18 @@ use axum::routing::get;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::cnf::HTTP_MAX_BUCKET_BODY_SIZE;
+#[cfg(doc)]
+use crate::ntw::scope::PathScope;
 
 pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
-		.route("/bucket/{ns}/{db}/{name}", get(implementation::list_objects))
-		.route("/bucket/{ns}/{db}/{name}/", get(implementation::list_objects))
+		.route("/bucket/{name}", get(implementation::list_objects))
+		.route("/bucket/{name}/", get(implementation::list_objects))
 		.route(
-			"/bucket/{ns}/{db}/{name}/{*path}",
+			"/bucket/{name}/{*path}",
 			get(implementation::get_object)
 				.head(implementation::head_object)
 				.put(implementation::put_object)
@@ -45,6 +59,25 @@ where
 		)
 		.route_layer(DefaultBodyLimit::disable())
 		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_BUCKET_BODY_SIZE))
+}
+
+/// Whether a bucket request presents a presigned-URL signature, whole or
+/// partial: a query parameter named `exp` or `sig`.
+///
+/// Such a request is authorised by its signature, and the auth layer
+/// authenticates it without reading its `Authorization` header or session
+/// cookie. A credential the browser attaches to every request (a cookie for
+/// another tenant, an expired token) would otherwise refuse a URL that needs
+/// no credential at all. The handler then refuses a signature it cannot
+/// verify rather than falling back to the session.
+pub(super) fn presents_signature(uri: &http::Uri) -> bool {
+	uri.path().starts_with("/bucket/")
+		&& uri.query().is_some_and(|query| {
+			query.split('&').any(|pair| {
+				let key = pair.split_once('=').map_or(pair, |(key, _)| key);
+				matches!(key, "exp" | "sig")
+			})
+		})
 }
 
 mod implementation {
@@ -67,7 +100,7 @@ mod implementation {
 	use serde::Deserialize;
 	use surrealdb_core::buc::BucketOperation;
 	use surrealdb_core::buc::access::{
-		BucketAccess, BucketAccessError, BucketAuth, SignedQuery, TransferOutcome,
+		BucketAccess, BucketAccessError, BucketAuth, BucketLocation, SignedQuery, TransferOutcome,
 	};
 	use surrealdb_core::buc::store::{
 		ByteRange, ListEntry, ListOptions, NO_CONTENT_TYPE, ObjectMeta, normalise_content_type,
@@ -79,6 +112,17 @@ mod implementation {
 	use crate::ntw::AppState;
 	use crate::ntw::error::{Error as NetError, ResponseError};
 	use crate::ntw::headers::{Accept, ContentType};
+	use crate::ntw::scope::PathScope;
+
+	/// The level a request's URL names: the scope it was rewritten from, or
+	/// the root for an unscoped `/bucket/…` path.
+	fn location(scope: Option<&PathScope>) -> BucketLocation<'_> {
+		match scope.map(|s| (s.ns.as_deref(), s.db.as_deref())) {
+			Some((Some(ns), Some(db))) => BucketLocation::Database(ns, db),
+			Some((Some(ns), None)) => BucketLocation::Namespace(ns),
+			_ => BucketLocation::Root,
+		}
+	}
 
 	/// What a handler on this route can fail with.
 	///
@@ -127,12 +171,12 @@ mod implementation {
 	async fn access(
 		state: &AppState,
 		session: &Session,
-		path: (String, String, String, String),
+		scope: Option<&PathScope>,
+		(name, key): (String, String),
 		query: Option<String>,
 		op: BucketOperation,
 		target: Option<&str>,
 	) -> Result<BucketAccess, RouteError> {
-		let (ns, db, name, key) = path;
 		let ds = &state.datastore;
 
 		if !ds.allows_http_route(&RouteTarget::Bucket) {
@@ -153,7 +197,7 @@ mod implementation {
 			Err(()) => return Err(RouteError::Status(StatusCode::UNAUTHORIZED)),
 		};
 
-		ds.bucket_access(session, &ns, &db, &name, &key, op, target, auth)
+		ds.bucket_access(session, location(scope), &name, &key, op, target, auth)
 			.await
 			.map_err(access_error)
 	}
@@ -321,11 +365,14 @@ mod implementation {
 	pub async fn get_object(
 		Extension(state): Extension<AppState>,
 		Extension(session): Extension<Session>,
-		Path(path): Path<(String, String, String, String)>,
+		scope: Option<Extension<PathScope>>,
+		Path(path): Path<(String, String)>,
 		RawQuery(query): RawQuery,
 		headers: HeaderMap,
 	) -> Result<Response, RouteError> {
-		let access = access(&state, &session, path, query, BucketOperation::Get, None).await?;
+		let access =
+			access(&state, &session, scope.as_deref(), path, query, BucketOperation::Get, None)
+				.await?;
 
 		// A conditional request is answered from metadata, before any object is
 		// opened. Opening first would issue a real backend GET whose body is
@@ -384,11 +431,14 @@ mod implementation {
 	pub async fn head_object(
 		Extension(state): Extension<AppState>,
 		Extension(session): Extension<Session>,
-		Path(path): Path<(String, String, String, String)>,
+		scope: Option<Extension<PathScope>>,
+		Path(path): Path<(String, String)>,
 		RawQuery(query): RawQuery,
 		headers: HeaderMap,
 	) -> Result<Response, RouteError> {
-		let access = access(&state, &session, path, query, BucketOperation::Head, None).await?;
+		let access =
+			access(&state, &session, scope.as_deref(), path, query, BucketOperation::Head, None)
+				.await?;
 
 		let Some(meta) = access.head().await.map_err(ResponseError)? else {
 			return Ok(StatusCode::NOT_FOUND.into_response());
@@ -413,7 +463,8 @@ mod implementation {
 	pub async fn put_object(
 		Extension(state): Extension<AppState>,
 		Extension(session): Extension<Session>,
-		Path(path): Path<(String, String, String, String)>,
+		scope: Option<Extension<PathScope>>,
+		Path(path): Path<(String, String)>,
 		RawQuery(query): RawQuery,
 		request: Request,
 	) -> Result<Response, RouteError> {
@@ -438,7 +489,9 @@ mod implementation {
 			Some(_) => return Err(RouteError::Status(StatusCode::BAD_REQUEST)),
 		};
 
-		let access = access(&state, &session, path, query, BucketOperation::Put, None).await?;
+		let access =
+			access(&state, &session, scope.as_deref(), path, query, BucketOperation::Put, None)
+				.await?;
 
 		// The signature stops `max` being edited; this counter is what enforces
 		// it. Erroring the stream is how the limit is applied, because
@@ -499,10 +552,13 @@ mod implementation {
 	pub async fn delete_object(
 		Extension(state): Extension<AppState>,
 		Extension(session): Extension<Session>,
-		Path(path): Path<(String, String, String, String)>,
+		scope: Option<Extension<PathScope>>,
+		Path(path): Path<(String, String)>,
 		RawQuery(query): RawQuery,
 	) -> Result<Response, RouteError> {
-		let access = access(&state, &session, path, query, BucketOperation::Delete, None).await?;
+		let access =
+			access(&state, &session, scope.as_deref(), path, query, BucketOperation::Delete, None)
+				.await?;
 		access.delete().await.map_err(ResponseError)?;
 		Ok(StatusCode::NO_CONTENT.into_response())
 	}
@@ -529,7 +585,8 @@ mod implementation {
 	pub async fn transfer_object(
 		Extension(state): Extension<AppState>,
 		Extension(session): Extension<Session>,
-		Path(path): Path<(String, String, String, String)>,
+		scope: Option<Extension<PathScope>>,
+		Path(path): Path<(String, String)>,
 		RawQuery(query): RawQuery,
 		content_type: Result<TypedHeader<ContentType>, TypedHeaderRejection>,
 		request: Request,
@@ -565,7 +622,9 @@ mod implementation {
 			"rename" => (BucketOperation::Rename, true),
 			_ => return Err(RouteError::Status(StatusCode::BAD_REQUEST)),
 		};
-		let access = access(&state, &session, path, query, op, Some(&request.target)).await?;
+		let access =
+			access(&state, &session, scope.as_deref(), path, query, op, Some(&request.target))
+				.await?;
 		let outcome = if rename {
 			access.rename(request.overwrite).await
 		} else {
@@ -614,7 +673,8 @@ mod implementation {
 	pub async fn list_objects(
 		Extension(state): Extension<AppState>,
 		Extension(session): Extension<Session>,
-		Path((ns, db, name)): Path<(String, String, String)>,
+		scope: Option<Extension<PathScope>>,
+		Path(name): Path<String>,
 		query: Result<Query<ListQuery>, axum::extract::rejection::QueryRejection>,
 		accept: Option<TypedHeader<Accept>>,
 	) -> Result<Response, RouteError> {
@@ -638,8 +698,10 @@ mod implementation {
 			return Err(RouteError::Status(StatusCode::NOT_ACCEPTABLE));
 		}
 
-		let path = (ns, db, name, "/".to_owned());
-		let access = access(&state, &session, path, None, BucketOperation::List, None).await?;
+		let path = (name, "/".to_owned());
+		let access =
+			access(&state, &session, scope.as_deref(), path, None, BucketOperation::List, None)
+				.await?;
 		let entries = access.list(&opts).await.map_err(ResponseError)?;
 		let value = PublicValue::Array(entries.into_iter().map(listed).collect::<Vec<_>>().into());
 
@@ -711,6 +773,21 @@ mod implementation {
 			assert!(parse_signed_query(Some("ct=a&ct=b&exp=100&sig=abc")).is_err());
 			// A parameter this build does not sign is refused, not ignored.
 			assert!(parse_signed_query(Some("exp=100&kid=1&sig=abc")).is_err());
+		}
+
+		#[test]
+		fn presigned_bucket_queries_are_recognised() {
+			let signed = |uri: &str| crate::ntw::bucket::presents_signature(&uri.parse().unwrap());
+			assert!(signed("/bucket/img/a?exp=1&sig=abc"));
+			assert!(signed("/bucket/img/a?ct=text%2Fplain&exp=1&sig=abc"));
+			// A partial signature is still a signature.
+			assert!(signed("/bucket/img/a?sig"));
+			assert!(signed("/bucket/img/a?exp=1"));
+			assert!(!signed("/bucket/img/a"));
+			assert!(!signed("/bucket/img/?prefix=a&limit=10"));
+			assert!(!signed("/bucket/img/a?signature=x&expires=1"));
+			// Only the bucket routes.
+			assert!(!signed("/sql?exp=1&sig=abc"));
 		}
 	}
 }

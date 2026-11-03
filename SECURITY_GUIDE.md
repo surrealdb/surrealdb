@@ -1261,7 +1261,9 @@ GraphQL, error formatting
   limiter, the credential-exchange checks in `ntw/auth.rs`) sees the same path
   for both forms. A layer that matches on the path must run behind that rewrite.
   A route joins the scoped set only if it applies the scope: the session
-  routes take the namespace and database from the session, and `signin` and
+  routes take the namespace and database from the session (`api` from the
+  path the scope is rewritten into, `bucket` the level of its bucket from the
+  scope itself), and `signin` and
   `signup` complete their credentials from the path (`scope::credentials`),
   refusing a body that names another scope. A route that read its scope from
   elsewhere would ignore it.
@@ -1942,9 +1944,11 @@ below follows from it.
 - The signature must cover the method, the full encoded path, and every query parameter except
   itself. A parameter that can be added, edited *or removed* without invalidating the signature is
   a bypass — removal is the direction an attacker wants, since it is how a limit is lifted.
-- The signing key must bind the tenant — namespace id, database id, bucket name, nonce — and
-  must do so through the *derivation*, not through a comparison in the verifier. An equality check
-  can be dropped in a refactor; a differing key cannot.
+- The signing key must bind the tenant — the ids of the bucket's level (none on the root, the
+  namespace id, or the namespace and database ids), the bucket name, the nonce — and must do so
+  through the *derivation*, not through a comparison in the verifier. An equality check can be
+  dropped in a refactor; a differing key cannot. The ids of the three levels differ in length, so
+  buckets at two levels never derive from one input.
 - The path that is signed must be the path that is resolved. Both sides re-encode from the
   normalised `ObjectKey`, because axum percent-decodes captures and `a%2Fb` and `a/b` arrive
   identically. Signing one spelling while the store resolves another grants access to an object
@@ -1983,12 +1987,19 @@ below follows from it.
   upload must declare exactly that type. Otherwise the holder of a URL minted for an image could
   store `text/html`. `$content_type` is bound for `presign_put`, and is `NONE` for a URL with no
   type, so a clause listing allowed types refuses an omitted one.
-- A session-authenticated `/bucket` request must additionally pass `can_access_ns_db` for the
-  namespace and database **named in the path**. Those came from the caller and have already
+- The level of the bucket a request reaches is the one **named in the URL path**
+  (`/bucket/…`, `/ns/{ns}/bucket/…`, `/ns/{ns}/db/{db}/bucket/…`), never one selected by a header.
+- A session-authenticated bucket request must additionally be admitted at that level
+  (`BucketLocation::admits`): a root principal anywhere, a namespace principal in its namespace,
+  a database or record principal in its database. The level came from the caller and has already
   replaced whatever the session selected, so the authenticated level is the only trustworthy
   scope, and `PERMISSIONS FULL` cannot see which tenant was asked for. A signature needs no
-  equivalent check: the ids and the nonce are inside its key derivation, so one minted for another
-  tenant derives a different key. The same gate guards `/api/{ns}/{db}` (GHSA-848m-r628-vrxw).
+  equivalent check: the level's ids and the nonce are inside its key derivation, so one minted for
+  another tenant or level derives a different key. The same gate guards `/api/{ns}/{db}`
+  (GHSA-848m-r628-vrxw).
+- A bucket request that presents a signature (an `exp` or `sig` parameter) is authenticated
+  without its `Authorization` header or session cookie (`ntw/auth.rs`). Its signature authorises
+  it, and the bucket route refuses one it cannot verify rather than falling back to a session.
 - A signature the server cannot fully reconstruct — an unknown parameter, a malformed number, `sig`
   without `exp` — must be refused, not retried as an unsigned request. Falling back lets a caller
   strip a signature it cannot satisfy and be judged by a different rule.

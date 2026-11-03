@@ -4,7 +4,8 @@
 //! third-party uploader cannot hold one either. A presigned URL stands in for
 //! the session: `file::presign_get` and `file::presign_put` evaluate the
 //! bucket's `PERMISSIONS` clause once, then hand out a URL that the
-//! `/bucket/...` route accepts without evaluating anything further.
+//! bucket route (`[/ns/{ns}[/db/{db}]]/bucket/...`) accepts without evaluating
+//! anything further.
 //!
 //! That is the bargain, and it is worth stating plainly. The URL is a **bearer
 //! credential**. Until it expires it works for whoever holds it, it outlives
@@ -15,9 +16,10 @@
 //!
 //! Two independent bindings keep a URL usable only where it was meant to be:
 //!
-//! - The **key** binds the tenant. The namespace, the database, the bucket name and the nonce go
-//!   into the derivation, never into the message, so a URL replayed against another database
-//!   derives a different key and fails. There is no equality check for a refactor to drop.
+//! - The **key** binds the tenant. The ids of the bucket's level, the bucket name and the nonce go
+//!   into the derivation, never into the message, so a URL replayed against another level,
+//!   namespace or database derives a different key and fails. There is no equality check for a
+//!   refactor to drop.
 //! - The **signature** binds the request. The method, the encoded path and every query parameter
 //!   are covered, so the object, the expiry and the size limit cannot be edited.
 
@@ -34,8 +36,8 @@ use hmac::Mac as _;
 use subtle::ConstantTimeEq;
 use surrealdb_types::{Datetime as PublicDatetime, SurrealValue};
 
-pub(crate) use self::key::BucketScope;
 use self::key::SigningKey;
+pub(crate) use self::key::{BucketScope, ScopeLevel};
 use crate::buc::PresignSecret;
 use crate::buc::store::ObjectKey;
 use crate::val::convert_public::convert_public_value_to_internal;
@@ -126,7 +128,7 @@ pub(crate) fn sign(
 ) -> Result<(String, String, DateTime<Utc>), PresignError> {
 	let signing_key = scope.signing_key(secret)?;
 
-	let path = canonical::path(scope.ns_name, scope.db_name, scope.bucket, key);
+	let path = canonical::path(&scope.level, scope.bucket, key);
 	let query = canonical::query(params);
 	let signature = mac(&signing_key, &canonical::blob(op, &path, &query))?;
 
@@ -153,7 +155,7 @@ pub(crate) fn verify(
 ) -> Result<PresignGrant, PresignError> {
 	let signing_key = scope.signing_key(secret)?;
 
-	let path = canonical::path(scope.ns_name, scope.db_name, scope.bucket, key);
+	let path = canonical::path(&scope.level, scope.bucket, key);
 	let query = canonical::query(&params);
 	let expected = mac(&signing_key, &canonical::blob(op, &path, &query))?;
 
@@ -376,12 +378,18 @@ mod tests {
 		PresignSecret::for_test(&bytes)
 	}
 
-	fn scope() -> BucketScope<'static> {
-		BucketScope {
-			ns_id: NamespaceId(7),
-			db_id: DatabaseId(12),
+	fn database(ns_id: u32, db_id: u32) -> ScopeLevel<'static> {
+		ScopeLevel::Database {
+			ns_id: NamespaceId(ns_id),
+			db_id: DatabaseId(db_id),
 			ns_name: "test",
 			db_name: "app",
+		}
+	}
+
+	fn scope() -> BucketScope<'static> {
+		BucketScope {
+			level: database(7, 12),
 			bucket: "images",
 			nonce: uuid::Uuid::from_u128(1),
 		}
@@ -427,10 +435,35 @@ mod tests {
 	}
 
 	#[test]
+	fn a_url_verifies_at_every_level() {
+		let levels = [
+			("/bucket/images/", ScopeLevel::Root),
+			(
+				"/ns/test/bucket/images/",
+				ScopeLevel::Namespace {
+					id: NamespaceId(7),
+					name: "test",
+				},
+			),
+			("/ns/test/db/app/bucket/images/", database(7, 12)),
+		];
+		for (prefix, level) in levels {
+			let s = BucketScope {
+				level,
+				..scope()
+			};
+			let (path, search, _) = sign(&secret(), s, PresignOp::Get, &key(), &params()).unwrap();
+			assert!(path.starts_with(prefix), "{path}");
+			let sig = search.rsplit_once("&sig=").unwrap().1;
+			assert!(check(PresignOp::Get, s, &key(), params(), sig, NOW).is_ok(), "{prefix}");
+		}
+	}
+
+	#[test]
 	fn the_url_carries_what_it_signed() {
 		let (path, search, expires) =
 			sign(&secret(), scope(), PresignOp::Put, &key(), &params()).unwrap();
-		assert_eq!(path, "/bucket/test/app/images/u/user%3Atobie/avatar.png");
+		assert_eq!(path, "/ns/test/db/app/bucket/images/u/user%3Atobie/avatar.png");
 		assert!(search.starts_with("?exp=1756637700&max=5242880&sig="));
 		assert_eq!(expires.timestamp(), 1756637700);
 	}
@@ -533,15 +566,27 @@ mod tests {
 		let sig = signature(PresignOp::Get, &params());
 
 		let mut other_ns = scope();
-		other_ns.ns_id = NamespaceId(9);
+		other_ns.level = database(9, 12);
 		let mut other_db = scope();
-		other_db.db_id = DatabaseId(99);
+		other_db.level = database(7, 99);
 		let mut other_bucket = scope();
 		other_bucket.bucket = "other";
+		// The same bucket name and nonce on the namespace, and on the root.
+		let mut on_ns = scope();
+		on_ns.level = ScopeLevel::Namespace {
+			id: NamespaceId(7),
+			name: "test",
+		};
+		let mut on_root = scope();
+		on_root.level = ScopeLevel::Root;
 
-		for (label, s) in
-			[("namespace", other_ns), ("database", other_db), ("bucket", other_bucket)]
-		{
+		for (label, s) in [
+			("namespace", other_ns),
+			("database", other_db),
+			("bucket", other_bucket),
+			("level (namespace)", on_ns),
+			("level (root)", on_root),
+		] {
 			assert!(
 				matches!(
 					check(PresignOp::Get, s, &key(), params(), &sig, NOW),
@@ -638,7 +683,7 @@ mod tests {
 		// be a deliberate edit of this constant.
 		assert_eq!(
 			signature(PresignOp::Put, &params()),
-			"Suc_JeuA0n2JcwchdjV-dvHIgTqAcEeUpCgfZIl5kcI"
+			"ymXEcBePMd7RORdQXL3fROv-pLhEFws8Bh0IkG3mHms"
 		);
 	}
 }

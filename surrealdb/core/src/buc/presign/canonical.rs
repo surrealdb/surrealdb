@@ -16,7 +16,7 @@ use std::fmt::Write as _;
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
-use super::{PresignOp, PresignParams};
+use super::{PresignOp, PresignParams, ScopeLevel};
 use crate::buc::store::ObjectKey;
 
 /// Identifies the layout of the signed blob.
@@ -24,7 +24,7 @@ use crate::buc::store::ObjectKey;
 /// A change to any rule in this module must change this string. Two builds that
 /// disagree about the bytes would otherwise reject each other's URLs with a
 /// signature mismatch, which reads as forgery rather than as a version skew.
-const VERSION: &str = "SDBURL1";
+const VERSION: &str = "SDBURL2";
 
 /// Everything outside the RFC 3986 unreserved set is percent-encoded, `/`
 /// included, so a segment can never introduce a path separator.
@@ -42,19 +42,47 @@ fn encode_segment(out: &mut String, value: &str) {
 	out.extend(utf8_percent_encode(value, UNRESERVED));
 }
 
-/// The request path for an object, encoded segment by segment.
+/// The request path for an object, encoded segment by segment: the path the
+/// bucket route serves it at.
+///
+/// ```text
+/// /bucket/{bucket}/{key}                   a bucket on the root
+/// /ns/{ns}/bucket/{bucket}/{key}           a bucket on a namespace
+/// /ns/{ns}/db/{db}/bucket/{bucket}/{key}   a bucket on a database
+/// ```
+///
+/// The literal segments name the level, so buckets at two levels never share
+/// a path.
 ///
 /// `key` is already normalised, so its `/` separators are structural and are
 /// the only ones emitted literally. The empty-segment filter is therefore a
 /// belt-and-braces guard rather than a normalisation step: [`ObjectKey::new`]
 /// has already collapsed them, and it must stay that way, because two keys
 /// that differ only in separators would otherwise sign the same blob.
-pub(crate) fn path(ns: &str, db: &str, bucket: &str, key: &ObjectKey) -> String {
-	let mut out = String::from("/bucket");
-	for segment in [ns, db, bucket] {
-		out.push('/');
-		encode_segment(&mut out, segment);
+pub(crate) fn path(level: &ScopeLevel<'_>, bucket: &str, key: &ObjectKey) -> String {
+	let mut out = String::new();
+	match *level {
+		ScopeLevel::Root => {}
+		ScopeLevel::Namespace {
+			name,
+			..
+		} => {
+			out.push_str("/ns/");
+			encode_segment(&mut out, name);
+		}
+		ScopeLevel::Database {
+			ns_name,
+			db_name,
+			..
+		} => {
+			out.push_str("/ns/");
+			encode_segment(&mut out, ns_name);
+			out.push_str("/db/");
+			encode_segment(&mut out, db_name);
+		}
 	}
+	out.push_str("/bucket/");
+	encode_segment(&mut out, bucket);
 	for segment in key.as_str().split('/').filter(|s| !s.is_empty()) {
 		out.push('/');
 		encode_segment(&mut out, segment);
@@ -102,6 +130,16 @@ pub(crate) fn blob(op: PresignOp, path: &str, query: &str) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId};
+
+	fn db<'a>(ns_name: &'a str, db_name: &'a str) -> ScopeLevel<'a> {
+		ScopeLevel::Database {
+			ns_id: NamespaceId(1),
+			db_id: DatabaseId(1),
+			ns_name,
+			db_name,
+		}
+	}
 
 	fn params() -> PresignParams {
 		PresignParams {
@@ -118,18 +156,33 @@ mod tests {
 		// slash, or a bucket name containing one, cannot restructure the path.
 		let key = ObjectKey::new("/u/user:tobie/avatar.png");
 		assert_eq!(
-			path("test", "app", "images", &key),
-			"/bucket/test/app/images/u/user%3Atobie/avatar.png"
+			path(&db("test", "app"), "images", &key),
+			"/ns/test/db/app/bucket/images/u/user%3Atobie/avatar.png"
 		);
 
 		let odd = ObjectKey::new("/a%2Fb");
-		assert_eq!(path("test", "app", "images", &odd), "/bucket/test/app/images/a%252Fb");
+		assert_eq!(
+			path(&db("test", "app"), "images", &odd),
+			"/ns/test/db/app/bucket/images/a%252Fb"
+		);
 	}
 
 	#[test]
-	fn an_awkward_bucket_name_is_encoded() {
+	fn the_path_names_the_level() {
 		let key = ObjectKey::new("/x");
-		assert_eq!(path("n s", "d/b", "b?u&c", &key), "/bucket/n%20s/d%2Fb/b%3Fu%26c/x");
+		assert_eq!(path(&ScopeLevel::Root, "images", &key), "/bucket/images/x");
+		let ns = ScopeLevel::Namespace {
+			id: NamespaceId(1),
+			name: "test",
+		};
+		assert_eq!(path(&ns, "images", &key), "/ns/test/bucket/images/x");
+		assert_eq!(path(&db("test", "app"), "images", &key), "/ns/test/db/app/bucket/images/x");
+	}
+
+	#[test]
+	fn an_awkward_name_is_encoded() {
+		let key = ObjectKey::new("/x");
+		assert_eq!(path(&db("n s", "d/b"), "b?u&c", &key), "/ns/n%20s/db/d%2Fb/bucket/b%3Fu%26c/x");
 	}
 
 	#[test]
@@ -141,15 +194,15 @@ mod tests {
 		for s in spellings {
 			assert_eq!(ObjectKey::new(s).as_str(), "/x/y", "{s}");
 			assert_eq!(
-				path("a", "b", "c", &ObjectKey::new(s)),
-				path("a", "b", "c", &ObjectKey::new("/x/y"))
+				path(&db("a", "b"), "c", &ObjectKey::new(s)),
+				path(&db("a", "b"), "c", &ObjectKey::new("/x/y"))
 			);
 		}
 
 		// Distinct keys must stay distinct.
 		assert_ne!(
-			path("a", "b", "c", &ObjectKey::new("/x/y")),
-			path("a", "b", "c", &ObjectKey::new("/x/y2"))
+			path(&db("a", "b"), "c", &ObjectKey::new("/x/y")),
+			path(&db("a", "b"), "c", &ObjectKey::new("/x/y2"))
 		);
 	}
 
@@ -175,8 +228,8 @@ mod tests {
 	#[test]
 	fn the_blob_names_its_own_version() {
 		let q = query(&params());
-		let b = blob(PresignOp::Put, "/bucket/a/b/c/d", &q);
-		assert_eq!(b, "SDBURL1\nPUT\n/bucket/a/b/c/d\nexp=1756637700&max=5242880");
+		let b = blob(PresignOp::Put, "/bucket/c/d", &q);
+		assert_eq!(b, "SDBURL2\nPUT\n/bucket/c/d\nexp=1756637700&max=5242880");
 	}
 
 	#[test]
