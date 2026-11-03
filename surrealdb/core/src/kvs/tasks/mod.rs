@@ -473,7 +473,7 @@ async fn run_job(
 		Job::RpcSessionGc => dbs.purge_expired_rpc_sessions(&opts.rpc_session_gc_interval).await,
 		Job::MvccGc => unleased(dbs.run_mvcc_gc(opts.mvcc_gc_lifetime).await),
 		Job::LockCleanup => unleased(dbs.run_lock_cleanup(opts.mvcc_gc_lifetime).await),
-		Job::DiskannWriterLeases => unleased(dbs.release_idle_writer_leases().await),
+		Job::DiskannWriterLeases => unleased(dbs.release_idle_writer_leases().await.map(|_| ())),
 		Job::SystemMetricsRefresh => {
 			// The snapshot is one cache per process, and its CPU percentage is a
 			// delta since the previous refresh of it, so only the driver holding

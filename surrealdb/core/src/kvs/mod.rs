@@ -51,6 +51,7 @@ pub(crate) use consts::{
 pub use ds::{
 	Builder, Datastore, GraphFoldRun, IndexBuildsRun, IndexCompactionRun, LiveQueryEngine,
 	ReclaimRun, StatementCacheStats, TransactionBuilderFactory, TransactionBuilderParts,
+	WriterLeaseRelease,
 };
 pub(crate) use ds::{DocIdsReclaimPending, DocIdsReclaimStep};
 pub(crate) use err::Error;

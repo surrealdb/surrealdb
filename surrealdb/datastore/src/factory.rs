@@ -457,6 +457,14 @@ impl TransactionFactory {
 		crate::tx::release_idle_writer_leases(self, &self.triggers, sequences, idle, None).await
 	}
 
+	/// How long until a writer lease this datastore holds will have had no
+	/// commit rely on it for `idle`, and so is released by
+	/// [`Self::release_idle_writer_leases`]: zero for one that already has,
+	/// `None` while it holds none. Reads only this datastore's memory.
+	pub fn next_idle_writer_lease(&self, idle: std::time::Duration) -> Option<std::time::Duration> {
+		self.triggers.pending_guard_fences.next_idle_lease(idle)
+	}
+
 	/// Release every writer lease this datastore holds on `index`, however
 	/// recently a commit relied on it, and return how many it released. For a
 	/// caller that has finished writing into the index and wants its drained

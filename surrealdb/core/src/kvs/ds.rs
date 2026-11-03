@@ -1491,6 +1491,17 @@ pub struct IndexCompactionRun {
 	pub retry_after: Option<Duration>,
 }
 
+/// What one call of [`Datastore::release_idle_writer_leases`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct WriterLeaseRelease {
+	/// The shard leases the call released.
+	pub released: usize,
+	/// How long until a lease this datastore still holds goes idle, when a host calls again:
+	/// `None` while it holds none, zero for one whose release failed and is to be retried.
+	pub next_idle: Option<Duration>,
+}
+
 /// What one call of [`Datastore::index_compaction_drain`] did.
 struct CompactionDrained {
 	/// The queue batches the call acted on.
@@ -9569,6 +9580,8 @@ impl Datastore {
 	/// after its index was compacted at or after it was written, and a plan that lost its race is
 	/// read again. Reads merge the backlog whatever a pass has folded, so a pass changes what a
 	/// read costs and what `INFO FOR INDEX` reports as `compacting`, never what a read answers.
+	/// read again. Reads merge the backlog whatever a pass has folded, so a pass changes what a
+	/// read costs and what `INFO FOR INDEX` reports as `compacting`, never what a read answers.
 	///
 	/// Nothing is spawned, no lease is taken and no timer runs: the passes run one after another on
 	/// the calling task, and their parallel work runs there too. The call continues the drain where
@@ -10532,15 +10545,42 @@ impl Datastore {
 		&self.transaction_factory
 	}
 
-	/// Release the writer leases this node holds on indexes it has
-	/// committed nothing under for [`WRITER_LEASE_IDLE`], so other nodes'
-	/// compaction can return those indexes' drained guards to `Empty`. A lease is
-	/// only ever held on a store this datastore is not the sole writer of.
-	pub(crate) async fn release_idle_writer_leases(&self) -> Result<()> {
-		self.transaction_factory
-			.release_idle_writer_leases(&self.sequences, WRITER_LEASE_IDLE)
-			.await
-			.map(|_| ())
+	/// Release the writer leases this datastore holds on indexes it has
+	/// committed nothing under for [`WRITER_LEASE_IDLE`], so compaction can
+	/// return those indexes' drained guards to `Empty`: no compaction pass steps
+	/// a guard under a live lease. A lease is only ever held on a store this
+	/// datastore is not the sole writer of.
+	///
+	/// Each index's release commits, in the same transaction, a compaction
+	/// request for the index, so whichever datastore drains the compaction
+	/// queue passes it again. A host that builds the datastore without its
+	/// maintenance tasks calls this itself, next after
+	/// [`WriterLeaseRelease::next_idle`] or [`Self::next_idle_writer_lease`].
+	pub async fn release_idle_writer_leases(&self) -> Result<WriterLeaseRelease> {
+		self.release_writer_leases_idle_for(WRITER_LEASE_IDLE).await
+	}
+
+	/// [`Self::release_idle_writer_leases`] for leases no commit has relied on
+	/// for `idle` rather than [`WRITER_LEASE_IDLE`]. A shorter `idle` costs a
+	/// writer a lease taken again on its next commit into the index.
+	pub async fn release_writer_leases_idle_for(
+		&self,
+		idle: Duration,
+	) -> Result<WriterLeaseRelease> {
+		let released =
+			self.transaction_factory.release_idle_writer_leases(&self.sequences, idle).await?;
+		Ok(WriterLeaseRelease {
+			released,
+			next_idle: self.transaction_factory.next_idle_writer_lease(idle),
+		})
+	}
+
+	/// How long until a writer lease this datastore holds goes idle and
+	/// [`Self::release_idle_writer_leases`] releases it: `None` while it holds
+	/// none, as on a store it is the sole writer of. Reads only this
+	/// datastore's memory, so a host may ask after every request.
+	pub fn next_idle_writer_lease(&self) -> Option<Duration> {
+		self.transaction_factory.next_idle_writer_lease(WRITER_LEASE_IDLE)
 	}
 
 	#[cfg(test)]
@@ -17274,6 +17314,43 @@ pub(crate) mod test {
 		assert_eq!(host_compaction_answers(&ds, &session).await?, before);
 		let idle = ds.run_index_compaction(1, Duration::from_secs(60)).await?;
 		assert_eq!((idle.passes, idle.more), (0, false), "a drained queue runs no pass");
+		Ok(())
+	}
+
+	/// On a store two datastores write, the HNSW guards one datastore's writes
+	/// leave under its writer leases are not stepped by the other's compaction
+	/// until the writer releases them: the writer reports when its leases go
+	/// idle, its release reports what it released and that it holds none, and
+	/// the release queues the request that lets the runner's next drain fold the
+	/// index.
+	#[tokio::test]
+	async fn a_writers_lease_release_lets_the_runners_compaction_fold_its_guards() -> Result<()> {
+		let (runner, session) = new_index_compaction_test_ds().await?;
+		let writer = runner.fork_for_test_as_another_process(Uuid::now_v7());
+		execute_all(&runner, &session, HOST_COMPACTION_SQL).await?;
+		assert_eq!(writer.next_idle_writer_lease(), None, "no write has taken a lease");
+		host_compaction_writes(&writer, &session, 8).await?;
+		let next = writer.next_idle_writer_lease().expect("the HNSW writes took leases");
+		assert!(next <= WRITER_LEASE_IDLE, "{next:?}");
+		assert_eq!(runner.next_idle_writer_lease(), None, "the runner wrote nothing");
+
+		run_index_compaction_until_done(&runner, Duration::from_secs(60)).await?;
+		assert!(
+			info_compacting(&runner, &session, "hx").await?,
+			"the writer's leases cover its guards"
+		);
+		let held = writer.release_idle_writer_leases().await?;
+		assert_eq!(held.released, 0, "no lease has been idle for {WRITER_LEASE_IDLE:?}");
+		assert!(held.next_idle.is_some(), "{held:?}");
+
+		let release = writer.release_writer_leases_idle_for(Duration::ZERO).await?;
+		assert!(release.released > 0, "{release:?}");
+		assert_eq!(release.next_idle, None, "the writer holds no lease");
+		assert_eq!(writer.next_idle_writer_lease(), None);
+		assert!(compaction_queue_len(&runner).await? > 0, "the release queued the index");
+
+		run_index_compaction_until_done(&runner, Duration::from_secs(60)).await?;
+		assert!(!info_compacting(&runner, &session, "hx").await?, "the runner folded the index");
 		Ok(())
 	}
 

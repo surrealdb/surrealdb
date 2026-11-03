@@ -421,6 +421,29 @@ impl PendingGuardFences {
 			.map(|(prefix, fence)| (prefix.clone(), fence.index.clone()))
 			.collect()
 	}
+
+	/// How long until a writer lease this datastore holds will have had no
+	/// commit rely on it for `idle`: zero for one that already has, `None`
+	/// while it holds none. Reads only this datastore's memory.
+	pub(crate) fn next_idle_lease(&self, idle: std::time::Duration) -> Option<std::time::Duration> {
+		// The fences are copied out under the map's lock and their leases read after it is
+		// released, so a call holds the map only as long as it takes to clone its handles.
+		let fences: Vec<Arc<IndexFence>> = self.fences.lock().fences.values().cloned().collect();
+		fences
+			.iter()
+			.filter_map(|fence| {
+				let leases = fence.leases.lock();
+				if leases.shards == 0 {
+					return None;
+				}
+				Some(
+					leases.last_used.map_or(std::time::Duration::ZERO, |used| {
+						idle.saturating_sub(used.elapsed())
+					}),
+				)
+			})
+			.min()
+	}
 }
 
 /// The set of post-commit wake-ups shared by a datastore and its transactions.
