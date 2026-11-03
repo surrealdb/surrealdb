@@ -100,11 +100,40 @@ async fn open(endpoint: &str) -> Result<Surreal<Any>> {
 	Ok(surrealdb::engine::any::connect((endpoint.to_string(), config)).await?)
 }
 
+/// The pause before the first retry of a refused connection; each retry doubles it.
+const OVERLOAD_BACKOFF: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// How many times a refused connection is retried before the refusal is the result.
+const OVERLOAD_RETRIES: u32 = 8;
+
+/// Open a connection, retrying while the server refuses it as overloaded.
+///
+/// A server that sheds load answers a new session with an error whose message begins
+/// `overloaded:` and which it marks retryable, and it admits one again once the pressure
+/// is gone. A run resets the session between every test, so one such refusal would
+/// otherwise end a test, and every test queued behind it, without a result. Any other
+/// failure is returned at once. The retries wait 100ms, doubling each time, and so give
+/// the server about 25 seconds in all.
+async fn open_retrying(endpoint: &str) -> Result<Surreal<Any>> {
+	let mut backoff = OVERLOAD_BACKOFF;
+	let mut retries = 0;
+	loop {
+		match open(endpoint).await {
+			Err(e) if retries < OVERLOAD_RETRIES && format!("{e:#}").contains("overloaded:") => {
+				retries += 1;
+				tokio::time::sleep(backoff).await;
+				backoff *= 2;
+			}
+			result => return result,
+		}
+	}
+}
+
 impl RemoteConn {
 	/// Connect to `endpoint` (ws/wss/http/https) and sign in as root.
 	pub async fn connect(endpoint: &str, user: &str, pass: &str) -> Result<RemoteConn> {
 		install_crypto_provider();
-		let db = open(endpoint)
+		let db = open_retrying(endpoint)
 			.await
 			.with_context(|| format!("connecting to --endpoint `{endpoint}`"))?;
 		let http_base = http_base_from_endpoint(endpoint)?;
@@ -130,7 +159,7 @@ impl RemoteConn {
 	/// only faithful reset. Without it, e.g. a test that expects "Specify a
 	/// namespace to use" instead sees the previous test's namespace still selected.
 	pub async fn reset_session(&mut self) -> Result<()> {
-		self.db = open(&self.endpoint)
+		self.db = open_retrying(&self.endpoint)
 			.await
 			.with_context(|| format!("reconnecting to --endpoint `{}`", self.endpoint))?;
 		self.signin_root().await?;
