@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-pgsql"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "surrealdb-sqlfront-derive",
  "thiserror",
@@ -117,7 +117,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-sqlfront-derive"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "proc-macro2",
  "quote",

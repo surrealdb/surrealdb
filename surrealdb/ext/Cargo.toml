@@ -2,7 +2,7 @@
 name = "surreal-ext"
 publish = false
 edition.workspace = true
-version = "1.0.0"
+version = "1.0.1"
 authors.workspace = true
 description = "The Surreal CLI's extension component: develop, build, sign, inspect, run and install Surrealism extensions"
 repository.workspace = true
