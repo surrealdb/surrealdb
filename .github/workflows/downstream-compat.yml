@@ -56,22 +56,15 @@ jobs:
           # PRs, or the setup window before the key secret was added), so gating
           # on the variable lets the token mint run without a key and hard-fail
           # instead of no-opping. `!= ''` yields a boolean without exposing it.
-          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
-          # Gated separately from HAS_APP: this key authenticates the
-          # downstream's OWN private git sources, which the checkout credential
-          # cannot reach. Absent, the cargo steps fail in resolution rather than
-          # at checkout, so the two are not interchangeable.
+          # The dependency-fetch App's read-only key covers both the downstream
+          # checkout and the downstream's own private git sources.
           HAS_DEP_APP: ${{ secrets.DEP_FETCH_APP_PRIVATE_KEY != '' }}
         run: |
-          echo "dep-configured=${HAS_DEP_APP}" >> "$GITHUB_OUTPUT"
-          if [ "${HAS_DEP_APP}" != "true" ]; then
-            echo "::notice title=Downstream compatibility::DEP_FETCH_APP_* absent, so the downstream's own private git dependencies are unauthenticated; the cargo steps will fail in resolution if it has any."
-          fi
-          if [ "${HAS_APP}" = "true" ]; then
+          if [ "${HAS_DEP_APP}" = "true" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Downstream compatibility::Not configured (RELEASE_AUTOMATION_APP_* absent) — skipping."
+            echo "::notice title=Downstream compatibility::Not configured (DEP_FETCH_APP_* absent) — skipping."
           fi
 
       # The engine (this PR) is checked out at the workspace root so the local
@@ -85,23 +78,21 @@ jobs:
           # made from this directory would otherwise pick it up and be denied.
           persist-credentials: false
 
-      # Mint a short-lived token scoped to the downstream repo, for the
-      # checkout below. The owner defaults to this repository's owner; the repo
-      # name comes from a secret.
-      #
-      # Deliberately does NOT cover the downstream's own private git
-      # dependencies. This token comes from the release-automation App, which
-      # carries write permissions for the release and cut workflows, so it is
-      # confined to the checkout step and never published to the build. The
-      # dependency credential below is a separate, read-only token.
+      # Mint a short-lived, read-only token scoped to the downstream repo, for
+      # the checkout below. The owner defaults to this repository's owner; the
+      # repo name comes from a secret. It comes from the dependency-fetch App
+      # (contents: read), installed on the downstream repo: this workflow can be
+      # dispatched from any branch, so it never reads the release-automation
+      # App's key, which is for the release workflows only.
       - name: Generate a token for the downstream repo
         id: app-token
         if: steps.preflight.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.DEP_FETCH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEP_FETCH_APP_PRIVATE_KEY }}
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
+          permission-contents: read
 
       # Pick the downstream branch to validate against, in priority order: the
       # exact target branch (the matching release branch for a release-targeted
@@ -169,7 +160,7 @@ jobs:
             [ -n "${ref}" ] && break
           done
           if [ -z "${ref}" ]; then
-            echo "::error title=Downstream compatibility::could not read '${WANT}' or 'main' on ${OWNER}/${REPO}. If git reports an auth/permission error below, the App is missing Contents:read on the repo (ref reads require it; approve the permission on the installation, not just add it to the App). git said: ${last_err:-<no error output: branches simply do not exist>}"
+            echo "::error title=Downstream compatibility::could not read '${WANT}' or 'main' on ${OWNER}/${REPO}. If git reports an auth/permission error below, the dependency-fetch App (DEP_FETCH_APP_*) is missing Contents:read on the repo (ref reads require it; approve the permission on the installation, not just add it to the App). git said: ${last_err:-<no error output: branches simply do not exist>}"
             exit 1
           fi
           if [ "${ref}" != "${WANT}" ]; then
@@ -201,14 +192,12 @@ jobs:
           save-cache: ${{ github.event_name == 'push' }}
 
       # Mint the credential cargo presents for the downstream's private git
-      # dependencies. Read-only, and from the dependency-fetch App rather than
-      # the release-automation App above, because of where it ends up: the step
-      # after this publishes it through GIT_CONFIG_GLOBAL, so every later step
-      # inherits it, including `cargo check` and `cargo nextest run` over the
-      # downstream workspace. Build scripts, proc macros and test binaries there
-      # run as this user and can read the file. What reaches them must therefore
-      # be read-only and confined to the repos this job already builds, which is
-      # what this App grants and a release token does not.
+      # dependencies. The step after this publishes it through GIT_CONFIG_GLOBAL,
+      # so every later step inherits it, including `cargo check` and `cargo
+      # nextest run` over the downstream workspace. Build scripts, proc macros
+      # and test binaries there run as this user and can read the file, so it
+      # must be read-only and confined to the dependency-fetch App's
+      # installation.
       #
       # No `repositories:` restriction: the App is single-purpose, so its
       # installation is itself the allowlist and a list here would only
@@ -216,7 +205,7 @@ jobs:
       # what the App is granted later.
       - name: Generate a token for the downstream's private git dependencies
         id: dep-token
-        if: steps.preflight.outputs.configured == 'true' && steps.preflight.outputs.dep-configured == 'true'
+        if: steps.preflight.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.DEP_FETCH_APP_CLIENT_ID }}
@@ -241,7 +230,7 @@ jobs:
       # than edited so a stale one left by a failed cleanup cannot win the
       # insteadOf tie with an expired token.
       - name: Authenticate the downstream's private git dependencies
-        if: steps.preflight.outputs.configured == 'true' && steps.preflight.outputs.dep-configured == 'true'
+        if: steps.preflight.outputs.configured == 'true'
         env:
           TOKEN: ${{ steps.dep-token.outputs.token }}
         run: |
