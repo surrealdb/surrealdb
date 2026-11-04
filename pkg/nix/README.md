@@ -111,7 +111,7 @@ If you just want to build the binary, without running it, you can use `nix build
  
 ## Setting up a development environment
 
-Nix can be used to set up C/C++ dependencies for this project in order for Cargo commands to work properly.
+The Nix development shell is the canonical development environment. It supplies the stable Rust compiler, the pinned nightly formatter, `cargo-make`, `cargo-nextest`, `revision-lock`, and the existing native build dependencies.
 
 If you haven't already done so, you will need to clone this repo and `cd` into it
 
@@ -119,6 +119,26 @@ If you haven't already done so, you will need to clone this repo and `cd` into i
 git clone https://github.com/surrealdb/surrealdb.git
 cd surrealdb
 ```
+
+Enter the shell with:
+
+```
+nix develop
+```
+
+For a resource-bounded first build of the default shell, run:
+
+```
+nix build --no-link --max-jobs 1 --cores 2 .#devShells.x86_64-linux.default
+```
+
+The repository neither requires nor modifies a global binary cache. Before the first build, you can inspect the build plan with:
+
+```
+nix build --dry-run --no-link .#devShells.x86_64-linux.default
+```
+
+Check only the derivations listed as locally built; fetched paths are acceptable. Stop before the actual build if that local build list contains `xgcc`, `gcc-*`, or `bootstrap-stage*`, because it indicates a heavy local GCC bootstrap.
 
 ### Setting dependencies up automatically
 
