@@ -47,7 +47,8 @@ use crate::kvs::testing::{
 	retryable_conflict_count,
 };
 use crate::kvs::tx::{
-	CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup, IndexBuildReservationRelease,
+	CachedIndexAdmission, CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup,
+	IndexBuildReservationRelease,
 };
 use crate::kvs::{
 	Datastore, DatastoreError, QueryRequest, is_retryable_transaction_conflict, storage_error,
@@ -6148,6 +6149,285 @@ async fn recheck_cached_admission_rejects_a_replacement_the_write_cannot_see() -
 
 	let err = outcome.expect_err("a replacement the write cannot see must abort it");
 	assert!(err.to_string().contains("replaced"), "unexpected error: {err}");
+	Ok(())
+}
+
+/// A write held between the commit of its reservation and its fence.
+///
+/// The reservation is taken for generation 1 of a `Building` index through a
+/// user transaction whose catalog cache already holds the definition, which is
+/// what a write's first record leaves behind. A schema change committed before
+/// [`fence_reserved_write`] runs lands in the window the fence has to rule on.
+#[cfg(feature = "kv-mem")]
+struct ReservedWrite {
+	tx: Arc<crate::kvs::Transaction>,
+	ctx: crate::ctx::FrozenContext,
+	admission: DurableAdmission,
+}
+
+#[cfg(feature = "kv-mem")]
+async fn reserve_write(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	ikb: &IndexKeyBase,
+	ix: &IndexDefinition,
+) -> Result<ReservedWrite> {
+	// A read transaction, as in the recheck tests: no outcome under test writes
+	// through it.
+	let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
+	assert!(
+		tx.get_tb_index(ns, db, &ix.table_name, ix.name.as_str(), None).await?.is_some(),
+		"the write's transaction must have the definition cached for this to mean anything"
+	);
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(Arc::clone(&tx));
+	let ctx = ctx.freeze();
+	let builder = ctx.get_index_builder().expect("index builder should be present").clone();
+	let decision = builder.reserve_durable_admission(&ctx, ikb, ix, ns, db, None).await?;
+	let DurableAdmissionDecision::Admit(admission) = decision else {
+		panic!("a building index must admit the write under a reservation");
+	};
+	Ok(ReservedWrite {
+		tx,
+		ctx,
+		admission: *admission,
+	})
+}
+
+/// Run the fence for `admission` and resolve the mutation under it, through
+/// the user transaction `ctx` holds.
+#[cfg(feature = "kv-mem")]
+async fn fence_reserved_write(
+	ctx: &crate::ctx::FrozenContext,
+	ikb: &IndexKeyBase,
+	ix: &IndexDefinition,
+	ns: NamespaceId,
+	db: DatabaseId,
+	admission: DurableAdmission,
+) -> Result<ConsumeResult> {
+	let rid = RecordId {
+		table: ix.table_name.clone(),
+		key: RecordIdKey::from("two".to_owned()),
+	};
+	let cache_key = CachedIndexBuildReservationKey {
+		ns,
+		db,
+		tb: ix.table_name.clone(),
+		ix: ix.index_id,
+	};
+	let builder = ctx.get_index_builder().expect("index builder should be present").clone();
+	builder
+		.admit_reserved(
+			ctx,
+			ikb,
+			ix,
+			cache_key,
+			admission,
+			IndexMutation {
+				old_values: None,
+				new_values: Some(vec![Value::from("two@example.com")]),
+				rid: &rid,
+				count_cond_match: None,
+			},
+		)
+		.await
+}
+
+/// Whether the reservation `!br(generation, ticket)` is still durable, read
+/// from a transaction of its own.
+#[cfg(feature = "kv-mem")]
+async fn reservation_is_held(
+	ds: &Datastore,
+	ikb: &IndexKeyBase,
+	generation: BuildGeneration,
+	ticket: BuildTicket,
+) -> Result<bool> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let held = catch!(tx, tx.get_key(&ikb.new_br_key(generation, ticket), None).await).is_some();
+	tx.cancel().await?;
+	Ok(held)
+}
+
+/// A write that reserved its ticket while the build was `Building`, and whose
+/// fence runs after a `REMOVE INDEX` has committed, skips the index instead of
+/// failing.
+///
+/// The retirement deletes `!bs` with the definition, so the fence finds the
+/// state missing. That is the observation a build vanishing under a live index
+/// produces too, and only the catalog, read by the transaction that observed
+/// it, tells them apart: here there is no index left to maintain. The skip is
+/// cached for the rest of the user transaction in place of the released ticket.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn fence_skips_an_index_retired_after_the_reservation_committed() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+				DEFINE TABLE user SCHEMALESS;
+				DEFINE INDEX test ON user FIELDS email;
+				",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	seed_build_state(&ds, &ikb, IndexBuildPhase::Building, 1).await?;
+
+	let write = reserve_write(&ds, ns, db, &ikb, ix.as_ref()).await?;
+	let (generation, ticket) = (write.admission.generation, write.admission.ticket);
+	assert!(reservation_is_held(&ds, &ikb, generation, ticket).await?);
+
+	execute_all(&ds, &session, "REMOVE INDEX test ON user").await?;
+
+	let outcome =
+		fence_reserved_write(&write.ctx, &ikb, ix.as_ref(), ns, db, write.admission).await;
+	let cache_key = CachedIndexBuildReservationKey {
+		ns,
+		db,
+		tb: table,
+		ix: ix.index_id,
+	};
+	let cached_reservation = write.tx.lookup_cached_index_build_reservation(&cache_key).await?;
+	let cached_admission = write.tx.lookup_cached_index_admission(&cache_key);
+	let held = reservation_is_held(&ds, &ikb, generation, ticket).await?;
+	write.tx.cancel().await?;
+
+	let outcome = outcome.expect("a retirement after the reservation must not fail the write");
+	assert!(
+		matches!(outcome, ConsumeResult::Retired),
+		"the fence must report the index retired so the mutation skips it"
+	);
+	assert!(!held, "the fence must release the reservation it no longer needs");
+	assert!(cached_reservation.is_none(), "the released ticket must not stay cached");
+	assert_eq!(cached_admission, Some(CachedIndexAdmission::Retired));
+	Ok(())
+}
+
+/// A write that reserved under the old definition, and that can already see
+/// the definition a `DEFINE INDEX OVERWRITE` installed in the window, maintains
+/// the replacement under its own id and skips the stale one.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn fence_skips_a_replaced_index_the_write_already_sees() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+				DEFINE TABLE user SCHEMALESS;
+				CREATE user:one SET email = 'one@example.com', account = 'apple' RETURN NONE;
+				DEFINE INDEX test ON user FIELDS email;
+				",
+	)
+	.await?;
+	let (ns, db, table, old_ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), old_ix.index_id);
+	seed_build_state(&ds, &ikb, IndexBuildPhase::Building, 1).await?;
+
+	let reserved = reserve_write(&ds, ns, db, &ikb, old_ix.as_ref()).await?;
+	let (generation, ticket) = (reserved.admission.generation, reserved.admission.ticket);
+
+	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE test ON user FIELDS account").await?;
+	let (_, _, _, new_ix) = get_table_index(&ds, "user", "test").await?;
+	assert_ne!(new_ix.index_id, old_ix.index_id, "the overwrite must allocate a fresh id");
+
+	// The fence's caller holds a view that already carries the replacement.
+	let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(Arc::clone(&tx));
+	let ctx = ctx.freeze();
+	let outcome =
+		fence_reserved_write(&ctx, &ikb, old_ix.as_ref(), ns, db, reserved.admission).await;
+	let held = reservation_is_held(&ds, &ikb, generation, ticket).await?;
+	tx.cancel().await?;
+	reserved.tx.cancel().await?;
+
+	let outcome = outcome.expect("a replacement the write can see must not fail it");
+	assert!(matches!(outcome, ConsumeResult::Retired), "the stale index must be skipped");
+	assert!(!held, "the fence must release the reservation it no longer needs");
+	Ok(())
+}
+
+/// A write whose view still carries the definition a `DEFINE INDEX OVERWRITE`
+/// replaced in the window fails at the fence: it cannot reach the new index,
+/// and skipping the old one would let the replacement publish without this
+/// record.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn fence_rejects_a_replacement_the_write_cannot_see() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+				DEFINE TABLE user SCHEMALESS;
+				CREATE user:one SET email = 'one@example.com', account = 'apple' RETURN NONE;
+				DEFINE INDEX test ON user FIELDS email;
+				",
+	)
+	.await?;
+	let (ns, db, table, old_ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), old_ix.index_id);
+	seed_build_state(&ds, &ikb, IndexBuildPhase::Building, 1).await?;
+
+	let write = reserve_write(&ds, ns, db, &ikb, old_ix.as_ref()).await?;
+	let (generation, ticket) = (write.admission.generation, write.admission.ticket);
+
+	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE test ON user FIELDS account").await?;
+
+	let outcome =
+		fence_reserved_write(&write.ctx, &ikb, old_ix.as_ref(), ns, db, write.admission).await;
+	let held = reservation_is_held(&ds, &ikb, generation, ticket).await?;
+	write.tx.cancel().await?;
+
+	let Err(err) = outcome else {
+		panic!("a replacement the write cannot see must abort it");
+	};
+	assert!(err.to_string().contains("replaced"), "unexpected error: {err}");
+	assert!(!held, "the fence must release the reservation of a write it fails");
+	Ok(())
+}
+
+/// Build state that goes missing while the definition still stands is a build
+/// that vanished under a live index. The fence fails the write and releases
+/// its reservation.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn fence_rejects_a_build_that_vanished_under_a_live_index() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+				DEFINE TABLE user SCHEMALESS;
+				DEFINE INDEX test ON user FIELDS email;
+				",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	seed_build_state(&ds, &ikb, IndexBuildPhase::Building, 1).await?;
+
+	let write = reserve_write(&ds, ns, db, &ikb, ix.as_ref()).await?;
+	let (generation, ticket) = (write.admission.generation, write.admission.ticket);
+	assert!(reservation_is_held(&ds, &ikb, generation, ticket).await?);
+
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.del_key(&ikb.new_bs_key()).await?;
+	tx.commit().await?;
+
+	let outcome =
+		fence_reserved_write(&write.ctx, &ikb, ix.as_ref(), ns, db, write.admission).await;
+	let held = reservation_is_held(&ds, &ikb, generation, ticket).await?;
+	write.tx.cancel().await?;
+
+	let Err(err) = outcome else {
+		panic!("missing build state under a live index must fail the write");
+	};
+	assert!(err.to_string().contains("no longer exists"), "unexpected error: {err}");
+	assert!(!held, "the fence must release the reservation of a write it fails");
 	Ok(())
 }
 
@@ -22079,8 +22359,19 @@ async fn an_uncommitted_definitions_build_is_kept_while_its_lease_holds_or_on_le
 	Ok(())
 }
 
+/// The write barrier's proof (`!bw`) recorded for the index `ikb` names, if any.
+#[cfg(feature = "kv-mem")]
+async fn barrier_proof(ds: &Datastore, ikb: &IndexKeyBase) -> Result<Option<BuildGeneration>> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let proof = catch!(tx, tx.get_key(&ikb.new_bw_key(), None).await);
+	tx.cancel().await?;
+	Ok(proof)
+}
+
 /// Retiring a lapsed build whose statement is still open fences that
-/// statement: the definition it holds can no longer commit.
+/// statement: the definition it holds can no longer commit. The build passed
+/// its write barrier before its owner lapsed, and the retirement removes the
+/// proof it recorded with the rest of the build's artifacts.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn retiring_an_uncommitted_build_fences_its_statement() -> Result<()> {
@@ -22096,6 +22387,7 @@ async fn retiring_an_uncommitted_build_fences_its_statement() -> Result<()> {
 	let txn =
 		build_index_inside_an_open_statement_transaction(&ds, &session, ns, db, &table, ix, true)
 			.await?;
+	assert!(barrier_proof(&ds, &ikb).await?.is_some(), "the build passed its write barrier");
 	lapse_the_online_owner(&ds, &ikb).await?;
 	let tx = ds.transaction(TransactionType::Write).await?;
 	catch!(tx, tx.set_key(&ikb.new_ic_key(ds.id()), &()).await);
@@ -22103,6 +22395,7 @@ async fn retiring_an_uncommitted_build_fences_its_statement() -> Result<()> {
 	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
 		.await?;
 	assert_eq!(orphan_left(&ds, &ikb).await?, (false, 0, 0), "the build is retired");
+	assert_eq!(barrier_proof(&ds, &ikb).await?, None, "and its barrier proof with it");
 	assert!(txn.commit().await.is_err(), "the statement that defined it cannot commit");
 	assert!(get_table_index(&ds, "t", "cy").await.is_err(), "and its definition is absent");
 	Ok(())

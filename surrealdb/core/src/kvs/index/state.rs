@@ -441,7 +441,8 @@ pub(crate) fn uncommitted_build_lapsed(state: &IndexBuildState, now: DateTime<Ut
 ///   the statement can no longer commit;
 /// - deletes the build state by a compare-and-delete against the state it read, so a heartbeat or a
 ///   batch that lands first fails `tx`'s commit;
-/// - deletes the build's queues and the index's data.
+/// - deletes the build's write-barrier proof (`!bw`), its queues and the index's data, as
+///   [`delete_durable_build_artifacts`] does for a retirement the catalog commits.
 ///
 /// A builder still running finds its state gone at its next ownership check,
 /// which every transaction writing index data makes, and stops.
@@ -467,6 +468,7 @@ pub(crate) async fn retire_uncommitted_build(tx: &Transaction, ikb: &IndexKeyBas
 	tx.del_key(&name).await?;
 	fence_table_definition(tx, ikb).await?;
 	tx.del_compare_key(&ikb.new_bs_key(), Some(&state)).await?;
+	tx.del_key(&ikb.new_bw_key()).await?;
 	delete_durable_build_queues(tx, ikb).await?;
 	tx.delr(
 		IdxRoot {

@@ -2705,10 +2705,9 @@ impl Transaction {
 
 	/// Remove a per-user-transaction admission reservation from the cache.
 	///
-	/// Called by `consume()` when the first-use fence returns `IndexNormally`:
-	/// the cached ticket has already been released by that fence, so subsequent
-	/// mutations must re-enter the reservation path and rediscover the online
-	/// build phase. Without this, the next mutation would hit a stale cache
+	/// Called by admission when the first-use fence releases the ticket it
+	/// reserved, because the build went online or the index was retired: the
+	/// next mutation must not reuse that ticket, or it would hit a stale cache
 	/// entry and write `!bg(old_gen, *)` that no builder will replay.
 	pub async fn remove_cached_index_build_reservation(
 		&self,

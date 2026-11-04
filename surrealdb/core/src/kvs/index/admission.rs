@@ -117,8 +117,9 @@ impl IndexBuilder {
 	/// mutation. A committed reservation carries a prepared close-time release,
 	/// which is registered before fence or queue work so failed writes cannot
 	/// leave a live-node ticket blocking `Closing`. The follow-up fence closes
-	/// the race where the build reaches `Online` or `Error` after the ticket was
-	/// reserved but before the user transaction writes its `!bg` entry.
+	/// the race where the build reaches `Online` or `Error`, or the index is
+	/// retired, after the ticket was reserved but before the user transaction
+	/// writes its `!bg` entry.
 	///
 	/// One reservation is allocated per user transaction per index. The first
 	/// admitted mutation runs the short reservation transaction; subsequent
@@ -236,53 +237,7 @@ impl IndexBuilder {
 			.await?
 		{
 			DurableAdmissionDecision::Admit(admission) => {
-				// Admission has already committed `!br`. Publish the prepared
-				// release and ticket into the per-user-txn cache before fence
-				// or queue work so any later error still releases the ticket
-				// when the user transaction closes — and so subsequent
-				// mutations in this user transaction skip the reservation.
-				let release = admission.release.clone();
-				ctx.tx().register_index_build_reservation_release(release.clone()).await;
-				let first_use = ctx
-					.tx()
-					.insert_cached_index_build_reservation(
-						cache_key.clone(),
-						admission.generation,
-						admission.ticket,
-						admission.initial_complete,
-					)
-					.await;
-				#[cfg(test)]
-				maybe_inject_non_retryable_error(
-					NonRetryableErrorSite::ConcurrentIndexAfterReservationRegistration,
-					ctx.node_id(),
-				)?;
-				if matches!(
-					self.fence_durable_admission(
-						ctx,
-						&ikb,
-						ix,
-						&admission,
-						release,
-						Some(&mutation)
-					)
-					.await?,
-					DurableAdmissionFence::IndexNormally
-				) {
-					// The fence saw the build go online and released `!br`.
-					// Drop the cache entry so the next mutation in this user
-					// transaction re-enters reservation and rediscovers the
-					// online state via `DurableAdmissionDecision::IndexNormally`
-					// instead of writing orphan `!bg` under the released ticket.
-					ctx.tx().remove_cached_index_build_reservation(&cache_key).await;
-					ctx.tx().insert_cached_index_admission(
-						cache_key,
-						CachedIndexAdmission::IndexNormally,
-					);
-					return Ok(ConsumeResult::Ignored(mutation.old_values, mutation.new_values));
-				}
-				let admitted = AdmittedMutation::from_lookup(first_use);
-				self.write_admitted_mutation(ctx, &ikb, mutation, admitted).await
+				self.admit_reserved(ctx, &ikb, ix, cache_key, *admission, mutation).await
 			}
 			DurableAdmissionDecision::IndexNormally => {
 				ctx.tx()
@@ -290,6 +245,75 @@ impl IndexBuilder {
 				Ok(ConsumeResult::Ignored(mutation.old_values, mutation.new_values))
 			}
 			DurableAdmissionDecision::Retired => {
+				ctx.tx().insert_cached_index_admission(cache_key, CachedIndexAdmission::Retired);
+				Ok(ConsumeResult::Retired)
+			}
+		}
+	}
+
+	/// Resolve a mutation under the reservation that `reserve_durable_admission`
+	/// committed for it: register the reservation's release, cache the ticket
+	/// for the rest of the user transaction, then run the fence and queue the
+	/// mutation, index it, or skip the index, as the fence decides.
+	pub(super) async fn admit_reserved(
+		&self,
+		ctx: &FrozenContext,
+		ikb: &IndexKeyBase,
+		ix: &IndexDefinition,
+		cache_key: CachedIndexBuildReservationKey,
+		admission: DurableAdmission,
+		mutation: IndexMutation<'_>,
+	) -> Result<ConsumeResult> {
+		// Admission has already committed `!br`. Publish the prepared
+		// release and ticket into the per-user-txn cache before fence
+		// or queue work so any later error still releases the ticket
+		// when the user transaction closes — and so subsequent
+		// mutations in this user transaction skip the reservation.
+		let release = admission.release.clone();
+		ctx.tx().register_index_build_reservation_release(release.clone()).await;
+		let first_use = ctx
+			.tx()
+			.insert_cached_index_build_reservation(
+				cache_key.clone(),
+				admission.generation,
+				admission.ticket,
+				admission.initial_complete,
+			)
+			.await;
+		#[cfg(test)]
+		maybe_inject_non_retryable_error(
+			NonRetryableErrorSite::ConcurrentIndexAfterReservationRegistration,
+			ctx.node_id(),
+		)?;
+		let fence = self
+			.fence_durable_admission(
+				ctx,
+				ikb,
+				ix,
+				cache_key.ns,
+				cache_key.db,
+				&admission,
+				release,
+				Some(&mutation),
+			)
+			.await?;
+		match fence {
+			DurableAdmissionFence::Queue => {
+				let admitted = AdmittedMutation::from_lookup(first_use);
+				self.write_admitted_mutation(ctx, ikb, mutation, admitted).await
+			}
+			// The fence released `!br` on both outcomes below. The cached
+			// ticket is dropped with it, so no later mutation in this user
+			// transaction writes `!bg` under a released ticket that no builder
+			// replays; the decision is cached in its place.
+			DurableAdmissionFence::IndexNormally => {
+				ctx.tx().remove_cached_index_build_reservation(&cache_key).await;
+				ctx.tx()
+					.insert_cached_index_admission(cache_key, CachedIndexAdmission::IndexNormally);
+				Ok(ConsumeResult::Ignored(mutation.old_values, mutation.new_values))
+			}
+			DurableAdmissionFence::Retired => {
+				ctx.tx().remove_cached_index_build_reservation(&cache_key).await;
 				ctx.tx().insert_cached_index_admission(cache_key, CachedIndexAdmission::Retired);
 				Ok(ConsumeResult::Retired)
 			}
@@ -341,19 +365,37 @@ impl IndexBuilder {
 
 	/// Re-read durable build state before writing a queued mutation.
 	///
-	/// If the generation changed, the reservation is released and the write
-	/// fails. If the build became online, the reservation is released and
-	/// the caller indexes normally in the user transaction. A build that
-	/// errored keeps queueing, or refuses the write (see
-	/// `reserve_durable_admission`). This
-	/// deliberately avoids `ctx.tx()`: a user transaction can define a
+	/// The reservation is released on every outcome but
+	/// [`DurableAdmissionFence::Queue`]. If the generation changed, the write
+	/// fails. If the build became online, the caller indexes normally in the
+	/// user transaction. A build that errored keeps queueing, or refuses the
+	/// write (see `reserve_durable_admission`).
+	///
+	/// Missing state splits on the catalog, as first-use admission and the
+	/// cached recheck do. A retirement deletes `!bs` in the transaction that
+	/// removes the definition, and a write must not fail because an index it no
+	/// longer has to maintain went away between its reservation and this fence:
+	/// a retired index, or a replaced one the write already maintains under the
+	/// new definition ([`Self::write_maintains_replacement`]), is
+	/// [`DurableAdmissionFence::Retired`]. A replacement the write cannot see
+	/// fails it, and so does state missing while the definition still stands,
+	/// which is a build that vanished under a live index and is not recoverable
+	/// here.
+	///
+	/// The state and the catalog are both read from a transaction of the
+	/// fence's own, never `ctx.tx()`: a user transaction can define a
 	/// concurrent index and then write to the same table before its snapshot
-	/// can see the builder's separately-committed `!bs` record.
-	async fn fence_durable_admission(
+	/// can see the builder's separately-committed `!bs` record, and a
+	/// retirement that commits during the write is invisible to that snapshot
+	/// and to the definition the write has already cached.
+	#[expect(clippy::too_many_arguments)]
+	pub(super) async fn fence_durable_admission(
 		&self,
 		ctx: &FrozenContext,
 		ikb: &IndexKeyBase,
 		ix: &IndexDefinition,
+		ns: NamespaceId,
+		db: DatabaseId,
 		admission: &DurableAdmission,
 		release: IndexBuildReservationRelease,
 		mutation: Option<&IndexMutation<'_>>,
@@ -361,14 +403,36 @@ impl IndexBuilder {
 		let tx =
 			self.tf.transaction(TransactionType::Read, ctx.try_get_sequences()?.clone()).await?;
 		let state = catch!(tx, tx.get_key(&ikb.new_bs_key(), None).await);
-		tx.cancel().await?;
 		let Some(state) = state else {
+			// Both halves of this decision come from the transaction that
+			// observed `!bs` missing, as in `recheck_cached_admission`.
+			let catalog =
+				catch!(tx, catalog_state(&tx, ns, db, &ix.table_name, &ix.name, ix.index_id).await);
+			tx.cancel().await?;
 			release.release().await?;
-			return Err(DatastoreError::IndexingBuildingCancelled {
-				reason: format!("Index {} build state no longer exists", ix.name),
-			}
-			.into());
+			return match catalog {
+				CatalogIndexState::Retired => Ok(DurableAdmissionFence::Retired),
+				CatalogIndexState::Replaced => {
+					if self.write_maintains_replacement(ctx, ix, ns, db).await? {
+						Ok(DurableAdmissionFence::Retired)
+					} else {
+						Err(DatastoreError::IndexingBuildingCancelled {
+							reason: format!(
+								"Index {} was replaced mid-transaction; queued mutations would \
+								 be lost",
+								ix.name
+							),
+						}
+						.into())
+					}
+				}
+				CatalogIndexState::Present => Err(DatastoreError::IndexingBuildingCancelled {
+					reason: format!("Index {} build state no longer exists", ix.name),
+				}
+				.into()),
+			};
 		};
+		tx.cancel().await?;
 		if state.generation != admission.generation {
 			release.release().await?;
 			return Err(DatastoreError::IndexingBuildingCancelled {
@@ -534,7 +598,7 @@ impl IndexBuilder {
 	/// catalog the entry was read from, and so reach the same decision. An index
 	/// that is building, closing, failed, replaced or retired is never known
 	/// online and takes the path below.
-	async fn reserve_durable_admission(
+	pub(super) async fn reserve_durable_admission(
 		&self,
 		ctx: &FrozenContext,
 		ikb: &IndexKeyBase,

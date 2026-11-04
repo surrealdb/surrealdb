@@ -171,6 +171,9 @@ enum DurableAdmissionFence {
 	Queue,
 	/// The index became online after admission; release the ticket and index now.
 	IndexNormally,
+	/// The index was retired after admission, or replaced by a definition the
+	/// write already maintains; release the ticket and skip the index.
+	Retired,
 }
 
 pub(crate) enum ConsumeResult {
