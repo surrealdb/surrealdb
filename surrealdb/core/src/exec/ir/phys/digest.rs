@@ -180,6 +180,7 @@ impl PhysOp {
 				encoder.u8(match attrs.key {
 					LookupKeyShape::Parent => 0,
 					LookupKeyShape::Probe => 1,
+					LookupKeyShape::Operand => 2,
 				});
 			}
 			PhysOp::RecordScan(attrs) => {

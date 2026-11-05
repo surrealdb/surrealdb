@@ -2280,7 +2280,8 @@ text_unit_enum!(CountSelect {
 });
 text_unit_enum!(LookupKeyShape {
 	Parent,
-	Probe
+	Probe,
+	Operand
 });
 text_unit_enum!(MaterializeImage {
 	KeyAndValue
