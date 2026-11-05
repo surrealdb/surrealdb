@@ -131,7 +131,10 @@
           })) util.platforms);
 
         # nix run
-        apps.default = flake-utils.lib.mkApp { drv = packages.default; };
+        apps.default = flake-utils.lib.mkApp {
+          drv = packages.default;
+          exePath = "/bin/${util.binaryName}";
+        };
 
       });
 }

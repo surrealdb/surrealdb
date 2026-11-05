@@ -3,7 +3,6 @@ use std::ops::{Bound, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 
 use serde::{Deserialize, Serialize};
 
-use crate as surrealdb_types;
 use crate::sql::{SqlFormat, ToSql};
 use crate::{Kind, Range, RecordIdKey, SurrealValue, Value, kind};
 
@@ -126,7 +125,7 @@ impl Ord for RecordIdKeyRange {
 			match a {
 				Bound::Unbounded => match b {
 					Bound::Unbounded => Ordering::Equal,
-					_ => Ordering::Less,
+					Bound::Included(_) | Bound::Excluded(_) => Ordering::Less,
 				},
 				Bound::Included(a) => match b {
 					Bound::Unbounded => Ordering::Greater,
@@ -135,13 +134,13 @@ impl Ord for RecordIdKeyRange {
 				},
 				Bound::Excluded(a) => match b {
 					Bound::Excluded(b) => a.cmp(b),
-					_ => Ordering::Greater,
+					Bound::Unbounded | Bound::Included(_) => Ordering::Greater,
 				},
 			}
 		}
-		match compare_bounds(&self.start, &other.end) {
+		match compare_bounds(&self.start, &other.start) {
 			Ordering::Equal => compare_bounds(&self.end, &other.end),
-			x => x,
+			ordering @ (Ordering::Less | Ordering::Greater) => ordering,
 		}
 	}
 }
@@ -192,8 +191,8 @@ impl ToSql for RecordIdKeyRange {
 				v.fmt_sql(f, fmt);
 			}
 			Bound::Excluded(v) => {
+				v.fmt_sql(f, fmt);
 				f.push('>');
-				v.fmt_sql(f, fmt)
 			}
 		};
 

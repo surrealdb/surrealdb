@@ -6,6 +6,7 @@ mod format;
 mod runner;
 mod tests;
 mod util;
+mod version;
 
 use anyhow::{self, Result};
 use cli::ColorMode;

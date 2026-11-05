@@ -1,0 +1,203 @@
+### SELECT * FROM person
+root[0] range in place, combine concat
+### SELECT name FROM person
+root[0] range in place, combine concat
+### SELECT name, age FROM person
+root[0] range in place, combine concat
+### SELECT * FROM person:tobie
+root[0] range in place, combine concat
+### SELECT * FROM person WHERE age > 18
+root[0] batches in place, combine concat
+### SELECT * FROM person WHERE age > 18 AND age > 3
+root[0] batches in place, combine concat
+### SELECT * FROM person WHERE true
+root[0] range in place, combine concat
+### SELECT * FROM person WHERE false
+root[0] batches in place, combine concat
+### SELECT * FROM person WHERE age > 18 AND city = 'SF'
+root[0] batches in place, combine concat
+### SELECT * FROM person WHERE age > 18 OR age < 5
+root[0] batches in place, combine concat
+### SELECT * FROM person WHERE NOT (age > 18 AND city = 'SF')
+root[0] batches, combine concat
+### SELECT * FROM person WHERE age > 1 + 2
+root[0] batches in place, combine concat
+### SELECT * FROM person WHERE city = NONE
+root[0] range in place, combine concat
+### SELECT * FROM person ORDER BY age
+root[0] batches in place, combine concat
+### SELECT * FROM person ORDER BY age LIMIT 10
+root[0] serial in place
+### SELECT * FROM person LIMIT 10 START 5
+root[0] range in place, paged, combine concat
+### SELECT count() FROM person GROUP ALL
+root[0] serial
+### SELECT city, count() FROM person GROUP BY city
+root[0] range in place, combine aggregate
+root[1] serial
+### SELECT * FROM person WHERE id IN (SELECT VALUE id FROM person WHERE age > 18)
+root[0] serial in place, group 0
+root[1] serial
+### SELECT (SELECT VALUE name FROM company) AS names FROM person
+root[0] range in place, combine concat, group 0
+root[1] serial
+### SELECT ->works_at->company FROM person
+root[0] batches, combine concat
+### SELECT * FROM person WHERE ->works_at->company
+root[0] batches, combine concat
+### CREATE person:tobie SET name = 'Tobie', age = 30
+root[0] serial
+### UPDATE person:tobie SET age = 31
+root[0] serial
+### UPDATE person:tobie SET age = age + 1
+root[0] serial
+### DELETE person:tobie
+root[0] serial
+root/0[0] serial
+### SELECT id, (CREATE log:1) AS made FROM person
+root[0] serial
+root/0[0] serial
+### UPDATE person SET city = (SELECT VALUE name FROM company)
+root[0] serial
+root/0[0] serial in place
+### UPDATE person SET city = (SELECT VALUE name FROM company WHERE name = $this)
+root[0] serial
+root/0[0] serial
+### UPDATE person SET city = (CREATE log:1).id
+root[0] serial
+root/0[0] serial
+### UPDATE person SET city = (SELECT VALUE rand::uuid() FROM company)
+root[0] serial
+root/0[0] serial
+### CREATE |person:3|
+root[0] serial
+### CREATE |person:1..4|
+root[0] batches, combine ordered apply
+### SELECT * FROM |person:3|
+root[0] serial
+### RETURN |person:3|
+root[0] serial
+### RETURN IF true THEN 1 ELSE 2 END
+root[0] serial
+### RETURN IF false THEN (CREATE log:1) ELSE 2 END
+root[0] serial
+### RETURN IF $c THEN 1 ELSE IF true THEN 2 ELSE 3 END
+root[0] serial
+### SELECT * FROM person WHERE age > rand::int(1, 10)
+root[0] serial
+### SELECT * FROM person WHERE age > time::now()
+root[0] batches in place, combine concat
+### SELECT * FROM person #2
+root[0] batches, combine concat
+### SELECT name, age FROM person WHERE age > 10
+root[0] batches in place, combine concat
+### SELECT ->works_at->company FROM person #2
+root[0] batches, combine concat
+### SELECT *, (SELECT VALUE name FROM company) AS c FROM person
+root[0] range in place, combine concat, group 0
+root[1] serial
+### SELECT * FROM person FETCH company
+root[0] batches, combine concat
+### SELECT * FROM person WHERE name @@ 'a'
+root[0] batches, combine concat
+### SELECT * FROM person WHERE emb <|3, 40|> [1, 2, 3]
+root[0] batches, combine concat
+### SELECT math::sum(age) FROM person GROUP ALL
+root[0] range in place, combine aggregate
+root[1] serial
+### SELECT city, count() FROM person GROUP BY city #2
+root[0] range in place, combine aggregate
+root[1] serial
+### SELECT * FROM person LIMIT 5 START 2
+root[0] batches, paged, combine concat
+### SELECT * FROM person ORDER BY age LIMIT 3
+root[0] serial
+### SELECT time::now() FROM person
+root[0] batches, combine concat
+### SELECT rand() FROM person
+root[0] serial
+### SELECT * FROM (SELECT * FROM person LIMIT 50) LIMIT 5
+root[0] batches, paged, combine concat, group 0
+root[1] serial
+### SELECT city, math::max(twice) AS top FROM person GROUP BY city
+root[0] batches, combine aggregate
+root[1] serial
+### SELECT city, math::sum(twice) AS total FROM person GROUP BY city
+root[0] serial
+root[1] serial
+### SELECT twice FROM person WHERE twice > 10 LIMIT 7
+root[0] batches, paged, combine concat
+### SELECT twice FROM person LIMIT 7
+root[0] batches, paged, combine concat
+### SELECT count() FROM person GROUP ALL #2
+root[0] serial
+### SELECT * FROM person WHERE id IN (SELECT VALUE id FROM person WHERE age > 18) #2
+root[0] serial in place, group 0
+root[1] serial
+### SELECT * FROM |person:3| #2
+root[0] serial
+### MATCH (n:person) RETURN DISTINCT n.city AS city ORDER BY city
+root[0] serial
+root[1] serial
+### MATCH (n:person) RETURN n.name AS name SKIP 1 LIMIT 2
+root[0] serial
+### MATCH (n:person) RETURN n.city AS city, count(*) AS c GROUP BY n.city ORDER BY city
+root[0] serial
+root[1] serial
+root[2] serial
+### SELECT DISTINCT city FROM person
+root[0] batches, combine distinct
+### SELECT DISTINCT sequence::nextval('s') AS n FROM person
+root[0] serial
+### SELECT * FROM l JOIN u ON l.k = u.k
+root[0] serial in place, group 0
+root[1] serial
+root[2] serial
+### SELECT * FROM l LEFT JOIN r ON l.k = r.k
+root[0] serial in place, group 0
+root[1] serial in place, group 1
+root[2] serial
+root[3] serial
+### SELECT *, sequence::nextval('s') AS n FROM person ORDER BY age LIMIT 3
+root[0] serial
+root[1] serial
+### SELECT sequence::nextval('s') FROM person WHERE emb <|3,40|> [1,2,3]
+root[0] serial
+### SELECT * FROM type::table($t)
+root[0] serial
+### SELECT id, (SELECT VALUE x FROM u WHERE k = $parent.k) AS xs FROM l
+root[0] serial in place, group 1
+root[1] serial, group 0
+root[2] serial
+### SELECT id, (SELECT VALUE x FROM r WHERE k = $parent.k) AS xs FROM l
+root[0] serial, group 0
+root[1] serial in place, group 2
+root[2] serial, group 1
+root[3] serial
+### SELECT * FROM person LIMIT rand::int(1, 5)
+root[0] serial
+### SELECT *, (SELECT VALUE name FROM company) AS c FROM person LIMIT rand::int(1, 5)
+root[0] serial in place, group 0
+root[1] serial
+### MATCH (a:person)-[:works_at]->(c:company), (b:person)-[:works_at]->(c:company) RETURN a.name AS a, b.name AS b
+root[0] serial, group 0
+root[1] serial, group 0
+root[2] serial
+root[3] serial
+root[4] serial
+root[5] serial
+### UPDATE person SET c = (SELECT VALUE count() FROM company GROUP ALL)
+root[0] serial
+root/0[0] serial
+### UPDATE person SET city = (SELECT VALUE name FROM company) #2
+root[0] serial
+root/0[0] serial in place
+### UPDATE person SET c = fn::scan()
+root[0] serial
+### UPDATE l SET xs = (SELECT VALUE x FROM r WHERE k = $parent.k)
+root[0] serial
+root/0[0] serial
+### { CREATE a:1; SELECT * FROM person; }
+root[0] serial, group 0
+root[1] serial, group 1
+root[2] serial

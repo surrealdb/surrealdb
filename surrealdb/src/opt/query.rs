@@ -5,7 +5,7 @@ use std::mem;
 
 use futures::future::Either;
 use futures::stream::select_all;
-use surrealdb_core::rpc::DbResultStats;
+use surrealdb_rpc::DbResultStats;
 
 use crate::method::live::Stream;
 use crate::notification::Notification;
@@ -20,7 +20,7 @@ where
 }
 
 mod query_result {
-	use surrealdb_core::rpc::DbResultStats;
+	use surrealdb_rpc::DbResultStats;
 
 	pub trait Sealed<Response>
 	where
@@ -66,11 +66,10 @@ where
 				0 => Ok(None),
 				1 => {
 					let value = vec.swap_remove(0);
-					match value {
-						Value::None => Ok(None),
-						v => {
-							Ok(Some(T::from_value(v).map_err(|e| Error::internal(e.to_string()))?))
-						}
+					if value.is_none() {
+						Ok(None)
+					} else {
+						Ok(Some(T::from_value(value).map_err(|e| Error::internal(e.to_string()))?))
 					}
 				}
 				_ => Err(Error::internal(
@@ -79,7 +78,26 @@ where
 				)),
 			},
 			Value::None => Ok(None),
-			v => Ok(Some(T::from_value(v).map_err(|e| Error::internal(e.to_string()))?)),
+			v @ (Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Object(_)
+			| Value::Set(_)) => Ok(Some(T::from_value(v).map_err(|e| Error::internal(e.to_string()))?)),
 		}
 	}
 
@@ -98,7 +116,27 @@ impl query_result::Sealed<Value> for (usize, &str) {
 
 		let value = match value {
 			Value::Object(object) => object.remove(key).unwrap_or_default(),
-			_ => Value::None,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Array(_)
+			| Value::Set(_) => Value::None,
 		};
 
 		Ok(value)
@@ -133,7 +171,27 @@ where
 					));
 				}
 			},
-			value => value,
+			value @ (Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Object(_)
+			| Value::Set(_)) => value,
 		};
 		match value {
 			Value::None => {
@@ -150,7 +208,26 @@ where
 				};
 				Ok(Some(T::from_value(value).map_err(|e| Error::internal(e.to_string()))?))
 			}
-			_ => Ok(None),
+			Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Array(_)
+			| Value::Set(_) => Ok(None),
 		}
 	}
 
@@ -168,7 +245,27 @@ where
 		let vec = match response.results.swap_remove(&self) {
 			Some((_, result)) => match result? {
 				Value::Array(arr) => arr.into_vec(),
-				vec => vec![vec],
+				vec @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Object(_)
+				| Value::Set(_)) => vec![vec],
 			},
 			None => {
 				return Ok(vec![]);
@@ -208,7 +305,27 @@ where
 						.map(|v| T::from_value(v).map_err(|e| Error::internal(e.to_string())))
 						.collect::<Result<Vec<T>>>()
 				}
-				val => {
+				val @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Object(_)
+				| Value::Set(_)) => {
 					if let Value::Object(object) = val
 						&& let Some(value) = object.remove(key)
 					{
@@ -237,7 +354,27 @@ where
 		let vec = match response.results.swap_remove(&self) {
 			Some((_, result)) => match result? {
 				Value::Array(arr) => arr.into_vec(),
-				vec => vec![vec],
+				vec @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Object(_)
+				| Value::Set(_)) => vec![vec],
 			},
 			None => {
 				return Ok(LinkedList::new());
@@ -277,7 +414,27 @@ where
 						.map(|v| T::from_value(v).map_err(|e| Error::internal(e.to_string())))
 						.collect::<Result<LinkedList<T>>>()
 				}
-				val => {
+				val @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Object(_)
+				| Value::Set(_)) => {
 					if let Value::Object(object) = val
 						&& let Some(value) = object.remove(key)
 					{
@@ -306,7 +463,27 @@ where
 		let vec = match response.results.swap_remove(&self) {
 			Some((_, result)) => match result? {
 				Value::Array(arr) => arr.into_vec(),
-				vec => vec![vec],
+				vec @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Object(_)
+				| Value::Set(_)) => vec![vec],
 			},
 			None => {
 				return Ok(HashSet::new());
@@ -346,7 +523,27 @@ where
 						.map(|v| T::from_value(v).map_err(|e| Error::internal(e.to_string())))
 						.collect::<Result<HashSet<T>>>()
 				}
-				val => {
+				val @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Object(_)
+				| Value::Set(_)) => {
 					if let Value::Object(object) = val
 						&& let Some(value) = object.remove(key)
 					{
@@ -522,7 +719,7 @@ where
 				false => Err(Error::internal(format!("Query statement {} is out of bounds", self))),
 			})?;
 		Ok(crate::method::QueryStream(Either::Left(Stream {
-			client: stream.client.clone(),
+			client: stream.client.share_session(),
 			id: mem::take(&mut stream.id),
 			rx: stream.rx.take(),
 			response_type: PhantomData,
@@ -565,7 +762,7 @@ where
 				}
 			};
 			streams.push(Stream {
-				client: stream.client.clone(),
+				client: stream.client.share_session(),
 				id: mem::take(&mut stream.id),
 				rx: stream.rx.take(),
 				response_type: PhantomData,

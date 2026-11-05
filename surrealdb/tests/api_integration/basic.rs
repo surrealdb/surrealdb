@@ -9,7 +9,7 @@ use surrealdb::IndexedResults;
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess, Token};
 use surrealdb::opt::{Config, PatchOp, PatchOps, Resource};
 use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object};
-use surrealdb_core::syn;
+use surrealdb_expr::parser as syn;
 use surrealdb_types::Array;
 use ulid::Ulid;
 
@@ -113,6 +113,66 @@ pub async fn signin_ns(new_db: impl CreateDb) {
 	})
 	.await
 	.unwrap();
+}
+
+/// A handle signed in with a system user's credentials keeps working after
+/// the token issued at signin has expired: the session lasts for the user's
+/// SESSION duration, which is unbounded by default.
+#[cfg(not(feature = "protocol-http"))]
+pub async fn signin_outlives_its_token(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	let namespace = Ulid::new().to_string();
+	db.use_ns(&namespace).use_db(Ulid::new().to_string()).await.unwrap();
+	let user = Ulid::new().to_string();
+	let pass = "password123".to_string();
+	let sql = format!(
+		"DEFINE USER `{user}` ON NAMESPACE PASSWORD '{pass}' ROLES EDITOR DURATION FOR TOKEN 1s"
+	);
+	let response = db.query(sql).await.unwrap();
+	drop(permit);
+	response.check().unwrap();
+	db.signin(Namespace {
+		namespace: namespace.clone(),
+		username: user,
+		password: pass,
+	})
+	.await
+	.unwrap();
+	// Wait for the token to expire
+	tokio::time::sleep(Duration::from_secs(2)).await;
+	let mut response = db.query("RETURN 1").await.unwrap().check().unwrap();
+	let one: Option<i64> = response.take(0).unwrap();
+	assert_eq!(one, Some(1));
+}
+
+/// HTTP holds no session between requests: each one presents the token issued
+/// at signin as a `Bearer` header, so it is a token session and ends at the
+/// token's `exp`.
+#[cfg(feature = "protocol-http")]
+pub async fn signin_outlives_its_token(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	let namespace = Ulid::new().to_string();
+	db.use_ns(&namespace).use_db(Ulid::new().to_string()).await.unwrap();
+	let user = Ulid::new().to_string();
+	let pass = "password123".to_string();
+	let sql = format!(
+		"DEFINE USER `{user}` ON NAMESPACE PASSWORD '{pass}' ROLES EDITOR DURATION FOR TOKEN 1s"
+	);
+	let response = db.query(sql).await.unwrap();
+	drop(permit);
+	response.check().unwrap();
+	db.signin(Namespace {
+		namespace: namespace.clone(),
+		username: user,
+		password: pass,
+	})
+	.await
+	.unwrap();
+	// Wait for the token to expire
+	tokio::time::sleep(Duration::from_secs(2)).await;
+	db.query("RETURN 1").await.unwrap_err();
 }
 
 pub async fn signin_db(new_db: impl CreateDb) {
@@ -223,7 +283,10 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 	} else if err.message().contains("HTTP") {
 		assert_eq!(
 			err.message(),
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			format!(
+				"HTTP status client error (400 Bad Request) for url (http://{}/signup)",
+				super::server_address()
+			)
 		);
 	} else {
 		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
@@ -250,7 +313,10 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 	} else if err.message().contains("HTTP") {
 		assert_eq!(
 			err.message(),
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			format!(
+				"HTTP status client error (400 Bad Request) for url (http://{}/signin)",
+				super::server_address()
+			)
 		);
 	} else {
 		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
@@ -301,7 +367,10 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 	} else if err.message().contains("HTTP") {
 		assert_eq!(
 			err.message(),
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			format!(
+				"HTTP status client error (400 Bad Request) for url (http://{}/signup)",
+				super::server_address()
+			)
 		);
 	} else {
 		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
@@ -329,7 +398,10 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 	} else if err.message().contains("HTTP") {
 		assert_eq!(
 			err.message(),
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
+			format!(
+				"HTTP status client error (400 Bad Request) for url (http://{}/signin)",
+				super::server_address()
+			)
 		);
 	} else {
 		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
@@ -441,6 +513,100 @@ pub async fn query_binds(new_db: impl CreateDb) {
 		panic!("query returned no record");
 	};
 	assert_eq!(record.name, "John Doe");
+}
+
+/// `stream_items` is the only caller of the engine's streaming query, and the
+/// embedded engine is the only one that serves it for real -- the rest answer
+/// from the buffered default, which replays a finished result as the same
+/// items. Both must produce every row, tagged with its statement and ahead of
+/// the item that confirms it.
+pub async fn query_stream_items(new_db: impl CreateDb) {
+	use futures::StreamExt as _;
+	use surrealdb::method::StreamItem;
+
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	for name in ["a", "b", "c"] {
+		db.query(format!("CREATE person SET name = '{name}'")).await.unwrap().check().unwrap();
+	}
+
+	// Two statements, so the items have to carry which one they belong to and
+	// the ends have to arrive in statement order -- neither of which a
+	// single-statement query can tell apart from an unindexed replay.
+	let mut items = db
+		.query("SELECT name FROM person")
+		.query("SELECT name FROM person WHERE name = 'a'")
+		.stream_items()
+		.unwrap();
+
+	let mut rows = [0, 0];
+	let mut ends = Vec::new();
+	while let Some(item) = items.next().await {
+		match item.unwrap() {
+			StreamItem::Row {
+				statement,
+				..
+			} => {
+				assert!(!ends.contains(&statement), "a row arrived after its statement ended");
+				rows[statement] += 1;
+			}
+			StreamItem::StatementEnd {
+				statement,
+				result,
+				..
+			} => {
+				result.unwrap();
+				ends.push(statement);
+			}
+		}
+	}
+	assert_eq!(rows, [3, 1], "every row reaches the caller, tagged with its statement");
+	assert_eq!(ends, vec![0, 1], "each statement ends exactly once, in order");
+}
+
+/// An owned query streams to the end even though nothing else holds the
+/// connection.
+///
+/// `into_owned` exists so a query can be moved onto another task, which means
+/// the handle it was built from is gone by the time the stream is read. The
+/// execution runs under a session, and a session lives only as long as a handle
+/// to it, so the owned handle has to travel with the execution.
+pub async fn owned_query_stream_outlives_its_builder(new_db: impl CreateDb) {
+	use futures::StreamExt as _;
+	use surrealdb::method::StreamItem;
+
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	db.query("CREATE person SET name = 'a'").await.unwrap().check().unwrap();
+
+	// `into_owned` clones the handle, and `stream_items` consumes the query --
+	// so nothing the caller holds keeps that clone's session alive.
+	let mut items = db.query("SELECT name FROM person").into_owned().stream_items().unwrap();
+
+	let mut rows = 0;
+	let mut ended = false;
+	while let Some(item) = items.next().await {
+		match item.unwrap() {
+			StreamItem::Row {
+				..
+			} => rows += 1,
+			StreamItem::StatementEnd {
+				result,
+				..
+			} => {
+				result.unwrap();
+				ended = true;
+			}
+		}
+	}
+	assert_eq!(rows, 1, "the row must reach the caller");
+	assert!(ended, "the stream must end, rather than stalling on a released session");
 }
 
 pub async fn query_with_stats(new_db: impl CreateDb) {
@@ -891,7 +1057,7 @@ pub async fn select_records_fetch(new_db: impl CreateDb) {
 
 	let check_fetch = |mut response: IndexedResults, expected: &str| {
 		let val: Value = response.take(0).unwrap();
-		let exp = surrealdb::parse::value(expected).unwrap();
+		let exp = surrealdb_expr::parser::value(expected).unwrap();
 		assert_eq!(val, exp);
 	};
 
@@ -1538,7 +1704,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let changes = a.get("changes").unwrap().clone();
 	assert_eq!(
 		changes,
-		surrealdb::parse::value(
+		surrealdb_expr::parser::value(
 			"[
         {
             define_table: {
@@ -1576,7 +1742,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::parse::value(
+		surrealdb_expr::parser::value(
 			"[
                  {
                       update: {
@@ -1600,7 +1766,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::parse::value(
+		surrealdb_expr::parser::value(
 			"[
                     {
                          update: {
@@ -1624,7 +1790,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::parse::value(
+		surrealdb_expr::parser::value(
 			"[
                     {
                         update: {
@@ -1648,7 +1814,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::parse::value(
+		surrealdb_expr::parser::value(
 			"[
         {
             update: {
@@ -1690,6 +1856,20 @@ pub async fn set_unset(new_db: impl CreateDb) {
 	assert_eq!(name, value);
 	// `token` is a reserved variable
 	db.set("token", value).await.unwrap_err();
+	// as is each name the engine reads from the session, which can be neither set nor unset
+	for name in ["auth", "access", "token", "session"] {
+		db.set(name, value).await.unwrap_err();
+		db.unset(name).await.unwrap_err();
+	}
+	// A name the engine binds per frame is not reserved: the frame's own binding shadows it, so
+	// a client may bind it like any other parameter.
+	for name in ["this", "self", "parent", "value", "input", "before", "after", "event"] {
+		db.set(name, value).await.unwrap();
+		let mut response = db.query(format!("RETURN ${name}")).await.unwrap();
+		let bound: Option<String> = response.take(0).unwrap();
+		assert_eq!(bound.as_deref(), Some(value), "`{name}` read back");
+		db.unset(name).await.unwrap();
+	}
 	// make sure we can still run queries after trying to set a protected variable
 	db.query("RETURN true").await.unwrap().check().unwrap();
 	db.unset(key).await.unwrap();
@@ -1849,8 +2029,190 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 	drop(permit);
 }
 
+/// A read-only transaction reads, rejects writes, commits without error, and
+/// describes the snapshot it reads.
+#[cfg(not(feature = "protocol-http"))]
+pub async fn client_side_read_only_transactions(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	db.query("CREATE item:one SET value = 1").await.unwrap().check().unwrap();
+
+	let txn = db.begin().max_staleness(std::time::Duration::from_secs(5)).strict().await.unwrap();
+	let snapshot = txn.snapshot().cloned().expect("a read-only transaction describes its snapshot");
+	let surrealdb_types::Value::Object(snapshot) = snapshot else {
+		panic!("the snapshot is an object");
+	};
+	assert_eq!(snapshot.get("stale"), Some(&surrealdb_types::Value::Bool(false)));
+	let rows: Vec<Value> = txn.select("item").await.unwrap();
+	assert_eq!(rows.len(), 1);
+	assert!(txn.create::<Option<Value>>("item").await.is_err());
+	let db = txn.commit().await.unwrap();
+
+	// Nothing was written, and a plain transaction still has no snapshot.
+	let rows: Vec<Value> = db.select("item").await.unwrap();
+	assert_eq!(rows.len(), 1);
+	let txn = db.begin().await.unwrap();
+	assert!(txn.snapshot().is_none());
+	let db = txn.cancel().await.unwrap();
+
+	let txn = db.begin().read_only().await.unwrap();
+	assert!(txn.snapshot().is_some());
+	txn.cancel().await.unwrap();
+
+	drop(permit);
+}
+
+/// A query abandoned part-way through cannot leave work a later commit would
+/// persist.
+///
+/// The execution runs on the caller's own task, so a caller that stops awaiting
+/// aborts it mid-batch. Whatever it wrote is still in the transaction, and the
+/// caller still holds the handle, so the transaction has to be taken away from
+/// it rather than left committable.
+///
+/// Embedded only: a remote transport does not tie the server's execution to the
+/// caller's future, so abandoning the future there leaves the statement to
+/// finish and the transaction is still the caller's to commit.
+#[cfg(not(any(feature = "protocol-http", feature = "protocol-ws")))]
+pub async fn an_abandoned_query_cannot_be_committed(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	let ns = Ulid::new().to_string();
+	let dbn = Ulid::new().to_string();
+	db.use_ns(&ns).use_db(&dbn).await.unwrap();
+	drop(permit);
+
+	// Seeded outside the transaction, so the check below distinguishes "the
+	// abandoned write is gone" from "the table never existed".
+	db.query("CREATE person:kept SET name = 'kept'").await.unwrap().check().unwrap();
+
+	// A clone, so the original handle is still available to check with once the
+	// transaction has been taken away from this one.
+	let txn = db.clone().begin().await.unwrap();
+
+	// Abandon a query that writes and then sleeps, so it is certain to be part
+	// way through when the timeout takes the future away.
+	let abandoned = tokio::time::timeout(
+		Duration::from_millis(250),
+		txn.query("CREATE person:ghost SET name = 'ghost'").query("SLEEP 10s"),
+	)
+	.await;
+	assert!(abandoned.is_err(), "the query must still be running when it is dropped");
+
+	// The transaction is no longer the caller's to commit.
+	txn.commit().await.expect_err("an abandoned transaction cannot be committed");
+
+	// And nothing it wrote survived.
+	let mut response = db.query("SELECT VALUE name FROM person").await.unwrap();
+	let names: Vec<String> = response.take(0).unwrap();
+	assert_eq!(names, vec!["kept".to_string()], "the abandoned write must not be visible");
+}
+
+#[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
+pub async fn an_abandoned_query_cannot_be_committed(_new_db: impl CreateDb) {
+	// A remote engine's execution outlives the caller's future; see above.
+}
+
+/// A write conflict raised when a client-side transaction commits reaches the caller
+/// as `QueryError::TransactionConflict`, the kind a retry loop keys on, whichever
+/// engine ran the commit.
+#[cfg(not(feature = "protocol-http"))]
+pub async fn a_commit_conflict_keeps_its_kind(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let first = db.clone().begin().await.unwrap();
+	let second = db.clone().begin().await.unwrap();
+	first.query("CREATE conflicted:one SET n = 1").await.unwrap().check().unwrap();
+	second.query("CREATE conflicted:one SET n = 2").await.unwrap().check().unwrap();
+	first.commit().await.unwrap();
+
+	let error = match second.commit().await {
+		Ok(_) => panic!("the second writer of one record must not commit"),
+		Err(error) => error,
+	};
+	assert_eq!(
+		error.query_details(),
+		Some(&surrealdb_types::QueryError::TransactionConflict),
+		"unexpected commit error: {error:?}"
+	);
+	drop(permit);
+}
+
+/// Concurrent read-modify-write transactions on one record lose no increment: each
+/// either commits or fails with a conflict a retry loop recognises by kind.
+#[cfg(not(feature = "protocol-http"))]
+pub async fn concurrent_counter_increments_are_not_lost(new_db: impl CreateDb) {
+	const WORKERS: usize = 4;
+	const INCREMENTS: usize = 8;
+
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	db.query("CREATE counter:main SET n = 0").await.unwrap().check().unwrap();
+
+	let mut workers = Vec::new();
+	for _ in 0..WORKERS {
+		let db = db.clone();
+		workers.push(tokio::spawn(async move {
+			for _ in 0..INCREMENTS {
+				loop {
+					let txn = db.clone().begin().await.unwrap();
+					let current: Option<i64> = txn
+						.query("SELECT VALUE n FROM ONLY counter:main")
+						.await
+						.unwrap()
+						.take(0)
+						.unwrap();
+					txn.query("UPDATE counter:main SET n = $n")
+						.bind(("n", current.unwrap() + 1))
+						.await
+						.unwrap()
+						.check()
+						.unwrap();
+					match txn.commit().await {
+						Ok(_) => break,
+						Err(error) => {
+							assert_eq!(
+								error.query_details(),
+								Some(&surrealdb_types::QueryError::TransactionConflict),
+								"only a conflict may fail a commit here: {error:?}"
+							);
+						}
+					}
+				}
+			}
+		}));
+	}
+	for worker in workers {
+		worker.await.unwrap();
+	}
+
+	let total: Option<i64> =
+		db.query("SELECT VALUE n FROM ONLY counter:main").await.unwrap().take(0).unwrap();
+	assert_eq!(total, Some((WORKERS * INCREMENTS) as i64));
+	drop(permit);
+}
+
+#[cfg(feature = "protocol-http")]
+pub async fn concurrent_counter_increments_are_not_lost(_new_db: impl CreateDb) {
+	// Client-side transactions are not supported on HTTP
+}
+
+#[cfg(feature = "protocol-http")]
+pub async fn a_commit_conflict_keeps_its_kind(_new_db: impl CreateDb) {
+	// Client-side transactions are not supported on HTTP
+}
+
 #[cfg(feature = "protocol-http")]
 pub async fn client_side_transactions(_new_db: impl CreateDb) {
+	// Client-side transactions are not supported on HTTP
+}
+
+#[cfg(feature = "protocol-http")]
+pub async fn client_side_read_only_transactions(_new_db: impl CreateDb) {
 	// Client-side transactions are not supported on HTTP
 }
 
@@ -1921,9 +2283,185 @@ pub async fn refresh_tokens(new_db: impl CreateDb) {
 	db.authenticate(token).refresh().await.unwrap_err();
 }
 
+/// `use_defaults` applies the datastore's configured default namespace and
+/// database.
+///
+/// This is a parity test between the transports, not a feature test: the
+/// WebSocket and HTTP engines resolve `DEFINE CONFIG DEFAULT` themselves before
+/// touching the session, while the embedded engine passes the empty `USE`
+/// straight to the shared session helper, which reads "no namespace and no
+/// database" as a request to *clear* both. The documented behaviour is to apply
+/// the default, so that is what every backend is held to here.
+pub async fn use_defaults_applies_the_configured_default(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db(Config::new()).await;
+
+	let ns = Ulid::new().to_string();
+	let database = Ulid::new().to_string();
+	db.query(format!("DEFINE CONFIG OVERWRITE DEFAULT NAMESPACE `{ns}` DATABASE `{database}`"))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
+
+	// The session has selected nothing yet, which is the only state in which
+	// the default applies — a session that already has a namespace keeps it.
+	let (got_ns, got_db) = db.use_defaults().await.unwrap();
+
+	assert_eq!(got_ns.as_deref(), Some(ns.as_str()), "namespace default was not applied");
+	assert_eq!(got_db.as_deref(), Some(database.as_str()), "database default was not applied");
+
+	drop(permit);
+}
+
+/// An expired session cannot set a variable.
+///
+/// A parity test between the transports. `SECURITY_GUIDE.md` section 3 requires
+/// expiry to be checked "before executing any statement, processing any RPC
+/// method"; the RPC path does that in `set`, while the embedded engine's `Set`
+/// command has no expiry check at all. `query` is checked on both — the
+/// datastore itself refuses an expired session — so this pins the session
+/// method, which is where the two diverge.
+pub async fn set_on_an_expired_session_is_rejected(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db(Config::new()).await;
+	let namespace = Ulid::new().to_string();
+	let database = Ulid::new().to_string();
+	db.use_ns(&namespace).use_db(&database).await.unwrap();
+
+	let access = Ulid::new();
+	let email = format!("{access}@example.com");
+	let pass = "password123";
+	// The shortest session this can be given, so the test waits it out rather
+	// than mocking a clock the engine does not expose.
+	db.query(format!(
+		"
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD
+        SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+        SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+        DURATION FOR SESSION 1s FOR TOKEN 15s
+    "
+	))
+	.await
+	.unwrap()
+	.check()
+	.unwrap();
+
+	db.signup(RecordAccess {
+		namespace: namespace.clone(),
+		database: database.clone(),
+		access: access.to_string(),
+		params: AuthParams {
+			pass: pass.to_string(),
+			email: email.clone(),
+		},
+	})
+	.await
+	.unwrap();
+
+	tokio::time::sleep(Duration::from_secs(2)).await;
+
+	db.set("some_key", 1).await.expect_err("an expired session must not be able to set a variable");
+
+	drop(permit);
+}
+
+/// `Begin::client` and `Transaction::client` expose the underlying session
+/// handle, whose direct operations execute outside any transaction and whose
+/// clones open independent sessions inheriting the session state.
+#[cfg(not(feature = "protocol-http"))]
+pub async fn client_accessor_clones_from_begin(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	db.query("DEFINE TABLE item").await.unwrap().check().unwrap();
+	db.set("session_var", "inherited").await.unwrap();
+
+	let begin = db.begin();
+
+	// Cloning from `Begin::client()` yields a new independent session with the
+	// same namespace, database, and variables.
+	let from_begin = begin.client().clone();
+	let mut res = from_begin.query("RETURN $session_var").await.unwrap().check().unwrap();
+	let inherited: Option<String> = res.take(0).unwrap();
+	assert_eq!(inherited.as_deref(), Some("inherited"));
+	from_begin.set("session_var", "changed_on_begin_clone").await.unwrap();
+
+	let txn = begin.await.unwrap();
+
+	// Uncommitted write inside the transaction.
+	txn.query("CREATE item:in_tx SET name = 'inside'").await.unwrap().check().unwrap();
+
+	// `Transaction::client()` returns the underlying session handle, which does
+	// not carry the transaction ID: operations on it execute outside the
+	// transaction, cannot see uncommitted writes in `txn`, and auto-commit
+	// immediately so cancelling `txn` does not roll them back.
+	let mut res = txn.client().query("RETURN $session_var").await.unwrap().check().unwrap();
+	let still_inherited: Option<String> = res.take(0).unwrap();
+	assert_eq!(still_inherited.as_deref(), Some("inherited"));
+
+	let unseen: Option<Value> = txn.client().select(("item", "in_tx")).await.unwrap();
+	assert!(
+		unseen.is_none(),
+		"tx.client() runs outside the transaction and must not see uncommitted writes"
+	);
+
+	txn.client()
+		.query("CREATE item:outside_tx SET name = 'outside'")
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
+
+	// Cloning from `Transaction::client()` yields a new independent session
+	// inheriting the session state and running outside the transaction.
+	let from_tx = txn.client().clone();
+	let mut res = from_tx.query("RETURN $session_var").await.unwrap().check().unwrap();
+	let tx_clone_var: Option<String> = res.take(0).unwrap();
+	assert_eq!(tx_clone_var.as_deref(), Some("inherited"));
+	from_tx.set("session_var", "changed_on_tx_clone").await.unwrap();
+
+	let unseen_by_clone: Option<Value> = from_tx.select(("item", "in_tx")).await.unwrap();
+	assert!(unseen_by_clone.is_none());
+
+	let db = txn.cancel().await.unwrap();
+
+	// The transactional write was rolled back, whereas the write through
+	// `txn.client()` ran outside the transaction and remains committed.
+	let in_tx: Option<Value> = db.select(("item", "in_tx")).await.unwrap();
+	assert!(in_tx.is_none());
+	let outside_tx: Option<Value> = db.select(("item", "outside_tx")).await.unwrap();
+	assert!(outside_tx.is_some());
+
+	// And the original session's variable was not mutated by either clone.
+	let mut res = db.query("RETURN $session_var").await.unwrap().check().unwrap();
+	let final_var: Option<String> = res.take(0).unwrap();
+	assert_eq!(final_var.as_deref(), Some("inherited"));
+
+	drop(permit);
+}
+
+#[cfg(feature = "protocol-http")]
+pub async fn client_accessor_clones_from_begin(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	db.set("session_var", "inherited").await.unwrap();
+
+	let begin = db.begin();
+	let from_begin = begin.client().clone();
+	let mut res = from_begin.query("RETURN $session_var").await.unwrap().check().unwrap();
+	let inherited: Option<String> = res.take(0).unwrap();
+	assert_eq!(inherited.as_deref(), Some("inherited"));
+
+	drop(permit);
+}
+
 define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	connect,
+	#[test_log::test(tokio::test)]
+	set_on_an_expired_session_is_rejected,
+	#[test_log::test(tokio::test)]
+	use_defaults_applies_the_configured_default,
 	#[test_log::test(tokio::test)]
 	yuse,
 	#[test_log::test(tokio::test)]
@@ -1932,6 +2470,8 @@ define_include_tests!(basic => {
 	signup_record,
 	#[test_log::test(tokio::test)]
 	signin_ns,
+	#[test_log::test(tokio::test)]
+	signin_outlives_its_token,
 	#[test_log::test(tokio::test)]
 	signin_db,
 	#[test_log::test(tokio::test)]
@@ -1950,6 +2490,10 @@ define_include_tests!(basic => {
 	query_decimals,
 	#[test_log::test(tokio::test)]
 	query_binds,
+	#[test_log::test(tokio::test)]
+	query_stream_items,
+	#[test_log::test(tokio::test)]
+	owned_query_stream_outlives_its_builder,
 	#[test_log::test(tokio::test)]
 	query_with_stats,
 	#[test_log::test(tokio::test)]
@@ -2026,6 +2570,16 @@ define_include_tests!(basic => {
 	field_and_index_methods,
 	#[test_log::test(tokio::test)]
 	client_side_transactions,
+	#[test_log::test(tokio::test)]
+	client_accessor_clones_from_begin,
+	#[test_log::test(tokio::test)]
+	client_side_read_only_transactions,
+	#[test_log::test(tokio::test)]
+	an_abandoned_query_cannot_be_committed,
+	#[test_log::test(tokio::test)]
+	a_commit_conflict_keeps_its_kind,
+	#[test_log::test(tokio::test)]
+	concurrent_counter_increments_are_not_lost,
 	#[test_log::test(tokio::test)]
 	refresh_tokens,
 });

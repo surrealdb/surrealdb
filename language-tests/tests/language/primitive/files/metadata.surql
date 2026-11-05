@@ -2,9 +2,6 @@
 
 [test]
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 # 0: Setup
 [[test.results]]
 value = '"OK"'

@@ -55,15 +55,13 @@
 //! compatibility).
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
-use super::common::{eval_buffered, is_recursion_target};
+use super::common::{DepthBody, RecursionBounds, eval_buffered, is_recursion_target};
 use crate::exec::FlowResult;
+use crate::exec::parts::is_final;
 use crate::exec::parts::recurse::value_hash;
-use crate::exec::parts::{evaluate_physical_path, is_final};
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::val::Value;
 
 /// Shortest path recursion: find the shortest path to a target node using BFS.
@@ -72,15 +70,15 @@ use crate::val::Value;
 /// target is not reachable within max_depth.
 ///
 /// Fully iterative -- level-based BFS loop.
-pub(crate) async fn evaluate_recurse_shortest(
+pub(crate) async fn evaluate_recurse_shortest_with(
 	start: &Value,
 	target: &Value,
-	path: &[Arc<dyn PhysicalExpr>],
-	min_depth: u32,
-	max_depth: u32,
+	body: &impl DepthBody,
+	bounds: RecursionBounds,
 	inclusive: bool,
-	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
+	let min_depth = bounds.min;
+	let max_depth = bounds.cap();
 	let mut seen = std::collections::HashSet::new();
 
 	let initial_path = if inclusive {
@@ -100,10 +98,7 @@ pub(crate) async fn evaluate_recurse_shortest(
 
 		// Phase 1: Evaluate all level values concurrently (bounded).
 		// Uses `buffered` (ordered) so results align with `level` for zip.
-		let futures: Vec<_> = level
-			.iter()
-			.map(|(current, _)| evaluate_physical_path(current, path, ctx.with_value(current)))
-			.collect();
+		let futures: Vec<_> = level.iter().map(|(current, _)| body.eval(current)).collect();
 		let eval_results = eval_buffered(futures).await?;
 
 		// Phase 2: Process results sequentially (target check, dedup, enqueue).
@@ -112,7 +107,26 @@ pub(crate) async fn evaluate_recurse_shortest(
 			let values = match result {
 				Value::Array(arr) => arr.0,
 				Value::None | Value::Null => continue,
-				other => vec![other],
+				other @ (Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_)) => vec![other],
 			};
 
 			for v in values {
@@ -124,7 +138,7 @@ pub(crate) async fn evaluate_recurse_shortest(
 				// Non-RecordId values during recursion are an error --
 				// recursion is intended purely for record graph traversal.
 				if !is_recursion_target(&v) {
-					return Err(crate::err::Error::InvalidRecursionTarget {
+					return Err(crate::exec::Error::InvalidRecursionTarget {
 						value: v.to_sql(),
 					}
 					.into());
@@ -147,6 +161,15 @@ pub(crate) async fn evaluate_recurse_shortest(
 		}
 
 		depth += 1;
+	}
+
+	// Unbounded recursion truncated at the system limit with the queue still
+	// non-empty: hard error (see `RecursionBounds`).
+	if bounds.errors_on_limit() && !queue.is_empty() {
+		return Err(crate::exec::Error::IdiomRecursionLimitExceeded {
+			limit: bounds.system_limit,
+		}
+		.into());
 	}
 
 	// Target not found within max_depth.

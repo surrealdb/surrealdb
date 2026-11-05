@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Structural pre-decode filter for AND conjunctions at the document root and nested shared prefixes (outer.x AND outer.y). Triple conjuncts and NOT must match full decode; scan_predicate remains authoritative. EXPLAIN shows plan-time pre_decode_filter status on KV scans."
+reason = "Structural pre-decode filter for AND conjunctions at the document root and nested shared prefixes (outer.x AND outer.y). Triple conjuncts and NOT must match full decode; scan_predicate remains authoritative. EXPLAIN shows the conjunction as one filter over the table scan."
 
 [[test.results]]
 value = "{ a: 1, b: 2, id: t:1, outer: { x: 10, y: 20 } }"
@@ -35,10 +34,10 @@ value = "[{ id: t:1 }]"
 value = "[{ id: t:1 }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: id]
     TableScan [ctx: Db] [table: t, direction: Forward, predicate: a = 1 AND b = 3, pre_decode_filter: yes]
-'"""
+''''
 
 [[test.results]]
 value = "NONE"
@@ -53,16 +52,16 @@ value = "NONE"
 value = "[{ a: 1, id: ex_cf:1, x: 1 }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: id]
     TableScan [ctx: Db] [table: ex_cf, direction: Forward, predicate: a = 1, pre_decode_filter: yes]
-'"""
+''''
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: outer CONTAINS {x: 10}, pre_decode_filter: yes]
-'"""
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: outer CONTAINS { x: 10 }, pre_decode_filter: yes]
+''''
 
 [[test.results]]
 value = "NONE"
@@ -74,10 +73,10 @@ value = "NONE"
 value = "[{ a: 1, id: ex_fp:1 }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: ex_fp, direction: Forward, predicate: a = 1, pre_decode_filter: deferred (runtime field state)]
-'"""
+    TableScan [ctx: Db] [table: ex_fp, direction: Forward, predicate: a = 1, pre_decode_filter: yes]
+''''
 */
 
 CREATE ONLY t:1 SET a = 1, b = 2, outer = { x: 10, y: 20 };

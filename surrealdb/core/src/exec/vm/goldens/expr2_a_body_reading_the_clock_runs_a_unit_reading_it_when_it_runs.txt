@@ -1,0 +1,8 @@
+### [$f(), $f()]
+[[1, 2, 3], [1, 2, 3]]
+### SELECT VALUE (|| (SELECT VALUE n FROM item WHERE time::now() > d'2000-01-01' ORDER BY n))() FROM item
+[1, 2, 3]
+[1, 2, 3]
+[1, 2, 3]
+### array::map([1, 2, 3, 4], |$v| (|| (SELECT VALUE n FROM item WHERE time::now() > d'2000-01-01' ORDER BY n))())
+[[1, 2, 3], [1, 2, 3], [1, 2, 3], [1, 2, 3]]

@@ -1,0 +1,23 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL json_extract, json_unquote, json_object, sha2 and uuid"
+
+[[test.results]]
+value = "[{ a: 20, b: 5, c: NULL }]"
+
+[[test.results]]
+value = "[{ a: 'abc', b: 'abc', c: { a: 1 } }]"
+
+[[test.results]]
+value = "[{ a: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', b: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', c: NULL, d: 36 }]"
+*/
+
+SELECT json_extract('{"a": [10, 20]}', '$.a[1]') AS a, json_extract('{"a": {"b": 5}}', '$.a.b') AS b, json_extract('{"a": 1}', '$.z') AS c;
+
+SELECT json_unquote('"abc"') AS a, json_unquote('abc') AS b, json_object('a', 1) AS c;
+
+SELECT sha2('abc', 256) AS a, sha2('abc', 0) AS b, sha2('abc', 99) AS c, char_length(uuid()) AS d;

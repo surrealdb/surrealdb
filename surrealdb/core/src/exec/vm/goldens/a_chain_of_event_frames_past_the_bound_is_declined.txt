@@ -1,0 +1,4 @@
+### CREATE t:start SET n = 0
+{ id: t:start, n: 0 }
+### SELECT * FROM t ORDER BY id
+{ id: t:3, n: 3 }

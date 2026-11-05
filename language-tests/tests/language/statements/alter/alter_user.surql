@@ -10,21 +10,21 @@ reason = "Test ALTER USER with all variations"
 value = "NONE"
 
 [[test.results]]
-match = '''$result.users.testuser = /DEFINE USER testuser ON DATABASE PASSHASH '\$argon2id\$.*' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/'''
+match = '''$result.users.testuser = /DEFINE USER testuser ON DATABASE PASSHASH '\[REDACTED\]' PASSSCRAM '\[REDACTED\]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/'''
 error = false
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-match = '''$result.users.testuser = /DEFINE USER testuser ON DATABASE PASSHASH '\$argon2id\$.*' ROLES EDITOR DURATION FOR TOKEN 1h, FOR SESSION 1d COMMENT 'updated user'/'''
+match = '''$result.users.testuser = /DEFINE USER testuser ON DATABASE PASSHASH '\[REDACTED\]' PASSSCRAM '\[REDACTED\]' ROLES EDITOR DURATION FOR TOKEN 1h, FOR SESSION 1d COMMENT 'updated user'/'''
 error = false
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-match = '''$result.users.testuser = /DEFINE USER testuser ON DATABASE PASSHASH '\$argon2id\$.*' ROLES EDITOR DURATION FOR TOKEN NONE, FOR SESSION NONE/'''
+match = '''$result.users.testuser = /DEFINE USER testuser ON DATABASE PASSHASH '\[REDACTED\]' PASSSCRAM '\[REDACTED\]' ROLES EDITOR DURATION FOR TOKEN NONE, FOR SESSION NONE/'''
 error = false
 
 [[test.results]]

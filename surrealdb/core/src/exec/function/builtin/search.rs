@@ -1,4 +1,4 @@
-//! Search functions for the streaming executor.
+//! Search functions for the engine.
 //!
 //! These functions provide full-text search capabilities including
 //! analyzer operations, result highlighting, scoring, offsets, and fusion.
@@ -11,21 +11,22 @@ use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, HashMap};
 
 use anyhow::Result;
-use reblessive::tree::TreeStack;
 
 use crate::catalog::providers::DatabaseProvider;
-use crate::err::Error;
-use crate::exec::ContextLevel;
+use crate::exec::analyzer_function::StreamingAnalyzerFunction;
 use crate::exec::function::index::{IndexContext, IndexContextKind, IndexFunction};
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
-use crate::exec::physical_expr::EvalContext;
-use crate::expr::Kind;
+use crate::exec::ir::iface::Fallibility;
+use crate::exec::{ContextLevel, EvalContext};
+use crate::expr::logical::EffectSet;
+use crate::expr::{Error, Kind};
+use crate::fnc::args::{FromArgs, Optional};
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::val::{Array, Number, Object, Value};
 
 // =========================================================================
-// search::analyze - ScalarFunction (already existed)
+// search::analyze - ScalarFunction
 // =========================================================================
 
 /// Analyzes text using a specified analyzer.
@@ -39,6 +40,18 @@ pub struct SearchAnalyze;
 impl ScalarFunction for SearchAnalyze {
 	fn name(&self) -> &'static str {
 		"search::analyze"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(
+			Scalar,
+			"search::analyze",
+			Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
+		)
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::READS_CATALOG
 	}
 
 	fn signature(&self) -> Signature {
@@ -70,44 +83,11 @@ impl ScalarFunction for SearchAnalyze {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
-			let mut args = args.into_iter();
-
-			// Get analyzer name
-			let az = match args.next() {
-				Some(Value::String(s)) => s,
-				Some(v) => {
-					return Err(anyhow::anyhow!(
-						"Function 'search::analyze' expects a string analyzer name, got: {}",
-						v.kind_of()
-					));
-				}
-				None => {
-					return Err(anyhow::anyhow!(
-						"Function 'search::analyze' expects two arguments: analyzer name and value"
-					));
-				}
-			};
-
-			// Get value to analyze
-			let val = match args.next() {
-				Some(Value::String(s)) => s,
-				Some(v) => {
-					return Err(anyhow::anyhow!(
-						"Function 'search::analyze' expects a string value, got: {}",
-						v.kind_of()
-					));
-				}
-				None => {
-					return Err(anyhow::anyhow!(
-						"Function 'search::analyze' expects two arguments: analyzer name and value"
-					));
-				}
-			};
-
-			// Get the options - if not available, return NONE (matching original behavior)
-			let opt = match ctx.exec_ctx.options() {
-				Some(opt) => opt,
-				None => return Ok(Value::None),
+			// Expects exactly two arguments. Returns NONE when either is not a
+			// string.
+			let (az, val): (Value, Value) = FromArgs::from_args("search::analyze", args)?;
+			let (Value::String(az), Value::String(val)) = (az, val) else {
+				return Ok(Value::None);
 			};
 
 			// Get database context - if not available, return NONE
@@ -120,22 +100,21 @@ impl ScalarFunction for SearchAnalyze {
 			let db_id = db_ctx.db.database_id;
 
 			// Get the analyzer definition from the database
-			let az_def = ctx
-				.txn()
-				.get_db_analyzer(ns_id, db_id, &az, ctx.exec_ctx.version_stamp())
-				.await
-				.map_err(|e| anyhow::anyhow!("Analyzer '{}' not found: {}", az, e))?;
+			let txn = ctx.txn();
+			let az_def = crate::exec::vm::descriptor::object(txn.get_db_analyzer(
+				ns_id,
+				db_id,
+				&az,
+				ctx.exec_ctx.version_stamp(),
+			))
+			.await
+			.map_err(|e| anyhow::anyhow!("Analyzer '{}' not found: {}", az, e))?;
 
 			// Create the analyzer
-			let analyzer = Analyzer::new(ctx.exec_ctx.ctx().get_index_stores(), az_def)?;
+			let analyzer = Analyzer::new(ctx.exec_ctx.ctx().get_index_stores(), az_def).await?;
 
-			// Analyze the value using a TreeStack
-			let frozen = ctx.exec_ctx.ctx();
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| async move { analyzer.analyze(stk, frozen, opt, val).await })
-				.finish()
-				.await
+			let az_fn = StreamingAnalyzerFunction::new(ctx.exec_ctx);
+			analyzer.analyze(&az_fn, val).await
 		})
 	}
 }
@@ -156,6 +135,14 @@ pub struct SearchHighlight;
 impl IndexFunction for SearchHighlight {
 	fn name(&self) -> &'static str {
 		"search::highlight"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(
+			Index,
+			"search::highlight",
+			Fallibility::VALUE.union(Fallibility::DATA)
+		)
 	}
 
 	fn signature(&self) -> Signature {
@@ -205,10 +192,13 @@ impl IndexFunction for SearchHighlight {
 			let rid = extract_record_id(ctx)?;
 
 			// Get the current document value
-			let doc = ctx.current_value.unwrap_or(&Value::None);
+			let doc = ctx.value_in_scope().read()?.unwrap_or(&Value::None);
 
-			// Get the full-text index resources (lazy init)
-			let (fti, qt, _scorer) = match_ctx.ft_resources(ctx).await?;
+			// Get the full-text index resources (lazy init); no index on
+			// the scan table covering the idiom → NONE.
+			let Some(ft) = match_ctx.ft_resources(ctx).await? else {
+				return Ok(Value::None);
+			};
 
 			let tx = ctx.txn();
 
@@ -219,7 +209,11 @@ impl IndexFunction for SearchHighlight {
 				partial,
 			};
 
-			fti.highlight(&tx, &rid, qt, hlp, &match_ctx.idiom, doc).await
+			let Some(doc_id) = match_ctx.doc_id(ctx, ft, &rid).await? else {
+				return Ok(Value::None);
+			};
+			let terms: Vec<&_> = std::iter::once(&ft.terms).chain(ft.extra_terms.iter()).collect();
+			ft.index.highlight_doc(&tx, doc_id, &terms, hlp, &ft.column, doc).await
 		})
 	}
 }
@@ -239,6 +233,10 @@ pub struct SearchScore;
 impl IndexFunction for SearchScore {
 	fn name(&self) -> &'static str {
 		"search::score"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Index, "search::score", Fallibility::DATA)
 	}
 
 	fn signature(&self) -> Signature {
@@ -274,24 +272,33 @@ impl IndexFunction for SearchScore {
 			// Extract RecordId from the current row
 			let rid = extract_record_id(ctx)?;
 
-			// Get the full-text index resources (lazy init)
-			let (fti, qt, scorer) = match_ctx.ft_resources(ctx).await?;
+			// Get the full-text index resources (lazy init); no index on
+			// the scan table covering the idiom → NONE.
+			let Some(ft) = match_ctx.ft_resources(ctx).await? else {
+				return Ok(Value::None);
+			};
 
-			let scorer = match scorer {
-				Some(s) => s,
-				None => return Ok(Value::None),
+			// The scan that listed the row scored it with its batch.
+			if let Some(score) = match_ctx.remembered_score(&rid) {
+				return Ok(Value::Number(Number::Float(score as f64)));
+			}
+			#[cfg(test)]
+			crate::exec::function::ROW_SCORES.with(|scores| scores.set(scores.get() + 1));
+
+			let Some(scorer) = match_ctx.scorer(ctx, ft).await? else {
+				return Ok(Value::None);
 			};
 
 			let tx = ctx.txn();
 
 			// Get the document ID from the record ID
-			let doc_id = match fti.get_doc_id(&tx, &rid).await? {
-				Some(id) => id,
-				None => return Ok(Value::None),
+			let Some(doc_id) = match_ctx.doc_id(ctx, ft, &rid).await? else {
+				return Ok(Value::None);
 			};
 
 			// Compute the BM25 score
-			let score = scorer.score(fti, &tx, qt, doc_id).await?;
+			let score = scorer.score(&ft.index, &tx, &ft.terms, doc_id).await?;
+			match_ctx.remember_score(&rid, doc_id, score);
 			Ok(Value::Number(Number::Float(score as f64)))
 		})
 	}
@@ -312,6 +319,10 @@ pub struct SearchOffsets;
 impl IndexFunction for SearchOffsets {
 	fn name(&self) -> &'static str {
 		"search::offsets"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Index, "search::offsets", Fallibility::DATA)
 	}
 
 	fn signature(&self) -> Signature {
@@ -355,12 +366,19 @@ impl IndexFunction for SearchOffsets {
 			// Extract RecordId from the current row
 			let rid = extract_record_id(ctx)?;
 
-			// Get the full-text index resources (lazy init)
-			let (fti, qt, _scorer) = match_ctx.ft_resources(ctx).await?;
+			// Get the full-text index resources (lazy init); no index on
+			// the scan table covering the idiom → NONE.
+			let Some(ft) = match_ctx.ft_resources(ctx).await? else {
+				return Ok(Value::None);
+			};
 
 			let tx = ctx.txn();
 
-			fti.read_offsets(&tx, &rid, qt, partial).await
+			let Some(doc_id) = match_ctx.doc_id(ctx, ft, &rid).await? else {
+				return Ok(Value::None);
+			};
+			let terms: Vec<&_> = std::iter::once(&ft.terms).chain(ft.extra_terms.iter()).collect();
+			ft.index.read_offsets_doc(&tx, doc_id, &terms, partial).await
 		})
 	}
 }
@@ -406,6 +424,14 @@ impl ScalarFunction for SearchRrf {
 		"search::rrf"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "search::rrf", Fallibility::VALUE)
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new()
 			.arg("results", Kind::Array(Box::new(Kind::Any), None))
@@ -433,40 +459,28 @@ impl ScalarFunction for SearchRrf {
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
-			let mut args = args.into_iter();
 
-			let results = match args.next() {
-				Some(Value::Array(a)) => a,
-				_ => return Ok(Value::Array(Array::new())),
-			};
-			let limit = match args.next() {
-				Some(Value::Number(n)) => {
-					let l = n.as_int();
-					if l < 1 {
-						anyhow::bail!(Error::InvalidFunctionArguments {
-							name: "search::rrf".to_string(),
-							message: "limit must be at least 1".to_string(),
-						});
-					}
-					l as usize
-				}
-				_ => anyhow::bail!(Error::InvalidFunctionArguments {
+			// results and limit are required. rrf_constant is optional.
+			let (results, limit, Optional(rrf_constant)): (Array, i64, Optional<i64>) =
+				FromArgs::from_args("search::rrf", args)?;
+			let limit = if limit < 1 {
+				anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "search::rrf".to_string(),
-					message: "limit must be a number".to_string(),
-				}),
+					message: "limit must be at least 1".to_string(),
+				});
+			} else {
+				limit as usize
 			};
-			let rrf_constant = match args.next() {
-				Some(Value::Number(n)) => {
-					let k = n.as_int();
-					if k < 0 {
-						anyhow::bail!(Error::InvalidFunctionArguments {
-							name: "search::rrf".to_string(),
-							message: "RRF constant must be at least 0".to_string(),
-						});
-					}
-					k as f64
+			let rrf_constant = if let Some(rrf_constant) = rrf_constant {
+				if rrf_constant < 0 {
+					anyhow::bail!(Error::InvalidFunctionArguments {
+						name: "search::rrf".to_string(),
+						message: "RRF constant must be at least 0".to_string(),
+					});
 				}
-				_ => 60.0,
+				rrf_constant as f64
+			} else {
+				60.0
 			};
 
 			if results.is_empty() {
@@ -503,7 +517,7 @@ impl ScalarFunction for SearchRrf {
 				}
 			}
 
-			let mut scored_docs = BinaryHeap::with_capacity(limit);
+			let mut scored_docs = BinaryHeap::with_capacity(limit.min(documents.len()));
 			for (id, (score, objects)) in documents {
 				if scored_docs.len() < limit {
 					scored_docs.push(FusionDoc(score, id, objects));
@@ -557,6 +571,14 @@ impl ScalarFunction for SearchLinear {
 		"search::linear"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "search::linear", Fallibility::VALUE)
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new()
 			.arg("results", Kind::Array(Box::new(Kind::Any), None))
@@ -585,50 +607,18 @@ impl ScalarFunction for SearchLinear {
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
-			let mut args = args.into_iter();
 
-			let results = match args.next() {
-				Some(Value::Array(a)) => a,
-				_ => return Ok(Value::Array(Array::new())),
-			};
-			let weights = match args.next() {
-				Some(Value::Array(a)) => a,
-				_ => anyhow::bail!(Error::InvalidFunctionArguments {
+			// results, weights, limit and norm are all required.
+			let (results, weights, limit, norm): (Array, Array, i64, String) =
+				FromArgs::from_args("search::linear", args)?;
+			let limit = if limit < 1 {
+				anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "search::linear".to_string(),
-					message: "weights must be an array".to_string(),
-				}),
+					message: "Limit must be at least 1".to_string(),
+				});
+			} else {
+				limit as usize
 			};
-			let limit = match args.next() {
-				Some(Value::Number(n)) => {
-					let l = n.as_int();
-					if l < 1 {
-						anyhow::bail!(Error::InvalidFunctionArguments {
-							name: "search::linear".to_string(),
-							message: "Limit must be at least 1".to_string(),
-						});
-					}
-					l as usize
-				}
-				_ => anyhow::bail!(Error::InvalidFunctionArguments {
-					name: "search::linear".to_string(),
-					message: "limit must be a number".to_string(),
-				}),
-			};
-			let norm = match args.next() {
-				Some(Value::String(s)) => match s.as_str() {
-					"minmax" => LinearNorm::MinMax,
-					"zscore" => LinearNorm::ZScore,
-					_ => anyhow::bail!(Error::InvalidFunctionArguments {
-						name: "search::linear".to_string(),
-						message: "Norm must be 'minmax' or 'zscore'".to_string(),
-					}),
-				},
-				_ => anyhow::bail!(Error::InvalidFunctionArguments {
-					name: "search::linear".to_string(),
-					message: "norm must be a string".to_string(),
-				}),
-			};
-
 			if weights.len() != results.len() {
 				anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "search::linear".to_string(),
@@ -644,6 +634,14 @@ impl ScalarFunction for SearchLinear {
 					});
 				}
 			}
+			let norm = match norm.as_str() {
+				"minmax" => LinearNorm::MinMax,
+				"zscore" => LinearNorm::ZScore,
+				_ => anyhow::bail!(Error::InvalidFunctionArguments {
+					name: "search::linear".to_string(),
+					message: "Norm must be 'minmax' or 'zscore'".to_string(),
+				}),
+			};
 
 			if results.is_empty() {
 				return Ok(Value::Array(Array::new()));
@@ -656,7 +654,7 @@ impl ScalarFunction for SearchLinear {
 
 			for (list_idx, result_list) in results.into_iter().enumerate() {
 				if let Value::Array(array) = result_list {
-					for doc in array {
+					for (rank, doc) in array.into_iter().enumerate() {
 						if let Value::Object(mut obj) = doc
 							&& let Some(id_value) = obj.remove("id")
 						{
@@ -667,7 +665,7 @@ impl ScalarFunction for SearchLinear {
 							} else if let Some(Value::Number(n)) = obj.get("score") {
 								n.as_float()
 							} else {
-								1.0 / (1.0 + count as f64)
+								1.0 / (1.0 + rank as f64)
 							};
 
 							match documents.entry(id_value) {
@@ -733,7 +731,7 @@ impl ScalarFunction for SearchLinear {
 				}
 			}
 
-			let mut scored_docs = BinaryHeap::with_capacity(limit);
+			let mut scored_docs = BinaryHeap::with_capacity(limit.min(documents.len()));
 			for (id, (scores, objects)) in documents {
 				let mut combined_score = 0.0;
 				for (list_idx, &score) in scores.iter().enumerate() {
@@ -797,21 +795,23 @@ impl ScalarFunction for SearchLinear {
 ///
 /// The current row is a Value::Object with an "id" field containing the RecordId.
 fn extract_record_id(ctx: &EvalContext<'_>) -> Result<crate::val::RecordId> {
-	let current = ctx.current_value.ok_or_else(|| {
+	let current = ctx.value_in_scope().read()?.ok_or_else(|| {
 		anyhow::anyhow!("Index function requires a current document (must be used in SELECT)")
 	})?;
 
-	match current {
-		Value::Object(obj) => match obj.get("id") {
+	if let Value::Object(obj) = current {
+		match obj.get("id") {
 			Some(Value::RecordId(rid)) => Ok(rid.clone()),
 			Some(_) => Err(anyhow::anyhow!("Current document 'id' field is not a RecordId")),
 			None => Err(anyhow::anyhow!("Current document has no 'id' field")),
-		},
-		Value::RecordId(rid) => Ok(rid.clone()),
-		_ => Err(anyhow::anyhow!(
+		}
+	} else if let Value::RecordId(rid) = current {
+		Ok(rid.clone())
+	} else {
+		Err(anyhow::anyhow!(
 			"Expected current document to be an Object, got: {}",
 			current.kind_of()
-		)),
+		))
 	}
 }
 
@@ -819,14 +819,87 @@ fn extract_record_id(ctx: &EvalContext<'_>) -> Result<crate::val::RecordId> {
 // Registration
 // =========================================================================
 
-pub fn register(registry: &mut FunctionRegistry) {
-	// Scalar functions
-	registry.register(SearchAnalyze);
-	registry.register(SearchRrf);
-	registry.register(SearchLinear);
+/// The `search::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[&SearchAnalyze, &SearchRrf, &SearchLinear];
 
+pub fn register(registry: &mut FunctionRegistry) {
 	// Index functions (bound to WHERE clause MATCHES predicates)
 	registry.register_index_function(SearchHighlight);
 	registry.register_index_function(SearchScore);
 	registry.register_index_function(SearchOffsets);
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::test_util::TestDb;
+
+	fn doc(id: &str) -> Value {
+		let mut obj = Object::default();
+		obj.insert("id", Value::from(id));
+		Value::Object(obj)
+	}
+
+	#[tokio::test]
+	async fn rrf_and_linear_cap_heap_capacity_on_huge_limit() {
+		let db = TestDb::new("").await;
+		let exec = db.exec_ctx().await;
+		let eval = EvalContext::from_exec_ctx(&exec);
+
+		let empty_lists = Value::Array(Array::from(vec![Value::Array(Array::new())]));
+		let rrf_res = SearchRrf
+			.invoke_async(&eval, vec![empty_lists.clone(), Value::from(i64::MAX)])
+			.await
+			.expect("search::rrf succeeds with huge limit");
+		assert_eq!(rrf_res, Value::Array(Array::new()));
+
+		let weights = Value::Array(Array::from(vec![Value::from(1)]));
+		let linear_res = SearchLinear
+			.invoke_async(
+				&eval,
+				vec![empty_lists, weights, Value::from(i64::MAX), Value::from("minmax")],
+			)
+			.await
+			.expect("search::linear succeeds with huge limit");
+		assert_eq!(linear_res, Value::Array(Array::new()));
+
+		exec.txn().cancel().await.expect("cancel");
+	}
+
+	#[tokio::test]
+	async fn linear_rank_fallback_is_per_list() {
+		let db = TestDb::new("").await;
+		let exec = db.exec_ctx().await;
+		let eval = EvalContext::from_exec_ctx(&exec);
+
+		let list0 = Value::Array(Array::from(vec![doc("d1"), doc("d2")]));
+		let list1 = Value::Array(Array::from(vec![doc("d3"), doc("d1"), doc("d4")]));
+		let results = Value::Array(Array::from(vec![list0, list1]));
+		let weights = Value::Array(Array::from(vec![Value::from(1.0), Value::from(1.0)]));
+
+		let Value::Array(out) = SearchLinear
+			.invoke_async(&eval, vec![results, weights, Value::from(10), Value::from("minmax")])
+			.await
+			.expect("search::linear succeeds")
+		else {
+			panic!("expected array output");
+		};
+
+		let d1_score = out
+			.iter()
+			.find_map(|v| {
+				if let Value::Object(obj) = v
+					&& obj.get("id") == Some(&Value::from("d1"))
+					&& let Some(Value::Number(n)) = obj.get("linear_score")
+				{
+					Some(n.as_float())
+				} else {
+					None
+				}
+			})
+			.expect("d1 in output");
+		assert!((d1_score - 1.25).abs() < 1e-12, "expected 1.25, got {d1_score}");
+
+		exec.txn().cancel().await.expect("cancel");
+	}
 }

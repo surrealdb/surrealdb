@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -14,10 +13,11 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 1}
-    FullTextScan [ctx: Db] [index: blog_content, query: Hello Bãr] {rows: 1}
+value = '''
+'SelectProject [ctx: Db] [projections: id] {rows: 1}
+    FullTextScan [ctx: Db] [table: blog, index: blog_content, query: Hello Bãr] {rows: 1}
 
-Total rows: 1"'''
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ content: ['<em>Hello</em> World!', 'Be Bop', 'Foo <em>Bãr</em>'], id: blog:1 }]"

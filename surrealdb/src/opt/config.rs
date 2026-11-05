@@ -1,15 +1,15 @@
-#[cfg(storage)]
 use std::path::PathBuf;
 use std::time::Duration;
 
-use surrealdb_core::dbs::Capabilities as CoreCapabilities;
-use surrealdb_core::iam::Level;
+use surrealdb_iam::Level;
+use surrealdb_rpc::capabilities::Capabilities as CoreCapabilities;
 
 use crate::opt::capabilities::Capabilities;
+use crate::opt::grpc::GrpcConfig;
 use crate::opt::websocket::WebsocketConfig;
 
-/// Configuration for server connection, including: strictness, notifications,
-/// query_timeout, transaction_timeout
+/// Configuration for a connection: credentials, capabilities, TLS, timeouts,
+/// and the background-task intervals the local engines run on.
 #[derive(Debug, Clone, Default)]
 pub struct Config {
 	pub(crate) ast_payload: bool,
@@ -23,13 +23,16 @@ pub struct Config {
 	pub(crate) username: String,
 	pub(crate) password: String,
 	pub(crate) capabilities: CoreCapabilities,
+	pub(crate) bucket_folder_allowlist: Vec<PathBuf>,
 	pub(crate) websocket: WebsocketConfig,
+	pub(crate) grpc: GrpcConfig,
 	#[cfg(storage)]
 	pub(crate) temporary_directory: Option<PathBuf>,
 	pub(crate) node_membership_refresh_interval: Option<Duration>,
 	pub(crate) node_membership_check_interval: Option<Duration>,
 	pub(crate) node_membership_cleanup_interval: Option<Duration>,
 	pub(crate) changefeed_gc_interval: Option<Duration>,
+	pub(crate) datastore_options: Vec<(String, String)>,
 }
 
 impl Config {
@@ -110,6 +113,65 @@ impl Config {
 		Ok(self)
 	}
 
+	/// Set the gRPC config
+	pub fn grpc(mut self, grpc: GrpcConfig) -> crate::Result<Self> {
+		// Refused here rather than at connect: a size this small cannot work
+		// against any server, so there is nothing about the connection left to
+		// find out.
+		if let Some(size) = grpc.max_message_size
+			&& size < crate::opt::grpc::MIN_MESSAGE_SIZE
+		{
+			return Err(crate::Error::configuration(
+				format!(
+					"The gRPC maximum message size must be at least \
+					 {} bytes, and is {size}: a file transfer is framed in fixed {} byte \
+					 chunks, which a smaller limit cannot carry in either direction.",
+					crate::opt::grpc::MIN_MESSAGE_SIZE,
+					crate::opt::grpc::FILE_CHUNK_SIZE
+				),
+				None,
+			));
+		}
+		// And likewise a size the wire cannot describe: a message carries its
+		// length in a four byte prefix, so no connection can transfer one past
+		// that however either peer is configured.
+		//
+		// Asked as "does this fit the prefix" rather than as a comparison
+		// against the ceiling, because on a 32-bit target -- wasm among them --
+		// the ceiling is `usize::MAX` and no comparison against it can ever be
+		// true. The conversion says the same thing at every pointer width.
+		if let Some(size) = grpc.max_message_size
+			&& u32::try_from(size).is_err()
+		{
+			return Err(crate::Error::configuration(
+				format!(
+					"The gRPC maximum message size must be at most {} bytes, and is {size}: a \
+					 message carries its length in a four byte prefix, so a longer one cannot be \
+					 framed.",
+					crate::opt::grpc::MAX_MESSAGE_SIZE
+				),
+				None,
+			));
+		}
+		self.grpc = grpc;
+		Ok(self)
+	}
+
+	/// Set the directories a local `file:` bucket backend may be defined in.
+	///
+	/// Only the embedded engines read this. A server reads
+	/// `SURREAL_BUCKET_FOLDER_ALLOWLIST` instead. A bucket whose backend path
+	/// is not inside one of these directories is refused, so with the default
+	/// empty list no local `file:` bucket can be defined. Each directory must
+	/// not contain the platform's path-list separator (`:` or, on Windows, `;`).
+	pub fn bucket_folder_allowlist(
+		mut self,
+		directories: impl IntoIterator<Item = impl Into<PathBuf>>,
+	) -> Self {
+		self.bucket_folder_allowlist = directories.into_iter().map(Into::into).collect();
+		self
+	}
+
 	#[cfg(storage)]
 	pub fn temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path;
@@ -143,6 +205,30 @@ impl Config {
 	/// Set the interval at which the database should run node maintenance tasks
 	pub fn changefeed_gc_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
 		self.changefeed_gc_interval = interval.into().filter(|x| !x.is_zero());
+		self
+	}
+
+	/// Set a datastore configuration key, as the server reads it from the
+	/// environment variable `SURREAL_<KEY>`.
+	///
+	/// Only the embedded engines read this. It reaches the storage backend's
+	/// settings, such as `surrealkv_block_cache_capacity`,
+	/// `surrealkv_max_memtable_size` or `tikv_request_timeout`, and the
+	/// datastore's runtime settings, such as `memory_limit`. Keys are not
+	/// case-sensitive, and a later call for the same key wins. A parameter on
+	/// the connection path, as in
+	/// `surrealkv://data?block_cache_capacity=268435456`, wins over a backend
+	/// setting made here.
+	///
+	/// `bucket_folder_allowlist` is set with
+	/// [`bucket_folder_allowlist`](Self::bucket_folder_allowlist); connecting
+	/// with it set here fails.
+	pub fn datastore_option(
+		mut self,
+		key: impl Into<String>,
+		value: impl std::fmt::Display,
+	) -> Self {
+		self.datastore_options.push((key.into(), value.to_string()));
 		self
 	}
 }

@@ -8,6 +8,7 @@ pub mod connection;
 pub mod crud;
 pub mod gql;
 pub mod graphql;
+pub(crate) mod input_schemas;
 pub mod output;
 pub(crate) mod output_schemas;
 pub mod query;
@@ -17,7 +18,9 @@ pub mod schema;
 use std::str::FromStr;
 
 use rmcp::ErrorData;
-use surrealdb_core::cnf::CommonConfig;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use surrealdb_core::syn::runtime::ParserConfig;
 use surrealdb_types::{Decimal, Number, SurrealValue, Value, Variables};
 
 pub(crate) use self::output::{
@@ -25,6 +28,49 @@ pub(crate) use self::output::{
 	tool_error_from_surreal,
 };
 use crate::cnf::McpConfig;
+
+/// Namespace and database a single tool call runs against.
+///
+/// Flattened into every tool's parameters so scope travels with the request
+/// instead of being read from connection state. This is what lets one
+/// endpoint serve both protocol eras: under `2026-07-28` there is no session
+/// to hold a current namespace, and the spec requires state spanning requests
+/// to be named explicitly by the client on each one.
+///
+/// Both fields are optional. When absent, [`crate::service::McpService`]
+/// falls back through the request's `surreal-ns` / `surreal-db` headers, the
+/// handshake session's `use` state (legacy protocol versions only), and
+/// finally the server's configured defaults. See
+/// [`crate::service::McpService::resolve_scope`] for the full precedence.
+///
+/// The `use` tool deliberately does not carry this: its own `namespace` and
+/// `database` arguments mean "switch to", not "run this call against".
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct ToolScope {
+	/// Namespace to run this call against. Defaults to the `surreal-ns`
+	/// request header, the session's current namespace, or the server's
+	/// configured default, in that order.
+	pub namespace: Option<String>,
+	/// Database to run this call against. Defaults to the `surreal-db`
+	/// request header, the session's current database, or the server's
+	/// configured default, in that order.
+	pub database: Option<String>,
+}
+
+impl ToolScope {
+	/// Validate both identifiers, rejecting anything that is not a bare or
+	/// backtick-quoted name. Record ids are rejected: a namespace or
+	/// database is always a plain identifier.
+	pub(crate) fn validate(&self) -> Result<(), ErrorData> {
+		if let Some(ns) = &self.namespace {
+			validate_table_name(ns)?;
+		}
+		if let Some(db) = &self.database {
+			validate_table_name(db)?;
+		}
+		Ok(())
+	}
+}
 
 /// Validate that a string is safe to use as a SurrealQL identifier or simple
 /// record ID when interpolated directly into a query string.
@@ -171,18 +217,41 @@ fn validate_record_id_key(key: &str) -> Result<(), ErrorData> {
 /// NUL bytes.
 fn consume_backtick_ident(s: &str) -> Result<&str, ErrorData> {
 	debug_assert!(s.starts_with('`'));
-	let body_and_tail = &s[1..];
-	let close = body_and_tail
-		.find('`')
-		.ok_or_else(|| crate::error::invalid_params("Unterminated backtick-quoted identifier"))?;
-	let body = &body_and_tail[..close];
-	if body.is_empty() {
-		return Err(crate::error::invalid_params("Backtick-quoted identifier cannot be empty"));
+	// Scan the body exactly as the SurrealQL lexer does (`delimited_ident` in
+	// surrealdb-parser): a backslash escapes the next byte, so an escaped
+	// backtick does not close the identifier - only an unescaped backtick ends
+	// it. The previous `str::find('`')` stopped at the first backtick, escaped
+	// or not, so a value such as `` `a\`; DROP ... `` validated as a short
+	// identifier here while the lexer read a longer one, executing the smuggled
+	// statement. Matching the lexer keeps the two in agreement.
+	let bytes = s.as_bytes();
+	let mut i = 1; // past the opening backtick
+	loop {
+		match bytes.get(i) {
+			None => {
+				return Err(crate::error::invalid_params(
+					"Unterminated backtick-quoted identifier",
+				));
+			}
+			Some(b'`') => {
+				let body = &s[1..i];
+				if body.is_empty() {
+					return Err(crate::error::invalid_params(
+						"Backtick-quoted identifier cannot be empty",
+					));
+				}
+				if body.contains('\n') || body.contains('\r') || body.contains('\0') {
+					return Err(crate::error::invalid_params(
+						"Identifier contains invalid characters",
+					));
+				}
+				return Ok(&s[i + 1..]);
+			}
+			// A backslash consumes the next byte too, matching the lexer.
+			Some(b'\\') => i += 2,
+			Some(_) => i += 1,
+		}
 	}
-	if body.contains('\n') || body.contains('\r') || body.contains('\0') {
-		return Err(crate::error::invalid_params("Identifier contains invalid characters"));
-	}
-	Ok(&body_and_tail[close + 1..])
 }
 
 /// Sentinel key that escapes a JSON object into a SurrealQL pass-through.
@@ -202,9 +271,9 @@ pub(crate) const QL_SENTINEL: &str = "$ql";
 ///
 /// `mcp` carries the MCP-side caps (notably
 /// [`McpConfig::params_max_ql_bytes`]); `core` carries the datastore's
-/// own [`CommonConfig`] so the `$ql` pass-through parser honours the
+/// own [`ParserConfig`] so the `$ql` pass-through parser honours the
 /// running parser depth limits rather than silently falling back to
-/// `CommonConfig::default()`.
+/// `ParserConfig::default()`.
 ///
 /// Returns a structured `invalid_params` error if a `$ql` body is empty,
 /// exceeds the configured byte cap, is non-string, appears alongside
@@ -215,7 +284,7 @@ pub(crate) const QL_SENTINEL: &str = "$ql";
 pub(crate) fn json_to_surreal_value(
 	json: &serde_json::Value,
 	mcp: &McpConfig,
-	core: &CommonConfig,
+	core: &ParserConfig,
 ) -> Result<Value, ErrorData> {
 	match json {
 		serde_json::Value::Null => Ok(Value::Null),
@@ -289,14 +358,14 @@ fn json_number_to_value(n: &serde_json::Number) -> Result<Value, ErrorData> {
 /// The body must be a non-empty string within
 /// [`McpConfig::params_max_ql_bytes`]; it is then parsed as a single
 /// SurrealQL value via the production parser using the running
-/// datastore's [`CommonConfig`], so operator-set parser recursion
+/// datastore's [`ParserConfig`], so operator-set parser recursion
 /// limits actually apply. Any parse failure surfaces as
 /// `invalid_params` with the parser's message so the LLM can
 /// self-correct.
 fn parse_ql_passthrough(
 	body: &serde_json::Value,
 	mcp: &McpConfig,
-	core: &CommonConfig,
+	core: &ParserConfig,
 ) -> Result<Value, ErrorData> {
 	let s = body.as_str().ok_or_else(|| {
 		crate::error::invalid_params(format!("`{QL_SENTINEL}` value must be a string"))
@@ -331,7 +400,7 @@ fn parse_ql_passthrough(
 pub fn json_to_variables(
 	json: &serde_json::Value,
 	mcp: &McpConfig,
-	core: &CommonConfig,
+	core: &ParserConfig,
 ) -> Result<Variables, ErrorData> {
 	match json {
 		serde_json::Value::Object(map) => {
@@ -348,7 +417,13 @@ pub fn json_to_variables(
 			}
 			Ok(vars)
 		}
-		_ => Err(crate::error::invalid_params("Parameters must be a JSON object")),
+		serde_json::Value::Null
+		| serde_json::Value::Bool(_)
+		| serde_json::Value::Number(_)
+		| serde_json::Value::String(_)
+		| serde_json::Value::Array(_) => {
+			Err(crate::error::invalid_params("Parameters must be a JSON object"))
+		}
 	}
 }
 
@@ -358,11 +433,11 @@ mod cap_tests {
 
 	use super::*;
 
-	/// Build a default `(McpConfig, CommonConfig)` pair for tests that
+	/// Build a default `(McpConfig, ParserConfig)` pair for tests that
 	/// don't care about overrides. Returning owned values keeps the
 	/// borrow checker happy for the duration of each test body.
-	fn default_configs() -> (McpConfig, CommonConfig) {
-		(McpConfig::default(), CommonConfig::default())
+	fn default_configs() -> (McpConfig, ParserConfig) {
+		(McpConfig::default(), ParserConfig::default())
 	}
 
 	#[test]
@@ -387,6 +462,29 @@ mod cap_tests {
 		let vars = json_to_variables(&payload, &mcp, &core).expect("within-cap payload accepted");
 		// Sanity check that conversion produced both keys.
 		assert_eq!(vars.len(), 2);
+	}
+
+	/// The backtick-identifier validator must agree with the SurrealQL lexer on
+	/// where an identifier ends, so a crafted value cannot validate as one thing
+	/// and lex as another (GHSA-cr79-9p8r-p5wx).
+	#[test]
+	fn backtick_identifier_validation_is_escape_aware() {
+		// Plain backtick identifier, and one with a trailing record-id key.
+		assert!(validate_identifier("`plain`").is_ok());
+		assert!(validate_identifier("`plain`:key").is_ok());
+		// An escaped backtick is part of the body, not the close, so a valid
+		// identifier that contains one is accepted. The previous validator
+		// stopped at the first backtick and wrongly rejected this.
+		assert!(validate_identifier("`a\\`b`").is_ok());
+		// An escaped *trailing* backtick leaves the identifier unterminated, as
+		// the lexer sees it. The previous validator stopped at the escaped
+		// backtick and accepted a short identifier, leaving the lexer to error
+		// on - or execute - the rest. It must be rejected.
+		assert!(validate_identifier("`a\\`").is_err());
+		// Raw SurrealQL after the identifier is rejected, with or without an
+		// escaped backtick smuggling it past the first-backtick scan.
+		assert!(validate_identifier("`tbl`; DROP TABLE x").is_err());
+		assert!(validate_identifier("`a\\`; DROP TABLE x; SELECT * FROM `b`").is_err());
 	}
 
 	/// `$ql` must round-trip every typed scalar that JSON cannot
@@ -483,19 +581,16 @@ mod cap_tests {
 		});
 		let value =
 			json_to_surreal_value(&payload, &mcp, &core).expect("nested $ql must round-trip");
-		let outer = match &value {
-			Value::Object(o) => o,
-			other => panic!("expected object, got {other:?}"),
+		let Value::Object(outer) = &value else {
+			panic!("expected object, got {value:?}");
 		};
-		let items = match outer.get("items") {
-			Some(Value::Array(a)) => a,
-			other => panic!("expected array, got {other:?}"),
+		let Some(Value::Array(items)) = outer.get("items") else {
+			panic!("expected array, got {:?}", outer.get("items"));
 		};
 		assert_eq!(items.len(), 2);
 		for item in items.iter() {
-			let obj = match item {
-				Value::Object(o) => o,
-				other => panic!("expected item object, got {other:?}"),
+			let Value::Object(obj) = item else {
+				panic!("expected item object, got {item:?}");
 			};
 			assert!(matches!(obj.get("product"), Some(Value::RecordId(_))));
 		}
@@ -510,11 +605,9 @@ mod cap_tests {
 		let (mcp, core) = default_configs();
 		let payload = json!(u64::MAX);
 		let value = json_to_surreal_value(&payload, &mcp, &core).expect("u64::MAX must convert");
-		match value {
-			Value::Number(Number::Decimal(d)) => {
-				assert_eq!(d.to_string(), u64::MAX.to_string());
-			}
-			other => panic!("expected Decimal for u64::MAX, got: {other:?}"),
-		}
+		let Value::Number(Number::Decimal(d)) = value else {
+			panic!("expected Decimal for u64::MAX, got: {value:?}");
+		};
+		assert_eq!(d.to_string(), u64::MAX.to_string());
 	}
 }

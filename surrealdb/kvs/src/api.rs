@@ -1,0 +1,1581 @@
+//! This module defines the API for a transaction in a key-value store.
+#![warn(clippy::missing_docs_in_private_items)]
+
+use std::sync::Arc;
+
+pub use common::future::BoxFut;
+
+use crate::consts::{COUNT_BATCH_SIZE, NORMAL_BATCH_SIZE};
+use crate::cursor::{DefaultKeysCursor, DefaultValsCursor};
+use crate::err::{Error, Result};
+use crate::snapshot::{Snapshot, ViewCapabilities};
+use crate::split::{
+	ESTIMATE_BUDGET, Estimate, SplitTarget, default_split, estimate_from_prefix, parts_for,
+};
+use crate::timestamp::{
+	BoxTimeStamp, BoxTimeStampImpl, HlcTimeStamp, HlcTimeStampImpl, IncTimeStamp, IncTimeStampImpl,
+};
+use crate::types::{Key, KeyRange};
+use crate::{Direction, Val};
+
+/// The result of a [`Transactable::keys`] or [`Transactable::keysr`] operation.
+///
+/// Contains the fetched keys together with the total number of key bytes in
+/// the result, accumulated by the backend during the same iteration that
+/// produced the keys.
+#[derive(Debug, Default)]
+pub struct KeysResult {
+	/// The fetched keys.
+	pub keys: Vec<Vec<u8>>,
+	/// The total number of key bytes in the result.
+	pub key_bytes: u64,
+}
+
+/// The result of a [`Transactable::scan`] or [`Transactable::scanr`] operation.
+///
+/// Contains the fetched key-value pairs together with the total number of
+/// key and value bytes consumed during the scan. Backends accumulate the
+/// counters while iterating their underlying cursor, so callers do not need
+/// to make a second pass over the result to compute them.
+#[derive(Debug, Default)]
+pub struct ScanResult {
+	/// The fetched key-value pairs.
+	pub values: Vec<(Vec<u8>, Val)>,
+	/// The total number of key bytes in the result.
+	pub key_bytes: u64,
+	/// The total number of value bytes in the result.
+	pub value_bytes: u64,
+}
+
+/// How the work of a backend's count grows with the keys a range holds
+/// ([`Transactable::count_cost`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CountCost {
+	/// A count examines every key it counts: a caller bounds each call with
+	/// [`Transactable::count_bounded`]'s budget and resumes it.
+	Linear,
+	/// A count is answered from summaries the backend keeps, in work
+	/// logarithmic in the keys counted, so one call over a whole range is
+	/// cheap and exact. An order-statistic B-tree, whose nodes hold the counts
+	/// of their subtrees, answers this way, and so does a segment store that
+	/// keeps each page's key count, such as a host's page files in object
+	/// storage.
+	Logarithmic,
+}
+
+/// Per-chunk statistics returned by [`ScanCursorVals::for_each`] /
+/// [`ScanCursorKeys::for_each`].
+///
+/// Accumulated by the backend while driving the visitor, so the caller can
+/// update scan metrics and limit accounting without a second pass. `rows`
+/// counts every row the cursor advanced over and handed to the visitor —
+/// including rows the visitor ignored (e.g. pre-decode-filter rejects) — so it
+/// matches the `len()` of an equivalent [`ScanCursorVals::next_batch`] batch.
+/// For the keys variant `value_bytes` is always `0`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ScanChunkStats {
+	/// Number of `(key, value)` pairs (or keys) visited in this chunk.
+	pub rows: u64,
+	/// Sum of every visited key's length in bytes.
+	pub key_bytes: u64,
+	/// Sum of every visited value's length in bytes (`0` for keys scans).
+	pub value_bytes: u64,
+}
+
+/// The result of a [`Transactable::getm`] operation.
+///
+/// `key_bytes` is intentionally omitted: callers pass the input keys in and
+/// already know their total length, so re-counting them here would be
+/// duplicate work on the hot path.
+#[derive(Debug, Default)]
+pub struct GetMultiResult {
+	/// One entry per input key, preserving input order. `None` indicates a
+	/// miss.
+	pub values: Vec<Option<Val>>,
+	/// The number of input keys that were found (count of `Some` entries).
+	pub records: u64,
+	/// The total number of value bytes across the `Some` entries.
+	pub value_bytes: u64,
+}
+
+/// Position of a single key inside the cursor's reusable byte buffer.
+///
+/// Backend-internal: backends fill a `Vec<KeySpan>` while iterating, and
+/// `KeysBatch` borrows that vec back out through opaque accessors. Not
+/// part of the public cursor API.
+///
+/// Offsets and lengths are `usize`, matching the buffer's natural
+/// addressing. Using `u32` would silently truncate batches whose
+/// concatenated bytes exceed 4 GB — possible for batches containing
+/// multi-GB values, and a defense-in-depth concern even when the
+/// numbers are typically small.
+#[derive(Clone, Copy, Debug)]
+#[doc(hidden)]
+pub struct KeySpan {
+	/// Byte offset into the cursor's key buffer.
+	pub offset: usize,
+	/// Length of this key in bytes.
+	pub len: usize,
+}
+
+/// Position of a single `(key, value)` pair inside the cursor's reusable
+/// key and value byte buffers. See [`KeySpan`] for the layering.
+#[derive(Clone, Copy, Debug)]
+#[doc(hidden)]
+pub struct KeyValSpan {
+	/// Byte offset into the cursor's key buffer.
+	pub key_offset: usize,
+	/// Length of the key in bytes.
+	pub key_len: usize,
+	/// Byte offset into the cursor's value buffer.
+	pub val_offset: usize,
+	/// Length of the value in bytes.
+	pub val_len: usize,
+}
+
+/// Per-batch result of [`ScanCursorKeys::next_batch`], borrowing from the
+/// cursor's internal buffer for the duration of the `&mut self` borrow.
+///
+/// Calling `next_batch` again invalidates the previous batch's slices —
+/// the borrow checker enforces this because both batches tie to the same
+/// `&'s mut self`.
+///
+/// **Zero allocations per batch.** The cursor owns a reusable key buffer
+/// and span table; this struct is just a borrowed view over them.
+/// Iterate via [`Self::iter`] or `&batch` ([`IntoIterator`]); index via
+/// [`Self::get`].
+pub struct KeysBatch<'c> {
+	/// Concatenated key bytes for this batch. Slices over `buf` according
+	/// to `spans` produce the individual keys.
+	buf: &'c [u8],
+	/// `(offset, len)` per key, in scan order.
+	spans: &'c [KeySpan],
+	/// Sum of every key's length in bytes.
+	pub key_bytes: u64,
+}
+
+impl<'c> KeysBatch<'c> {
+	/// Internal constructor — backends call this with their populated
+	/// `buf` and `spans` slices. Not part of the public API.
+	#[doc(hidden)]
+	#[inline]
+	pub fn from_parts(buf: &'c [u8], spans: &'c [KeySpan], key_bytes: u64) -> Self {
+		Self {
+			buf,
+			spans,
+			key_bytes,
+		}
+	}
+
+	/// Number of keys in this batch.
+	#[inline]
+	pub fn len(&self) -> usize {
+		self.spans.len()
+	}
+
+	/// `true` when the cursor has reached the end of its range and no
+	/// further batches will be produced.
+	#[inline]
+	pub fn is_empty(&self) -> bool {
+		self.spans.is_empty()
+	}
+
+	/// Borrowed key at position `i`, or `None` if out of range.
+	#[inline]
+	pub fn get(&self, i: usize) -> Option<&[u8]> {
+		let span = self.spans.get(i)?;
+		Some(&self.buf[span.offset..span.offset + span.len])
+	}
+
+	/// Iterator over the keys in scan order. Items borrow from the
+	/// cursor's internal buffer; they're valid until the next call to
+	/// `next_batch` on the same cursor.
+	#[inline]
+	pub fn iter(&self) -> KeysIter<'_> {
+		KeysIter {
+			buf: self.buf,
+			spans: self.spans.iter(),
+		}
+	}
+}
+
+impl<'a, 'c: 'a> IntoIterator for &'a KeysBatch<'c> {
+	type Item = &'a [u8];
+	type IntoIter = KeysIter<'a>;
+	#[inline]
+	fn into_iter(self) -> Self::IntoIter {
+		self.iter()
+	}
+}
+
+/// Iterator over the keys in a [`KeysBatch`]. Yields borrowed slices into
+/// the cursor's internal buffer.
+pub struct KeysIter<'a> {
+	/// Concatenated key bytes.
+	buf: &'a [u8],
+	/// Remaining spans to deliver, in scan order.
+	spans: std::slice::Iter<'a, KeySpan>,
+}
+
+impl<'a> Iterator for KeysIter<'a> {
+	type Item = &'a [u8];
+	#[inline]
+	fn next(&mut self) -> Option<&'a [u8]> {
+		let span = self.spans.next()?;
+		Some(&self.buf[span.offset..span.offset + span.len])
+	}
+	#[inline]
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		self.spans.size_hint()
+	}
+}
+
+impl ExactSizeIterator for KeysIter<'_> {}
+
+/// Per-batch result of [`ScanCursorVals::next_batch`], borrowing from the
+/// cursor's internal buffers. See [`KeysBatch`].
+pub struct ValsBatch<'c> {
+	/// Concatenated key bytes for this batch.
+	key_buf: &'c [u8],
+	/// Concatenated value bytes for this batch.
+	val_buf: &'c [u8],
+	/// `(key_offset, key_len, value_offset, value_len)` per pair.
+	spans: &'c [KeyValSpan],
+	/// Sum of every key's length in bytes.
+	pub key_bytes: u64,
+	/// Sum of every value's length in bytes.
+	pub value_bytes: u64,
+}
+
+impl<'c> ValsBatch<'c> {
+	/// Internal constructor — see [`KeysBatch::from_parts`].
+	#[doc(hidden)]
+	#[inline]
+	pub fn from_parts(
+		key_buf: &'c [u8],
+		val_buf: &'c [u8],
+		spans: &'c [KeyValSpan],
+		key_bytes: u64,
+		value_bytes: u64,
+	) -> Self {
+		Self {
+			key_buf,
+			val_buf,
+			spans,
+			key_bytes,
+			value_bytes,
+		}
+	}
+
+	/// Number of `(key, value)` pairs in this batch.
+	#[inline]
+	pub fn len(&self) -> usize {
+		self.spans.len()
+	}
+
+	/// `true` when the cursor has reached the end of its range.
+	#[inline]
+	pub fn is_empty(&self) -> bool {
+		self.spans.is_empty()
+	}
+
+	/// Borrowed `(key, value)` at position `i`, or `None` if out of range.
+	#[inline]
+	pub fn get(&self, i: usize) -> Option<(&[u8], &[u8])> {
+		let span = self.spans.get(i)?;
+		let k = &self.key_buf[span.key_offset..span.key_offset + span.key_len];
+		let v = &self.val_buf[span.val_offset..span.val_offset + span.val_len];
+		Some((k, v))
+	}
+
+	/// Iterator over `(key, value)` pairs in scan order.
+	#[inline]
+	pub fn iter(&self) -> ValsIter<'_> {
+		ValsIter {
+			key_buf: self.key_buf,
+			val_buf: self.val_buf,
+			spans: self.spans.iter(),
+		}
+	}
+}
+
+impl<'a, 'c: 'a> IntoIterator for &'a ValsBatch<'c> {
+	type Item = (&'a [u8], &'a [u8]);
+	type IntoIter = ValsIter<'a>;
+	#[inline]
+	fn into_iter(self) -> Self::IntoIter {
+		self.iter()
+	}
+}
+
+/// Iterator over `(key, value)` pairs in a [`ValsBatch`].
+pub struct ValsIter<'a> {
+	/// Concatenated key bytes.
+	key_buf: &'a [u8],
+	/// Concatenated value bytes.
+	val_buf: &'a [u8],
+	/// Remaining spans to deliver.
+	spans: std::slice::Iter<'a, KeyValSpan>,
+}
+
+impl<'a> Iterator for ValsIter<'a> {
+	type Item = (&'a [u8], &'a [u8]);
+	#[inline]
+	fn next(&mut self) -> Option<Self::Item> {
+		let span = self.spans.next()?;
+		let k = &self.key_buf[span.key_offset..span.key_offset + span.key_len];
+		let v = &self.val_buf[span.val_offset..span.val_offset + span.val_len];
+		Some((k, v))
+	}
+	#[inline]
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		self.spans.size_hint()
+	}
+}
+
+impl ExactSizeIterator for ValsIter<'_> {}
+
+/// Per-`(key, value)` visitor for [`ScanCursorVals::for_each`].
+///
+/// Invoked once per row with slices borrowed directly from the cursor's
+/// engine-native handle (no per-row allocation). Return
+/// `ControlFlow::Break(())` to stop the scan early (e.g. a consumer-side
+/// `LIMIT`) — this does **not** mark the range exhausted, so the cursor stays
+/// resumable. The closure must be synchronous (no `.await`).
+///
+/// `Send` is required as a `for_each` future is `Send` and captures the
+/// `&mut dyn ValVisitor`.
+pub trait ValVisitor: FnMut(&[u8], &[u8]) -> Result<std::ops::ControlFlow<()>> + Send {}
+impl<T: FnMut(&[u8], &[u8]) -> Result<std::ops::ControlFlow<()>> + Send> ValVisitor for T {}
+
+/// Per-key visitor for [`ScanCursorKeys::for_each`]. See [`ValVisitor`] for the
+/// contract (this variant receives only the key).
+pub trait KeyVisitor: FnMut(&[u8]) -> Result<std::ops::ControlFlow<()>> + Send {}
+impl<T: FnMut(&[u8]) -> Result<std::ops::ControlFlow<()>> + Send> KeyVisitor for T {}
+
+/// Per-key visitor for [`Transactable::visit_key_ranges`]: invoked with the index of the range
+/// the key belongs to and the key itself, borrowed from the engine. See [`KeyVisitor`] for the
+/// contract; `Break` ends the whole read, every later range included.
+pub trait RangeKeyVisitor: FnMut(usize, &[u8]) -> Result<std::ops::ControlFlow<()>> + Send {}
+impl<T: FnMut(usize, &[u8]) -> Result<std::ops::ControlFlow<()>> + Send> RangeKeyVisitor for T {}
+
+/// A stateful keys-only scan cursor. Returned by [`Transactable::open_keys_cursor`].
+///
+/// A cursor represents one logical scan operation (e.g. an outer table walk,
+/// or one prefix of a graph-edge traversal). It is opened once and pumped
+/// until the range is exhausted or the caller drops the handle, via either of
+/// two driving methods (the direction and range bounds are fixed at open
+/// time):
+///
+/// - [`Self::next_batch`] materialises a [`KeysBatch`] borrowed from the cursor for the duration of
+///   the call's `&mut self` lifetime — no per-item allocation on the hot path; only one `Vec<_>`
+///   allocation per batch. An empty batch signals end of range.
+/// - [`Self::for_each`] is the zero-copy streaming alternative: it drives a visitor directly over
+///   the same borrowed keys, skipping even the per-batch `Vec`.
+///
+/// Pick **one** driving method per cursor: interleaving `next_batch` and
+/// `for_each` on the same cursor is unsupported (an implementation may buffer
+/// rows for one path that the other does not see) and is debug-asserted
+/// against by the default cursor.
+///
+/// Backends that can keep an underlying iterator alive across batches (e.g.
+/// a native database iterator) hold it inside the cursor — the caller's
+/// `Drop` is what frees the iterator, **not** an LRU. This avoids the
+/// thrashing failure mode of a bounded cache when there are more concurrent
+/// prefixes than cache slots (e.g. `SELECT ->knows FROM person` with many
+/// outer rows).
+pub trait ScanCursorKeys: Send + Sync {
+	/// Advance the cursor and return up to `limit` more keys, borrowed
+	/// from the cursor's internal buffer. An empty batch from a non-zero
+	/// `limit` signals end of range; a `limit == 0` call is a pure no-op —
+	/// it returns an empty batch without consuming rows or exhausting the
+	/// cursor. The cursor remains valid after an empty batch and may be
+	/// dropped at any time.
+	fn next_batch<'s>(&'s mut self, limit: u32) -> BoxFut<'s, Result<KeysBatch<'s>>>;
+
+	/// Drive the cursor, invoking `f` for up to `limit` keys borrowed directly
+	/// from the cursor — the zero-copy streaming path. `f` returns
+	/// `ControlFlow::Break(())` to stop early without exhausting the range.
+	/// Returns this chunk's row/byte stats (`value_bytes` is always `0`); rows
+	/// are counted only after the visitor accepts them, and pre-decode-filter
+	/// rejects (visitor returns `Continue`) count as scanned. A `limit == 0`
+	/// chunk visits nothing and leaves the cursor untouched. After a visitor
+	/// error the cursor's resume position is implementation-defined — treat
+	/// the error as terminal and do not reuse the cursor.
+	fn for_each<'s>(
+		&'s mut self,
+		limit: u32,
+		f: &'s mut dyn KeyVisitor,
+	) -> BoxFut<'s, Result<ScanChunkStats>>;
+}
+
+/// A stateful key+value scan cursor. Returned by [`Transactable::open_vals_cursor`].
+///
+/// A cursor represents one logical scan operation (e.g. an outer table walk,
+/// or one prefix of a graph-edge traversal). It is opened once and pumped
+/// until the range is exhausted or the caller drops the handle, via either of
+/// two driving methods (the direction and range bounds are fixed at open
+/// time):
+///
+/// - [`Self::next_batch`] materialises a [`ValsBatch`] borrowed from the cursor for the duration of
+///   the call's `&mut self` lifetime — no per-item allocation on the hot path; only one `Vec<_>`
+///   allocation per batch. An empty batch signals end of range.
+/// - [`Self::for_each`] is the zero-copy streaming alternative: it drives a visitor directly over
+///   the same borrowed `(key, value)` pairs, skipping even the per-batch `Vec`.
+///
+/// Pick **one** driving method per cursor: interleaving `next_batch` and
+/// `for_each` on the same cursor is unsupported (an implementation may buffer
+/// rows for one path that the other does not see) and is debug-asserted
+/// against by the default cursor.
+///
+/// Backends that can keep an underlying iterator alive across batches (e.g.
+/// a native database iterator) hold it inside the cursor — the caller's
+/// `Drop` is what frees the iterator, **not** an LRU. This avoids the
+/// thrashing failure mode of a bounded cache when there are more concurrent
+/// prefixes than cache slots (e.g. `SELECT ->knows FROM person` with many
+/// outer rows).
+pub trait ScanCursorVals: Send + Sync {
+	/// Advance the cursor and return up to `limit` more `(key, value)`
+	/// pairs, borrowed from the cursor's internal buffer. An empty batch
+	/// from a non-zero `limit` signals end of range; a `limit == 0` call is
+	/// a pure no-op — it returns an empty batch without consuming rows or
+	/// exhausting the cursor.
+	fn next_batch<'s>(&'s mut self, limit: u32) -> BoxFut<'s, Result<ValsBatch<'s>>>;
+
+	/// Drive the cursor, invoking `f` for up to `limit` `(key, value)` pairs
+	/// borrowed directly from the cursor — the zero-copy streaming path. `f`
+	/// returns `ControlFlow::Break(())` to stop early without exhausting the
+	/// range. Returns this chunk's row/byte stats; rows are counted only after
+	/// the visitor accepts them, and pre-decode-filter rejects (visitor returns
+	/// `Continue`) count as scanned. A `limit == 0` chunk visits nothing and
+	/// leaves the cursor untouched. After a visitor error the cursor's resume
+	/// position is implementation-defined — treat the error as terminal and do
+	/// not reuse the cursor.
+	fn for_each<'s>(
+		&'s mut self,
+		limit: u32,
+		f: &'s mut dyn ValVisitor,
+	) -> BoxFut<'s, Result<ScanChunkStats>>;
+}
+
+/// The write commit bound of a backend that does not report its own
+/// ([`Transactable::write_commit_bound`]).
+pub const DEFAULT_WRITE_COMMIT_BOUND: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// A batch scan result returned from the [`Transaction::batch`] or
+/// [`Transactor::batch`] functions.
+#[derive(Debug)]
+pub struct Batch<T> {
+	pub next: Option<KeyRange<'static>>,
+	pub result: Vec<T>,
+}
+
+impl<T> Batch<T> {
+	/// Create a new batch scan result.
+	pub fn new(next: Option<KeyRange<'static>>, result: Vec<T>) -> Self {
+		Self {
+			next,
+			result,
+		}
+	}
+}
+
+/// A batch which contains only keys
+type KeyBatch = Batch<Vec<u8>>;
+/// A batch which contains both keys and values.
+type ValueBatch = Batch<(Vec<u8>, Vec<u8>)>;
+
+/// This trait defines the API for a transaction in a key-value store.
+///
+/// All keys and values are represented as byte arrays, encoding is handled
+/// one layer up, by the caller.
+#[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
+pub trait Transactable: Send + Sync {
+	/// Get the name of the transaction type.
+	fn kind(&self) -> &'static str;
+
+	/// Whether every transaction committed to the store is committed through
+	/// the datastore this transaction belongs to — a store held in this
+	/// process's memory, or one whose files this process holds the exclusive
+	/// lock of — and this transaction reads the snapshot the store held when
+	/// it opened. A caller may then learn which commits a transaction sees by
+	/// watching the datastore's own. `false` unless the backend guarantees
+	/// both.
+	fn sole_writer(&self) -> bool {
+		false
+	}
+
+	/// The longest a write commit to a store other datastores write may run before the
+	/// datastore reports its outcome unknown and abandons it.
+	///
+	/// A node that records no heartbeat for longer than its write fence refuses new commits,
+	/// and other nodes stop waiting for it once the fence, this bound, the abandoned commit's
+	/// settling time and the clock margin have all passed, so every node of a cluster must
+	/// report the same bound. A backend whose commits legitimately run longer than the default
+	/// reports a larger one.
+	fn write_commit_bound(&self) -> std::time::Duration {
+		DEFAULT_WRITE_COMMIT_BOUND
+	}
+
+	/// Whether a write transaction commits only if no key it read, by any read
+	/// and not only [`Self::getu`], was written by a transaction that committed
+	/// after it opened. A caller may then rely on a plain read staying true up
+	/// to its commit, and must not have another transaction write a key this
+	/// one read without failing this one's commit. `false` unless the backend
+	/// guarantees it.
+	fn validates_reads(&self) -> bool {
+		false
+	}
+
+	/// Whether [`Self::count`] reads its range off the calling thread, and
+	/// in parallel where the transaction allows: a caller may then count a
+	/// range in a few calls, each awaited without holding its thread for the
+	/// keys it reads. `false` for a backend that counts on the calling
+	/// thread, whose caller counts through a keys cursor a batch at a time.
+	fn parallel_count(&self) -> bool {
+		false
+	}
+
+	/// Whether the backend bounds the memory its write buffer takes — staging
+	/// writes outside memory, or flushing them before commit — so a caller need
+	/// not count what the transaction has written against its own memory.
+	/// `false` unless the backend guarantees it.
+	fn bounds_write_buffer(&self) -> bool {
+		false
+	}
+
+	/// How the work of [`Self::count`] and [`Self::count_bounded`] grows with
+	/// the keys a range holds. [`CountCost::Linear`] unless the backend
+	/// answers a count from summaries it keeps.
+	fn count_cost(&self) -> CountCost {
+		CountCost::Linear
+	}
+
+	/// Check if transaction is finished.
+	///
+	/// If the transaction has been cancelled or committed,
+	/// then this function will return [`true`], and any further
+	/// calls to functions on this transaction will result
+	/// in a [`crate::err::Error::TransactionFinished`] error.
+	fn closed(&self) -> bool;
+
+	/// Check if transaction is writeable.
+	///
+	/// If the transaction has been marked as a writeable
+	/// transaction, then this function will return [`true`].
+	/// This fuction can be used to check whether a transaction
+	/// allows data to be modified, and if not then the function
+	/// will return a [`crate::err::Error::TransactionReadonly`] error.
+	fn writeable(&self) -> bool;
+
+	/// Cancel a transaction.
+	///
+	/// This reverses all changes made within the transaction.
+	fn cancel<'a>(&'a self) -> BoxFut<'a, Result<()>>;
+
+	/// Commit a transaction.
+	///
+	/// This attempts to commit all changes made within the transaction.
+	///
+	/// An error is an assertion that nothing was written, so a backend that
+	/// cannot determine whether the transaction applied must return
+	/// [`crate::err::Error::CommitOutcomeUnknown`] rather than a definite
+	/// variant. Callers rely on that distinction: a definite failure is
+	/// reported to clients as work that did not happen, which is unsafe to
+	/// claim for a commit that may have landed. Determinate rejections — a
+	/// write conflict, an oversized entry, a key that already exists — must not
+	/// use it, because they carry classifications that retry paths depend on.
+	///
+	/// Any commit that completes in phases can reach this state; it is not
+	/// specific to networked backends, since a durability step that fails after
+	/// the write is already visible leaves the same ambiguity.
+	fn commit<'a>(&'a self) -> BoxFut<'a, Result<()>>;
+
+	/// Commit a transaction as [`Self::commit`] does, without waiting for the
+	/// store to make this commit durable on its own.
+	///
+	/// For a commit whose durability a later synced commit through the same
+	/// store provides. The commit is applied and visible on return, with the
+	/// same error contract as [`Self::commit`]; only the store's own sync wait
+	/// is skipped. A backend overrides this only where its commits become
+	/// durable in the order they are applied, so that no later commit survives
+	/// a crash this one does not. The default commits as usual.
+	fn commit_unsynced<'a>(&'a self) -> BoxFut<'a, Result<()>> {
+		self.commit()
+	}
+
+	/// Check if a key exists in the datastore.
+	fn exists<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<bool>>;
+
+	/// Fetch a key from the datastore.
+	fn get<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<Option<Val>>>;
+
+	/// Fetch a key from the datastore, registering the key for
+	/// commit-time conflict detection.
+	///
+	/// A transaction that reads a key with this method commits
+	/// successfully only if no other transaction commits a write to the
+	/// key after this transaction's snapshot was established. The
+	/// registration is only validated when the transaction commits, so
+	/// implementations must reject calls on non-writeable transactions
+	/// with [`crate::err::Error::TransactionReadonly`]. The default
+	/// implementation rejects the call with
+	/// [`crate::err::Error::UnsupportedLockedReads`] so that an engine
+	/// without a conflict-tracked read path can never silently serve an
+	/// unvalidated read: engines with such a path must override this
+	/// with the read that arms their conflict-detection machinery, and
+	/// engines whose commit protocol already validates every read
+	/// against the snapshot may override it with a plain read.
+	///
+	/// Whether a registration taken inside a savepoint scope survives
+	/// [`Transactable::rollback_to_save_point`] is engine-defined:
+	/// engines built on rollback-scoped conflict tracking release it
+	/// with the scope, while engines with monotonic read tracking keep
+	/// it armed. Callers that must keep the guarantee across a rollback
+	/// re-issue the locked read afterwards rather than relying on
+	/// either behaviour.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
+	#[cfg_attr(not(feature = "observability"), expect(unused_variables))]
+	fn getu<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<Option<Val>>> {
+		Box::pin(async move { Err(Error::UnsupportedLockedReads) })
+	}
+
+	/// Whether a [`Self::getu`] registration conflicts only with writes.
+	///
+	/// When this returns [`true`], a locked read is invalidated only by
+	/// another transaction committing a write to the key, never by another
+	/// transaction's locked read of it: any number of overlapping
+	/// transactions may hold a locked read of one key and all of them
+	/// commit. Callers rely on this to take a locked read of a key that
+	/// many concurrent writers read, without making those writers conflict
+	/// with one another. An engine that does not guarantee it returns
+	/// [`false`], which is the default: among them are engines whose locked
+	/// read counts as a write of the key for conflict detection, so that two
+	/// locked reads of one key conflict.
+	fn shared_locked_reads(&self) -> bool {
+		false
+	}
+
+	/// Insert or update a key in the datastore.
+	fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>>;
+
+	/// Insert a key if it doesn't exist in the datastore.
+	fn put<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>>;
+
+	/// Update a key in the datastore if the current value matches a condition.
+	fn putc<'a>(&'a self, key: Key<'a>, val: Val, chk: Option<Val>) -> BoxFut<'a, Result<()>>;
+
+	/// Delete a key from the datastore.
+	fn del<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<()>>;
+
+	/// Delete a key from the datastore if the current value matches a
+	/// condition.
+	fn delc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, Result<()>>;
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
+	/// This function fetches the full range of keys without values, in a single
+	/// request to the underlying datastore. Implementations also return the
+	/// total number of key bytes scanned, accumulated during the same
+	/// iteration that produces the keys, so callers can record metrics
+	/// without re-walking the result.
+	fn keys<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<KeysResult>>;
+
+	/// Retrieve a specific range of keys from the datastore, in reverse order.
+	///
+	/// This function fetches the full range of keys without values, in a single
+	/// request to the underlying datastore. Implementations also return the
+	/// total number of key bytes scanned, accumulated during the same
+	/// iteration that produces the keys, so callers can record metrics
+	/// without re-walking the result.
+	fn keysr<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<KeysResult>>;
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
+	/// This function fetches the full range of key-value pairs, in a single
+	/// request to the underlying datastore. Implementations also return the
+	/// total number of value bytes scanned, accumulated during the same
+	/// iteration that produces the values, so callers can record metrics
+	/// without re-walking the result.
+	fn scan<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<ScanResult>>;
+
+	/// Retrieve a specific range of keys from the datastore in reverse order.
+	///
+	/// This function fetches the full range of key-value pairs, in a single
+	/// request to the underlying datastore. Implementations also return the
+	/// total number of value bytes scanned, accumulated during the same
+	/// iteration that produces the values, so callers can record metrics
+	/// without re-walking the result.
+	fn scanr<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<ScanResult>>;
+
+	/// Open a stateful keys-only scan cursor over `rng`.
+	///
+	/// `skip` is applied once on the first batch (drops the first `skip`
+	/// keys at the start of the range, then yields up to `limit`).
+	/// Subsequent batches continue from the cursor's current position with
+	/// no skip.
+	///
+	/// The cursor's lifetime is tied to `&self`, so it cannot outlive the
+	/// transaction. Backends that can keep an underlying iterator alive
+	/// across batches override this to do so; otherwise the default impl
+	/// wraps the existing single-shot [`Self::keys`] / [`Self::keysr`] and
+	/// advances `range.start` between calls. See [`ScanCursorKeys`] for the
+	/// rationale.
+	fn open_keys_cursor<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		dir: Direction,
+		skip: u32,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Box<dyn ScanCursorKeys + 'a>>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Fall back to the generic cursor that wraps `keys`/`keysr` and
+			// advances `rng.start` between batches. Backends that can keep a
+			// native iterator alive across batches override this method.
+			Ok(Box::new(DefaultKeysCursor::new(self, rng, dir, version, skip))
+				as Box<dyn ScanCursorKeys + 'a>)
+		})
+	}
+
+	/// Visit the keys of each of `ranges`, in range order and key order within a range, at most
+	/// `limit` keys from each, handing the visitor the index of the range and the key. The
+	/// visitor's `Break` ends the whole read after that key, the remaining ranges unread. The
+	/// returned stats count the keys the visitor was handed.
+	///
+	/// A range holds the keys at or after its start and before its end, as [`Self::keys`] reads
+	/// it. A range that yields `limit` keys may hold more. The reads see the transaction as a
+	/// cursor over each range would, at `version`.
+	///
+	/// The default opens one keys cursor per range and drives it through one chunk, so it costs
+	/// what reading the ranges one by one costs. A backend that can serve the ranges with less
+	/// work than that (one iterator for all of them) overrides it and answers
+	/// [`Self::multi_read`] with `true`.
+	fn visit_key_ranges<'a>(
+		&'a self,
+		ranges: &'a [KeyRange<'a>],
+		limit: u32,
+		version: Option<u64>,
+		f: &'a mut dyn RangeKeyVisitor,
+	) -> BoxFut<'a, Result<ScanChunkStats>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let mut total = ScanChunkStats::default();
+			if limit == 0 {
+				return Ok(total);
+			}
+			for (at, rng) in ranges.iter().enumerate() {
+				let mut cursor =
+					self.open_keys_cursor(rng.clone(), Direction::Forward, 0, version).await?;
+				let mut stopped = false;
+				let chunk = cursor
+					.for_each(limit, &mut |key: &[u8]| {
+						let flow = f(at, key)?;
+						stopped = flow.is_break();
+						Ok(flow)
+					})
+					.await?;
+				total.rows += chunk.rows;
+				total.key_bytes += chunk.key_bytes;
+				if stopped {
+					break;
+				}
+			}
+			Ok(total)
+		})
+	}
+
+	/// Open a stateful key+value scan cursor over `rng`. See
+	/// [`Self::open_keys_cursor`] for the semantics.
+	fn open_vals_cursor<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		dir: Direction,
+		skip: u32,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Box<dyn ScanCursorVals + 'a>>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Fall back to the generic cursor that wraps `scan`/`scanr` and
+			// advances `rng.start` between batches. Backends that can keep a
+			// native iterator alive across batches override this method.
+			Ok(Box::new(DefaultValsCursor::new(self, rng, dir, version, skip))
+				as Box<dyn ScanCursorVals + 'a>)
+		})
+	}
+
+	/// Insert or replace a key in the datastore.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
+	fn replace<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move { self.set(key, val).await })
+	}
+
+	/// Insert or update many keys in the datastore.
+	///
+	/// Every entry is written as [`Self::set`] writes it, in input order, so a
+	/// key repeated in `entries` ends up holding its last value. The default
+	/// implementation issues one sequential `set` per entry, which is correct
+	/// for every engine; a backend where each write costs a round trip, or
+	/// where a savepoint needs a read of each key's prior value, overrides it
+	/// with a batched form. Like a run of individual `set` calls, the batch is
+	/// not atomic on its own: an error leaves the entries before the failing
+	/// one written in the transaction, and the transaction's own rollback and
+	/// savepoint rules decide what becomes of them.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all, fields(entries = entries.len())))]
+	fn setm<'a>(&'a self, entries: Vec<(Key<'a>, Val)>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			// Continue with function logic
+			for (key, val) in entries {
+				self.set(key, val).await?;
+			}
+			Ok(())
+		})
+	}
+
+	/// Delete many keys from the datastore.
+	///
+	/// Every key is deleted as [`Self::del`] deletes it, in input order, with
+	/// the same batching latitude and the same non-atomicity as
+	/// [`Self::setm`].
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all, fields(keys = keys.len())))]
+	fn delm<'a>(&'a self, keys: Vec<Key<'a>>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			// Continue with function logic
+			for key in keys {
+				self.del(key).await?;
+			}
+			Ok(())
+		})
+	}
+
+	/// Delete all versions of a key from the datastore.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
+	fn clr<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move { self.del(key).await })
+	}
+
+	/// Delete all versions of a key from the datastore if the current value
+	/// matches a condition.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
+	fn clrc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move { self.delc(key, chk).await })
+	}
+
+	/// Fetch many keys from the datastore.
+	///
+	/// The default implementation issues one sequential point get per input
+	/// key, so backends where each get is a round-trip override this method
+	/// with a native batched read. Results preserve input order, with misses
+	/// reported as `None`. The returned [`GetMultiResult`] also reports the
+	/// number of input keys that were found and the total value bytes across
+	/// the hits, accumulated in the same loop that performs the individual
+	/// point gets.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))))]
+	fn getm<'a>(
+		&'a self,
+		keys: &'a [Key<'a>],
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<GetMultiResult>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Continue with function logic
+			let mut out = Vec::with_capacity(keys.len());
+			let mut records = 0u64;
+			let mut value_bytes = 0u64;
+			for key in keys {
+				if let Some(val) = self.get(key.as_borrowed(), version).await? {
+					records += 1;
+					value_bytes += val.len() as u64;
+					out.push(Some(val));
+				} else {
+					out.push(None);
+				}
+			}
+			Ok(GetMultiResult {
+				values: out,
+				records,
+				value_bytes,
+			})
+		})
+	}
+
+	/// The position in `keys` of the first key the transaction's current view holds a value for,
+	/// or `None` when it holds none of them.
+	///
+	/// This is the existence check [`Self::put`] makes before it writes, made for many keys at
+	/// once: each key is read as `put` reads the key it is about to write, so the view includes the
+	/// transaction's own writes and deletes, and the read joins the transaction's conflict
+	/// tracking exactly as `put`'s read does. Nothing is written. "First" is the smallest position
+	/// in `keys`, whatever order a backend reads them in. A key may appear more than once.
+	///
+	/// The default reads one key at a time, in order, and stops at the first present one. A
+	/// backend where each read is a round trip, or that can read sorted keys with one iterator,
+	/// overrides it.
+	fn assert_absent<'a>(&'a self, keys: &'a [Key<'a>]) -> BoxFut<'a, Result<Option<usize>>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			for (at, key) in keys.iter().enumerate() {
+				if self.exists(key.as_borrowed(), None).await? {
+					return Ok(Some(at));
+				}
+			}
+			Ok(None)
+		})
+	}
+
+	/// Insert or update many keys, in order, as [`Self::set`] does each.
+	///
+	/// The default sets one key at a time. A backend whose `set` takes a lock or a dispatch per
+	/// call overrides it to take one for all of them.
+	fn set_many<'a>(&'a self, entries: Vec<(Vec<u8>, Val)>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			for (key, val) in entries {
+				self.set(Key::from(key), val).await?;
+			}
+			Ok(())
+		})
+	}
+
+	/// Retrieve a range of keys from the datastore.
+	///
+	/// This function fetches all matching key-value pairs from the underlying
+	/// datastore in grouped batches. The returned [`ScanResult`] also reports
+	/// the total key and value bytes consumed during the scan, accumulated
+	/// while merging successive batches.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
+	fn getr<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<ScanResult>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Continue with function logic
+			let mut out: Vec<(Vec<u8>, Val)> = vec![];
+			let mut key_bytes = 0u64;
+			let mut value_bytes = 0u64;
+			let mut next = Some(rng);
+			while let Some(rng) = next {
+				let res = self.batch_keys_vals(rng, NORMAL_BATCH_SIZE, version).await?;
+				next = res.next;
+				for (k, v) in res.result {
+					key_bytes += k.len() as u64;
+					value_bytes += v.len() as u64;
+					out.push((k, v));
+				}
+			}
+			Ok(ScanResult {
+				values: out,
+				key_bytes,
+				value_bytes,
+			})
+		})
+	}
+
+	/// Delete a range of keys from the datastore.
+	///
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
+	fn delr<'a>(&'a self, rng: KeyRange<'a>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			// Continue with function logic
+			let mut next = Some(rng);
+			while let Some(rng) = next {
+				let res = self.batch_keys(rng, NORMAL_BATCH_SIZE, None).await?;
+				next = res.next;
+				for k in res.result {
+					self.del(Key::from(k)).await?;
+				}
+			}
+			Ok(())
+		})
+	}
+	/// Delete all versions of a range of keys from the datastore.
+	///
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
+	fn clrr<'a>(&'a self, rng: KeyRange<'a>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			// Continue with function logic
+			let mut next = Some(rng);
+			while let Some(rng) = next {
+				let res = self.batch_keys(rng, NORMAL_BATCH_SIZE, None).await?;
+				next = res.next;
+				for k in res.result {
+					self.clr(k.into()).await?;
+				}
+			}
+			Ok(())
+		})
+	}
+
+	/// Count the total number of keys within a range in the datastore.
+	///
+	/// This function fetches the total key count from the underlying datastore
+	/// in grouped batches.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
+	fn count<'a>(&'a self, rng: KeyRange<'a>, version: Option<u64>) -> BoxFut<'a, Result<usize>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Continue with function logic
+			let mut len = 0;
+			let mut next = Some(rng);
+			while let Some(rng) = next {
+				let res = self.batch_keys(rng, COUNT_BATCH_SIZE, version).await?;
+				next = res.next;
+				len += res.result.len();
+			}
+			Ok(len)
+		})
+	}
+
+	/// Count the keys within a range, examining at most `budget` of them.
+	///
+	/// Answers the keys counted and, when the range holds more, the key the
+	/// count stopped at: counting `[resume, rng.end)` next counts exactly the
+	/// keys this call did not, so a range counted call by call, each resumed at
+	/// the key the last answered, sums to [`Self::count`] of the whole range.
+	/// `None` means the range is exhausted.
+	///
+	/// - **Exact at the snapshot.** The keys counted are those [`Self::count`] counts over the same
+	///   range as of `version` in this transaction, its own buffered writes included; a resumed
+	///   call reads the same snapshot.
+	/// - **Bounded.** A call examines at most `budget` keys (at least one): it never answers more
+	///   than `budget`, and a backend that examines keys it does not count — tombstones, older
+	///   versions — charges them to the budget too, so it may answer fewer than `budget` with a
+	///   resume key.
+	/// - **Resumable.** The resume key is within the range and after every key counted.
+	///
+	/// A backend whose count is [`CountCost::Logarithmic`] may answer a range
+	/// whole whatever the budget.
+	///
+	/// The default reads up to `budget` keys through [`Self::keys`].
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
+	fn count_bounded<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+		budget: u32,
+	) -> BoxFut<'a, Result<(usize, Option<Key<'static>>)>> {
+		Box::pin(async move {
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let budget = budget.max(1);
+			let keys = self.keys(rng, budget, 0, version).await?.keys;
+			let resume = match keys.last() {
+				Some(last) if keys.len() == budget as usize => Some(Key::from(last).next()),
+				_ => None,
+			};
+			Ok((keys.len(), resume))
+		})
+	}
+
+	/// This transaction's owned read view, or `None` when the backend cannot give one now.
+	///
+	/// The view reads what this transaction reads at this moment, its buffered writes included, and
+	/// is the handle by which code that does not hold the transaction reads it, concurrently
+	/// ([`Snapshot`]). This binds writable transactions as well as read-only ones. A
+	/// backend that cannot freeze buffered writes answers `None` whenever any are buffered, and
+	/// answers `None` whenever it has no view to give; callers fall back to the transaction's
+	/// own reads. The most a backend may answer is declared by [`Self::view_capabilities`].
+	/// The default is `None`.
+	fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+		None
+	}
+
+	/// The upper bound on the read views this backend hands out (see [`ViewCapabilities`]): the
+	/// same answer for every transaction of a datastore, plain or speculative, so it is a static
+	/// fact a planner may read once. `snapshot()` may still answer `None` where a flag is `true`.
+	/// A wrapper that holds another transaction forwards it. The default is no view of either kind,
+	/// which is what a backend answering `None` from [`Self::snapshot`] always declares.
+	fn view_capabilities(&self) -> ViewCapabilities {
+		ViewCapabilities::default()
+	}
+
+	/// Whether a plain read through this transaction joins its conflict set.
+	///
+	/// `false` is a promise: a plain `get`, `getm` or [`Snapshot`] read never makes the transaction
+	/// conflict with a later commit of the key it read, so a caller may issue such reads
+	/// speculatively without widening the transaction's conflict set. `true` is the conservative
+	/// answer every backend may give, and says nothing about whether a read does join it. The
+	/// default is `true`.
+	fn plain_reads_tracked(&self) -> bool {
+		true
+	}
+
+	/// Whether this transaction's commit fails when a key it wrote was also written by a
+	/// transaction that committed after this one's snapshot was taken: first-committer-wins on
+	/// write-write overlap.
+	///
+	/// `true` is a promise that holds whether or not either transaction read the key, and
+	/// including a key the other transaction also wrote blindly, with `set` and no read. A caller
+	/// that has read a key through this transaction and found it absent, and not written it
+	/// through this transaction since the read, may therefore claim it with `set` in place of
+	/// `put`: a transaction that committed the key since the snapshot makes this commit fail, as
+	/// the existence check would not have prevented, so the check adds no protection. The
+	/// precondition is "absent, and not written by this transaction since the read": the
+	/// promise is about other transactions' commits, and a write of this transaction between
+	/// the read and the `set` is overwritten, which `put` would have refused. The promise is
+	/// about a key written by key (`set`, `put`, `replace`, `del`); a range delete is not part of
+	/// it. `false` is always correct, and is the default; a backend
+	/// whose commit is last-writer-wins on a blind write, or that cannot be shown to detect one,
+	/// answers it. It is the same answer for every transaction of a datastore, so it is a static
+	/// fact the datastore may read once.
+	fn blind_write_conflicts(&self) -> bool {
+		false
+	}
+
+	/// Whether the next chunk of a scan is worth reading on another task while the caller works on
+	/// the current one.
+	///
+	/// `true` says a chunk read does storage work beyond copying held bytes, and that the
+	/// transaction may be read from another task while its owner reads it. It is the same answer
+	/// for every transaction of a datastore, so it is a static fact a planner may read once.
+	/// `false` is always correct, and is the default.
+	fn scan_read_ahead(&self) -> bool {
+		false
+	}
+
+	/// Whether reading many keys or many ranges at once costs less than reading them one by one:
+	/// [`Self::getm`] and [`Self::visit_key_ranges`] serve a batch with one acquisition of the
+	/// transaction and one hop to the thread that reads, where the same reads one by one pay each.
+	///
+	/// It is the same answer for every transaction of a datastore, so it is a static fact a
+	/// planner may read once. `false` is always correct, and is the default.
+	fn multi_read(&self) -> bool {
+		false
+	}
+
+	/// What `rng` holds, as of `version`.
+	///
+	/// Exact when the range holds fewer than [`ESTIMATE_BUDGET`] keys and the backend counts it,
+	/// otherwise flagged inexact: extrapolated from the first `ESTIMATE_BUDGET` keys by the share
+	/// they span of the keys the range holds, or answered
+	/// from what [`Self::approximate`] reads of a range its metadata measures as large.
+	///
+	/// The default reads up to `ESTIMATE_BUDGET` entries through [`Self::scan`], and past the
+	/// budget the range's last key with one [`Self::keysr`] of one key.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
+	fn estimate<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Estimate>> {
+		Box::pin(async move {
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let res = self.scan(rng.as_borrowed(), ESTIMATE_BUDGET, 0, version).await?;
+			let read = res.values.len() as u64;
+			let far = if read < u64::from(ESTIMATE_BUDGET) {
+				None
+			} else {
+				self.keysr(rng.as_borrowed(), 1, 0, version).await?.keys.pop()
+			};
+			Ok(estimate_from_prefix(
+				read,
+				res.key_bytes + res.value_bytes,
+				res.values.first().map(|(key, _)| key.as_slice()),
+				res.values.last().map(|(key, _)| key.as_slice()),
+				far.as_deref(),
+			))
+		})
+	}
+
+	/// What each of `ranges` holds, as of `version`, answered as [`Self::estimate`] answers one
+	/// range and in the order of `ranges`.
+	///
+	/// The default estimates the ranges one by one; a backend that measures many ranges in one
+	/// call of its metadata answers them together.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all, fields(ranges = ranges.len())))]
+	fn estimate_many<'a>(
+		&'a self,
+		ranges: Vec<KeyRange<'a>>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Vec<Estimate>>> {
+		Box::pin(async move {
+			let mut out = Vec::with_capacity(ranges.len());
+			for rng in ranges {
+				out.push(self.estimate(rng, version).await?);
+			}
+			Ok(out)
+		})
+	}
+
+	/// What the backend's metadata says `rng` holds, as of `version`, read without visiting the
+	/// range's entries: `None` where the backend keeps no such metadata, or has none for the
+	/// range. An answer is never exact and may count no keys; its bytes are what the backend
+	/// stores, and may leave out writes it has not yet persisted.
+	///
+	/// A caller that must not read the entries of a range to size it asks this, never
+	/// [`Self::estimate`]. The default answers `None`.
+	fn approximate<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Option<Estimate>>> {
+		let _ = (rng, version);
+		Box::pin(async move {
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			Ok(None)
+		})
+	}
+
+	/// Boundary keys that divide `rng` into parts, as of `version`.
+	///
+	/// The boundaries are strictly inside `rng` and strictly ascending, and the parts they cut
+	/// tile `rng` exactly, so every key of the range lies in exactly one part. A backend may answer
+	/// fewer boundaries than `target` asks for, or none: a range holding no more than one key, or
+	/// keys too close to divide, is left whole.
+	///
+	/// The default finds the first and last key of the range with one [`Self::keys`] and one
+	/// [`Self::keysr`] of one key, then cuts between them with
+	/// [`split_range`](crate::split::split_range). For [`SplitTarget::Bytes`] the part count is
+	/// `ceil(estimate.bytes / max(b, 1))`; the count is clamped to `[1, MAX_SPLIT_PARTS]`.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
+	fn split<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		target: SplitTarget,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Vec<Key<'static>>>> {
+		Box::pin(async move {
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			if rng.is_empty() {
+				return Ok(Vec::new());
+			}
+			let first = self.keys(rng.as_borrowed(), 1, 0, version).await?.keys.pop();
+			let last = self.keysr(rng.as_borrowed(), 1, 0, version).await?.keys.pop();
+			let (Some(first), Some(last)) = (first, last) else {
+				return Ok(Vec::new());
+			};
+			let parts = match target {
+				SplitTarget::Parts(_) => parts_for(target, || 0),
+				SplitTarget::Bytes(_) => {
+					let bytes = self.estimate(rng.as_borrowed(), version).await?.bytes;
+					parts_for(target, || bytes)
+				}
+			};
+			Ok(default_split(&first, &last, parts, &rng))
+		})
+	}
+
+	// --------------------------------------------------
+	// Batch functions
+	// --------------------------------------------------
+
+	/// Retrieve a batched scan over a specific range of keys in the datastore.
+	///
+	/// This function fetches keys, in batches, with multiple requests to the
+	/// underlying datastore.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
+	fn batch_keys<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		batch: u32,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<KeyBatch>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Scan for the next batch (we only need the keys here; the byte
+			// total is intended for metrics consumers higher up the stack)
+			let res = self.keys(rng.as_borrowed(), batch, 0, version).await?.keys;
+			// Short page ⇒ the range is fully consumed; no continuation needed.
+			if res.len() < batch as usize && batch > 0 {
+				Ok(Batch::new(None, res))
+			} else {
+				// Full page ⇒ produce a continuation range starting after the
+				// last returned key.
+				match res.last() {
+					Some(k) => Ok(Batch::new(
+						Some(KeyRange {
+							start: Key::from(k).next(),
+							end: rng.end.into_static(),
+						}),
+						res,
+					)),
+					// Unreachable: the `len < batch` branch above already
+					// handles the empty-result case, so a full page must
+					// have at least one element.
+					None => Ok(Batch::new(None, res)),
+				}
+			}
+		})
+	}
+
+	/// Retrieve a batched scan over a specific range of keys in the datastore.
+	///
+	/// This function fetches key-value pairs, in batches, with multiple
+	/// requests to the underlying datastore.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
+	fn batch_keys_vals<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		batch: u32,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<ValueBatch>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Scan for the next batch (we only need the values here; the byte
+			// total is intended for metrics consumers higher up the stack)
+			let res = self.scan(rng.as_borrowed(), batch, 0, version).await?.values;
+			// Short page ⇒ the range is fully consumed; no continuation needed.
+			if res.len() < batch as usize && batch > 0 {
+				Ok(Batch::new(None, res))
+			} else {
+				// Full page ⇒ produce a continuation range starting after the
+				// last returned key.
+				match res.last() {
+					Some((k, _)) => {
+						let k = Key::from(k).next();
+						Ok(Batch::new(
+							Some(KeyRange {
+								start: k,
+								end: rng.end.as_borrowed().into_static(),
+							}),
+							res,
+						))
+					}
+					// Unreachable: the `len < batch` branch above already
+					// handles the empty-result case.
+					None => Ok(Batch::new(None, res)),
+				}
+			}
+		})
+	}
+
+	// --------------------------------------------------
+	// Savepoint functions
+	// --------------------------------------------------
+
+	/// Set a new save point on the transaction, opening a scope that subsequent
+	/// writes belong to.
+	///
+	/// Savepoints delimit a scope of writes that can be undone as a unit.
+	/// Exactly one [`Self::release_last_save_point`] or
+	/// [`Self::rollback_to_save_point`] closes the scope this opens. Scopes
+	/// nest, and every implementation must agree on the semantics of all three
+	/// methods, because callers rely on them regardless of which backend they
+	/// run against:
+	///
+	/// - Release keeps the scope's writes, but does not make them permanent: a rollback to an
+	///   *enclosing* scope must still undo them. Discarding a released scope's undo state is only
+	///   correct when no enclosing scope remains.
+	/// - Rollback undoes every write made since the scope was opened, including those inherited
+	///   from scopes released inside it, and leaves any enclosing scope open and still able to undo
+	///   its own writes.
+	/// - Rollback with no scope open fails with [`Error::NoSavepoint`]. Release with no scope open
+	///   is accepted and inert.
+	/// - The three methods must not be called concurrently on one transaction. Each pairs
+	///   bookkeeping about the open scopes with the engine state backing them, and implementations
+	///   only keep the two consistent within a single call. Core drives a transaction's savepoints
+	///   from one task.
+	///
+	/// Nesting is reachable in practice: a per-document savepoint is still open
+	/// while a synchronous `DEFINE EVENT` computes its `THEN` expression as a
+	/// full statement, which takes and releases a savepoint of its own.
+	///
+	/// Engines that expose a native savepoint and a native release call both
+	/// directly. Engines with a savepoint but no release can get the
+	/// release-merge behaviour from [`crate::SavepointStack`]. Engines with no
+	/// native savepoint need an undo log keyed per open scope.
+	fn new_save_point(&self) -> BoxFut<'_, Result<()>>;
+
+	/// Release the last save point, keeping its writes undoable by any enclosing
+	/// save point.
+	///
+	/// Accepted and inert when no save point is open. See
+	/// [`Self::new_save_point`] for the full contract.
+	fn release_last_save_point(&self) -> BoxFut<'_, Result<()>>;
+
+	/// Rollback to the last save point, undoing every write made since it was
+	/// taken.
+	///
+	/// Fails with [`Error::NoSavepoint`] when no save point is open. See
+	/// [`Self::new_save_point`] for the full contract.
+	fn rollback_to_save_point(&self) -> BoxFut<'_, Result<()>>;
+
+	// --------------------------------------------------
+	// Timestamp functions
+	// --------------------------------------------------
+
+	/// Get the current monotonic timestamp.
+	///
+	/// With the `test-inc-timestamp` feature enabled this returns a
+	/// deterministic incrementing counter (`IncTimeStamp`) so tests are
+	/// reproducible; in production it returns an HLC timestamp
+	/// (`HlcTimeStamp`) that combines wall-clock time with a logical counter
+	/// for cluster-wide ordering.
+	fn timestamp(&self) -> BoxFut<'_, Result<BoxTimeStamp>> {
+		Box::pin(async move {
+			if cfg!(feature = "test-inc-timestamp") {
+				Ok(BoxTimeStamp::new(IncTimeStamp::next()))
+			} else {
+				Ok(BoxTimeStamp::new(HlcTimeStamp::next()))
+			}
+		})
+	}
+
+	/// Get the current *safe* (closed) watermark timestamp: a versionstamp at or
+	/// below which every committed transaction is final **and** visible on this
+	/// node.
+	///
+	/// The live-query router uses this as the upper bound of what it delivers in
+	/// a pass, and as the bound it advances its cursor to, so it never advances
+	/// past a commit that could still become visible later with a lower
+	/// versionstamp (which would silently drop that notification).
+	///
+	/// The default returns [`Self::timestamp`], which is correct for any backend
+	/// with a single monotonic oracle and synchronous local visibility (mem,
+	/// surrealkv): everything below a freshly minted stamp is already
+	/// committed and visible. A distributed backend whose commit log is
+	/// non-linear (e.g. SurrealDS, where the highest committed timestamp can
+	/// float above an unapplied lower one) MUST override this to return a genuine
+	/// closed/safe watermark, or the router can miss notifications.
+	fn safe_timestamp(&self) -> BoxFut<'_, Result<BoxTimeStamp>> {
+		self.timestamp()
+	}
+
+	/// Get a handle to the timestamp implementation of the stamps
+	/// [`Self::timestamp`] mints: it decodes them, re-creates them from their
+	/// versionstamps, and converts a datetime into their order.
+	///
+	/// A datetime converted through it sorts at or below every stamp minted at
+	/// or after that instant, and above every stamp minted in an earlier tick of
+	/// the clock behind them. `SHOW CHANGES ... SINCE <datetime>` starts its
+	/// scan there, so a conversion in any other unit starts it years away from
+	/// the change sets it was asked for. A backend that overrides either this or
+	/// [`Self::timestamp`] overrides both, and keeps them agreeing.
+	///
+	/// Mirrors the `test-inc-timestamp` swap in [`Self::timestamp`]. That
+	/// deterministic counter tracks no clock, so under it a datetime converts to
+	/// a count rather than to the stamps minted at that instant.
+	fn timestamp_impl(&self) -> BoxTimeStampImpl {
+		if cfg!(feature = "test-inc-timestamp") {
+			Box::new(IncTimeStampImpl)
+		} else {
+			Box::new(HlcTimeStampImpl)
+		}
+	}
+
+	/// Get a handle to the timestamp implementation of the `version` a
+	/// versioned read takes: [`Self::get`], [`Self::scan`] and the other reads
+	/// given `Some(version)` read the datastore as of that stamp, and a
+	/// `VERSION <datetime>` clause is converted through this implementation to
+	/// name it.
+	///
+	/// Defaults to [`Self::timestamp_impl`], which is right for a backend that
+	/// stamps its versions from the same oracle as [`Self::timestamp`]. A
+	/// backend whose versions come from anywhere else — its storage engine's own
+	/// commit clock, or its commit positions — overrides this one alone: the
+	/// change feed stays keyed by what `timestamp` mints.
+	///
+	/// A transaction that wraps another forwards this as well as
+	/// [`Self::timestamp_impl`]: left to the default, it would answer the
+	/// wrapped backend's stamps where that backend's versions are asked for.
+	fn version_impl(&self) -> BoxTimeStampImpl {
+		self.timestamp_impl()
+	}
+
+	/// Hint the backend to compact the given range (or the whole keyspace if
+	/// `None`).
+	///
+	/// Default impl returns [`Error::CompactionNotSupported`]; backends
+	/// whose storage engine exposes a compaction primitive (e.g. an LSM tree)
+	/// override this. The call is advisory — callers must not rely on it
+	/// for correctness, only for reclaiming space / improving read
+	/// performance.
+	fn compact<'a>(&'a self, _range: Option<KeyRange<'a>>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move { Err(Error::CompactionNotSupported) })
+	}
+}

@@ -1,0 +1,152 @@
+[package]
+name = "surrealdb-idx"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-idx/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = ["cjk-tokenizer", "fulltext", "vector-index"]
+
+# Analyzers and the full-text index, with their stemmers and the `ascii`
+# filter. Without it `DEFINE ANALYZER` and full-text index definitions still
+# parse and stored state still decodes, and defining or using an analyzer, and
+# building, loading or querying a full-text index, fails with an error naming
+# this feature.
+fulltext = ["dep:deunicode", "dep:rust-stemmers"]
+
+# Tracing spans on the full-text index's per-query and per-batch functions
+# (`#[instrument]`). Without it those functions run with no span wrapper; log
+# events are not affected.
+observability = []
+
+# The HNSW vector index. Without it `HNSW` index definitions still parse and
+# stored HNSW state still decodes, and building, loading or searching an HNSW
+# index fails with an error naming this feature. Brute-force KNN and the
+# vector functions are not affected.
+vector-index = []
+
+# Backends for the engines' own concurrency tests. The library selects no
+# backend; the in-memory one is always available as a dev-dependency, and these
+# add the on-disk and distributed ones so the matching KVS CI lane runs the
+# race tests against its own store. Nothing in the library reads them.
+kv-surrealkv = ["surrealdb-kvs-any/kv-surrealkv"]
+
+# The `SEGMENT(<language>)` tokenizer and its lindera dependency. Without it
+# `SEGMENT` still parses, and building an analyzer that uses it fails with an
+# error naming this feature.
+cjk-tokenizer = ["dep:lindera"]
+
+# Bake a morphological dictionary for `TOKENIZERS SEGMENT(<language>)` into the
+# binary, so `SEGMENT` works with no files on disk. Without these, `SEGMENT`
+# still works: the dictionary is then read from the directory named by the
+# `segment_dictionary_path` config key.
+#
+# Each costs both image size and memory: Korean adds roughly 82 MB, Japanese
+# 45 MB and Chinese 22 MB. An embedded dictionary is part of the binary image,
+# so unlike a file-backed one it cannot be evicted once touched - the first
+# query in a language turns its dictionary into resident memory for the
+# process's lifetime, which is a figure to size memory limits against rather
+# than discover.
+#
+# Enabling one also makes its crate's build script download the dictionary
+# archive at build time. lindera checks the archive against an MD5 constant in
+# that crate's source, so what lands in the binary is pinned transitively by
+# `Cargo.lock` - though by a hash that is not collision-resistant.
+cjk-embed-chinese = ["cjk-tokenizer", "lindera?/embed-cc-cedict"]
+cjk-embed-japanese = ["cjk-tokenizer", "lindera?/embed-ipadic"]
+cjk-embed-korean = ["cjk-tokenizer", "lindera?/embed-ko-dic"]
+cjk-embed-all = ["cjk-embed-chinese", "cjk-embed-japanese", "cjk-embed-korean"]
+
+[package.metadata.docs.rs]
+# docs.rs builds with the latest nightly, whose trait solver rejects the `diskann`
+# crate (`Arc<B>: Batch` not satisfied); `-Znext-solver=no` keeps it compiling there.
+rustc-args = ["-Znext-solver=no"]
+
+[dependencies]
+ahash.workspace = true
+anyhow.workspace = true
+bytes.workspace = true
+common.workspace = true
+dashmap.workspace = true
+deunicode = { workspace = true, optional = true }
+fst.workspace = true
+half.workspace = true
+lindera = { workspace = true, optional = true }
+ndarray.workspace = true
+ndarray-stats.workspace = true
+geo = { workspace = true, features = ["use-serde"] }
+parking_lot.workspace = true
+quick_cache.workspace = true
+rand.workspace = true
+roaring = { workspace = true, features = ["serde"] }
+rust-stemmers = { workspace = true, optional = true }
+storekey.workspace = true
+surrealdb-catalog.workspace = true
+surrealdb-cnf.workspace = true
+surrealdb-datastore.workspace = true
+surrealdb-expr.workspace = true
+surrealdb-kvs.workspace = true
+surrealdb-observe.workspace = true
+surrealdb-runtime.workspace = true
+surrealdb-strand.workspace = true
+surrealdb-types.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid = { workspace = true }
+web-time.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+tokio = { workspace = true, default-features = false, features = ["rt", "sync"] }
+
+# The mapper reads its term file asynchronously off-wasm; on wasm it falls back
+# to `std::fs`, so `fs`/`io-util` are only named here.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, default-features = false, features = [
+    "fs",
+    "io-util",
+    "rt",
+    "sync",
+] }
+
+# DISKANN DEPENDENCY CONFIGURATION
+# DiskANN (the `diskann` library of the `surrealdb-diskann` crate) is a dependency
+# on 64-bit targets and on wasm, which that crate supports on wasm32. Other 32-bit targets
+# (i686, armv7, …) leave it out, so `surrealdb-idx` still compiles there and HNSW is
+# their vector index. The matching source gate is the `diskann` cfg set in build.rs.
+[target.'cfg(any(target_family = "wasm", target_pointer_width = "64"))'.dependencies]
+diskann.workspace = true
+diskann-utils.workspace = true
+diskann-vector.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true
+rstest.workspace = true
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+serial_test.workspace = true
+# The engines' own tests open a transaction against an in-memory backend.
+# Nothing in the library selects a backend.
+surrealdb-kvs-any = { workspace = true, features = ["kv-mem"] }
+# The tests whose subject is a store that gives workers no read view open one
+# through the viewless test double.
+surrealdb-kvs = { workspace = true, features = ["test-utils"] }
+# The writer-lease tests run two datastores over one in-memory store, which
+# reports itself the sole writer; the hook has them run the lease protocol.
+surrealdb-datastore = { workspace = true, features = ["test-hooks"] }
+# The analyzer helper parses a `DEFINE ANALYZER` statement rather than building
+# the definition by hand, so the tests keep the parser.
+temp-dir.workspace = true
+tempfile.workspace = true
+test-log = { workspace = true, features = ["trace"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

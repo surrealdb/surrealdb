@@ -4,6 +4,7 @@ imports = ["datasets/type_order.surql"]
 
 [test]
 
+requires = ["regex"]
 [[test.results]]
 value = "[]"
 

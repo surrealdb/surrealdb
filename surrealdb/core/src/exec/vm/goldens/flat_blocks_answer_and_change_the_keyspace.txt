@@ -1,0 +1,183 @@
+### { LET $p = SELECT * FROM ONLY person:1; RETURN $p }
+{ existing: 'a', id: person:1 }
+keyspace:
+### { LET $p = SELECT * FROM ONLY person; RETURN $p }
+{ existing: 'a', id: person:1 }
+keyspace:
+### { LET $p = SELECT * FROM ONLY person WHERE existing = 'zz'; RETURN $p }
+NONE
+keyspace:
+### { CREATE person:2 SET existing = 'b'; LET $p = SELECT * FROM ONLY person; RETURN $p }
+error: Couldn't coerce value for field `loose` of `person:2`: Expected `object` but found `NONE`
+keyspace:
+### FOR $i IN 1..3 { SELECT * FROM ONLY person }
+NONE
+keyspace:
+### { LET $x = SELECT existing FROM person TIMEOUT 1s; RETURN $x }
+[{ existing: 'a' }]
+keyspace:
+### { LET $x = CREATE ONLY counter:1 TIMEOUT 1s; RETURN $x }
+{ id: counter:1 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounter\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gncounter\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounter\x00 => f09eb27ab9840310 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!lg\x00\x01 => f2a158cb90a774a1 (24 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => e64d01ce35b9a8c3 (5 bytes)
+### { FOR $i IN 1..4 { CREATE type::record('counter', $i) SET n = $i TIMEOUT 5s }; RETURN SELECT * FROM counter ORDER BY id }
+[{ id: counter:1, n: 1 }, { id: counter:2, n: 2 }, { id: counter:3, n: 3 }]
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounter\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gncounter\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounter\x00 => f09eb27ab9840310 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!lg\x00\x01 => f2a158cb90a774a1 (24 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f6fd904fbfd0b102 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => f6fd8f4fbfd0af4f (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => f6fd8e4fbfd0ad9c (9 bytes)
+### { LET $x = SELECT * FROM person WHERE sleep(30ms) = NONE TIMEOUT 1ms; RETURN $x }
+error: The query was not executed because it exceeded the timeout: 1ms
+keyspace:
+### FOR $i IN 1..3 { SELECT * FROM person WHERE sleep(30ms) = NONE TIMEOUT 1ms }
+error: The query was not executed because it exceeded the timeout: 1ms
+keyspace:
+### { FOR $i IN 1..5 { CREATE type::record('counter', $i) SET n = $i; LET $c = SELECT count() AS c FROM counter GROUP ALL; LET $s = SELECT VALUE n FROM counter ORDER BY n DESC LIMIT 2; CREATE type::record('seen', $i) SET c = $c, s = $s }; RETURN SELECT * FROM seen ORDER BY id }
+[{ c: [{ c: 1 }], id: seen:1, s: [1] }, { c: [{ c: 2 }], id: seen:2, s: [2, 1] }, { c: [{ c: 3 }], id: seen:3, s: [3, 2] }, { c: [{ c: 4 }], id: seen:4, s: [4, 3] }]
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounter\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvseen\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gncounter\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnseen\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounter\x00 => f09eb27ab9840310 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbseen\x00 => 6844ce7c6e65d8ac (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!lg\x00\x01 => f2a158cb90a774a1 (24 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f6fd904fbfd0b102 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => f6fd8f4fbfd0af4f (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => f6fd8e4fbfd0ad9c (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x04 => f6fd8d4fbfd0abe9 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*seen\x00!lg\x00\x01 => b0165567ad9c0701 (21 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*seen\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*seen\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ad67bc0f20ba8101 (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*seen\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 646413424dc0a028 (23 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*seen\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => 58ec7805c8d3ad29 (23 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*seen\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x04 => 5e636fee9cedee46 (23 bytes)
+### { FOR $i IN 1..4 { CREATE type::record('counter', $i) }; FOR $i IN 0..4 { LET $r = SELECT VALUE id FROM counter ORDER BY id LIMIT $i START 1; CREATE type::record('lim', $i) SET r = $r }; RETURN SELECT * FROM lim ORDER BY id }
+[{ id: lim:0, r: [] }, { id: lim:1, r: [counter:2] }, { id: lim:2, r: [counter:2, counter:3] }, { id: lim:3, r: [counter:2, counter:3] }]
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounter\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvlim\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gncounter\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnlim\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounter\x00 => f09eb27ab9840310 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tblim\x00 => ed5fec1cc11b0517 (171 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!lg\x00\x01 => f2a158cb90a774a1 (24 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => e64d01ce35b9a8c3 (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => e64d01ce35b9a8c3 (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => e64d01ce35b9a8c3 (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*lim\x00!lg\x00\x01 => 16b39585fb1cc4df (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*lim\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*lim\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a2c783830207ceef (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*lim\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => b93fc808cd7b1a7e (21 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*lim\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 39e7bd3ae9cbff38 (32 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*lim\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => 39e7bd3ae9cbff38 (32 bytes)
+### { FOR $i IN 1..7 { UPSERT type::record('counter', $i % 2) SET n += 1 }; RETURN SELECT * FROM counter ORDER BY id }
+[{ id: counter:0, n: 3 }, { id: counter:1, n: 3 }]
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounter\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gncounter\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounter\x00 => f09eb27ab9840310 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!lg\x00\x01 => f2a158cb90a774a1 (24 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x00 => f6fd8e4fbfd0ad9c (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f6fd8e4fbfd0ad9c (9 bytes)
+### { FOR $i IN 1..3 { LET $c = CREATE ONLY type::record('counter', $i); CREATE type::record('copy', $i) SET c = $c.id }; RETURN SELECT * FROM copy ORDER BY id }
+[{ c: counter:1, id: copy:1 }, { c: counter:2, id: copy:2 }]
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcopy\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounter\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gncopy\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gncounter\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcopy\x00 => 7f7319b26e5a811a (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounter\x00 => f09eb27ab9840310 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*copy\x00!lg\x00\x01 => 97d320a565edf4bb (21 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*copy\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*copy\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 964b3415974888ef (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*copy\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 964b351597488aa2 (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!lg\x00\x01 => f2a158cb90a774a1 (24 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => e64d01ce35b9a8c3 (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => e64d01ce35b9a8c3 (5 bytes)
+### { FOR $i IN 1..4 { LET $x = (IF $i = 2 { RETURN 'early' } ELSE { $i }); CREATE type::record('counter', $i) SET x = $x }; RETURN 'late' }
+'late'
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounter\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gncounter\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounter\x00 => f09eb27ab9840310 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!lg\x00\x01 => f2a158cb90a774a1 (24 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f72d244fbff91d40 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 334a7bb648df8271 (14 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => f72d264fbff920a6 (9 bytes)
+### FOR $i IN 1..4 { CREATE type::record('counter', $i); IF $i = 2 { THROW 'stopped' } }
+error: An error occurred: stopped
+keyspace:
+### FOR $i IN 1..4 { CREATE counter:1 }
+error: Database record `counter:1` already exists
+keyspace:
+### { FOR $i IN 1..5 { CREATE type::record('counter', $i) SET n = $i; DEFINE FIELD OVERWRITE m ON counter VALUE 7 }; RETURN SELECT * FROM counter ORDER BY id }
+[{ id: counter:1, n: 1 }, { id: counter:2, m: 7, n: 2 }, { id: counter:3, m: 7, n: 3 }, { id: counter:4, m: 7, n: 4 }]
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounter\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gncounter\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounter\x00 => f09eb27ab9840310 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!fdm\x00 => 5286c59c8cce63ae (81 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!lg\x00\x01 => f2a158cb90a774a1 (24 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f6fd904fbfd0b102 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 99a10b918a45affa (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => 99a10c918a45b1ad (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x04 => 99a105918a45a5c8 (13 bytes)
+### { FOR $i IN 1..4 { LET $l = SELECT * FROM ONLY late:1; CREATE type::record('late', $i) SET prev = $l.id TIMEOUT 5s; DEFINE FIELD OVERWRITE seen ON late VALUE true }; RETURN SELECT * FROM late ORDER BY id }
+error: The table 'late' does not exist
+keyspace:
+### { LET $i = 10; FOR $i IN 1..3 { FOR $j IN 1..3 { LET $i = $i * 100 + $j; CREATE type::record('pair', $i) } }; RETURN [$i, (SELECT VALUE id FROM pair ORDER BY id)] }
+[10, [pair:101, pair:102, pair:201, pair:202]]
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvpair\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnpair\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbpair\x00 => ee68b8f5bf8b3626 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*pair\x00!lg\x00\x01 => 0f9b52070284c0be (21 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*pair\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*pair\x00*\x02\x80\x00\x00\x00\x00\x00\x00e => e64d01ce35b9a8c3 (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*pair\x00*\x02\x80\x00\x00\x00\x00\x00\x00f => e64d01ce35b9a8c3 (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*pair\x00*\x02\x80\x00\x00\x00\x00\x00\x00\xc9 => e64d01ce35b9a8c3 (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*pair\x00*\x02\x80\x00\x00\x00\x00\x00\x00\xca => e64d01ce35b9a8c3 (5 bytes)
+### FOR $i IN 1..4 { IF $i = 3 { BREAK }; LET $x = SELECT VALUE existing FROM person; IF $x = ['a'] { CONTINUE }; CREATE counter }
+NONE
+keyspace:
+### { LET $acc = []; FOR $i IN 0..3 { LET $acc = $acc + [$i] }; RETURN $acc }
+[]
+keyspace:
+### { LET $x = 5; { LET $x = $x + 1; LET $y = SELECT VALUE $x FROM person; RETURN [$x, $y] } }
+[6, [6]]
+keyspace:
+### { FOR $i IN 0..3 { LET $r = SELECT VALUE existing FROM person WHERE $i > 0; IF $r = ['a'] { RETURN [$i, $r] } }; RETURN 'none' }
+[1, ['a']]
+keyspace:
+### { FOR $i IN 0..3 { LET $r = SELECT VALUE string::len(existing) + $i FROM person; IF $i = 2 { RETURN $r } } }
+[3]
+keyspace:
+### { DEFINE TABLE fresh; FOR $i IN 0..3 { LET $r = SELECT VALUE [existing, $i] FROM person WHERE $i > 0; IF $i = 2 { RETURN $r } } }
+[['a', 2]]
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnfresh\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => d5593014cfe5ea6c (173 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!lg\x00\x01 => 5e45e05a330cfe1f (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!mi => d7876502b7aabd4b (16 bytes)
+### { FOR $i IN 0..3 { FOR $j IN 0..3 { LET $k = $i * 10 + $j; IF $k = 21 { RETURN SELECT VALUE [$k, $i, $j] FROM person } } } }
+[[21, 2, 1]]
+keyspace:

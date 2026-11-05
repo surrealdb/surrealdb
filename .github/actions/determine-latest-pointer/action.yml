@@ -1,0 +1,76 @@
+name: 'Determine latest release pointer'
+description: >-
+  Answers, from one read of the repository's published GitHub releases, whether
+  VERSION is the newest stable release overall (`latest`), on its major line
+  (`latest-major`) and on its major.minor line (`latest-minor`). Only a stable
+  engine release can be any of them. Inputs are the calling step's environment:
+  VERSION (X.Y.Z, or X.Y.Z-<pre>); RELEASE_ENGINE ('true' when the release
+  ships the engine); NIGHTLY ('true' for a nightly); GH_TOKEN (reads the
+  releases). A failed read fails the step rather than guess.
+
+outputs:
+  latest:
+    description: "'true' when no published stable release is newer than VERSION"
+    value: ${{ steps.latest.outputs.latest }}
+  latest-major:
+    description: "'true' when no published stable release on VERSION's major line is newer than VERSION"
+    value: ${{ steps.latest.outputs.latest-major }}
+  latest-minor:
+    description: "'true' when no published stable release on VERSION's major.minor line is newer than VERSION"
+    value: ${{ steps.latest.outputs.latest-minor }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine latest release pointer
+      id: latest
+      shell: bash
+      run: |
+        set -euo pipefail
+        latest=false
+        latest_major=false
+        latest_minor=false
+        # Only a stable ENGINE release can ever own `latest`.
+        if [[ "$RELEASE_ENGINE" == "true" && "$NIGHTLY" != "true" && "$VERSION" != *-* ]]; then
+          # Collect every publicly released STABLE version (non-draft,
+          # non-prerelease), paginating the releases API. gh may be absent on the
+          # private runner, so use curl+jq (as the overwrite guard does). Fail
+          # hard on an API error instead of guessing which version is latest.
+          published=""
+          page=1
+          while (( page <= 50 )); do
+            if ! resp=$(curl -fsS --retry 3 --retry-delay 2 \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100&page=${page}"); then
+              echo "::error::Could not read GitHub releases to determine the 'latest' pointer (page ${page}). Refusing to guess which stable version is latest — re-run once the API is reachable."
+              exit 1
+            fi
+            n=$(printf '%s' "$resp" | jq 'length')
+            (( n > 0 )) || break
+            published+="$(printf '%s' "$resp" | jq -r '.[] | select(.draft==false and .prerelease==false) | .tag_name')"$'\n'
+            (( n < 100 )) && break
+            page=$(( page + 1 ))
+          done
+          # The published stable triples (vX.Y.Z -> X.Y.Z) plus this version.
+          stables=$(
+            { printf '%s\n' "$published" \
+                | sed -n 's/^v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p'
+              printf '%s\n' "$VERSION"; } \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$')
+          # The highest of them starting with $1. When it is this version, this
+          # release is (or, on a re-release, remains) the newest there; when a
+          # strictly higher stable exists, it is not.
+          highest() {
+            awk -v line="$1" 'substr($0, 1, length(line)) == line' <<<"$stables" | sort -V | tail -n1
+          }
+          [[ "$(highest "")" == "$VERSION" ]] && latest=true
+          [[ "$(highest "$(cut -d. -f1 <<<"$VERSION").")" == "$VERSION" ]] && latest_major=true
+          [[ "$(highest "$(cut -d. -f1,2 <<<"$VERSION").")" == "$VERSION" ]] && latest_minor=true
+        fi
+        echo "Computed latest=${latest}, latest-major=${latest_major}, latest-minor=${latest_minor} (version=${VERSION}, engine=${RELEASE_ENGINE}, nightly=${NIGHTLY})."
+        {
+          echo "latest=${latest}"
+          echo "latest-major=${latest_major}"
+          echo "latest-minor=${latest_minor}"
+        } >> "$GITHUB_OUTPUT"

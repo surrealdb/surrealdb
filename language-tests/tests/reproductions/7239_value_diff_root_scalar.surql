@@ -43,18 +43,18 @@ value = "2"
 
 -- Object round-trip already works.
 LET $start = { msg: "Hello" };
-LET $after = { msg: "Hello there!" };
-LET $diff = value::diff($start, $after);
+LET $end = { msg: "Hello there!" };
+LET $diff = value::diff($start, $end);
 RETURN value::patch($start, $diff);
 
 -- String root round-trip — was silently no-op before fix.
 LET $start = "Hello";
-LET $after = "Hello there!";
-LET $diff = value::diff($start, $after);
+LET $end = "Hello there!";
+LET $diff = value::diff($start, $end);
 RETURN value::patch($start, $diff);
 
 -- Number root round-trip — uses Operation::Replace at the root.
 LET $start = 1;
-LET $after = 2;
-LET $diff = value::diff($start, $after);
+LET $end = 2;
+LET $diff = value::diff($start, $end);
 RETURN value::patch($start, $diff);

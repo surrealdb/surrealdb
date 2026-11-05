@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = "Bare field name `parent` (object.sub) must not be treated as $parent correlation — needed-fields / selective scan (#7154 review)"

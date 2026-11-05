@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test EXPLAIN with basic SELECT queries: table scan, predicates, specific records, and SELECT VALUE"
@@ -9,35 +8,34 @@ reason = "Test EXPLAIN with basic SELECT queries: table scan, predicates, specif
 value = "'OK'"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: item, direction: Forward]
-'"""
+''''
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15, pre_decode_filter: yes]
-'"""
+''''
 
 [[test.results]]
-value = """
-'Project [ctx: Db]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
     RecordIdScan [ctx: Db] [record_id: item:1]
-'"""
+''''
 
 [[test.results]]
-value = """
+value = '''
 'ProjectValue [ctx: Db] [expr: name]
     TableScan [ctx: Db] [table: item, direction: Forward]
-'"""
+''''
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: name, doubled]
-    Compute [ctx: Db] [fields: doubled = score * 2]
-        TableScan [ctx: Db] [table: item, direction: Forward]
-'"""
+    TableScan [ctx: Db] [table: item, direction: Forward]
+''''
 */
 
 -- Setup test data

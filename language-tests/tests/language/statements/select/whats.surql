@@ -1,7 +1,4 @@
 /**
-[env]
-planner-strategy = ["all-ro"]
-
 [test]
 
 # 0
@@ -14,7 +11,7 @@ value = "1"
 
 # 2
 [[test.results]]
-error = "Expected a single result output when using the ONLY keyword"
+value = "NONE"
 
 # 3
 [[test.results]]
@@ -90,11 +87,11 @@ value = "[]"
 
 # 21
 [[test.results]]
-error = "Expected a single result output when using the ONLY keyword"
+value = "NONE"
 
 # 22
 [[test.results]]
-error = "Expected a single result output when using the ONLY keyword"
+value = "NONE"
 */
 
 # 0: Setup

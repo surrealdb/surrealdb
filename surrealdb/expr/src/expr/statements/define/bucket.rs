@@ -1,0 +1,60 @@
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use super::DefineKind;
+use crate::expr::permission::Permission;
+use crate::expr::{Base, CoverStmts, Expr, Literal};
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct DefineBucketStatement {
+	pub kind: DefineKind,
+	pub name: Expr,
+	/// The level the bucket lives at; `DATABASE` when the statement names none.
+	pub base: Base,
+	pub backend: Option<Expr>,
+	pub permissions: Permission,
+	pub readonly: bool,
+	pub comment: Expr,
+}
+
+impl Default for DefineBucketStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			base: Base::Db,
+			backend: None,
+			permissions: Permission::default(),
+			readonly: false,
+			comment: Expr::Literal(Literal::None),
+		}
+	}
+}
+
+impl ToSql for DefineBucketStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE BUCKET");
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
+		}
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
+		if self.base != Base::Db {
+			write_sql!(f, sql_fmt, " ON {}", self.base);
+		}
+
+		if self.readonly {
+			write_sql!(f, sql_fmt, " READONLY");
+		}
+
+		if let Some(ref backend) = self.backend {
+			write_sql!(f, sql_fmt, " BACKEND {}", CoverStmts(backend));
+		}
+
+		write_sql!(f, sql_fmt, " PERMISSIONS {}", self.permissions);
+
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
+		}
+	}
+}

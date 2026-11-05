@@ -5,9 +5,13 @@
 
 use anyhow::Result;
 
+use super::Rejected;
+use super::saved::{Loading, Saving};
+use crate::catalog::aggregation;
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
-use crate::val::{Number, Value};
+use crate::val::{Number, TryAdd as _, Value};
 
 // ============================================================================
 // Sum
@@ -22,8 +26,16 @@ impl AggregateFunction for MathSum {
 		"math::sum"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::sum", Fallibility::VALUE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(SumAccumulator::default())
+	}
+
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::Sum(SumAccumulator::default())
 	}
 
 	fn signature(&self) -> Signature {
@@ -32,23 +44,59 @@ impl AggregateFunction for MathSum {
 }
 
 #[derive(Debug, Clone, Default)]
-struct SumAccumulator {
+pub(crate) struct SumAccumulator {
 	sum: Number,
+	rejected: Rejected,
+}
+
+impl SumAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) -> Result<()> {
+		self.rejected.merge_from(&other.rejected);
+		self.add(other.sum.clone());
+		Ok(())
+	}
+}
+
+impl SumAccumulator {
+	/// Fold `n` into the total. A total leaving `i64` fails the group when it
+	/// is finalised: wrapping would answer with a number that is not the sum.
+	#[allow(
+		clippy::needless_pass_by_value,
+		reason = "Number is not Copy; this takes its operand by value like the arithmetic it feeds"
+	)]
+	fn add(&mut self, n: Number) {
+		match self.sum.clone().try_add(n.widened()) {
+			Ok(sum) => self.sum = sum,
+			Err(e) => self.rejected.fail(&e),
+		}
+	}
 }
 
 impl Accumulator for SumAccumulator {
-	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
-			self.sum = self.sum + n;
-		}
-		// Skip non-numbers (matches old behavior)
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().number(self.sum.clone()).rejected(&self.rejected).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.sum = state.number()?;
+		self.rejected = state.rejected()?;
 		Ok(())
 	}
 
+	fn update(&mut self, value: Value) -> Result<()> {
+		if let Some(n) = self.rejected.number("math::sum", &value) {
+			self.add(n);
+		}
+		Ok(())
+	}
+
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
-			if let Value::Number(n) = value {
-				self.sum = self.sum + *n;
+			if let Some(n) = self.rejected.number("math::sum", value) {
+				self.add(n);
 			}
 		}
 		Ok(())
@@ -59,16 +107,17 @@ impl Accumulator for SumAccumulator {
 			.as_any()
 			.downcast_ref::<SumAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.sum = self.sum + other.sum;
-		Ok(())
+		self.absorb(other)
 	}
 
 	fn finalize(&self) -> Result<Value> {
-		Ok(Value::Number(self.sum))
+		self.rejected.check()?;
+		Ok(Value::Number(self.sum.clone()))
 	}
 
 	fn reset(&mut self) {
 		self.sum = Number::Int(0);
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -93,8 +142,16 @@ impl AggregateFunction for MathMean {
 		"math::mean"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::mean", Fallibility::VALUE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(MeanAccumulator::default())
+	}
+
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::Mean(MeanAccumulator::default())
 	}
 
 	fn signature(&self) -> Signature {
@@ -103,25 +160,70 @@ impl AggregateFunction for MathMean {
 }
 
 #[derive(Debug, Clone, Default)]
-struct MeanAccumulator {
+pub(crate) struct MeanAccumulator {
 	sum: Number,
 	count: i64,
+	rejected: Rejected,
+}
+
+impl MeanAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) -> Result<()> {
+		self.rejected.merge_from(&other.rejected);
+		self.add(other.sum.clone());
+		self.count += other.count;
+		Ok(())
+	}
+}
+
+impl MeanAccumulator {
+	/// Fold `n` into the total, which stays exact: integers that leave `i64`
+	/// continue as a decimal. A total no decimal holds fails the group when it
+	/// is finalised.
+	#[allow(
+		clippy::needless_pass_by_value,
+		reason = "Number is not Copy; this takes its operand by value like the arithmetic it feeds"
+	)]
+	fn add(&mut self, n: Number) {
+		match self.sum.clone().add_exact(n.widened()) {
+			Ok(sum) => self.sum = sum,
+			Err(e) => self.rejected.fail(&e),
+		}
+	}
 }
 
 impl Accumulator for MeanAccumulator {
-	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
-			self.sum = self.sum + n;
-			self.count += 1;
-		}
-		// Skip non-numbers
+	fn save(&self) -> Option<Value> {
+		Some(
+			Saving::default()
+				.number(self.sum.clone())
+				.int(self.count)
+				.rejected(&self.rejected)
+				.done(),
+		)
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.sum = state.number()?;
+		self.count = state.int()?;
+		self.rejected = state.rejected()?;
 		Ok(())
 	}
 
+	fn update(&mut self, value: Value) -> Result<()> {
+		if let Some(n) = self.rejected.number("math::mean", &value) {
+			self.add(n);
+			self.count += 1;
+		}
+		Ok(())
+	}
+
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
-			if let Value::Number(n) = value {
-				self.sum = self.sum + *n;
+			if let Some(n) = self.rejected.number("math::mean", value) {
+				self.add(n);
 				self.count += 1;
 			}
 		}
@@ -133,15 +235,19 @@ impl Accumulator for MeanAccumulator {
 			.as_any()
 			.downcast_ref::<MeanAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.sum = self.sum + other.sum;
-		self.count += other.count;
-		Ok(())
+		self.absorb(other)
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		self.rejected.check()?;
 		if self.count == 0 {
-			// Return NaN for empty groups (matches old behavior)
+			// An empty group has no mean, so it finalises to NaN.
 			Ok(Value::Number(Number::Float(f64::NAN)))
+		} else if let Number::BigDecimal(sum) = &self.sum {
+			// A total that reached a bigdecimal has an exact mean, rounded half away from zero
+			// as a bigdecimal division is, as the scalar math::mean has.
+			let count = surrealdb_types::BigDecimal::from(self.count);
+			Ok(Value::Number(Number::BigDecimal(Box::new(sum.div_default(&count)?))))
 		} else {
 			let mean = self.sum.to_float() / self.count as f64;
 			Ok(Value::Number(Number::Float(mean)))
@@ -151,6 +257,7 @@ impl Accumulator for MeanAccumulator {
 	fn reset(&mut self) {
 		self.sum = Number::Int(0);
 		self.count = 0;
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -175,8 +282,16 @@ impl AggregateFunction for MathMin {
 		"math::min"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::min", Fallibility::VALUE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(MinAccumulator::default())
+	}
+
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::Min(MinAccumulator::default())
 	}
 
 	fn signature(&self) -> Signature {
@@ -185,20 +300,51 @@ impl AggregateFunction for MathMin {
 }
 
 #[derive(Debug, Clone, Default)]
-struct MinAccumulator {
+pub(crate) struct MinAccumulator {
 	min: Option<Number>,
+	rejected: Rejected,
+}
+
+impl MinAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) {
+		self.rejected.merge_from(&other.rejected);
+		if let Some(other_min) = &other.min {
+			self.min = Some(match &self.min {
+				None => other_min.clone(),
+				Some(current) => {
+					if *other_min < *current {
+						other_min.clone()
+					} else {
+						current.clone()
+					}
+				}
+			});
+		}
+	}
 }
 
 impl Accumulator for MinAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().option_number(self.min.clone()).rejected(&self.rejected).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.min = state.option_number()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
+		if let Some(n) = self.rejected.number("math::min", &value) {
 			self.min = Some(match &self.min {
 				None => n,
 				Some(current) => {
 					if n < *current {
 						n
 					} else {
-						*current
+						current.clone()
 					}
 				}
 			});
@@ -206,16 +352,17 @@ impl Accumulator for MinAccumulator {
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
-			if let Value::Number(n) = value {
+			if let Some(n) = self.rejected.number("math::min", value) {
 				self.min = Some(match &self.min {
-					None => *n,
+					None => n,
 					Some(current) => {
-						if *n < *current {
-							*n
+						if n < *current {
+							n
 						} else {
-							*current
+							current.clone()
 						}
 					}
 				});
@@ -229,30 +376,21 @@ impl Accumulator for MinAccumulator {
 			.as_any()
 			.downcast_ref::<MinAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		if let Some(other_min) = &other.min {
-			self.min = Some(match &self.min {
-				None => *other_min,
-				Some(current) => {
-					if *other_min < *current {
-						*other_min
-					} else {
-						*current
-					}
-				}
-			});
-		}
+		self.absorb(other);
 		Ok(())
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		self.rejected.check()?;
 		match &self.min {
-			Some(n) => Ok(Value::Number(*n)),
+			Some(n) => Ok(Value::Number(n.clone())),
 			None => Ok(Value::Number(Number::Float(f64::INFINITY))),
 		}
 	}
 
 	fn reset(&mut self) {
 		self.min = None;
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -277,8 +415,16 @@ impl AggregateFunction for MathMax {
 		"math::max"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::max", Fallibility::VALUE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(MaxAccumulator::default())
+	}
+
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::Max(MaxAccumulator::default())
 	}
 
 	fn signature(&self) -> Signature {
@@ -287,20 +433,51 @@ impl AggregateFunction for MathMax {
 }
 
 #[derive(Debug, Clone, Default)]
-struct MaxAccumulator {
+pub(crate) struct MaxAccumulator {
 	max: Option<Number>,
+	rejected: Rejected,
+}
+
+impl MaxAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) {
+		self.rejected.merge_from(&other.rejected);
+		if let Some(other_max) = &other.max {
+			self.max = Some(match &self.max {
+				None => other_max.clone(),
+				Some(current) => {
+					if *other_max > *current {
+						other_max.clone()
+					} else {
+						current.clone()
+					}
+				}
+			});
+		}
+	}
 }
 
 impl Accumulator for MaxAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().option_number(self.max.clone()).rejected(&self.rejected).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.max = state.option_number()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
+		if let Some(n) = self.rejected.number("math::max", &value) {
 			self.max = Some(match &self.max {
 				None => n,
 				Some(current) => {
 					if n > *current {
 						n
 					} else {
-						*current
+						current.clone()
 					}
 				}
 			});
@@ -308,16 +485,17 @@ impl Accumulator for MaxAccumulator {
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
-			if let Value::Number(n) = value {
+			if let Some(n) = self.rejected.number("math::max", value) {
 				self.max = Some(match &self.max {
-					None => *n,
+					None => n,
 					Some(current) => {
-						if *n > *current {
-							*n
+						if n > *current {
+							n
 						} else {
-							*current
+							current.clone()
 						}
 					}
 				});
@@ -331,30 +509,21 @@ impl Accumulator for MaxAccumulator {
 			.as_any()
 			.downcast_ref::<MaxAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		if let Some(other_max) = &other.max {
-			self.max = Some(match &self.max {
-				None => *other_max,
-				Some(current) => {
-					if *other_max > *current {
-						*other_max
-					} else {
-						*current
-					}
-				}
-			});
-		}
+		self.absorb(other);
 		Ok(())
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		self.rejected.check()?;
 		match &self.max {
-			Some(n) => Ok(Value::Number(*n)),
+			Some(n) => Ok(Value::Number(n.clone())),
 			None => Ok(Value::Number(Number::Float(f64::NEG_INFINITY))),
 		}
 	}
 
 	fn reset(&mut self) {
 		self.max = None;
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -367,14 +536,10 @@ impl Accumulator for MaxAccumulator {
 }
 
 // ============================================================================
-// Stddev (using Welford's online algorithm)
+// Stddev / Variance (shifted sum-of-squares)
 // ============================================================================
 
-/// math::stddev - calculates sample standard deviation using Welford's algorithm
-///
-/// Welford's online algorithm is numerically stable and avoids catastrophic
-/// cancellation that can occur with the naive sum-of-squares approach for
-/// large numbers or numbers close in value.
+/// math::stddev - sample standard deviation.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MathStddev;
 
@@ -383,8 +548,12 @@ impl AggregateFunction for MathStddev {
 		"math::stddev"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::stddev", Fallibility::VALUE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
-		Box::new(WelfordAccumulator::default())
+		Box::new(SpreadAccumulator::deviation())
 	}
 
 	fn signature(&self) -> Signature {
@@ -392,121 +561,7 @@ impl AggregateFunction for MathStddev {
 	}
 }
 
-/// Welford's online algorithm accumulator for computing variance/stddev.
-///
-/// This algorithm maintains a running mean and sum of squared differences
-/// from the mean (M2), which provides better numerical stability than
-/// the naive sum and sum-of-squares approach.
-///
-/// Reference: Welford, B. P. (1962). "Note on a method for calculating
-/// corrected sums of squares and products"
-#[derive(Debug, Clone, Default)]
-struct WelfordAccumulator {
-	count: i64,
-	mean: f64,
-	m2: f64, // Sum of squared differences from mean
-}
-
-impl WelfordAccumulator {
-	/// Update with a new value using Welford's algorithm
-	fn update_value(&mut self, x: f64) {
-		self.count += 1;
-		let delta = x - self.mean;
-		self.mean += delta / self.count as f64;
-		let delta2 = x - self.mean;
-		self.m2 += delta * delta2;
-	}
-
-	/// Merge another Welford accumulator using parallel algorithm.
-	///
-	/// Uses Chan's parallel algorithm for combining partial results.
-	/// Reference: Chan et al. (1979) "Updating Formulae and a Pairwise
-	/// Algorithm for Computing Sample Variances"
-	#[allow(unused)]
-	fn merge_welford(&mut self, other: &WelfordAccumulator) {
-		if other.count == 0 {
-			return;
-		}
-		if self.count == 0 {
-			self.count = other.count;
-			self.mean = other.mean;
-			self.m2 = other.m2;
-			return;
-		}
-
-		let total_count = self.count + other.count;
-		let delta = other.mean - self.mean;
-
-		// Combined mean
-		let new_mean = self.mean + delta * (other.count as f64 / total_count as f64);
-
-		// Combined M2 using Chan's formula
-		let new_m2 = self.m2
-			+ other.m2
-			+ delta * delta * (self.count as f64 * other.count as f64 / total_count as f64);
-
-		self.count = total_count;
-		self.mean = new_mean;
-		self.m2 = new_m2;
-	}
-
-	/// Compute sample variance (using n-1 divisor)
-	fn sample_variance(&self) -> f64 {
-		if self.count <= 1 {
-			0.0
-		} else {
-			self.m2 / (self.count - 1) as f64
-		}
-	}
-}
-
-impl Accumulator for WelfordAccumulator {
-	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
-			self.update_value(n.to_float());
-		}
-		Ok(())
-	}
-
-	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
-		let other = other
-			.as_any()
-			.downcast_ref::<WelfordAccumulator>()
-			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.merge_welford(other);
-		Ok(())
-	}
-
-	fn finalize(&self) -> Result<Value> {
-		// Match the scalar `math::stddev`: an empty group has no defined
-		// deviation. A single element has deviation 0.
-		if self.count == 0 {
-			return Ok(Value::Number(Number::Float(f64::NAN)));
-		}
-		let stddev = self.sample_variance().sqrt();
-		Ok(Value::Number(Number::Float(stddev)))
-	}
-
-	fn reset(&mut self) {
-		self.count = 0;
-		self.mean = 0.0;
-		self.m2 = 0.0;
-	}
-
-	fn clone_box(&self) -> Box<dyn Accumulator> {
-		Box::new(self.clone())
-	}
-
-	fn as_any(&self) -> &dyn std::any::Any {
-		self
-	}
-}
-
-// ============================================================================
-// Variance (using Welford's online algorithm)
-// ============================================================================
-
-/// math::variance - calculates sample variance using Welford's algorithm
+/// math::variance - sample variance.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MathVariance;
 
@@ -515,8 +570,12 @@ impl AggregateFunction for MathVariance {
 		"math::variance"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::variance", Fallibility::VALUE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
-		Box::new(VarianceAccumulator::default())
+		Box::new(SpreadAccumulator::variance())
 	}
 
 	fn signature(&self) -> Signature {
@@ -524,16 +583,93 @@ impl AggregateFunction for MathVariance {
 	}
 }
 
-/// Variance accumulator using Welford's algorithm (same as stddev, different finalize)
-#[derive(Debug, Clone, Default)]
-struct VarianceAccumulator {
-	welford: WelfordAccumulator,
+/// Whether a [`SpreadAccumulator`] finalises to a variance or its square root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Spread {
+	Variance,
+	Deviation,
 }
 
-impl Accumulator for VarianceAccumulator {
+impl Spread {
+	/// The function name to report a rejected input against.
+	fn function_name(self) -> &'static str {
+		match self {
+			Spread::Variance => "math::variance",
+			Spread::Deviation => "math::stddev",
+		}
+	}
+}
+
+/// Shared accumulator for `math::variance` and `math::stddev`.
+///
+/// Delegates to [`aggregation::shifted_accumulate`] and
+/// [`aggregation::shifted_sample_variance`], the same functions materialized-view
+/// maintenance uses, so both paths produce bit-identical results over the same input order.
+/// Arithmetic stays in `Number`, so a group of `Decimal` inputs finalises as `Decimal`.
+#[derive(Debug, Clone)]
+struct SpreadAccumulator {
+	spread: Spread,
+	shift: Number,
+	sum: Number,
+	sum_of_squares: Number,
+	count: i64,
+	rejected: Rejected,
+}
+
+impl SpreadAccumulator {
+	fn new(spread: Spread) -> Self {
+		Self {
+			spread,
+			shift: 0.0.into(),
+			sum: 0.0.into(),
+			sum_of_squares: 0.0.into(),
+			count: 0,
+			rejected: Rejected::default(),
+		}
+	}
+
+	fn variance() -> Self {
+		Self::new(Spread::Variance)
+	}
+
+	fn deviation() -> Self {
+		Self::new(Spread::Deviation)
+	}
+}
+
+impl Accumulator for SpreadAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(
+			Saving::default()
+				.number(self.shift.clone())
+				.number(self.sum.clone())
+				.number(self.sum_of_squares.clone())
+				.int(self.count)
+				.rejected(&self.rejected)
+				.done(),
+		)
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.shift = state.number()?;
+		self.sum = state.number()?;
+		self.sum_of_squares = state.number()?;
+		self.count = state.int()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
-			self.welford.update_value(n.to_float());
+		if let Some(n) = self.rejected.number(self.spread.function_name(), &value)
+			&& let Err(e) = aggregation::shifted_accumulate(
+				&mut self.shift,
+				&mut self.sum,
+				&mut self.sum_of_squares,
+				&mut self.count,
+				n.widened(),
+			) {
+			self.rejected.fail(&e);
 		}
 		Ok(())
 	}
@@ -541,24 +677,76 @@ impl Accumulator for VarianceAccumulator {
 	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
 		let other = other
 			.as_any()
-			.downcast_ref::<VarianceAccumulator>()
+			.downcast_ref::<SpreadAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.welford.merge_welford(&other.welford);
+		// Both spread kinds share this accumulator, so the downcast alone cannot tell them apart.
+		// The check below rejects a merge across kinds.
+		// Finalising a mixed merge would return a variance where a deviation was asked for.
+		// Such a merge is an error, never a silent result.
+		anyhow::ensure!(
+			self.spread == other.spread,
+			"Cannot merge a {:?} accumulator into a {:?} one",
+			other.spread,
+			self.spread
+		);
+		self.rejected.merge_from(&other.rejected);
+		if other.count == 0 {
+			return Ok(());
+		}
+		if self.count == 0 {
+			self.shift = other.shift.clone();
+			self.sum = other.sum.clone();
+			self.sum_of_squares = other.sum_of_squares.clone();
+			self.count = other.count;
+			return Ok(());
+		}
+
+		// The two halves were shifted against different assumed means, so
+		// re-base `other` onto ours before adding.
+		let self_sum = self.sum.clone();
+		let self_sum_of_squares = self.sum_of_squares.clone();
+		let rebased = aggregation::shifted_rebase(
+			other.sum.clone(),
+			other.sum_of_squares.clone(),
+			other.count,
+			other.shift.clone(),
+			self.shift.clone(),
+		)
+		.and_then(|(rebased_sum, rebased_sum_of_squares)| {
+			let next_sum = self_sum.try_add(rebased_sum)?;
+			let next_sum_of_squares = self_sum_of_squares.try_add(rebased_sum_of_squares)?;
+			Ok((next_sum, next_sum_of_squares))
+		});
+		match rebased {
+			Ok((next_sum, next_sum_of_squares)) => {
+				self.sum = next_sum;
+				self.sum_of_squares = next_sum_of_squares;
+				self.count += other.count;
+			}
+			Err(e) => self.rejected.fail(&e),
+		}
 		Ok(())
 	}
 
 	fn finalize(&self) -> Result<Value> {
-		// Match the scalar `math::variance`: NaN for an empty group, 0 for
-		// a single element.
-		if self.welford.count == 0 {
-			return Ok(Value::Number(Number::Float(f64::NAN)));
-		}
-		let variance = self.welford.sample_variance();
-		Ok(Value::Number(Number::Float(variance)))
+		self.rejected.check()?;
+		let num = match self.spread {
+			Spread::Variance => aggregation::shifted_sample_variance(
+				self.sum.clone(),
+				self.sum_of_squares.clone(),
+				self.count,
+			),
+			Spread::Deviation => aggregation::shifted_sample_deviation(
+				self.sum.clone(),
+				self.sum_of_squares.clone(),
+				self.count,
+			),
+		};
+		Ok(Value::Number(num))
 	}
 
 	fn reset(&mut self) {
-		self.welford.reset();
+		*self = Self::new(self.spread);
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -583,6 +771,10 @@ impl AggregateFunction for MathMedian {
 		"math::median"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::median", Fallibility::VALUE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(MedianAccumulator::default())
 	}
@@ -595,11 +787,27 @@ impl AggregateFunction for MathMedian {
 #[derive(Debug, Clone, Default)]
 struct MedianAccumulator {
 	values: Vec<Number>,
+	rejected: Rejected,
 }
 
 impl Accumulator for MedianAccumulator {
+	fn holds_inputs(&self) -> bool {
+		true
+	}
+
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().numbers(&self.values).rejected(&self.rejected).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.values = state.numbers()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
+		if let Some(n) = self.rejected.number("math::median", &value) {
 			self.values.push(n);
 		}
 		Ok(())
@@ -610,11 +818,13 @@ impl Accumulator for MedianAccumulator {
 			.as_any()
 			.downcast_ref::<MedianAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.values.extend(other.values.iter().copied());
+		self.rejected.merge_from(&other.rejected);
+		self.values.extend(other.values.iter().cloned());
 		Ok(())
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		self.rejected.check()?;
 		if self.values.is_empty() {
 			return Ok(Value::None);
 		}
@@ -632,7 +842,7 @@ impl Accumulator for MedianAccumulator {
 			Number::Float((a + b) / 2.0)
 		} else {
 			// Odd number of elements: middle value
-			sorted[len / 2]
+			sorted[len / 2].widened()
 		};
 
 		Ok(Value::Number(median))
@@ -640,6 +850,7 @@ impl Accumulator for MedianAccumulator {
 
 	fn reset(&mut self) {
 		self.values.clear();
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -663,10 +874,12 @@ mod tests {
 
 	// Helper to extract f64 from Value
 	fn as_float(v: &Value) -> f64 {
-		match v {
-			Value::Number(Number::Float(f)) => *f,
-			Value::Number(Number::Int(i)) => *i as f64,
-			_ => panic!("Expected Number, got {:?}", v),
+		if let Value::Number(Number::Float(f)) = v {
+			*f
+		} else if let Value::Number(Number::Int(i)) = v {
+			*i as f64
+		} else {
+			panic!("Expected Number, got {:?}", v);
 		}
 	}
 
@@ -922,6 +1135,29 @@ mod tests {
 		let result = acc.finalize().unwrap();
 		// stddev of [1, 2, 3] offset by 1e9 should still be 1.0
 		assert!(approx_eq(as_float(&result), 1.0, 1e-6));
+	}
+
+	#[test]
+	fn stddev_extreme_i64_spread() {
+		let func = MathStddev;
+		let mut acc = func.create_accumulator();
+		acc.update(Value::Number(Number::Int(i64::MIN))).unwrap();
+		acc.update(Value::Number(Number::Int(i64::MAX))).unwrap();
+		let result = acc.finalize().unwrap();
+		assert!(as_float(&result).is_finite() && as_float(&result) > 0.0);
+	}
+
+	#[test]
+	fn variance_decimal_overflow_propagates_to_finalize() {
+		use rust_decimal::Decimal;
+		let func = MathVariance;
+		let mut acc = func.create_accumulator();
+		acc.update(Value::Number(Number::Decimal(Decimal::ZERO))).unwrap();
+		// Updating with Decimal::MAX causes delta * delta to overflow Decimal in
+		// shifted_accumulate. Even when callers ignore the update() result (as the VM does),
+		// finalize() must fail.
+		let _ = acc.update(Value::Number(Number::Decimal(Decimal::MAX)));
+		assert!(acc.finalize().is_err());
 	}
 
 	// -------------------------------------------------------------------------

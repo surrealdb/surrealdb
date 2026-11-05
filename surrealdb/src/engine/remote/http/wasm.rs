@@ -12,7 +12,7 @@ use crate::conn::{Route, Router};
 use crate::engine::{SessionError, session_error_to_error};
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
-use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
+use crate::{ExtraFeatures, Result, SessionClone, Surreal, conn};
 
 impl crate::Connection for Client {}
 impl conn::Sealed for Client {
@@ -32,7 +32,7 @@ impl conn::Sealed for Client {
 			let config = address.config.clone();
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			spawn_local(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
+			spawn_local(run_router(address, conn_tx, route_rx, session_clone.router_receiver()));
 
 			conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 
@@ -40,11 +40,7 @@ impl conn::Sealed for Client {
 			features.insert(ExtraFeatures::Backup);
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})
@@ -64,7 +60,7 @@ pub(crate) async fn run_router(
 	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
-	session_rx: Receiver<SessionId>,
+	session_rx: crate::RouterSessions,
 ) {
 	let base_url = address.url;
 
@@ -122,7 +118,7 @@ pub(crate) async fn run_router(
 
 				// Spawn the request handling in a background task
 				// SessionState uses RwLock internally, so we can share the Arc directly
-				let router_state = state.clone();
+				let router_state = Arc::clone(&state);
 				spawn_local(async move {
 					let result = super::router(
 						route.request,
@@ -132,11 +128,11 @@ pub(crate) async fn run_router(
 					)
 					.await;
 
-					// On success, add replayable commands to the replay list.
+					// On success, record the command in the replay list.
 					// boxcar::Vec is lock-free, so this is safe to do concurrently.
 					// NOTE: see native.rs for why HTTP doesn't coalesce Use entries.
-					if result.is_ok() && command.replayable() {
-						session_state.replay.push(command);
+					if result.is_ok() {
+						super::record_replay(&session_state, command).await;
 					}
 
 					match result {
@@ -151,4 +147,7 @@ pub(crate) async fn run_router(
 			}
 		}
 	}
+	// The loop only ends once the SDK has closed its session channel, so no
+	// further `Drop` events will arrive to detach what is left.
+	state.detach_all().await;
 }

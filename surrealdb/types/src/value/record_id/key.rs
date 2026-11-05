@@ -1,7 +1,6 @@
 use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize};
 
-use crate as surrealdb_types;
 use crate::sql::{SqlFormat, ToSql};
 use crate::{Array, Number, Object, RecordIdKeyRange, SurrealValue, Uuid, Value, kind};
 
@@ -167,15 +166,46 @@ impl SurrealValue for RecordIdKey {
 	}
 
 	fn is_value(value: &Value) -> bool {
-		matches!(
-			value,
-			Value::Number(Number::Int(_))
-				| Value::String(_)
-				| Value::Uuid(_)
-				| Value::Array(_)
-				| Value::Object(_)
-				| Value::Range(_)
-		)
+		match value {
+			Value::Number(
+				Number::Int(_)
+				| Number::I8(_)
+				| Number::U8(_)
+				| Number::I16(_)
+				| Number::U16(_)
+				| Number::I32(_)
+				| Number::U32(_),
+			)
+			| Value::String(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Object(_)
+			| Value::Range(_) => true,
+			Value::Number(Number::U64(n)) => i64::try_from(*n).is_ok(),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(
+				Number::Float(_)
+				| Number::Decimal(_)
+				| Number::BigDecimal(_)
+				| Number::F16(_)
+				| Number::F32(_),
+			)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Set(_) => false,
+		}
 	}
 
 	fn into_value(self) -> Value {
@@ -192,6 +222,19 @@ impl SurrealValue for RecordIdKey {
 	fn from_value(value: Value) -> Result<Self, crate::Error> {
 		match value {
 			Value::Number(Number::Int(n)) => Ok(RecordIdKey::Number(n)),
+			Value::Number(Number::I8(n)) => Ok(RecordIdKey::Number(i64::from(n))),
+			Value::Number(Number::U8(n)) => Ok(RecordIdKey::Number(i64::from(n))),
+			Value::Number(Number::I16(n)) => Ok(RecordIdKey::Number(i64::from(n))),
+			Value::Number(Number::U16(n)) => Ok(RecordIdKey::Number(i64::from(n))),
+			Value::Number(Number::I32(n)) => Ok(RecordIdKey::Number(i64::from(n))),
+			Value::Number(Number::U32(n)) => Ok(RecordIdKey::Number(i64::from(n))),
+			Value::Number(Number::U64(n)) => match i64::try_from(n) {
+				Ok(i) => Ok(RecordIdKey::Number(i)),
+				Err(_) => Err(crate::Error::internal(format!(
+					"Cannot convert {:?} to RecordIdKey",
+					Value::Number(Number::U64(n))
+				))),
+			},
 			Value::String(s) => Ok(RecordIdKey::String(s)),
 			Value::Uuid(u) => Ok(RecordIdKey::Uuid(u)),
 			Value::Array(a) => Ok(RecordIdKey::Array(a)),
@@ -200,7 +243,31 @@ impl SurrealValue for RecordIdKey {
 				let range = RecordIdKeyRange::from_value(value)?;
 				Ok(RecordIdKey::Range(Box::new(range)))
 			}
-			_ => Err(crate::Error::internal(format!("Cannot convert {:?} to RecordIdKey", value))),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(
+				Number::Float(_)
+				| Number::Decimal(_)
+				| Number::BigDecimal(_)
+				| Number::F16(_)
+				| Number::F32(_),
+			)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Set(_) => {
+				Err(crate::Error::internal(format!("Cannot convert {:?} to RecordIdKey", value)))
+			}
 		}
 	}
 }

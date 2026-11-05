@@ -1,0 +1,127 @@
+### SELECT city, math::sum(age * 2) AS s FROM person GROUP BY city
+{ city: NONE, s: 184 }
+{ city: 'x', s: 60 }
+### SELECT math::mean(age + 1) AS m, math::max(age - 1) AS hi FROM person GROUP ALL
+{ hi: 44, m: 31.5f }
+### SELECT math::min(string::len(name)) AS lo, math::max(string::len(name)) AS hi FROM person GROUP ALL
+{ hi: 3, lo: 3 }
+### SELECT count(age > 20) AS adults FROM person GROUP ALL
+{ adults: 3 }
+### SELECT array::group(nested.x) AS xs FROM person GROUP ALL
+{ xs: [1, NONE, 2] }
+### SELECT city, array::group(string::uppercase(name)) AS names FROM person GROUP BY city
+{ city: NONE, names: ['ANN', 'BOB', 'DAN', 'EVE'] }
+{ city: 'x', names: ['CAT'] }
+### SELECT math::stddev(age) AS sd, math::variance(age) AS v FROM person GROUP ALL
+{ sd: 11.445523142259598f, v: 131f }
+### SELECT math::mean(i % 7) AS m, count() AS c FROM big GROUP ALL
+{ c: 3000, m: 2.9993333333333334f }
+### SELECT age % 2 AS parity, count() AS c FROM person GROUP BY parity
+error: Cannot perform remainder with 'none' and 'int'
+### SELECT string::len(name) AS l, count() AS c FROM person GROUP BY l
+{ c: 5, l: 3 }
+### SELECT age > 20 AS adult, count() AS c, math::max(age) AS hi FROM person GROUP BY adult
+{ adult: false, c: 2, hi: 17 }
+{ adult: true, c: 3, hi: 45 }
+### SELECT n % 3 AS k, count() AS c, math::sum(i) AS s FROM big GROUP BY k
+{ c: 1285, k: 0, s: 1928785 }
+{ c: 858, k: 1, s: 1287429 }
+{ c: 857, k: 2, s: 1285286 }
+### SELECT city, math::sum(age) / count() AS avg FROM person GROUP BY city
+{ avg: 23, city: NONE }
+{ avg: 30, city: 'x' }
+### SELECT math::sum(age) + math::max(age) AS t FROM person GROUP ALL
+{ t: 167 }
+### SELECT age, math::sum(age) + age AS t FROM person GROUP BY age
+{ age: NONE, t: NULL }
+{ age: 17, t: 34 }
+{ age: 30, t: 90 }
+{ age: 45, t: 90 }
+### SELECT math::round(math::mean(age)) AS m FROM person GROUP ALL
+{ m: 31f }
+### SELECT array::distinct(array::group(city)) AS cities FROM person GROUP ALL
+{ cities: [NONE, 'x'] }
+### SELECT count() * 2 AS twice, math::max(age) - math::min(age) AS span FROM person GROUP ALL
+{ span: 28, twice: 10 }
+### SELECT array::join(name, '-') AS j FROM person GROUP ALL
+{ j: 'ann-Bob-cat-dan-Eve' }
+### SELECT city, array::join(name, ', ') AS j FROM person GROUP BY city
+{ city: NONE, j: 'ann, Bob, dan, Eve' }
+{ city: 'x', j: 'cat' }
+### SELECT array::join(name, string::concat('<', '>')) AS j FROM person GROUP ALL
+{ j: 'ann<>Bob<>cat<>dan<>Eve' }
+### SELECT age, array::join(name, string::concat('<', age)) AS j FROM person GROUP BY age
+{ age: NONE, j: 'dan' }
+{ age: 17, j: 'Bob' }
+{ age: 30, j: 'ann<30cat' }
+{ age: 45, j: 'Eve' }
+### SELECT 'k' AS label, count() AS c FROM person GROUP ALL
+{ c: 5, label: 'k' }
+### SELECT $limit AS l, count() AS c FROM person GROUP ALL
+{ c: 5, l: 30 }
+### SELECT math::abs(-7) AS k, count() AS c FROM person WHERE age > 1000 GROUP ALL
+{ c: 0, k: 7 }
+### SELECT $missing AS z, count() AS c FROM person GROUP ALL
+{ c: 5, z: NONE }
+### SELECT city, 7 AS seven, count() AS c FROM person GROUP BY city
+{ c: 4, city: NONE, seven: 7 }
+{ c: 1, city: 'x', seven: 7 }
+### SELECT city, $missing AS z, count() AS c FROM person GROUP BY city
+{ c: 4, city: NONE, z: NONE }
+{ c: 1, city: 'x', z: NONE }
+### SELECT city, $limit + 1 AS l FROM person GROUP BY city
+{ city: NONE, l: 31 }
+{ city: 'x', l: 31 }
+### SELECT VALUE 5 FROM person GROUP ALL
+5
+### SELECT math::sum(<int> name) AS s FROM person GROUP ALL
+error: Could not cast into `int` using input `'ann'`
+### SELECT city, count(<int> name) AS c FROM person GROUP BY city
+error: Could not cast into `int` using input `'ann'`
+### SELECT count(age + 'x') AS c FROM person GROUP ALL
+{ c: 0 }
+### SELECT <int> name AS k, count() AS c FROM person GROUP BY k
+error: Could not cast into `int` using input `'ann'`
+### SELECT math::sum(age / 0) AS s FROM person GROUP ALL
+{ s: NaN }
+### SELECT math::sum((SELECT VALUE age FROM person LIMIT 1)[0] + name) AS s FROM person GROUP ALL
+{ s: 0 }
+### SELECT math::sum((SELECT VALUE count() FROM person GROUP ALL)[0] + age) AS s FROM person GROUP ALL
+{ s: 142 }
+### SELECT math::sum(n) AS s FROM mixed GROUP ALL
+{ s: -9223372036854775795dec }
+### SELECT math::sum(n + 1) AS s, math::mean(n * 2) AS m FROM mixed GROUP ALL
+{ m: 6.5f, s: -9223372036854775790dec }
+### SELECT count() AS c, math::mean(age) AS m, math::stddev(age) AS sd, math::min(age) AS lo, math::max(age) AS hi FROM person GROUP ALL
+{ c: 5, hi: 45, lo: 17, m: 30.5f, sd: 11.445523142259598f }
+### SELECT city, count() AS c, math::mean(age) AS m, math::min(age) AS lo, math::max(age) AS hi FROM person GROUP BY city
+{ c: 4, city: NONE, hi: 45, lo: 17, m: 30.666666666666668f }
+{ c: 1, city: 'x', hi: 30, lo: 30, m: 30f }
+### SELECT VALUE math::median(age) FROM person GROUP ALL
+30f
+### SELECT tags, count() AS c FROM (SELECT tags FROM person SPLIT tags) GROUP BY tags
+{ c: 3, tags: NONE }
+{ c: 1, tags: 'a' }
+{ c: 2, tags: 'b' }
+### SELECT tags, math::sum(age * 2) AS s FROM (SELECT tags, age FROM person SPLIT tags) GROUP BY tags
+{ s: 150, tags: NONE }
+{ s: 60, tags: 'a' }
+{ s: 94, tags: 'b' }
+### SELECT count() AS c FROM (SELECT tags FROM person SPLIT tags) GROUP ALL
+{ c: 6 }
+### SELECT count() AS c, math::sum(a * 2) AS s FROM [{ a: 1 }, { a: 2 }, { a: 'x' }, 5] GROUP ALL
+{ c: 4, s: 6 }
+### SELECT k, math::sum(a + 1) AS s FROM [{ k: 1, a: 1 }, { k: 1, a: 2 }, { k: 2, a: 3 }] GROUP BY k
+{ k: 1, s: 5 }
+{ k: 2, s: 4 }
+### SELECT math::mean(a.b) AS m FROM [{ a: { b: 1 } }, { a: { b: 3 } }, { a: 7 }] GROUP ALL
+{ m: 2f }
+### SELECT age % 3 AS k, count() AS c FROM indexed WHERE age > 2 GROUP BY k
+error: Cannot perform remainder with 'array' and 'int'
+### SELECT kind * 2 AS k, math::sum(age + 1) AS s FROM indexed GROUP BY k ORDER BY k
+{ k: NONE, s: 0 }
+{ k: 0, s: 83 }
+{ k: 2, s: 97 }
+{ k: 4, s: 117 }
+### SELECT age % 2 AS parity, count() AS c FROM person GROUP BY parity ORDER BY c DESC LIMIT 1
+error: Cannot perform remainder with 'none' and 'int'

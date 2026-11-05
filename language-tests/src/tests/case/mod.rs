@@ -40,12 +40,16 @@ pub struct Origin {
 }
 
 /// The query language a test case is written in, derived from the file
-/// extension: `.surql` is SurrealQL, `.gql` is GQL, `.graphql` is GraphQL.
+/// extension: `.surql` is SurrealQL, `.gql` is GQL, `.graphql` is GraphQL,
+/// `.pgsql` is PostgreSQL, `.mysql` is MySQL.
+/// For doc tests the dialect is derived from the code block tag.
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Dialect {
 	SurrealQl,
 	Gql,
 	GraphQl,
+	PgSql,
+	MySql,
 }
 
 /// A single test case, which might produce multiple test runs depending on configuration.
@@ -68,7 +72,7 @@ impl TestCase {
 		source: String,
 		dialect: Dialect,
 	) -> Result<Self> {
-		let config = CaseConfig::parse(&source, dialect).with_context(|| {
+		let config = CaseConfig::parse(&source).with_context(|| {
 			if let Some(line) = origin.line_offset {
 				format!("Could not parse config for test file `{}` at line {line}", origin.path)
 			} else {
@@ -251,15 +255,113 @@ impl CaseSet {
 		ok
 	}
 
+	#[cfg(feature = "docs")]
+	async fn load_doc_file(
+		root: &str,
+		path: &str,
+		cases: &mut Vec<Arc<TestCase>>,
+		by_path: &mut HashMap<String, Vec<Arc<TestCase>>>,
+		errors: &mut Vec<TestLoadError>,
+	) -> Result<()> {
+		use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TextMergeWithOffset};
+
+		let metadata = fs::metadata(path).await.context("Could not read file metadata")?;
+
+		let modified = metadata.modified().context("Could not read file modification time")?;
+
+		let source = fs::read_to_string(path)
+			.await
+			.with_context(|| format!("Could not read doc file: {path}"))?;
+
+		let options = Options::all();
+
+		let parser = Parser::new_ext(&source, options);
+		let mut iterator = TextMergeWithOffset::new(parser.into_offset_iter());
+
+		assert!(path.starts_with(root));
+		let path = &path[root.len()..];
+
+		while let Some((event, _)) = iterator.next() {
+			use pulldown_cmark::TagEnd;
+
+			let Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(kind))) = event else {
+				continue;
+			};
+
+			let dialect = if !kind.starts_with("surql") {
+				Dialect::SurrealQl
+			} else if kind.starts_with("gql") {
+				Dialect::Gql
+			} else if kind.starts_with("graphql") {
+				Dialect::GraphQl
+			} else {
+				continue;
+			};
+
+			if kind.contains("notest") {
+				continue;
+			}
+
+			let (code, range) = match iterator.next() {
+				Some((Event::Text(code), range)) => (code, range),
+				Some((Event::End(TagEnd::CodeBlock), _)) => continue,
+				_ => {
+					println!("Invalid code block");
+					continue;
+				}
+			};
+
+			let Some((Event::End(_), _)) = iterator.next() else {
+				println!("Invalid code block");
+				continue;
+			};
+
+			let line_offset = source[..range.start].lines().count();
+			let origin = Arc::new(Origin {
+				path: path.to_string(),
+				modified,
+				subset: Some(range.clone()),
+				line_offset: Some(line_offset),
+			});
+
+			// Ensure the block is not idented because we don't support editting for those.
+			let raw = &source[range];
+			if raw.replace("\r\n", "\n") != *code {
+				println!("Indented blocks are not supported");
+				continue;
+			}
+
+			let id = CaseId(cases.len());
+
+			match TestCase::from_source_origin_id(id, origin.clone(), code.to_string(), dialect) {
+				Ok(x) => {
+					let case = Arc::new(x);
+					by_path.entry(path.to_string()).or_default().push(case.clone());
+					cases.push(case);
+				}
+				Err(e) => {
+					errors.push(TestLoadError {
+						origin,
+						error: e,
+					});
+				}
+			}
+		}
+
+		Ok(())
+	}
+
 	/// Loads every `.surql` (SurrealQL), `.gql` (GQL) and `.graphql`
 	/// (GraphQL) file under `root` (recursively) into a [`CaseSet`].
+	///
+	/// When the `docs` feature is enabled it will also try to load `.md` and `.mdx` files.
 	///
 	/// Each file's config comment is parsed into a [`TestCase`] keyed by its path
 	/// relative to `root`. Files whose config fails to parse are recorded in
 	/// `errors` (with their [`Origin`]) and skipped rather than aborting the whole
 	/// load, so one bad file doesn't hide the rest. Files with other extensions
 	/// are ignored.
-	pub async fn load_surrealql_files(root: &str, errors: &mut Vec<TestLoadError>) -> Result<Self> {
+	pub async fn load_test_files(root: &str, errors: &mut Vec<TestLoadError>) -> Result<Self> {
 		let mut cases = Vec::new();
 		let mut by_path = HashMap::new();
 
@@ -269,12 +371,22 @@ impl CaseSet {
 		}
 
 		walk_directory(&root, &mut async |path: &str| {
+			#[cfg(feature = "docs")]
+			if path.ends_with(".md") || path.ends_with(".mdx") {
+				Self::load_doc_file(&root, path, &mut cases, &mut by_path, errors).await?;
+				return Ok(());
+			}
+
 			let dialect = if path.ends_with(".surql") {
 				Dialect::SurrealQl
 			} else if path.ends_with(".gql") {
 				Dialect::Gql
 			} else if path.ends_with(".graphql") {
 				Dialect::GraphQl
+			} else if path.ends_with(".pgsql") {
+				Dialect::PgSql
+			} else if path.ends_with(".mysql") {
+				Dialect::MySql
 			} else {
 				return Ok(());
 			};

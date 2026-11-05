@@ -1,0 +1,4 @@
+### SELECT n, (SELECT VALUE <int> secret FROM item) AS x FROM open WHERE n > 100
+(no rows)
+### SELECT n, (SELECT VALUE <int> secret FROM item) AS x FROM open
+error: Could not cast into `int` using input `'s1'`

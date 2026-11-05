@@ -14,7 +14,7 @@ use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::opt::Tls;
 use crate::opt::{Endpoint, WaitFor};
-use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
+use crate::{Error, ExtraFeatures, Result, SessionClone, Surreal, conn};
 
 /// Creates an HTTP client with address pinning for the given URL.
 ///
@@ -53,6 +53,14 @@ pub(crate) async fn create_client(
 	let mut last_error = None;
 
 	for addr in addrs {
+		// TODO: raise the HTTP/2 connection window with
+		// `http2_initial_connection_window_size` (e.g. 8 MiB). h2 budgets small
+		// buffered DATA frames (under 256 bytes) at half the connection window
+		// (hyper's 5 MiB default gives 2.5 MiB) and closes the connection with
+		// ENHANCE_YOUR_CALM once a peer exhausts it, which a slow reader of a
+		// server sending many tiny export frames can hit. The method requires
+		// reqwest's `http2` feature, which this crate does not enable; enabling it
+		// adds `h2` and makes standalone builds negotiate HTTP/2 over TLS.
 		#[cfg_attr(not(any(feature = "native-tls", feature = "rustls")), expect(unused_mut))]
 		let mut builder = ClientBuilder::new().default_headers(headers.clone()).resolve(hostname, addr);
 
@@ -115,17 +123,13 @@ impl conn::Sealed for Client {
 			};
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			tokio::spawn(run_router(client, base_url, route_rx, session_clone.receiver.clone()));
+			tokio::spawn(run_router(client, base_url, route_rx, session_clone.router_receiver()));
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})
@@ -136,7 +140,7 @@ pub(crate) async fn run_router(
 	client: reqwest::Client,
 	base_url: url::Url,
 	route_rx: Receiver<Route>,
-	session_rx: Receiver<SessionId>,
+	session_rx: crate::RouterSessions,
 ) {
 	let state = Arc::new(RouterState::new(client, base_url));
 	loop {
@@ -192,15 +196,15 @@ pub(crate) async fn run_router(
 					)
 					.await;
 
-					// On success, add replayable commands to the replay list.
+					// On success, record the command in the replay list.
 					// boxcar::Vec is lock-free, so this is safe to do concurrently.
 					// NOTE: unlike the WS engine we do not coalesce idempotent Use
 					// entries here. HTTP requests are processed in spawned tasks, so
 					// a tail-check + push isn't atomic — a concurrent task could
 					// drop a still-pending Use whose result hasn't been recorded
 					// yet. Append-only push is safe under that concurrency.
-					if result.is_ok() && command.replayable() {
-						session_state.replay.push(command);
+					if result.is_ok() {
+						super::record_replay(&session_state, command).await;
 					}
 
 					// Convert api::err::Error to wire error type
@@ -210,4 +214,7 @@ pub(crate) async fn run_router(
 			}
 		}
 	}
+	// The loop only ends once the SDK has closed its session channel, so no
+	// further `Drop` events will arrive to detach what is left.
+	state.detach_all().await;
 }

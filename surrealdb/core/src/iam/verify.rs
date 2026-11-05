@@ -12,16 +12,27 @@ use crate::catalog::providers::{
 };
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::iam::access::{authenticate_generic, authenticate_record};
+#[cfg(feature = "jwks")]
+use crate::expr::Error as ExprError;
+use crate::iam::access::{
+	access_session, authenticate_generic, authenticate_record, reset_previous_principal,
+	session_data_for_record,
+};
 use crate::iam::issue::expiration;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
 use crate::iam::token::Claims;
-use crate::iam::{self, Actor, Auth, Level, Role};
+use crate::iam::{Actor, Auth, Error as AuthError, Level, Role};
 use crate::kvs::Datastore;
-use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
+use crate::types::PublicValue;
 use crate::{catalog, syn};
+
+/// How far ahead of the verifying host's clock a token's `nbf` claim may be
+/// and still be accepted. Tokens the server issues carry `nbf` equal to the
+/// issue time, so any step of the clock back since issue would otherwise
+/// reject them. Only `nbf` is relaxed: an `exp` in the past is always expired.
+const NBF_LEEWAY_SECS: i64 = 60;
 
 /// Returns the decoding key as wel as the method by which to verify the key against
 fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
@@ -71,13 +82,27 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 		}
 	};
 
-	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
-	// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
-	// Now that the audience claim is validated by default, we could allow users to leverage this.
-	// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
+	// Without configured audiences the `aud` claim is not validated, matching
+	// access methods that do not define an AUDIENCE clause. Callers enable
+	// validation via `apply_audience_validation` when the access method
+	// defines an audience list.
 	val.validate_aud = false;
 
 	Ok((dec, val))
+}
+
+/// Enables audience validation when the access method defines an audience
+/// list: the token must carry an `aud` claim (string or array) that
+/// intersects the configured values. Access methods without configured
+/// audiences ignore the claim entirely.
+fn apply_audience_validation(val: &mut Validation, jwt: &catalog::JwtAccess) {
+	if let Some(audience) = &jwt.audience {
+		val.set_audience(audience);
+		val.validate_aud = true;
+		// A configured audience makes the claim mandatory; otherwise a
+		// token that simply omits `aud` would bypass the restriction.
+		val.required_spec_claims.insert("aud".to_string());
+	}
 }
 
 /// Decodes JWT claims without cryptographic verification.
@@ -86,9 +111,64 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 /// database, access method) needed to look up the correct verification key.
 /// The token MUST be fully verified via [`verify_token`] before any claims
 /// are trusted for authorization decisions.
-fn decode_claims_unverified(token: &str) -> Result<TokenData<Claims>> {
-	let data = jsonwebtoken::dangerous::insecure_decode::<Claims>(token)?;
-	Ok(data)
+///
+/// A malformed token yields [`AuthError::InvalidAuth`]: the decoder's own
+/// account of what was wrong with the token stays in the debug log and never
+/// reaches the caller.
+fn decode_claims_unverified(token: &str) -> Result<TokenData<Claims>, AuthError> {
+	jsonwebtoken::dangerous::insecure_decode::<Claims>(token).map_err(|err| {
+		debug!("Error decoding authentication token claims: {err}");
+		err.into()
+	})
+}
+
+/// The actor identity for a session authenticated by a non-record access
+/// method.
+///
+/// `Auth::id()` is the identity half of every principal fingerprint the engine
+/// takes — the MCP transport's per-request subject re-check, and
+/// `AuthPrincipalSnapshot`, which tears a stream down when its session stops
+/// acting as the principal it was opened for. Naming the access method alone
+/// makes that identity identical for every holder of a token issued by it, so
+/// two different users of one `DEFINE ACCESS` are indistinguishable to both.
+///
+/// The token's own `sub` claim is therefore folded in, scoped by the access
+/// method so subjects cannot collide across methods. `sub` is the standard JWT
+/// subject and, unlike `id`, is not part of the claim shape that selects record
+/// or user authentication, so it is free to name the principal here.
+///
+/// The access name is length-prefixed rather than bare-joined with `/`, because
+/// an access name is an ident that may itself contain `/` (`DEFINE ACCESS
+/// `a/b``). A bare `"{access}/{sub}"` would then be ambiguous — access `a` with
+/// subject `b/c` and access `a/b` with subject `c` would both render `a/b/c` —
+/// which is exactly the cross-method collision this identity exists to prevent.
+/// The `<len>:` prefix fixes the access span, so the encoding is injective over
+/// `(access, sub)` and over `(access, no-sub)`.
+///
+/// A token carrying no `sub` names the access method alone, which is the most
+/// that can be said about it — so every holder of a sub-less token for one
+/// method shares an actor identity, and the per-subject protections that
+/// fingerprint `Auth::id()` (the MCP transport's session binding,
+/// `AuthPrincipalSnapshot`) cannot tell those holders apart. That is a property
+/// of the token, not something this function can repair, so it warns (once per
+/// process, since `token` runs per request on stateless transports) rather than
+/// inventing an identity: an operator relying on subject binding must issue
+/// tokens with a `sub` claim. Callers that do not rely on it are unaffected.
+fn access_actor_id(access: &str, claims: &Claims) -> String {
+	match claims.sub.as_deref() {
+		Some(subject) => format!("{}:{access}/{subject}", access.len()),
+		None => {
+			// `token` runs on every request that carries a token, so warn at most
+			// once per process rather than per request. Mirrors the ES512 notice.
+			static SUBLESS_WARN: Once = Once::new();
+			SUBLESS_WARN.call_once(|| {
+				warn!(
+					"Access method '{access}' authenticated a token with no 'sub' claim: every sub-less token for an access method shares one actor identity, so per-subject session binding (such as the MCP transport's) cannot distinguish their holders. Issue tokens with a 'sub' claim to identify the principal."
+				);
+			});
+			format!("{}:{access}", access.len())
+		}
+	}
 }
 
 pub async fn basic(
@@ -107,76 +187,128 @@ pub async fn basic(
 		(Some(ns), Some(db)) => match verify_db_creds(kvs, ns, db, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as database user '{}'", user);
-				session.exp = expiration(u.session_duration)?;
+				// Every fallible step is taken before the session is touched: a
+				// partial failure must leave the session in its
+				// pre-authentication state.
+				let session_exp = expiration(u.session_duration)?;
 				let au = Auth::new(Actor::from_role_names(
 					u.name.to_string(),
 					&u.roles,
 					Level::Database(ns.to_owned(), db.to_owned()),
 				)?);
-
+				reset_previous_principal(session);
+				session.exp = session_exp;
 				session.au = Arc::new(au);
 				Ok(())
 			}
-			Err(err) => Err(err),
+			Err(err) => {
+				debug!(
+					"Failed to verify basic credentials for user `{user}` in database `{ns}/{db}`: {err}"
+				);
+				Err(AuthError::InvalidAuth.into())
+			}
 		},
 		// NS signin
 		(Some(ns), None) => match verify_ns_creds(kvs, ns, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as namespace user '{}'", user);
-				session.exp = expiration(u.session_duration)?;
+				// Every fallible step is taken before the session is touched: a
+				// partial failure must leave the session in its
+				// pre-authentication state.
+				let session_exp = expiration(u.session_duration)?;
 				let au = Auth::new(Actor::from_role_names(
 					u.name.to_string(),
 					&u.roles,
 					Level::Namespace(ns.to_owned()),
 				)?);
-
+				reset_previous_principal(session);
+				session.exp = session_exp;
 				session.au = Arc::new(au);
 				Ok(())
 			}
-			Err(err) => Err(err),
+			Err(err) => {
+				debug!(
+					"Failed to verify basic credentials for user `{user}` in namespace `{ns}`: {err}"
+				);
+				Err(AuthError::InvalidAuth.into())
+			}
 		},
 		// Root signin
 		(None, None) => match verify_root_creds(kvs, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as root user '{}'", user);
-				session.exp = expiration(u.session_duration)?;
+				// Every fallible step is taken before the session is touched: a
+				// partial failure must leave the session in its
+				// pre-authentication state.
+				let session_exp = expiration(u.session_duration)?;
 				let au =
 					Auth::new(Actor::from_role_names(u.name.to_string(), &u.roles, Level::Root)?);
-
+				reset_previous_principal(session);
+				session.exp = session_exp;
 				session.au = Arc::new(au);
 				Ok(())
 			}
-			Err(err) => Err(err),
+			Err(err) => {
+				debug!("Failed to verify basic credentials for root user `{user}`: {err}");
+				Err(AuthError::InvalidAuth.into())
+			}
 		},
 		(None, Some(db)) => {
 			debug!(
 				"Attempted basic authentication in database '{db}' without specifying a namespace"
 			);
-			Err(anyhow::Error::new(Error::InvalidAuth))
+			Err(anyhow::Error::new(AuthError::InvalidAuth))
 		}
 	}
 }
 
+/// Authenticates `session` with `token`.
+///
+/// A session established with a token lasts for the SESSION duration of the
+/// user or access method the token names, but never past the token's own
+/// `exp`: a bearer token must not keep working through a session derived from
+/// it once the token itself has expired. Sessions established with
+/// credentials (`signin`, `signup`, basic auth) are not bound this way. The
+/// token those issue is a by-product, and their session lasts for its SESSION
+/// duration alone.
 pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Result<()> {
 	// Log the authentication type
 	trace!("Attempting token authentication");
 	// Decode the token without verifying to extract routing claims
 	let token_data = decode_claims_unverified(token)?;
+	let token_exp = token_data.claims.exp;
+	token_principal(kvs, session, token, token_data).await?;
+	if let Some(token_exp) = token_exp {
+		session.exp = Some(session.exp.map_or(token_exp, |exp| exp.min(token_exp)));
+	}
+	Ok(())
+}
+
+/// Verifies `token` and establishes its principal on `session`, with the
+/// session's expiry taken from the SESSION duration alone (see [`token`]).
+async fn token_principal(
+	kvs: &Datastore,
+	session: &mut Session,
+	token: &str,
+	token_data: TokenData<Claims>,
+) -> Result<()> {
 	// Convert the token to a SurrealQL object value
 	let value = crate::val::Value::from(token_data.claims.clone().into_claims_object());
-	// Check if the auth token can be used
+	// Check if the auth token can be used. A token is honoured up to
+	// `NBF_LEEWAY_SECS` before its `nbf`, so a host clock stepped backwards
+	// after the token was issued does not invalidate it (RFC 7519 §4.1.5).
 	if let Some(nbf) = token_data.claims.nbf
-		&& nbf > Utc::now().timestamp()
+		&& nbf.saturating_sub(NBF_LEEWAY_SECS) > Utc::now().timestamp()
 	{
 		debug!("Token verification failed due to the 'nbf' claim containing a future time");
-		bail!(Error::InvalidAuth);
+		bail!(AuthError::InvalidAuth);
 	}
 	// Check if the auth token has expired
 	if let Some(exp) = token_data.claims.exp
 		&& exp < Utc::now().timestamp()
 	{
 		debug!("Token verification failed due to the 'exp' claim containing a past time");
-		bail!(Error::ExpiredToken);
+		bail!(AuthError::ExpiredToken);
 	}
 	// Check the token authentication claims
 	match &token_data.claims {
@@ -191,23 +323,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating with record access method `{}`", ac);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::DbNotFound {
-						name: db.clone(),
-					}
-					.into());
-				}
-			};
-			// Parse the record id
-			let mut rid = match syn::record_id(id) {
-				Ok(rid) => rid,
-				Err(e) => {
-					let _ = tx.cancel().await;
-					return Err(e);
+					debug!("Database `{db}` not found during record access authentication");
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 			// Get the database access method
@@ -216,66 +338,119 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				tx.get_db_access(db_def.namespace_id, db_def.database_id, ac, None).await
 			) else {
 				let _ = tx.cancel().await;
-				return Err(Error::AccessDbNotFound {
-					ac: ac.clone(),
-					ns: ns.clone(),
-					db: db.clone(),
-				}
-				.into());
+				debug!("Database access method `{ac}` not found in `{ns}/{db}`");
+				return Err(AuthError::InvalidAuth.into());
 			};
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
-			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.access_type {
-				catalog::AccessType::Record(at) => match &at.jwt.verify {
-					catalog::JwtAccessVerify::Key(key) => {
-						iam::verify::decode_key(key.alg, key.key.as_bytes())
-					}
-					#[cfg(feature = "jwks")]
-					catalog::JwtAccessVerify::Jwks(jwks) => {
-						if let Some(kid) = token_data.header.kid {
-							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-						} else {
-							Err(anyhow::Error::new(Error::InvalidFunctionArguments {
-								name: "token".to_string(),
-								message: "Missing token header 'kid'".to_string(),
-							}))
-						}
-					}
-					#[cfg(not(feature = "jwks"))]
-					_ => bail!(Error::AccessMethodMismatch),
-				}?,
-				_ => bail!(Error::AccessMethodMismatch),
+			// Which JWT configuration verifies the token, and whether the
+			// AUTHENTICATE clause settles the record. A `BEARER FOR RECORD`
+			// grant is exchanged for a token carrying the granted record as its
+			// `id`, and that token is verified as `signin` judged the grant: its
+			// AUTHENTICATE clause is the generic one, and the record it names is
+			// the session's record.
+			let (jwt, authenticate_settles_record) = match &de.access_type {
+				catalog::AccessType::Record(at) => (&at.jwt, true),
+				catalog::AccessType::Bearer(catalog::BearerAccess {
+					subject: catalog::BearerAccessSubject::Record,
+					jwt,
+					..
+				}) => (jwt, false),
+				// A `BEARER FOR USER` grant's token names the system user as its
+				// `id`. It is database access, verified as every other
+				// database-level access token is.
+				catalog::AccessType::Bearer(catalog::BearerAccess {
+					subject: catalog::BearerAccessSubject::User,
+					jwt,
+					..
+				}) => {
+					return access_method_token(
+						kvs,
+						session,
+						token,
+						&token_data,
+						value,
+						Some(ns),
+						Some(db),
+						GrantScope::Database(db_def.namespace_id, db_def.database_id),
+						ac,
+						&de,
+						jwt,
+					)
+					.await;
+				}
+				catalog::AccessType::Jwt(_) => bail!(AuthError::AccessMethodMismatch),
 			};
+			// Parse the record id
+			let mut rid = syn::record_id(id)?;
+			// Obtain the configuration to verify the token based on the access method
+			let cf = verification_config(kvs, jwt, &token_data.header).await?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
+			// A bearer grant's token is only as good as its grant, which must
+			// still be active and grant the record the token names.
+			if !authenticate_settles_record
+				&& !matches!(
+					bearer_grant_subject(
+						kvs,
+						GrantScope::Database(db_def.namespace_id, db_def.database_id),
+						&de,
+						&token_data.claims
+					)
+					.await?,
+					BearerSubject::Record
+				) {
+				debug!("A system user bearer grant's token cannot authenticate a record");
+				bail!(AuthError::InvalidAuth);
+			}
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
-				// Setup the system session for finding the signin record
-				let mut sess = Session::editor().with_ns(ns).with_db(db);
-				sess.rd = Some(
-					crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
-						rid.clone().into(),
-					))
-					.expect("record id conversion should succeed"),
-				);
+				// Setup the system session for executing the clause
+				let mut sess = access_session(&de, Some(ns.as_str()), Some(db.as_str()), session)?;
 				sess.tk = Some(
 					crate::val::convert_value_to_public_value(
 						token_data.claims.clone().into_claims_object().into(),
 					)
 					.expect("claims conversion should succeed"),
 				);
-				sess.ip.clone_from(&session.ip);
-				sess.or.clone_from(&session.or);
-				rid = authenticate_record(kvs, &sess, au).await?;
+				if authenticate_settles_record {
+					sess.rd = Some(
+						crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
+							rid.clone().into(),
+						))
+						.expect("record id conversion should succeed"),
+					);
+					rid = authenticate_record(kvs, &sess, au).await?;
+				} else {
+					authenticate_generic(kvs, &sess, au).await?;
+				}
 			}
+			// CONTEXT clause. Evaluated after the identity has settled — and
+			// after `verify_token` above — so `$auth` is the final record and
+			// an unverified token never pays for it. Independent of the
+			// AUTHENTICATE clause: an access method may define either.
+			let data = session_data_for_record(
+				kvs,
+				&de,
+				ns.as_str(),
+				db.as_str(),
+				PublicValue::RecordId(rid.clone()),
+				&token_data.claims,
+				session,
+			)
+			.await?;
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(de.session_duration)?;
 			// Set the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(value)
 					.expect("value conversion should succeed"),
 			);
+			session.data = data;
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
@@ -285,7 +460,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				))
 				.expect("record id conversion should succeed"),
 			);
-			session.exp = expiration(de.session_duration)?;
+			session.exp = session_exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_sql(),
 				Default::default(),
@@ -304,15 +479,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to database `{}` with access method `{}`", db, ac);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::DbNotFound {
-						name: db.clone(),
-					}
-					.into());
+					debug!("Database `{db}` not found during database access authentication");
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 
@@ -325,12 +498,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 
 			let Some(de) = de else {
-				return Err(Error::AccessDbNotFound {
-					ac: ac.clone(),
-					ns: ns.clone(),
-					db: db.clone(),
-				}
-				.into());
+				debug!("Database access method `{ac}` not found in `{ns}/{db}`");
+				return Err(AuthError::InvalidAuth.into());
 			};
 
 			// Obtain the configuration to verify the token based on the access method
@@ -341,70 +510,20 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					jwt,
 					..
 				}) => {
-					let cf = match &jwt.verify {
-						catalog::JwtAccessVerify::Key(key) => {
-							decode_key(key.alg, key.key.as_bytes())
-						}
-						#[cfg(feature = "jwks")]
-						catalog::JwtAccessVerify::Jwks(jwks) => {
-							if let Some(kid) = token_data.header.kid {
-								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-							} else {
-								Err(anyhow::Error::new(Error::InvalidFunctionArguments {
-									name: "token".to_string(),
-									message: "Missing token header 'kid'".to_string(),
-								}))
-							}
-						}
-						#[cfg(not(feature = "jwks"))]
-						_ => bail!(Error::AccessMethodMismatch),
-					}?;
-					// Verify the token
-					verify_token(token, &cf.0, &cf.1)?;
-					// AUTHENTICATE clause
-					if let Some(au) = &de.authenticate {
-						// Setup the system session for executing the clause
-						let mut sess = Session::editor().with_ns(ns).with_db(db);
-						sess.tk = Some(
-							crate::val::convert_value_to_public_value(
-								token_data.claims.clone().into_claims_object().into(),
-							)
-							.expect("claims conversion should succeed"),
-						);
-						sess.ip.clone_from(&session.ip);
-						sess.or.clone_from(&session.or);
-						authenticate_generic(kvs, &sess, au).await?;
-					}
-					// Parse the roles
-					let roles = match &token_data.claims.roles {
-						// If no role is provided, grant the viewer role
-						None => vec![Role::Viewer],
-						// If roles are provided, parse them
-						Some(roles) => roles
-							.iter()
-							.map(|r| -> Result<Role> {
-								Role::from_str(r.as_str())
-									.map_err(Error::IamError)
-									.map_err(anyhow::Error::new)
-							})
-							.collect::<Result<Vec<_>, _>>()?,
-					};
-					// Log the success
-					debug!("Authenticated to database `{}` with access method `{}`", db, ac);
-					// Set the session
-					session.tk = Some(
-						crate::val::convert_value_to_public_value(value)
-							.expect("value conversion should succeed"),
-					);
-					session.ns = Some(ns.to_owned());
-					session.db = Some(db.to_owned());
-					session.ac = Some(ac.to_owned());
-					session.exp = expiration(de.session_duration)?;
-					session.au = Arc::new(Auth::new(Actor::new(
-						de.name.to_string(),
-						roles,
-						Level::Database(ns.clone(), db.clone()),
-					)));
+					access_method_token(
+						kvs,
+						session,
+						token,
+						&token_data,
+						value,
+						Some(ns),
+						Some(db),
+						GrantScope::Database(db_def.namespace_id, db_def.database_id),
+						ac,
+						&de,
+						jwt,
+					)
+					.await?;
 				}
 				// If the access type is Record, this is record access
 				// Record access without an "id" claim is only possible if there is an AUTHENTICATE
@@ -413,46 +532,44 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				catalog::AccessType::Record(at) => match &de.authenticate {
 					Some(au) => {
 						trace!("Access method `{}` is record access with AUTHENTICATE clause", ac);
-						let cf = match &at.jwt.verify {
-							catalog::JwtAccessVerify::Key(key) => {
-								decode_key(key.alg, key.key.as_bytes())
-							}
-							#[cfg(feature = "jwks")]
-							catalog::JwtAccessVerify::Jwks(jwks) => {
-								if let Some(kid) = token_data.header.kid {
-									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-								} else {
-									Err(anyhow::Error::new(Error::InvalidFunctionArguments {
-										name: "token".to_string(),
-										message: "Missing token header 'kid'".to_string(),
-									}))
-								}
-							}
-							#[cfg(not(feature = "jwks"))]
-							_ => bail!(Error::AccessMethodMismatch),
-						}?;
+						let cf = verification_config(kvs, &at.jwt, &token_data.header).await?;
 
 						// Verify the token
 						verify_token(token, &cf.0, &cf.1)?;
 						// AUTHENTICATE clause
 						// Setup the system session for finding the signin record
-						let mut sess = Session::editor().with_ns(ns).with_db(db);
+						let mut sess =
+							access_session(&de, Some(ns.as_str()), Some(db.as_str()), session)?;
 						sess.tk = Some(
 							crate::val::convert_value_to_public_value(
 								token_data.claims.clone().into_claims_object().into(),
 							)
 							.expect("claims conversion should succeed"),
 						);
-						sess.ip.clone_from(&session.ip);
-						sess.or.clone_from(&session.or);
 						let rid = authenticate_record(kvs, &sess, au).await?;
+						// CONTEXT clause, evaluated with the settled identity.
+						let data = session_data_for_record(
+							kvs,
+							&de,
+							ns.as_str(),
+							db.as_str(),
+							PublicValue::RecordId(rid.clone()),
+							&token_data.claims,
+							session,
+						)
+						.await?;
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
+						// Every fallible step is taken before the session is touched: a partial
+						// failure must leave the session in its pre-authentication state.
+						let session_exp = expiration(de.session_duration)?;
 						// Set the session
+						reset_previous_principal(session);
 						session.tk = Some(
 							crate::val::convert_value_to_public_value(value)
 								.expect("value conversion should succeed"),
 						);
+						session.data = data;
 						session.ns = Some(ns.to_owned());
 						session.db = Some(db.to_owned());
 						session.ac = Some(ac.to_owned());
@@ -462,14 +579,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							))
 							.expect("record id conversion should succeed"),
 						);
-						session.exp = expiration(de.session_duration)?;
+						session.exp = session_exp;
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_sql(),
 							Default::default(),
 							Level::Record(ns.clone(), db.clone(), rid.to_sql()),
 						)));
 					}
-					_ => bail!(Error::AccessMethodMismatch),
+					_ => bail!(AuthError::AccessMethodMismatch),
 				},
 			};
 			Ok(())
@@ -484,15 +601,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to database `{}` with user `{}`", db, id);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::DbNotFound {
-						name: db.clone(),
-					}
-					.into());
+					debug!("Database `{db}` not found during database user authentication");
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 
@@ -502,14 +617,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				tx.get_db_user(db_def.namespace_id, db_def.database_id, id, None).await.map_err(
 					|e| {
 						debug!("Error while authenticating to database `{db}`: {e}");
-						anyhow::Error::new(Error::InvalidAuth)
+						anyhow::Error::new(AuthError::InvalidAuth)
 					}
 				)
 			) {
 				Some(de) => de,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::InvalidAuth.into());
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 			// Ensure that the transaction is cancelled
@@ -520,20 +635,26 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
 			debug!("Authenticated to database `{}` with user `{}` using token", db, id);
+			let roles: Vec<Role> = de
+				.roles
+				.iter()
+				.map(|e| Role::from_str(e).map_err(Error::from))
+				.collect::<Result<_, _>>()?;
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(de.session_duration)?;
 			// Set the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(value)
 					.expect("value conversion should succeed"),
 			);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.exp = expiration(de.session_duration)?;
+			session.exp = session_exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.clone(),
-				de.roles
-					.iter()
-					.map(|e| Role::from_str(e).map_err(Error::from))
-					.collect::<Result<_, _>>()?,
+				roles,
 				Level::Database(ns.clone(), db.clone()),
 			)));
 			Ok(())
@@ -547,15 +668,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to namespace `{}` with access method `{}`", ns, ac);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			let ns_def = match catch!(tx, tx.get_ns_by_name(ns, None).await) {
 				Some(ns) => ns,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::NsNotFound {
-						name: ns.clone(),
-					}
-					.into());
+					debug!("Namespace `{ns}` not found during namespace access authentication");
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 
@@ -565,83 +684,34 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 
 			let Some(de) = de else {
-				return Err(Error::AccessNsNotFound {
-					ac: ac.clone(),
-					ns: ns.clone(),
-				}
-				.into());
+				debug!("Namespace access method `{ac}` not found in `{ns}`");
+				return Err(AuthError::InvalidAuth.into());
 			};
 
-			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.access_type {
+			// Verify the token and authenticate the session
+			match &de.access_type {
 				catalog::AccessType::Jwt(jwt)
 				| catalog::AccessType::Bearer(catalog::BearerAccess {
 					jwt,
 					..
-				}) => match &jwt.verify {
-					catalog::JwtAccessVerify::Key(key) => decode_key(key.alg, key.key.as_bytes()),
-					#[cfg(feature = "jwks")]
-					catalog::JwtAccessVerify::Jwks(jwks) => {
-						if let Some(kid) = token_data.header.kid {
-							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-						} else {
-							bail!(Error::InvalidFunctionArguments {
-								name: "token".to_string(),
-								message: "Missing token header 'kid'".to_string()
-							})
-						}
-					}
-					#[cfg(not(feature = "jwks"))]
-					_ => bail!(Error::AccessMethodMismatch),
-				},
-				_ => bail!(Error::AccessMethodMismatch),
-			}?;
-			// Verify the token
-			verify_token(token, &cf.0, &cf.1)?;
-			// AUTHENTICATE clause
-			if let Some(au) = &de.authenticate {
-				// Setup the system session for executing the clause
-				let mut sess = Session::editor().with_ns(ns);
-				sess.tk = Some(
-					crate::val::convert_value_to_public_value(
-						token_data.claims.clone().into_claims_object().into(),
+				}) => {
+					access_method_token(
+						kvs,
+						session,
+						token,
+						&token_data,
+						value,
+						Some(ns),
+						None,
+						GrantScope::Namespace(ns_def.namespace_id),
+						ac,
+						&de,
+						jwt,
 					)
-					.expect("claims conversion should succeed"),
-				);
-				sess.ip.clone_from(&session.ip);
-				sess.or.clone_from(&session.or);
-				authenticate_generic(kvs, &sess, au).await?;
+					.await
+				}
+				_ => bail!(AuthError::AccessMethodMismatch),
 			}
-			// Parse the roles
-			let roles = match &token_data.claims.roles {
-				// If no role is provided, grant the viewer role
-				None => vec![Role::Viewer],
-				// If roles are provided, parse them
-				Some(roles) => roles
-					.iter()
-					.map(|r| -> Result<Role> {
-						Role::from_str(r.as_str())
-							.map_err(Error::IamError)
-							.map_err(anyhow::Error::new)
-					})
-					.collect::<Result<Vec<_>, _>>()?,
-			};
-			// Log the success
-			debug!("Authenticated to namespace `{}` with access method `{}`", ns, ac);
-			// Set the session
-			session.tk = Some(
-				crate::val::convert_value_to_public_value(value)
-					.expect("value conversion should succeed"),
-			);
-			session.ns = Some(ns.to_owned());
-			session.ac = Some(ac.to_owned());
-			session.exp = expiration(de.session_duration)?;
-			session.au = Arc::new(Auth::new(Actor::new(
-				de.name.to_string(),
-				roles,
-				Level::Namespace(ns.clone()),
-			)));
-			Ok(())
 		}
 		// Check if this is namespace authentication with user credentials
 		Claims {
@@ -652,15 +722,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to namespace `{}` with user `{}`", ns, id);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			let ns_def = match catch!(tx, tx.get_ns_by_name(ns, None).await) {
 				Some(ns) => ns,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::NsNotFound {
-						name: ns.clone(),
-					}
-					.into());
+					debug!("Namespace `{ns}` not found during namespace user authentication");
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 			// Get the namespace user
@@ -668,13 +736,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				tx,
 				tx.get_ns_user(ns_def.namespace_id, id, None).await.map_err(|e| {
 					debug!("Error while authenticating to namespace `{ns}`: {e}");
-					anyhow::Error::new(Error::InvalidAuth)
+					anyhow::Error::new(AuthError::InvalidAuth)
 				})
 			) {
 				Some(de) => de,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::InvalidAuth.into());
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 			// Ensure that the transaction is cancelled
@@ -685,21 +753,24 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
 			debug!("Authenticated to namespace `{}` with user `{}` using token", ns, id);
+			let roles: Vec<Role> = de
+				.roles
+				.iter()
+				.map(|e| Role::from_str(e).map_err(Error::from))
+				.collect::<Result<_, _>>()?;
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(de.session_duration)?;
 			// Set the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(value)
 					.expect("value conversion should succeed"),
 			);
 			session.ns = Some(ns.to_owned());
-			session.exp = expiration(de.session_duration)?;
-			session.au = Arc::new(Auth::new(Actor::new(
-				id.clone(),
-				de.roles
-					.iter()
-					.map(|e| Role::from_str(e).map_err(Error::from))
-					.collect::<Result<_, _>>()?,
-				Level::Namespace(ns.clone()),
-			)));
+			session.exp = session_exp;
+			session.au =
+				Arc::new(Auth::new(Actor::new(id.clone(), roles, Level::Namespace(ns.clone()))));
 			Ok(())
 		}
 		// Check if this is root access
@@ -710,7 +781,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to root with access method `{}`", ac);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			// Get the root access method
 			let de = catch!(tx, tx.get_root_access(ac, None).await);
 
@@ -718,77 +789,34 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 
 			let Some(de) = de else {
-				return Err(Error::AccessRootNotFound {
-					ac: ac.clone(),
-				}
-				.into());
+				debug!("Root access method `{ac}` not found");
+				return Err(AuthError::InvalidAuth.into());
 			};
 
-			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.access_type {
+			// Verify the token and authenticate the session
+			match &de.access_type {
 				catalog::AccessType::Jwt(jwt)
 				| catalog::AccessType::Bearer(catalog::BearerAccess {
 					jwt,
 					..
-				}) => match &jwt.verify {
-					catalog::JwtAccessVerify::Key(key) => decode_key(key.alg, key.key.as_bytes()),
-					#[cfg(feature = "jwks")]
-					catalog::JwtAccessVerify::Jwks(jwks) => {
-						if let Some(kid) = token_data.header.kid {
-							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-						} else {
-							bail!(Error::InvalidFunctionArguments {
-								name: "token".to_string(),
-								message: "Missing token header 'kid'".to_string()
-							})
-						}
-					}
-					#[cfg(not(feature = "jwks"))]
-					_ => bail!(Error::AccessMethodMismatch),
-				},
-				_ => bail!(Error::AccessMethodMismatch),
-			}?;
-			// Verify the token
-			verify_token(token, &cf.0, &cf.1)?;
-			// AUTHENTICATE clause
-			if let Some(au) = &de.authenticate {
-				// Setup the system session for executing the clause
-				let mut sess = Session::editor();
-				sess.tk = Some(
-					crate::val::convert_value_to_public_value(
-						token_data.claims.clone().into_claims_object().into(),
+				}) => {
+					access_method_token(
+						kvs,
+						session,
+						token,
+						&token_data,
+						value,
+						None,
+						None,
+						GrantScope::Root,
+						ac,
+						&de,
+						jwt,
 					)
-					.expect("claims conversion should succeed"),
-				);
-				sess.ip.clone_from(&session.ip);
-				sess.or.clone_from(&session.or);
-				authenticate_generic(kvs, &sess, au).await?;
+					.await
+				}
+				_ => bail!(AuthError::AccessMethodMismatch),
 			}
-			// Parse the roles
-			let roles = match &token_data.claims.roles {
-				// If no role is provided, grant the viewer role
-				None => vec![Role::Viewer],
-				// If roles are provided, parse them
-				Some(roles) => roles
-					.iter()
-					.map(|r| -> Result<Role> {
-						Role::from_str(r.as_str())
-							.map_err(Error::IamError)
-							.map_err(anyhow::Error::new)
-					})
-					.collect::<Result<Vec<_>, _>>()?,
-			};
-			// Log the success
-			debug!("Authenticated to root with access method `{}`", ac);
-			// Set the session
-			session.tk = Some(
-				crate::val::convert_value_to_public_value(value)
-					.expect("value conversion should succeed"),
-			);
-			session.ac = Some(ac.to_owned());
-			session.exp = expiration(de.session_duration)?;
-			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
-			Ok(())
 		}
 		// Check if this is root authentication with user credentials
 		Claims {
@@ -798,13 +826,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to root level with user `{}`", id);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			// Get the namespace user
 			let de = catch!(
 				tx,
 				tx.expect_root_user(id).await.map_err(|e| {
 					debug!("Error while authenticating to root: {e}");
-					anyhow::Error::new(Error::InvalidAuth)
+					anyhow::Error::new(AuthError::InvalidAuth)
 				})
 			);
 			// Ensure that the transaction is cancelled
@@ -815,24 +843,26 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
 			debug!("Authenticated to root level with user `{}` using token", id);
+			let roles: Vec<Role> = de
+				.roles
+				.iter()
+				.map(|e| Role::from_str(e).map_err(Error::from))
+				.collect::<Result<_, _>>()?;
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(de.session_duration)?;
 			// Set the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(value)
 					.expect("value conversion should succeed"),
 			);
-			session.exp = expiration(de.session_duration)?;
-			session.au = Arc::new(Auth::new(Actor::new(
-				id.clone(),
-				de.roles
-					.iter()
-					.map(|e| Role::from_str(e).map_err(Error::from))
-					.collect::<Result<_, _>>()?,
-				Level::Root,
-			)));
+			session.exp = session_exp;
+			session.au = Arc::new(Auth::new(Actor::new(id.clone(), roles, Level::Root)));
 			Ok(())
 		}
 		// There was an auth error
-		_ => Err(anyhow::Error::new(Error::InvalidAuth)),
+		_ => Err(anyhow::Error::new(AuthError::InvalidAuth)),
 	}
 }
 
@@ -842,13 +872,13 @@ pub async fn verify_root_creds(
 	pass: &str,
 ) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
-	let tx = ds.transaction(Read, Optimistic).await?;
+	let tx = ds.transaction(Read).await?;
 	// Fetch the specified user from storage
 	let user = catch!(
 		tx,
 		tx.expect_root_user(user).await.map_err(|e| {
 			debug!("Error retrieving user for authentication to root: {e}");
-			anyhow::Error::new(Error::InvalidAuth)
+			anyhow::Error::new(AuthError::InvalidAuth)
 		})
 	);
 	// Ensure that the transaction is cancelled
@@ -868,15 +898,13 @@ pub async fn verify_ns_creds(
 	pass: &str,
 ) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
-	let tx = ds.transaction(Read, Optimistic).await?;
+	let tx = ds.transaction(Read).await?;
 	let ns_def = match catch!(tx, tx.get_ns_by_name(ns, None).await) {
 		Some(ns) => ns,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(Error::NsNotFound {
-				name: ns.to_string(),
-			}
-			.into());
+			debug!("Namespace `{ns}` not found during credential verification");
+			return Err(AuthError::InvalidAuth.into());
 		}
 	};
 
@@ -885,14 +913,14 @@ pub async fn verify_ns_creds(
 		tx,
 		tx.get_ns_user(ns_def.namespace_id, user, None).await.map_err(|e| {
 			debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
-			anyhow::Error::new(Error::InvalidAuth)
+			anyhow::Error::new(AuthError::InvalidAuth)
 		})
 	);
 	let user = match user {
 		Some(user) => user,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(Error::InvalidAuth.into());
+			return Err(AuthError::InvalidAuth.into());
 		}
 	};
 	// Ensure that the transaction is cancelled
@@ -914,15 +942,13 @@ pub async fn verify_db_creds(
 	pass: &str,
 ) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
-	let tx = ds.transaction(Read, Optimistic).await?;
+	let tx = ds.transaction(Read).await?;
 	let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 		Some(db) => db,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(Error::DbNotFound {
-				name: db.to_string(),
-			}
-			.into());
+			debug!("Database `{ns}/{db}` not found during credential verification");
+			return Err(AuthError::InvalidAuth.into());
 		}
 	};
 
@@ -931,14 +957,14 @@ pub async fn verify_db_creds(
 		tx,
 		tx.get_db_user(db_def.namespace_id, db_def.database_id, user, None).await.map_err(|e| {
 			debug!("Error retrieving user for authentication to database `{ns}/{db}`: {e}");
-			anyhow::Error::new(Error::InvalidAuth)
+			anyhow::Error::new(AuthError::InvalidAuth)
 		})
 	);
 	let user = match user {
 		Some(user) => user,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(Error::InvalidAuth.into());
+			return Err(AuthError::InvalidAuth.into());
 		}
 	};
 	// Ensure that the transaction is cancelled
@@ -952,6 +978,121 @@ pub async fn verify_db_creds(
 	Ok(user)
 }
 
+/// A resolved SCRAM verifier plus the identity needed to establish the session
+/// once a transport has verified the client proof. Returned by [`scram_lookup`].
+///
+/// SCRAM is challenge-response, so — unlike [`basic`] — the transport drives the
+/// exchange itself (using [`ScramAuth::credential`]) and only then calls
+/// [`ScramAuth::apply`] to authenticate the session. Password verification never
+/// happens here; possession of a valid client proof is the proof of identity.
+pub struct ScramAuth {
+	credential: catalog::ScramCredential,
+	user: catalog::UserDefinition,
+	level: Level,
+}
+
+impl ScramAuth {
+	/// The per-user SCRAM salt, sent to the client in the server-first message.
+	pub fn salt(&self) -> &[u8] {
+		&self.credential.salt
+	}
+
+	/// The PBKDF2 iteration count, sent to the client in the server-first message.
+	pub fn iterations(&self) -> u32 {
+		self.credential.iterations
+	}
+
+	/// Verify a client proof against this verifier for the caller-assembled
+	/// `AuthMessage`. Returns `true` when the proof is valid.
+	pub fn verify_client_proof(&self, auth_message: &[u8], client_proof: &[u8]) -> bool {
+		self.credential.verify_client_proof(auth_message, client_proof)
+	}
+
+	/// The server signature (`v=`) for the caller-assembled `AuthMessage`, proving
+	/// the server also holds the verifier.
+	pub fn server_signature(&self, auth_message: &[u8]) -> [u8; 32] {
+		self.credential.server_signature(auth_message)
+	}
+
+	/// Establish `session.au` / `session.exp` for the SCRAM-verified user. Call
+	/// only after the client proof has been verified via [`Self::verify_client_proof`].
+	pub fn apply(&self, session: &mut Session) -> Result<()> {
+		// Every fallible step is taken before the session is touched: a partial
+		// failure must leave the session in its pre-authentication state.
+		let session_exp = expiration(self.user.session_duration)?;
+		let au = Auth::new(Actor::from_role_names(
+			self.user.name.to_string(),
+			&self.user.roles,
+			self.level.clone(),
+		)?);
+		reset_previous_principal(session);
+		session.exp = session_exp;
+		session.au = Arc::new(au);
+		Ok(())
+	}
+}
+
+/// Resolve a user's SCRAM verifier for the given scope, trying database, then
+/// namespace, then root level (mirroring the fallback a transport with no
+/// explicit auth-level field uses). Returns the first level at which the named
+/// user exists *and* has SCRAM material, or `None` when none does — in which
+/// case the transport falls back to another mechanism (e.g. cleartext against
+/// the Argon2 hash). Does not verify any password.
+pub async fn scram_lookup(
+	kvs: &Datastore,
+	user: &str,
+	ns: Option<&str>,
+	db: Option<&str>,
+) -> Result<Option<ScramAuth>> {
+	let tx = kvs.transaction(Read).await?;
+	let result = scram_lookup_inner(&tx, user, ns, db).await;
+	let _ = tx.cancel().await;
+	result
+}
+
+async fn scram_lookup_inner(
+	tx: &crate::kvs::Transaction,
+	user: &str,
+	ns: Option<&str>,
+	db: Option<&str>,
+) -> Result<Option<ScramAuth>> {
+	// Database level.
+	if let (Some(ns), Some(db)) = (ns, db)
+		&& let Some(db_def) = tx.get_db_by_name(ns, db, None).await?
+		&& let Some(u) = tx.get_db_user(db_def.namespace_id, db_def.database_id, user, None).await?
+		&& let Some(scram) = u.scram.clone()
+	{
+		return Ok(Some(ScramAuth {
+			credential: scram,
+			user: (*u).clone(),
+			level: Level::Database(ns.to_owned(), db.to_owned()),
+		}));
+	}
+	// Namespace level.
+	if let Some(ns) = ns
+		&& let Some(ns_def) = tx.get_ns_by_name(ns, None).await?
+		&& let Some(u) = tx.get_ns_user(ns_def.namespace_id, user, None).await?
+		&& let Some(scram) = u.scram.clone()
+	{
+		return Ok(Some(ScramAuth {
+			credential: scram,
+			user: (*u).clone(),
+			level: Level::Namespace(ns.to_owned()),
+		}));
+	}
+	// Root level.
+	if let Some(u) = tx.get_root_user(user, None).await?
+		&& let Some(scram) = u.scram.clone()
+	{
+		return Ok(Some(ScramAuth {
+			credential: scram,
+			user: (*u).clone(),
+			level: Level::Root,
+		}));
+	}
+	Ok(None)
+}
+
 fn verify_pass(pass: &str, hash: &str) -> Result<()> {
 	// Compute the hash and verify the password
 	let hash =
@@ -959,8 +1100,233 @@ fn verify_pass(pass: &str, hash: &str) -> Result<()> {
 	// Attempt to verify the password using Argon2
 	match Argon2::default().verify_password(pass.as_ref(), &hash) {
 		Ok(_) => Ok(()),
-		_ => Err(anyhow::Error::new(Error::InvalidPass)),
+		_ => Err(anyhow::Error::new(AuthError::InvalidPass)),
 	}
+}
+
+/// The key and validation that verify a token issued under `jwt`: the
+/// configured key, or the JWKS entry the token's `kid` header names, with the
+/// method's audience applied.
+#[cfg_attr(not(feature = "jwks"), expect(unused_variables))]
+async fn verification_config(
+	kvs: &Datastore,
+	jwt: &catalog::JwtAccess,
+	header: &jsonwebtoken::Header,
+) -> Result<(DecodingKey, Validation)> {
+	let mut cf = match &jwt.verify {
+		catalog::JwtAccessVerify::Key(key) => decode_key(key.alg, key.key.as_bytes())?,
+		#[cfg(feature = "jwks")]
+		catalog::JwtAccessVerify::Jwks(jwks) => {
+			let Some(kid) = &header.kid else {
+				bail!(ExprError::InvalidFunctionArguments {
+					name: "token".to_string(),
+					message: "Missing token header 'kid'".to_string(),
+				});
+			};
+			jwks::config(kvs, kid, &jwks.url, header.alg).await?
+		}
+		#[cfg(not(feature = "jwks"))]
+		catalog::JwtAccessVerify::Jwks(_) => bail!(AuthError::AccessMethodMismatch),
+	};
+	apply_audience_validation(&mut cf.1, jwt);
+	Ok(cf)
+}
+
+/// Verifies a token issued by a `JWT` access method or a `BEARER` grant at the
+/// level `ns` and `db` name (root when neither), and on success authenticates
+/// the session there.
+///
+/// A `JWT` method's token carries its principal: its roles (`Viewer` when it
+/// carries none) and the identity [`access_actor_id`] derives. A `BEARER`
+/// method's token is only as good as the grant it was exchanged from, which
+/// [`bearer_grant_subject`] requires to be active still; the session acts as
+/// the granted system user, with the roles that user holds now. The session is
+/// left untouched on every failure.
+#[expect(clippy::too_many_arguments)]
+async fn access_method_token(
+	kvs: &Datastore,
+	session: &mut Session,
+	token: &str,
+	token_data: &TokenData<Claims>,
+	value: crate::val::Value,
+	ns: Option<&str>,
+	db: Option<&str>,
+	scope: GrantScope,
+	ac: &str,
+	de: &catalog::AccessDefinition,
+	jwt: &catalog::JwtAccess,
+) -> Result<()> {
+	let cf = verification_config(kvs, jwt, &token_data.header).await?;
+	// Verify the token
+	verify_token(token, &cf.0, &cf.1)?;
+	// The principal the token authenticates
+	let (actor, roles) = match &de.access_type {
+		catalog::AccessType::Bearer(_) => {
+			match bearer_grant_subject(kvs, scope, de, &token_data.claims).await? {
+				BearerSubject::User {
+					name,
+					roles,
+				} => (name, roles),
+				BearerSubject::Record => {
+					debug!("A record bearer grant's token cannot authenticate a system user");
+					bail!(AuthError::InvalidAuth);
+				}
+			}
+		}
+		catalog::AccessType::Record(_) | catalog::AccessType::Jwt(_) => {
+			let roles = match &token_data.claims.roles {
+				// If no role is provided, grant the viewer role
+				None => vec![Role::Viewer],
+				// If roles are provided, parse them
+				Some(roles) => roles
+					.iter()
+					.map(|r| -> Result<Role> {
+						Role::from_str(r.as_str())
+							.map_err(Error::IamError)
+							.map_err(anyhow::Error::new)
+					})
+					.collect::<Result<Vec<_>, _>>()?,
+			};
+			(access_actor_id(&de.name, &token_data.claims), roles)
+		}
+	};
+	// AUTHENTICATE clause
+	if let Some(au) = &de.authenticate {
+		// Setup the system session for executing the clause
+		let mut sess = access_session(de, ns, db, session)?;
+		sess.tk = Some(
+			crate::val::convert_value_to_public_value(
+				token_data.claims.clone().into_claims_object().into(),
+			)
+			.expect("claims conversion should succeed"),
+		);
+		authenticate_generic(kvs, &sess, au).await?;
+	}
+	let level = match (ns, db) {
+		(Some(ns), Some(db)) => Level::Database(ns.to_owned(), db.to_owned()),
+		(Some(ns), None) => Level::Namespace(ns.to_owned()),
+		(None, None) => Level::Root,
+		(None, Some(_)) => bail!(AuthError::InvalidAuth),
+	};
+	// Log the success
+	debug!("Authenticated at {level:?} with access method `{ac}`");
+	// Every fallible step is taken before the session is touched: a partial
+	// failure must leave the session in its pre-authentication state.
+	let session_exp = expiration(de.session_duration)?;
+	// Set the session
+	reset_previous_principal(session);
+	session.tk = Some(
+		crate::val::convert_value_to_public_value(value).expect("value conversion should succeed"),
+	);
+	if let Some(ns) = ns {
+		session.ns = Some(ns.to_owned());
+	}
+	if let Some(db) = db {
+		session.db = Some(db.to_owned());
+	}
+	session.ac = Some(ac.to_owned());
+	session.exp = session_exp;
+	session.au = Arc::new(Auth::new(Actor::new(actor, roles, level)));
+	Ok(())
+}
+
+/// Who a token issued by a `BEARER` access method authenticates.
+enum BearerSubject {
+	/// The granted record, which the token names as its `id`.
+	Record,
+	/// The granted system user, with the roles the user holds now.
+	User {
+		name: String,
+		roles: Vec<Role>,
+	},
+}
+
+/// Where the grants of an access method are stored: the level the method is
+/// defined at, resolved to ids.
+#[derive(Clone, Copy)]
+enum GrantScope {
+	Root,
+	Namespace(catalog::NamespaceId),
+	Database(catalog::NamespaceId, catalog::DatabaseId),
+}
+
+/// The subject of the grant a `BEARER` method's token was exchanged from,
+/// checked against the catalog as it stands: the token must name a grant
+/// (`GR`), and that grant must exist for the method `de` in `scope`, be
+/// neither revoked nor expired, and grant the subject the token names as its
+/// `id`. A system user must still exist, and is read with the roles it holds
+/// now. Revoking the grant, removing the user or changing the user's roles
+/// therefore takes effect at the next verification of a token already issued.
+///
+/// Every refusal is the opaque `InvalidAuth`, so a token never learns whether
+/// its grant was revoked, expired or never existed, or its user removed.
+async fn bearer_grant_subject(
+	kvs: &Datastore,
+	scope: GrantScope,
+	de: &catalog::AccessDefinition,
+	claims: &Claims,
+) -> Result<BearerSubject> {
+	let Some(grant_id) = claims.grant.as_deref() else {
+		debug!("A token for bearer access method `{}` names no grant", de.name);
+		bail!(AuthError::InvalidAuth);
+	};
+	let tx = kvs.transaction(Read).await?;
+	let subject = catch!(tx, bearer_grant_subject_in(&tx, scope, de, grant_id, claims).await);
+	tx.cancel().await?;
+	Ok(subject)
+}
+
+/// [`bearer_grant_subject`] within the transaction `tx`.
+async fn bearer_grant_subject_in(
+	tx: &crate::kvs::Transaction,
+	scope: GrantScope,
+	de: &catalog::AccessDefinition,
+	grant_id: &str,
+	claims: &Claims,
+) -> Result<BearerSubject> {
+	let invalid = || anyhow::Error::new(AuthError::InvalidAuth);
+	let grant = match scope {
+		GrantScope::Database(ns, db) => {
+			tx.get_db_access_grant(ns, db, &de.name, grant_id, None).await?
+		}
+		GrantScope::Namespace(ns) => tx.get_ns_access_grant(ns, &de.name, grant_id, None).await?,
+		GrantScope::Root => tx.get_root_access_grant(&de.name, grant_id, None).await?,
+	};
+	let Some(grant) = grant else {
+		debug!("Bearer access grant `{grant_id}` for method `{}` does not exist", de.name);
+		return Err(invalid());
+	};
+	crate::iam::signin::require_active_grant(&grant)?;
+	if claims.id.as_deref() != Some(grant.subject.id().as_str()) {
+		debug!("A token names a subject other than its bearer grant `{grant_id}`'s");
+		return Err(invalid());
+	}
+	let name = match &grant.subject {
+		catalog::Subject::Record(_) => return Ok(BearerSubject::Record),
+		catalog::Subject::User(name) => name,
+	};
+	let user = match scope {
+		GrantScope::Database(ns, db) => tx.get_db_user(ns, db, name, None).await?,
+		GrantScope::Namespace(ns) => tx.get_ns_user(ns, name, None).await?,
+		GrantScope::Root => tx.get_root_user(name, None).await?,
+	};
+	let Some(user) = user else {
+		debug!("The user of bearer access grant `{grant_id}` no longer exists");
+		return Err(invalid());
+	};
+	let roles =
+		user.roles.iter().map(|r| Role::from_str(r)).collect::<Result<Vec<_>, _>>().map_err(
+			|e| {
+				debug!(
+					"The user of bearer access grant `{grant_id}` holds a role that is not valid: {e}"
+				);
+				invalid()
+			},
+		)?;
+	Ok(BearerSubject::User {
+		name: name.clone(),
+		roles,
+	})
 }
 
 fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Result<()> {
@@ -968,14 +1334,11 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 		Ok(_) => Ok(()),
 		Err(err) => {
 			// Only transparently return certain token verification errors
-			match err.kind() {
-				jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
-					Err(anyhow::Error::new(Error::ExpiredToken))
-				}
-				_ => {
-					debug!("Error verifying authentication token: {err}");
-					Err(anyhow::Error::new(Error::InvalidAuth))
-				}
+			if let jsonwebtoken::errors::ErrorKind::ExpiredSignature = err.kind() {
+				Err(anyhow::Error::new(AuthError::ExpiredToken))
+			} else {
+				debug!("Error verifying authentication token: {err}");
+				Err(anyhow::Error::new(AuthError::InvalidAuth))
 			}
 		}
 	}
@@ -991,10 +1354,12 @@ mod tests {
 	use rstest::rstest;
 
 	use super::*;
+	use crate::err::exec_error;
+	use crate::exec::Error as ExecError;
+	use crate::expr::Literal;
+	use crate::expr::statements::define::DefineKind;
 	use crate::iam::token::{Audience, HEADER};
-	use crate::sql::statements::define::DefineKind;
-	use crate::sql::statements::define::user::PassType;
-	use crate::sql::{Ast, Literal};
+	use crate::syn::Query as Ast;
 
 	struct TestLevel {
 		level: &'static str,
@@ -1045,6 +1410,7 @@ mod tests {
 					Role::Viewer => "VIEWER",
 					Role::Editor => "EDITOR",
 					Role::Owner => "OWNER",
+					_ => unreachable!("unknown role"),
 				})
 				.collect();
 			format!("ROLES {}", roles.join(", "))
@@ -1111,9 +1477,10 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
-		use crate::iam::Error as IamError;
-		use crate::sql::statements::define::{DefineStatement, DefineUserStatement};
-		use crate::sql::{Base, Expr, TopLevelExpr};
+		use crate::expr::statements::define::{DefineStatement, DefineUserStatement};
+		use crate::expr::{Base, Expr};
+		use crate::iam::PolicyError;
+		use crate::syn::TopLevelExpr;
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
@@ -1146,16 +1513,20 @@ mod tests {
 			let user = DefineUserStatement {
 				kind: DefineKind::Default,
 				base,
-				name: crate::sql::Expr::Idiom(crate::sql::Idiom::field("user".to_string())),
+				name: crate::expr::Expr::Idiom(crate::expr::Idiom::field("user".to_string())),
 				// This is the Argon2id hash for "pass" with a random salt.
-				pass_type: PassType::Hash(
-					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
-						.to_string(),
-				),
+				hash: "$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
+					.to_string(),
+				hash_is_set: true,
+				scram: None,
 				roles: vec!["nonexistent".to_owned()],
-				token_duration: Expr::Literal(Literal::None),
-				session_duration: Expr::Literal(Literal::None),
+				duration: crate::expr::user::UserDuration {
+					token: Expr::Literal(Literal::None),
+					session: Expr::Literal(Literal::None),
+				},
+
 				comment: Expr::Literal(Literal::None),
+				..Default::default()
 			};
 
 			let ast = Ast {
@@ -1178,8 +1549,8 @@ mod tests {
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				IamError::InvalidRole(_) => {}
-				e => panic!("Unexpected error, expected IamError(InvalidRole) found {e}"),
+				PolicyError::InvalidRole(_) => {}
+				e => panic!("Unexpected error, expected PolicyError::InvalidRole found {e}"),
 			}
 		}
 	}
@@ -1263,7 +1634,8 @@ mod tests {
 			assert!(res.is_ok(), "Failed to sign in with token");
 			assert_eq!(sess.ns, level.ns.map(|s| s.to_string()));
 			assert_eq!(sess.db, level.db.map(|s| s.to_string()));
-			assert_eq!(sess.au.id(), "token");
+			// Sub-less token: the identity is the access name, length-prefixed.
+			assert_eq!(sess.au.id(), "5:token");
 
 			// Check roles
 			for role in AVAILABLE_ROLES {
@@ -1274,12 +1646,218 @@ mod tests {
 
 			// Ensure that the expiration is set correctly
 			let exp = sess.exp.unwrap();
-			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to match the defined duration"
+				"Session expiration is expected to be bounded by the token's exp"
 			);
+		}
+	}
+
+	#[rstest]
+	#[case::matching_audience(Some(Audience::Single("surrealdb-test".to_string())), false)]
+	#[case::mismatched_audience(Some(Audience::Single("invalid".to_string())), true)]
+	#[case::missing_audience(None, true)]
+	#[case::array_with_matching_audience(Some(Audience::Multiple(vec!["other".to_string(), "surrealdb-test".to_string()])), false)]
+	#[case::array_without_matching_audience(Some(Audience::Multiple(vec!["other".to_string(), "invalid".to_string()])), true)]
+	#[tokio::test]
+	async fn test_token_with_audience(
+		#[case] aud: Option<Audience>,
+		#[case] expect_error: bool,
+		#[values(
+			 TestLevel {
+				level: "ROOT",
+				ns: None,
+				db: None,
+			},
+			TestLevel {
+				level: "NS",
+				ns: Some("test"),
+				db: None,
+			},
+			TestLevel {
+				level: "DB",
+				ns: Some("test"),
+				db: Some("test"),
+			}
+		)]
+		level: TestLevel,
+	) {
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+
+		// Define the access token for that level with a required audience
+		ds.execute(
+			format!(
+				r#"
+				DEFINE ACCESS token ON {} TYPE JWT
+					ALGORITHM HS512 KEY 'secret' AUDIENCE "surrealdb-test"
+					DURATION FOR SESSION 30d
+				;
+			"#,
+				level.level
+			)
+			.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		// Prepare the claims object
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ac: Some("token".to_string()),
+			aud,
+			ns: level.ns.map(|s| s.to_string()),
+			db: level.db.map(|s| s.to_string()),
+			..Claims::default()
+		};
+
+		// Create the token
+		let key = EncodingKey::from_secret("secret".as_ref());
+		let enc = encode(&HEADER, &claims, &key).unwrap();
+
+		// Authenticate with the token
+		let mut sess = Session::default();
+		let res = token(&ds, &mut sess, &enc).await;
+
+		if expect_error {
+			assert!(res.is_err(), "Unexpected success with audience case");
+		} else {
+			assert!(res.is_ok(), "Failed to sign in with token: {:?}", res);
+			// Sub-less token: the identity is the access name, length-prefixed.
+			assert_eq!(sess.au.id(), "5:token");
+		}
+	}
+
+	#[rstest]
+	#[tokio::test]
+	async fn test_token_without_configured_audience(
+		#[values(
+			 TestLevel {
+				level: "ROOT",
+				ns: None,
+				db: None,
+			},
+			TestLevel {
+				level: "NS",
+				ns: Some("test"),
+				db: None,
+			},
+			TestLevel {
+				level: "DB",
+				ns: Some("test"),
+				db: Some("test"),
+			}
+		)]
+		level: TestLevel,
+	) {
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+
+		// Define the access token for that level without an audience
+		ds.execute(
+			format!(
+				r#"
+				DEFINE ACCESS token ON {} TYPE JWT
+					ALGORITHM HS512 KEY 'secret' DURATION FOR SESSION 30d
+				;
+			"#,
+				level.level
+			)
+			.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		// Any `aud` claim is ignored when the access method defines no audience
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ac: Some("token".to_string()),
+			aud: Some(Audience::Single("anything".to_string())),
+			ns: level.ns.map(|s| s.to_string()),
+			db: level.db.map(|s| s.to_string()),
+			..Claims::default()
+		};
+
+		// Create the token
+		let key = EncodingKey::from_secret("secret".as_ref());
+		let enc = encode(&HEADER, &claims, &key).unwrap();
+
+		// Authenticate with the token
+		let mut sess = Session::default();
+		let res = token(&ds, &mut sess, &enc).await;
+		assert!(res.is_ok(), "Failed to sign in with token: {:?}", res);
+		// Sub-less token: the identity is the access name, length-prefixed.
+		assert_eq!(sess.au.id(), "5:token");
+	}
+
+	#[rstest]
+	#[case::matching_audience(Some(Audience::Single("surrealdb-test".to_string())), false)]
+	#[case::mismatched_audience(Some(Audience::Single("invalid".to_string())), true)]
+	#[case::missing_audience(None, true)]
+	#[tokio::test]
+	async fn test_token_record_with_audience(
+		#[case] aud: Option<Audience>,
+		#[case] expect_error: bool,
+	) {
+		let secret = "secret";
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!(
+				r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY '{secret}' AUDIENCE "surrealdb-test"
+				DURATION FOR SESSION 30d;
+
+			CREATE user:test;
+			"#
+			)
+			.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		// Prepare the claims object
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			ac: Some("token".to_string()),
+			id: Some(syn::record_id("user:test").unwrap().to_sql()),
+			aud,
+			..Claims::default()
+		};
+
+		// Create the token
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let enc = encode(&HEADER, &claims, &key).unwrap();
+
+		// Authenticate with the token
+		let mut sess = Session::default();
+		let res = token(&ds, &mut sess, &enc).await;
+
+		if expect_error {
+			assert!(res.is_err(), "Unexpected success with audience case");
+		} else {
+			assert!(res.is_ok(), "Failed to sign in with token: {:?}", res);
+			assert_eq!(sess.au.id(), "user:test");
 		}
 	}
 
@@ -1363,11 +1941,11 @@ mod tests {
 
 				// Ensure that the expiration is set correctly
 				let exp = sess.exp.unwrap();
-				let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
-				let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+				let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+				let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 				assert!(
 					exp > min_exp && exp < max_exp,
-					"Session expiration is expected to match the defined duration in case"
+					"Session expiration is expected to be bounded by the token's exp in case"
 				);
 			}
 		}
@@ -1459,11 +2037,11 @@ mod tests {
 			// Session expiration has been set explicitly
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to match the defined duration"
+				"Session expiration is expected to be bounded by the token's exp"
 			);
 			let tk = match sess.tk {
 				Some(crate::types::PublicValue::Object(tk)) => tk,
@@ -1633,7 +2211,10 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
-			assert_eq!(sess.exp, None, "Default session expiration is expected to be None");
+			assert_eq!(
+				sess.exp, claims.exp,
+				"With no session duration the token's exp bounds the session"
+			);
 		}
 
 		//
@@ -1726,6 +2307,168 @@ mod tests {
 		}
 	}
 
+	// Every holder of a token issued by one `DEFINE ACCESS` shared an actor
+	// identity, because it was the access method's name. `Auth::id()` is the
+	// identity half of the fingerprints the MCP transport's per-request subject
+	// re-check and `AuthPrincipalSnapshot` both take, so two different users of
+	// one access method were indistinguishable to both.
+	#[tokio::test]
+	async fn test_token_actor_id_distinguishes_subjects_of_one_access_method() {
+		let secret = "jwt_secret_that_is_long_enough_for_hs512_signing_in_tests";
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			&format!(
+				r#"DEFINE ACCESS api ON DATABASE TYPE JWT
+					ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 1h;"#
+			),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let key = EncodingKey::from_secret(secret.as_ref());
+		// Two tokens for the same access method differing only in subject and
+		// roles, exactly as two users of one method would be issued.
+		let sign = |subject: &str, roles: Vec<String>| {
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("api".to_string()),
+				sub: Some(subject.to_string()),
+				roles: Some(roles),
+				..Claims::default()
+			};
+			encode(&HEADER, &claims, &key).unwrap()
+		};
+
+		let mut alice_sess = Session::default();
+		token(&ds, &mut alice_sess, &sign("alice", vec!["Editor".to_string()]))
+			.await
+			.expect("alice's token must verify");
+		let mut bob_sess = Session::default();
+		token(&ds, &mut bob_sess, &sign("bob", vec!["Viewer".to_string()]))
+			.await
+			.expect("bob's token must verify");
+
+		assert_ne!(
+			alice_sess.au.id(),
+			bob_sess.au.id(),
+			"two subjects of one access method must not share an actor identity"
+		);
+		// The identity is scoped by the access method, so subjects cannot
+		// collide across methods.
+		// The identity is the access name length-prefixed (so a `/` in an access
+		// name can't collide two subjects across methods), then the subject.
+		assert_eq!(alice_sess.au.id(), "3:api/alice");
+		assert_eq!(bob_sess.au.id(), "3:api/bob");
+		// The level still describes the access path both were granted.
+		assert_eq!(alice_sess.au.level(), bob_sess.au.level());
+
+		// The same subject presented twice is stable, so a legitimate caller is
+		// not rejected by their own re-presented token.
+		let mut again = Session::default();
+		token(&ds, &mut again, &sign("alice", vec!["Editor".to_string()]))
+			.await
+			.expect("alice's token must verify again");
+		assert_eq!(again.au.id(), alice_sess.au.id());
+
+		// A token carrying no `sub` claim keeps naming the access method: that is
+		// the most that can be said about it.
+		let anonymous_subject = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			ac: Some("api".to_string()),
+			..Claims::default()
+		};
+		let mut plain = Session::default();
+		token(&ds, &mut plain, &encode(&HEADER, &anonymous_subject, &key).unwrap())
+			.await
+			.expect("a token with no subject claim must still verify");
+		assert_eq!(plain.au.id(), "3:api");
+	}
+
+	// An access name is an ident that may contain '/', and `sub` is an arbitrary
+	// claim, so a bare "{access}/{sub}" join is ambiguous: access "a" + subject
+	// "b/c" and access "a/b" + subject "c" would both render "a/b/c", colliding
+	// two subjects across methods — the very thing the per-subject identity
+	// exists to prevent. The length prefix keeps the encoding injective.
+	#[test]
+	fn access_actor_id_encoding_is_injective() {
+		let with_sub = |access: &str, sub: &str| {
+			access_actor_id(
+				access,
+				&Claims {
+					sub: Some(sub.to_owned()),
+					..Claims::default()
+				},
+			)
+		};
+		let no_sub = |access: &str| access_actor_id(access, &Claims::default());
+
+		assert_ne!(
+			with_sub("a", "b/c"),
+			with_sub("a/b", "c"),
+			"a '/' in the access name must not collide two subjects across methods"
+		);
+		assert_ne!(
+			no_sub("a/x"),
+			with_sub("a", "x"),
+			"a sub-less identity must not collide with a with-subject one"
+		);
+		// The same principal is stable across presentations.
+		assert_eq!(with_sub("api", "alice"), with_sub("api", "alice"));
+		assert_eq!(no_sub("api"), no_sub("api"));
+	}
+
+	#[tokio::test]
+	async fn test_token_nbf_leeway() {
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
+				.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+		let present = |nbf_offset: Duration| {
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some((Utc::now() + nbf_offset).timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ac: Some("token".to_string()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let ds = &ds;
+			async move {
+				let mut sess = Session::default();
+				token(ds, &mut sess, &enc).await
+			}
+		};
+		// A clock stepped back a few seconds leaves the token valid.
+		present(Duration::seconds(5)).await.expect("a token a few seconds early is accepted");
+		// A token that is far from valid yet is still refused.
+		let err = present(Duration::hours(1)).await.expect_err("a distant nbf is refused");
+		assert_eq!(err.to_string(), "There was a problem with authentication");
+	}
+
 	#[tokio::test]
 	async fn test_expired_token() {
 		let secret = "jwt_secret";
@@ -1762,21 +2505,31 @@ mod tests {
 		let res = token(&ds, &mut sess, &enc).await;
 
 		let e = res.unwrap_err();
-		match e.downcast().expect("Unexpected error kind") {
-			Error::ExpiredToken => {}
-			e => panic!("Unexpected error, expected ExpiredToken found {e}"),
-		}
+		let AuthError::ExpiredToken = e.downcast().expect("Unexpected error kind") else {
+			panic!("Unexpected error, expected ExpiredToken");
+		};
 	}
 
 	#[tokio::test]
 	async fn test_token_authenticate_clause() {
+		/// How `token` is expected to fail.
+		///
+		/// The AUTHENTICATE clause can reject a token two ways, and they are
+		/// two different error types: user SurrealQL raising `THROW`, or the
+		/// clause declining, which is a plain authentication failure.
+		#[derive(Debug)]
+		enum ExpectedError {
+			Thrown(&'static str),
+			InvalidAuth,
+		}
+
 		#[derive(Debug)]
 		struct TestCase {
 			title: &'static str,
 			iss_claim: Option<&'static str>,
 			aud_claim: Option<Audience>,
 			error_statement: &'static str,
-			expected_error: Option<Error>,
+			expected_error: Option<ExpectedError>,
 		}
 
 		let test_cases = vec![
@@ -1802,7 +2555,7 @@ mod tests {
 				iss_claim: Some("surrealdb-test"),
 				aud_claim: Some(Audience::Single("invalid".to_string())),
 				error_statement: "THROW",
-				expected_error: Some(Error::Thrown("Invalid token audience string".to_string())),
+				expected_error: Some(ExpectedError::Thrown("Invalid token audience string")),
 			},
 			TestCase {
 				title: "with correct 'iss' claim but invalid 'aud' claim, multiple audiences",
@@ -1812,14 +2565,14 @@ mod tests {
 					"surrealdb-test-different".to_string(),
 				])),
 				error_statement: "THROW",
-				expected_error: Some(Error::Thrown("Invalid token audience array".to_string())),
+				expected_error: Some(ExpectedError::Thrown("Invalid token audience array")),
 			},
 			TestCase {
 				title: "with correct 'iss' claim but invalid 'aud' claim, generic error",
 				iss_claim: Some("surrealdb-test"),
 				aud_claim: Some(Audience::Single("invalid".to_string())),
 				error_statement: "RETURN",
-				expected_error: Some(Error::InvalidAuth),
+				expected_error: Some(ExpectedError::InvalidAuth),
 			},
 		];
 
@@ -1900,19 +2653,23 @@ mod tests {
 
 				if let Some(expected_err) = &case.expected_error {
 					assert!(res.is_err(), "Unexpected success for case: {:?}", case);
-					let err = res.unwrap_err().downcast().expect("Unexpected error type");
-					match (expected_err, &err) {
-						(Error::InvalidAuth, Error::InvalidAuth) => {}
-						(Error::Thrown(expected_msg), Error::Thrown(msg))
-							if expected_msg == msg => {}
-						_ => panic!("Unexpected error for case: {:?}, got: {:?}", case, err),
-					}
+					let err = res.unwrap_err();
+					let matched = match expected_err {
+						ExpectedError::Thrown(expected_msg) => {
+							matches!(exec_error(&err), Some(ExecError::Thrown(msg)) if msg == expected_msg)
+						}
+						ExpectedError::InvalidAuth => {
+							matches!(err.downcast_ref::<AuthError>(), Some(AuthError::InvalidAuth))
+						}
+					};
+					assert!(matched, "Unexpected error for case: {:?}, got: {:?}", case, err);
 				} else {
 					assert!(res.is_ok(), "Failed to sign in with token for case: {:?}", case);
 					assert_eq!(sess.ns, level.ns.map(|s| s.to_string()));
 					assert_eq!(sess.db, level.db.map(|s| s.to_string()));
 					assert_eq!(sess.ac, Some("user".to_string()));
-					assert_eq!(sess.au.id(), "user");
+					// Sub-less token: the identity is the access name, length-prefixed.
+					assert_eq!(sess.au.id(), "4:user");
 
 					// Check auth level
 					assert_eq!(sess.au.level().ns(), level.ns);
@@ -1941,16 +2698,285 @@ mod tests {
 					// Check expiration
 					let exp = sess.exp.unwrap();
 					let min_exp =
-						(Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+						(Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
 					let max_exp =
-						(Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+						(Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 					assert!(
 						exp > min_exp && exp < max_exp,
-						"Session expiration is expected to match the defined duration in case: {:?}",
+						"Session expiration is expected to be bounded by the token's exp in case: {:?}",
 						case
 					);
 				}
 			}
+		}
+	}
+
+	/// Returns the names of the namespaces currently defined at root level.
+	async fn root_namespaces(ds: &Datastore) -> Vec<String> {
+		let mut info = ds.execute("INFO FOR ROOT", &Session::owner(), None).await.unwrap();
+		let info = info.remove(0).result.unwrap();
+		let crate::types::PublicValue::Object(info) = info else {
+			panic!("INFO FOR ROOT did not return an object: {info:?}");
+		};
+		let Some(crate::types::PublicValue::Object(namespaces)) = info.get("namespaces") else {
+			panic!("INFO FOR ROOT did not list namespaces: {info:?}");
+		};
+		namespaces.keys().cloned().collect()
+	}
+
+	/// Checks the outcome of presenting a token whose AUTHENTICATE clause
+	/// attempts a root-level operation. The namespaces in `present` must still
+	/// exist, those in `absent` must not, and verification must have been
+	/// rejected with `InvalidAuth`. Namespace state is checked before the
+	/// verification result so that a clause which ran with excess privileges
+	/// is reported as such rather than as an unexpected success.
+	async fn assert_root_operation_denied(
+		ds: &Datastore,
+		res: Result<()>,
+		present: &[&str],
+		absent: &[&str],
+		clause: &str,
+	) {
+		let namespaces = root_namespaces(ds).await;
+		for ns in present {
+			assert!(
+				namespaces.iter().any(|n| n == ns),
+				"Namespace `{ns}` was removed by a {clause} AUTHENTICATE clause: {namespaces:?}"
+			);
+		}
+		for ns in absent {
+			assert!(
+				!namespaces.iter().any(|n| n == ns),
+				"Namespace `{ns}` was created by a {clause} AUTHENTICATE clause: {namespaces:?}"
+			);
+		}
+		assert!(
+			res.is_err(),
+			"Token was accepted despite a root-level statement in a {clause} AUTHENTICATE clause"
+		);
+		let AuthError::InvalidAuth = res.unwrap_err().downcast().expect("Unexpected error kind")
+		else {
+			panic!("Unexpected error, expected InvalidAuth");
+		};
+	}
+
+	#[tokio::test]
+	async fn test_token_authenticate_clause_minimum_privileges() {
+		// The AUTHENTICATE clause must be evaluated with a session scoped to
+		// the access method's own level, never at root level. A database- or
+		// namespace-level access definer must not be able to execute
+		// root-level statements (e.g. removing another namespace) when a
+		// token is presented.
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let root = Session::owner();
+
+		// Database-level JWT access attempting a root-level operation
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			ds.execute("DEFINE NAMESPACE second", &root, None).await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON DATABASE TYPE JWT
+						ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							REMOVE NAMESPACE second;
+						}}
+						DURATION FOR SESSION 2h
+					;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let claims = Claims {
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+			assert_root_operation_denied(&ds, res, &["second"], &[], "database-level").await;
+		}
+
+		// Namespace-level JWT access attempting a root-level operation
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON NAMESPACE TYPE JWT
+						ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							DEFINE NAMESPACE pwned;
+						}}
+						DURATION FOR SESSION 2h
+					;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let claims = Claims {
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+			// The access method's own namespace anchors the listing, so an
+			// empty or malformed INFO FOR ROOT cannot satisfy the check
+			assert_root_operation_denied(&ds, res, &["test"], &["pwned"], "namespace-level").await;
+		}
+
+		// Record access with an `id` claim attempting a root-level operation
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			ds.execute("DEFINE NAMESPACE second", &root, None).await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON DATABASE TYPE RECORD
+						WITH JWT ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							REMOVE NAMESPACE second;
+							RETURN $auth;
+						}}
+						DURATION FOR SESSION 2h
+					;
+
+					CREATE user:1;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let claims = Claims {
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				id: Some("user:1".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+			assert_root_operation_denied(&ds, res, &["second"], &[], "record-access").await;
+		}
+
+		// Record access without an `id` claim attempting a root-level operation.
+		// This takes the path where the AUTHENTICATE clause itself resolves the
+		// record, which is only reachable when the token carries no `id`.
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			ds.execute("DEFINE NAMESPACE second", &root, None).await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON DATABASE TYPE RECORD
+						WITH JWT ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							REMOVE NAMESPACE second;
+							RETURN user:1;
+						}}
+						DURATION FOR SESSION 2h
+					;
+
+					CREATE user:1;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let claims = Claims {
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+			assert_root_operation_denied(&ds, res, &["second"], &[], "record-access").await;
+		}
+
+		// Root-level JWT access performing the same root-level operation. This
+		// is the positive control: the clause is legitimately evaluated at
+		// root level, so the token is accepted and the namespace is removed.
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			ds.execute("DEFINE NAMESPACE second", &root, None).await.unwrap();
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON ROOT TYPE JWT
+						ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							REMOVE NAMESPACE second;
+						}}
+						DURATION FOR SESSION 2h
+					;
+				"#
+				)
+				.as_str(),
+				&root,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let claims = Claims {
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+			assert!(res.is_ok(), "Root-level AUTHENTICATE clause was rejected: {res:?}");
+			let namespaces = root_namespaces(&ds).await;
+			assert!(
+				!namespaces.iter().any(|n| n == "second"),
+				"Root-level AUTHENTICATE clause did not remove the namespace: {namespaces:?}"
+			);
 		}
 	}
 
@@ -2021,11 +3047,11 @@ mod tests {
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow the defined duration"
+				"Session expiration is expected to be bounded by the token's exp"
 			);
 		}
 
@@ -2102,11 +3128,11 @@ mod tests {
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow the defined duration"
+				"Session expiration is expected to be bounded by the token's exp"
 			);
 		}
 
@@ -2162,10 +3188,10 @@ mod tests {
 			let res = token(&ds, &mut sess, &enc).await;
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				Error::Thrown(e) => assert_eq!(e, "This user is not enabled"),
-				e => panic!("Unexpected error, expected Thrown found {e:?}"),
-			}
+			let ExecError::Thrown(e) = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected Thrown");
+			};
+			assert_eq!(e, "This user is not enabled");
 		}
 
 		// Test AUTHENTICATE clause not returning a value
@@ -2215,9 +3241,306 @@ mod tests {
 			let res = token(&ds, &mut sess, &enc).await;
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
-				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
+			let AuthError::InvalidAuth = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected InvalidAuth");
+			};
+		}
+	}
+
+	/// A token the decoder cannot even parse is an authentication refusal, not
+	/// an internal failure, and carries none of the decoder's own account of
+	/// what was wrong with it.
+	#[rstest]
+	#[case::not_a_jwt("garbage")]
+	#[case::wrong_segment_count("aaaa.bbbb")]
+	#[case::unparseable_segments("aaaa.bbbb.cccc")]
+	#[case::empty("")]
+	#[tokio::test]
+	async fn test_token_malformed(#[case] malformed: &'static str) {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut sess = Session::default();
+
+		let e = token(&ds, &mut sess, malformed).await.unwrap_err();
+		assert!(
+			matches!(e.downcast_ref::<AuthError>(), Some(AuthError::InvalidAuth)),
+			"expected InvalidAuth, got: {e}"
+		);
+
+		let public = crate::err::anyhow_to_types_error(e);
+		assert!(
+			public.is_not_allowed(),
+			"expected an auth refusal, got {} with message: {}",
+			public.kind_str(),
+			public.message()
+		);
+		assert_eq!(
+			public.message(),
+			AuthError::InvalidAuth.to_string(),
+			"the public message must not describe why the token failed to decode"
+		);
+	}
+}
+
+/// `CONTEXT` on the two token-verification paths that settle on a record.
+#[cfg(test)]
+mod context_clause_tests {
+	use chrono::{Duration, Utc};
+	use jsonwebtoken::{EncodingKey, encode};
+	use surrealdb_types::Value as PV;
+
+	use super::*;
+	use crate::iam::token::HEADER;
+
+	fn signed(secret: &str, claims: &Claims) -> String {
+		encode(&HEADER, claims, &EncodingKey::from_secret(secret.as_ref())).unwrap()
+	}
+
+	fn base_claims() -> Claims {
+		Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			ac: Some("token".to_string()),
+			..Claims::default()
+		}
+	}
+
+	/// A token carrying an `id` claim: CONTEXT runs with `$auth` bound to that
+	/// record, with no AUTHENTICATE clause in play.
+	#[tokio::test]
+	async fn token_with_id_claim_computes_the_context() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY 'secret'
+				CONTEXT ( SELECT VALUE org FROM grant WHERE owner = $auth )
+				DURATION FOR SESSION 30d;
+			DEFINE TABLE grant SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+			CREATE user:test;
+			CREATE grant:a SET owner = user:test, org = "acme";
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut claims = base_claims();
+		claims.id = Some("user:test".to_string());
+		let enc = signed("secret", &claims);
+
+		let mut sess = Session::default();
+		token(&ds, &mut sess, &enc).await.expect("token verification failed");
+		assert_eq!(
+			sess.data.as_ref().expect("data").public().clone().into_array().unwrap().into_vec(),
+			vec![PV::String("acme".to_owned())]
+		);
+
+		// A token that fails signature verification never reaches the clause,
+		// and leaves the session untouched.
+		let bad = signed("wrong-secret", &claims);
+		let mut sess = Session::default();
+		assert!(token(&ds, &mut sess, &bad).await.is_err());
+		assert!(sess.data.is_none());
+	}
+
+	/// A token with no `id` claim, where AUTHENTICATE derives the record:
+	/// CONTEXT must see the identity AUTHENTICATE settled on.
+	#[tokio::test]
+	async fn token_authenticated_by_clause_computes_the_context() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY 'secret'
+				AUTHENTICATE ( SELECT * FROM ONLY user:test )
+				CONTEXT ( RETURN $auth )
+				DURATION FOR SESSION 30d;
+			DEFINE TABLE user SCHEMALESS PERMISSIONS FULL;
+			CREATE user:test;
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let enc = signed("secret", &base_claims());
+		let mut sess = Session::default();
+		token(&ds, &mut sess, &enc).await.expect("token verification failed");
+		assert_eq!(
+			sess.data.as_ref().expect("data").public(),
+			&PV::RecordId(surrealdb_types::RecordId::new("user", "test"))
+		);
+	}
+
+	/// Re-authenticating a session replaces the principal, so it must not
+	/// leave the previous principal's CONTEXT payload behind.
+	///
+	/// `data` is an authorisation grant — the same grounds on which `clear`
+	/// and `reset` drop it. Only the paths that settle a record identity used
+	/// to assign it, so a session that authenticated as `user:1` and then
+	/// re-authenticated as a database-level principal kept carrying `user:1`'s
+	/// grants into every permission it evaluated. An empty `roles` array is
+	/// what makes that observable: it leaves the actor without the viewer
+	/// role, so table permissions are still enforced for the new principal.
+	#[tokio::test]
+	async fn re_authentication_drops_the_previous_principals_payload() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY 'secret'
+				CONTEXT ( SELECT VALUE org FROM grant WHERE owner = $auth )
+				DURATION FOR SESSION 30d;
+			DEFINE ACCESS tok ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'other'
+				DURATION FOR SESSION 30d;
+			DEFINE TABLE grant SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+			DEFINE TABLE doc SCHEMALESS PERMISSIONS FOR select WHERE org IN $session.data;
+			CREATE user:1;
+			CREATE grant:a SET owner = user:1, org = "acme";
+			CREATE doc:1 SET org = "acme";
+			CREATE doc:2 SET org = "initech";
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		// Authenticate as the record: the payload is populated.
+		let mut claims = base_claims();
+		claims.ac = Some("user".to_string());
+		claims.id = Some("user:1".to_string());
+		let mut sess = Session::default();
+		token(&ds, &mut sess, &signed("secret", &claims)).await.expect("record token");
+		assert!(sess.data.is_some(), "the record path populates the payload");
+		assert!(sess.rd.is_some());
+
+		// Re-authenticate the SAME session as a different principal, through
+		// an access method that has no record identity and no CONTEXT clause.
+		let mut claims = base_claims();
+		claims.ac = Some("tok".to_string());
+		claims.roles = Some(vec![]);
+		token(&ds, &mut sess, &signed("other", &claims)).await.expect("database token");
+
+		assert_eq!(sess.ac.as_deref(), Some("tok"));
+		assert!(sess.data.is_none(), "the previous principal's CONTEXT payload must not survive");
+		assert!(sess.rd.is_none(), "the previous principal's record identity must not survive");
+
+		let res = ds.execute("SELECT VALUE id FROM doc ORDER BY id", &sess, None).await.unwrap();
+		let rows = res.into_iter().next().unwrap().result.unwrap().into_array().unwrap().into_vec();
+		assert_eq!(rows, Vec::<PV>::new(), "a stale payload must not keep granting rows");
+	}
+
+	/// An access method without the clause is untouched on this path too.
+	#[tokio::test]
+	async fn token_without_the_clause_leaves_no_data() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY 'secret'
+				DURATION FOR SESSION 30d;
+			CREATE user:test;
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut claims = base_claims();
+		claims.id = Some("user:test".to_string());
+		let mut sess = Session::default();
+		token(&ds, &mut sess, &signed("secret", &claims)).await.expect("token verification");
+		assert!(sess.data.is_none());
+	}
+}
+
+/// How long a session lives against the token it came with: a session
+/// established with a token ends at the token's `exp`, while a session signed
+/// in with credentials lasts for its SESSION duration alone.
+#[cfg(test)]
+mod token_expiry_tests {
+	use surrealdb_rpc::Token;
+
+	use super::*;
+	use crate::iam::signin::root_user;
+
+	fn access(token: Token) -> String {
+		match token {
+			Token::Access(access) => access,
+			Token::WithRefresh {
+				access,
+				..
+			} => access,
+		}
+	}
+
+	/// The `exp` claim of a server-issued token.
+	fn claimed_exp(token: &str) -> i64 {
+		decode_claims_unverified(token).unwrap().claims.exp.expect("the token has an exp")
+	}
+
+	async fn datastore(sql: &str) -> Arc<Datastore> {
+		let ds = Datastore::new("memory").await.unwrap();
+		ds.execute(sql, &Session::owner(), None).await.unwrap();
+		ds
+	}
+
+	#[tokio::test]
+	async fn a_credential_signin_is_not_bound_by_its_token() {
+		let ds = datastore(
+			"DEFINE USER short ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1s;
+			DEFINE USER long ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1s, FOR SESSION 1d;",
+		)
+		.await;
+		// No SESSION duration: the session never expires, and outlives the
+		// token whose claims it holds as `$token`
+		let mut sess = Session::default();
+		root_user(&ds, &mut sess, "short".into(), "pass".into()).await.unwrap();
+		assert_eq!(sess.exp, None);
+		tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+		assert!(!sess.expired(), "an expired `$token` must not expire a credential session");
+		// A SESSION duration: the session expires with it, not with the token
+		let mut sess = Session::default();
+		let tk = access(root_user(&ds, &mut sess, "long".into(), "pass".into()).await.unwrap());
+		let exp = sess.exp.expect("the session expires");
+		assert!(exp > claimed_exp(&tk) + 3600, "session exp {exp} is bound by the token");
+	}
+
+	#[tokio::test]
+	async fn a_token_session_ends_with_its_token() {
+		let ds = datastore(
+			"DEFINE USER unset ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1h;
+			DEFINE USER long ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION 1d;
+			DEFINE USER short ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION 1m;",
+		)
+		.await;
+		for (user, bound_by_token) in [("unset", true), ("long", true), ("short", false)] {
+			let tk = access(
+				root_user(&ds, &mut Session::default(), user.into(), "pass".into()).await.unwrap(),
+			);
+			let mut sess = Session::default();
+			token(&ds, &mut sess, &tk).await.unwrap();
+			let exp = sess.exp.expect("a token session always expires");
+			if bound_by_token {
+				assert_eq!(
+					exp,
+					claimed_exp(&tk),
+					"user `{user}`: the token's exp bounds the session"
+				);
+			} else {
+				assert!(exp < claimed_exp(&tk), "user `{user}`: the shorter SESSION duration wins");
 			}
 		}
 	}

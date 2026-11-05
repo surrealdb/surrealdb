@@ -1,0 +1,11 @@
+1ns;
+1us;
+1µs;
+1ms;
+1s;
+1m;
+1h;
+1d;
+1w;
+1y;
+1ns1us1µs1ms1s1m1h1d1w1y;

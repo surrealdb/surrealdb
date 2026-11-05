@@ -1,0 +1,10 @@
+### read-only: $f(false)
+'skipped'
+### read-only: $f(true)
+error: Invalid statement: Cannot run CREATE on a read only transaction
+### PermissionPredicate: $f(true)
+error: A PERMISSIONS clause cannot contain a statement that modifies data
+### ComputedField: $f(true)
+error: A COMPUTED clause cannot contain a statement that modifies data
+### SurrealismReadOnly: $f(true)
+error: A read-only Surrealism function cannot modify data; the function must declare that it requires a writeable transaction

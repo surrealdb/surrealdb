@@ -1,0 +1,13 @@
+/**
+[env]
+namespace = "metadata_ns"
+database = "metadata_db"
+
+[test]
+issue = 2194
+reason = "SQL database and schema aliases expose the selected database from the execution session."
+
+[[test.results]]
+value = "[{ db: 'metadata_db', s: 'metadata_db' }]"
+*/
+SELECT database() AS db, schema() AS s;

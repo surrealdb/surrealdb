@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "`score != NONE` must push down to a BTree index as an exclusive lower bound `> NONE` and return the same rows as the table-scan + filter path (NONE sorts first in BTree key ordering so this is exact). `score != NULL` is intentionally NOT pushed because that would also drop NONE rows even though `NONE != NULL` is true under SurrealQL semantics."
@@ -29,7 +28,10 @@ value = "[{ id: t:d, score: 10 }]"
 value = "[{ id: t:b }, { id: t:c }, { id: t:d }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]\n    IndexScan [ctx: Db] [index: idx_score, access: >NONE, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [table: t, index: idx_score, access: >NONE, direction: Forward]
+''''
 
 [[test.results]]
 value = "[{ id: t:b }, { id: t:c }, { id: t:d }]"
@@ -38,7 +40,10 @@ value = "[{ id: t:b }, { id: t:c }, { id: t:d }]"
 value = "[{ id: t:a }, { id: t:c }, { id: t:d }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]\n    TableScan [ctx: Db] [table: t, direction: Forward, predicate: score != NULL, pre_decode_filter: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: score != NULL, pre_decode_filter: yes]
+''''
 
 [[test.results]]
 value = "[{ id: t:a }, { id: t:c }, { id: t:d }]"

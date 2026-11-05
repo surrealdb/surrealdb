@@ -1,9 +1,7 @@
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
-use surrealdb_types::Value;
-
-use crate::conn::Command;
+use crate::conn::ctx;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::WaitFor;
 use crate::{Connection, Result, Surreal};
@@ -42,24 +40,12 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			let result = router
-				.execute_value(
-					self.client.session_id,
-					Command::Use {
-						namespace: self.ns,
-						database: Some(self.db),
-					},
-				)
+				.engine
+				.use_ns_db(ctx(self.client.session_id), self.ns, Some(self.db))
 				.await?;
 			self.client.inner.waiter.0.send(Some(WaitFor::Database)).ok();
 
-			let Value::Object(obj) = result else {
-				return Ok((None, None));
-			};
-
-			let namespace = obj.get("namespace").and_then(|v| v.as_string()).map(String::from);
-			let database = obj.get("database").and_then(|v| v.as_string()).map(String::from);
-
-			Ok((namespace, database))
+			Ok(result)
 		})
 	}
 }

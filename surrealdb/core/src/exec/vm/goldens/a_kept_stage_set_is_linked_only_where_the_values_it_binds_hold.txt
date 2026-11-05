@@ -1,0 +1,8 @@
+### w = 1, run 0
+{ id: a:1, seen: [b:1] }
+### w = 2, run 1
+{ id: a:1, seen: [b:2] }
+### w = 1, run 2
+{ id: a:1, seen: [b:1] }
+### w = 2, run 3
+{ id: a:1, seen: [b:2] }

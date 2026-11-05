@@ -20,6 +20,10 @@ impl TestReport {
 			// nothing to report
 			return;
 		}
+		if self.grade() == TestGrade::Skipped {
+			// Skips are accounted for in the summary count, not printed per-test.
+			return;
+		}
 		let use_color = match color {
 			ColorMode::Always => true,
 			ColorMode::Never => false,
@@ -35,7 +39,19 @@ impl TestReport {
 	fn display_grade(&self, use_color: bool, f: &mut Fmt) -> fmt::Result {
 		self.display_grade_header(use_color, f)?;
 
-		f.indent(|f| match self.kind {
+		f.indent(|f| self.display_kind(&self.kind, use_color, f))
+	}
+
+	/// Render one grade. Recursive: a chain failure renders the locating header
+	/// and then delegates to the hop's own kind, so a mismatch inside a walk
+	/// reads exactly like the same mismatch in a plain pairwise run.
+	fn display_kind(
+		&self,
+		kind: &super::TestReportKind,
+		use_color: bool,
+		f: &mut Fmt,
+	) -> fmt::Result {
+		match *kind {
 			super::TestReportKind::Error(ref e) => self.display_run_error(e, f),
 			super::TestReportKind::NoExpectation {
 				ref output,
@@ -76,6 +92,18 @@ impl TestReport {
 					f.indent(|f| writeln!(f, "- Signin error: {got}"))
 				})
 			}
+			super::TestReportKind::MismatchedRequest {
+				ref got,
+				ref expected,
+			} => {
+				writeln!(f, "> Test returned invalid request error")?;
+				f.indent(|f| {
+					writeln!(f, "= Expected:")?;
+					f.indent(|f| writeln!(f, "- Request error: {expected}"))?;
+					writeln!(f, "= Got:")?;
+					f.indent(|f| writeln!(f, "- Request error: {got}"))
+				})
+			}
 			super::TestReportKind::MismatchedSignup {
 				ref got,
 				ref expected,
@@ -91,7 +119,29 @@ impl TestReport {
 			super::TestReportKind::MismatchedValues(ref v) => {
 				Self::display_mismatched_values(v, use_color, f)
 			}
-		})
+			super::TestReportKind::ChainHop {
+				ref version,
+				hop,
+				hops,
+				outputs: _,
+				ref inner,
+			} => {
+				writeln!(f, "> Chain failed at hop {hop}/{hops}, running version {version}")?;
+				writeln!(
+					f,
+					"> Every earlier version in the walk verified; this is the first that did not."
+				)?;
+				f.indent(|f| self.display_kind(inner, use_color, f))
+			}
+			super::TestReportKind::RepairContract(ref explanation) => {
+				writeln!(f, "> Declared `[[test.repair]]` does not describe the code")?;
+				f.indent(|f| writeln!(f, "{explanation}"))
+			}
+			// Skips are filtered out before `display_grade` is reached.
+			super::TestReportKind::Skipped {
+				..
+			} => Ok(()),
+		}
 	}
 
 	fn display_grade_header(&self, use_color: bool, f: &mut Fmt) -> fmt::Result {
@@ -186,6 +236,8 @@ impl TestReport {
 					)?;
 				}
 			}
+			// Skips are filtered out before the header is rendered.
+			TestGrade::Skipped => {}
 		}
 		Ok(())
 	}
@@ -203,6 +255,37 @@ impl TestReport {
 			TestError::Import(import, error) => {
 				writeln!(f, "> Test failed, running import `{import}` caused an error:")?;
 				f.indent(|f| writeln!(f, "- {error}"))
+			}
+			TestError::LeakedRootState(x) => {
+				writeln!(
+					f,
+					"> Test failed, it created root-level state but is not marked `[env] remote-exclusive`:"
+				)?;
+				f.indent(|f| {
+					for x in x.iter() {
+						writeln!(f, "- {x}")?;
+					}
+					writeln!(
+						f,
+						"A remote run isolates tests by giving each its own namespace, so anything"
+					)?;
+					writeln!(
+						f,
+						"created outside one survives cleanup and is visible to every test running"
+					)?;
+					writeln!(
+						f,
+						"alongside. Set `remote-exclusive = true` in the test's `[env]` to run it on"
+					)?;
+					writeln!(
+						f,
+						"its own instead. The state above was seen while this test ran; when a"
+					)?;
+					writeln!(
+						f,
+						"test running alongside is the one that created it, mark that test."
+					)
+				})
 			}
 			TestError::BadCleanup(x) => {
 				writeln!(
@@ -241,6 +324,9 @@ impl TestReport {
 				TestOutputs::SigninError(res) => {
 					writeln!(f, "- Signin error: {res}")
 				}
+				TestOutputs::RequestError(res) => {
+					writeln!(f, "- Request error: {res}")
+				}
 			})
 		})
 	}
@@ -266,6 +352,10 @@ impl TestReport {
 					Some(x) => writeln!(f, "- Signup Error: {x}"),
 					None => writeln!(f, "- Any signup error"),
 				},
+				super::TestExpectation::Request(e) => match e {
+					Some(x) => writeln!(f, "- Request Error: {x}"),
+					None => writeln!(f, "- Any request error"),
+				},
 			})?;
 			writeln!(f, "= Got:")?;
 			f.indent(|f| match &mismatch.got {
@@ -273,6 +363,7 @@ impl TestReport {
 				TestOutputs::ParsingError(e) => writeln!(f, "- Parsing error: {e}"),
 				TestOutputs::SigninError(e) => writeln!(f, "- Signin error: {e}"),
 				TestOutputs::SignupError(e) => writeln!(f, "- Signup error: {e}"),
+				TestOutputs::RequestError(e) => writeln!(f, "- Request error: {e}"),
 			})
 		})
 	}
@@ -300,6 +391,35 @@ impl TestReport {
 					f.indent(|f| {
 						writeln!(f, "= Expected:")?;
 						f.indent(|f| Self::display_expectation(expected, f))
+					})
+				})?,
+				MismatchKind::Trace {
+					ref expected,
+					ref got,
+				} => f.indent(|f| {
+					writeln!(
+						f,
+						"> The trace of the statement at index `{}` did not match expectation.",
+						v.index
+					)?;
+					let shown = |trace: &Option<SurValue>| match trace {
+						Some(trace) => trace.clone(),
+						None => SurValue::None,
+					};
+					f.indent(|f| {
+						writeln!(f, "= Expected:")?;
+						f.indent(|f| Self::display_labelled_value("Trace", &shown(expected), f))?;
+						writeln!(f, "= Got:")?;
+						f.indent(|f| Self::display_labelled_value("Trace", &shown(got), f))?;
+						writeln!(f, "= Diff:")?;
+						f.indent(|f| {
+							Self::display_diff(
+								&Self::diffable(&shown(got)),
+								&Self::diffable(&shown(expected)),
+								use_color,
+								f,
+							)
+						})
 					})
 				})?,
 				MismatchKind::Value(ref x) => f.indent(|f| {
@@ -330,14 +450,16 @@ impl TestReport {
 							writeln!(f, "> Got a different value then was expected")?;
 							f.indent(|f| {
 								writeln!(f, "= Expected:")?;
-								f.indent(|f| writeln!(f, "- Value: {}", expected.to_sql()))?;
+								f.indent(|f| Self::display_labelled_value("Value", expected, f))?;
 								writeln!(f, "= Got:")?;
-								f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))?;
+								f.indent(|f| Self::display_labelled_value("Value", got, f))?;
 								writeln!(f, "= Diff:")?;
 								f.indent(|f| {
+									// Two strings are diffed as their text, so a
+									// plan's lines stay lines in the diff too.
 									Self::display_diff(
-										&got.to_sql(),
-										&expected.to_sql(),
+										&Self::diffable(got),
+										&Self::diffable(expected),
 										use_color,
 										f,
 									)
@@ -357,7 +479,7 @@ impl TestReport {
 									f.indent(|f| writeln!(f, "- Any error"))?;
 								}
 								writeln!(f, "= Got:")?;
-								f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))
+								f.indent(|f| Self::display_labelled_value("Value", got, f))
 							})
 						}
 						ValueMismatchKind::ExpectedValue {
@@ -368,7 +490,9 @@ impl TestReport {
 							f.indent(|f| {
 								writeln!(f, "= Expected:")?;
 								if let Some(expected) = expected {
-									f.indent(|f| writeln!(f, "- Value: {}", expected.to_sql()))?;
+									f.indent(|f| {
+										Self::display_labelled_value("Value", expected, f)
+									})?;
 								} else {
 									f.indent(|f| writeln!(f, "- Any value"))?;
 								}
@@ -406,7 +530,7 @@ impl TestReport {
 						writeln!(f, "> Matcher expected a value but got an error")?;
 						f.indent(|f| {
 							writeln!(f, "= Got:")?;
-							f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))
+							f.indent(|f| Self::display_labelled_value("Value", got, f))
 						})?
 					}
 					MatcherMismatch::UnexpectedError {
@@ -424,7 +548,7 @@ impl TestReport {
 						writeln!(f, "> Matching expression did not return a boolean.")?;
 						f.indent(|f| {
 							writeln!(f, "= Matching expression returned value:")?;
-							f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))
+							f.indent(|f| Self::display_labelled_value("Value", got, f))
 						})?
 					}
 				},
@@ -439,11 +563,35 @@ impl TestReport {
 		}
 		Ok(())
 	}
+	/// The text a value is diffed as: a string as its own text, so a plan's
+	/// lines stay lines, and every other value as the SurrealQL it renders.
+	fn diffable(value: &SurValue) -> String {
+		match value {
+			SurValue::String(text) => text.as_str().to_owned(),
+			_ => value.to_sql(),
+		}
+	}
+
+	/// A value beneath its label: on the label's line, or — for a string
+	/// whose text spans lines, which is what an `EXPLAIN` renders — as the
+	/// text itself on the lines beneath, so a plan reads as the tree it is.
+	fn display_labelled_value(label: &str, value: &SurValue, f: &mut Fmt) -> fmt::Result {
+		match value {
+			SurValue::String(text) if text.as_str().contains('\n') => {
+				writeln!(f, "- {label}:")?;
+				// A rendering that already ends in a newline would otherwise show a
+				// blank line beneath it.
+				let text = text.as_str();
+				let text = text.strip_suffix('\n').unwrap_or(text);
+				f.indent(|f| writeln!(f, "{text}"))
+			}
+			_ => writeln!(f, "- {label}: {}", value.to_sql()),
+		}
+	}
+
 	fn display_value(v: &Result<SurValue, String>, f: &mut Fmt) -> fmt::Result {
 		match v {
-			Ok(x) => {
-				writeln!(f, "- Value: {}", x.to_sql())
-			}
+			Ok(x) => Self::display_labelled_value("Value", x, f),
 			Err(e) => {
 				writeln!(f, "- Error: {e}")
 			}
@@ -464,7 +612,7 @@ impl TestReport {
 				None => writeln!(f, "- Any Error"),
 			},
 			TestValueExpectation::Value(v) => match v {
-				Some(v) => writeln!(f, "- Value: {}", v.expected.to_sql()),
+				Some(v) => Self::display_labelled_value("Value", &v.expected, f),
 				None => writeln!(f, "- Any value"),
 			},
 			TestValueExpectation::Matcher(m) => match m.matcher_value_type {

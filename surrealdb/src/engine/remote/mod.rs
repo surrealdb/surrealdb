@@ -3,27 +3,22 @@
 //! # Example
 //!
 //! ```no_run
-//! use std::borrow::Cow;
-//! use serde::{Serialize, Deserialize};
-//! use serde_json::json;
 //! use surrealdb::{Error, Surreal};
 //! use surrealdb::opt::auth::Root;
 //! use surrealdb::engine::remote::ws::Ws;
+//! use surrealdb::types::{SurrealValue, object};
 //!
-//! #[derive(Serialize, Deserialize)]
+//! #[derive(SurrealValue)]
 //! struct Person {
 //!     title: String,
 //!     name: Name,
 //!     marketing: bool,
 //! }
 //!
-//! // Pro tip: Replace String with Cow<'static, str> to
-//! // avoid unnecessary heap allocations when inserting
-//!
-//! #[derive(Serialize, Deserialize)]
+//! #[derive(SurrealValue)]
 //! struct Name {
-//!     first: Cow<'static, str>,
-//!     last: Cow<'static, str>,
+//!     first: String,
+//!     last: String,
 //! }
 //!
 //! // Install at https://surrealdb.com/install
@@ -40,8 +35,8 @@
 //!
 //!     // Signin as a namespace, database, or root user
 //!     db.signin(Root {
-//!         username: "root",
-//!         password: "root",
+//!         username: "root".into(),
+//!         password: "root".into(),
 //!     }).await?;
 //!
 //!     // Select a specific namespace / database
@@ -73,7 +68,7 @@
 //!
 //!     // Update a person record with a specific ID
 //!     let updated: Option<Person> = db.update(("person", "jaime"))
-//!         .merge(json!({"marketing": true}))
+//!         .merge(object! { marketing: true })
 //!         .await?;
 //!
 //!     // Select all people records
@@ -94,24 +89,37 @@
 //! }
 //! ```
 
-#[cfg(feature = "protocol-http")]
+#[cfg(all(feature = "protocol-grpc", not(target_family = "wasm")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "protocol-grpc")))]
+pub mod grpc;
+
+#[cfg(http_engine)]
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-http")))]
 pub mod http;
 
-#[cfg(feature = "protocol-ws")]
+#[cfg(ws_engine)]
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
-use surrealdb_core::iam::token::Token;
+#[cfg(any(ws_engine, http_engine))]
+use surrealdb_rpc::Token;
+#[cfg(any(ws_engine, http_engine))]
 use uuid::Uuid;
 
-use crate::conn::cmd::Command;
+#[cfg(any(ws_engine, http_engine))]
+use crate::conn::Command;
+#[cfg(any(ws_engine, http_engine))]
 use crate::types::{Array, SurrealValue, Value};
 
 /// A struct which will be serialized as a map to behave like the previously
 /// used BTreeMap.
 ///
 /// This struct serializes as if it is a crate::types::Value::Object.
+///
+/// This is the request shape of the JSON/CBOR wire the WebSocket
+/// and HTTP engines speak; gRPC has its own generated messages and needs
+/// none of it.
+#[cfg(any(ws_engine, http_engine))]
 #[derive(Clone, Debug, SurrealValue)]
 #[surreal(crate = "crate::types")]
 pub(crate) struct RouterRequest {
@@ -123,7 +131,41 @@ pub(crate) struct RouterRequest {
 	pub(crate) session_id: Option<Uuid>,
 }
 
-impl Command {
+/// How a [`Command`] is presented to a remote server: the request it encodes
+/// to, and whether it belongs in the session replay log used to rebuild state
+/// after a reconnect.
+#[cfg(any(ws_engine, http_engine))]
+pub(crate) trait RemoteCommand: Sized {
+	/// The request to send for this command, or `None` when the remote
+	/// protocol has no equivalent (backups, live-query subscription).
+	fn into_router_request(
+		self,
+		id: Option<i64>,
+		session_id: Option<Uuid>,
+	) -> Option<RouterRequest>;
+
+	/// Whether replaying this command restores session state a reconnect lost.
+	fn replayable(&self) -> bool;
+
+	/// Whether `self` would be a no-op (replay-wise) if appended directly after
+	/// `prev` at the tail of the replay log. Used to coalesce idempotent
+	/// command runs (e.g. a `useDb` loop) so the replay log doesn't grow O(N).
+	///
+	/// Load-bearing invariant for the `Use(None, None)` -> `true` branch:
+	/// `Command::Use` carries `Option<String>` for each field, and
+	/// [`RemoteCommand::into_router_request`] encodes `None` as `Value::None`
+	/// (never `Value::Null`). The server-side `yuse` handler treats
+	/// `(None, None)` as a no-op when `session.ns` is already set — only the
+	/// `Value::Null` form (unreachable from the SDK) clears the session. If a
+	/// future change adds a clearing variant to `Command::Use` or maps `None`
+	/// to `Value::Null` on the wire, revisit this method and the corresponding
+	/// tests.
+	#[cfg(ws_engine)]
+	fn is_replay_noop_after(&self, prev: &Command) -> bool;
+}
+
+#[cfg(any(ws_engine, http_engine))]
+impl RemoteCommand for Command {
 	fn into_router_request(
 		self,
 		id: Option<i64>,
@@ -200,10 +242,14 @@ impl Command {
 				txn: None,
 				session_id,
 			},
-			Command::Begin => RouterRequest {
+			Command::Begin {
+				read_only,
+				isolation,
+			} => RouterRequest {
 				id,
 				method: "begin",
-				params: None,
+				params: surrealdb_engine_api::begin_options(read_only, isolation)
+					.map(|options| Value::Array(Array::from(vec![options]))),
 				txn: None,
 				session_id,
 			},
@@ -256,15 +302,6 @@ impl Command {
 				..
 			}
 			| Command::ImportFile {
-				..
-			}
-			| Command::ExportBytesMl {
-				..
-			}
-			| Command::ExportMl {
-				..
-			}
-			| Command::ImportMl {
 				..
 			} => return None,
 			Command::Health => RouterRequest {
@@ -365,19 +402,7 @@ impl Command {
 		)
 	}
 
-	/// Whether `self` would be a no-op (replay-wise) if appended directly after
-	/// `prev` at the tail of the replay log. Used to coalesce idempotent
-	/// command runs (e.g. a `useDb` loop) so the replay log doesn't grow O(N).
-	///
-	/// Load-bearing invariant for the `Use(None, None)` -> `true` branch:
-	/// `Command::Use` carries `Option<String>` for each field, and
-	/// [`Command::into_router_request`] encodes `None` as `Value::None` (never
-	/// `Value::Null`). The server-side `yuse` handler treats `(None, None)` as
-	/// a no-op when `session.ns` is already set — only the `Value::Null` form
-	/// (unreachable from the SDK) clears the session. If a future change adds
-	/// a clearing variant to `Command::Use` or maps `None` to `Value::Null` on
-	/// the wire, revisit this method and the corresponding tests.
-	#[cfg(feature = "protocol-ws")]
+	#[cfg(ws_engine)]
 	fn is_replay_noop_after(&self, prev: &Command) -> bool {
 		match (prev, self) {
 			(
@@ -411,7 +436,7 @@ impl Command {
 /// for a given session (e.g. the WS engine's single-threaded response loop).
 /// The HTTP engine handles each request in a spawned task and must keep using
 /// a plain `replay.push(command)`.
-#[cfg(feature = "protocol-ws")]
+#[cfg(ws_engine)]
 fn record_replayable(replay: &boxcar::Vec<Command>, command: Command) {
 	debug_assert!(
 		command.replayable(),
@@ -427,7 +452,7 @@ fn record_replayable(replay: &boxcar::Vec<Command>, command: Command) {
 	replay.push(command);
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(ws_engine, http_engine)))]
 mod test {
 	use uuid::Uuid;
 
@@ -476,17 +501,17 @@ mod test {
 
 		assert_converts(
 			&request,
-			|i| surrealdb_core::rpc::format::flatbuffers::encode(i).unwrap(),
-			|b| surrealdb_core::rpc::format::flatbuffers::decode(&b).unwrap(),
+			|i| surrealdb_rpc::wire::encode(i.clone()).unwrap(),
+			|b| surrealdb_rpc::wire::decode(&b).unwrap(),
 		);
 	}
 }
 
 // Replay coalescing is only used by the WS engine, so gate these tests on the
 // same feature that compiles `record_replayable` / `is_replay_noop_after`.
-#[cfg(all(test, feature = "protocol-ws"))]
+#[cfg(all(test, ws_engine))]
 mod replay_test {
-	use super::{Command, record_replayable};
+	use super::{Command, RemoteCommand, record_replayable};
 
 	fn use_cmd(ns: Option<&str>, db: Option<&str>) -> Command {
 		Command::Use {

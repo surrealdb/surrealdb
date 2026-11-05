@@ -1,8 +1,9 @@
-#![cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
+#![cfg(any(http_engine, ws_engine))]
 #![cfg(not(target_family = "wasm"))]
 
 mod protocol;
 mod server;
+mod transaction_drop;
 mod types;
 
 use std::ops::Bound;
@@ -165,13 +166,26 @@ async fn api() {
 
 	// version
 	let _: Version = DB.version().await.unwrap();
+
+	// transaction and client accessors
+	let begin = DB.clone().begin();
+	let _: &Surreal<Client> = begin.client();
+	let _: Surreal<Client> = begin.client().clone();
+	let txn = begin.await.unwrap();
+	let _: &Surreal<Client> = txn.client();
+	let _: Surreal<Client> = txn.client().clone();
+	let _: QueryResponse = txn.query("SELECT * FROM user").await.unwrap();
+	let _: Surreal<Client> = txn.commit().await.unwrap();
 }
 
-fn assert_send_sync(_: impl Send + Sync) {}
+fn assert_send(_: impl Send) {}
 
+/// The SDK's futures must stay `Send`, so callers can spawn them and hold
+/// them across threads. They are deliberately not `Sync` (see
+/// [`BoxFuture`](crate::method::BoxFuture)).
 #[test]
-fn futures_are_send_sync() {
-	assert_send_sync(async {
+fn futures_are_send() {
+	assert_send(async {
 		let db = Surreal::new::<Test>(()).await.unwrap();
 		db.signin(Root {
 			username: "root".to_string(),

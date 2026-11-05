@@ -1,0 +1,45 @@
+### { DEFINE FIELD age ON person TYPE int ASSERT $value > 0; CREATE person:1 SET age = -1 }
+error: Found -1 for field `age`, with record `person:1`, but field must conform to: $value > 0
+[]
+[]
+error: The table 'fresh' does not exist
+### { DEFINE FIELD age ON person TYPE int ASSERT $value > 0; CREATE person:2 SET age = 3 }
+[{ age: 3, id: person:2 }]
+[]
+[{ age: 3, id: person:2 }]
+error: The table 'fresh' does not exist
+### { LET $a = 2; DEFINE FIELD k ON t VALUE 5; CREATE t:1 SET n = $a }
+[{ id: t:1, k: 5, n: 2 }]
+[{ k: 5, m: NONE, n: 2 }]
+[]
+error: The table 'fresh' does not exist
+### FOR $i IN 0..5 { CREATE fresh SET n = $i }
+NONE
+[]
+[]
+[{ n: 0 }, { n: 1 }, { n: 2 }, { n: 3 }, { n: 4 }]
+### FOR $i IN 0..5 { CREATE type::record('fresh', $i) SET n = $i }
+NONE
+[]
+[]
+[{ n: 0 }, { n: 1 }, { n: 2 }, { n: 3 }, { n: 4 }]
+### FOR $i IN 0..4 { FOR $j IN 0..4 { IF $j > $i { BREAK }; IF $j = 1 { CONTINUE }; CREATE t SET n = $i * 10 + $j } }
+NONE
+[{ k: NONE, m: NONE, n: 0 }, { k: NONE, m: NONE, n: 10 }, { k: NONE, m: NONE, n: 20 }, { k: NONE, m: NONE, n: 22 }, { k: NONE, m: NONE, n: 30 }, { k: NONE, m: NONE, n: 32 }, { k: NONE, m: NONE, n: 33 }]
+[]
+error: The table 'fresh' does not exist
+### { FOR $i IN 0..10 { IF $i = 3 { RETURN $i }; CREATE t SET n = $i }; CREATE t SET n = 99 }
+3
+[{ k: NONE, m: NONE, n: 0 }, { k: NONE, m: NONE, n: 1 }, { k: NONE, m: NONE, n: 2 }]
+[]
+error: The table 'fresh' does not exist
+### FOR $i IN 0..5 { CREATE t SET n = $i; IF $i = 3 { THROW 'stop' } }
+error: An error occurred: stop
+[]
+[]
+error: The table 'fresh' does not exist
+### FOR $i IN 0..3 { CREATE t SET n = $i; DEFINE FIELD m ON t VALUE $i; CREATE t SET n = $i + 100 }
+error: The field 'm' already exists
+[]
+[]
+error: The table 'fresh' does not exist

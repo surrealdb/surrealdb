@@ -1,0 +1,14 @@
+/**
+[env]
+imports = ["gql/_mutate_perm_delete_import.surql"]
+auth = { namespace = "test", database = "test", access = "user", rid = "person:1" }
+
+[test]
+reason = "SECURITY (write == DELETE): the write a DETACH DELETE makes is gated by the table's own delete permission for the session principal. `FOR delete NONE` leaves both rows in place, which the MATCH after the write reads."
+
+[[test.results]]
+value = "[{ name: 'alice' }, { name: 'bob' }]"
+*/
+
+MATCH (n:person WHERE n.name = 'alice') DETACH DELETE n
+MATCH (m:person) RETURN m.name AS name ORDER BY name

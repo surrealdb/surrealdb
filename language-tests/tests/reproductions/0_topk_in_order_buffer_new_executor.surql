@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Streaming executor plan: when only a SINGLE-column index covers the IN-list and ORDER BY is on an UNRELATED column with a small literal LIMIT, the planner cannot k-way-merge (no composite suffix) but must mark the UnionIndexScan with `downstream_topk = true` so eager per-sub-stream prefetch is skipped. Regression guard for Phase 1 of the OOM fix."
+reason = "Plan: when only a SINGLE-column index covers the IN-list and ORDER BY is on an UNRELATED column with a small literal LIMIT, the union cannot be k-way-merged (no composite suffix), so its rows reach a bounded Sort (`keep: N`) that discards most of them. The union's branches are read on demand by the program, so no branch buffers ahead of the Sort and the plan carries no merge mode. Guard against the Sort being dropped or the merge being claimed."
 
 [[test.results]]
 value = "NONE"
@@ -41,18 +40,42 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: created_at, http_status]\n    Limit [ctx: Db] [limit: 3]\n        SortTopKByKey [ctx: Db] [sort_keys: created_at DESC, limit: 3]\n            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]\n                UnionIndexScan [ctx: Db] [table: record, branches: 2, downstream_topk: true]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 200, direction: Forward]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 201, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: created_at, http_status]
+    Limit [ctx: Db] [limit: 3]
+        Sort [ctx: Db] [sort_keys: created_at DESC, keep: 3]
+            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
+                UnionIndexScan [ctx: Db] [table: record, branches: 2]
+                    IndexScan [ctx: Db] [table: record, index: idx_status, access: = 200, direction: Forward]
+                    IndexScan [ctx: Db] [table: record, index: idx_status, access: = 201, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: created_at, http_status]\n    Limit [ctx: Db] [limit: 3]\n        SortTopKByKey [ctx: Db] [sort_keys: created_at ASC, limit: 3]\n            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]\n                UnionIndexScan [ctx: Db] [table: record, branches: 2, downstream_topk: true]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 200, direction: Forward]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 201, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: created_at, http_status]
+    Limit [ctx: Db] [limit: 3]
+        Sort [ctx: Db] [sort_keys: created_at ASC, keep: 3]
+            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
+                UnionIndexScan [ctx: Db] [table: record, branches: 2]
+                    IndexScan [ctx: Db] [table: record, index: idx_status, access: = 200, direction: Forward]
+                    IndexScan [ctx: Db] [table: record, index: idx_status, access: = 201, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: created_at, http_status]\n    Limit [ctx: Db] [limit: 3, offset: 2]\n        SortTopKByKey [ctx: Db] [sort_keys: created_at DESC, limit: 5]\n            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]\n                UnionIndexScan [ctx: Db] [table: record, branches: 2, downstream_topk: true]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 200, direction: Forward]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 201, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: created_at, http_status]
+    Limit [ctx: Db] [limit: 3, offset: 2]
+        Sort [ctx: Db] [sort_keys: created_at DESC, keep: 5]
+            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
+                UnionIndexScan [ctx: Db] [table: record, branches: 2]
+                    IndexScan [ctx: Db] [table: record, index: idx_status, access: = 200, direction: Forward]
+                    IndexScan [ctx: Db] [table: record, index: idx_status, access: = 201, direction: Forward]
+''''
 */
 
 -- Single-column index on the IN-list column only.  ORDER BY is on
 -- `created_at`, which is NOT in any index — the merge-by-index-key path
--- cannot engage, so the planner falls back to the downstream_topk flag.
+-- cannot engage, so the Sort keeps the top rows of the unmerged union.
 DEFINE INDEX idx_status ON record FIELDS http_status;
 
 CREATE record:0 SET http_status = 200, created_at = 0 RETURN NONE;
@@ -66,7 +89,7 @@ CREATE record:7 SET http_status = 200, created_at = 7 RETURN NONE;
 CREATE record:8 SET http_status = 201, created_at = 8 RETURN NONE;
 CREATE record:9 SET http_status = 200, created_at = 9 RETURN NONE;
 
--- DESC: UnionIndexScan with downstream_topk = true, no merge mode.
+-- DESC: UnionIndexScan with no merge mode under a bounded Sort.
 EXPLAIN SELECT created_at, http_status FROM record
 	WHERE http_status IN [200, 201]
 	ORDER BY created_at DESC

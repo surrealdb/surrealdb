@@ -1,11 +1,5 @@
 #![allow(clippy::unwrap_used)]
-#![cfg(any(
-	feature = "protocol-ws",
-	feature = "kv-mem",
-	feature = "kv-rocksdb",
-	feature = "kv-tikv",
-	feature = "kv-surrealkv",
-))]
+#![cfg(any(feature = "protocol-ws", feature = "kv-mem", feature = "kv-surrealkv",))]
 
 // Tests for running live queries
 // Supported by the storage engines and the WS protocol
@@ -21,6 +15,7 @@ use surrealdb::{Notification, Result};
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
+use uuid::Uuid;
 
 use super::CreateDb;
 use crate::api_integration::ApiRecordId;
@@ -241,9 +236,8 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 		assert_eq!(notification.action, Action::Create);
 
 		// Delete the record
-		let thing = match created_value.get("id").unwrap() {
-			Value::RecordId(thing) => thing,
-			_ => panic!("Expected a thing"),
+		let Value::RecordId(thing) = created_value.get("id").unwrap() else {
+			panic!("Expected a thing");
 		};
 		db.query("DELETE $item").bind(("item", thing.clone())).await.unwrap();
 
@@ -253,9 +247,8 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
-		let notification = match notification.data {
-			Value::Object(notification) => notification,
-			_ => panic!("Expected an object"),
+		let Value::Object(notification) = notification.data else {
+			panic!("Expected an object");
 		};
 		assert_eq!(notification, created_value);
 	}
@@ -603,7 +596,178 @@ pub async fn live_select_returns_uuid(new_db: impl CreateDb) {
 	drop(permit);
 }
 
+/// Re-authenticating a session ends the live queries the previous principal
+/// registered.
+///
+/// A parity test between the transports, and the embedded half of
+/// GHSA-2xrp-m9c6-75rj: a subscription authorised for one principal must not
+/// keep delivering once the session belongs to another. The RPC path tears live
+/// queries down on all six methods that change the principal (`signup`,
+/// `signin`, `authenticate`, `refresh`, `invalidate`, `reset`); the embedded
+/// engine tears them down on none.
+pub async fn signin_ends_the_previous_principals_live_queries(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db(Config::new()).await;
+
+	let namespace = Ulid::new().to_string();
+	let database = Ulid::new().to_string();
+	db.use_ns(&namespace).use_db(&database).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	let access = Ulid::new();
+	let email = format!("{access}@example.com");
+	let pass = "password123";
+	db.query(format!(
+		"
+        DEFINE TABLE {table};
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD
+        SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+        SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+        DURATION FOR SESSION 1d FOR TOKEN 15s
+    "
+	))
+	.await
+	.unwrap()
+	.check()
+	.unwrap();
+
+	// A second session on the same connection, so the write below comes from a
+	// principal that is still allowed to make it. Cloning copies the current
+	// (root) session state.
+	let writer = db.clone();
+
+	// Subscribe while this session is still root.
+	let mut stream = db.select(Resource::from(&table)).live().await.unwrap();
+
+	// Change the principal: root -> record user. The subscription above belongs
+	// to the principal that has just been replaced, so it must not survive.
+	db.signup(surrealdb::opt::auth::Record {
+		namespace: namespace.clone(),
+		database: database.clone(),
+		access: access.to_string(),
+		params: super::AuthParams {
+			pass: pass.to_string(),
+			email: email.clone(),
+		},
+	})
+	.await
+	.unwrap();
+
+	// Anything the old subscription would have matched, written by a principal
+	// that is still permitted to write it.
+	let _: Value = writer.create(Resource::from(&table)).await.unwrap();
+
+	// The stream must not deliver: either it has ended, or nothing arrives.
+	if let Ok(Some(notification)) = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await {
+		panic!(
+			"a live query registered before the principal changed still delivered: {:?}",
+			notification.map(|n| n.action)
+		);
+	}
+
+	drop(permit);
+}
+
+/// A write inside a client-side transaction reaches live subscribers once the
+/// transaction commits, and not before.
+pub async fn live_select_sees_client_side_transaction(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
+	let mut stream = db.select(Resource::from(&table)).live().await.unwrap();
+
+	let tx = db.clone().begin().await.unwrap();
+	let _: Value = tx.create(Resource::from(&table)).await.unwrap();
+
+	assert!(
+		tokio::time::timeout(Duration::from_millis(500), stream.next()).await.is_err(),
+		"a notification arrived before the client-side transaction committed",
+	);
+
+	tx.commit().await.unwrap();
+
+	let notification: Notification<Value> =
+		tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap().unwrap();
+	assert_eq!(notification.action, Action::Create);
+
+	drop(permit);
+}
+
+/// A cancelled client-side transaction delivers nothing.
+pub async fn live_select_ignores_cancelled_client_side_transaction(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
+	let mut stream = db.select(Resource::from(&table)).live().await.unwrap();
+
+	let tx = db.clone().begin().await.unwrap();
+	let _: Value = tx.create(Resource::from(&table)).await.unwrap();
+	tx.cancel().await.unwrap();
+
+	assert!(
+		tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.is_err(),
+		"a cancelled client-side transaction delivered a notification",
+	);
+
+	drop(permit);
+}
+
+/// A `KILL` the server refuses is reported like any other failed statement.
+pub async fn kill_of_an_unknown_live_query_reports_its_error(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let mut response = db.query(format!("KILL u'{}'", Uuid::new_v4())).await.unwrap();
+	assert_eq!(response.num_statements(), 1, "the KILL statement has a result");
+	let errors = response.take_errors();
+	assert_eq!(errors.len(), 1, "the refused KILL is reported: {errors:?}");
+	assert!(errors.contains_key(&0));
+
+	drop(permit);
+}
+
+/// A `KILL` the server accepts answers `NONE` at its own index, so statements
+/// after it keep their indexes.
+pub async fn kill_of_a_live_query_reports_success(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+	// The response holds the live query's stream, and a stream that is dropped
+	// kills its live query. The response is kept until the `KILL` below has
+	// run, so that `KILL` is the only one that ends the live query.
+	let mut live = db.query(format!("LIVE SELECT * FROM {table}")).await.unwrap();
+	let id: Value = live.take(0).unwrap();
+
+	let mut response =
+		db.query("KILL $id; RETURN 1").bind(("id", id)).await.unwrap().check().unwrap();
+	assert_eq!(response.num_statements(), 2);
+	let killed: Value = response.take(0).unwrap();
+	assert_eq!(killed, Value::None);
+	let after: Option<i64> = response.take(1).unwrap();
+	assert_eq!(after, Some(1));
+
+	drop(live);
+	drop(permit);
+}
+
 define_include_tests!(live => {
+	#[test_log::test(tokio::test)]
+	signin_ends_the_previous_principals_live_queries,
 	#[test_log::test(tokio::test)]
 	live_select_table,
 	#[test_log::test(tokio::test)]
@@ -618,4 +782,12 @@ define_include_tests!(live => {
 	live_query_delete_notifications,
 	#[test_log::test(tokio::test)]
 	live_select_returns_uuid,
+	#[test_log::test(tokio::test)]
+	live_select_sees_client_side_transaction,
+	#[test_log::test(tokio::test)]
+	live_select_ignores_cancelled_client_side_transaction,
+	#[test_log::test(tokio::test)]
+	kill_of_an_unknown_live_query_reports_its_error,
+	#[test_log::test(tokio::test)]
+	kill_of_a_live_query_reports_success,
 });

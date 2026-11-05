@@ -1,8 +1,11 @@
 pub mod case;
 pub mod cmp;
+pub mod feature;
 pub mod report;
 pub mod run;
 pub mod schema;
+pub mod trace;
+pub mod unordered;
 
 use std::fmt::Write;
 use std::io::{self, IsTerminal as _};

@@ -1,0 +1,959 @@
+# Community rolling build
+#
+# Builds the promotable community-edition artifact set for ONE commit: the
+# binary matrix (+ macOS universal), the scanned prod/dev Docker images in the
+# private registry, and on release lines the npm bundles that embed the engine.
+# ce-release.yml promotes that set without rebuilding anything.
+#
+# A commit is releasable exactly when a run of this workflow for it on main or
+# a release line succeeded. Every job a release needs runs unconditionally on
+# those refs (npm on release lines only), and the run ends by checking that
+# the whole set is stored, so a successful run is one that stored the whole
+# set. Every name in the set is derived from the branch and the commit, so
+# nothing records it: S3 ce-builds/<slug>/<sha>/, ECR tags ce-<slug>-<sha>[-dev],
+# binaries named surreal-ce-<sha>.* (.github/scripts/ce-rolling-set.sh).
+#
+# A stored set is written once, by one run. When a commit already has a
+# successful run on a branch, a later run or re-run of it there (the nightly
+# on an unchanged main, a dispatch at the same tip, "Re-run all jobs") builds
+# and writes nothing and succeeds, so nothing a release may be reading is
+# overwritten. Until then only the newest run of the commit on the branch
+# writes; an older run's re-run fails rather than write over part of a newer
+# run's set. prepare checks before compiling, and each write step checks
+# again, because a re-run of failed jobs does not re-run prepare
+# (.github/scripts/ce-rolling-built.sh).
+#
+# The commit built is always github.sha. The sources, the workflow and actions
+# that build them, and the branch the artifacts are keyed under all come from
+# that one commit, so a release line's artifacts are produced by the workflow
+# that shipped with the line. There is no override to build some other commit;
+# a transiently failed build is repaired by re-running its failed jobs.
+#
+#   * releases/* - every push. Every commit on a release line is promotable.
+#   * main       - once a day on the schedule (the nightly channel), or by
+#                  dispatch. Pushes to main are not built.
+#   * any other branch - dispatch only. Builds, scans and pushes the full set
+#                  under a test-<slug> namespace so a change can be exercised,
+#                  and deletes its artifacts afterwards. It is never releasable:
+#                  ce-release.yml runs only from main and releases/*.
+#   * a tag        - refused: a set is keyed by the branch it was built on, and
+#                  the runs of a tag are listed under its name as if it were a
+#                  branch.
+#
+# The artifacts live in their own namespace - S3 ce-builds/<slug>/<sha>/ and
+# ECR tags ce-<slug>-<sha>[-dev] - so they share no object with any other build
+# of the same commit. Only ce-release.yml reads them. A test build deletes its
+# own; any other set is deleted only by the weekly cleanup (ce-prune.yml).
+#
+# The crate packaging and version-drift gates run beside the compile. Every job
+# that persists an artifact waits on them, so a commit that fails a gate stores
+# nothing and its run fails, which is what keeps it from being promoted. Correctness is
+# gated by ci.yml on the same commit and is not re-run here, and crates are
+# never published here: crates.io versions are write-once.
+
+name: CE rolling build
+
+run-name: "CE rolling build (${{ github.ref_name }} @ ${{ github.sha }})"
+
+on:
+  push:
+    branches:
+      - 'releases/*'
+  # The nightly channel. Staggered after the other nightly builds that share
+  # these runners, and well ahead of midnight so a failed build can be re-run
+  # before anything promotes it.
+  schedule:
+    - cron: "30 20 * * *"
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+# Keyed per ref and commit, the key of a stored set: distinct commits, and one
+# commit on two branches, build in parallel and never cancel one another. Only
+# a second run of the same commit on the same branch supersedes an in-flight
+# build, which has not succeeded, so no release can be using it.
+concurrency:
+  group: ce-rolling-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Prepare
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
+    runs-on: ubuntu-latest
+    # actions: read for the check that this branch has already built the commit.
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      build: ${{ steps.built.outputs.build }}
+      name: ${{ steps.vars.outputs.name }}
+      slug: ${{ steps.vars.outputs.slug }}
+      s3-prefix: ${{ steps.vars.outputs.s3-prefix }}
+      image-tag: ${{ steps.vars.outputs.image-tag }}
+      version: ${{ steps.vars.outputs.version }}
+      build-metadata: ${{ steps.vars.outputs.build-metadata }}
+      promotable: ${{ steps.vars.outputs.promotable }}
+      features: ${{ steps.vars.outputs.features }}
+      build-npm: ${{ steps.built.outputs.build == 'true' && steps.vars.outputs.build-npm || 'false' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Everything that names or shapes the artifact set is derived here, once,
+      # from the commit being built.
+      #
+      #   promotable     - the branches main and releases/* only, matched on the
+      #                    full ref. Any other branch is a test build and is
+      #                    namespaced under test-<slug>, so it can never collide
+      #                    with a promotable prefix even when a branch name slugs
+      #                    to the same string as a release line. A tag fails.
+      #   build-metadata - main only. Every main commit shares one X.Y.Z-nightly
+      #                    version, so date.rev is what tells nightlies apart; a
+      #                    release line's version is already unique.
+      #   features       - the default extras plus `cjk` when this commit defines
+      #                    it. The build actions' `extra-features` REPLACES their
+      #                    default, so the whole set is spelled out.
+      #   build-npm      - on releases/* (the only channel that publishes npm) and
+      #                    on a test build (so a change to it can be exercised),
+      #                    when the commit carries both package sources. main never
+      #                    builds it, so an npm failure cannot fail a nightly. Both
+      #                    packages were introduced together, so a line without
+      #                    them ships none. ce-release.yml makes the same decision
+      #                    from the same commit.
+      - name: Derive the build identity
+        id: vars
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          sha="${GITHUB_SHA}"
+          slug=$(bash .github/scripts/ce-rolling-set.sh slug "${BRANCH}")
+          version=$(awk '/^\[workspace.package\]/{f=1} f&&/^version[[:space:]]*=/{gsub(/version[[:space:]]*=[[:space:]]*"|"/,""); print; exit}' Cargo.toml)
+          if [ -z "${version}" ]; then
+            echo "::error::Could not read [workspace.package] version from Cargo.toml at ${sha}"
+            exit 1
+          fi
+
+          build_metadata=""
+          case "${GITHUB_REF}" in
+            refs/heads/main)
+              promotable=true
+              build_metadata="$(git show --no-patch --format=%ad --date=format:%Y%m%d).$(git rev-parse --short HEAD)"
+              ;;
+            refs/heads/releases/*)
+              promotable=true
+              ;;
+            refs/heads/*)
+              promotable=false
+              slug="test-${slug}"
+              ;;
+            *)
+              echo "::error::Dispatch this workflow from a branch, not ${GITHUB_REF}: a rolling set is keyed by the branch it was built on."
+              exit 1
+              ;;
+          esac
+
+          features="jwks"
+          if grep -qE '^cjk = ' Cargo.toml; then
+            features="${features},cjk"
+          else
+            echo "::notice::This commit predates the cjk feature; building without the embedded CJK dictionaries."
+          fi
+
+          build_npm=false
+          if [[ "${GITHUB_REF}" == refs/heads/releases/* || "${promotable}" == false ]]; then
+            if [ -f surrealdb/node/package.json ] && [ -f surrealdb/wasm/package.json ]; then
+              build_npm=true
+            else
+              echo "::notice::surrealdb/node and/or surrealdb/wasm absent at ${sha}; this line ships no npm packages."
+            fi
+          fi
+
+          {
+            echo "name=ce-${sha}"
+            echo "slug=${slug}"
+            echo "s3-prefix=ce-builds/${slug}/${sha}"
+            echo "image-tag=ce-${slug}-${sha}"
+            echo "version=${version}"
+            echo "build-metadata=${build_metadata}"
+            echo "promotable=${promotable}"
+            echo "features=${features}"
+            echo "build-npm=${build_npm}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### CE rolling build"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | \`${sha}\` |"
+            echo "| Branch | \`${BRANCH}\` |"
+            echo "| Version | \`${version}\` |"
+            echo "| Promotable | ${promotable} |"
+            echo "| S3 prefix | \`ce-builds/${slug}/${sha}\` |"
+            echo "| Image tag | \`ce-${slug}-${sha}\` |"
+            echo "| npm bundles | ${build_npm} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Every artifact job hangs off build, check-versions, package or the npm
+      # builds, so gating those four (npm through build-npm) skips them all.
+      # Test builds always build: their namespace is deleted when the run ends.
+      - name: Skip a commit this branch has already built
+        id: built
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROMOTABLE: ${{ steps.vars.outputs.promotable }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          build=true
+          stored=false
+          if [[ "${PROMOTABLE}" == true ]]; then
+            stored=$(.github/scripts/ce-rolling-built.sh)
+          fi
+          if [[ "${stored}" == true ]]; then
+            build=false
+            echo "::notice::${GITHUB_SHA} already has a successful CE rolling build on ${BRANCH}; its stored set is kept and nothing is rebuilt."
+          fi
+          echo "build=${build}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.arch }} binary
+    needs: [prepare]
+    if: ${{ needs.prepare.outputs.build == 'true' }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64-unknown-linux-gnu
+            platform: amd64
+            os: linux
+            runner: [runner-amd-32-cores]
+          - arch: aarch64-unknown-linux-gnu
+            platform: arm64
+            os: linux
+            runner: [runner-arm-32-cores]
+          - arch: x86_64-apple-darwin
+            platform: amd64
+            os: macos
+            runner: macos-15-xlarge
+          - arch: aarch64-apple-darwin
+            platform: arm64
+            os: macos
+            runner: macos-15-xlarge
+          - arch: x86_64-pc-windows-msvc
+            platform: amd64
+            os: windows
+            runner: windows-latest-32-cores
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The Linux legs compile inside the builder container, which carries
+      # neither the kache binary nor the host's store and is started with an
+      # explicit environment that excludes RUSTC_WRAPPER, so they opt out of
+      # kache; macOS and Windows compile on the runner and use it.
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-branch: ${{ github.ref_name }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          enable-kache: ${{ matrix.os != 'linux' }}
+          targets: ${{ matrix.arch }}
+          # Both macOS targets build on one arm64 runner, so only the target
+          # triple separates their artifact sets.
+          kache-manifest-key: ${{ matrix.arch }}
+
+      - name: Build Linux binary
+        if: matrix.os == 'linux'
+        uses: ./.github/actions/build-linux
+        with:
+          arch: ${{ matrix.arch }}
+          extra-features: ${{ needs.prepare.outputs.features }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare.outputs.name }}
+          build-metadata: ${{ needs.prepare.outputs.build-metadata }}
+          upload: true
+          release: true
+          # Builder-image layer cache: one moving tag per line and platform, in
+          # the ECR repo this runner pool can push to. Unset, the build uses a
+          # cold local cache. The cache repo's lifecycle policy owns its tags.
+          cache-image: ${{ secrets.BUILDER_CACHE_ECR_IMAGE != '' && format('{0}:builder-cache-{1}-{2}', secrets.BUILDER_CACHE_ECR_IMAGE, needs.prepare.outputs.slug, matrix.platform) || '' }}
+
+      - name: Build macOS binary
+        if: matrix.os == 'macos'
+        uses: ./.github/actions/build-macos
+        with:
+          arch: ${{ matrix.arch }}
+          extra-features: ${{ needs.prepare.outputs.features }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare.outputs.name }}
+          build-metadata: ${{ needs.prepare.outputs.build-metadata }}
+          upload: true
+          release: true
+
+      - name: Build Windows binary
+        if: matrix.os == 'windows'
+        uses: ./.github/actions/build-windows
+        with:
+          arch: ${{ matrix.arch }}
+          extra-features: ${{ needs.prepare.outputs.features }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare.outputs.name }}
+          build-metadata: ${{ needs.prepare.outputs.build-metadata }}
+          upload: true
+          release: true
+
+  macos-universal:
+    name: Package macOS universal binary
+    needs: [prepare, build]
+    runs-on: macos-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Package macOS universal binary
+        uses: ./.github/actions/package-macos-universal
+        with:
+          name: ${{ needs.prepare.outputs.name }}
+
+  # Gates. They run beside the compile, and everything that persists an
+  # artifact waits on them.
+  check-versions:
+    name: Check crate versions
+    needs: [prepare]
+    if: ${{ needs.prepare.outputs.build == 'true' }}
+    runs-on: ubuntu-latest-4-cores
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-branch: ${{ github.ref_name }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+      - name: Check crate versions
+        uses: ./.github/actions/check-crate-versions
+
+  # `cargo publish --workspace --dry-run` with verify on, so each crate compiles
+  # from its packaged tarball the way a crates.io consumer builds it. That
+  # compile overflows a hosted runner's default disk, hence free-disk-space.
+  package:
+    name: Package crates
+    needs: [prepare]
+    if: ${{ needs.prepare.outputs.build == 'true' }}
+    runs-on: ubuntu-latest-4-cores
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-branch: ${{ github.ref_name }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          free-disk-space: 'true'
+
+      - name: Package crates
+        uses: ./.github/actions/quality-package
+
+  publish-s3:
+    name: Publish binaries to S3
+    needs: [prepare, build, macos-universal, check-versions, package]
+    # Private runner: the rolling bucket is reached through the runner's ambient
+    # IAM role, never static keys.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      # Before any download: checkout empties a workspace that is not yet a
+      # repository, which would take the downloaded files with it.
+      - name: Checkout the build scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          pattern: surreal-${{ needs.prepare.outputs.name }}.*
+
+      - name: Check the set is not already stored
+        id: stored
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROMOTABLE: ${{ needs.prepare.outputs.promotable }}
+        run: |
+          set -euo pipefail
+          stored=false
+          if [[ "${PROMOTABLE}" == true ]]; then
+            stored=$(.github/scripts/ce-rolling-built.sh)
+          fi
+          if [[ "${stored}" == true ]]; then
+            echo "::notice::This commit's set is already stored on ${GITHUB_REF_NAME}; not overwriting it."
+          fi
+          echo "stored=${stored}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to the rolling prefix
+        if: steps.stored.outputs.stored != 'true'
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          S3_PREFIX: ${{ needs.prepare.outputs.s3-prefix }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          files=(artifacts/**/*.tgz artifacts/**/*.txt artifacts/**/*.exe)
+          # A run that stores nothing must not succeed: its success is what
+          # marks the set stored.
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No binaries were downloaded, so there is nothing to store."
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            aws s3 cp --cache-control 'no-store' "$file" "s3://${ROLLING_BUCKET}/${S3_PREFIX}/"
+          done
+
+  docker:
+    name: Docker ${{ matrix.name }}
+    needs: [prepare, build, check-versions, package]
+    # Private runner: pushes to ECR with the runner's ambient IAM role.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+      ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
+      IMAGE_TAG: ${{ needs.prepare.outputs.image-tag }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Prod image
+            build-target: prod-ci
+            tag-suffix: ''
+          - name: Dev image
+            build-target: dev-ci
+            tag-suffix: -dev
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          pattern: surreal-${{ needs.prepare.outputs.name }}.*
+
+      # The CI targets have RUN steps that execute in the target arch, so the
+      # arm64 image is emulated on this amd64 runner. A self-hosted runner may
+      # not ship binfmt, so register it explicitly.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      # The region is read off the registry host
+      # (<account>.dkr.ecr.<region>.amazonaws.com), so it cannot drift from it.
+      - name: Login to Amazon ECR
+        run: |
+          set -euo pipefail
+          region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+          aws ecr get-login-password --region "$region" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      # Built locally first, without attestations so it loads into the daemon,
+      # and scanned and smoke-tested before anything is pushed: an image that
+      # fails the gate never reaches the registry and so can never be promoted.
+      # amd64 only; the runtime base digest is shared across arches.
+      - name: Build image locally for scanning (amd64)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: artifacts
+          load: true
+          platforms: linux/amd64
+          file: docker/Dockerfile
+          target: ${{ matrix.build-target }}
+          provenance: false
+          sbom: false
+          tags: surrealdb-ce-rolling-local:amd64
+          build-args: |
+            ARTIFACT_PREFIX=surreal-${{ needs.prepare.outputs.name }}
+
+      - name: Test the Docker image (scan + smoke test)
+        uses: ./.github/actions/test-docker-image
+        with:
+          image-ref: surrealdb-ce-rolling-local:amd64
+
+      # Provenance and SBOM attestations stay in the private registry as an
+      # audit trail. Their in-toto subjects name the registry host, so the public
+      # mirror in ce-release.yml rebuilds the index from the platform manifests
+      # alone and never copies them.
+      - name: Check the set is not already stored
+        id: stored
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROMOTABLE: ${{ needs.prepare.outputs.promotable }}
+        run: |
+          set -euo pipefail
+          stored=false
+          if [[ "${PROMOTABLE}" == true ]]; then
+            stored=$(.github/scripts/ce-rolling-built.sh)
+          fi
+          if [[ "${stored}" == true ]]; then
+            echo "::notice::This commit's set is already stored on ${GITHUB_REF_NAME}; not overwriting it."
+          fi
+          echo "stored=${stored}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push rolling image to ECR
+        if: steps.stored.outputs.stored != 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: artifacts
+          push: true
+          platforms: linux/amd64,linux/arm64
+          file: docker/Dockerfile
+          target: ${{ matrix.build-target }}
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}${{ matrix.tag-suffix }}
+          build-args: |
+            ARTIFACT_PREFIX=surreal-${{ needs.prepare.outputs.name }}
+
+      # Advisory: a missing attestation is reported, never blocking.
+      - name: Verify image attestations
+        continue-on-error: true
+        uses: ./.github/actions/verify-attestations
+        with:
+          image-ref: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}${{ matrix.tag-suffix }}
+
+  # `@surrealdb/node-native`: the NAPI addon, one native binary per platform.
+  # Built version-agnostic; the version is injected at publish time.
+  build-node-addon:
+    name: Build Node addon (${{ matrix.name }})
+    needs: [prepare]
+    if: ${{ needs.prepare.outputs.build-npm == 'true' }}
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS x86_64
+            host: macos-latest
+            target: x86_64-apple-darwin
+          - name: macOS aarch64
+            host: macos-latest
+            target: aarch64-apple-darwin
+          # The repository-root cargo config links the `surreal` binary against
+          # the static CRT. An addon is loaded into an already-running node or
+          # node.exe and has to share that process's dynamic CRT, so the flags
+          # are set here: `RUSTFLAGS` overrides every config's `rustflags`,
+          # including surrealdb/node/.cargo/config.toml's. Every musl entry sets
+          # it too, rather than relying on the napi CLI appending it.
+          - name: Windows x86_64
+            host: windows-latest
+            target: x86_64-pc-windows-msvc
+            rustflags: -C target-feature=-crt-static
+          - name: Windows aarch64
+            host: windows-latest
+            target: aarch64-pc-windows-msvc
+          - name: Linux x86_64 (gnu)
+            host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: true
+          - name: Linux x86_64 (musl)
+            host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cross: true
+            rustflags: -C target-feature=-crt-static
+          - name: Linux aarch64 (gnu)
+            host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+          - name: Linux aarch64 (musl)
+            host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            cross: true
+            rustflags: -C target-feature=-crt-static
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-branch: ${{ github.ref_name }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          targets: ${{ matrix.target }}
+          cache-key: npm-addon-${{ matrix.target }}
+          save-cache: 'true'
+
+      # napi/cargo compile with the repo-pinned toolchain (rust-toolchain.toml),
+      # not the `stable` one setup-environment installs `targets:` into, so the
+      # target's std is added to the pinned toolchain here. Running rustup at
+      # the repo root resolves (and installs) the pinned toolchain. A no-op for
+      # the host target.
+      - name: Add the target to the pinned toolchain
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # Only the gnu aarch64 target links with the GNU toolchain; the musl
+      # targets are linked by zig via cargo-zigbuild.
+      - name: Install cross-compilation toolchain
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      # Zig is the cross linker for the cross targets. Downloaded directly with a
+      # pinned version and checksum (from https://ziglang.org/download/index.json)
+      # so the supply chain is ours to verify; every cross entry runs on an
+      # x86_64 Linux host.
+      - name: Install ziglang
+        if: ${{ matrix.cross }}
+        env:
+          ZIG_VERSION: 0.14.1
+          ZIG_SHA256: 24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c
+        run: |
+          set -euo pipefail
+          dist="zig-x86_64-linux-${ZIG_VERSION}"
+          curl -fsSL --retry 5 -o zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/${dist}.tar.xz"
+          echo "${ZIG_SHA256}  zig.tar.xz" | sha256sum -c -
+          sudo tar -C /opt -xJf zig.tar.xz
+          rm zig.tar.xz
+          echo "/opt/${dist}" >> "$GITHUB_PATH"
+
+      - name: Install cargo-zigbuild
+        if: ${{ matrix.cross }}
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-zigbuild
+
+      - name: Install dependencies
+        working-directory: surrealdb/node
+        run: bun install --frozen-lockfile
+
+      - name: Build the addon
+        working-directory: surrealdb/node
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: bun run build.ts --target ${{ matrix.target }} ${{ matrix.cross && '-x' || '' }}
+
+      - name: Upload the native binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: node-addon-${{ needs.prepare.outputs.name }}-${{ matrix.target }}
+          if-no-files-found: error
+          path: surrealdb/node/dist/*.node
+
+      # The JavaScript entry point and type declarations are identical for
+      # every target, so one build's copy is enough.
+      - name: Upload the package bundle
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: node-addon-${{ needs.prepare.outputs.name }}-bundle
+          if-no-files-found: error
+          path: |
+            surrealdb/node/dist/
+            !surrealdb/node/dist/*.node
+
+  # `@surrealdb/wasm-native`: the embedded browser engine. WebAssembly is the
+  # only target.
+  build-wasm-engine:
+    name: Build Wasm engine
+    needs: [prepare]
+    if: ${{ needs.prepare.outputs.build-npm == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-branch: ${{ github.ref_name }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          targets: wasm32-unknown-unknown
+          cache-key: npm-wasm
+          save-cache: 'true'
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # The CLI and the wasm-bindgen crate share a bindgen schema that changes
+      # between patch releases, so the CLI version is read from the lockfile -
+      # the same source `build.ts` checks. Both installs are skipped when the
+      # exact version is already in the cached ~/.cargo/bin.
+      - name: Install wasm-bindgen-cli + wasm-opt
+        run: |
+          set -euo pipefail
+          installed() { cargo install --list | grep -q "^$1 v$2:"; }
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
+          if installed wasm-bindgen-cli "$version"; then
+            echo "wasm-bindgen-cli $version already installed (cache)"
+          else
+            echo "Installing wasm-bindgen-cli $version"
+            cargo install --locked -f wasm-bindgen-cli --version "$version"
+          fi
+          if installed wasm-opt 0.116.1; then
+            echo "wasm-opt 0.116.1 already installed (cache)"
+          else
+            cargo install --locked -f wasm-opt --version 0.116.1
+          fi
+
+      - name: Install dependencies
+        working-directory: surrealdb/wasm
+        run: bun install --frozen-lockfile
+
+      - name: Build the module
+        working-directory: surrealdb/wasm
+        run: bun run build
+
+      - name: Upload the package bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wasm-engine-${{ needs.prepare.outputs.name }}-bundle
+          if-no-files-found: error
+          path: surrealdb/wasm/dist/
+
+  # Assembles each package's dist/ exactly as its publish script expects it and
+  # stores it under npm/<pkg>/ in the rolling prefix, so ce-release.yml can
+  # publish without compiling.
+  publish-npm-s3:
+    name: Publish npm bundles to S3
+    needs: [prepare, build-node-addon, build-wasm-engine, check-versions, package]
+    if: ${{ needs.prepare.outputs.build-npm == 'true' }}
+    runs-on: ${{ vars.RUNNER_AMD }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      # Before any download: checkout empties a workspace that is not yet a
+      # repository, which would take the downloaded files with it.
+      - name: Checkout the build scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      # One pattern assembles the whole node dist/: the shared JS/typings bundle
+      # and every platform's native binary.
+      - name: Download the Node bundle + native binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: node-addon-${{ needs.prepare.outputs.name }}-*
+          path: node/dist/
+          merge-multiple: true
+
+      - name: Download the Wasm package bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wasm-engine-${{ needs.prepare.outputs.name }}-bundle
+          path: wasm/dist/
+
+      - name: Distribution summary
+        run: |
+          echo "node/dist:" && ls -l node/dist
+          echo "wasm/dist:" && ls -lR wasm/dist
+
+      - name: Check the set is not already stored
+        id: stored
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROMOTABLE: ${{ needs.prepare.outputs.promotable }}
+        run: |
+          set -euo pipefail
+          stored=false
+          if [[ "${PROMOTABLE}" == true ]]; then
+            stored=$(.github/scripts/ce-rolling-built.sh)
+          fi
+          if [[ "${stored}" == true ]]; then
+            echo "::notice::This commit's set is already stored on ${GITHUB_REF_NAME}; not overwriting it."
+          fi
+          echo "stored=${stored}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to the rolling prefix
+        if: steps.stored.outputs.stored != 'true'
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          S3_PREFIX: ${{ needs.prepare.outputs.s3-prefix }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          aws s3 cp --recursive --cache-control 'no-store' \
+            node/dist/ "s3://${ROLLING_BUCKET}/${S3_PREFIX}/npm/node/"
+          aws s3 cp --recursive --cache-control 'no-store' \
+            wasm/dist/ "s3://${ROLLING_BUCKET}/${S3_PREFIX}/npm/wasm/"
+
+  # A run's success is what marks its set stored, so the run ends by checking
+  # the stored set is whole, exactly as ce-release.yml checks it before a
+  # release: a write step that stored only part of it (an artifact its
+  # download missed), or a set that lost objects before a re-run completed it,
+  # fails the run instead. Skipped with the writes when the set was already
+  # stored.
+  verify:
+    name: Verify the stored set
+    needs: [prepare, publish-s3, docker, publish-npm-s3]
+    if: ${{ !cancelled() && !failure() && needs.prepare.outputs.build == 'true' }}
+    # Private runner: reads the rolling bucket and ECR with its ambient IAM role.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      # The npm check reads each package.json at this commit.
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the set is whole
+        env:
+          BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          PREFIX: ${{ needs.prepare.outputs.s3-prefix }}
+          TAG: ${{ needs.prepare.outputs.image-tag }}
+          SHA: ${{ github.sha }}
+          NPM: ${{ needs.prepare.outputs.build-npm }}
+          ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+          ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          if missing="$(ECR_REGION="$(printf '%s' "${ECR_REGISTRY}" | cut -d. -f4)" bash .github/scripts/ce-rolling-set.sh missing)"; then
+            echo "The rolling set of ${SHA} is whole."
+            exit 0
+          else
+            rc=$?
+          fi
+          if ((rc == 1)); then
+            echo "::error::The rolling set of ${SHA} is incomplete, so this run must not mark it stored. Re-run all jobs of this run to rebuild it. Missing:"
+            printf '%s\n' "${missing}" | sed 's/^/  /'
+          fi
+          exit 1
+
+  # Test builds only: their prefix and tags live under test-<slug>, which no
+  # promotable build ever writes, so deleting them can never touch a releasable
+  # artifact. Runs whatever the build outcome so partial sets are removed too.
+  cleanup-test:
+    name: Clean up test artifacts
+    needs: [prepare, build, macos-universal, publish-s3, docker, build-node-addon, build-wasm-engine, publish-npm-s3, verify]
+    if: ${{ always() && needs.prepare.result == 'success' && needs.prepare.outputs.promotable != 'true' && startsWith(needs.prepare.outputs.slug, 'test-') }}
+    runs-on: ${{ vars.RUNNER_AMD }}
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+      ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      # Best-effort: a missing s3:DeleteObject grant leaves orphaned test objects
+      # but has no bearing on any promotable build, so it must not fail the run.
+      - name: Delete test binaries from S3
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          S3_PREFIX: ${{ needs.prepare.outputs.s3-prefix }}
+        run: |
+          set -euo pipefail
+          echo "Removing s3://${ROLLING_BUCKET}/${S3_PREFIX}/ (test build)"
+          if ! aws s3 rm --recursive "s3://${ROLLING_BUCKET}/${S3_PREFIX}/"; then
+            echo "::warning::Could not delete test artifacts under ${S3_PREFIX}; leaving them in place."
+          fi
+
+      - name: Delete test images from ECR
+        if: ${{ always() }}
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.image-tag }}
+        run: |
+          set -euo pipefail
+          region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+          # batch-delete-image reports an absent tag as a failure entry, not an error.
+          aws ecr batch-delete-image --region "$region" \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="${IMAGE_TAG}" imageTag="${IMAGE_TAG}-dev" \
+            || echo "::warning::ECR cleanup returned non-zero; some tags may have been absent."

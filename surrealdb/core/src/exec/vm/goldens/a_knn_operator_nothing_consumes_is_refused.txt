@@ -1,0 +1,8 @@
+### SELECT id FROM open WHERE array::len([title @@ 'beta']) > 0
+There was no suitable index supporting the expression: title @@ 'beta'
+### SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] OR tag = 'a' ORDER BY id
+Invalid query: KNN operators must appear at the top level of the WHERE clause (joined with AND); nesting `<|k, …|>` inside OR or NOT is not supported.
+### SELECT id FROM bare WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] OR n = 1 ORDER BY id
+Invalid query: KNN operators must appear at the top level of the WHERE clause (joined with AND); nesting `<|k, …|>` inside OR or NOT is not supported.
+### SELECT id FROM open WHERE !(emb <|4, 40|> [4.75, 0.0, 0.0]) ORDER BY id
+Invalid query: KNN operators must appear at the top level of the WHERE clause (joined with AND); nesting `<|k, …|>` inside OR or NOT is not supported.

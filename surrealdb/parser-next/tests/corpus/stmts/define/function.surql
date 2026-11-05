@@ -1,0 +1,10 @@
+DEFINE FUNCTION fn::a::b(){};
+DEFINE FUNCTION OVERWRITE fn::a::b(){};
+DEFINE FUNCTION IF NOT EXISTS fn::a::b(){};
+DEFINE FUNCTION fn::a::b($c: int, $d:int){};
+DEFINE FUNCTION fn::a::b($c: int, $d:int) -> int{};
+DEFINE FUNCTION fn::a::b($c: int, $d:int) -> int{} COMMENT "com";
+DEFINE FUNCTION fn::a::b($c: int, $d:int) -> int{} COMMENT "com";
+DEFINE FUNCTION fn::a::b($c: int, $d:int) -> int{} PERMISSIONS FULL COMMENT "com";
+DEFINE FUNCTION fn::a::b($c: int, $d:int) -> int{} PERMISSIONS NONE COMMENT "com";
+DEFINE FUNCTION fn::a::b($c: int, $d:int) -> int{} PERMISSIONS WHERE $session = "bla" COMMENT "com";

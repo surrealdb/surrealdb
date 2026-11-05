@@ -10,10 +10,12 @@
 //! <a href="https://crates.io/crates/surrealdb">the Rust SDK</a>.
 //! </section>
 
-#![recursion_limit = "256"]
+#![recursion_limit = "512"]
 // Temporarily allow deprecated items until version 3.0 for backward compatibility
 #![allow(deprecated)]
 #![deny(clippy::mem_forget)]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 #[macro_use]
 extern crate tracing;
@@ -30,6 +32,10 @@ pub mod ntw;
 /// Observability wiring: community Prometheus registry, `/metrics` handler,
 /// and the allowlists controlling what may leave the server unauthenticated.
 pub mod observe;
+#[cfg(feature = "mysql")]
+pub use surrealdb_mywire as mysql;
+#[cfg(feature = "postgres")]
+pub use surrealdb_pgwire as pg;
 /// Make `rpc` public so embedders can access RpcState and related router definitions
 /// when running SurrealDB as a library.
 pub mod rpc;
@@ -43,7 +49,7 @@ pub mod tls;
 use std::future::Future;
 use std::process::ExitCode;
 
-pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
+pub use cli::{Config, ConfigCheck};
 /// Re-export `RouterFactory` for convenience so embedders can `use
 /// surrealdb_server::RouterFactory`.
 #[doc(inline)]
@@ -64,7 +70,6 @@ pub use surrealdb as sdk;
 /// Re-export `core` for convenience so embedders can `use surrealdb_server::core::...`.
 #[doc(inline)]
 pub use surrealdb_core as core;
-use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 
 // Re-export the core crate in the same path used across internal modules
@@ -83,11 +88,7 @@ use surrealdb_core::kvs::TransactionBuilderFactory;
 ///   - `RouterFactory` (constructs the HTTP router)
 ///   - `ConfigCheck` (validates configuration before initialization)
 pub fn init<
-	C: TransactionBuilderFactory
-		+ RouterFactory
-		+ ConfigCheck
-		+ BucketStoreProvider
-		+ observe::ObservabilityProvider,
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + observe::ObservabilityProvider,
 >(
 	composer: C,
 ) -> ExitCode {

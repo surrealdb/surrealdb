@@ -1,6 +1,11 @@
 use std::future::IntoFuture;
+use std::time::Duration;
 
-use crate::conn::Command;
+pub use surrealdb_engine_api::IsolationLevel;
+use surrealdb_engine_api::ReadOnlyBegin;
+
+use crate::conn::ctx;
+use crate::method::transaction::RollbackOnDrop;
 use crate::method::{BoxFuture, Transaction};
 use crate::{Connection, OnceLockExt, Result, Surreal};
 
@@ -13,6 +18,69 @@ use crate::{Connection, OnceLockExt, Result, Surreal};
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Begin<C: Connection> {
 	pub(super) client: Surreal<C>,
+	pub(super) read_only: Option<ReadOnlyBegin>,
+	pub(super) isolation: Option<IsolationLevel>,
+}
+
+impl<C: Connection> Begin<C> {
+	/// Opens the transaction at `level`. Without this a transaction is
+	/// `Snapshot`, which conflicts on its writes only; `Serializable` also
+	/// conflicts on everything it read. A datastore that cannot provide the
+	/// level refuses the call.
+	pub fn isolation(mut self, level: IsolationLevel) -> Self {
+		self.isolation = Some(level);
+		self
+	}
+
+	/// Opens a read-only transaction that reads the current state. Any write
+	/// on it fails.
+	pub fn read_only(mut self) -> Self {
+		self.read_only.get_or_insert(ReadOnlyBegin {
+			max_staleness: Duration::ZERO,
+			strict: false,
+		});
+		self
+	}
+
+	/// Opens a read-only transaction over a snapshot no older than `bound`.
+	///
+	/// A datastore with no stale tier reads the current state, which meets any
+	/// bound. See [`Self::strict`] for what happens when no snapshot does.
+	pub fn max_staleness(mut self, bound: Duration) -> Self {
+		let strict = self.read_only.is_some_and(|read_only| read_only.strict);
+		self.read_only = Some(ReadOnlyBegin {
+			max_staleness: bound,
+			strict,
+		});
+		self
+	}
+
+	/// Fails, instead of reading the current state, when no snapshot meets the
+	/// staleness bound. Implies a read-only transaction.
+	pub fn strict(mut self) -> Self {
+		let max_staleness = self.read_only.map_or(Duration::ZERO, |r| r.max_staleness);
+		self.read_only = Some(ReadOnlyBegin {
+			max_staleness,
+			strict: true,
+		});
+		self
+	}
+}
+
+impl<C> Begin<C>
+where
+	C: Connection,
+{
+	/// Returns the underlying [`Surreal`] session handle that this [`Begin`]
+	/// future will start a transaction on when awaited.
+	///
+	/// Operations run on `begin.client()` execute on that session outside any
+	/// transaction. Calling `begin.client().clone()` creates a new independent
+	/// session on the same connection, inheriting the session's namespace,
+	/// database, authentication, and variables.
+	pub fn client(&self) -> &Surreal<C> {
+		&self.client
+	}
 }
 
 impl<C> IntoFuture for Begin<C>
@@ -24,15 +92,16 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		let client = self.client;
+		let read_only = self.read_only;
+		let isolation = self.isolation;
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
-			let result: crate::types::Value =
-				router.execute(client.session_id, Command::Begin).await?;
-			// Extract the UUID from the result
-			let uuid = result.into_uuid().map_err(|e| crate::Error::internal(e.to_string()))?;
+			let opened = router.engine.begin(ctx(client.session_id), read_only, isolation).await?;
 			Ok(Transaction {
-				id: uuid.into(),
+				id: opened.id,
+				guard: RollbackOnDrop::new(&client, opened.id),
 				client,
+				snapshot: opened.snapshot,
 			})
 		})
 	}

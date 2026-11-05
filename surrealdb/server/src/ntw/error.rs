@@ -7,7 +7,7 @@ use serde::{Serialize, Serializer};
 use surrealdb_core::api::X_SURREAL_REQUEST_ID;
 use surrealdb_core::api::err::ApiError;
 use surrealdb_core::err::anyhow_to_types_error;
-use surrealdb_types::{AuthError, NotAllowedError};
+use surrealdb_types::{AuthError, NotAllowedError, QueryError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -30,23 +30,48 @@ pub enum Error {
 	#[error("There was a problem connecting with the storage engine")]
 	InvalidStorage,
 
+	#[error(
+		"Tracked memory has been beyond SURREAL_MEMORY_THRESHOLD for {0}s, so every request is being refused"
+	)]
+	MemoryGuardEngaged(u64),
+
 	#[error("There was an error with the remote request: {0}")]
 	Remote(#[from] reqwest::Error),
 
 	#[error("The HTTP route '{0}' is forbidden")]
 	ForbiddenRoute(String),
 
+	#[error("The request origin is not allowed to use cookie authentication")]
+	ForbiddenOrigin,
+
+	#[error("A session cookie cannot be issued because the session has no expiry")]
+	CookieUnbounded,
+
 	#[error("The HTTP route '{0}' is not found")]
 	NotFound(String),
 
 	#[error("There was a problem parsing the header {0}: {1}")]
 	InvalidHeader(HeaderName, String),
+
+	#[error("The {0} in the URL path does not match the {0} the request names")]
+	ScopeConflict(&'static str),
+
+	#[error("Too many authentication attempts, please try again later")]
+	TooManyRequests(u64),
 }
 
 impl IntoResponse for Error {
 	fn into_response(self) -> Response {
 		match self {
 			Error::ForbiddenRoute(_) => {
+				ErrorMessage{
+					code: StatusCode::FORBIDDEN,
+					details: Some("Forbidden".to_string()),
+					description: Some("Not allowed to do this.".to_string()),
+					information: Some(self.to_string())
+				}.into_response()
+			}
+			Error::ForbiddenOrigin => {
 				ErrorMessage{
 					code: StatusCode::FORBIDDEN,
 					details: Some("Forbidden".to_string()),
@@ -85,6 +110,27 @@ impl IntoResponse for Error {
 					description: Some("The database health check for this instance failed. There was an issue with the underlying storage engine.".to_string()),
 					information: Some(self.to_string()),
 				}.into_response(),
+			Error::MemoryGuardEngaged(_) =>
+				ErrorMessage {
+					code: StatusCode::SERVICE_UNAVAILABLE,
+					details: Some("Health check failed".to_string()),
+					description: Some("The memory guard has refused every request for longer than SURREAL_MEMORY_THRESHOLD_UNHEALTHY_AFTER. The instance needs restarting to release memory.".to_string()),
+					information: Some(self.to_string()),
+				}.into_response(),
+			Error::ServerOverloaded => {
+				let mut response = ErrorMessage {
+					code: StatusCode::SERVICE_UNAVAILABLE,
+					details: Some("Service unavailable".to_string()),
+					description: Some("The server is under memory pressure and refused this request. Retry shortly.".to_string()),
+					information: Some(self.to_string()),
+				}.into_response();
+				// The refusal is transient: hint clients to retry once memory is released.
+				response.headers_mut().insert(
+					http::header::RETRY_AFTER,
+					HeaderValue::from_static("1"),
+				);
+				response
+			}
 			Error::NotReady =>
 				ErrorMessage {
 					code: StatusCode::SERVICE_UNAVAILABLE,
@@ -92,7 +138,25 @@ impl IntoResponse for Error {
 					description: Some("The server is still starting up and cannot serve this request yet. Retry once the instance is ready.".to_string()),
 					information: Some(self.to_string()),
 				}.into_response(),
-			_ => ErrorMessage {
+			Error::TooManyRequests(retry_after_secs) => {
+				let mut response = ErrorMessage {
+					code: StatusCode::TOO_MANY_REQUESTS,
+					details: Some("Too many requests".to_string()),
+					description: Some("Too many authentication attempts were made from this client address. Wait before retrying.".to_string()),
+					information: Some(self.to_string()),
+				}.into_response();
+				// Hint clients when the next attempt will be admitted.
+				response.headers_mut().insert(
+					http::header::RETRY_AFTER,
+					HeaderValue::from(retry_after_secs),
+				);
+				response
+			}
+			Error::Request
+			| Error::Remote(_)
+			| Error::CookieUnbounded
+			| Error::ScopeConflict(_)
+			| Error::InvalidHeader(..) => ErrorMessage {
 				code: StatusCode::BAD_REQUEST,
 				details: Some("Request problems detected".to_string()),
 				description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
@@ -171,6 +235,24 @@ impl IntoResponse for ResponseError {
 /// Map a structured [`surrealdb_types::Error`] to an HTTP response with the appropriate status
 /// code based on the error kind and details.
 fn types_error_into_response(e: &surrealdb_types::Error) -> Response {
+	// A query / transaction timeout is a server-side time-budget breach, not a
+	// malformed request, so render it as 504 rather than the generic 400 the
+	// fall-through would otherwise produce. 503 is deliberately avoided: load
+	// balancers commonly treat it as "node unhealthy", and a single slow query
+	// exceeding the timeout should not evict the node from rotation. The
+	// structured `QueryError::TimedOut` detail (wire code `QUERY_TIMEDOUT`) is
+	// still carried in the body regardless of the HTTP status.
+	if matches!(e.query_details(), Some(QueryError::TimedOut { .. })) {
+		return ErrorMessage {
+			code: StatusCode::GATEWAY_TIMEOUT,
+			details: Some("Query timeout".to_string()),
+			description: Some(
+				"The request exceeded the configured query timeout. Reduce the work performed by the request or raise the timeout.".to_string(),
+			),
+			information: Some(e.message().to_string()),
+		}
+		.into_response();
+	}
 	if e.is_not_allowed() {
 		let (code, details, description, information) = match e.not_allowed_details() {
 			Some(NotAllowedError::Auth(AuthError::InvalidAuth))
@@ -233,5 +315,48 @@ impl IntoResponse for ApiHandlerError {
 			response.headers_mut().insert(X_SURREAL_REQUEST_ID, value);
 		}
 		response
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::time::Duration;
+
+	use surrealdb_types::{Error as TypesError, QueryError};
+
+	use super::*;
+
+	#[test]
+	fn query_timeout_renders_as_gateway_timeout() {
+		// A wall-clock / deadline timeout surfaced at the request level should
+		// be a 504, not the generic 400 the fall-through produces.
+		let err = TypesError::query(
+			"The query was not executed because it exceeded the timeout: 5s".to_string(),
+			QueryError::TimedOut {
+				duration: Duration::from_secs(5),
+			},
+		);
+		assert_eq!(types_error_into_response(&err).status(), StatusCode::GATEWAY_TIMEOUT);
+	}
+
+	#[test]
+	fn non_timeout_query_error_still_renders_as_bad_request() {
+		let err = TypesError::query("cancelled".to_string(), QueryError::Cancelled);
+		assert_eq!(types_error_into_response(&err).status(), StatusCode::BAD_REQUEST);
+	}
+
+	#[test]
+	fn too_many_requests_renders_429_with_retry_after() {
+		let res = Error::TooManyRequests(2).into_response();
+		assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+		assert_eq!(res.headers().get(http::header::RETRY_AFTER).unwrap(), "2");
+	}
+
+	#[test]
+	fn server_overloaded_renders_503_with_retry_after() {
+		// Exercise the path the RPC handler takes: `NetError` wrapped in `ResponseError`.
+		let res = ResponseError::from(Error::ServerOverloaded).into_response();
+		assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+		assert_eq!(res.headers().get(http::header::RETRY_AFTER).unwrap(), "1");
 	}
 }

@@ -1,24 +1,17 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
 [[test.results]]
-value = ''''Project [ctx: Db]
-  field.lookup: GraphEdgeScan [ctx: Db] [direction: <->, tables: person, output: TargetId]
-      GraphEdgeScan [ctx: Db] [direction: ->, tables: likes, output: TargetId]
-          CurrentValueSource [ctx: Rt]
+value = '''
+'Project [ctx: Db]
     TableScan [ctx: Db] [table: person, direction: Forward]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
-  field.lookup: SelectProject [ctx: Db] [projections: *]
-      Filter [ctx: Db] [predicate: age > 30]
-          GraphEdgeScan [ctx: Db] [direction: <-, tables: person, output: FullEdge]
-              GraphEdgeScan [ctx: Db] [direction: ->, tables: likes, output: TargetId]
-                  CurrentValueSource [ctx: Rt]
+value = '''
+'Project [ctx: Db]
     TableScan [ctx: Db] [table: person, direction: Forward]
 ''''
 

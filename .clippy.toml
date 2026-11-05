@@ -8,3 +8,15 @@ disallowed-methods = [
 ]
 
 allow-unwrap-in-tests = true
+
+# Crate roots that `absolute_paths` does not count as an absolute path.
+#
+# `crate` and `self` are matched as literal first segments, not resolved to the enclosing package, so
+# both must be listed for `crate::err::Error` and `self::module::Item` to be accepted. Without them the
+# lint's two-segment budget is spent on the root itself and every qualified in-crate reference trips it.
+#
+# `std`, `core` and `alloc` are allowed so that `std::io::Result` and friends may be written inline.
+#
+# Everything else — third-party and sibling workspace crates alike — must be imported with `use`, which
+# is what the lint is enabled for.
+absolute-paths-allowed-crates = ["alloc", "core", "crate", "self", "std"]

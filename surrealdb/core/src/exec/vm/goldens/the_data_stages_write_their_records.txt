@@ -1,0 +1,927 @@
+### owner: UPDATE doc SET n += 1 WHERE twice > 2
+{ echoed: 's2', id: doc:2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+### owner: UPDATE doc SET n = n + 1, m = n WHERE veiled
+{ echoed: 's1', id: doc:1, m: 1, n: 2, open: 1, secret: 's1', twice: 4, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, m: 2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, m: 1, n: 2, open: 1, secret: 's1', twice: 4, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, m: 2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+### owner: UPDATE doc SET copy = secret
+{ copy: 's1', echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ copy: 's2', echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ copy: 's1', echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ copy: 's2', echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET copy = echoed, twin = twice
+{ copy: 's1', echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, twin: 2, veiled: 'v1' }
+{ copy: 's2', echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, twin: 4, veiled: 'v2' }
+records:
+{ copy: 's1', echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, twin: 2, veiled: 'v1' }
+{ copy: 's2', echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, twin: 4, veiled: 'v2' }
+### owner: UPDATE doc SET n = NONE
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET tags += 'a', tags += 'b'
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', tags: ['a', 'b'], twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', tags: ['a', 'b'], twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', tags: ['a', 'b'], twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', tags: ['a', 'b'], twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET x = $this.n, y = $parent
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1', x: 1 }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2', x: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1', x: 1 }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2', x: 2 }
+### owner: UPDATE doc CONTENT { n: 10 }
+{ echoed: NONE, id: doc:1, n: 10, twice: 20 }
+{ echoed: NONE, id: doc:2, n: 10, twice: 20 }
+records:
+{ echoed: NONE, id: doc:1, n: 10, twice: 20 }
+{ echoed: NONE, id: doc:2, n: 10, twice: 20 }
+### owner: UPDATE doc MERGE { extra: twice, peek: secret }
+{ echoed: 's1', extra: 2, id: doc:1, n: 1, open: 1, peek: 's1', secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', extra: 4, id: doc:2, n: 2, open: 2, peek: 's2', secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', extra: 2, id: doc:1, n: 1, open: 1, peek: 's1', secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', extra: 4, id: doc:2, n: 2, open: 2, peek: 's2', secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc REPLACE { n: 4 }
+{ echoed: NONE, id: doc:1, n: 4, twice: 8 }
+{ echoed: NONE, id: doc:2, n: 4, twice: 8 }
+records:
+{ echoed: NONE, id: doc:1, n: 4, twice: 8 }
+{ echoed: NONE, id: doc:2, n: 4, twice: 8 }
+### owner: UPDATE doc UNSET veiled, open
+{ echoed: 's1', id: doc:1, n: 1, secret: 's1', twice: 2 }
+{ echoed: 's2', id: doc:2, n: 2, secret: 's2', twice: 4 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, secret: 's1', twice: 2 }
+{ echoed: 's2', id: doc:2, n: 2, secret: 's2', twice: 4 }
+### owner: UPDATE doc PATCH [{ op: 'replace', path: '/n', value: 9 }]
+{ echoed: 's1', id: doc:1, n: 9, open: 1, secret: 's1', twice: 18, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 9, open: 2, secret: 's2', twice: 18, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 9, open: 1, secret: 's1', twice: 18, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 9, open: 2, secret: 's2', twice: 18, veiled: 'v2' }
+### owner: UPDATE doc SET n = 1 WHERE (SELECT VALUE n FROM ONLY $this) > 1
+{ echoed: 's2', id: doc:2, n: 1, open: 2, secret: 's2', twice: 2, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 1, open: 2, secret: 's2', twice: 2, veiled: 'v2' }
+### owner: DELETE doc WHERE n > 1
+(no rows)
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+### owner: DELETE doc WHERE secret
+(no rows)
+records:
+### owner: UPSERT doc:1 SET n = 7 WHERE n = 1
+{ echoed: 's1', id: doc:1, n: 7, open: 1, secret: 's1', twice: 14, veiled: 'v1' }
+records:
+{ echoed: 's1', id: doc:1, n: 7, open: 1, secret: 's1', twice: 14, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPSERT doc:5 SET n = 7
+{ echoed: NONE, id: doc:5, n: 7, twice: 14 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:5, n: 7, twice: 14 }
+### owner: UPSERT doc SET n = 8 WHERE n = 99
+{ echoed: NONE, id: doc:generated, n: 8, twice: 16 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:generated, n: 8, twice: 16 }
+### owner: CREATE doc:4 SET n = secret, m = twice
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: CREATE doc:4 CONTENT { n: 3, secret: 'z' }
+{ echoed: 'z', id: doc:4, n: 3, secret: 'z', twice: 6 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: 'z', id: doc:4, n: 3, secret: 'z', twice: 6 }
+### owner: CREATE doc SET n = 1
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+### owner: INSERT INTO doc { id: doc:8, n: 8 }
+{ echoed: NONE, id: doc:8, n: 8, twice: 16 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:8, n: 8, twice: 16 }
+### owner: INSERT INTO doc [{ id: doc:1, n: 5 }, { id: doc:9, n: 9 }]
+error: Database record `doc:1` already exists
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET n = <int> 'x'
+error: Could not cast into `int` using input `'x'`
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc PATCH [{ op: 'copy', from: '/secret', path: '/leak' }]
+{ echoed: 's1', id: doc:1, leak: 's1', n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, leak: 's2', n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, leak: 's1', n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, leak: 's2', n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc PATCH [{ op: 'move', from: '/secret', path: '/moved' }]
+{ echoed: NONE, id: doc:1, moved: 's1', n: 1, open: 1, twice: 2, veiled: 'v1' }
+{ echoed: NONE, id: doc:2, moved: 's2', n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ echoed: NONE, id: doc:1, moved: 's1', n: 1, open: 1, twice: 2, veiled: 'v1' }
+{ echoed: NONE, id: doc:2, moved: 's2', n: 2, open: 2, twice: 4, veiled: 'v2' }
+### owner: UPDATE doc PATCH [{ op: 'test', path: '/secret', value: 's1' }]
+error: Given test operation failed for JSON Patch. Expected `'s1'`, but got `'s2'` instead.
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc PATCH [{ op: 'copy', from: '/n', path: '/m' }, { op: 'test', path: '/m', value: 1 }]
+error: Given test operation failed for JSON Patch. Expected `1`, but got `2` instead.
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc PATCH [{ op: 'add', path: '/list', value: [1] }, { op: 'copy', from: '/list/0', path: '/first' }]
+{ echoed: 's1', first: 1, id: doc:1, list: [1], n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', first: 1, id: doc:2, list: [1], n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', first: 1, id: doc:1, list: [1], n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', first: 1, id: doc:2, list: [1], n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc PATCH [{ op: 'copy', from: '/missing', path: '/x' }]
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc PATCH [{ op: 'nonsense' }]
+error: The JSON Patch contains invalid operations. Failed to parse JSON patch structure: Key 'path' missing
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT INTO doc { id: doc:1, n: 5 } ON DUPLICATE KEY UPDATE n += $input.n, seen = $input
+{ echoed: 's1', id: doc:1, n: 6, open: 1, secret: 's1', seen: { id: doc:1, n: 5 }, twice: 12, veiled: 'v1' }
+records:
+{ echoed: 's1', id: doc:1, n: 6, open: 1, secret: 's1', seen: { id: doc:1, n: 5 }, twice: 12, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT INTO doc { id: doc:1, n: 5 } ON DUPLICATE KEY UPDATE copy = secret, got = $input.n
+{ copy: 's1', echoed: 's1', got: 5, id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+records:
+{ copy: 's1', echoed: 's1', got: 5, id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT INTO doc [{ id: doc:2, n: 1 }, { id: doc:6, n: 6 }] ON DUPLICATE KEY UPDATE n = $input.n * 100
+{ echoed: 's2', id: doc:2, n: 100, open: 2, secret: 's2', twice: 200, veiled: 'v2' }
+{ echoed: NONE, id: doc:6, n: 6, twice: 12 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 100, open: 2, secret: 's2', twice: 200, veiled: 'v2' }
+{ echoed: NONE, id: doc:6, n: 6, twice: 12 }
+### owner: INSERT INTO doc { id: doc:1, n: 5 } ON DUPLICATE KEY UPDATE nested = (SELECT VALUE $input FROM ONLY 1)
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [1, 2, 3], a[1 + 1] = 9
+{ a: [1, 2, 9], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 2, 9], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 2, 9], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 2, 9], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [1, 2, 3], a[1 + 1] += 9
+{ a: [1, 2, 12], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 2, 12], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 2, 12], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 2, 12], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [{ k: 1, v: 1 }, { k: 2, v: 2 }], a[WHERE k > 1].v = 7
+{ a: [{ k: 1, v: 1 }, { k: 2, v: 7 }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ k: 1, v: 1 }, { k: 2, v: 7 }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [{ k: 1, v: 1 }, { k: 2, v: 7 }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ k: 1, v: 1 }, { k: 2, v: 7 }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [{ k: 1, v: 1 }, { k: 2, v: 2 }], a[WHERE k > 1].v += 7
+{ a: [{ k: 1, v: 1 }, { k: 2, v: [2, 7] }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ k: 1, v: 1 }, { k: 2, v: [2, 7] }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [{ k: 1, v: 1 }, { k: 2, v: [2, 7] }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ k: 1, v: 1 }, { k: 2, v: [2, 7] }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [{ b: 1 }, { b: 2 }], a.*.b = 5
+{ a: [{ b: 5 }, { b: 5 }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ b: 5 }, { b: 5 }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [{ b: 5 }, { b: 5 }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ b: 5 }, { b: 5 }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [{ b: 1 }, { b: 2 }], a[*].b += 5
+{ a: [{ b: [1, 2, 5] }, { b: [1, 2, 5] }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ b: [1, 2, 5] }, { b: [1, 2, 5] }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [{ b: [1, 2, 5] }, { b: [1, 2, 5] }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ b: [1, 2, 5] }, { b: [1, 2, 5] }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = { x: { y: 1 } }, a['x'].y += 2, a.x['z'] = 3
+{ a: { x: { y: 3, z: 3 } }, echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: { x: { y: 3, z: 3 } }, echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: { x: { y: 3, z: 3 } }, echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: { x: { y: 3, z: 3 } }, echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [1, 2, 3, 4], a[WHERE $this > 2] -= 1
+{ a: [1, 2, [3, 4], [3, 4]], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 2, [3, 4], [3, 4]], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 2, [3, 4], [3, 4]], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 2, [3, 4], [3, 4]], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [1, 2, 3, 4], a[WHERE $this > 1][0] = 9
+{ a: [1, 9, 3, 4], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 9, 3, 4], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 9, 3, 4], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 9, 3, 4], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [1, 2, 3, 4], a[WHERE $this > 1][0] = NONE
+{ a: [1, 3, 4], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 3, 4], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 3, 4], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 3, 4], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [3, 4, 5], a -= 4, a += 1, a +?= 3
+{ a: [3, 5, 1], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [3, 5, 1], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [3, 5, 1], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [3, 5, 1], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [[1], [2]], a[0][0] += 1, a[$][0] = 7
+{ a: [[2], [7]], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [[2], [7]], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [[2], [7]], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [[2], [7]], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a[1 + 1] = 1, b.c['d'] = 2
+{ a: { "2": 1 }, b: { c: { d: 2 } }, echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: { "2": 1 }, b: { c: { d: 2 } }, echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: { "2": 1 }, b: { c: { d: 2 } }, echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: { "2": 1 }, b: { c: { d: 2 } }, echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [1, 2], a[<int> 'x'] = 3
+error: Could not cast into `int` using input `'x'`
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a[<int> 'x'] = 3, b = <int> 'y'
+error: Could not cast into `int` using input `'y'`
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [1, 2, 3], a[1 + 0] = NONE
+{ a: [1, 3], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 3], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 3], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 3], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc UNSET veiled, tags[0], tags[WHERE $this = 1]
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2 }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2 }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4 }
+### owner: UPSERT doc:50 SET a = [{ k: 1 }], a[WHERE k = 1].v = 3
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc SET a = [{ k: 1 }] RETURN a, $before.n
+{ "$before.n": 1, a: [{ k: 1 }] }
+{ "$before.n": 2, a: [{ k: 1 }] }
+records:
+{ a: [{ k: 1 }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ k: 1 }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: CREATE doc:60 SET a.b[WHERE x = 1].c = 2
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT INTO doc { id: doc:1, n: 5 } ON DUPLICATE KEY UPDATE a = [1, 2], a[0 + 1] = $input.n
+{ a: [1, 5], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+records:
+{ a: [1, 5], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT INTO doc (id, n, tags) VALUES (doc:20, 1, [1]), (doc:21, 2 + 3, [2])
+{ echoed: NONE, id: doc:20, n: 1, tags: [1], twice: 2 }
+{ echoed: NONE, id: doc:21, n: 5, tags: [2], twice: 10 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:20, n: 1, tags: [1], twice: 2 }
+{ echoed: NONE, id: doc:21, n: 5, tags: [2], twice: 10 }
+### owner: INSERT INTO doc (id, a.b, a.c[0]) VALUES (doc:22, 1, 2)
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT INTO doc (id, a[1 + 1]) VALUES (doc:24, 5)
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT INTO doc (id, n) VALUES (doc:25, 1), (doc:25, 2)
+error: Database record `doc:25` already exists
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT INTO doc (id, a[<int> 'x']) VALUES (doc:26, 5)
+error: Could not cast into `int` using input `'x'`
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT INTO $session { id: doc:1 }
+error: Cannot execute INSERT statement using value: $session
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT INTO doc 5
+error: Cannot execute INSERT statement using value: 5
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT INTO other (SELECT n + 10 AS n FROM doc)
+{ id: other:generated, n: 11 }
+{ id: other:generated, n: 12 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT [{ id: doc:31, n: 3 }, { id: other:31, n: 4 }]
+{ echoed: NONE, id: doc:31, n: 3, twice: 6 }
+{ id: other:31, n: 4 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:31, n: 3, twice: 6 }
+### owner: INSERT INTO doc { id: doc:32, n: 3 + 4 }
+{ echoed: NONE, id: doc:32, n: 7, twice: 14 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:32, n: 7, twice: 14 }
+### owner: INSERT RELATION INTO doc { in: doc:1, out: doc:2, id: doc:33 }
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT RELATION INTO doc [{ in: doc:1, out: doc:2 }, { in: doc:2, out: doc:1 }]
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: INSERT RELATION INTO doc { in: doc:1 }
+error: Cannot execute INSERT statement where property 'out' is: NONE
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: RELATE (SELECT VALUE id FROM doc:1)->doc->doc:2 SET n = 1
+{ echoed: NONE, id: doc:generated, in: doc:1, n: 1, out: doc:2, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:generated, in: doc:1, n: 1, out: doc:2, twice: 2 }
+### owner: RELATE doc:1->(type::record('doc', 'e1'))->(SELECT VALUE id FROM doc:2) SET a = [1], a[0] += 1
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: CREATE |doc:3| SET n = 1
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+### owner: CREATE |doc:5..7| SET n = 2
+{ echoed: NONE, id: doc:5, n: 2, twice: 4 }
+{ echoed: NONE, id: doc:6, n: 2, twice: 4 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:5, n: 2, twice: 4 }
+{ echoed: NONE, id: doc:6, n: 2, twice: 4 }
+### owner: UPDATE |doc:1..3| SET n = 9
+{ echoed: 's1', id: doc:1, n: 9, open: 1, secret: 's1', twice: 18, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 9, open: 2, secret: 's2', twice: 18, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 9, open: 1, secret: 's1', twice: 18, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 9, open: 2, secret: 's2', twice: 18, veiled: 'v2' }
+### owner: CREATE doc:4 CONTENT { id: doc:5 }
+error: Found doc:5 for the `id` field, but a specific record has been specified
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: CREATE doc:4 CONTENT { id: doc:4, n: 1 }
+{ echoed: NONE, id: doc:4, n: 1, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:4, n: 1, twice: 2 }
+### owner: CREATE doc:4 SET id = 4
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: CREATE doc CONTENT { id: doc:12, n: 1 }
+{ echoed: NONE, id: doc:12, n: 1, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:12, n: 1, twice: 2 }
+### owner: UPDATE doc:1 CONTENT { id: doc:2 }
+error: Found doc:2 for the `id` field, but a specific record has been specified
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: RELATE doc:1->doc->doc:2 SET n = 1
+{ echoed: NONE, id: doc:generated, in: doc:1, n: 1, out: doc:2, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:generated, in: doc:1, n: 1, out: doc:2, twice: 2 }
+### owner: RELATE doc:1->doc->doc:2 CONTENT { in: doc:9 }
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: RELATE doc:1->doc:77->doc:2 CONTENT { id: doc:77, out: doc:2 }
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET n += 1 WHERE twice > 2
+{ echoed: NONE, id: doc:2, n: 3, open: 2, twice: 6, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+### record user: UPDATE doc SET n = n + 1, m = n WHERE veiled
+{ echoed: NONE, id: doc:2, m: 2, n: 3, open: 2, twice: 6, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, m: 2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+### record user: UPDATE doc SET copy = secret
+{ id: doc:1, n: 1, open: 1, twice: 2 }
+{ echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET copy = echoed, twin = twice
+{ id: doc:1, n: 1, open: 1, twice: 2, twin: 2 }
+{ echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, twin: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, twin: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, twin: 4, veiled: 'v2' }
+### record user: UPDATE doc SET n = NONE
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET tags += 'a', tags += 'b'
+{ id: doc:1, n: 1, open: 1, tags: ['a', 'b'], twice: 2 }
+{ echoed: NONE, id: doc:2, n: 2, open: 2, tags: ['a', 'b'], twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', tags: ['a', 'b'], twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', tags: ['a', 'b'], twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET x = $this.n, y = $parent
+{ id: doc:1, n: 1, open: 1, twice: 2, x: 1 }
+{ echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2', x: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1', x: 1 }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2', x: 2 }
+### record user: UPDATE doc CONTENT { n: 10 }
+{ echoed: NONE, id: doc:1, n: 10, twice: 20 }
+{ echoed: NONE, id: doc:2, n: 10, twice: 20 }
+records:
+{ echoed: NONE, id: doc:1, n: 10, twice: 20 }
+{ echoed: NONE, id: doc:2, n: 10, twice: 20 }
+### record user: UPDATE doc MERGE { extra: twice, peek: secret }
+{ extra: 2, id: doc:1, n: 1, open: 1, twice: 2 }
+{ echoed: NONE, extra: 4, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', extra: 2, id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', extra: 4, id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc REPLACE { n: 4 }
+{ echoed: NONE, id: doc:1, n: 4, twice: 8 }
+{ echoed: NONE, id: doc:2, n: 4, twice: 8 }
+records:
+{ echoed: NONE, id: doc:1, n: 4, twice: 8 }
+{ echoed: NONE, id: doc:2, n: 4, twice: 8 }
+### record user: UPDATE doc UNSET veiled, open
+{ id: doc:1, n: 1, twice: 2 }
+{ echoed: NONE, id: doc:2, n: 2, twice: 4 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, secret: 's1', twice: 2 }
+{ echoed: 's2', id: doc:2, n: 2, secret: 's2', twice: 4 }
+### record user: UPDATE doc PATCH [{ op: 'replace', path: '/n', value: 9 }]
+{ echoed: NONE, id: doc:1, n: 9, open: 1, twice: 18 }
+{ echoed: NONE, id: doc:2, n: 9, open: 2, twice: 18, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 9, open: 1, secret: 's1', twice: 18, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 9, open: 2, secret: 's2', twice: 18, veiled: 'v2' }
+### record user: UPDATE doc SET n = 1 WHERE (SELECT VALUE n FROM ONLY $this) > 1
+{ id: doc:2, n: 1, open: 2, twice: 2, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 1, open: 2, secret: 's2', twice: 2, veiled: 'v2' }
+### record user: DELETE doc WHERE n > 1
+(no rows)
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+### record user: DELETE doc WHERE secret
+(no rows)
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPSERT doc:1 SET n = 7 WHERE n = 1
+{ echoed: NONE, id: doc:1, n: 7, open: 1, twice: 14 }
+records:
+{ echoed: 's1', id: doc:1, n: 7, open: 1, secret: 's1', twice: 14, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPSERT doc:5 SET n = 7
+{ echoed: NONE, id: doc:5, n: 7, twice: 14 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:5, n: 7, twice: 14 }
+### record user: UPSERT doc SET n = 8 WHERE n = 99
+{ echoed: NONE, id: doc:generated, n: 8, twice: 16 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:generated, n: 8, twice: 16 }
+### record user: CREATE doc:4 SET n = secret, m = twice
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: CREATE doc:4 CONTENT { n: 3, secret: 'z' }
+{ echoed: NONE, id: doc:4, n: 3, twice: 6 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: 'z', id: doc:4, n: 3, secret: 'z', twice: 6 }
+### record user: CREATE doc SET n = 1
+{ id: doc:generated, n: 1, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+### record user: INSERT INTO doc { id: doc:8, n: 8 }
+{ echoed: NONE, id: doc:8, n: 8, twice: 16 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:8, n: 8, twice: 16 }
+### record user: INSERT INTO doc [{ id: doc:1, n: 5 }, { id: doc:9, n: 9 }]
+error: Database record `doc:1` already exists
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET n = <int> 'x'
+error: Could not cast into `int` using input `'x'`
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc PATCH [{ op: 'copy', from: '/secret', path: '/leak' }]
+error: Cannot read `secret` in a JSON Patch operation: the field's PERMISSIONS FOR select clause does not allow it
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc PATCH [{ op: 'move', from: '/secret', path: '/moved' }]
+error: Cannot read `secret` in a JSON Patch operation: the field's PERMISSIONS FOR select clause does not allow it
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc PATCH [{ op: 'test', path: '/secret', value: 's1' }]
+error: Cannot read `secret` in a JSON Patch operation: the field's PERMISSIONS FOR select clause does not allow it
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc PATCH [{ op: 'copy', from: '/n', path: '/m' }, { op: 'test', path: '/m', value: 1 }]
+error: Given test operation failed for JSON Patch. Expected `1`, but got `2` instead.
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc PATCH [{ op: 'add', path: '/list', value: [1] }, { op: 'copy', from: '/list/0', path: '/first' }]
+{ first: 1, id: doc:1, list: [1], n: 1, open: 1, twice: 2 }
+{ echoed: NONE, first: 1, id: doc:2, list: [1], n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', first: 1, id: doc:1, list: [1], n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', first: 1, id: doc:2, list: [1], n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc PATCH [{ op: 'copy', from: '/missing', path: '/x' }]
+{ id: doc:1, n: 1, open: 1, twice: 2 }
+{ echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc PATCH [{ op: 'nonsense' }]
+error: The JSON Patch contains invalid operations. Failed to parse JSON patch structure: Key 'path' missing
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT INTO doc { id: doc:1, n: 5 } ON DUPLICATE KEY UPDATE n += $input.n, seen = $input
+{ echoed: NONE, id: doc:1, n: 6, open: 1, seen: { id: doc:1, n: 5 }, twice: 12 }
+records:
+{ echoed: 's1', id: doc:1, n: 6, open: 1, secret: 's1', seen: { id: doc:1, n: 5 }, twice: 12, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT INTO doc { id: doc:1, n: 5 } ON DUPLICATE KEY UPDATE copy = secret, got = $input.n
+{ got: 5, id: doc:1, n: 1, open: 1, twice: 2 }
+records:
+{ echoed: 's1', got: 5, id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT INTO doc [{ id: doc:2, n: 1 }, { id: doc:6, n: 6 }] ON DUPLICATE KEY UPDATE n = $input.n * 100
+{ echoed: NONE, id: doc:2, n: 100, open: 2, twice: 200, veiled: 'v2' }
+{ echoed: NONE, id: doc:6, n: 6, twice: 12 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 100, open: 2, secret: 's2', twice: 200, veiled: 'v2' }
+{ echoed: NONE, id: doc:6, n: 6, twice: 12 }
+### record user: INSERT INTO doc { id: doc:1, n: 5 } ON DUPLICATE KEY UPDATE nested = (SELECT VALUE $input FROM ONLY 1)
+{ id: doc:1, n: 1, open: 1, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [1, 2, 3], a[1 + 1] = 9
+{ a: [1, 2, 9], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [1, 2, 9], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 2, 9], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 2, 9], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [1, 2, 3], a[1 + 1] += 9
+{ a: [1, 2, 12], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [1, 2, 12], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 2, 12], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 2, 12], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [{ k: 1, v: 1 }, { k: 2, v: 2 }], a[WHERE k > 1].v = 7
+{ a: [{ k: 1, v: 1 }, { k: 2, v: 7 }], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [{ k: 1, v: 1 }, { k: 2, v: 7 }], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [{ k: 1, v: 1 }, { k: 2, v: 7 }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ k: 1, v: 1 }, { k: 2, v: 7 }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [{ k: 1, v: 1 }, { k: 2, v: 2 }], a[WHERE k > 1].v += 7
+{ a: [{ k: 1, v: 1 }, { k: 2, v: [2, 7] }], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [{ k: 1, v: 1 }, { k: 2, v: [2, 7] }], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [{ k: 1, v: 1 }, { k: 2, v: [2, 7] }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ k: 1, v: 1 }, { k: 2, v: [2, 7] }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [{ b: 1 }, { b: 2 }], a.*.b = 5
+{ a: [{ b: 5 }, { b: 5 }], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [{ b: 5 }, { b: 5 }], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [{ b: 5 }, { b: 5 }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ b: 5 }, { b: 5 }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [{ b: 1 }, { b: 2 }], a[*].b += 5
+{ a: [{ b: [1, 2, 5] }, { b: [1, 2, 5] }], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [{ b: [1, 2, 5] }, { b: [1, 2, 5] }], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [{ b: [1, 2, 5] }, { b: [1, 2, 5] }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ b: [1, 2, 5] }, { b: [1, 2, 5] }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = { x: { y: 1 } }, a['x'].y += 2, a.x['z'] = 3
+{ a: { x: { y: 3, z: 3 } }, id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: { x: { y: 3, z: 3 } }, echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: { x: { y: 3, z: 3 } }, echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: { x: { y: 3, z: 3 } }, echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [1, 2, 3, 4], a[WHERE $this > 2] -= 1
+{ a: [1, 2, [3, 4], [3, 4]], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [1, 2, [3, 4], [3, 4]], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 2, [3, 4], [3, 4]], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 2, [3, 4], [3, 4]], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [1, 2, 3, 4], a[WHERE $this > 1][0] = 9
+{ a: [1, 9, 3, 4], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [1, 9, 3, 4], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 9, 3, 4], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 9, 3, 4], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [1, 2, 3, 4], a[WHERE $this > 1][0] = NONE
+{ a: [1, 3, 4], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [1, 3, 4], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 3, 4], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 3, 4], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [3, 4, 5], a -= 4, a += 1, a +?= 3
+{ a: [3, 5, 1], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [3, 5, 1], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [3, 5, 1], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [3, 5, 1], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [[1], [2]], a[0][0] += 1, a[$][0] = 7
+{ a: [[2], [7]], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [[2], [7]], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [[2], [7]], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [[2], [7]], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a[1 + 1] = 1, b.c['d'] = 2
+{ a: { "2": 1 }, b: { c: { d: 2 } }, id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: { "2": 1 }, b: { c: { d: 2 } }, echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: { "2": 1 }, b: { c: { d: 2 } }, echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: { "2": 1 }, b: { c: { d: 2 } }, echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [1, 2], a[<int> 'x'] = 3
+error: Could not cast into `int` using input `'x'`
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a[<int> 'x'] = 3, b = <int> 'y'
+error: Could not cast into `int` using input `'y'`
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [1, 2, 3], a[1 + 0] = NONE
+{ a: [1, 3], id: doc:1, n: 1, open: 1, twice: 2 }
+{ a: [1, 3], echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ a: [1, 3], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [1, 3], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc UNSET veiled, tags[0], tags[WHERE $this = 1]
+{ id: doc:1, n: 1, open: 1, twice: 2 }
+{ echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2 }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4 }
+### record user: UPSERT doc:50 SET a = [{ k: 1 }], a[WHERE k = 1].v = 3
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc SET a = [{ k: 1 }] RETURN a, $before.n
+{ "$before.n": 1, a: [{ k: 1 }] }
+{ "$before.n": 2, a: [{ k: 1 }] }
+records:
+{ a: [{ k: 1 }], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ a: [{ k: 1 }], echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: CREATE doc:60 SET a.b[WHERE x = 1].c = 2
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT INTO doc { id: doc:1, n: 5 } ON DUPLICATE KEY UPDATE a = [1, 2], a[0 + 1] = $input.n
+{ a: [1, 5], id: doc:1, n: 1, open: 1, twice: 2 }
+records:
+{ a: [1, 5], echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT INTO doc (id, n, tags) VALUES (doc:20, 1, [1]), (doc:21, 2 + 3, [2])
+{ id: doc:20, n: 1, tags: [1], twice: 2 }
+{ echoed: NONE, id: doc:21, n: 5, tags: [2], twice: 10 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:20, n: 1, tags: [1], twice: 2 }
+{ echoed: NONE, id: doc:21, n: 5, tags: [2], twice: 10 }
+### record user: INSERT INTO doc (id, a.b, a.c[0]) VALUES (doc:22, 1, 2)
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT INTO doc (id, a[1 + 1]) VALUES (doc:24, 5)
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT INTO doc (id, n) VALUES (doc:25, 1), (doc:25, 2)
+error: Database record `doc:25` already exists
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT INTO doc (id, a[<int> 'x']) VALUES (doc:26, 5)
+error: Could not cast into `int` using input `'x'`
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT INTO $session { id: doc:1 }
+error: Cannot execute INSERT statement using value: $session
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT INTO doc 5
+error: Cannot execute INSERT statement using value: 5
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT INTO other (SELECT n + 10 AS n FROM doc)
+{ id: other:generated, n: 11 }
+{ id: other:generated, n: 12 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT [{ id: doc:31, n: 3 }, { id: other:31, n: 4 }]
+{ echoed: NONE, id: doc:31, n: 3, twice: 6 }
+{ id: other:31, n: 4 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:31, n: 3, twice: 6 }
+### record user: INSERT INTO doc { id: doc:32, n: 3 + 4 }
+{ echoed: NONE, id: doc:32, n: 7, twice: 14 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:32, n: 7, twice: 14 }
+### record user: INSERT RELATION INTO doc { in: doc:1, out: doc:2, id: doc:33 }
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT RELATION INTO doc [{ in: doc:1, out: doc:2 }, { in: doc:2, out: doc:1 }]
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: INSERT RELATION INTO doc { in: doc:1 }
+error: Cannot execute INSERT statement where property 'out' is: NONE
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: RELATE (SELECT VALUE id FROM doc:1)->doc->doc:2 SET n = 1
+{ id: doc:generated, in: doc:1, n: 1, out: doc:2, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:generated, in: doc:1, n: 1, out: doc:2, twice: 2 }
+### record user: RELATE doc:1->(type::record('doc', 'e1'))->(SELECT VALUE id FROM doc:2) SET a = [1], a[0] += 1
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: CREATE |doc:3| SET n = 1
+{ id: doc:generated, n: 1, twice: 2 }
+{ id: doc:generated, n: 1, twice: 2 }
+{ id: doc:generated, n: 1, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+{ echoed: NONE, id: doc:generated, n: 1, twice: 2 }
+### record user: CREATE |doc:5..7| SET n = 2
+{ echoed: NONE, id: doc:5, n: 2, twice: 4 }
+{ echoed: NONE, id: doc:6, n: 2, twice: 4 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:5, n: 2, twice: 4 }
+{ echoed: NONE, id: doc:6, n: 2, twice: 4 }
+### record user: UPDATE |doc:1..3| SET n = 9
+{ echoed: NONE, id: doc:1, n: 9, open: 1, twice: 18 }
+{ echoed: NONE, id: doc:2, n: 9, open: 2, twice: 18, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 9, open: 1, secret: 's1', twice: 18, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 9, open: 2, secret: 's2', twice: 18, veiled: 'v2' }
+### record user: CREATE doc:4 CONTENT { id: doc:5 }
+error: Found doc:5 for the `id` field, but a specific record has been specified
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: CREATE doc:4 CONTENT { id: doc:4, n: 1 }
+{ id: doc:4, n: 1, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:4, n: 1, twice: 2 }
+### record user: CREATE doc:4 SET id = 4
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: CREATE doc CONTENT { id: doc:12, n: 1 }
+{ id: doc:12, n: 1, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:12, n: 1, twice: 2 }
+### record user: UPDATE doc:1 CONTENT { id: doc:2 }
+error: Found doc:2 for the `id` field, but a specific record has been specified
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: RELATE doc:1->doc->doc:2 SET n = 1
+{ id: doc:generated, in: doc:1, n: 1, out: doc:2, twice: 2 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:generated, in: doc:1, n: 1, out: doc:2, twice: 2 }
+### record user: RELATE doc:1->doc->doc:2 CONTENT { in: doc:9 }
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: RELATE doc:1->doc:77->doc:2 CONTENT { id: doc:77, out: doc:2 }
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }

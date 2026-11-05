@@ -1,0 +1,14 @@
+### array::map([1, 2, 3], |$x| $x + 1)
+[2, 3, 4]
+### array::filter([1, 2, 3, 4], |$x| $x % 2 = 0)
+[2, 4]
+### array::fold([1, 2, 3], 0, |$acc, $x| $acc + $x)
+6
+### { LET $f = |$x| $x + 1; RETURN [1, 2].map($f) }
+[2, 3]
+### { LET $n = 10; LET $f = |$x| |$y| $x + $y + $n; RETURN $f(1)(2) }
+13
+### { LET $f = fn::mk(); RETURN $f(4) }
+12
+### { LET $f = eval::surql('|$x| $x * 5'); RETURN $f(3) }
+error: Function 'eval::surql' is not allowed to be executed

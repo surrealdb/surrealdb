@@ -1,0 +1,9 @@
+### SELECT array::group(sequence::nextval('s')) AS n FROM person GROUP ALL
+{ n: [1, 2, 3, 4, 5] }
+### SELECT city, array::group(sequence::nextval('s')) AS n FROM person GROUP BY city
+{ city: NONE, n: [1, 2, 4, 5] }
+{ city: 'x', n: [3] }
+### SELECT math::sum(sequence::nextval('s')) AS n FROM person GROUP ALL
+{ n: 15 }
+### SELECT sequence::nextval('s') AS n, count() AS c FROM person GROUP ALL
+{ c: 5, n: [1, 2, 3, 4, 5] }

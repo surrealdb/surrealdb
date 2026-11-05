@@ -7,6 +7,7 @@ impl_module_def!(
 	Package,
 	"vector::distance",
 	"chebyshev" => run,
+	"cosine" => run,
 	"euclidean" => run,
 	"hamming" => run,
 	"knn" => run,

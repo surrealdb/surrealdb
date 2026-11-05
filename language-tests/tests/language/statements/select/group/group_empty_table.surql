@@ -1,7 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
-
 [test]
 reason = "Test GROUP BY and GROUP ALL on empty tables"
 
@@ -30,7 +28,10 @@ value = "[]"
 -- Test GROUP BY on empty table
 SELECT category, COUNT() as count FROM empty_test GROUP BY category;
 
--- Test GROUP ALL on empty table
+-- GROUP ALL on an empty table: the one group is the statement's, not the
+-- data's, so it reports the grand total of no rows — each aggregate's
+-- answer over no values. GROUP BY above and below has no such group,
+-- because a key can only come from a row.
 SELECT COUNT() as count, math::sum(value) as total FROM empty_test GROUP ALL;
 
 -- Test aggregate functions on empty table with GROUP BY

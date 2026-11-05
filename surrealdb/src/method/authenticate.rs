@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use crate::conn::Command;
+use crate::conn::ctx;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::auth::{RefreshToken, Token};
 use crate::types::SurrealValue;
@@ -28,16 +28,9 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
-			let value = router
-				.execute_value(
-					self.client.session_id,
-					Command::Authenticate {
-						token: SurrealValue::from_value(self.token.into_value())
-							.map_err(|e| Error::internal(e.to_string()))?,
-					},
-				)
-				.await?;
-			Token::from_value(value).map_err(|e| Error::internal(e.to_string()))
+			let token =
+				router.engine.authenticate(ctx(self.client.session_id), self.token.into()).await?;
+			Ok(token.into())
 		})
 	}
 }
@@ -106,16 +99,10 @@ where
 				}
 			};
 			// Execute the refresh command to obtain new tokens.
-			let value = router
-				.execute_value(
-					self.client.session_id,
-					Command::Refresh {
-						token: SurrealValue::from_value(token)
-							.map_err(|e| Error::internal(e.to_string()))?,
-					},
-				)
-				.await?;
-			Token::from_value(value).map_err(|e| Error::internal(e.to_string()))
+			let token: surrealdb_rpc::Token =
+				SurrealValue::from_value(token).map_err(|e| Error::internal(e.to_string()))?;
+			let refreshed = router.engine.refresh(ctx(self.client.session_id), token).await?;
+			Ok(refreshed.into())
 		})
 	}
 }

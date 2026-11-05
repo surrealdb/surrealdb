@@ -1,0 +1,3 @@
+ALTER FIELD author ON post REFERENCE ON DELETE CASCADE MATERIALIZE INTO author.posts;
+ALTER FIELD author ON post REFERENCE MATERIALIZE INTO author.posts WHERE archived != true;
+ALTER FIELD author ON post MATERIALIZE INTO author.posts REFERENCE;

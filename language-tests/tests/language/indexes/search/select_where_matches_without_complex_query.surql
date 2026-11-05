@@ -20,13 +20,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
+value = "[{ id: page:1, sc1: 0f, sc2: 0.1757841259241104f }, { id: page:2, sc1: 0f, sc2: 0.1893640160560608f }]"
 
 [[test.results]]
-value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
+value = "[{ id: page:1, sc1: 0f, sc2: 0.1757841259241104f }, { id: page:2, sc1: 0f, sc2: 0.1893640160560608f }]"
 
 [[test.results]]
-value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
+value = "[{ id: page:1, sc1: 0f, sc2: 0.1757841259241104f }, { id: page:2, sc1: 0f, sc2: 0.1893640160560608f }]"
 
 */
 CREATE page:1 SET title = 'the quick brown', content = 'fox jumped over the lazy dog', host = 'test';

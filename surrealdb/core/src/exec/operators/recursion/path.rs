@@ -57,14 +57,11 @@
 //! state:texas], [planet:earth, country:canada, province:ontario], [planet:earth, country:canada,
 //! province:bc], ...]`.
 
-use std::sync::Arc;
-
 use surrealdb_types::ToSql;
 
-use super::common::{eval_buffered, is_recursion_target};
+use super::common::{DepthBody, RecursionBounds, eval_buffered, is_recursion_target};
 use crate::exec::FlowResult;
-use crate::exec::parts::{evaluate_physical_path, is_final};
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::parts::is_final;
 use crate::val::Value;
 
 /// Path recursion: return all paths as arrays of arrays.
@@ -73,14 +70,14 @@ use crate::val::Value;
 /// path as an array. Paths terminate at dead ends or max depth.
 ///
 /// Fully iterative -- BFS loop over active paths.
-pub(crate) async fn evaluate_recurse_path(
+pub(crate) async fn evaluate_recurse_path_with(
 	start: &Value,
-	path: &[Arc<dyn PhysicalExpr>],
-	min_depth: u32,
-	max_depth: u32,
+	body: &impl DepthBody,
+	bounds: RecursionBounds,
 	inclusive: bool,
-	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
+	let min_depth = bounds.min;
+	let max_depth = bounds.cap();
 	let mut completed_paths: Vec<Value> = Vec::new();
 	let mut active_paths: Vec<Vec<Value>> = if inclusive {
 		vec![vec![start.clone()]]
@@ -99,7 +96,7 @@ pub(crate) async fn evaluate_recurse_path(
 			.iter()
 			.map(|current_path| {
 				let current_value = current_path.last().unwrap_or(start);
-				evaluate_physical_path(current_value, path, ctx.with_value(current_value))
+				body.eval(current_value)
 			})
 			.collect();
 		let eval_results = eval_buffered(futures).await?;
@@ -115,7 +112,26 @@ pub(crate) async fn evaluate_recurse_path(
 					}
 					continue;
 				}
-				other => vec![other],
+				other @ (Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_)) => vec![other],
 			};
 
 			// Single pass: extend paths for valid recursion targets, detect dead ends.
@@ -131,7 +147,7 @@ pub(crate) async fn evaluate_recurse_path(
 				// Non-RecordId values during recursion are an error --
 				// recursion is intended purely for record graph traversal.
 				if !is_recursion_target(&v) {
-					return Err(crate::err::Error::InvalidRecursionTarget {
+					return Err(crate::exec::Error::InvalidRecursionTarget {
 						value: v.to_sql(),
 					}
 					.into());
@@ -165,6 +181,15 @@ pub(crate) async fn evaluate_recurse_path(
 
 		active_paths = next_paths;
 		depth += 1;
+	}
+
+	// Unbounded recursion truncated at the system limit with paths still
+	// active: hard error (see `RecursionBounds`).
+	if bounds.errors_on_limit() && !active_paths.is_empty() {
+		return Err(crate::exec::Error::IdiomRecursionLimitExceeded {
+			limit: bounds.system_limit,
+		}
+		.into());
 	}
 
 	// Add remaining active paths that reached max depth

@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Bare field paths in a subquery FROM clause should resolve against the outer document when traversing record links"

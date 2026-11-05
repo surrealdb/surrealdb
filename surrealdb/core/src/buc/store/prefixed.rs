@@ -7,8 +7,12 @@ use std::future::Future;
 use std::pin::Pin;
 
 use bytes::Bytes;
+use futures::stream::BoxStream;
 
-use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
+use super::{
+	ByteRange, ListEntry, ListOptions, ObjectKey, ObjectMeta, ObjectStore, ObjectStream, PutError,
+	PutOptions, PutResult,
+};
 
 /// A wrapper that adds a prefix to all keys in an underlying [`ObjectStore`].
 ///
@@ -69,6 +73,24 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		Box::pin(async move { self.store.put_if_not_exists(&full_key, data).await })
 	}
 
+	fn supports_content_type(&self) -> bool {
+		self.store.supports_content_type()
+	}
+
+	fn put_streamed<'a>(
+		&'a self,
+		key: &'a ObjectKey,
+		data: BoxStream<'static, Result<Bytes, String>>,
+		opts: PutOptions,
+	) -> Pin<Box<dyn Future<Output = Result<PutResult, PutError>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal() {
+			return Box::pin(async move { Err(PutError::Failed(e)) });
+		}
+		let full_key = self.prefix.join(key);
+
+		Box::pin(async move { self.store.put_streamed(&full_key, data, opts).await })
+	}
+
 	fn get<'a>(
 		&'a self,
 		key: &'a ObjectKey,
@@ -79,6 +101,27 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		let full_key = self.prefix.join(key);
 
 		Box::pin(async move { self.store.get(&full_key).await })
+	}
+
+	fn get_streamed<'a>(
+		&'a self,
+		key: &'a ObjectKey,
+		range: Option<ByteRange>,
+	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectStream>, String>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal() {
+			return Box::pin(async move { Err(e) });
+		}
+		let full_key = self.prefix.join(key);
+
+		Box::pin(async move {
+			// The prefix is stripped back off `meta.key` so the caller sees the
+			// key it asked for, as every other method here does.
+			let mut res = self.store.get_streamed(&full_key, range).await?;
+			if let Some(stream) = res.as_mut() {
+				key.clone_into(&mut stream.meta.key);
+			}
+			Ok(res)
+		})
 	}
 
 	fn head<'a>(
@@ -181,39 +224,37 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 	fn list<'a>(
 		&'a self,
 		opts: &'a ListOptions,
-	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
-		if let Some(ref req_prefix) = opts.prefix
-			&& let Err(e) = req_prefix.check_no_traversal()
-		{
-			return Box::pin(async move { Err(e) });
-		}
+	) -> Pin<Box<dyn Future<Output = Result<Vec<ListEntry>, String>> + Send + 'a>> {
 		Box::pin(async move {
-			// Combine the store's prefix with the request prefix
-			let prefix = match opts.prefix {
-				Some(ref req_prefix) => self.prefix.join(req_prefix),
-				None => self.prefix.clone(),
-			};
+			// The store's root, without a trailing `/`, so that prepending it
+			// to a key (which starts with `/`) never doubles the separator.
+			let root = self.prefix.as_str().trim_end_matches('/');
 
+			// Both the prefix and `start` are rebased under the root. The
+			// prefix always is, so a listing of this bucket can never reach a
+			// sibling whose name merely starts with this one's.
 			let opts = ListOptions {
-				start: opts.start.clone(),
-				prefix: Some(prefix),
+				start: opts.start.as_ref().map(|start| format!("{root}{start}")),
+				prefix: Some(format!("{root}{}", opts.prefix())),
+				delimiter: opts.delimiter,
 				limit: opts.limit,
 			};
 
-			// Delegate to the underlying store with the combined prefix
-			let objects_result = self.store.list(&opts).await?;
+			let entries = self.store.list(&opts).await?;
 
-			// Map the returned objects to strip the prefix
-			let mapped_objects = objects_result
+			// Strip the root, and drop anything that does not carry it.
+			Ok(entries
 				.into_iter()
-				.map(|mut meta| {
-					// Strip the prefix from keys to maintain proper namespacing
-					meta.key = meta.key.strip_prefix(&self.prefix).unwrap_or(meta.key);
-					meta
+				.filter_map(|entry| match entry {
+					ListEntry::Object(mut meta) => {
+						meta.key = meta.key.strip_prefix(&self.prefix)?;
+						Some(ListEntry::Object(meta))
+					}
+					ListEntry::Prefix(group) => {
+						Some(ListEntry::Prefix(group.strip_prefix(root)?.to_owned()))
+					}
 				})
-				.collect();
-
-			Ok(mapped_objects)
+				.collect())
 		})
 	}
 }

@@ -19,8 +19,9 @@ use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
 use super::{
-	HandleResult, PATH, PING_INTERVAL, SessionState, WsMessage, create_ping_message,
-	handle_response, handle_route, handle_session, replay_session, reset_sessions,
+	HandleResult, PATH, PING_INTERVAL, SessionState, WsMessage, answer_encoded,
+	create_ping_message, handle_response, handle_route, handle_session, replay_session,
+	reset_sessions, take_for_decoding_apart,
 };
 use crate::conn::{self, Route, Router};
 use crate::engine::{IntervalStream, SessionError};
@@ -29,7 +30,7 @@ use crate::method::BoxFuture;
 use crate::opt::Tls;
 use crate::opt::{Endpoint, WaitFor};
 use crate::types::HashMap;
-use crate::{Error, ExtraFeatures, SessionClone, SessionId, Surreal};
+use crate::{Error, ExtraFeatures, SessionClone, Surreal};
 
 pub(crate) const NAGLE_ALG: bool = false;
 
@@ -47,9 +48,10 @@ impl WsMessage for Message {
 	}
 
 	fn as_binary(&self) -> Option<&[u8]> {
-		match self {
-			Message::Binary(data) => Some(data),
-			_ => None,
+		if let Message::Binary(data) = self {
+			Some(data)
+		} else {
+			None
 		}
 	}
 
@@ -91,7 +93,10 @@ pub(crate) async fn connect(
 		Error::validation(format!("Invalid URL: {}", err), ValidationError::InvalidRequest)
 	})?;
 
-	request.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("flatbuffers"));
+	request.headers_mut().insert(
+		SEC_WEBSOCKET_PROTOCOL,
+		HeaderValue::from_static(surrealdb_rpc::wire::PROTOCOLS_HEADER),
+	);
 
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]
 	let (socket, _) = tokio_tungstenite::connect_async_tls_with_config(
@@ -155,18 +160,14 @@ impl conn::Sealed for super::Client {
 				ws_config,
 				socket,
 				route_rx,
-				session_clone.receiver.clone(),
+				session_clone.router_receiver(),
 			));
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})
@@ -217,7 +218,9 @@ async fn router_reconnect(
 				state.update_connection(new_sink, new_stream).await;
 				// Replay state for ALL sessions
 				for (session_id, session_result) in state.sessions.to_vec() {
-					if let Ok(session_state) = session_result {
+					if let Ok(session_state) = session_result
+						&& !session_state.unattached.load(std::sync::atomic::Ordering::SeqCst)
+					{
 						replay_session::<Message, _, _>(session_id, &session_state, &state.sink)
 							.await
 							.ok();
@@ -240,7 +243,7 @@ pub(crate) async fn run_router(
 	config: WebSocketConfig,
 	socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
 	route_rx: Receiver<Route>,
-	session_rx: Receiver<SessionId>,
+	session_rx: crate::RouterSessions,
 ) {
 	let ping: Message = create_ping_message();
 
@@ -300,8 +303,17 @@ pub(crate) async fn run_router(
 
 					match result {
 						Ok(message) => {
+							// A large result is decoded on a task of its own, so that the
+							// connection's other responses are not held behind it.
+							if let Message::Binary(bytes) = &message
+								&& let Some(pending) = take_for_decoding_apart(bytes, &state.sessions)
+							{
+								let bytes = bytes.clone();
+								tokio::spawn(async move { answer_encoded(&bytes, pending).await });
+								continue;
+							}
 							match handle_response::<Message, _, _>(
-								&message, &state.sessions, &state.sink
+								&message, config.max_message_size, &state.sessions, &state.sink
 							).await {
 								HandleResult::Ok => continue,
 								HandleResult::Disconnected => {
@@ -312,13 +324,10 @@ pub(crate) async fn run_router(
 						}
 						Err(error) => {
 							reset_sessions(&state.sessions).await;
-							match error {
-								WsError::ConnectionClosed => {
-									trace!("Connection successfully closed on the server");
-								}
-								error => {
-									trace!("{error}");
-								}
+							if matches!(error, WsError::ConnectionClosed) {
+								trace!("Connection successfully closed on the server");
+							} else {
+								trace!("{error}");
 							}
 							router_reconnect(&maybe_connector, &config, &state, &endpoint).await;
 							continue 'router;
@@ -349,7 +358,6 @@ mod tests {
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
 	use rand::Rng;
-	use surrealdb_core::rpc;
 	use web_time::SystemTime;
 
 	use crate::types::{Array, Value};
@@ -377,51 +385,27 @@ mod tests {
 			vector.push(rng.random());
 		}
 		let mut results = vec![];
-		let ref_payload;
-		let ref_compressed;
 
 		let vector = Value::Array(Array::from(vector));
 
-		const FLATBUFFERS: &str = "Flatbuffers Vec<Value>";
-		const FLATBUFFERS_COMPRESSED: &str = "Flatbuffers Compressed Vec<Value>";
+		const CBOR: &str = "CBOR Vec<Value>";
+		const CBOR_COMPRESSED: &str = "CBOR Compressed Vec<Value>";
 		{
 			let (duration, payload) =
-				timed(&|| surrealdb_core::rpc::format::flatbuffers::encode(&vector).unwrap());
-			ref_payload = payload.len() as f32;
-			results.push((payload.len(), FLATBUFFERS, duration, 1.0));
+				timed(&|| surrealdb_rpc::wire::encode(vector.clone()).unwrap());
+			results.push((payload.len(), CBOR, duration, 1.0));
 
 			let (compression_duration, payload) = timed(&|| compress(&payload));
 			let duration = duration + compression_duration;
-			ref_compressed = payload.len() as f32;
-			results.push((payload.len(), FLATBUFFERS_COMPRESSED, duration, 1.0));
+			results.push((payload.len(), CBOR_COMPRESSED, duration, 1.0));
 		}
 
-		const CBOR: &str = "CBor Vec<Value>";
-		const CBOR_COMPRESSED: &str = "Compressed CBor Vec<Value>";
-		{
-			let (duration, payload) = timed(&|| {
-				let cbor = rpc::format::cbor::encode(vector.clone()).unwrap();
-				let mut res = Vec::new();
-				ciborium::into_writer(&cbor, &mut res).unwrap();
-				res
-			});
-			results.push((payload.len(), CBOR, duration, payload.len() as f32 / ref_payload));
-
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			results.push((
-				payload.len(),
-				CBOR_COMPRESSED,
-				duration,
-				payload.len() as f32 / ref_compressed,
-			));
-		}
 		results.sort_by_key(|(a, _, _, _)| *a);
 		for (size, name, duration, factor) in &results {
 			info!("{name} - Size: {size} - Duration: {duration:?} - Factor: {factor}");
 		}
 
 		let results: Vec<&str> = results.into_iter().map(|(_, name, _, _)| name).collect();
-		assert_eq!(results, vec![CBOR_COMPRESSED, CBOR, FLATBUFFERS_COMPRESSED, FLATBUFFERS])
+		assert_eq!(results, vec![CBOR_COMPRESSED, CBOR])
 	}
 }

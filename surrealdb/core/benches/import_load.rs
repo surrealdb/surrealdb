@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![recursion_limit = "256"]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 //! Import load test benchmark.
 //!
@@ -28,8 +30,9 @@ use bytes::Bytes;
 use common::create_runtime;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use futures::StreamExt;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
 
 // ---------------------------------------------------------------------------
 // Configuration

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -17,7 +16,9 @@ value = "NONE"
 value = "{ events: [], fields: [], indexes: [{ cols: [], index: 'COUNT', name: 'count_idx', table: 'test' }], lives: [], tables: [] }"
 
 [[test.results]]
-value = ''''CountScan [ctx: Db] [source: test] {rows: 1}
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 1}
+    CountScan [ctx: Db] [source: test] {rows: 1}
 
 Total rows: 1''''
 
@@ -31,7 +32,9 @@ value = "NONE"
 value = "{ events: [], fields: [], indexes: [{ cols: [], comment: 'may rebuild instead', index: 'COUNT', name: 'count_idx', prepare_remove: true, table: 'test' }], lives: [], tables: [] }"
 
 [[test.results]]
-value = ''''CountScan [ctx: Db] [source: test] {rows: 1}
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 1}
+    CountScan [ctx: Db] [source: test] {rows: 1}
 
 Total rows: 1''''
 

@@ -1,124 +1,83 @@
-//! Plan-time resolved table context.
+//! How a table source's scan is planned for the rules that depend on the rows' schema:
+//! the table `SELECT` permission, the computed fields and the field-level `SELECT` permissions.
+//! The two cases below differ in where those rules are applied.
 //!
-//! When the table name is known at planning time and a transaction is available,
-//! the planner resolves table definitions and field state eagerly. The result is
-//! bundled into [`ResolvedTableContext`] and passed directly to scan operators,
-//! eliminating all per-query runtime KV lookups from the hot path.
+//! - A source the analyzer resolved (`LogicalOp::Source(LogicalSource { schema: Some(_), .. })`)
+//!   carries the rules in the plan, as a `PermissionFilter` and a stack of projection layers above
+//!   the scan. The scan is planned [`EnforcementMode::Planned`] and yields rows as stored. If the
+//!   scan also cut rows, the nodes above would receive an already-cut row, and a computed field's
+//!   guard, which reads a stored field raw, would be judged against that cut, so the plan alone
+//!   applies the rules.
+//! - A source the analyzer did not resolve carries none of them. The scan is planned
+//!   [`EnforcementMode::Runtime`] and applies all three rules per row.
 //!
-//! Permission checks (`should_check_perms`, `validate_record_user_access`) are
-//! still done at execution time because they depend on auth context that is set
-//! up by the executor, but these are pure CPU operations with zero KV overhead.
+//! The session-level gates (`should_check_perms`, `validate_record_user_access`)
+//! stay with the scan. They are checked at execution time against the authority the
+//! executor set up.
+
+// The plan lowering reaches these items; dead-code warnings are suppressed for them.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 
-use super::pipeline::{FieldState, build_field_state_raw, filter_field_state_for_projection};
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
-use crate::err::Error;
-use crate::exec::permission::{PhysicalPermission, convert_permission_to_physical};
-use crate::exec::planner::Planner;
-use crate::val::TableName;
+use crate::catalog::{Permission, TableDefinition};
+use crate::exec::permission::PhysicalPermission;
+use crate::expr::logical::Schema;
 
-/// Plan-time resolved table metadata that replaces runtime KV lookups.
+/// How a `Source` node asks its scan to be planned.
 ///
-/// Contains the table definition, pre-compiled SELECT permission, and
-/// pre-built field state. When an operator has a `ResolvedTableContext`,
-/// its `execute()` performs zero async work for metadata resolution --
-/// only the synchronous `should_check_perms` call remains.
-#[derive(Debug, Clone)]
-pub(crate) struct ResolvedTableContext {
-	/// The resolved table definition (used for ns_id/db_id/table_id).
-	pub table_def: Arc<TableDefinition>,
-	/// Pre-compiled SELECT permission (Full/None/Conditional with PhysicalExpr).
-	/// Compiled at plan time so operators don't need to call
-	/// `convert_permission_to_physical` at execute time.
-	pub select_permission: PhysicalPermission,
-	/// Pre-built field state with all computed fields and field-level permissions.
-	/// Stored as Arc for cheap cloning; operators filter by `needed_fields` at use time.
-	pub field_state: Arc<FieldState>,
+/// Chosen from the node's `schema`. A resolved schema means the analyzer has
+/// already inserted, above the source, every stage the read needs. No other
+/// stage may apply them again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EnforcementMode {
+	/// The plan enforces; the scan yields rows as stored.
+	Planned,
+	/// The scan enforces per row.
+	Runtime,
 }
 
-impl ResolvedTableContext {
-	/// Get a field state filtered for a specific projection.
-	pub fn field_state_for_projection(
-		&self,
-		needed_fields: Option<&std::collections::HashSet<String>>,
-	) -> FieldState {
-		filter_field_state_for_projection(&self.field_state, needed_fields)
-	}
-
-	/// Get the SELECT permission, respecting the `check_perms` flag.
-	/// When `check_perms` is false, returns `Allow` regardless of the
-	/// pre-compiled permission.
-	pub fn select_permission(&self, check_perms: bool) -> PhysicalPermission {
-		if check_perms {
-			self.select_permission.clone()
+impl EnforcementMode {
+	/// The mode for a source with the given `schema`.
+	pub(crate) fn for_source(schema: Option<&Arc<Schema>>) -> Self {
+		if schema.is_some() {
+			Self::Planned
 		} else {
-			PhysicalPermission::Allow
+			Self::Runtime
 		}
 	}
 }
 
-/// Resolve table context at plan time.
-///
-/// Performs the expensive KV lookups (table definition, field definitions) and
-/// PhysicalExpr compilation eagerly during planning. Returns `None` if the
-/// table does not exist.
-///
-/// The `check_perms` flag controls whether field-level permissions are compiled
-/// into the field state. Since the planner doesn't have auth context, this
-/// should be `true` (conservative) -- the operator will skip permission
-/// evaluation at runtime if it determines checks aren't needed.
-///
-/// `planner` provides the transaction, ns/db context, and the
-/// [`crate::exec::planner::CycleGuard`] used to break compile-time cycles
-/// for self-referential permissions / computed fields. The caller (the
-/// only legitimate one is `try_resolve_table_ctx`) is responsible for
-/// pushing `(ns_id, db_id, table_name)` onto the guard *before* invoking
-/// this function.
-pub(crate) async fn resolve_table_context(
-	planner: &Planner<'_>,
-	ns: &str,
-	db: &str,
-	ns_id: NamespaceId,
-	db_id: DatabaseId,
-	table_name: &TableName,
-) -> Result<Option<ResolvedTableContext>, Error> {
-	use crate::catalog::providers::TableProvider;
+/// The table `SELECT` permission that a scan under
+/// [`EnforcementMode::Planned`] carries for readers outside the plan. It is
+/// `Deny` for `NONE` and `Allow` otherwise, because the plan judges any
+/// conditional guard. It is read from the definition the scan runs with.
+pub(crate) fn planned_select_permission(table_def: &TableDefinition) -> PhysicalPermission {
+	match table_def.permissions.select {
+		Permission::None => PhysicalPermission::Deny,
+		Permission::Full | Permission::Specific(_) => PhysicalPermission::Allow,
+	}
+}
 
-	let txn = planner.txn().ok_or_else(|| {
-		Error::Internal("resolve_table_context requires a planner with txn".into())
-	})?;
+#[cfg(test)]
+pub(crate) mod test_support {
 
-	// Look up table definition
-	let table_def = match txn
-		.get_tb_by_name(ns, db, table_name, None)
-		.await
-		.map_err(|e| Error::Internal(e.to_string()))?
-	{
-		Some(def) => def,
-		None => return Ok(None),
-	};
+	use surrealdb_strand::TableName;
 
-	// Pre-compile SELECT permission and field state at plan time. Inner
-	// subqueries inherit the planner's `CycleGuard` via
-	// `planner.physical_expr(...)` → SELECT planning →
-	// `try_resolve_table_ctx` → guard check. A self-referential permission
-	// like `WHERE (SELECT FROM same_table) != NONE` will fall back to
-	// runtime resolution for the inner subtree only; the outer `table_def`
-	// here is fully resolved.
-	let select_permission =
-		convert_permission_to_physical(&table_def.permissions.select, planner).await?;
+	use crate::exec::ExecutionContext;
+	use crate::exec::index::access_path::IndexRef;
 
-	let field_state = build_field_state_raw(planner, ns_id, db_id, table_name, true, None)
-		.await
-		.map_err(|cf| match cf {
-			crate::expr::ControlFlow::Err(e) => Error::Internal(e.to_string()),
-			_ => Error::Internal("Unexpected control flow in field state resolution".into()),
-		})?;
-
-	Ok(Some(ResolvedTableContext {
-		table_def,
-		select_permission,
-		field_state: Arc::new(field_state),
-	}))
+	/// The index `name` on `table`, as the access-path chooser hands it to a
+	/// scan.
+	pub(crate) async fn index_ref(ctx: &ExecutionContext, table: &str, name: &str) -> IndexRef {
+		let indexes = ctx
+			.database()
+			.expect("a database context")
+			.get_table_indexes(&TableName::from(table), None)
+			.await
+			.expect("catalog read");
+		let idx =
+			indexes.iter().position(|ix| ix.name.as_str() == name).expect("the index is defined");
+		IndexRef::new(&indexes, idx)
+	}
 }

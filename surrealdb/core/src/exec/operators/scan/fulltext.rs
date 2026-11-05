@@ -3,330 +3,99 @@
 //! This operator retrieves records using full-text search indexes,
 //! supporting the MATCHES operator with BM25 or VS scoring.
 
-use std::collections::HashSet;
-use std::sync::Arc;
-
-use reblessive::TreeStack;
-
-use super::common::fetch_and_filter_records_batch;
-use super::pipeline::{ScanPipeline, build_field_state};
-use super::resolved::ResolvedTableContext;
-use crate::catalog::Index;
-use crate::err::Error;
-use crate::exec::index::access_path::IndexRef;
-use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
-	validate_record_user_access,
-};
-use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
-};
-use crate::expr::operator::MatchesOperator;
+use crate::catalog::{Index, IndexDefinition};
+use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::{ControlFlow, ControlFlowExt};
-use crate::iam::Action;
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::planner::iterators::MatchesHitsIterator;
-use crate::kvs::CachePolicy;
+use crate::idx::docids::DocId;
+use crate::idx::ft::fulltext::{FullTextHitsIterator, FullTextIndex};
+use crate::kvs::Transaction;
+use crate::val::{RecordId, TableName};
 
 /// Batch size for full-text result batching.
 ///
-/// Smaller than the default [`super::common::DEFAULT_SCAN_BATCH_SIZE`] because full-text
-/// results are ordered by relevance score, so smaller batches let downstream
-/// operators begin processing sooner.
-const BATCH_SIZE: usize = 100;
-
-/// Full-text search scan operator.
+/// The most record ids a full-text scan reads at once.
 ///
-/// Executes a full-text search query against a FullText index and returns
-/// matching records ordered by relevance score.
-#[derive(Debug)]
-pub struct FullTextScan {
-	/// Reference to the index definition
-	pub index_ref: IndexRef,
-	/// The search query string
-	pub query: String,
-	/// The MATCHES operator configuration (reference number, scoring)
-	pub operator: MatchesOperator,
-	/// Table name for record fetching
-	pub table_name: crate::val::TableName,
-	/// Optional VERSION timestamp for time-travel queries.
-	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
-	/// Plan-time resolved table context. When present, `execute()` skips
-	/// runtime table def + permission lookup.
-	pub(crate) resolved: Option<ResolvedTableContext>,
-	/// Projection-aware field set for computed-field materialization.
-	/// Outer `None` = sub-operator mode (parent handles fields).
-	/// `Some(None)` = all fields, `Some(Some(set))` = specific fields.
-	pub(crate) needed_fields: Option<Option<HashSet<String>>>,
-	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
-	pub(crate) metrics: Arc<OperatorMetrics>,
+/// Smaller than the default
+/// [`ExecConfig::scan_batch_size`](crate::exec::config::ExecConfig::scan_batch_size) because
+/// full-text results are ordered by relevance score, so smaller batches let
+/// downstream operators begin processing sooner. Each read below it is sized
+/// from the bytes the read before it held, as the other record scans do.
+pub(crate) const FULL_TEXT_BATCH_SIZE: usize = 100;
+
+/// The hits of a full-text query, in the order the index lists them, read a
+/// batch of record IDs at a time.
+pub(crate) struct FullTextHits {
+	iter: FullTextHitsIterator,
+	/// How many of the clauses of a sum an index union's branch ranks by the
+	/// hits are no longer listed for alone.
+	pub(crate) passed_clauses: usize,
 }
 
-impl FullTextScan {
-	pub(crate) fn new(
-		index_ref: IndexRef,
-		query: String,
-		operator: MatchesOperator,
-		table_name: crate::val::TableName,
-		version: Option<Arc<dyn PhysicalExpr>>,
-		needed_fields: Option<Option<HashSet<String>>>,
-	) -> Self {
+impl FullTextHits {
+	pub(crate) fn new(iter: FullTextHitsIterator) -> Self {
 		Self {
-			index_ref,
-			query,
-			operator,
-			table_name,
-			version,
-			resolved: None,
-			needed_fields,
-			metrics: Arc::new(OperatorMetrics::new()),
+			iter,
+			passed_clauses: 0,
 		}
 	}
 
-	/// Set the plan-time resolved table context.
-	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
-		self.resolved = Some(resolved);
-		self
+	/// The doc ids of up to `limit` hits not yet taken, in doc-id order; empty
+	/// once the hits have run out.
+	pub(crate) fn take_doc_ids(&mut self, limit: usize) -> Vec<DocId> {
+		self.iter.take_doc_ids(limit)
+	}
+
+	/// The index's iterator over the hits, for a take that passes hits over by
+	/// their bounds.
+	pub(crate) fn hits_mut(&mut self) -> &mut FullTextHitsIterator {
+		&mut self.iter
+	}
+
+	/// The record each of `doc_ids` maps to, in order, in one batched read;
+	/// `None` for a doc id whose mapping is gone.
+	pub(crate) async fn records(
+		&self,
+		txn: &Transaction,
+		doc_ids: &[DocId],
+	) -> FlowResult<Vec<Option<RecordId>>> {
+		self.iter.records(txn, doc_ids).await.context("Failed to resolve hits")
 	}
 }
-impl ExecOperator for FullTextScan {
-	fn name(&self) -> &'static str {
-		"FullTextScan"
-	}
 
-	fn attrs(&self) -> Vec<(String, String)> {
-		vec![
-			("index".to_string(), self.index_ref.name.to_string()),
-			("query".to_string(), self.query.clone()),
-		]
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let db_ctx = ctx.database()?.clone();
-
-		// Validate record user has access to this namespace/database
-		validate_record_user_access(&db_ctx)?;
-
-		// Check if we need to enforce permissions
-		let check_perms = should_check_perms(&db_ctx, Action::View)?;
-
-		// Clone for the async block
-		let index_ref = self.index_ref.clone();
-		let query = self.query.clone();
-		let operator = self.operator.clone();
-		let table_name = self.table_name.clone();
-		let version_expr = self.version.clone();
-		let resolved = self.resolved.clone();
-		let needed_fields = self.needed_fields.clone();
-		let ctx = ctx.clone();
-
-		let stream = async_stream::try_stream! {
-			// Get namespace and database IDs
-			let db_ctx = ctx.database().context("FullTextScan requires database context")?;
-			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
-			let db = Arc::clone(&db_ctx.db);
-			let txn = ctx.txn();
-
-			// Evaluate VERSION expression
-			let version: Option<u64> = match &version_expr {
-				Some(expr) => {
-					let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&ctx);
-					let v = expr.evaluate(eval_ctx).await?;
-					Some(
-						v.cast_to::<crate::val::Datetime>()
-							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp(txn.timestamp_impl().as_ref())?,
-					)
-				}
-				None => ctx.version_stamp(),
-			};
-
-			// Get the FrozenContext and Options from the root context
-			let root = ctx.root();
-			let frozen_ctx = &root.ctx;
-			let opt = root.options.as_ref().context("FullTextScan requires Options context")?;
-
-			// Resolve table permissions: plan-time fast path or runtime fallback
-			let select_permission = if let Some(ref res) = resolved {
-				res.select_permission(check_perms)
-			} else if check_perms {
-				let table_def = db_ctx
-					.get_table_def(&table_name, version)
-					.await
-					.context("Failed to get table")?;
-
-				if let Some(def) = &table_def {
-					convert_permission_to_physical_runtime(&def.permissions.select, ctx.ctx())
-						.await
-						.context("Failed to convert permission")?
-				} else {
-					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
-						name: table_name.clone(),
-					})))?
-				}
-			} else {
-				PhysicalPermission::Allow
-			};
-
-			// Early exit if denied
-			if matches!(select_permission, PhysicalPermission::Deny) {
-				return;
-			}
-
-			// Resolve field state for computed fields and field-level
-			// permissions. When needed_fields is None (sub-operator mode),
-			// the parent operator handles field processing.
-			let field_state = match &needed_fields {
-				Some(nf) => {
-					if let Some(ref res) = resolved {
-						res.field_state_for_projection(nf.as_ref())
-					} else {
-						build_field_state(
-							&ctx, &table_name, check_perms, nf.as_ref(),
-						).await?
-					}
-				}
-				None => super::pipeline::FieldState::empty(),
-			};
-
-			// Table-level permissions are handled by fetch_and_filter_records_batch.
-			// The pipeline handles computed fields and field-level permissions.
-			let mut pipeline = ScanPipeline::new(
-				PhysicalPermission::Allow,
-				None,
-				field_state,
-				check_perms,
-				None,
-				0,
-			);
-
-			// Get the FullText index parameters from the index definition
-			let index_def = index_ref.definition();
-			let ft_params = match &index_def.index {
-				Index::FullText(params) => params,
-				_ => {
-					Err(ControlFlow::Err(anyhow::anyhow!(
-						"Index '{}' is not a full-text index",
-						index_def.name
-					)))?
-				}
-			};
-
-			// Create the index key base
-			let ikb = IndexKeyBase::new(ns.namespace_id, db.database_id, table_name.clone(), index_def.index_id);
-
-			// Open the full-text index
-			let fti = FullTextIndex::new(
-				frozen_ctx.get_index_stores(),
-				txn.as_ref(),
-				ikb,
-				ft_params,
-				&frozen_ctx.config.file_allowlist
-			)
-			.await
-			.context("Failed to open full-text index")?;
-
-			// Extract query terms using TreeStack for stack management
-			let query_terms = {
-				let mut stack = TreeStack::new();
-				stack
-					.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, opt, query.clone()))
-					.finish()
-					.await
-					.context("Failed to extract query terms")?
-			};
-
-			// If query terms are empty, no results
-			if query_terms.is_empty() {
-				return;
-			}
-
-			// Get the boolean operator from the MATCHES operator
-			let bool_op = operator.operator;
-
-			// Create hits iterator
-			let hits_iter = match fti.new_hits_iterator(&query_terms, bool_op) {
-				Some(iter) => iter,
-				None => {
-					// No matching documents
-					return;
-				}
-			};
-
-			// Iterate over hits, collecting record IDs into batches for
-			// batch-fetching via get_records.
-			let mut hits_iter = hits_iter;
-			let mut rid_batch = Vec::with_capacity(BATCH_SIZE);
-
-			loop {
-				// Collect up to BATCH_SIZE record IDs from the hits iterator
-				let hit = hits_iter.next(txn.as_ref()).await
-					.context("Failed to get next hit")?;
-
-				match hit {
-					Some((rid, _doc_id)) => {
-						rid_batch.push(rid);
-
-						if rid_batch.len() >= BATCH_SIZE {
-							let mut values = fetch_and_filter_records_batch(
-								&ctx,
-								&txn,
-								ns.namespace_id,
-								db.database_id,
-								&rid_batch,
-								&select_permission,
-								check_perms,
-								version,
-								CachePolicy::ReadOnly,
-							).await?;
-							pipeline.process_batch(&mut values, &ctx).await?;
-							if !values.is_empty() {
-								yield ValueBatch { values };
-							}
-							rid_batch.clear();
-						}
-					}
-					None => {
-						// No more hits
-						break;
-					}
-				}
-			}
-
-			// Yield any remaining records
-			if !rid_batch.is_empty() {
-				let mut values = fetch_and_filter_records_batch(
-					&ctx,
-					&txn,
-					ns.namespace_id,
-					db.database_id,
-					&rid_batch,
-					&select_permission,
-					check_perms,
-					version,
-					CachePolicy::ReadOnly,
-				).await?;
-				pipeline.process_batch(&mut values, &ctx).await?;
-				if !values.is_empty() {
-					yield ValueBatch { values };
-				}
-			}
-		};
-
-		Ok(monitor_stream(Box::pin(stream), "FullTextScan", &self.metrics))
-	}
+/// The full-text index `index_def` of `table`, opened for a query in `ctx`.
+pub(crate) async fn open_full_text_index(
+	ctx: &ExecutionContext,
+	table: &TableName,
+	index_def: &IndexDefinition,
+) -> FlowResult<FullTextIndex> {
+	let db_ctx = ctx.database().context("a full-text scan requires database context")?;
+	let txn = ctx.txn();
+	let root = ctx.root();
+	let frozen_ctx = &root.ctx;
+	// Legacy (pre-shared-doc-ID) indexes resolve postings through their
+	// historical private doc-ID layout until explicitly rebuilt; the format
+	// version selects the resolver.
+	let Index::FullText(ft_params) = &index_def.index else {
+		return Err(ControlFlow::Err(anyhow::anyhow!(
+			"Index '{}' is not a full-text index",
+			index_def.name
+		)));
+	};
+	let ikb = IndexKeyBase::new(
+		db_ctx.ns_ctx.ns.namespace_id,
+		db_ctx.db.database_id,
+		table.clone(),
+		index_def.index_id,
+	);
+	crate::exec::vm::descriptor::object(FullTextIndex::new(
+		frozen_ctx.get_index_stores(),
+		txn.as_ref(),
+		ikb,
+		ft_params,
+		&frozen_ctx.config.idx.file_allowlist,
+		index_def.format_version,
+	))
+	.await
+	.context("Failed to open full-text index")
 }

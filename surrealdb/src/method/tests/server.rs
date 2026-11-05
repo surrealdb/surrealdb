@@ -1,8 +1,13 @@
+use std::sync::Mutex;
+
 use async_channel::Receiver;
-use surrealdb_core::dbs::QueryResultBuilder;
+use surrealdb_rpc::QueryResultBuilder;
 
 use crate::conn::{Command, Route};
 use crate::types::{SurrealValue, Value};
+
+/// The transaction ids the mock has been asked to roll back, in order.
+pub(super) static ROLLED_BACK: Mutex<Vec<uuid::Uuid>> = Mutex::new(Vec::new());
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
@@ -17,13 +22,16 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 
 			let query_result = match cmd {
 				Command::Invalidate | Command::Health => query_result,
-				Command::Begin => {
-					query_result.with_result(Ok(Value::Uuid(uuid::Uuid::now_v7().into())))
+				Command::Begin {
+					..
+				} => query_result.with_result(Ok(Value::Uuid(uuid::Uuid::now_v7().into()))),
+				Command::Rollback {
+					txn,
+				} => {
+					ROLLED_BACK.lock().expect("rollback log").push(txn);
+					query_result
 				}
 				Command::Commit {
-					..
-				}
-				| Command::Rollback {
 					..
 				}
 				| Command::Revoke {
@@ -67,19 +75,10 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				Command::Run {
 					..
 				} => query_result,
-				Command::ExportMl {
-					..
-				}
-				| Command::ExportBytesMl {
-					..
-				}
-				| Command::ExportFile {
+				Command::ExportFile {
 					..
 				}
 				| Command::ExportBytes {
-					..
-				}
-				| Command::ImportMl {
 					..
 				}
 				| Command::ImportFile {
@@ -95,9 +94,8 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 
 			let result = query_result.finish();
 
-			if let Err(message) = response.send(Ok(vec![result])).await {
-				panic!("message dropped; {message:?}");
-			}
+			// A caller that cancelled its request has dropped the receiver.
+			response.send(Ok(vec![result])).await.ok();
 		}
 	});
 }

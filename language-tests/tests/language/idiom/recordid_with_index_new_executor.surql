@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -26,32 +25,34 @@ value = "[{ id: test:{ val: 123 }, val: 456 }]"
 value = "[{ id: test:{ val: 123 }, val: 456 }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: doc_val, access: = 456, direction: Forward] {rows: 1}
+    IndexScan [ctx: Db] [table: test, index: doc_val, access: = 456, direction: Forward] {rows: 1}
 
-Total rows: 1'"""
+Total rows: 1''''
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 1}
-    TableScan [ctx: Db] [table: test, direction: Forward, predicate: id.val = 123, pre_decode_filter: yes] {rows: 1}
+    Filter [ctx: Db] [predicate: id.val = 123] {rows: 1}
+        TableScan [ctx: Db] [table: test, direction: Forward] {rows: 1}
 
-Total rows: 1'"""
+Total rows: 1''''
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: rid_val, access: = 123, direction: Forward] {rows: 1}
+    IndexScan [ctx: Db] [table: test, index: rid_val, access: = 123, direction: Forward] {rows: 1}
 
-Total rows: 1'"""
+Total rows: 1''''
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 1}
-    TableScan [ctx: Db] [table: test, direction: Forward, predicate: record::id(id).val = 123, pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    Filter [ctx: Db] [predicate: record::id(id).val = 123] {rows: 1}
+        TableScan [ctx: Db] [table: test, direction: Forward] {rows: 1}
 
-Total rows: 1'"""
+Total rows: 1''''
 
 */
 

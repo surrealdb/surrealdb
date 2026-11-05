@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::{Result, bail};
@@ -12,6 +11,7 @@ use sha2::{Digest, Sha256};
 
 use crate::dbs::capabilities::NetTarget;
 use crate::err::Error;
+use crate::iam::Error as AuthError;
 use crate::kvs::Datastore;
 use crate::kvs::cache::ds::{CachedJwks, DatastoreCache, Entry, Lookup};
 
@@ -47,14 +47,17 @@ static CACHE_COOLDOWN: LazyLock<chrono::Duration> =
 		}
 	});
 
-#[cfg(not(target_family = "wasm"))]
 static REMOTE_TIMEOUT: LazyLock<chrono::Duration> =
 	LazyLock::new(|| match std::env::var("SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS") {
 		Ok(milliseconds_str) => {
 			let milliseconds = milliseconds_str.parse::<u64>().expect(
 				"Expected a valid number of milliseconds for SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS",
 			);
-			Duration::milliseconds(milliseconds as i64)
+			// Saturates, so the value is never negative and always converts to a std duration.
+			i64::try_from(milliseconds)
+				.ok()
+				.and_then(Duration::try_milliseconds)
+				.unwrap_or(Duration::MAX)
 		}
 		Err(_) => {
 			Duration::milliseconds(1000) // Set default remote timeout to 1 second
@@ -90,7 +93,7 @@ pub(super) async fn config(
 						// Check that the cached JWKS object has not been recently updated
 						if Utc::now().signed_duration_since(cached.time) < *CACHE_COOLDOWN {
 							debug!("Refused to refresh cache before cooldown period is over");
-							bail!(Error::InvalidAuth); // Return opaque error
+							bail!(AuthError::InvalidAuth); // Return opaque error
 						}
 						find_jwk_from_url(kvs, url, kid).await?
 					}
@@ -125,9 +128,12 @@ pub(super) async fn config(
 			KeyAlgorithm::RS256 => RS256,
 			KeyAlgorithm::RS384 => RS384,
 			KeyAlgorithm::RS512 => RS512,
-			_ => {
+			KeyAlgorithm::RSA1_5
+			| KeyAlgorithm::RSA_OAEP
+			| KeyAlgorithm::RSA_OAEP_256
+			| KeyAlgorithm::UNKNOWN_ALGORITHM => {
 				warn!("Unspported value for parameter 'alg' in JWK object: '{:?}'", alg);
-				bail!(Error::InvalidAuth); // Return opaque error
+				bail!(AuthError::InvalidAuth); // Return opaque error
 			}
 		},
 		// If not specified, use the algorithm provided in the token header
@@ -136,7 +142,7 @@ pub(super) async fn config(
 		// In the case of "jsonwebtoken", the "none" algorithm is not part of the enumeration
 		// Source: https://docs.rs/jsonwebtoken/latest/jsonwebtoken/enum.Algorithm.html
 		// Confirmation: https://github.com/Keats/jsonwebtoken/issues/381
-		_ => {
+		None => {
 			// Ensure that the algorithm specified in the token matches the key type defined
 			// in the JWK
 			match (&jwk.algorithm, token_alg) {
@@ -146,7 +152,7 @@ pub(super) async fn config(
 						"Algorithm from token '{:?}' does not match JWK key type '{:?}'",
 						token_alg, key.key_type
 					);
-					bail!(Error::InvalidAuth); // Return opaque error
+					bail!(AuthError::InvalidAuth); // Return opaque error
 				}
 				(EllipticCurve(_), ES256 | ES384) => token_alg,
 				(EllipticCurve(key), _) => {
@@ -154,7 +160,7 @@ pub(super) async fn config(
 						"Algorithm from token '{:?}' does not match JWK key type '{:?}'",
 						token_alg, key.key_type
 					);
-					bail!(Error::InvalidAuth); // Return opaque error
+					bail!(AuthError::InvalidAuth); // Return opaque error
 				}
 				(OctetKey(_), HS256 | HS384 | HS512) => token_alg,
 				(OctetKey(key), _) => {
@@ -162,7 +168,7 @@ pub(super) async fn config(
 						"Algorithm from token '{:?}' does not match JWK key type '{:?}'",
 						token_alg, key.key_type
 					);
-					bail!(Error::InvalidAuth); // Return opaque error
+					bail!(AuthError::InvalidAuth); // Return opaque error
 				}
 				(OctetKeyPair(_), EdDSA) => token_alg,
 				(OctetKeyPair(key), _) => {
@@ -170,7 +176,7 @@ pub(super) async fn config(
 						"Algorithm from token '{:?}' does not match JWK key type '{:?}'",
 						token_alg, key.key_type
 					);
-					bail!(Error::InvalidAuth); // Return opaque error
+					bail!(AuthError::InvalidAuth); // Return opaque error
 				}
 			}
 		}
@@ -181,7 +187,7 @@ pub(super) async fn config(
 		Some(PublicKeyUse::Signature) => (),
 		Some(key_use) => {
 			warn!("Invalid value for parameter 'use' in JWK object: '{:?}'", key_use);
-			bail!(Error::InvalidAuth); // Return opaque error
+			bail!(AuthError::InvalidAuth); // Return opaque error
 		}
 		None => (),
 	}
@@ -194,7 +200,7 @@ pub(super) async fn config(
 			"Invalid values for parameter 'key_ops' in JWK object: '{:?}'",
 			jwk.common.key_operations
 		);
-		bail!(Error::InvalidAuth); // Return opaque error
+		bail!(AuthError::InvalidAuth); // Return opaque error
 	}
 
 	// Return verification configuration if a decoding key can be retrieved from the
@@ -203,20 +209,27 @@ pub(super) async fn config(
 		Ok(dec) => {
 			let mut val = Validation::new(alg);
 
-			// TODO(gguillemas): This keeps the existing behavior as of SurrealDB
-			// 2.0.0-alpha.9. Up to that point, a fork of the "jsonwebtoken" crate in
-			// version 8.3.0 was being used. Now that the audience claim is validated by
-			// default, we could allow users to leverage this. This will most likely
-			// involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
+			// Without configured audiences the `aud` claim is not validated,
+			// matching access methods that do not define an AUDIENCE clause.
+			// Callers in `iam::verify` enable validation per access method,
+			// so cached JWKs never carry one method's audience to another.
 			val.validate_aud = false;
 
 			Ok((dec, val))
 		}
 		Err(err) => {
 			warn!("Failed to retrieve decoding key from JWK object: '{}'", err);
-			Err(anyhow::Error::new(Error::InvalidAuth)) // Return opaque error
+			Err(anyhow::Error::new(AuthError::InvalidAuth)) // Return opaque error
 		}
 	}
+}
+
+// Renders a failed fetch with its whole cause chain. The outermost error of a
+// failed request only names the URL; the cause is what tells an operator that
+// the network policy refused an address the host name resolved to, which an
+// allowed host name does not cover.
+fn describe_fetch_failure(err: &anyhow::Error) -> String {
+	format!("{err:#}")
 }
 
 // Checks if network access to a remote location is allowed by the datastore
@@ -226,7 +239,7 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk>
 	// Check that the datastore capabilities allow connections to the URL host
 	if let Err(err) = check_capabilities_url(kvs, url) {
 		warn!("Network access to JWKS location is not allowed: '{}'", err);
-		bail!(Error::InvalidAuth); // Return opaque error
+		bail!(AuthError::InvalidAuth); // Return opaque error
 	}
 
 	// Attempt to fetch JWKS object from remote location
@@ -240,13 +253,16 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk>
 					debug!(
 						"Failed to find JWK object with key identifier '{kid}' in remote JWKS object"
 					);
-					Err(anyhow::Error::new(Error::InvalidAuth)) // Return opaque error
+					Err(anyhow::Error::new(AuthError::InvalidAuth)) // Return opaque error
 				}
 			}
 		}
 		Err(err) => {
-			warn!("Failed to fetch JWKS object from remote location: '{}'", err);
-			Err(anyhow::Error::new(Error::InvalidAuth)) // Return opaque error
+			warn!(
+				"Failed to fetch JWKS object from remote location: '{}'",
+				describe_fetch_failure(&err)
+			);
+			Err(anyhow::Error::new(AuthError::InvalidAuth)) // Return opaque error
 		}
 	}
 }
@@ -260,21 +276,18 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 			bail!(Error::InvalidUrl(url.to_string()));
 		}
 	};
-	let addr = match url_parsed.host_str() {
+	// The effective port must be carried into the capability target, including
+	// when the URL relies on the scheme's default. A `deny-net HOST:PORT` rule
+	// is stored as `NetTarget::Host(host, Some(port))` and only matches a target
+	// that carries the same port, so dropping an implicit `:80` / `:443` would
+	// leave such a rule unenforced. The target is built from the parsed host
+	// rather than re-parsed as a rule, so a host spelled like a wildcard rule is
+	// checked as the one host it is.
+	let target = match url_parsed.host() {
 		Some(host) => {
-			if let Some(port) = url_parsed.port() {
-				format!("{host}:{port}")
-			} else {
-				host.to_string()
-			}
+			NetTarget::Host(NetTarget::canonical_host(host), url_parsed.port_or_known_default())
 		}
 		None => {
-			bail!(Error::InvalidUrl(url.to_string()));
-		}
-	};
-	let target = match NetTarget::from_str(&addr) {
-		Ok(host) => host,
-		Err(_) => {
 			bail!(Error::InvalidUrl(url.to_string()));
 		}
 	};
@@ -314,8 +327,8 @@ fn build_jwks_client(kvs: &Datastore) -> Result<Client> {
 
 	// Snapshot the capabilities and redirect budget so the policy closure (which
 	// must be `'static + Send + Sync`) does not borrow the datastore.
-	let capabilities = Arc::new(kvs.get_capabilities().clone());
-	let max_redirects = kvs.config().max_http_redirects;
+	let capabilities = kvs.get_capabilities();
+	let max_redirects = kvs.config().http.max_http_redirects;
 
 	// Build the DNS-level filter from the same capability snapshot before the
 	// `capabilities` handle is moved into the redirect policy closure below.
@@ -332,13 +345,14 @@ fn build_jwks_client(kvs: &Datastore) -> Result<Client> {
 		let url_str = attempt.url().to_string();
 		// Re-validate the redirect target host (and explicit port, if any) against
 		// the configured network capabilities, mirroring `check_capabilities_url`.
-		let addr = match (attempt.url().host_str(), attempt.url().port()) {
-			(Some(host), Some(port)) => Some(format!("{host}:{port}")),
-			(Some(host), None) => Some(host.to_string()),
-			(None, _) => None,
-		};
-		match addr.as_deref().map(NetTarget::from_str) {
-			Some(Ok(target)) if capabilities.allows_network_target(&target) => attempt.follow(),
+		// `port_or_known_default` for the same reason as the initial check: an
+		// implicit default port must still be matched against port-specific
+		// deny rules.
+		let target = attempt.url().host().map(|host| {
+			NetTarget::Host(NetTarget::canonical_host(host), attempt.url().port_or_known_default())
+		});
+		match target {
+			Some(target) if capabilities.allows_network_target(&target) => attempt.follow(),
 			_ => {
 				warn!(
 					"Capabilities denied JWKS redirect to disallowed network target: '{url_str}'"
@@ -357,39 +371,46 @@ fn build_jwks_client(kvs: &Datastore) -> Result<Client> {
 // Attempts to fetch a JWKS object from a remote location and stores it in the
 // cache if successful
 async fn fetch_jwks_from_url(kvs: &Datastore, url: &str) -> Result<JwkSet> {
-	let cache = kvs.cache();
-	#[cfg(not(target_family = "wasm"))]
-	let client = build_jwks_client(kvs)?;
-	#[cfg(target_family = "wasm")]
-	let client = Client::new();
-	let req = client.get(url);
-	// Add a User-Agent header so that WAF rules don't reject the request
-	#[cfg(not(target_family = "wasm"))]
-	let req = req.header(reqwest::header::USER_AGENT, &kvs.config().surrealdb_user_agent);
-	#[cfg(not(target_family = "wasm"))]
-	let res = req.timeout((*REMOTE_TIMEOUT).to_std().expect("valid duration")).send().await?;
-	#[cfg(target_family = "wasm")]
-	let res = req.send().await?;
-	if !res.status().is_success() {
-		warn!(
-			"Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'",
-			res.status()
-		);
-		bail!(Error::InvalidAuth); // Return opaque error
-	}
-	let jwks = res.bytes().await?;
+	// On browser WASM the reqwest futures and response held across the awaits
+	// below are not `Send`, while the callers that authenticate a session are
+	// `Send`-bounded; the wrapper asserts `Send` for the whole block.
+	common::future::assert_send(async move {
+		let cache = kvs.cache();
+		#[cfg(not(target_family = "wasm"))]
+		let client = build_jwks_client(kvs)?;
+		// The runtime's `fetch` takes the redirect and DNS decisions on wasm, so the client carries
+		// only the configured User-Agent, which the Workers `fetch` permits setting.
+		#[cfg(target_family = "wasm")]
+		let client = Client::builder()
+			.user_agent(kvs.config().http.surrealdb_user_agent.as_str())
+			.build()?;
+		let req = client.get(url);
+		// Add a User-Agent header so that WAF rules don't reject the request
+		#[cfg(not(target_family = "wasm"))]
+		let req = req.header(reqwest::header::USER_AGENT, &kvs.config().http.surrealdb_user_agent);
+		let res = req.timeout((*REMOTE_TIMEOUT).to_std().expect("valid duration")).send().await?;
+		if !res.status().is_success() {
+			warn!(
+				"Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'",
+				res.status()
+			);
+			bail!(AuthError::InvalidAuth); // Return opaque error
+		}
+		let jwks = res.bytes().await?;
 
-	match serde_json::from_slice::<JwkSet>(&jwks) {
-		Ok(jwks) => {
-			// If successful, cache the JWKS object by its URL
-			store_jwks_in_cache(cache.as_ref(), jwks.clone(), url);
-			Ok(jwks)
+		match serde_json::from_slice::<JwkSet>(&jwks) {
+			Ok(jwks) => {
+				// If successful, cache the JWKS object by its URL
+				store_jwks_in_cache(cache.as_ref(), jwks.clone(), url);
+				Ok(jwks)
+			}
+			Err(err) => {
+				warn!("Failed to parse malformed JWKS object: '{}'", err);
+				Err(anyhow::Error::new(AuthError::InvalidAuth)) // Return opaque error
+			}
 		}
-		Err(err) => {
-			warn!("Failed to parse malformed JWKS object: '{}'", err);
-			Err(anyhow::Error::new(Error::InvalidAuth)) // Return opaque error
-		}
-	}
+	})
+	.await
 }
 
 // Attempts to fetch a JWKS object from the local cache
@@ -421,6 +442,8 @@ fn cache_key_from_url(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+	use std::str::FromStr;
+
 	use rand::distr::{Alphanumeric, SampleString};
 	use wiremock::matchers::{header, method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -555,6 +578,27 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn test_fetch_failure_names_a_refused_address() {
+		// The host name is allowed but the loopback address it resolves to is
+		// not, so the connection is refused by the resolver.
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("localhost").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let mock_server = MockServer::start().await;
+		let url = format!("http://localhost:{}/jwks.json", mock_server.address().port());
+		let err = fetch_jwks_from_url(&ds, &url).await.expect_err("the address is refused");
+		let described = describe_fetch_failure(&err);
+		assert!(
+			described.contains("Access to network target"),
+			"the cause of the refusal is part of the description, got: {described}"
+		);
+	}
+
+	#[tokio::test]
 	async fn test_capabilities_specific_port() {
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::default().with_network_targets(
@@ -585,6 +629,46 @@ mod tests {
 		)
 		.await;
 		assert!(res.is_err(), "Unexpected success validating token from unallowed remote location");
+	}
+
+	// A `deny-net HOST:PORT` rule must still be enforced when the JWKS URL
+	// relies on the scheme's default port. `Url::port()` returns `None` for
+	// `http://host/` and `https://host/`, so building the capability target
+	// from it would drop the effective port and leave the rule unmatched.
+	#[tokio::test]
+	async fn test_deny_net_matches_implicit_default_port() {
+		for (scheme, port) in [("http", 80u16), ("https", 443u16)] {
+			let ds = Datastore::builder()
+				.with_capabilities(
+					Capabilities::default()
+						.with_network_targets(Targets::<NetTarget>::All)
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str(&format!("127.0.0.1:{port}")).unwrap()].into(),
+						)),
+				)
+				.build_with_path("memory")
+				.await
+				.unwrap();
+			// No explicit port: the effective port is the scheme default.
+			let implicit = format!("{scheme}://127.0.0.1/jwks.json");
+			assert!(
+				check_capabilities_url(&ds, &implicit).is_err(),
+				"deny-net 127.0.0.1:{port} must block the implicitly addressed URL {implicit}"
+			);
+			// Positive control: the same URL written with the explicit port.
+			let explicit = format!("{scheme}://127.0.0.1:{port}/jwks.json");
+			assert!(
+				check_capabilities_url(&ds, &explicit).is_err(),
+				"deny-net 127.0.0.1:{port} must block the explicitly addressed URL {explicit}"
+			);
+			// Negative control: a different port on the same host is unaffected,
+			// proving the rule is still port-specific rather than host-wide.
+			let other = format!("{scheme}://127.0.0.1:9999/jwks.json");
+			assert!(
+				check_capabilities_url(&ds, &other).is_ok(),
+				"deny-net 127.0.0.1:{port} must not block {other}"
+			);
+		}
 	}
 
 	#[tokio::test]
@@ -998,11 +1082,19 @@ mod tests {
 			.unwrap();
 		let jwks = DEFAULT_JWKS.clone();
 
+		// The server delay and the grace window are sized so that the two failure
+		// modes cannot be confused: a working timeout aborts the fetch close to
+		// REMOTE_TIMEOUT (the grace window absorbs scheduler lag on loaded
+		// machines), while a broken timeout waits out the full server delay and
+		// receives a valid JWKS response, failing the error assertion instead.
+		let server_delay = Duration::seconds(60);
+		let grace_window = Duration::seconds(30);
+
 		let jwks_path = format!("{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(200)
 			.set_body_json(jwks)
-			.set_delay((*REMOTE_TIMEOUT + Duration::seconds(10)).to_std().unwrap());
+			.set_delay((*REMOTE_TIMEOUT + server_delay).to_std().unwrap());
 		Mock::given(method("GET"))
 			.and(path(&jwks_path))
 			.respond_with(response)
@@ -1022,11 +1114,11 @@ mod tests {
 		.await;
 		assert!(
 			res.is_err(),
-			"Unexpected success validating token configuration with unavailable remote location"
+			"Remote request was not aborted by the timeout; the fetch waited for the delayed response"
 		);
 		assert!(
-			Utc::now() - start_time < *REMOTE_TIMEOUT + Duration::seconds(1),
-			"Remote request was not aborted immediately after timeout"
+			Utc::now() - start_time < *REMOTE_TIMEOUT + grace_window,
+			"Remote request was not aborted within a bounded window after the timeout"
 		);
 	}
 

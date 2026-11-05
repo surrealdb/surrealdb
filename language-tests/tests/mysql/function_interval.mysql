@@ -1,0 +1,23 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL date_add, date_sub and the interval operators move a datetime by an interval, keeping the day of the month or the last day of a shorter month"
+
+[[test.results]]
+value = "[{ a: ts'2024-03-16T10:20:30', b: ts'2024-03-13T22:20:30', c: ts'2024-03-22T10:20:30' }]"
+
+[[test.results]]
+value = "[{ a: ts'2024-02-29T10:20:30', b: ts'2025-02-28T10:20:30', c: ts'2024-06-15T10:20:30', d: ts'2024-02-29T00:00:00', e: ts'2025-02-15T00:00:00' }]"
+
+[[test.results]]
+value = "[{ a: ts'2024-03-15T12:20:30', b: ts'2024-03-15T08:50:30', c: ts'2024-03-16T10:20:30', d: NULL }]"
+*/
+
+SELECT date_add(CAST('2024-03-15T10:20:30Z' AS datetime), INTERVAL 1 DAY) AS a, date_add(CAST('2024-03-15T10:20:30Z' AS datetime), INTERVAL -36 HOUR) AS b, date_add(CAST('2024-03-15T10:20:30Z' AS datetime), INTERVAL 1 WEEK) AS c;
+
+SELECT date_add(CAST('2024-01-31T10:20:30Z' AS datetime), INTERVAL 1 MONTH) AS a, date_add(CAST('2024-02-29T10:20:30Z' AS datetime), INTERVAL 1 YEAR) AS b, date_add(CAST('2024-03-15T10:20:30Z' AS datetime), INTERVAL 1 QUARTER) AS c, date_sub(CAST('2024-03-31T00:00:00Z' AS datetime), INTERVAL 1 MONTH) AS d, date_add(CAST('2024-12-15T00:00:00Z' AS datetime), INTERVAL 2 MONTH) AS e;
+
+SELECT CAST('2024-03-15T10:20:30Z' AS datetime) + INTERVAL 2 HOUR AS a, CAST('2024-03-15T10:20:30Z' AS datetime) - INTERVAL 90 MINUTE AS b, INTERVAL 1 DAY + CAST('2024-03-15T10:20:30Z' AS datetime) AS c, date_add(NULL, INTERVAL 1 DAY) AS d;

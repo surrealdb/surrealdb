@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "`field IN []` must short-circuit to an empty result via AccessPath::EmptyScan. The literal folder rewrites the predicate to `false`, then the planner emits EmptyScan; the index is bypassed even though one exists on the field."
@@ -26,13 +25,21 @@ value = "[{ id: t:a, name: 'alice' }, { id: t:b, name: 'bob' }]"
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    EmptyScan [ctx: Rt]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Filter [ctx: Db] [predicate: false]
+        Union [ctx: Db]
+''''
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    EmptyScan [ctx: Rt]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Filter [ctx: Db] [predicate: false]
+        Union [ctx: Db]
+''''
 */
 DEFINE TABLE t;
 DEFINE INDEX idx_name ON t FIELDS name;

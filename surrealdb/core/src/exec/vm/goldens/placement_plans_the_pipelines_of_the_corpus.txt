@@ -1,0 +1,165 @@
+### SELECT * FROM person
+range in place
+### SELECT name FROM person
+range in place
+### SELECT name, age FROM person
+range in place
+### SELECT * FROM person:tobie
+range in place
+### SELECT * FROM person WHERE age > 18
+batches in place
+### SELECT * FROM person WHERE age > 18 AND age > 3
+batches in place
+### SELECT * FROM person WHERE true
+range in place
+### SELECT * FROM person WHERE false
+batches in place
+### SELECT * FROM person WHERE age > 18 AND city = 'SF'
+batches in place
+### SELECT * FROM person WHERE age > 18 OR age < 5
+batches in place
+### SELECT * FROM person WHERE NOT (age > 18 AND city = 'SF')
+batches
+### SELECT * FROM person WHERE age > 1 + 2
+batches in place
+### SELECT * FROM person WHERE city = NONE
+range in place
+### SELECT * FROM person ORDER BY age
+batches in place
+  refused: the loop's source cannot be split
+### SELECT * FROM person ORDER BY age LIMIT 10
+serial in place
+  refused: the paging is not one a merge replays
+  refused: the loop's source cannot be split
+### SELECT * FROM person LIMIT 10 START 5
+range in place
+  refused: the logical plan does not allow the pipeline to split
+### SELECT count() FROM person GROUP ALL
+serial
+### SELECT city, count() FROM person GROUP BY city
+range in place, serial
+### SELECT * FROM person WHERE id IN (SELECT VALUE id FROM person WHERE age > 18)
+serial in place, serial
+  refused: the logical plan does not allow the pipeline to split
+### SELECT (SELECT VALUE name FROM company) AS names FROM person
+range in place, serial
+  refused: a nested statement is evaluated once, probed, or writes
+### SELECT ->works_at->company FROM person
+batches
+  refused: the logical plan does not allow the pipeline to split
+### SELECT * FROM person WHERE ->works_at->company
+batches
+  refused: the logical plan does not allow the pipeline to split
+### CREATE person:tobie SET name = 'Tobie', age = 30
+serial
+  refused: two iterations may write one key
+### UPDATE person:tobie SET age = 31
+serial
+  refused: the write reads one record, which leaves no second batch to hand on
+### UPDATE person:tobie SET age = age + 1
+serial
+  refused: the write reads one record, which leaves no second batch to hand on
+### DELETE person:tobie
+serial, serial
+  refused: the write reads one record, which leaves no second batch to hand on
+### SELECT id, (CREATE log:1) AS made FROM person
+serial, serial
+  refused: the loop body, or the code its table stores, may write a record of the table its source reads at another key
+  refused: two iterations may write one key
+### UPDATE person SET city = (SELECT VALUE name FROM company)
+serial, serial in place
+  refused: a stage the plan marks compute holds an op that only the apply half may run
+  refused: the pipeline or its statement writes
+### UPDATE person SET city = (SELECT VALUE name FROM company WHERE name = $this)
+serial, serial
+  refused: a stage the plan marks compute holds an op that only the apply half may run
+  refused: the pipeline or its statement writes
+### UPDATE person SET city = (CREATE log:1).id
+serial, serial
+  refused: the statement runs a body the plan cannot see
+  refused: two iterations may write one key
+### UPDATE person SET city = (SELECT VALUE rand::uuid() FROM company)
+serial, serial
+  refused: the statement draws entropy
+### CREATE |person:3|
+serial
+  refused: two iterations may write one key
+### CREATE |person:1..4|
+batches
+### SELECT * FROM |person:3|
+serial
+  refused: the loop's source cannot be split
+### RETURN |person:3|
+serial
+### RETURN IF true THEN 1 ELSE 2 END
+serial
+### RETURN IF false THEN (CREATE log:1) ELSE 2 END
+serial
+### RETURN IF $c THEN 1 ELSE IF true THEN 2 ELSE 3 END
+serial
+### SELECT * FROM person WHERE age > rand::int(1, 10)
+serial
+  refused: the statement draws entropy
+### SELECT * FROM person WHERE age > time::now()
+batches in place
+### SELECT * FROM person #2
+batches
+### SELECT name, age FROM person WHERE age > 10
+batches in place
+### SELECT ->works_at->company FROM person #2
+batches
+  refused: the logical plan does not allow the pipeline to split
+### SELECT *, (SELECT VALUE name FROM company) AS c FROM person
+range in place, serial
+  refused: a nested statement is evaluated once, probed, or writes
+### SELECT * FROM person FETCH company
+batches
+### SELECT * FROM person WHERE name @@ 'a'
+batches
+### SELECT * FROM person WHERE emb <|3, 40|> [1, 2, 3]
+batches
+### SELECT math::sum(age) FROM person GROUP ALL
+range in place, serial
+### SELECT city, count() FROM person GROUP BY city #2
+range in place, serial
+### SELECT * FROM person LIMIT 5 START 2
+batches
+  refused: the logical plan does not allow the pipeline to split
+### SELECT * FROM person ORDER BY age LIMIT 3
+serial
+  refused: the paging is not one a merge replays
+  refused: the loop's source cannot be split
+### SELECT time::now() FROM person
+batches
+### SELECT rand() FROM person
+serial
+  refused: the statement draws entropy
+### SELECT * FROM (SELECT * FROM person LIMIT 50) LIMIT 5
+batches, serial
+  refused: the logical plan does not allow the pipeline to split
+### SELECT city, math::max(twice) AS top FROM person GROUP BY city
+batches, serial
+### SELECT city, math::sum(twice) AS total FROM person GROUP BY city
+serial, serial
+  refused: a float fold depends on how its terms are grouped
+### SELECT twice FROM person WHERE twice > 10 LIMIT 7
+batches
+  refused: the logical plan does not allow the pipeline to split
+### SELECT twice FROM person LIMIT 7
+batches
+  refused: the logical plan does not allow the pipeline to split
+### MATCH (n:person) RETURN DISTINCT n.city AS city ORDER BY city
+serial, serial
+  refused: the logical plan does not allow the pipeline to split
+  refused: the loop's source cannot be split
+### MATCH (n:person) RETURN n.name AS name SKIP 1 LIMIT 2
+serial
+  refused: the logical plan does not allow the pipeline to split
+  refused: the loop's source cannot be split
+### MATCH (n:person) RETURN n.city AS city, count(*) AS c GROUP BY n.city ORDER BY city
+serial, serial, serial
+  refused: the logical plan does not allow the pipeline to split
+  refused: the loop's source cannot be split
+### SELECT DISTINCT city FROM person
+batches
+  refused: the loop's source cannot be split

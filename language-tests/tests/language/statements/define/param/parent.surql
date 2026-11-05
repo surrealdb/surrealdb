@@ -6,7 +6,7 @@ reason = "This test proves that $parent is fixed at the time when the query is e
 value = "[{ a: parent:a, b: parent:b, c: parent:c, id: test:1 }]"
 
 [[test.results]]
-value = "[{ id: parent:a }, { id: parent:b }, { id: parent:c }]"
+value = "[{ id: parent:a, parent: { id: test:1 } }, { id: parent:b, parent: { id: test:1 } }, { id: parent:c, parent: { id: test:1 } }]"
 
 */
 

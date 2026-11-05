@@ -1,9 +1,8 @@
 /**
 [test]
-reason = "Top-level `LET $rows = SELECT ...` runs the RHS through the streaming planner. EXPLAIN ANALYZE of the same SELECT renders a streaming plan tree — under planner-strategy = all-ro this is load-bearing because the legacy compute path produces a different shape."
+reason = "Top-level `LET $rows = SELECT ...` runs the RHS through the planner. EXPLAIN ANALYZE of the same SELECT renders a plan tree"
 
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [[test.results]]
 value = "NONE"
@@ -15,7 +14,11 @@ value = "NONE"
 value = "5"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 5}\n    TableScan [ctx: Db] [table: seeded, direction: Forward] {rows: 5}\n\nTotal rows: 5''''
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 5}
+    TableScan [ctx: Db] [table: seeded, direction: Forward] {rows: 5}
+
+Total rows: 5''''
 
 */
 

@@ -5,7 +5,7 @@ use rmcp::model::CallToolResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
-use surrealdb_core::dbs::QueryResult;
+use surrealdb_rpc::QueryResult;
 
 use super::output::cap_value;
 use super::{
@@ -18,6 +18,11 @@ use crate::session::McpSession;
 pub struct InfoParams {
 	/// Scope: "root", "ns", "db", or a table name. Defaults to most specific context.
 	pub target: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 /// Dump full introspection for a scope or table via `INFO FOR <scope>` / `INFO FOR TABLE`.
@@ -43,7 +48,7 @@ pub async fn info(session: &McpSession, params: InfoParams) -> Result<CallToolRe
 	let mut results = session.execute(&query, None).await?;
 	let result = results.pop().unwrap_or_else(|| {
 		tracing::warn!(target: "surrealdb::mcp", "info() returned no statements");
-		surrealdb_core::dbs::QueryResultBuilder::instant_none()
+		surrealdb_rpc::QueryResultBuilder::instant_none()
 	});
 	Ok(single_statement_result(result, session.config().max_result_bytes))
 }
@@ -65,7 +70,8 @@ pub enum ListKind {
 	Apis,
 	Buckets,
 	Models,
-	Modules,
+	#[serde(alias = "modules")]
+	Extensions,
 	Sequences,
 	Configs,
 	// Multi-scope (require `scope`)
@@ -94,6 +100,16 @@ pub struct ListParams {
 	pub table: Option<String>,
 	/// Required when `kind` is one of: users, accesses. One of: root, ns, db.
 	pub scope: Option<ListScope>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	///
+	/// Named apart from `scope` above, which selects the *level* a `users` or
+	/// `accesses` listing is read at rather than the namespace/database the
+	/// call runs in. The two are independent: listing database users requires
+	/// `scope = "db"` and a namespace/database to read them from.
+	#[serde(flatten)]
+	pub tool_scope: super::ToolScope,
 }
 
 /// Enumerate entities of a given kind, returning only the requested subtree of
@@ -136,7 +152,7 @@ fn resolve_list_target(p: &ListParams) -> Result<(String, &'static str), ErrorDa
 		Apis => db_scope(p, "apis"),
 		Buckets => db_scope(p, "buckets"),
 		Models => db_scope(p, "models"),
-		Modules => db_scope(p, "modules"),
+		Extensions => db_scope(p, "extensions"),
 		Sequences => db_scope(p, "sequences"),
 		Configs => db_scope(p, "configs"),
 		// Multi-scope
@@ -232,7 +248,11 @@ fn subtree_result(
 			map.remove(key).unwrap_or(serde_json::Value::Array(Vec::new()))
 		}
 		// The INFO statement always returns an object, but guard against it.
-		_ => serde_json::Value::Array(Vec::new()),
+		serde_json::Value::Null
+		| serde_json::Value::Bool(_)
+		| serde_json::Value::Number(_)
+		| serde_json::Value::String(_)
+		| serde_json::Value::Array(_) => serde_json::Value::Array(Vec::new()),
 	};
 	let (items, truncated) = cap_value(subtree, max_bytes);
 	Ok(structured_success(json!({

@@ -1,0 +1,8 @@
+### array::fold([1, 2, 3, 4], 0, |$acc, $v| $acc + fn::v() + $v)
+14
+### SELECT VALUE array::fold(tags, 0, |$acc, $v| $acc + fn::v() + $v) FROM t
+9
+9
+9
+9
+9

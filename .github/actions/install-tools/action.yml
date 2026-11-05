@@ -52,6 +52,6 @@ runs:
 
     - name: Install tools
       if: inputs.use-cargo-install != 'true'
-      uses: taiki-e/install-action@80e6af7a2ec7f280fffe2d0a9d3a12a9d11d86e9 # (Actions must be pinned by commit hash) v2.75.1
+      uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # (Actions must be pinned by commit hash) v2.85.13
       with:
         tool: ${{ steps.resolve-tools.outputs.tools }}

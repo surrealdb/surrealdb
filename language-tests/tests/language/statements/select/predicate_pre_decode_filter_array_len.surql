@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "`WHERE array::len(field) <op> N` reads just the array's rev-2 prologue varint (no element decode) and compares the count against the numeric literal. Covers equality, inequality, and ordering ops. EXPLAIN must show pre_decode_filter: yes."
+reason = "`WHERE array::len(field) <op> N` reads just the array's rev-2 prologue varint (no element decode) and compares the count against the numeric literal. Covers equality, inequality, and ordering ops. EXPLAIN shows the predicate as a filter over the table scan."
 
 [[test.results]]
 value = "{ id: pflen:1, tags: [] }"
@@ -19,38 +18,30 @@ value = "{ id: pflen:3, tags: ['x', 'y', 'z'] }"
 [[test.results]]
 value = "{ id: pflen:4, tags: ['a', 'b', 'c', 'd', 'e'] }"
 
-# WHERE array::len(tags) = 3 → pflen:3
 [[test.results]]
 value = "[{ id: pflen:3 }]"
 
-# WHERE array::len(tags) > 0 → pflen:2, pflen:3, pflen:4
 [[test.results]]
 value = "[{ id: pflen:2 }, { id: pflen:3 }, { id: pflen:4 }]"
 
-# WHERE array::len(tags) >= 3 → pflen:3, pflen:4
 [[test.results]]
 value = "[{ id: pflen:3 }, { id: pflen:4 }]"
 
-# WHERE array::len(tags) <= 1 → pflen:1, pflen:2
 [[test.results]]
 value = "[{ id: pflen:1 }, { id: pflen:2 }]"
 
-# WHERE array::len(tags) != 0 → pflen:2, pflen:3, pflen:4
 [[test.results]]
 value = "[{ id: pflen:2 }, { id: pflen:3 }, { id: pflen:4 }]"
 
-# Reversed: `3 = array::len(tags)` → pflen:3
 [[test.results]]
 value = "[{ id: pflen:3 }]"
 
-# EXPLAIN: the predicate is compiled to LeafStreaming (invisible in EXPLAIN
-# beyond the opaque `array::len(...)` rendering) but pre_decode_filter still
-# reports yes for the scan — the load-bearing assertion that the wire-fast
-# array-length path was selected.
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: pflen, direction: Forward, predicate: array::len(...) > 0, pre_decode_filter: yes]
-"'''
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: array::len(tags) > 0]
+        TableScan [ctx: Db] [table: pflen, direction: Forward]
+''''
 
 */
 

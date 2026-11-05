@@ -1,0 +1,139 @@
+use std::fmt::{self, Display};
+
+use anyhow::Result;
+use common::fail;
+use common::fmt::EscapeKwFreeIdent;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::expr::Kind;
+use crate::val::File;
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum ModuleExecutable {
+	Surrealism(SurrealismExecutable),
+	Silo(SiloExecutable),
+}
+
+impl ToSql for ModuleExecutable {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			ModuleExecutable::Surrealism(surrealism) => surrealism.fmt_sql(f, fmt),
+			ModuleExecutable::Silo(silo) => silo.fmt_sql(f, fmt),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct Signature {
+	pub args: Vec<Kind>,
+	pub returns: Option<Kind>,
+	pub writeable: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct SurrealismExecutable(pub File);
+
+impl ToSql for SurrealismExecutable {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.0.fmt_sql(f, fmt);
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct SiloExecutable {
+	pub organisation: String,
+	pub package: String,
+	pub major: u32,
+	pub minor: u32,
+	pub patch: u32,
+}
+
+impl ToSql for SiloExecutable {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(
+			f,
+			fmt,
+			"silo::{}::{}<{}.{}.{}>",
+			self.organisation,
+			self.package,
+			self.major,
+			self.minor,
+			self.patch
+		)
+	}
+}
+
+/// The parsed name of an extension: an `ext::` name, or the package release
+/// of an unnamed silo definition.
+///
+/// Not persisted itself; [`ModuleName::get_storage_name`] is the single point
+/// that derives the storage name both the statements and the catalog use.
+/// The storage name of a named extension keeps the `mod::` prefix, which is
+/// part of its catalog key; the SurrealQL and display forms write `ext::`.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum ModuleName {
+	Module(String),
+	Silo(String, String, u32, u32, u32),
+}
+
+impl ModuleName {
+	pub fn get_storage_name(&self) -> String {
+		match self {
+			ModuleName::Module(name) => format!("mod::{}", name),
+			ModuleName::Silo(org, pkg, major, minor, patch) => {
+				format!("silo::{org}::{pkg}::<{major}.{minor}.{patch}>")
+			}
+		}
+	}
+}
+
+impl<'a> TryFrom<&'a crate::expr::statements::DefineModuleStatement> for ModuleName {
+	type Error = anyhow::Error;
+	fn try_from(
+		value: &'a crate::expr::statements::DefineModuleStatement,
+	) -> Result<Self, Self::Error> {
+		if let Some(name) = &value.name {
+			Ok(ModuleName::Module(name.clone()))
+		} else if let crate::expr::ModuleExecutable::Silo(silo) = &value.executable {
+			Ok(ModuleName::Silo(
+				silo.organisation.clone(),
+				silo.package.clone(),
+				silo.major,
+				silo.minor,
+				silo.patch,
+			))
+		} else {
+			// It should not be possible to get to this point as in the parser
+			// we validate that the module has a name or is a silo module
+			fail!("A module without a name cannot be stored")
+		}
+	}
+}
+
+impl Display for ModuleName {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			ModuleName::Module(name) => write!(f, "ext::{}", name),
+			ModuleName::Silo(org, pkg, major, minor, patch) => {
+				write!(f, "silo::{org}::{pkg}<{major}.{minor}.{patch}>")
+			}
+		}
+	}
+}
+
+impl ToSql for ModuleName {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			ModuleName::Module(name) => write_sql!(f, fmt, "ext::{}", EscapeKwFreeIdent(name)),
+			ModuleName::Silo(org, pkg, major, minor, patch) => {
+				write_sql!(
+					f,
+					fmt,
+					"silo::{}::{}<{major}.{minor}.{patch}>",
+					EscapeKwFreeIdent(org),
+					EscapeKwFreeIdent(pkg)
+				);
+			}
+		}
+	}
+}

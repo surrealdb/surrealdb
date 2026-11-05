@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_distinct_sums.surql"]
+
+[test]
+reason = "A DISTINCT aggregate over another aggregate is refused"
+
+[[test.results]]
+error = "Invalid query: Nested aggregate functions are not supported"
+*/
+
+SELECT sum(DISTINCT sum(v)) FROM ds_t;

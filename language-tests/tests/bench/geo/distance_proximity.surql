@@ -1,11 +1,9 @@
 /**
-[env]
-imports = ["bench/util/geo-points-100000.surql"]
-
 [bench]
-reason = "Geo proximity full scan: geo::distance from a fixed point evaluated per row, filtered by radius (no spatial index — see #219)"
+reason = "Geo proximity scan: geo::distance from a fixed point filtered by 1,000 km radius (unindexed full scan vs SPATIAL index)"
 run = true
 rebuild = false
+datasets = { unindexed = "bench/util/geo-points-100000.surql", indexed = "bench/util/geo-points-100000-indexed.surql" }
 warmup = "2s"
 sample-size = 50
 measurement-time = "20s"

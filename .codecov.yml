@@ -32,14 +32,12 @@ flags:
       - surrealdb/
       - src/
       - surrealism/
-      - surrealml/
       - tests/
     carryforward: true
   language-tests:
     paths:
       - surrealdb/
       - surrealism/
-      - surrealml/
       - tests/
     carryforward: true
 
@@ -58,6 +56,14 @@ component_management:
       name: surrealdb-core
       paths:
         - surrealdb/core/**
+
+    # The streaming execution engine is reported separately from the rest of
+    # core: it is the engine the read path runs on, so its coverage has to be
+    # readable without being averaged into a crate an order of magnitude larger.
+    - component_id: surrealdb_core_exec
+      name: surrealdb-core-exec
+      paths:
+        - surrealdb/core/src/exec/**
 
     - component_id: surrealdb_types
       name: surrealdb-types

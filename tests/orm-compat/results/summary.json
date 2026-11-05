@@ -1,0 +1,59 @@
+{
+  "environment": {
+    "measuredAt": "2026-10-24T19:40:33.292Z",
+    "node": "v26.12.1",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "reference": "PostgreSQL 18.4 on x86_64-apple-darwin24.6.0, compiled by Apple clang version 17.0.0 (clang-1700.6.3.2), 64-bit",
+    "sourceCommit": "349d827b79b614f086dfa993898ea6090790ca9e",
+    "sourceTree": "354c64cc6dfa91145b6c12e0d97c42e5960d18f7",
+    "versions": {
+      "@prisma/adapter-pg": "7.10.1",
+      "@prisma/client": "7.10.1",
+      "drizzle-kit": "0.31.11",
+      "drizzle-orm": "0.45.4",
+      "embedded-postgres": "18.4.0-beta.17",
+      "pg": "8.23.1",
+      "prisma": "7.10.1",
+      "reflect-metadata": "0.2.2",
+      "tsx": "4.23.15",
+      "typeorm": "1.1.2",
+      "typescript": "7.0.2"
+    }
+  },
+  "scope": "Targeted compatibility probes; not upstream ORM suites or a performance benchmark",
+  "reference": {
+    "prisma": {
+      "pass": 18,
+      "fail": 0,
+      "blocked": 0
+    },
+    "drizzle": {
+      "pass": 18,
+      "fail": 0,
+      "blocked": 0
+    },
+    "typeorm": {
+      "pass": 18,
+      "fail": 0,
+      "blocked": 0
+    }
+  },
+  "surrealdb": {
+    "prisma": {
+      "pass": 18,
+      "fail": 0,
+      "blocked": 0
+    },
+    "drizzle": {
+      "pass": 17,
+      "fail": 1,
+      "blocked": 0
+    },
+    "typeorm": {
+      "pass": 15,
+      "fail": 3,
+      "blocked": 0
+    }
+  }
+}

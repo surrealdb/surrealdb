@@ -6,16 +6,16 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::Args;
-use surrealdb::engine::{any, tasks};
-use surrealdb_core::buc::BucketStoreProvider;
+use surrealdb::engine::any;
 use surrealdb_core::kvs::TransactionBuilderFactory;
-use surrealdb_core::observe::{ExecutionObserver, FanOutObserver};
 use surrealdb_core::options::EngineOptions;
+use surrealdb_observe::{ExecutionObserver, FanOutObserver};
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use super::config::Config;
 use crate::cli::ConfigCheck;
-use crate::cnf::{LOGO, METRICS_ENABLED, PROCESS_METRICS_REFRESH_INTERVAL};
+use crate::cnf::{METRICS_ENABLED, PROCESS_METRICS_REFRESH_INTERVAL};
 use crate::dbs::StartCommandDbsOptions;
 use crate::ntw::RouterFactory;
 use crate::ntw::client_ip::ClientIp;
@@ -24,15 +24,49 @@ use crate::observe::{MetricsObserver, MetricsState, ObservabilityProvider, Obser
 use crate::telemetry::metrics::otlp_metrics_active;
 use crate::{dbs, env, ntw};
 
+/// How long the HTTP bind waits for the deferred startup work to finish when
+/// there is no startup import.
+///
+/// Bounded from both sides, and the gap between them is wide:
+///
+/// - It must exceed that work, which against local storage is milliseconds per step except the root
+///   credential hash — deliberately expensive, but bounded CPU work at a little over a second on a
+///   loaded CI runner. Binding before it finishes costs the guarantee that a server answering
+///   `/health` can serve, which clients and test harnesses rely on far more than they poll
+///   `/ready`.
+/// - It must stay under the shortest deadline a client gives the listener to appear, since it is
+///   also the longest the listener can take. The tightest known is 10s, in the JS SDK's own
+///   harness.
+///
+/// Anything past this is a datastore that is not accepting transactions, which
+/// no amount of further waiting fixes, so the listener binds and the work
+/// continues behind the readiness gate.
+const STARTUP_BIND_GRACE: Duration = Duration::from_secs(5);
+
+/// How long shutdown waits for the deferred startup work to stop before it
+/// closes the storage engine.
+///
+/// That work opens transactions of its own — the version stamp, the defaults,
+/// this node's registration, the import — and is not joined the way the
+/// datastore's own maintenance tasks are, because it is the task that starts
+/// the maintenance schedule: there is nothing to register with until it has
+/// already run. So the join is made here instead, on the same terms
+/// `Datastore::shutdown` gives the maintenance tasks: bounded at the same
+/// budget, and a task still running when it expires is abandoned exactly as a
+/// maintenance pass would be.
+const STARTUP_SHUTDOWN_JOIN: Duration = Duration::from_secs(30);
+
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
 	#[arg(help = "Database path used for storing data")]
 	#[arg(env = "SURREAL_PATH", index = 1)]
 	#[arg(default_value = "memory")]
 	path: String,
-	#[arg(help = "Whether to hide the startup banner")]
-	#[arg(env = "SURREAL_NO_BANNER", long)]
+	/// Accepted, silently, so that scripts and containers passing it start. The
+	/// database prints no banner, so it has no effect.
+	#[arg(env = "SURREAL_NO_BANNER", long, hide = true)]
 	#[arg(default_value_t = false)]
+	#[allow(dead_code, reason = "accepted for compatibility; the value is never used")]
 	no_banner: bool,
 	#[arg(help = "Encryption key to use for on-disk encryption")]
 	#[arg(env = "SURREAL_KEY", short = 'k', long = "key")]
@@ -73,6 +107,13 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "5s")]
 	index_compaction_interval: Duration,
 	#[arg(
+		help = "The interval at which to fold graph adjacency keys into packed blocks",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_GRAPH_FOLD_INTERVAL", long = "graph-fold-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "5s")]
+	graph_fold_interval: Duration,
+	#[arg(
 		help = "The interval at which to resume index builds left unfinished by a crashed node (0 to disable)",
 		help_heading = "Database"
 	)]
@@ -93,26 +134,45 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "10m")]
 	reclaim_grace: Duration,
 	#[arg(
-		help = "The interval at which the TiKV MVCC garbage collector runs",
+		help = "The interval at which the storage backend's MVCC garbage collector runs",
 		help_heading = "Database"
 	)]
 	#[arg(env = "SURREAL_TIKV_GC_INTERVAL", long = "tikv-gc-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "10m")]
-	tikv_gc_interval: Duration,
+	mvcc_gc_interval: Duration,
 	#[arg(
-		help = "How far behind the current TSO the TiKV GC safepoint is allowed to sit",
+		help = "How far behind the current time the MVCC GC safepoint is allowed to sit",
 		help_heading = "Database"
 	)]
 	#[arg(env = "SURREAL_TIKV_GC_LIFETIME", long = "tikv-gc-lifetime", value_parser = super::validator::duration)]
 	#[arg(default_value = "10m")]
-	tikv_gc_lifetime: Duration,
+	mvcc_gc_lifetime: Duration,
 	#[arg(
-		help = "The interval at which TiKV stale transactional locks are resolved",
+		help = "The interval at which stale transactional locks are resolved",
 		help_heading = "Database"
 	)]
 	#[arg(env = "SURREAL_TIKV_LOCK_CLEANUP_INTERVAL", long = "tikv-lock-cleanup-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "60s")]
-	tikv_lock_cleanup_interval: Duration,
+	lock_cleanup_interval: Duration,
+	// Accepted so deployments that still pass it keep starting: attached HTTP
+	// RPC sessions are always stored in the datastore, so it has no effect.
+	#[arg(env = "SURREAL_DURABLE_SESSIONS", long = "durable-sessions", hide = true)]
+	#[arg(default_value_t = false)]
+	durable_sessions: bool,
+	#[arg(
+		help = "How long an attached HTTP RPC session survives without being used: it expires between one and one and a half times this long after its last request. Attached sessions are stored in the datastore, including their authentication state, so they survive restarts and any node can serve them",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_DURABLE_SESSION_TTL", long = "durable-session-ttl", value_parser = super::validator::duration)]
+	#[arg(default_value = "24h")]
+	durable_session_ttl: Duration,
+	#[arg(
+		help = "The interval at which expired attached HTTP RPC sessions are purged from the datastore (0 to disable). An expired session is refused whether or not it has been purged",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_DURABLE_SESSION_GC_INTERVAL", long = "durable-session-gc-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "1h")]
+	durable_session_gc_interval: Duration,
 	//
 	// Authentication
 	#[arg(
@@ -124,7 +184,8 @@ pub struct StartCommandArguments {
 		short = 'u',
 		long = "username",
 		visible_alias = "user",
-		requires = "password"
+		requires = "password",
+		value_parser = clap::builder::NonEmptyStringValueParser::new()
 	)]
 	username: Option<String>,
 	#[arg(
@@ -133,10 +194,13 @@ pub struct StartCommandArguments {
 	)]
 	#[arg(
 		env = "SURREAL_PASS",
+		// Keep the value out of `--help`: clap prints an env var's current value unless this is set.
+		hide_env_values = true,
 		short = 'p',
 		long = "password",
 		visible_alias = "pass",
-		requires = "username"
+		requires = "username",
+		value_parser = clap::builder::NonEmptyStringValueParser::new()
 	)]
 	password: Option<String>,
 	//
@@ -165,6 +229,26 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_ALLOW_ORIGIN", long = "allow-origin")]
 	#[arg(value_delimiter = ',', value_parser = super::validator::cors_origin)]
 	allow_origin: Vec<String>,
+	#[arg(
+		help = "Issue the access token as an HttpOnly cookie on request, and accept it from the allowed origins. Requires --allow-origin. The cookie is Secure, so a browser stores it only over HTTPS or on a loopback address"
+	)]
+	#[arg(env = "SURREAL_COOKIE_AUTH", long = "cookie-auth")]
+	#[arg(default_value_t = false)]
+	cookie_auth: bool,
+	//
+	// Postgres server
+	#[arg(
+		help = "The hostname or IP address to listen for Postgres wire protocol connections on. No port is opened unless set. Deny the `postgres` route with --deny-http to refuse connections and PostgreSQL queries",
+		help_heading = "Postgres server"
+	)]
+	#[arg(env = "SURREAL_POSTGRES_BIND", long = "postgres-bind")]
+	postgres_bind: Option<SocketAddr>,
+	#[arg(
+		help = "The hostname or IP address to listen for MySQL wire protocol connections on. No port is opened unless set. Deny the `mysql` route with --deny-http to refuse connections and MySQL queries",
+		help_heading = "MySQL server"
+	)]
+	#[arg(env = "SURREAL_MYSQL_BIND", long = "mysql-bind")]
+	mysql_bind: Option<SocketAddr>,
 	//
 	// Database options
 	#[command(flatten)]
@@ -210,11 +294,7 @@ struct StartCommandWebTlsOptions {
 ///   - `RouterFactory` (HTTP router factory for route/middleware customization)
 ///   - `ConfigCheck` (validates configuration before initialization)
 pub async fn init<
-	C: TransactionBuilderFactory
-		+ RouterFactory
-		+ ConfigCheck
-		+ BucketStoreProvider
-		+ ObservabilityProvider,
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + ObservabilityProvider,
 >(
 	mut composer: C,
 	StartCommandArguments {
@@ -230,26 +310,29 @@ pub async fn init<
 		node_membership_cleanup_interval,
 		changefeed_gc_interval,
 		index_compaction_interval,
+		graph_fold_interval,
 		index_build_resume_interval,
 		event_processing_interval,
 		reclaim_interval,
 		reclaim_grace,
-		tikv_gc_interval,
-		tikv_gc_lifetime,
-		tikv_lock_cleanup_interval,
-		no_banner,
+		mvcc_gc_interval,
+		mvcc_gc_lifetime,
+		lock_cleanup_interval,
+		durable_sessions,
+		durable_session_ttl,
+		durable_session_gc_interval,
 		no_identification_headers,
 		allow_origin,
+		cookie_auth,
+		postgres_bind,
+		mysql_bind,
 		..
 	}: StartCommandArguments,
 	runtime: ObservabilityRuntime,
 ) -> Result<()> {
 	// Check the path is valid
-	C::path_valid(&path)?;
-	// Check if we should output a banner
-	if !no_banner {
-		println!("{LOGO}");
-	}
+	composer.path_valid(&path)?;
+	check_durable_session_ttl(durable_session_ttl)?;
 	// Clean the path
 	let endpoint = any::__into_endpoint(path)?;
 	let path = if endpoint.path.is_empty() {
@@ -270,19 +353,39 @@ pub async fn init<
 		.with_node_membership_cleanup_interval(node_membership_cleanup_interval)
 		.with_changefeed_gc_interval(changefeed_gc_interval)
 		.with_index_compaction_interval(index_compaction_interval)
+		.with_graph_fold_interval(graph_fold_interval)
 		.with_index_build_resume_interval(index_build_resume_interval)
 		.with_event_processing_interval(event_processing_interval)
 		.with_reclaim_interval(reclaim_interval)
 		.with_reclaim_grace(reclaim_grace)
-		.with_tikv_gc_interval(tikv_gc_interval)
-		.with_tikv_gc_lifetime(tikv_gc_lifetime)
-		.with_tikv_lock_cleanup_interval(tikv_lock_cleanup_interval);
+		.with_mvcc_gc_interval(mvcc_gc_interval)
+		.with_mvcc_gc_lifetime(mvcc_gc_lifetime)
+		.with_lock_cleanup_interval(lock_cleanup_interval)
+		.with_rpc_session_gc_interval(durable_session_gc_interval)
+		// Floor the configured value at 1s so a misconfigured zero neither
+		// produces a tight refresh loop nor unregisters the job.
+		.with_system_metrics_refresh_interval(Duration::from_secs(
+			(*PROCESS_METRICS_REFRESH_INTERVAL).max(1),
+		));
+	// The memory threshold is read once per process, so this is the only place
+	// its effective value is observable.
+	match surrealdb_core::mem::memory_threshold() {
+		0 => info!("Memory threshold is disabled; queries will not be refused on memory pressure"),
+		bytes => info!("Memory threshold is {bytes} bytes"),
+	}
+	if durable_sessions {
+		warn!(
+			"--durable-sessions is deprecated and has no effect: attached HTTP RPC sessions are always stored in the datastore"
+		);
+	}
 	// Configure the config
 	let Some(bind) = listen_addresses.first().copied() else {
 		return Err(anyhow::anyhow!("No listen address provided"));
 	};
 	let config = Config {
 		bind,
+		postgres_bind,
+		mysql_bind,
 		client_ip,
 		path,
 		user,
@@ -292,6 +395,8 @@ pub async fn init<
 		engine,
 		crt,
 		key,
+		durable_session_ttl,
+		cookie_auth,
 	};
 	composer.check_config(&config).await?;
 	// Setup the command-line options
@@ -307,31 +412,44 @@ pub async fn init<
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 
-	// Keep the cached process snapshot fresh for both readers. The
-	// `/metrics` handler used to refresh on each scrape; OTLP push has
-	// no equivalent path, so a background task is the only way to
-	// avoid flat-lined `surrealdb.process.*` values on OTLP-only
-	// deployments. Only spawn when at least one reader is configured;
-	// otherwise nobody reads the cache.
-	if *METRICS_ENABLED || otlp_metrics_active() {
-		spawn_process_snapshot_refresh(canceller.clone());
-	}
-	// Start the datastore. The startup import and credential initialisation are
-	// returned rather than run here, so the web server can bind before they run.
+	// Build the datastore. Every startup step that opens a transaction — the
+	// version check, the default namespace and database, this node's cluster
+	// registration, the import and the root credentials — is returned rather than
+	// run here, so the bind waits for none of them. It still waits for the
+	// datastore itself: a composer that does not return its builder until its
+	// engine is ready to serve holds the bind for that long regardless.
 	let (datastore, recv, router_state, pending_startup) =
-		dbs::init::<C>(composer, &config, canceller.clone(), combined_observer, dbs).await?;
-	let datastore = Arc::new(datastore);
-	// Tracks whether the instance has finished starting up (import + credentials)
-	// and is ready to serve user-facing queries. The HTTP listener binds
-	// immediately; until this flips to `true`, query/auth endpoints return 503
-	// and `/ready` reports not-ready.
+		dbs::init::<C>(&composer, &config, canceller.clone(), combined_observer, dbs).await?;
+	// Tracks whether the instance has finished starting up and is ready to serve
+	// user-facing queries. Until it flips to `true`, query/auth endpoints return
+	// 503 and `/ready` reports not-ready.
 	let ready = Arc::new(AtomicBool::new(false));
-	if pending_startup.has_work() {
-		// Run the deferred startup work (import, then credentials) concurrently
-		// so the listener comes up right away, flipping `ready` once it succeeds.
+	// Carries a failure of the steps the instance cannot serve without back to
+	// this function, so the process reports it as its exit status. The token is
+	// what the rest of this function watches: it is tripped only by such a
+	// failure, and only after the error itself has been sent, so a tripped token
+	// means the channel holds the error. A dropped sender — which a clean
+	// startup and a cancelled one both leave behind — never trips it, and
+	// awaiting or testing a token is safe any number of times, which reading the
+	// channel is not.
+	let (failed_tx, mut failed_rx) = oneshot::channel::<anyhow::Error>();
+	let fatal = CancellationToken::new();
+	// Whether the deferred work includes a startup import, which decides whether
+	// the bind waits for it (see the grace period below).
+	let has_import = pending_startup.has_import();
+	let mut startup = Some({
+		// Run the deferred startup work as a task, so the listener can bind
+		// without waiting for it when it turns out to be slow.
 		let ds = Arc::clone(&datastore);
 		let ready = Arc::clone(&ready);
 		let startup_canceller = canceller.clone();
+		let fatal_canceller = canceller.clone();
+		let fatal = fatal.clone();
+		// A plain spawn: this is the task that starts the maintenance schedule,
+		// so until it has run there is no task set to register it with. Shutdown
+		// joins this handle directly instead — see [`STARTUP_SHUTDOWN_JOIN`] —
+		// which keeps the same guarantee: the storage engine does not close
+		// under the transactions this task opens.
 		tokio::spawn(async move {
 			tokio::select! {
 				biased;
@@ -340,29 +458,90 @@ pub async fn init<
 				_ = startup_canceller.cancelled() => {
 					debug!("Startup aborted before completion due to shutdown");
 				}
-				res = dbs::finish_startup(&ds, &pending_startup) => match res {
-					Ok(()) => {
-						ready.store(true, Ordering::SeqCst);
-						info!("Startup complete; instance is now ready to serve");
+				() = async move {
+					// Nothing this instance serves works without these steps, so a
+					// failure ends the process rather than leaving a server that
+					// can never become ready. An operator facing a datastore from
+					// another version, or storage that never came up, has to act
+					// on it, and an exit status is both what reaches them and
+					// what restarts the pod.
+					if let Err(err) = dbs::initialise_datastore(&composer, &ds, &pending_startup).await {
+						error!("Failed to initialise the datastore: {err}");
+						// The error goes first, so a tripped `fatal` always has one
+						// to report.
+						let _ = failed_tx.send(err);
+						fatal.cancel();
+						fatal_canceller.cancel();
+						return;
 					}
-					Err(err) => {
-						error!("Startup failed; instance will not become ready: {err}");
+					// Start the extension runner and, unless extensions load
+					// lazily, prepare every extension in use, in the background.
+					// Ordered behind the initialisation because the
+					// load reads the catalog once and gives up with a warning: an
+					// engine that refuses transactions until it has joined a
+					// cluster would spend that one attempt against a datastore
+					// that cannot answer, leaving every module to load lazily on
+					// first use instead.
+					#[cfg(feature = "surrealism")]
+					{
+						let ds = Arc::clone(&ds);
+						tokio::spawn(async move {
+							ds.prepare_extensions().await;
+						});
 					}
-				}
+					// The import and the root credentials, by contrast, leave a
+					// running instance that is simply never ready: it keeps
+					// serving `/status`, `/metrics` and the logs an operator needs
+					// to see what the import did.
+					match dbs::finish_startup(&ds, &pending_startup).await {
+						Ok(()) => {
+							ready.store(true, Ordering::SeqCst);
+							info!("Startup complete; instance is now ready to serve");
+						}
+						Err(err) => {
+							error!("Startup failed; instance will not become ready: {err}");
+						}
+					}
+				} => {}
 			}
-		});
-	} else {
-		// Nothing deferred (no import, credentials already initialised): ready to
-		// serve as soon as the listener binds.
-		ready.store(true, Ordering::SeqCst);
+		})
+	});
+	// With no startup import, everything deferred is bounded work against local
+	// storage — the version check, the defaults, this node's registration and the
+	// root credential hash — so the bind waits for it. A client that connects the
+	// instant the port opens is then served, instead of being turned away with a
+	// 503 it never asked to poll for; `/ready` answers 200 from the first probe.
+	//
+	// The wait is bounded because that work is only bounded when the datastore is
+	// accepting transactions. One that is not — an engine still joining a
+	// cluster, storage that has not come up — runs past this, and the listener
+	// binds anyway so `/status` and `/ready` can answer for the rest of it
+	// instead of leaving an operator with a refused connection and no way to tell
+	// starting from dead.
+	//
+	// An import is never waited for: it is unbounded, and not starving the probes
+	// for the length of one is why it is deferred at all.
+	if !has_import && let Some(handle) = startup.as_mut() {
+		if tokio::time::timeout(STARTUP_BIND_GRACE, handle).await.is_ok() {
+			// The work finished inside the grace period, so the handle has already
+			// yielded its output. Drop it here: a `JoinHandle` panics when polled
+			// again after completion, and the shutdown join below is that second
+			// poll. What that join is there for — not closing the storage engine
+			// under this task's transactions — is satisfied either way, because
+			// the task is done.
+			startup = None;
+		} else {
+			info!(
+				"Startup is still running after {STARTUP_BIND_GRACE:?}; binding the listener now and finishing in the background"
+			);
+		}
 	}
-	// Eagerly load surrealism modules in the background unless opted out
-	#[cfg(feature = "surrealism")]
-	if !datastore.is_lazy_surrealism() {
-		let ds = Arc::clone(&datastore);
-		tokio::spawn(async move {
-			ds.eager_load_surrealism_modules().await;
-		});
+	// A failure already known here has not been served against, so report it
+	// without binding at all.
+	if fatal.is_cancelled() {
+		canceller.cancel();
+		datastore.shutdown().await?;
+		return Err(startup_failure(&mut failed_rx));
 	}
 	// Register datastore metrics against the unified meter provider. The
 	// instruments flow to both the Prometheus text exporter (rendered by
@@ -373,8 +552,6 @@ pub async fn init<
 	if let Err(err) = crate::observe::register_storage_metrics(&datastore, &runtime) {
 		warn!("failed to register storage metrics: {err}");
 	}
-	// Start the node agent
-	let nodetasks = tasks::init(Arc::clone(&datastore), canceller.clone(), &config.engine);
 	// The `/ready` probe treats the node as unhealthy if its cluster heartbeat
 	// hasn't refreshed within a few cycles of the node-membership refresh task
 	// (which also confirms the storage read and write paths are working).
@@ -392,8 +569,46 @@ pub async fn init<
 		// node-membership refresh task keeps the heartbeat current.
 		max_heartbeat_age: Some(max_heartbeat_age),
 	};
+	// Start the Postgres wire protocol listener when configured
+	#[cfg(feature = "postgres")]
+	if let Some(postgres_addr) = config.postgres_bind {
+		let _ = crate::pg::start(
+			postgres_addr,
+			Arc::clone(&datastore),
+			Arc::clone(&ready),
+			canceller.clone(),
+			config.crt.clone(),
+			config.key.clone(),
+		)
+		.await?;
+	}
+	#[cfg(not(feature = "postgres"))]
+	if config.postgres_bind.is_some() {
+		return Err(anyhow::anyhow!(
+			"The --postgres-bind option requires a binary built with the 'postgres' feature"
+		));
+	}
+	// Start the MySQL wire protocol listener when configured
+	#[cfg(feature = "mysql")]
+	if let Some(mysql_addr) = config.mysql_bind {
+		let _ = crate::mysql::start(
+			mysql_addr,
+			Arc::clone(&datastore),
+			Arc::clone(&ready),
+			canceller.clone(),
+			config.crt.clone(),
+			config.key.clone(),
+		)
+		.await?;
+	}
+	#[cfg(not(feature = "mysql"))]
+	if config.mysql_bind.is_some() {
+		return Err(anyhow::anyhow!(
+			"The --mysql-bind option requires a binary built with the 'mysql' feature"
+		));
+	}
 	// Build and run the HTTP server using the provided RouterFactory implementation
-	ntw::init_with_metrics::<C>(
+	let serve = ntw::init_with_metrics::<C>(
 		&config,
 		Arc::clone(&datastore),
 		recv,
@@ -401,16 +616,61 @@ pub async fn init<
 		router_state,
 		metrics_state,
 		readiness,
-	)
-	.await?;
+	);
+	// The web server ends when an OS signal reaches its shutdown handler or its
+	// listener fails. Cancelling the token does not end it: that handler waits
+	// on a signal first and only then watches the token. So a startup failure
+	// the instance cannot serve without has to stop the server from here, by
+	// dropping it — otherwise the process would answer every probe with a 503
+	// for as long as the pod lives instead of reporting the condition an
+	// operator has to act on.
+	let failed = tokio::select! {
+		res = serve => {
+			res?;
+			// The server stopped on its own. A failure that landed while it was
+			// stopping is still this process's exit status.
+			fatal.is_cancelled()
+		}
+		_ = fatal.cancelled() => true,
+	};
 	// Shutdown and stop closed tasks
 	canceller.cancel();
+	// Join the deferred startup work before the engine closes under the
+	// transactions it opens. The wait is short in practice because the task
+	// selects on the token cancelled just above.
+	if let Some(handle) = startup
+		&& tokio::time::timeout(STARTUP_SHUTDOWN_JOIN, handle).await.is_err()
+	{
+		warn!(
+			"Deferred startup work did not stop within {STARTUP_SHUTDOWN_JOIN:?}; continuing shutdown without it"
+		);
+	}
 	// Wait for background tasks to finish
-	nodetasks.resolve().await?;
 	// Shutdown the datastore
-	datastore.shutdown().await?;
+	let shutdown = datastore.shutdown().await;
+	// Report a startup failure as this process's exit status, in preference to
+	// whatever shutdown reports: a datastore that could not be initialised is
+	// also the likeliest to fail on the way out, and the startup error is the
+	// one that names what an operator has to act on.
+	if failed {
+		return Err(startup_failure(&mut failed_rx));
+	}
+	shutdown?;
 	// All ok
 	Ok(())
+}
+
+/// Takes the error a fatal startup step reported.
+///
+/// Only call this with the fatal signal tripped, and only once: the error is
+/// sent before the signal, so a tripped signal means it is there to take. The
+/// fallback stands in for a channel that has already been drained rather than
+/// masking a different failure — the log line carrying the real error is written
+/// where it happens, before the signal is tripped.
+fn startup_failure(failed_rx: &mut oneshot::Receiver<anyhow::Error>) -> anyhow::Error {
+	failed_rx
+		.try_recv()
+		.unwrap_or_else(|_| anyhow::anyhow!("the datastore could not be initialised"))
 }
 
 /// Build the observer that will be installed on the datastore along with the
@@ -424,10 +684,10 @@ pub async fn init<
 ///   configured).
 /// - The process / pipeline observable gauges (`surrealdb.build.info`, `surrealdb.process.*`, audit
 ///   / slow-query self-metrics) are registered whenever any reader is attached -- either Prometheus
-///   pull or OTLP push. This matches the gate used by [`spawn_process_snapshot_refresh`] so the
-///   cache and its readers stay symmetrical, and keeps OTLP-only deployments
-///   (`SURREAL_METRICS_ENABLED=false` + `SURREAL_TELEMETRY_PROVIDER=otlp`) wired up to the same
-///   gauge surface as Prometheus scrapers.
+///   pull or OTLP push. This keeps OTLP-only deployments (`SURREAL_METRICS_ENABLED=false` +
+///   `SURREAL_TELEMETRY_PROVIDER=otlp`) wired up to the same gauge surface as Prometheus scrapers.
+///   The snapshot these gauges read is refreshed by the engine's maintenance scheduler regardless
+///   of whether any reader is attached, because `INFO FOR ROOT` reads the same cache.
 /// - When [`METRICS_ENABLED`] is `true`, a [`MetricsObserver`] is constructed and returned as part
 ///   of the [`MetricsState`] so the `/metrics` handler can reach the Prometheus text exporter; it
 ///   also lands in the fan-out so the labelled `surrealdb.*` family is recorded on every emit.
@@ -450,10 +710,9 @@ fn build_observability<C: ObservabilityProvider>(
 	// against the unified meter provider whenever any reader -- Prometheus
 	// pull or OTLP push -- is configured. Without this hoist OTLP-only
 	// deployments would build the `SdkMeterProvider` (see
-	// `telemetry::metrics::init`) and refresh the process snapshot via
-	// `spawn_process_snapshot_refresh` but never expose any gauges that
-	// read from the cache, leaving OTLP collectors with zero
-	// `surrealdb.build.info` / `surrealdb.process.*` /
+	// `telemetry::metrics::init`) and keep the process snapshot fresh but
+	// never expose any gauges that read from the cache, leaving OTLP
+	// collectors with zero `surrealdb.build.info` / `surrealdb.process.*` /
 	// `surrealdb_audit_*` / `surrealdb_slow_query_*` samples.
 	if *METRICS_ENABLED || otlp_metrics_active() {
 		crate::observe::metrics::register_process_metrics(runtime);
@@ -500,37 +759,25 @@ fn build_observability<C: ObservabilityProvider>(
 	Ok((metrics_state, combined))
 }
 
-/// Spawn a background task that refreshes the cached process snapshot
-/// used by the `surrealdb.process.{memory,cpu_percent}` observable
-/// gauges every [`PROCESS_METRICS_REFRESH_INTERVAL`] seconds.
-///
-/// The task runs an eager refresh once before entering its tick loop
-/// so the first OTLP export and the first `/metrics` scrape both
-/// observe non-zero values; without that the cold-start window can
-/// take up to one full interval before the cache populates. The task
-/// cancels cleanly via the supplied [`CancellationToken`] on graceful
-/// shutdown.
-fn spawn_process_snapshot_refresh(canceller: CancellationToken) {
-	// Floor the configured value at 1s so a misconfigured zero does
-	// not produce a tight refresh loop.
-	let secs = (*PROCESS_METRICS_REFRESH_INTERVAL).max(1);
-	let period = Duration::from_secs(secs);
-	tokio::spawn(async move {
-		// Eager initial refresh so cold-start exports observe a real
-		// snapshot rather than the all-zero default.
-		let _ = surrealdb_core::observe::refresh_process_snapshot().await;
-		let mut ticker = tokio::time::interval(period);
-		// `tokio::time::interval` fires immediately on first tick; we
-		// already refreshed above, so skip the leading tick.
-		ticker.tick().await;
-		loop {
-			tokio::select! {
-				biased;
-				_ = canceller.cancelled() => break,
-				_ = ticker.tick() => {
-					let _ = surrealdb_core::observe::refresh_process_snapshot().await;
-				}
-			}
+/// Refuse a `--durable-session-ttl` under one millisecond. Stored sessions must
+/// have a finite expiry, and expiries are stored in milliseconds, so a shorter
+/// TTL would expire every session at birth.
+fn check_durable_session_ttl(ttl: Duration) -> Result<()> {
+	if ttl < Duration::from_millis(1) {
+		return Err(anyhow::anyhow!("The durable session TTL must be at least one millisecond"));
+	}
+	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn a_durable_session_ttl_under_one_millisecond_is_refused() {
+		for ttl in [Duration::ZERO, Duration::from_nanos(1), Duration::from_micros(999)] {
+			assert!(check_durable_session_ttl(ttl).is_err(), "{ttl:?} must be refused");
 		}
-	});
+		check_durable_session_ttl(Duration::from_millis(1)).unwrap();
+	}
 }

@@ -7,11 +7,11 @@ use std::task::{Context, Poll};
 
 use async_channel::Receiver;
 use futures::{Stream, StreamExt};
-use semver::Version;
-use surrealdb_core::kvs::export::{Config as DbExportConfig, TableConfig};
+use surrealdb_rpc::export::{Config as DbExportConfig, TableConfig};
+use surrealdb_types::ValidationError;
 
-use crate::conn::{Command, MlExportConfig};
-use crate::method::{BoxFuture, ExportConfig as Config, Model, OnceLockExt};
+use crate::conn::ctx;
+use crate::method::{BoxFuture, ExportConfig as Config, OnceLockExt};
 use crate::{Connection, Error, ExtraFeatures, Result, Surreal};
 
 /// Returned by [`Surreal::export`](crate::Surreal::export). File targets complete in place, while
@@ -21,7 +21,6 @@ use crate::{Connection, Error, ExtraFeatures, Result, Surreal};
 pub struct Export<'r, C: Connection, R, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) target: R,
-	pub(super) ml_config: Option<MlExportConfig>,
 	pub(super) db_config: Option<DbExportConfig>,
 	pub(super) response: PhantomData<R>,
 	pub(super) export_type: PhantomData<T>,
@@ -31,28 +30,11 @@ impl<'r, C, R> Export<'r, C, R>
 where
 	C: Connection,
 {
-	/// Export machine learning model
-	#[allow(clippy::needless_pass_by_value)] // Public SDK builder: ergonomic for callers passing an owned `Version`.
-	pub fn ml(self, name: &str, version: Version) -> Export<'r, C, R, Model> {
-		Export {
-			client: self.client,
-			target: self.target,
-			ml_config: Some(MlExportConfig {
-				name: name.to_owned(),
-				version: version.to_string(),
-			}),
-			db_config: self.db_config,
-			response: self.response,
-			export_type: PhantomData,
-		}
-	}
-
 	/// Configure the export options
 	pub fn with_config(self) -> Export<'r, C, R, Config> {
 		Export {
 			client: self.client,
 			target: self.target,
-			ml_config: self.ml_config,
 			// Use default configuration options
 			db_config: Some(Default::default()),
 			response: self.response,
@@ -65,6 +47,18 @@ impl<C, R> Export<'_, C, R, Config>
 where
 	C: Connection,
 {
+	/// Whether to export the database's own definition — its `STRICT` flag,
+	/// `COMMENT` and `CHANGEFEED`
+	///
+	/// Restoring it rewrites those clauses on the target database, so an export
+	/// scoped to particular resources should leave it off.
+	pub fn database_definition(mut self, database_definition: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.database_definition = database_definition;
+		}
+		self
+	}
+
 	/// Whether to export users from the database
 	pub fn users(mut self, users: bool) -> Self {
 		if let Some(cfg) = self.db_config.as_mut() {
@@ -175,6 +169,14 @@ where
 		}
 		self
 	}
+
+	/// Whether to export sequences from the database
+	pub fn sequences(mut self, sequences: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.sequences = sequences;
+		}
+		self
+	}
 }
 
 impl<C, R, T> Export<'_, C, R, T>
@@ -189,6 +191,29 @@ where
 			..self
 		}
 	}
+}
+
+/// Refuses an export that asks for record history.
+///
+/// A dump carries the current state of each record and has no grammar for a
+/// record's history, so `versions` cannot be honoured. The engine refuses it too,
+/// before it answers; the check is repeated here so the refusal does not depend
+/// on the server being new enough to make it, since one that validates only once
+/// it is already streaming delivers a short file instead of a failed call.
+///
+/// Classified as a validation failure, matching what the datastore and the gRPC
+/// transport report for the same option: the request named something the format
+/// cannot represent, so a caller reading the kind is told to change the request
+/// rather than to retry it.
+fn reject_versions(config: Option<&DbExportConfig>) -> Result<()> {
+	if config.is_some_and(|cfg| cfg.versions) {
+		return Err(Error::validation(
+			"Versioned export is not supported: a dump carries the current state of each record only"
+				.to_string(),
+			ValidationError::InvalidRequest,
+		));
+	}
+	Ok(())
 }
 
 impl<'r, Client, T> IntoFuture for Export<'r, Client, PathBuf, T>
@@ -208,26 +233,11 @@ where
 				));
 			}
 
-			if let Some(config) = self.ml_config {
-				return router
-					.execute_unit(
-						self.client.session_id,
-						Command::ExportMl {
-							path: self.target,
-							config,
-						},
-					)
-					.await;
-			}
+			reject_versions(self.db_config.as_ref())?;
 
 			router
-				.execute_unit(
-					self.client.session_id,
-					Command::ExportFile {
-						path: self.target,
-						config: self.db_config,
-					},
-				)
+				.engine
+				.export_file(ctx(self.client.session_id), self.target, self.db_config)
 				.await
 		})
 	}
@@ -255,30 +265,9 @@ where
 
 			tracing::info!("Exporting bytes");
 
-			if let Some(config) = self.ml_config {
-				router
-					.execute_unit(
-						self.client.session_id,
-						Command::ExportBytesMl {
-							bytes: tx,
-							config,
-						},
-					)
-					.await?;
-				return Ok(Backup {
-					rx,
-				});
-			}
+			reject_versions(self.db_config.as_ref())?;
 
-			router
-				.execute_unit(
-					self.client.session_id,
-					Command::ExportBytes {
-						bytes: tx,
-						config: self.db_config,
-					},
-				)
-				.await?;
+			router.engine.export_bytes(ctx(self.client.session_id), tx, self.db_config).await?;
 
 			Ok(Backup {
 				rx,

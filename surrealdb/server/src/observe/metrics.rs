@@ -44,18 +44,40 @@
 
 use std::borrow::Cow;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
-use surrealdb_core::observe::{
-	AuthEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent,
-	NetworkDirection, QueryEvent, RpcEvent, SessionAction, SessionEvent, StatementEvent,
-	TransactionEvent, process_snapshot,
+use surrealdb_core::mem::{RefusalSite, refusal_count};
+use surrealdb_core::observe::process_snapshot;
+use surrealdb_observe::{
+	AuthEvent, BucketOperationEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent,
+	IndexCompactionPassEvent, IndexCompactionPlanEvent, IndexCompactionRetryEvent,
+	IndexHnswCacheDiscardEvent, IndexPendingReadEvent, NetworkBytesEvent, NetworkDirection,
+	Outcome, QueryEvent, RpcEvent, SessionAction, SessionEvent, StatementEvent, TaskPassEvent,
+	TransactionEvent, TransactionMetricsSnapshot,
 };
 
 use super::instruments::{NONE_LABEL, attrs, names, scope};
 use super::provider::PipelineCounters;
 use super::runtime::ObservabilityRuntime;
+
+/// Bucket boundaries, in seconds, of the age of a background queue's oldest
+/// entry. A queue age is no `.duration` and matches none of the provider's
+/// views, so it carries its own: from the sub-second wait of a queue kept up
+/// with to the day a stuck one reaches, where the latency buckets stop at
+/// thirty seconds.
+const TASK_QUEUE_AGE_BUCKETS: &[f64] = &[
+	0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0,
+	3600.0, 7200.0, 21600.0, 86400.0,
+];
+
+/// Bucket boundaries for `surrealdb.index.pending_keys_read`: counts of
+/// uncompacted pending delta keys merged on a single query read, spanning a
+/// single key through single-batch (<= 512) and multi-batch backlog. A read
+/// that merges no pending key records no sample.
+const INDEX_PENDING_KEYS_READ_BUCKETS: &[f64] =
+	&[1.0, 4.0, 16.0, 64.0, 256.0, 512.0, 1024.0, 4096.0, 16384.0];
 
 /// Resolve an `Option<&str>` ctx field into a stable attribute value.
 ///
@@ -94,36 +116,23 @@ fn error_class_label(class: Option<&'static str>) -> &'static str {
 /// for the cardinality-capped per-tenant rollups and SurrealDS cluster
 /// internals, but the primary `surrealdb.*` family lives here.
 pub struct MetricsObserver {
-	// Statement (scope: surrealdb.statement)
-	statement_total: Counter<u64>,
-	statement_duration: Histogram<f64>,
-	statement_rows: Counter<u64>,
-	// Query (scope: surrealdb.query)
-	query_total: Counter<u64>,
-	query_duration: Histogram<f64>,
-	// Transaction (scope: surrealdb.transaction)
-	transaction_total: Counter<u64>,
-	transaction_duration: Histogram<f64>,
-	transaction_kv_ops: Counter<u64>,
-	transaction_keys_read: Counter<u64>,
-	transaction_keys_written: Counter<u64>,
-	transaction_key_bytes_read: Counter<u64>,
-	transaction_value_bytes_read: Counter<u64>,
-	transaction_key_bytes_written: Counter<u64>,
-	transaction_value_bytes_written: Counter<u64>,
+	/// The statement, query, transaction, RPC and network-byte families, which every request
+	/// adds to, gathered before they reach their instruments ([`Gathered`]).
+	gathered: Arc<Gathered>,
+	/// The KV operation, key and byte counts of the transactions, reported by observable
+	/// counters ([`TransactionTallies`]).
+	transaction_tallies: Arc<TransactionTallies>,
 	transaction_conflicts: Counter<u64>,
-	// RPC (scope: surrealdb.rpc)
-	rpc_total: Counter<u64>,
-	rpc_duration: Histogram<f64>,
 	// Auth (scope: surrealdb.auth)
 	auth_total: Counter<u64>,
 	// Session (scope: surrealdb.session)
 	session_total: Counter<u64>,
 	session_active: UpDownCounter<i64>,
 	session_duration: Histogram<f64>,
-	// Network (scope: surrealdb.network)
-	network_received: Counter<u64>,
-	network_sent: Counter<u64>,
+	// Bucket object storage (scope: surrealdb.bucket)
+	bucket_sent: Counter<u64>,
+	bucket_received: Counter<u64>,
+	bucket_operations: Counter<u64>,
 	// HTTP (scope: surrealdb.http)
 	http_request_total: Counter<u64>,
 	http_request_duration: Histogram<f64>,
@@ -146,6 +155,474 @@ pub struct MetricsObserver {
 	mcp_tool_invocation: Counter<u64>,
 	mcp_tool_duration: Histogram<f64>,
 	mcp_session_active: UpDownCounter<i64>,
+	// Background tasks (scope: surrealdb.task)
+	task_pass: Counter<u64>,
+	task_pass_duration: Histogram<f64>,
+	task_items: Counter<u64>,
+	task_queue_age: Histogram<f64>,
+	task_backlog: Counter<u64>,
+	// Index compaction & backlog (scope: surrealdb.index)
+	index_compaction_pass: Counter<u64>,
+	index_compaction_pass_duration: Histogram<f64>,
+	index_compaction_plans: Counter<u64>,
+	index_compaction_plan_duration: Histogram<f64>,
+	index_compaction_pending_keys_folded: Counter<u64>,
+	index_compaction_retries: Counter<u64>,
+	index_compaction_unqueued: Counter<u64>,
+	index_hnsw_cache_discards: Counter<u64>,
+	index_pending_keys_read: Histogram<f64>,
+}
+
+/// The KV operations a transaction made, by op, as the `kv_op` attribute names them.
+const KV_OPS: [&str; 5] = ["get", "scan", "put", "set", "del"];
+
+/// The outcomes a transaction ends with, in the order of [`TransactionTallies`]' counts.
+const OUTCOMES: [Outcome; 3] = [Outcome::Success, Outcome::Error, Outcome::Cancelled];
+
+/// The counts of the per-transaction KV metrics: the operations by op, and the keys and bytes read
+/// and written by outcome. Every write transaction adds to up to nine of them, and an instrument
+/// sorts and hashes its attributes and locks its aggregator on every add, which at a hundred
+/// thousand transactions a second on many cores is a lock every core contends for. So they are
+/// added to atomics, in shards that the cores mostly do not share, and the observable counters
+/// that report them sum the shards when they are collected: the same cumulative sums, under the
+/// same names, units and attributes.
+struct TransactionTallies {
+	shards: Box<[TallyShard]>,
+}
+
+/// How many shards [`TransactionTallies`] keeps.
+const TALLY_SHARDS: usize = 16;
+
+/// What a byte or key count of [`TransactionTallies`] counts.
+#[derive(Clone, Copy)]
+enum Tally {
+	KeysRead,
+	KeysWritten,
+	KeyBytesRead,
+	ValueBytesRead,
+	KeyBytesWritten,
+	ValueBytesWritten,
+}
+
+/// One shard of [`TransactionTallies`], on a cache line of its own.
+#[derive(Default)]
+#[repr(align(128))]
+struct TallyShard {
+	kv_ops: [AtomicU64; KV_OPS.len()],
+	/// By [`Tally`], then by the index of the outcome in [`OUTCOMES`].
+	counts: [[AtomicU64; OUTCOMES.len()]; 6],
+}
+
+impl TransactionTallies {
+	/// The tallies, with an observable counter on `meter` for each of the seven metrics.
+	///
+	/// `gathered` is handed to its instruments in the callback of the first: a collection runs
+	/// every callback before it reads any instrument, so it reads what was gathered until then.
+	fn register(meter: &opentelemetry::metrics::Meter, gathered: Arc<Gathered>) -> Arc<Self> {
+		let tallies = Arc::new(Self {
+			shards: (0..TALLY_SHARDS).map(|_| TallyShard::default()).collect(),
+		});
+		let kv_ops = Arc::clone(&tallies);
+		// `build` returns the instrument, not a result. The meter keeps the callback registered
+		// once the handle is dropped, as for the process instruments in `register_process_metrics`.
+		let _kv_ops = meter
+			.u64_observable_counter(names::TRANSACTION_KV_OPS)
+			.with_description("Per-transaction KV operation counts, broken out by op type")
+			.with_callback(move |obs| {
+				gathered.hand_over();
+				for (i, op) in KV_OPS.iter().enumerate() {
+					let total = kv_ops.sum(|shard| &shard.kv_ops[i]);
+					obs.observe(total, &[KeyValue::new(attrs::KV_OP, *op)]);
+				}
+			})
+			.build();
+		let counts = [
+			(
+				Tally::KeysRead,
+				names::TRANSACTION_KEYS_READ,
+				"Total keys read across transactions",
+				None,
+			),
+			(
+				Tally::KeysWritten,
+				names::TRANSACTION_KEYS_WRITTEN,
+				"Total keys written across transactions",
+				None,
+			),
+			(
+				Tally::KeyBytesRead,
+				names::TRANSACTION_KEY_BYTES_READ,
+				"Total key bytes read across transactions",
+				Some("By"),
+			),
+			(
+				Tally::ValueBytesRead,
+				names::TRANSACTION_VALUE_BYTES_READ,
+				"Total value bytes read across transactions",
+				Some("By"),
+			),
+			(
+				Tally::KeyBytesWritten,
+				names::TRANSACTION_KEY_BYTES_WRITTEN,
+				"Total key bytes written across transactions",
+				Some("By"),
+			),
+			(
+				Tally::ValueBytesWritten,
+				names::TRANSACTION_VALUE_BYTES_WRITTEN,
+				"Total value bytes written across transactions",
+				Some("By"),
+			),
+		];
+		for (tally, name, description, unit) in counts {
+			let observed = Arc::clone(&tallies);
+			let builder = meter.u64_observable_counter(name).with_description(description);
+			let builder = match unit {
+				Some(unit) => builder.with_unit(unit),
+				None => builder,
+			};
+			// The meter keeps the callback registered once the handle is dropped, as above.
+			let _counter = builder
+				.with_callback(move |obs| {
+					for (i, outcome) in OUTCOMES.iter().enumerate() {
+						let total = observed.sum(|shard| &shard.counts[tally as usize][i]);
+						// A count never added to is not reported, as an `add` never made would not
+						// have made its series.
+						if total > 0 {
+							obs.observe(
+								total,
+								&[KeyValue::new(attrs::OUTCOME, outcome.as_label())],
+							);
+						}
+					}
+				})
+				.build();
+		}
+		tallies
+	}
+
+	/// The shard the calling thread adds to.
+	fn shard(&self) -> &TallyShard {
+		static NEXT: AtomicUsize = AtomicUsize::new(0);
+		thread_local! {
+			static SHARD: usize = NEXT.fetch_add(1, Ordering::Relaxed) % TALLY_SHARDS;
+		}
+		&self.shards[SHARD.with(|shard| *shard)]
+	}
+
+	fn sum(&self, count: impl Fn(&TallyShard) -> &AtomicU64) -> u64 {
+		self.shards.iter().map(|shard| count(shard).load(Ordering::Relaxed)).sum()
+	}
+
+	/// Adds what a transaction that ended with `outcome` did.
+	fn record(&self, outcome: Outcome, m: &TransactionMetricsSnapshot) {
+		let shard = self.shard();
+		let ops = [m.ops_get, m.ops_scan, m.ops_put, m.ops_set, m.ops_del];
+		for (count, n) in shard.kv_ops.iter().zip(ops) {
+			if n > 0 {
+				count.fetch_add(u64::from(n), Ordering::Relaxed);
+			}
+		}
+		let Some(at) = OUTCOMES.iter().position(|o| *o == outcome) else {
+			return;
+		};
+		let counts = [
+			(Tally::KeysRead, m.keys_read),
+			(Tally::KeysWritten, m.keys_written),
+			(Tally::KeyBytesRead, m.key_bytes_read),
+			(Tally::ValueBytesRead, m.value_bytes_read),
+			(Tally::KeyBytesWritten, m.key_bytes_written),
+			(Tally::ValueBytesWritten, m.value_bytes_written),
+		];
+		for (tally, n) in counts {
+			if n > 0 {
+				shard.counts[tally as usize][at].fetch_add(n, Ordering::Relaxed);
+			}
+		}
+	}
+}
+
+/// The statement, query, transaction, RPC and network-byte families, which every request adds to,
+/// with what was added to them since they were last handed it.
+///
+/// An instrument sorts and hashes the attributes of every measurement, takes a read lock over its
+/// series and, for a histogram, locks the series' buckets. A request adds to these families six
+/// times over, every request of a tenant to the same series, so at a hundred thousand requests a
+/// second on many cores those locks are what the cores contend for. So each thread adds to a shard
+/// of its own, which keeps the measurements by series, and the shard hands them to the instruments
+/// once it holds [`GATHER_HOLD`] of them, and whenever the metrics are collected: the
+/// [`TransactionTallies`] callback hands every shard over before the collection reads the
+/// instruments. The instruments receive every measurement, with the attributes it was made with, so
+/// their sums, counts, buckets and bounds are those of measuring each as it is made.
+struct Gathered {
+	// Statement (scope: surrealdb.statement)
+	statement_total: Counter<u64>,
+	statement_duration: Histogram<f64>,
+	statement_rows: Counter<u64>,
+	// Query (scope: surrealdb.query)
+	query_total: Counter<u64>,
+	query_duration: Histogram<f64>,
+	// Transaction (scope: surrealdb.transaction)
+	transaction_total: Counter<u64>,
+	transaction_duration: Histogram<f64>,
+	// RPC (scope: surrealdb.rpc)
+	rpc_total: Counter<u64>,
+	rpc_duration: Histogram<f64>,
+	// Network (scope: surrealdb.network)
+	network_received: Counter<u64>,
+	network_sent: Counter<u64>,
+	shards: Box<[GatherShard]>,
+}
+
+/// How many shards [`Gathered`] keeps.
+const GATHER_SHARDS: usize = 64;
+
+/// How many measurements a shard of [`Gathered`] holds before it hands them over.
+const GATHER_HOLD: usize = 256;
+
+/// How many series a shard of [`Gathered`] keeps between hand-overs. A series is kept while it is
+/// added to, so a shard that tenants come and go through does not grow without bound.
+const GATHER_SERIES: usize = 64;
+
+/// One shard of [`Gathered`], on a cache line of its own.
+#[derive(Default)]
+#[repr(align(128))]
+struct GatherShard(std::sync::Mutex<GatherSeries>);
+
+/// The series a shard of [`Gathered`] keeps, and how many measurements they hold.
+#[derive(Default)]
+struct GatherSeries {
+	series: Vec<Series>,
+	held: usize,
+}
+
+/// The family a measurement of [`Gathered`] is made in, with the attributes only that family has.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Family {
+	/// A statement completed, of the type labelled.
+	Statement(&'static str),
+	/// A query batch completed.
+	Query,
+	/// A transaction completed; whether it could write.
+	Transaction(bool),
+	/// An RPC method of the name labelled completed.
+	Rpc(&'static str),
+	/// Bytes were received over the protocol labelled.
+	Received(&'static str),
+	/// Bytes were sent over the protocol labelled.
+	Sent(&'static str),
+}
+
+/// The labels of one measurement of [`Gathered`]. `outcome` and `error_class` are not attributes
+/// of the network-byte families.
+#[derive(Clone, Copy)]
+struct Labels<'a> {
+	family: Family,
+	outcome: &'static str,
+	error_class: &'static str,
+	namespace: Option<&'a str>,
+	database: Option<&'a str>,
+	user: Option<&'a str>,
+}
+
+/// The measurements one series of [`Gathered`] holds.
+struct Series {
+	family: Family,
+	outcome: &'static str,
+	error_class: &'static str,
+	/// The tenant labels, `None` where [`label_cow`] reports [`NONE_LABEL`].
+	namespace: Option<String>,
+	database: Option<String>,
+	user: Option<String>,
+	/// How many measurements were made.
+	count: u64,
+	/// The rows of the statements, or the bytes received or sent.
+	amount: u64,
+	/// The duration of each measurement, in seconds, for the families that have one.
+	durations: Vec<f64>,
+}
+
+/// A tenant label as [`Series`] keeps it.
+fn tenant(label: Option<&str>) -> Option<&str> {
+	label.filter(|label| !label.is_empty())
+}
+
+impl Series {
+	fn new(labels: &Labels<'_>) -> Self {
+		Self {
+			family: labels.family,
+			outcome: labels.outcome,
+			error_class: labels.error_class,
+			namespace: tenant(labels.namespace).map(str::to_owned),
+			database: tenant(labels.database).map(str::to_owned),
+			user: tenant(labels.user).map(str::to_owned),
+			count: 0,
+			amount: 0,
+			durations: Vec::new(),
+		}
+	}
+
+	/// Whether a measurement with `labels` belongs to this series.
+	fn is(&self, labels: &Labels<'_>) -> bool {
+		self.family == labels.family
+			&& self.outcome == labels.outcome
+			&& self.error_class == labels.error_class
+			&& self.namespace.as_deref() == tenant(labels.namespace)
+			&& self.database.as_deref() == tenant(labels.database)
+			&& self.user.as_deref() == tenant(labels.user)
+	}
+
+	/// The tenant attributes, as each family reports them last.
+	fn tenant_attributes(&self) -> [KeyValue; 3] {
+		[
+			KeyValue::new(attrs::NAMESPACE, label_cow(self.namespace.as_deref())),
+			KeyValue::new(attrs::DATABASE, label_cow(self.database.as_deref())),
+			KeyValue::new(attrs::USER, label_cow(self.user.as_deref())),
+		]
+	}
+
+	/// The attributes of a family whose own attribute is `first`, followed by the outcome, the
+	/// error class and the tenant.
+	fn attributes(&self, first: KeyValue, tenant: [KeyValue; 3]) -> [KeyValue; 6] {
+		let [namespace, database, user] = tenant;
+		[
+			first,
+			KeyValue::new(attrs::OUTCOME, self.outcome),
+			KeyValue::new(attrs::ERROR_CLASS, self.error_class),
+			namespace,
+			database,
+			user,
+		]
+	}
+}
+
+impl Gathered {
+	fn shards() -> Box<[GatherShard]> {
+		(0..GATHER_SHARDS).map(|_| GatherShard::default()).collect()
+	}
+
+	/// The shard the calling thread adds to.
+	fn shard(&self) -> &GatherShard {
+		static NEXT: AtomicUsize = AtomicUsize::new(0);
+		thread_local! {
+			static SHARD: usize = NEXT.fetch_add(1, Ordering::Relaxed) % GATHER_SHARDS;
+		}
+		&self.shards[SHARD.with(|shard| *shard)]
+	}
+
+	/// Add a measurement with `labels`: its duration in seconds, for the families that have one,
+	/// and the rows or bytes it counts.
+	fn gather(&self, labels: Labels<'_>, duration: Option<f64>, amount: u64) {
+		let mut held = self.shard().0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+		let at = match held.series.iter().position(|series| series.is(&labels)) {
+			Some(at) => at,
+			None => {
+				held.series.push(Series::new(&labels));
+				held.series.len() - 1
+			}
+		};
+		let series = &mut held.series[at];
+		series.count += 1;
+		series.amount += amount;
+		if let Some(duration) = duration {
+			series.durations.push(duration);
+		}
+		held.held += 1;
+		if held.held >= GATHER_HOLD {
+			self.hand_over_shard(&mut held);
+		}
+	}
+
+	/// Hand what every shard holds to the instruments.
+	fn hand_over(&self) {
+		for shard in self.shards.iter() {
+			self.hand_over_shard(
+				&mut shard.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+			);
+		}
+	}
+
+	/// Hand what `held` holds to the instruments, and let go of the series nothing was added to
+	/// since the last hand-over.
+	fn hand_over_shard(&self, held: &mut GatherSeries) {
+		held.series.retain_mut(|series| {
+			if series.count == 0 {
+				return false;
+			}
+			self.hand(series);
+			series.count = 0;
+			series.amount = 0;
+			series.durations.clear();
+			true
+		});
+		if held.series.len() > GATHER_SERIES {
+			held.series.clear();
+		}
+		held.held = 0;
+	}
+
+	/// Hand the measurements `series` holds to its family's instruments.
+	fn hand(&self, series: &Series) {
+		let tenant = series.tenant_attributes();
+		match series.family {
+			Family::Statement(kind) => {
+				let attrs = series.attributes(KeyValue::new(attrs::STATEMENT_TYPE, kind), tenant);
+				self.measure(&self.statement_total, &self.statement_duration, series, &attrs);
+				if series.amount > 0 {
+					self.statement_rows.add(series.amount, &attrs);
+				}
+			}
+			Family::Query => {
+				let [namespace, database, user] = tenant;
+				let attrs = [
+					KeyValue::new(attrs::OUTCOME, series.outcome),
+					KeyValue::new(attrs::ERROR_CLASS, series.error_class),
+					namespace,
+					database,
+					user,
+				];
+				self.measure(&self.query_total, &self.query_duration, series, &attrs);
+			}
+			Family::Transaction(write) => {
+				let write = if write {
+					"true"
+				} else {
+					"false"
+				};
+				let attrs = series.attributes(KeyValue::new(attrs::WRITE, write), tenant);
+				self.measure(&self.transaction_total, &self.transaction_duration, series, &attrs);
+			}
+			Family::Rpc(method) => {
+				let attrs = series.attributes(KeyValue::new(attrs::RPC_METHOD, method), tenant);
+				self.measure(&self.rpc_total, &self.rpc_duration, series, &attrs);
+			}
+			Family::Received(protocol) => {
+				let [namespace, database, user] = tenant;
+				let attrs = [KeyValue::new(attrs::PROTOCOL, protocol), namespace, database, user];
+				self.network_received.add(series.amount, &attrs);
+			}
+			Family::Sent(protocol) => {
+				let [namespace, database, user] = tenant;
+				let attrs = [KeyValue::new(attrs::PROTOCOL, protocol), namespace, database, user];
+				self.network_sent.add(series.amount, &attrs);
+			}
+		}
+	}
+
+	/// Count the measurements of `series` in `total`, and record each one's duration in
+	/// `duration`, with `attrs`.
+	fn measure(
+		&self,
+		total: &Counter<u64>,
+		duration: &Histogram<f64>,
+		series: &Series,
+		attrs: &[KeyValue],
+	) {
+		total.add(series.count, attrs);
+		for value in &series.durations {
+			duration.record(*value, attrs);
+		}
+	}
 }
 
 impl MetricsObserver {
@@ -167,13 +644,16 @@ impl MetricsObserver {
 		let auth = runtime.meter(scope::AUTH);
 		let sess = runtime.meter(scope::SESSION);
 		let net = runtime.meter(scope::NETWORK);
+		let buc = runtime.meter(scope::BUCKET);
 		let http = runtime.meter(scope::HTTP);
 		let lq = runtime.meter(scope::LIVE_QUERY);
 		let slow = runtime.meter(scope::SLOW_QUERY);
 		let gql = runtime.meter(scope::GRAPHQL);
 		let mcp = runtime.meter(scope::MCP);
+		let task = runtime.meter(scope::TASK);
+		let idx = runtime.meter(scope::INDEX);
 
-		Ok(Self {
+		let gathered = Arc::new(Gathered {
 			statement_total: stmt
 				.u64_counter(names::STATEMENT_TOTAL)
 				.with_description("Cumulative count of top-level statement completions")
@@ -209,44 +689,6 @@ impl MetricsObserver {
 				.with_description("Distribution of transaction lifetime at commit / cancel")
 				.with_unit("s")
 				.build(),
-			transaction_kv_ops: tx
-				.u64_counter(names::TRANSACTION_KV_OPS)
-				.with_description("Per-transaction KV operation counts, broken out by op type")
-				.build(),
-			transaction_keys_read: tx
-				.u64_counter(names::TRANSACTION_KEYS_READ)
-				.with_description("Total keys read across transactions")
-				.build(),
-			transaction_keys_written: tx
-				.u64_counter(names::TRANSACTION_KEYS_WRITTEN)
-				.with_description("Total keys written across transactions")
-				.build(),
-			transaction_key_bytes_read: tx
-				.u64_counter(names::TRANSACTION_KEY_BYTES_READ)
-				.with_description("Total key bytes read across transactions")
-				.with_unit("By")
-				.build(),
-			transaction_value_bytes_read: tx
-				.u64_counter(names::TRANSACTION_VALUE_BYTES_READ)
-				.with_description("Total value bytes read across transactions")
-				.with_unit("By")
-				.build(),
-			transaction_key_bytes_written: tx
-				.u64_counter(names::TRANSACTION_KEY_BYTES_WRITTEN)
-				.with_description("Total key bytes written across transactions")
-				.with_unit("By")
-				.build(),
-			transaction_value_bytes_written: tx
-				.u64_counter(names::TRANSACTION_VALUE_BYTES_WRITTEN)
-				.with_description("Total value bytes written across transactions")
-				.with_unit("By")
-				.build(),
-			transaction_conflicts: tx
-				.u64_counter(names::TRANSACTION_CONFLICTS)
-				.with_description(
-					"Cumulative count of transactions that aborted due to a commit conflict",
-				)
-				.build(),
 			rpc_total: rpc
 				.u64_counter(names::RPC_TOTAL)
 				.with_description("Cumulative count of RPC method invocations")
@@ -255,6 +697,31 @@ impl MetricsObserver {
 				.f64_histogram(names::RPC_DURATION)
 				.with_description("Distribution of RPC method latency")
 				.with_unit("s")
+				.build(),
+			network_received: net
+				.u64_counter(names::NETWORK_RECEIVED)
+				.with_description(
+					"Cumulative inbound bytes observed at the HTTP / WebSocket ingress",
+				)
+				.with_unit("By")
+				.build(),
+			network_sent: net
+				.u64_counter(names::NETWORK_SENT)
+				.with_description(
+					"Cumulative outbound bytes written at the HTTP / WebSocket egress",
+				)
+				.with_unit("By")
+				.build(),
+			shards: Gathered::shards(),
+		});
+		Ok(Self {
+			transaction_tallies: TransactionTallies::register(&tx, Arc::clone(&gathered)),
+			gathered,
+			transaction_conflicts: tx
+				.u64_counter(names::TRANSACTION_CONFLICTS)
+				.with_description(
+					"Cumulative count of transactions that aborted due to a commit conflict",
+				)
 				.build(),
 			auth_total: auth
 				.u64_counter(names::AUTH_TOTAL)
@@ -273,19 +740,19 @@ impl MetricsObserver {
 				.with_description("Distribution of session lifetime at disconnect")
 				.with_unit("s")
 				.build(),
-			network_received: net
-				.u64_counter(names::NETWORK_RECEIVED)
-				.with_description(
-					"Cumulative inbound bytes observed at the HTTP / WebSocket ingress",
-				)
+			bucket_sent: buc
+				.u64_counter(names::BUCKET_SENT_BYTES)
+				.with_description("Cumulative bytes uploaded to bucket object storage")
 				.with_unit("By")
 				.build(),
-			network_sent: net
-				.u64_counter(names::NETWORK_SENT)
-				.with_description(
-					"Cumulative outbound bytes written at the HTTP / WebSocket egress",
-				)
+			bucket_received: buc
+				.u64_counter(names::BUCKET_RECEIVED_BYTES)
+				.with_description("Cumulative bytes downloaded from bucket object storage")
 				.with_unit("By")
+				.build(),
+			bucket_operations: buc
+				.u64_counter(names::BUCKET_OPERATIONS)
+				.with_description("Cumulative count of bucket object-storage operations")
 				.build(),
 			http_request_total: http
 				.u64_counter(names::HTTP_REQUEST_TOTAL)
@@ -366,6 +833,104 @@ impl MetricsObserver {
 				.i64_up_down_counter(names::MCP_SESSION_ACTIVE)
 				.with_description("Number of currently-active MCP sessions")
 				.build(),
+			task_pass: task
+				.u64_counter(names::TASK_PASS)
+				.with_description(
+					"Cumulative count of background maintenance job passes, by job, \
+					 outcome and lease standing",
+				)
+				.build(),
+			task_pass_duration: task
+				.f64_histogram(names::TASK_PASS_DURATION)
+				.with_description("Distribution of background maintenance pass duration")
+				.with_unit("s")
+				.build(),
+			task_items: task
+				.u64_counter(names::TASK_ITEMS)
+				.with_description(
+					"Cumulative count of queue entries or work units handled by background \
+					 maintenance passes",
+				)
+				.build(),
+			task_queue_age: task
+				.f64_histogram(names::TASK_QUEUE_AGE)
+				.with_description(
+					"Distribution of the age of the oldest queued entry when a background \
+					 pass started, for passes that found work queued",
+				)
+				.with_unit("s")
+				.with_boundaries(TASK_QUEUE_AGE_BUCKETS.to_vec())
+				.build(),
+			task_backlog: task
+				.u64_counter(names::TASK_BACKLOG)
+				.with_description(
+					"Cumulative count of background maintenance passes that stopped at their \
+					 budget with work still pending",
+				)
+				.build(),
+			index_compaction_pass: idx
+				.u64_counter(names::INDEX_COMPACTION_PASS)
+				.with_description(
+					"Cumulative count of per-index compaction passes, by index kind, trigger, \
+					 and outcome",
+				)
+				.build(),
+			index_compaction_pass_duration: idx
+				.f64_histogram(names::INDEX_COMPACTION_PASS_DURATION)
+				.with_description("Distribution of per-index compaction pass duration")
+				.with_unit("s")
+				.build(),
+			index_compaction_plans: idx
+				.u64_counter(names::INDEX_COMPACTION_PLANS)
+				.with_description(
+					"Cumulative count of committed index compaction plans that folded at least \
+					 one pending key, by index kind and plan mode",
+				)
+				.build(),
+			index_compaction_plan_duration: idx
+				.f64_histogram(names::INDEX_COMPACTION_PLAN_DURATION)
+				.with_description(
+					"Distribution of the duration of committed index compaction plans that \
+					 folded at least one pending key",
+				)
+				.with_unit("s")
+				.build(),
+			index_compaction_pending_keys_folded: idx
+				.u64_counter(names::INDEX_COMPACTION_PENDING_KEYS_FOLDED)
+				.with_description(
+					"Cumulative count of pending delta keys folded into compacted index \
+					 structures, by index kind and plan mode",
+				)
+				.build(),
+			index_compaction_retries: idx
+				.u64_counter(names::INDEX_COMPACTION_RETRIES)
+				.with_description(
+					"Cumulative count of index compaction batch retries, by index kind and \
+					 retry reason",
+				)
+				.build(),
+			index_compaction_unqueued: idx
+				.u64_counter(names::INDEX_COMPACTION_UNQUEUED)
+				.with_description(
+					"Cumulative count of compaction passes that owed their index a fresh \
+					 compaction request and failed to queue it, by index kind and trigger",
+				)
+				.build(),
+			index_hnsw_cache_discards: idx
+				.u64_counter(names::INDEX_HNSW_CACHE_DISCARDS)
+				.with_description(
+					"Cumulative count of resident HNSW graph caches discarded after a failed \
+					 compaction commit",
+				)
+				.build(),
+			index_pending_keys_read: idx
+				.f64_histogram(names::INDEX_PENDING_KEYS_READ)
+				.with_description(
+					"Distribution of uncompacted pending delta keys merged per query-time \
+					 pending-delta read that merged any, by index kind",
+				)
+				.with_boundaries(INDEX_PENDING_KEYS_READ_BUCKETS.to_vec())
+				.build(),
 		})
 	}
 
@@ -419,12 +984,12 @@ impl MetricsObserver {
 	/// `operation_type` should be a stable lower-case identifier from the
 	/// closed set `{"query", "mutation", "subscription", "unknown"}`.
 	/// `error_class` is `Some` only when `outcome` is
-	/// [`surrealdb_core::observe::Outcome::Error`].
+	/// [`surrealdb_observe::Outcome::Error`].
 	#[allow(clippy::too_many_arguments)]
 	pub fn record_graphql_operation(
 		&self,
 		operation_type: &'static str,
-		outcome: surrealdb_core::observe::Outcome,
+		outcome: surrealdb_observe::Outcome,
 		error_class: Option<&'static str>,
 		duration: std::time::Duration,
 		namespace: Option<&str>,
@@ -451,7 +1016,7 @@ impl MetricsObserver {
 		&self,
 		tool: &'static str,
 		transport: &'static str,
-		outcome: surrealdb_core::observe::Outcome,
+		outcome: surrealdb_observe::Outcome,
 		error_class: Option<&'static str>,
 		duration: std::time::Duration,
 	) {
@@ -574,6 +1139,105 @@ pub fn register_process_metrics(runtime: &ObservabilityRuntime) {
 			obs.observe(snap.memory_bytes as i64, &[]);
 		})
 		.build();
+	// The quantity the memory threshold is actually compared against. Paired
+	// with `PROCESS_MEMORY` (resident set size) it shows how far tracked bytes
+	// sit below the real footprint, and paired with `PROCESS_MEMORY_THRESHOLD`
+	// it shows how close the instance is to refusing queries. Reports 0 in
+	// builds without allocation tracking compiled in.
+	let _memory_allocated = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_ALLOCATED)
+		.with_description(
+			"Tracked memory of the surreal process: live Rust-heap allocations plus external \
+			 memory reporters. This is the value compared against SURREAL_MEMORY_THRESHOLD",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			let snap = process_snapshot();
+			obs.observe(snap.memory_allocated_bytes as i64, &[]);
+		})
+		.build();
+	// The logical size of the process's data, before size-class rounding.
+	// Unlike the reserved and allocated gauges it is comparable across builds
+	// and architectures. Pair it with `PROCESS_MEMORY_RESERVED` for internal
+	// fragmentation — not with `PROCESS_MEMORY_ALLOCATED`, which also carries
+	// the external reporters. Reports 0 in builds without allocation tracking
+	// compiled in.
+	let _memory_requested = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_REQUESTED)
+		.with_description(
+			"Bytes requested by the surreal process for live heap allocations, before the \
+			 allocator rounded each request up to a size class",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			let snap = process_snapshot();
+			obs.observe(snap.memory_requested_bytes as i64, &[]);
+		})
+		.build();
+	// The heap half of `PROCESS_MEMORY_ALLOCATED`, excluding the external
+	// reporters. This is the term that makes the fragmentation subtraction
+	// meaningful, and the one to compare against a heap-only budget. Reports 0
+	// in builds without allocation tracking compiled in.
+	let _memory_reserved = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_RESERVED)
+		.with_description(
+			"Reserved Rust-heap bytes of the surreal process: the size classes the allocator \
+			 rounded live requests up into, excluding external memory reporters",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			let snap = process_snapshot();
+			obs.observe(snap.memory_reserved_bytes as i64, &[]);
+		})
+		.build();
+	// Emitted so a dashboard can plot the limit alongside the usage without the
+	// operator having to restate it. Constant for the process lifetime, since
+	// the threshold is read once from the environment.
+	let _memory_threshold = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_THRESHOLD)
+		.with_description(
+			"Configured SURREAL_MEMORY_THRESHOLD in bytes, or 0 when the memory guard is disabled",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			obs.observe(surrealdb_core::mem::memory_threshold() as i64, &[]);
+		})
+		.build();
+	// Requests and queries the memory guard turned away, one series per
+	// `RefusalSite`. A refusal short-circuits before dispatch, so this is the
+	// only metric that moves when the guard sheds load. Monotonic for the
+	// process lifetime.
+	let _memory_refusals = meter
+		.u64_observable_counter(names::PROCESS_MEMORY_REFUSALS)
+		.with_description(
+			"Requests and queries refused because tracked memory was beyond \
+			 SURREAL_MEMORY_THRESHOLD, by the site that refused them",
+		)
+		.with_callback(|obs| {
+			for site in RefusalSite::ALL {
+				obs.observe(
+					refusal_count(site),
+					&[KeyValue::new(attrs::MEMORY_REFUSAL_SITE, site.as_label())],
+				);
+			}
+		})
+		.build();
+	// How long the memory guard has been engaged without a break: 0 while it
+	// is not. `/health` fails once this reaches
+	// SURREAL_MEMORY_THRESHOLD_UNHEALTHY_AFTER. Reading it observes the guard,
+	// as a `/health` probe does.
+	let _memory_guard_engaged = meter
+		.u64_observable_gauge(names::PROCESS_MEMORY_GUARD_ENGAGED)
+		.with_description(
+			"Seconds the memory guard has been refusing every request without a break, or 0 when \
+			 tracked memory is below SURREAL_MEMORY_THRESHOLD",
+		)
+		.with_unit("s")
+		.with_callback(|obs| {
+			let engaged = crate::ntw::memory_guard::probe().unwrap_or_default();
+			obs.observe(engaged.as_secs(), &[]);
+		})
+		.build();
 	let _cpu = meter
 		.f64_observable_gauge(names::PROCESS_CPU_PERCENT)
 		.with_description(
@@ -589,22 +1253,29 @@ pub fn register_process_metrics(runtime: &ObservabilityRuntime) {
 
 impl ExecutionObserver for MetricsObserver {
 	fn on_statement_complete(&self, event: &StatementEvent) {
-		let attrs = [
-			KeyValue::new(attrs::STATEMENT_TYPE, event.safe.kind.as_label()),
-			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
-			KeyValue::new(attrs::ERROR_CLASS, error_class_label(event.safe.error_class)),
-			KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
-			KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
-			KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
-		];
-		self.statement_total.add(1, &attrs);
-		self.statement_duration.record(event.safe.duration.as_secs_f64(), &attrs);
-		if event.safe.result_rows > 0 {
-			self.statement_rows.add(event.safe.result_rows, &attrs);
-		}
+		self.gathered.gather(
+			Labels {
+				family: Family::Statement(event.safe.kind.as_label()),
+				outcome: event.safe.outcome.as_label(),
+				error_class: error_class_label(event.safe.error_class),
+				namespace: event.ctx.namespace.as_deref(),
+				database: event.ctx.database.as_deref(),
+				user: event.ctx.user.as_deref(),
+			},
+			Some(event.safe.duration.as_secs_f64()),
+			event.safe.result_rows,
+		);
 		if self.slow_query_threshold_ms > 0 {
 			let duration_ms = event.safe.duration.as_millis() as u64;
 			if duration_ms >= self.slow_query_threshold_ms {
+				let attrs = [
+					KeyValue::new(attrs::STATEMENT_TYPE, event.safe.kind.as_label()),
+					KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
+					KeyValue::new(attrs::ERROR_CLASS, error_class_label(event.safe.error_class)),
+					KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
+					KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
+					KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
+				];
 				// Slow-query counter intentionally re-uses the same labels
 				// as `surrealdb.statement.*` so dashboards can join across
 				// the two families on `statement_type` / `outcome` / tenant ctx.
@@ -614,34 +1285,33 @@ impl ExecutionObserver for MetricsObserver {
 	}
 
 	fn on_query_complete(&self, event: &QueryEvent) {
-		let attrs = [
-			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
-			KeyValue::new(attrs::ERROR_CLASS, error_class_label(event.safe.error_class)),
-			KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
-			KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
-			KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
-		];
-		self.query_total.add(1, &attrs);
-		self.query_duration.record(event.safe.duration.as_secs_f64(), &attrs);
+		self.gathered.gather(
+			Labels {
+				family: Family::Query,
+				outcome: event.safe.outcome.as_label(),
+				error_class: error_class_label(event.safe.error_class),
+				namespace: event.ctx.namespace.as_deref(),
+				database: event.ctx.database.as_deref(),
+				user: event.ctx.user.as_deref(),
+			},
+			Some(event.safe.duration.as_secs_f64()),
+			0,
+		);
 	}
 
 	fn on_transaction_complete(&self, event: &TransactionEvent) {
-		let outcome = event.safe.outcome.as_label();
-		let write = if event.safe.write {
-			"true"
-		} else {
-			"false"
-		};
-		let core_attrs = [
-			KeyValue::new(attrs::WRITE, write),
-			KeyValue::new(attrs::OUTCOME, outcome),
-			KeyValue::new(attrs::ERROR_CLASS, error_class_label(event.safe.error_class)),
-			KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
-			KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
-			KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
-		];
-		self.transaction_total.add(1, &core_attrs);
-		self.transaction_duration.record(event.safe.duration.as_secs_f64(), &core_attrs);
+		self.gathered.gather(
+			Labels {
+				family: Family::Transaction(event.safe.write),
+				outcome: event.safe.outcome.as_label(),
+				error_class: error_class_label(event.safe.error_class),
+				namespace: event.ctx.namespace.as_deref(),
+				database: event.ctx.database.as_deref(),
+				user: event.ctx.user.as_deref(),
+			},
+			Some(event.safe.duration.as_secs_f64()),
+			0,
+		);
 		// Each commit-conflict failure is itself a retry trigger when
 		// surrounded by an optimistic-retry loop, so the conflicts
 		// counter doubles as the retry-pressure signal. Operators alert
@@ -661,52 +1331,22 @@ impl ExecutionObserver for MetricsObserver {
 			];
 			self.transaction_conflicts.add(1, &conflict_attrs);
 		}
-		let m = event.safe.metrics;
-		let bump = |op: &'static str, n: u32| {
-			if n > 0 {
-				self.transaction_kv_ops.add(u64::from(n), &[KeyValue::new(attrs::KV_OP, op)]);
-			}
-		};
-		bump("get", m.ops_get);
-		bump("scan", m.ops_scan);
-		bump("put", m.ops_put);
-		bump("set", m.ops_set);
-		bump("del", m.ops_del);
-		// keys / bytes counters carry the outcome dimension so success
-		// vs error cohorts can be separated. Tenant attribution lives
-		// on the per-transaction total / duration above.
-		let outcome_attrs = [KeyValue::new(attrs::OUTCOME, outcome)];
-		if m.keys_read > 0 {
-			self.transaction_keys_read.add(m.keys_read, &outcome_attrs);
-		}
-		if m.keys_written > 0 {
-			self.transaction_keys_written.add(m.keys_written, &outcome_attrs);
-		}
-		if m.key_bytes_read > 0 {
-			self.transaction_key_bytes_read.add(m.key_bytes_read, &outcome_attrs);
-		}
-		if m.value_bytes_read > 0 {
-			self.transaction_value_bytes_read.add(m.value_bytes_read, &outcome_attrs);
-		}
-		if m.key_bytes_written > 0 {
-			self.transaction_key_bytes_written.add(m.key_bytes_written, &outcome_attrs);
-		}
-		if m.value_bytes_written > 0 {
-			self.transaction_value_bytes_written.add(m.value_bytes_written, &outcome_attrs);
-		}
+		self.transaction_tallies.record(event.safe.outcome, &event.safe.metrics);
 	}
 
 	fn on_rpc_complete(&self, event: &RpcEvent) {
-		let attrs = [
-			KeyValue::new(attrs::RPC_METHOD, event.safe.method.to_str()),
-			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
-			KeyValue::new(attrs::ERROR_CLASS, error_class_label(event.safe.error_class)),
-			KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
-			KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
-			KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
-		];
-		self.rpc_total.add(1, &attrs);
-		self.rpc_duration.record(event.safe.duration.as_secs_f64(), &attrs);
+		self.gathered.gather(
+			Labels {
+				family: Family::Rpc(event.safe.method.to_str()),
+				outcome: event.safe.outcome.as_label(),
+				error_class: error_class_label(event.safe.error_class),
+				namespace: event.ctx.namespace.as_deref(),
+				database: event.ctx.database.as_deref(),
+				user: event.ctx.user.as_deref(),
+			},
+			Some(event.safe.duration.as_secs_f64()),
+			0,
+		);
 	}
 
 	fn on_auth_event(&self, event: &AuthEvent) {
@@ -754,16 +1394,105 @@ impl ExecutionObserver for MetricsObserver {
 		if event.safe.bytes == 0 {
 			return;
 		}
+		let protocol = event.safe.protocol.as_label();
+		self.gathered.gather(
+			Labels {
+				family: match event.safe.direction {
+					NetworkDirection::Received => Family::Received(protocol),
+					NetworkDirection::Sent => Family::Sent(protocol),
+				},
+				outcome: NONE_LABEL,
+				error_class: NONE_LABEL,
+				namespace: event.ctx.namespace.as_deref(),
+				database: event.ctx.database.as_deref(),
+				user: event.ctx.user.as_deref(),
+			},
+			None,
+			event.safe.bytes,
+		);
+	}
+
+	fn on_bucket_operation(&self, event: &BucketOperationEvent) {
 		let attrs = [
-			KeyValue::new(attrs::PROTOCOL, event.safe.protocol.as_label()),
-			KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
-			KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
-			KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
+			KeyValue::new(attrs::BACKEND, event.safe.backend),
+			KeyValue::new(attrs::BUCKET_OP, event.safe.op.as_label()),
+			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
 		];
-		match event.safe.direction {
-			NetworkDirection::Received => self.network_received.add(event.safe.bytes, &attrs),
-			NetworkDirection::Sent => self.network_sent.add(event.safe.bytes, &attrs),
+		self.bucket_operations.add(1, &attrs);
+		if event.safe.sent > 0 {
+			self.bucket_sent.add(event.safe.sent, &attrs);
 		}
+		if event.safe.received > 0 {
+			self.bucket_received.add(event.safe.received, &attrs);
+		}
+	}
+
+	fn on_task_pass(&self, event: &TaskPassEvent) {
+		let attrs = [
+			KeyValue::new(attrs::JOB, event.safe.job),
+			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
+			KeyValue::new(attrs::LEASE, event.safe.lease.as_label()),
+		];
+		self.task_pass.add(1, &attrs);
+		// Duration, throughput and lag are per job: the lease and outcome
+		// labels would only split their distributions.
+		let job = [KeyValue::new(attrs::JOB, event.safe.job)];
+		self.task_pass_duration.record(event.safe.duration.as_secs_f64(), &job);
+		if event.safe.items > 0 {
+			self.task_items.add(event.safe.items, &job);
+		}
+		if let Some(age) = event.safe.oldest_age {
+			self.task_queue_age.record(age.as_secs_f64(), &job);
+		}
+		if event.safe.backlog {
+			self.task_backlog.add(1, &job);
+		}
+	}
+
+	fn on_index_compaction_pass(&self, event: &IndexCompactionPassEvent) {
+		let kind_label = event.safe.kind.map_or(NONE_LABEL, |k| k.as_label());
+		let trigger_label = event.safe.trigger.as_label();
+		let attrs = [
+			KeyValue::new(attrs::INDEX_KIND, kind_label),
+			KeyValue::new(attrs::COMPACTION_TRIGGER, trigger_label),
+			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
+		];
+		self.index_compaction_pass.add(1, &attrs);
+		self.index_compaction_pass_duration.record(event.safe.duration.as_secs_f64(), &attrs);
+		if event.safe.unqueued {
+			let unqueued_attrs = [
+				KeyValue::new(attrs::INDEX_KIND, kind_label),
+				KeyValue::new(attrs::COMPACTION_TRIGGER, trigger_label),
+			];
+			self.index_compaction_unqueued.add(1, &unqueued_attrs);
+		}
+	}
+
+	fn on_index_compaction_plan(&self, event: &IndexCompactionPlanEvent) {
+		let attrs = [
+			KeyValue::new(attrs::INDEX_KIND, event.safe.kind.as_label()),
+			KeyValue::new(attrs::COMPACTION_MODE, event.safe.mode.as_label()),
+		];
+		self.index_compaction_plans.add(1, &attrs);
+		self.index_compaction_plan_duration.record(event.safe.duration.as_secs_f64(), &attrs);
+		self.index_compaction_pending_keys_folded.add(event.safe.pending_entries, &attrs);
+	}
+
+	fn on_index_hnsw_cache_discard(&self, _event: &IndexHnswCacheDiscardEvent) {
+		self.index_hnsw_cache_discards.add(1, &[]);
+	}
+
+	fn on_index_compaction_retry(&self, event: &IndexCompactionRetryEvent) {
+		let attrs = [
+			KeyValue::new(attrs::INDEX_KIND, event.safe.kind.as_label()),
+			KeyValue::new(attrs::RETRY_REASON, event.safe.reason.as_label()),
+		];
+		self.index_compaction_retries.add(1, &attrs);
+	}
+
+	fn on_index_pending_read(&self, event: &IndexPendingReadEvent) {
+		let attrs = [KeyValue::new(attrs::INDEX_KIND, event.safe.kind.as_label())];
+		self.index_pending_keys_read.record(event.safe.keys as f64, &attrs);
 	}
 
 	fn on_http_request_started(&self, event: &HttpRequestStartEvent) {
@@ -829,7 +1558,7 @@ mod tests {
 	use opentelemetry_sdk::metrics::data::ResourceMetrics;
 	use opentelemetry_sdk::metrics::reader::MetricReader;
 	use opentelemetry_sdk::metrics::{InstrumentKind, ManualReader, SdkMeterProvider, Temporality};
-	use surrealdb_core::observe::{
+	use surrealdb_observe::{
 		AuthAction, AuthEvent, AuthEventCtx, AuthEventSafe, AuthScope, ExecutionObserver,
 		HttpMethod, HttpRequestEvent, HttpRequestEventCtx, HttpRequestEventSafe,
 		HttpRequestStartEvent, HttpRequestStartEventSafe, HttpVersion, NetworkBytesEvent,
@@ -922,6 +1651,71 @@ mod tests {
 		(total, points)
 	}
 
+	/// The `site`-labelled data-points of the memory refusal counter.
+	fn memory_refusals_by_site(reader: &TestReader) -> std::collections::BTreeMap<String, u64> {
+		use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+		let mut rm = ResourceMetrics::default();
+		reader.collect(&mut rm).expect("collect");
+		let mut out = std::collections::BTreeMap::new();
+		for sm in rm.scope_metrics() {
+			for metric in sm.metrics() {
+				if metric.name() != names::PROCESS_MEMORY_REFUSALS {
+					continue;
+				}
+				let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() else {
+					panic!("{} is not a u64 sum: {:?}", metric.name(), metric.data());
+				};
+				assert!(sum.is_monotonic(), "memory refusals must be a counter");
+				for dp in sum.data_points() {
+					let site = dp
+						.attributes()
+						.find(|kv| kv.key.as_str() == attrs::MEMORY_REFUSAL_SITE)
+						.map(|kv| kv.value.as_str().into_owned())
+						.expect("site attribute");
+					out.insert(site, dp.value());
+				}
+			}
+		}
+		out
+	}
+
+	/// Every refusal recorded at a site shows up on that site's series of the
+	/// counter, and every site is published even before it has refused anything.
+	#[tokio::test]
+	async fn memory_refusals_are_published_per_site() {
+		use surrealdb_core::mem::record_refusal;
+
+		let (provider, reader, runtime) = fresh_runtime();
+		register_process_metrics(&runtime);
+		let before = memory_refusals_by_site(&reader);
+		assert_eq!(
+			before.keys().map(String::as_str).collect::<Vec<_>>(),
+			["http", "query", "websocket"],
+		);
+		record_refusal(RefusalSite::Websocket);
+		record_refusal(RefusalSite::Http);
+		record_refusal(RefusalSite::Http);
+		let after = memory_refusals_by_site(&reader);
+		// The counters are process-wide, so other tests may add to them too.
+		assert!(after["websocket"] > before["websocket"]);
+		assert!(after["http"] >= before["http"] + 2);
+		provider.shutdown().expect("shutdown");
+	}
+
+	/// The engaged-for gauge is published, and reads 0 while the guard is not
+	/// engaged.
+	#[tokio::test]
+	async fn memory_guard_engaged_gauge_is_published() {
+		let (provider, reader, runtime) = fresh_runtime();
+		register_process_metrics(&runtime);
+		let names_seen = collect_names(&reader);
+		assert!(
+			names_seen.iter().any(|(_, n)| n == names::PROCESS_MEMORY_GUARD_ENGAGED),
+			"{names_seen:?}"
+		);
+		provider.shutdown().expect("shutdown");
+	}
+
 	/// Walk every data-point on every metric in every scope looking for
 	/// an attribute whose value matches `needle`. Used as a tenant-canary
 	/// leak check.
@@ -953,7 +1747,9 @@ mod tests {
 							}
 						}
 					}
-					_ => {}
+					AggregatedMetrics::F64(_)
+					| AggregatedMetrics::U64(_)
+					| AggregatedMetrics::I64(_) => {}
 				}
 			}
 		}
@@ -1009,6 +1805,49 @@ mod tests {
 				"missing `{instrument}` under `{expected_scope}`: {names:?}",
 			);
 		}
+		provider.shutdown().expect("shutdown");
+	}
+
+	/// Measurements gathered past a shard's hand-over and those still held when
+	/// the metrics are collected all reach the instruments, each once.
+	#[tokio::test]
+	async fn gathered_measurements_reach_the_instruments_once() {
+		use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+		let (provider, reader, runtime) = fresh_runtime();
+		let obs = MetricsObserver::new(&runtime).expect("observer");
+		let made = 3 * GATHER_HOLD as u64 + 7;
+		for _ in 0..made {
+			obs.on_statement_complete(&statement_event(
+				StatementType::Select,
+				Some("acme"),
+				Some("alice"),
+				2,
+				Outcome::Success,
+			));
+		}
+		let mut rm = ResourceMetrics::default();
+		reader.collect(&mut rm).expect("collect");
+		let (mut total, mut rows, mut recorded) = (0, 0, 0);
+		for sm in rm.scope_metrics() {
+			for metric in sm.metrics() {
+				let name = metric.name();
+				if let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() {
+					let sum = sum.data_points().map(|dp| dp.value()).sum::<u64>();
+					if name == names::STATEMENT_TOTAL {
+						total += sum;
+					} else if name == names::STATEMENT_ROWS {
+						rows += sum;
+					}
+				} else if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) =
+					metric.data() && name == names::STATEMENT_DURATION
+				{
+					recorded += histogram.data_points().map(|dp| dp.count()).sum::<u64>();
+				}
+			}
+		}
+		assert_eq!(total, made);
+		assert_eq!(rows, 2 * made);
+		assert_eq!(recorded, made);
 		provider.shutdown().expect("shutdown");
 	}
 
@@ -1149,6 +1988,92 @@ mod tests {
 		provider.shutdown().expect("shutdown");
 	}
 
+	/// The `attr`-labelled data-points of the u64 counter `metric_name`, by the value of the
+	/// attribute.
+	fn u64_sums_by(
+		reader: &TestReader,
+		metric_name: &str,
+		attr: &str,
+	) -> std::collections::BTreeMap<String, u64> {
+		use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+		let mut rm = ResourceMetrics::default();
+		reader.collect(&mut rm).expect("collect");
+		let mut out = std::collections::BTreeMap::new();
+		for sm in rm.scope_metrics() {
+			for metric in sm.metrics() {
+				if metric.name() != metric_name {
+					continue;
+				}
+				let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() else {
+					panic!("{} is not a u64 sum: {:?}", metric.name(), metric.data());
+				};
+				assert!(sum.is_monotonic(), "{metric_name} is a counter");
+				for dp in sum.data_points() {
+					let label = dp
+						.attributes()
+						.find(|kv| kv.key.as_str() == attr)
+						.map(|kv| kv.value.to_string())
+						.unwrap_or_default();
+					*out.entry(label).or_default() += dp.value();
+				}
+			}
+		}
+		out
+	}
+
+	/// The per-transaction KV counts are the sums of what every transaction reported, by op and
+	/// by outcome, from whichever thread reported it.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn transaction_kv_counts_are_the_sums_of_every_transaction() {
+		let (provider, reader, runtime) = fresh_runtime();
+		let obs = Arc::new(MetricsObserver::new(&runtime).expect("observer"));
+		let event = |outcome, keys_written, ops_set| TransactionEvent {
+			safe: TransactionEventSafe {
+				outcome,
+				write: true,
+				duration: Duration::from_millis(1),
+				metrics: TransactionMetricsSnapshot {
+					keys_read: 2,
+					keys_written,
+					key_bytes_written: 10 * keys_written,
+					ops_get: 2,
+					ops_set,
+					..Default::default()
+				},
+				error_class: None,
+			},
+			ctx: TransactionEventCtx::default(),
+		};
+		let mut tasks = Vec::new();
+		for i in 0..64u64 {
+			let obs = Arc::clone(&obs);
+			let outcome = if i % 4 == 0 {
+				Outcome::Error
+			} else {
+				Outcome::Success
+			};
+			let event = event(outcome, 1, 3);
+			tasks.push(tokio::spawn(async move { obs.on_transaction_complete(&event) }));
+		}
+		for task in tasks {
+			task.await.unwrap();
+		}
+		let ops = u64_sums_by(&reader, names::TRANSACTION_KV_OPS, attrs::KV_OP);
+		assert_eq!(ops.get("get"), Some(&128));
+		assert_eq!(ops.get("set"), Some(&192));
+		assert_eq!(ops.get("del"), Some(&0));
+		let written = u64_sums_by(&reader, names::TRANSACTION_KEYS_WRITTEN, attrs::OUTCOME);
+		assert_eq!(written.get("success"), Some(&48));
+		assert_eq!(written.get("error"), Some(&16));
+		assert_eq!(written.get("cancelled"), None, "a count never added to is not reported");
+		let bytes = u64_sums_by(&reader, names::TRANSACTION_KEY_BYTES_WRITTEN, attrs::OUTCOME);
+		assert_eq!(bytes.values().sum::<u64>(), 640);
+		assert!(
+			u64_sums_by(&reader, names::TRANSACTION_VALUE_BYTES_READ, attrs::OUTCOME).is_empty()
+		);
+		provider.shutdown().expect("shutdown");
+	}
+
 	#[tokio::test]
 	async fn rpc_query_auth_record_under_their_scopes() {
 		let (provider, reader, runtime) = fresh_runtime();
@@ -1173,7 +2098,7 @@ mod tests {
 		});
 		obs.on_rpc_complete(&RpcEvent {
 			safe: RpcEventSafe {
-				method: surrealdb_core::rpc::Method::Select,
+				method: surrealdb_rpc::Method::Select,
 				outcome: Outcome::Success,
 				duration: Duration::from_millis(1),
 				error_class: None,
@@ -1424,6 +2349,150 @@ mod tests {
 				}
 			}
 		}
+		provider.shutdown().expect("shutdown");
+	}
+
+	/// A queue age is recorded against boundaries of its own: the default
+	/// ones would put every age under five seconds in a single bucket.
+	#[tokio::test]
+	async fn task_queue_age_records_against_its_own_buckets() {
+		use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+		use surrealdb_observe::{
+			TaskLeaseState, TaskPassEvent, TaskPassEventCtx, TaskPassEventSafe,
+		};
+		let (provider, reader, runtime) = fresh_runtime();
+		let obs = MetricsObserver::new(&runtime).expect("observer");
+		obs.on_task_pass(&TaskPassEvent {
+			safe: TaskPassEventSafe {
+				job: "event_processing",
+				outcome: Outcome::Success,
+				duration: Duration::from_millis(3),
+				items: 1,
+				oldest_age: Some(Duration::from_millis(400)),
+				lease: TaskLeaseState::Held,
+				backlog: false,
+			},
+			ctx: TaskPassEventCtx {},
+		});
+		let mut rm = ResourceMetrics::default();
+		reader.collect(&mut rm).expect("collect");
+		let bounds: Vec<f64> = rm
+			.scope_metrics()
+			.flat_map(|sm| sm.metrics())
+			.filter(|m| m.name() == names::TASK_QUEUE_AGE)
+			.find_map(|m| match m.data() {
+				AggregatedMetrics::F64(MetricData::Histogram(h)) => {
+					h.data_points().next().map(|dp| dp.bounds().collect())
+				}
+				AggregatedMetrics::F64(_)
+				| AggregatedMetrics::U64(_)
+				| AggregatedMetrics::I64(_) => None,
+			})
+			.expect("the queue age is recorded");
+		assert_eq!(bounds, TASK_QUEUE_AGE_BUCKETS);
+		provider.shutdown().expect("shutdown");
+	}
+
+	#[tokio::test]
+	async fn index_compaction_and_pending_read_record_under_index_scope() {
+		use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+		use surrealdb_observe::{
+			IndexCompactionKind, IndexCompactionPassEvent, IndexCompactionPassEventCtx,
+			IndexCompactionPassEventSafe, IndexCompactionPassOutcome, IndexCompactionPlanEvent,
+			IndexCompactionPlanEventCtx, IndexCompactionPlanEventSafe, IndexCompactionPlanMode,
+			IndexCompactionRetryEvent, IndexCompactionRetryEventCtx, IndexCompactionRetryEventSafe,
+			IndexCompactionRetryReason, IndexCompactionTrigger, IndexHnswCacheDiscardEvent,
+			IndexPendingReadEvent, IndexPendingReadEventCtx, IndexPendingReadEventSafe,
+		};
+		let (provider, reader, runtime) = fresh_runtime();
+		let obs = MetricsObserver::new(&runtime).expect("observer");
+		obs.on_index_compaction_pass(&IndexCompactionPassEvent {
+			safe: IndexCompactionPassEventSafe {
+				kind: Some(IndexCompactionKind::Hnsw),
+				trigger: IndexCompactionTrigger::Queue,
+				outcome: IndexCompactionPassOutcome::Short,
+				duration: Duration::from_millis(12),
+				unqueued: true,
+			},
+			ctx: IndexCompactionPassEventCtx::default(),
+		});
+		obs.on_index_compaction_plan(&IndexCompactionPlanEvent {
+			safe: IndexCompactionPlanEventSafe {
+				kind: IndexCompactionKind::Hnsw,
+				mode: IndexCompactionPlanMode::Staged,
+				duration: Duration::from_millis(8),
+				pending_entries: 42,
+			},
+			ctx: IndexCompactionPlanEventCtx::default(),
+		});
+		obs.on_index_hnsw_cache_discard(&IndexHnswCacheDiscardEvent::default());
+		obs.on_index_compaction_retry(&IndexCompactionRetryEvent {
+			safe: IndexCompactionRetryEventSafe {
+				kind: IndexCompactionKind::Hnsw,
+				reason: IndexCompactionRetryReason::TxnConflict,
+			},
+			ctx: IndexCompactionRetryEventCtx::default(),
+		});
+		obs.on_index_pending_read(&IndexPendingReadEvent {
+			safe: IndexPendingReadEventSafe {
+				kind: IndexCompactionKind::Hnsw,
+				keys: 16,
+			},
+			ctx: IndexPendingReadEventCtx::default(),
+		});
+
+		let names_seen = collect_names(&reader);
+		for expected in [
+			names::INDEX_COMPACTION_PASS,
+			names::INDEX_COMPACTION_PASS_DURATION,
+			names::INDEX_COMPACTION_PLANS,
+			names::INDEX_COMPACTION_PLAN_DURATION,
+			names::INDEX_COMPACTION_PENDING_KEYS_FOLDED,
+			names::INDEX_COMPACTION_RETRIES,
+			names::INDEX_COMPACTION_UNQUEUED,
+			names::INDEX_HNSW_CACHE_DISCARDS,
+			names::INDEX_PENDING_KEYS_READ,
+		] {
+			assert!(
+				names_seen.iter().any(|(s, n)| s == scope::INDEX && n == expected),
+				"missing `{expected}` under `{}`: {names_seen:?}",
+				scope::INDEX,
+			);
+		}
+
+		let mut rm = ResourceMetrics::default();
+		reader.collect(&mut rm).expect("collect");
+		let counter_sum = |name: &str| -> u64 {
+			rm.scope_metrics()
+				.flat_map(|sm| sm.metrics())
+				.filter(|m| m.name() == name)
+				.find_map(|m| match m.data() {
+					AggregatedMetrics::U64(MetricData::Sum(s)) => {
+						Some(s.data_points().map(|dp| dp.value()).sum())
+					}
+					AggregatedMetrics::F64(_)
+					| AggregatedMetrics::U64(_)
+					| AggregatedMetrics::I64(_) => None,
+				})
+				.expect("counter is recorded")
+		};
+		assert_eq!(counter_sum(names::INDEX_COMPACTION_PLANS), 1);
+		assert_eq!(counter_sum(names::INDEX_HNSW_CACHE_DISCARDS), 1);
+		assert_eq!(counter_sum(names::INDEX_COMPACTION_PENDING_KEYS_FOLDED), 42);
+		let bounds: Vec<f64> = rm
+			.scope_metrics()
+			.flat_map(|sm| sm.metrics())
+			.filter(|m| m.name() == names::INDEX_PENDING_KEYS_READ)
+			.find_map(|m| match m.data() {
+				AggregatedMetrics::F64(MetricData::Histogram(h)) => {
+					h.data_points().next().map(|dp| dp.bounds().collect())
+				}
+				AggregatedMetrics::F64(_)
+				| AggregatedMetrics::U64(_)
+				| AggregatedMetrics::I64(_) => None,
+			})
+			.expect("pending_keys_read histogram is recorded");
+		assert_eq!(bounds, INDEX_PENDING_KEYS_READ_BUCKETS);
 		provider.shutdown().expect("shutdown");
 	}
 }

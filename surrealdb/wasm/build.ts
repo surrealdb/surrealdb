@@ -1,0 +1,160 @@
+/**
+ * Build the `@surrealdb/wasm-native` package.
+ *
+ * This package is the WebAssembly module plus the bridge that runs it in a
+ * dedicated worker: the engine that implements the SDK's interface lives in the
+ * surrealdb.js repository and depends on this. wasm-bindgen emits the loader
+ * and its typings; the worker host and the page's client for it are the small
+ * TypeScript under `ts/`, bundled beside them.
+ *
+ * `--debug` builds the unstripped, unwinding profile with the crate's `debug`
+ * feature, which reports panics to the browser console. It also skips
+ * `wasm-opt`, whose renaming would undo the symbol names that build is for.
+ *
+ * Requires two Cargo-installed tools: `wasm-bindgen-cli`, at exactly the
+ * version the workspace locks (checked below), and `wasm-opt`.
+ */
+
+import { rm } from "node:fs/promises";
+
+const [, , ...flags] = Bun.argv;
+const isDebug = flags.includes("--debug") || !!process.env.DEBUG_WASM;
+
+const profile = isDebug ? "wasm-release-debug" : "wasm-release";
+const features = isDebug ? "kv-surrealkv,kv-mem,debug" : "kv-surrealkv,kv-mem";
+
+/** The workspace target directory, since this crate is a workspace member. */
+const wasmModule = `../../target/wasm32-unknown-unknown/${profile}/surrealdb_wasm.wasm`;
+
+/**
+ * Run a build step, failing the build if it fails.
+ *
+ * Without this a broken `cargo build` leaves the previous `dist/` in place and
+ * the package looks like it built.
+ */
+async function run(step: string, cmd: string[]): Promise<void> {
+	console.log(`🔨 ${step}`);
+
+	const code = await Bun.spawn(cmd, {
+		stdout: "inherit",
+		stderr: "inherit",
+	}).exited;
+
+	if (code !== 0) {
+		console.error(`❌ ${step} failed (exit ${code})`);
+		process.exit(code);
+	}
+}
+
+/**
+ * The wasm-bindgen version the workspace resolves to.
+ *
+ * The CLI and the crate share a bindgen schema that changes between patch
+ * releases, so they have to match exactly. Reading the lockfile rather than
+ * pinning a number here means a dependency bump cannot leave this stale — it
+ * just asks for the new CLI.
+ */
+async function lockedBindgenVersion(): Promise<string> {
+	const lock = await Bun.file("../../Cargo.lock").text();
+	const version = lock.match(/^name = "wasm-bindgen"\nversion = "([^"]+)"/m)?.[1];
+
+	if (!version) {
+		console.error("❌ Could not read the wasm-bindgen version from ../../Cargo.lock");
+		process.exit(1);
+	}
+
+	return version;
+}
+
+/** The version of the `wasm-bindgen` on `PATH`, or null if there is none. */
+async function installedBindgenVersion(): Promise<string | null> {
+	try {
+		const proc = Bun.spawn(["wasm-bindgen", "--version"], { stdout: "pipe", stderr: "ignore" });
+		const output = await new Response(proc.stdout).text();
+		return (await proc.exited) === 0 ? (output.trim().split(/\s+/).at(-1) ?? null) : null;
+	} catch {
+		return null;
+	}
+}
+
+const expectedBindgen = await lockedBindgenVersion();
+const actualBindgen = await installedBindgenVersion();
+
+if (actualBindgen !== expectedBindgen) {
+	console.error(
+		actualBindgen
+			? `❌ wasm-bindgen ${actualBindgen} is installed, but the workspace locks ${expectedBindgen}`
+			: "❌ wasm-bindgen is not installed",
+	);
+	console.error(`   cargo install -f wasm-bindgen-cli --version ${expectedBindgen}`);
+	process.exit(1);
+}
+
+// A stale module from an earlier build must not survive a failed one.
+await rm("dist", { recursive: true, force: true });
+
+await run(`Compiling the engine (profile: ${profile})`, [
+	"cargo",
+	"build",
+	"--package",
+	"surrealdb-wasm",
+	"--target",
+	"wasm32-unknown-unknown",
+	"--profile",
+	profile,
+	"--features",
+	features,
+]);
+
+// `web` rather than `bundler`: the loader then works from a plain `<script
+// type="module">` as well as through a bundler, and leaves the consumer free to
+// supply the module bytes itself.
+await run("Generating the bindings", [
+	"wasm-bindgen",
+	"--target",
+	"web",
+	"--out-dir",
+	"dist",
+	"--out-name",
+	"index",
+	wasmModule,
+]);
+
+if (isDebug) {
+	console.log("⏭️  Skipping wasm-opt (debug build keeps its symbol names)");
+} else {
+	await run("Optimizing the module", [
+		"wasm-opt",
+		"-Oz",
+		// Rust lays the stack out first, so no live data sits below 1 KiB; the flag only lets
+		// wasm-opt fold small constant offsets into load and store immediates.
+		"--low-memory-unused",
+		"--converge",
+		"--enable-bulk-memory",
+		"--enable-nontrapping-float-to-int",
+		"dist/index_bg.wasm",
+		"-o",
+		"dist/index_bg.wasm",
+	]);
+}
+
+// The worker host and the page's client for it. Both import the engine module
+// only by URL or as a type, so they bundle to single files that sit beside it.
+await run("Bundling the worker bridge", [
+	"bun",
+	"build",
+	"ts/worker.ts",
+	"ts/client.ts",
+	"--outdir",
+	"dist",
+	"--target",
+	"browser",
+	"--format",
+	"esm",
+	"--entry-naming",
+	"[name].js",
+]);
+await Bun.write("dist/client.d.ts", Bun.file("ts/client.d.ts"));
+
+const { size } = await Bun.file("dist/index_bg.wasm").stat();
+console.log(`📦 dist/index_bg.wasm — ${(size / 1024 / 1024).toFixed(2)} MiB`);

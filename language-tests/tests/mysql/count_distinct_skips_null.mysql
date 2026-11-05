@@ -1,0 +1,42 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_distinct_values.surql"]
+
+[test]
+reason = "COUNT(DISTINCT x) counts the distinct values of x that are not NULL: a NULL or a missing x is not counted, a group holding only NULLs counts none, a count over no row is zero, and the same number written as an int, a float and a decimal is one value"
+
+[[test.results]]
+value = "[{ distinct_values: 2, rows_with_value: 3, n_rows: 6 }]"
+
+[[test.results]]
+value = "[{ distinct_values: 1, grp: 'x' }, { distinct_values: 1, grp: 'y' }, { distinct_values: 0, grp: 'z' }]"
+
+[[test.results]]
+value = "[{ distinct_values: 0 }]"
+
+[[test.results]]
+value = "[{ grp: 'x' }, { grp: 'y' }]"
+
+[[test.results]]
+value = "[{ doubled: 4 }]"
+
+[[test.results]]
+value = "[{ n: 0 }]"
+
+[[test.results]]
+value = "[{ grp: 'x' }, { grp: 'y' }, { grp: 'z' }]"
+
+[[test.results]]
+value = "[{ n: 2 }]"
+*/
+
+SELECT count(DISTINCT v) AS distinct_values, count(v) AS rows_with_value, count(*) AS n_rows FROM dv_t;
+SELECT grp, count(DISTINCT v) AS distinct_values FROM dv_t GROUP BY grp ORDER BY grp;
+SELECT count(DISTINCT v) AS distinct_values FROM dv_t WHERE k > 100;
+SELECT grp FROM dv_t GROUP BY grp HAVING count(DISTINCT v) > 0 ORDER BY grp;
+SELECT count(DISTINCT v) * 2 AS doubled FROM dv_t;
+SELECT count(DISTINCT v) AS n FROM dv_t WHERE grp = 'z';
+SELECT grp FROM dv_t GROUP BY grp ORDER BY count(DISTINCT v) DESC, grp;
+SELECT count(DISTINCT k) AS n FROM dv_n;

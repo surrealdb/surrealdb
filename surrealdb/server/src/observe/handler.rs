@@ -127,7 +127,7 @@ fn filter_to_public_metrics(text: &str) -> String {
 mod tests {
 	use opentelemetry_prometheus_text_exporter::PrometheusExporter;
 	use opentelemetry_sdk::metrics::SdkMeterProvider;
-	use surrealdb_core::observe::{
+	use surrealdb_observe::{
 		AuthAction, AuthEvent, AuthEventCtx, AuthEventSafe, AuthScope, ExecutionObserver,
 		HttpMethod, HttpRequestEvent, HttpRequestEventCtx, HttpRequestEventSafe,
 		HttpRequestStartEvent, HttpRequestStartEventSafe, HttpVersion, NetworkBytesEvent,
@@ -252,7 +252,7 @@ surrealdb_process_uptime_seconds 99
 
 		let rpc_event = RpcEvent {
 			safe: RpcEventSafe {
-				method: surrealdb_core::rpc::Method::Select,
+				method: surrealdb_rpc::Method::Select,
 				outcome: Outcome::Success,
 				duration: std::time::Duration::from_millis(1),
 				error_class: None,

@@ -15,8 +15,7 @@ error = "The table 'test' does not exist"
 value = "[{ field: 3, id: target:1 }]"
 
 [[test.results]]
-value = "[{ after: { mean: 3f }, even: 'CREATE', id: test:triggered_on_view }]"
-
+value = "[{ after: { mean: 3f }, before: { mean: NaN }, even: 'UPDATE', id: test:triggered_on_view }]"
 */
 
 	DEFINE TABLE target;

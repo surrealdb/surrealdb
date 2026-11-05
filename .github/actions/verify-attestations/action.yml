@@ -1,0 +1,75 @@
+name: 'Verify image attestations'
+description: 'Advisory check that a pushed ECR image carries SLSA provenance + SBOM attestations. Logs a warning (never fails) when they are missing.'
+
+inputs:
+  image-ref:
+    description: 'Full image reference (registry/repo:tag) to inspect for attestation manifests'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    # Advisory only. Attestation coverage is an internal audit-trail nicety, so a
+    # missing (or unreadable) attestation logs a warning but must NEVER fail the
+    # build — releases are not blocked on this. Hence no `set -e`, and the step is
+    # also marked continue-on-error by the caller as a belt-and-suspenders.
+    - name: Verify build attestations (provenance + SBOM)
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-ref }}
+      run: |
+        set -uo pipefail
+
+        # Repository (registry/repo without the :tag) so attestation manifests can
+        # be addressed by digest below.
+        repo="${IMAGE_REF%:*}"
+
+        raw="$(docker buildx imagetools inspect "$IMAGE_REF" --raw 2>/dev/null)"
+        if [ -z "$raw" ]; then
+          echo "::warning title=Attestations::Could not inspect ${IMAGE_REF}; skipping attestation verification."
+          exit 0
+        fi
+
+        # BuildKit attaches provenance/SBOM as separate "attestation manifests"
+        # that report platform unknown/unknown and reference a real platform image.
+        att="$(printf '%s' "$raw" | jq -r '.manifests[]? | select(.platform.os=="unknown" and .platform.architecture=="unknown") | .digest' 2>/dev/null)"
+
+        if [ -z "$att" ]; then
+          echo "::warning title=Attestations::No build attestations (provenance/SBOM) found on ${IMAGE_REF}."
+          exit 0
+        fi
+
+        # Classify the attestations by in-toto predicate type. This can be empty on
+        # some BuildKit versions; when we cannot read any predicate type we only
+        # report the raw count rather than warning about a specific missing type.
+        have_prov=false
+        have_sbom=false
+        classified=false
+        while IFS= read -r d; do
+          [ -z "$d" ] && continue
+          ptypes="$(docker buildx imagetools inspect "${repo}@${d}" --raw 2>/dev/null \
+            | jq -r '.layers[]?.annotations["in-toto.io/predicate-type"] // empty' 2>/dev/null)"
+          if [ -n "$ptypes" ]; then
+            classified=true
+            printf '%s\n' "$ptypes" | grep -q 'slsa.dev/provenance' && have_prov=true
+            printf '%s\n' "$ptypes" | grep -qi 'spdx' && have_sbom=true
+          fi
+        done <<< "$att"
+
+        count="$(printf '%s\n' "$att" | grep -c . || true)"
+
+        if [ "$classified" != "true" ]; then
+          echo "${IMAGE_REF}: ${count} attestation manifest(s) present (predicate types unavailable to classify)."
+          exit 0
+        fi
+
+        if [ "$have_prov" = "true" ]; then
+          echo "${IMAGE_REF}: SLSA provenance attestation present."
+        else
+          echo "::warning title=Attestations::No SLSA provenance attestation on ${IMAGE_REF}."
+        fi
+        if [ "$have_sbom" = "true" ]; then
+          echo "${IMAGE_REF}: SBOM (SPDX) attestation present."
+        else
+          echo "::warning title=Attestations::No SBOM (SPDX) attestation on ${IMAGE_REF}."
+        fi

@@ -1,0 +1,13 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A variable MySQL does not have is refused where it is written in a condition that never reads it, as MySQL resolves every variable as it reads the statement; tx_isolation went in MySQL 8.0.3"
+
+[test.results]
+request-error = "MySQL SELECT lowering error: lowering error: Unknown system variable 'tx_isolation'"
+*/
+
+SELECT 1 AS one WHERE 1 = 0 AND @@tx_isolation = 'REPEATABLE-READ';

@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["gql/_schema.surql"]
+
+[test]
+reason = "NODETACH (the default) refuses to delete a node that still has a connected edge, whatever the principal can select."
+
+[[test.results]]
+error = "Invalid statement: Cannot DELETE `person:1` because it still has connected edges; use `DETACH DELETE` to remove the edges as well"
+*/
+
+MATCH (n:person WHERE n.name = 'A') DELETE n

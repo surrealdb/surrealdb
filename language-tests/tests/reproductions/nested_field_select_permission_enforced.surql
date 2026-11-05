@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Issue #83: nested-path SELECT permissions (DEFINE FIELD outer.a … PERMISSIONS FOR SELECT WHERE …) must be enforced at the streaming runtime. Pre-fix, the streaming filter iterated only top-level keys and silently leaked the restricted nested field."
+reason = "Issue #83: nested-path SELECT permissions (DEFINE FIELD outer.a … PERMISSIONS FOR SELECT WHERE …) must be enforced: a restricted nested field is never shown."
 
 issue = 83
 

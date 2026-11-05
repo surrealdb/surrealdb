@@ -1,15 +1,15 @@
 use std::fmt;
 use std::time::Duration;
 
-use surrealdb_core::kvs::config::{AolMode, SnapshotMode, format_duration};
-
 use crate::engine::local::Db;
+use crate::opt::storage::format_duration;
+use crate::opt::{AolMode, SnapshotMode};
 use crate::{Connect, Error};
 
 impl<R> Connect<Db, R> {
 	/// Enable MVCC versioning on the datastore.
 	///
-	/// Supported by `SurrealKv` and `Mem` engines.
+	/// Supported by the `SurrealKv` engine.
 	///
 	/// # Examples
 	///
@@ -36,7 +36,7 @@ impl<R> Connect<Db, R> {
 	/// Determines how long old versions are kept before being garbage collected.
 	/// A duration of zero means unlimited retention.
 	///
-	/// Supported by `SurrealKv` and `Mem` engines. Requires `versioned()`.
+	/// Supported by the `SurrealKv` engine. Requires `versioned()`.
 	///
 	/// # Examples
 	///
@@ -64,17 +64,22 @@ impl<R> Connect<Db, R> {
 
 	/// Set the disk sync mode.
 	///
-	/// Controls how and when data is flushed to disk. Supported by `SurrealKv`,
-	/// `RocksDb`, and `Mem` engines (the `Mem` engine requires a persist path,
+	/// Controls how and when data is flushed to disk. Supported by `SurrealKv`
+	/// and `Mem` engines (the `Mem` engine requires a persist path,
 	/// e.g. `Surreal::new::<Mem>("/tmp/data")` or `connect("mem:///tmp/data")`,
 	/// for sync to take effect).
 	///
-	/// The `mode` argument can be any type that implements `Display`. The
-	/// canonical type is `SyncMode`:
+	/// The `mode` argument can be any type whose `Display` form the engine
+	/// parses as a sync mode. The canonical type is [`SyncMode`](crate::opt::SyncMode):
 	///
 	/// - `SyncMode::Never` - leave flushing to the OS (fastest, least durable).
 	/// - `SyncMode::Every` - sync on every transaction commit (fast, most durable).
 	/// - `SyncMode::Interval(duration)` - periodic background flushing (fast, less durable).
+	///
+	/// The default for `SurrealKv` is `SyncMode::Every` on native targets. In the
+	/// browser (`wasm32`) it is `SyncMode::Interval` of one second, since a
+	/// commit that waited for a durable flush would wait on the origin private
+	/// file system. The default for `Mem` is `SyncMode::Never`.
 	///
 	/// # Examples
 	///
@@ -83,7 +88,7 @@ impl<R> Connect<Db, R> {
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::local::SurrealKv;
-	/// use surrealdb_core::kvs::config::SyncMode;
+	/// use surrealdb::opt::SyncMode;
 	///
 	/// let db = Surreal::new::<SurrealKv>("path/to/database-folder")
 	///     .sync(SyncMode::Every)
@@ -97,10 +102,10 @@ impl<R> Connect<Db, R> {
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// use std::time::Duration;
 	/// use surrealdb::Surreal;
-	/// use surrealdb::engine::local::RocksDb;
-	/// use surrealdb_core::kvs::config::SyncMode;
+	/// use surrealdb::engine::local::SurrealKv;
+	/// use surrealdb::opt::SyncMode;
 	///
-	/// let db = Surreal::new::<RocksDb>("path/to/database-folder")
+	/// let db = Surreal::new::<SurrealKv>("path/to/database-folder")
 	///     .sync(SyncMode::Interval(Duration::from_millis(200)))
 	///     .await?;
 	/// # Ok(())
@@ -119,9 +124,9 @@ impl<R> Connect<Db, R> {
 	/// Requires a persist path (e.g. `Surreal::new::<Mem>("/tmp/data")` or
 	/// `connect("mem:///tmp/data")`).
 	///
-	/// - `MemAolMode::Never` - never use AOL (default).
-	/// - `MemAolMode::Sync` - write synchronously to AOL on every commit.
-	/// - `MemAolMode::Async` - write asynchronously to AOL after commit.
+	/// - `AolMode::Never` - never use AOL (default).
+	/// - `AolMode::Sync` - write synchronously to AOL on every commit.
+	/// - `AolMode::Async` - write asynchronously to AOL after commit.
 	pub fn aol(mut self, mode: AolMode) -> Self {
 		self.address = self.address.and_then(|mut endpoint| match endpoint.url.scheme() {
 			"mem" => {

@@ -1,0 +1,382 @@
+### owner: CREATE f:10 SET n = 10, ro = 'r', a = 5, locked = 'l', sealed = 's'
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:10, locked: 'l', n: 10, ro: 'r', sealed: 's', sv: 'static', twice: 20, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:10, locked: 'l', n: 10, ro: 'r', sealed: 's', sv: 'static', twice: 20, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: CREATE f:11 SET n = '2'
+error: Couldn't coerce value for field `n` of `f:11`: Expected `int` but found `'2'`
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: CREATE f:12 SET n = 12, a = -1
+error: Found -1 for field `a`, with record `f:12`, but field must conform to: $value > 0
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: CREATE f:13 SET n = 13, a = 13, pair = 13
+error: Found 13 for field `pair`, with record `f:13`, but field must conform to: $value != n
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: CREATE f:14 SET n = 14, bogus = 1
+error: Found field 'bogus', but no such field exists for table 'f'
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: CREATE f:15 SET n = 15, obj = { x: 2 }, arr = [{ k: 'a' }, { k: 'b' }], flex = { any: 1, deep: { x: 1 } }, s = [1, 1, 2]
+{ always: 7, arr: [{ k: 'a' }, { k: 'b' }], b: 'fresh', d: 'dflt', flex: { any: 1, deep: { x: 1 } }, i: 'none', id: f:15, n: 15, obj: { x: 2 }, s: {1, 2}, sv: 'static', twice: 30, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [{ k: 'a' }, { k: 'b' }], b: 'fresh', d: 'dflt', flex: { any: 1, deep: { x: 1 } }, i: 'none', id: f:15, n: 15, obj: { x: 2 }, s: {1, 2}, sv: 'static', twice: 30, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: CREATE f:16 CONTENT { n: 16, v: 'lower' }
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:16, n: 16, sv: 'static', twice: 32, v: 'LOWER' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:16, n: 16, sv: 'static', twice: 32, v: 'LOWER' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: CREATE f:17 SET n = 17, twice = 99
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:17, n: 17, sv: 'static', twice: 34, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:17, n: 17, sv: 'static', twice: 34, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: CREATE f:18 SET n = 18, arr = [{ k: 1 }]
+error: Couldn't coerce value for field `arr.*.k` of `f:18`: Expected `string` but found `1`
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: CREATE f:19 SET n = 19, obj = {}
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:19, n: 19, obj: { x: 1 }, sv: 'static', twice: 38, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:19, n: 19, obj: { x: 1 }, sv: 'static', twice: 38, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: CREATE f:20 SET n = 20, flex = { x: 1 }, obj = { x: 1, y: 2 }
+error: Found field 'obj.y', but no such field exists for table 'f'
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: UPDATE f:1 SET ro = 'changed'
+error: Found changed value for field `ro`, with record `f:1`, but field is readonly
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: UPDATE f:1 SET n = 10
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 10, ro: 'r', sv: 'static', twice: 20, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 10, ro: 'r', sv: 'static', twice: 20, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: UPDATE f:1 CONTENT { n: 11 }
+error: Couldn't coerce value for field `arr` of `f:1`: Expected `array` but found `NONE`
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: UPDATE f:1 CONTENT { n: 11, arr: [] }
+error: Couldn't coerce value for field `d` of `f:1`: Expected `string` but found `NONE`
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: UPDATE f:1 SET locked = 'new', sealed = 'x'
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'new', n: 1, ro: 'r', sealed: 'x', sv: 'static', twice: 2, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'new', n: 1, ro: 'r', sealed: 'x', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: UPDATE f:1 SET a = NONE
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+records:
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: UPDATE f:1 SET obj = NONE
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: UPDATE f:1 SET v = 'again', d = NONE
+error: Couldn't coerce value for field `d` of `f:1`: Expected `string` but found `NONE`
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: UPDATE f:1 MERGE { n: 30, d: 'kept' }
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'kept', i: 'none', id: f:1, locked: 'l', n: 30, ro: 'r', sv: 'static', twice: 60, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'kept', i: 'none', id: f:1, locked: 'l', n: 30, ro: 'r', sv: 'static', twice: 60, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: UPSERT f:9 SET n = 9
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:9, n: 9, sv: 'static', twice: 18, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:9, n: 9, sv: 'static', twice: 18, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: INSERT INTO f { id: f:8, n: 8 }
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:8, n: 8, sv: 'static', twice: 16, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:8, n: 8, sv: 'static', twice: 16, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: INSERT INTO f { id: f:1, n: 8 } ON DUPLICATE KEY UPDATE n += 1
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 2, ro: 'r', sv: 'static', twice: 4, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 2, ro: 'r', sv: 'static', twice: 4, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: UPDATE f SET n += 1
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 2, ro: 'r', sv: 'static', twice: 4, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 2, ro: 'r', sv: 'static', twice: 4, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: DELETE f:1
+(no rows)
+records:
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: CREATE e:2 SET n = 2
+{ id: e:2, more: 5, n: 2, twice: 4 }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+e: { id: e:2, more: 5, n: 2, twice: 4 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+elog: { after: 5, event: 'CREATE', id: elog:generated }
+### owner: UPDATE e:1 SET n = 5
+{ id: e:1, more: 11, n: 5, twice: 10 }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 11, n: 5, twice: 10 }
+elog: { after: 11, before: 3, event: 'UPDATE', id: elog:generated }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### owner: DELETE e:1
+(no rows)
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+elog: { before: 3, event: 'DELETE', id: elog:generated }
+### owner: CREATE loose:1
+{ id: loose:1, n: 3 }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+loose: { id: loose:1, n: 3 }
+### owner: CREATE loose:2 SET n = 1, extra = NONE, nested = { gone: NONE, kept: 1 }
+{ id: loose:2, n: 1, nested: { kept: 1 } }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+loose: { id: loose:2, n: 1, nested: { kept: 1 } }
+### record user: CREATE f:10 SET n = 10, ro = 'r', a = 5, locked = 'l', sealed = 's'
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:10, locked: 'l', n: 10, ro: 'r', sv: 'static', twice: 20, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:10, locked: 'l', n: 10, ro: 'r', sv: 'static', twice: 20, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: CREATE f:11 SET n = '2'
+error: Couldn't coerce value for field `n` of `f:11`: Expected `int` but found `'2'`
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: CREATE f:12 SET n = 12, a = -1
+error: Found -1 for field `a`, with record `f:12`, but field must conform to: $value > 0
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: CREATE f:13 SET n = 13, a = 13, pair = 13
+error: Found 13 for field `pair`, with record `f:13`, but field must conform to: $value != n
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: CREATE f:14 SET n = 14, bogus = 1
+error: Found field 'bogus', but no such field exists for table 'f'
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: CREATE f:15 SET n = 15, obj = { x: 2 }, arr = [{ k: 'a' }, { k: 'b' }], flex = { any: 1, deep: { x: 1 } }, s = [1, 1, 2]
+{ always: 7, arr: [{ k: 'a' }, { k: 'b' }], b: 'fresh', d: 'dflt', flex: { any: 1, deep: { x: 1 } }, i: 'none', id: f:15, n: 15, obj: { x: 2 }, s: {1, 2}, sv: 'static', twice: 30, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [{ k: 'a' }, { k: 'b' }], b: 'fresh', d: 'dflt', flex: { any: 1, deep: { x: 1 } }, i: 'none', id: f:15, n: 15, obj: { x: 2 }, s: {1, 2}, sv: 'static', twice: 30, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: CREATE f:16 CONTENT { n: 16, v: 'lower' }
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:16, n: 16, sv: 'static', twice: 32, v: 'LOWER' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:16, n: 16, sv: 'static', twice: 32, v: 'LOWER' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: CREATE f:17 SET n = 17, twice = 99
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:17, n: 17, sv: 'static', twice: 34, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:17, n: 17, sv: 'static', twice: 34, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: CREATE f:18 SET n = 18, arr = [{ k: 1 }]
+error: Couldn't coerce value for field `arr.*.k` of `f:18`: Expected `string` but found `1`
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: CREATE f:19 SET n = 19, obj = {}
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:19, n: 19, obj: { x: 1 }, sv: 'static', twice: 38, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:19, n: 19, obj: { x: 1 }, sv: 'static', twice: 38, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: CREATE f:20 SET n = 20, flex = { x: 1 }, obj = { x: 1, y: 2 }
+error: Found field 'obj.y', but no such field exists for table 'f'
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: UPDATE f:1 SET ro = 'changed'
+error: Found changed value for field `ro`, with record `f:1`, but field is readonly
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: UPDATE f:1 SET n = 10
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 10, ro: 'r', sv: 'static', twice: 20, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 10, ro: 'r', sv: 'static', twice: 20, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: UPDATE f:1 CONTENT { n: 11 }
+error: Couldn't coerce value for field `arr` of `f:1`: Expected `array` but found `NONE`
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: UPDATE f:1 CONTENT { n: 11, arr: [] }
+error: Couldn't coerce value for field `d` of `f:1`: Expected `string` but found `NONE`
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: UPDATE f:1 SET locked = 'new', sealed = 'x'
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sealed: 'x', sv: 'static', twice: 2, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sealed: 'x', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: UPDATE f:1 SET a = NONE
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+records:
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: UPDATE f:1 SET obj = NONE
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: UPDATE f:1 SET v = 'again', d = NONE
+error: Couldn't coerce value for field `d` of `f:1`: Expected `string` but found `NONE`
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: UPDATE f:1 MERGE { n: 30, d: 'kept' }
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'kept', i: 'none', id: f:1, locked: 'l', n: 30, ro: 'r', sv: 'static', twice: 60, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'kept', i: 'none', id: f:1, locked: 'l', n: 30, ro: 'r', sv: 'static', twice: 60, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: UPSERT f:9 SET n = 9
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:9, n: 9, sv: 'static', twice: 18, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:9, n: 9, sv: 'static', twice: 18, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: INSERT INTO f { id: f:8, n: 8 }
+{ always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:8, n: 8, sv: 'static', twice: 16, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+f: { always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:8, n: 8, sv: 'static', twice: 16, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: INSERT INTO f { id: f:1, n: 8 } ON DUPLICATE KEY UPDATE n += 1
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 2, ro: 'r', sv: 'static', twice: 4, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 2, ro: 'r', sv: 'static', twice: 4, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: UPDATE f SET n += 1
+{ a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 2, ro: 'r', sv: 'static', twice: 4, v: 'X' }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 2, ro: 'r', sv: 'static', twice: 4, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: DELETE f:1
+(no rows)
+records:
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: CREATE e:2 SET n = 2
+{ id: e:2, more: 5, n: 2, twice: 4 }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+e: { id: e:2, more: 5, n: 2, twice: 4 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+elog: { after: 5, event: 'CREATE', id: elog:generated }
+### record user: UPDATE e:1 SET n = 5
+{ id: e:1, more: 11, n: 5, twice: 10 }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 11, n: 5, twice: 10 }
+elog: { after: 11, before: 3, event: 'UPDATE', id: elog:generated }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+### record user: DELETE e:1
+(no rows)
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+elog: { before: 3, event: 'DELETE', id: elog:generated }
+### record user: CREATE loose:1
+{ id: loose:1, n: 3 }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+loose: { id: loose:1, n: 3 }
+### record user: CREATE loose:2 SET n = 1, extra = NONE, nested = { gone: NONE, kept: 1 }
+{ id: loose:2, n: 1, nested: { kept: 1 } }
+records:
+f: { a: 5, always: 7, arr: [], b: 'fresh', d: 'dflt', i: 'none', id: f:1, locked: 'l', n: 1, ro: 'r', sv: 'static', twice: 2, v: 'X' }
+e: { id: e:1, more: 3, n: 1, twice: 2 }
+elog: { after: 3, event: 'CREATE', id: elog:generated }
+loose: { id: loose:2, n: 1, nested: { kept: 1 } }

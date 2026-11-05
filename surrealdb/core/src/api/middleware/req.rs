@@ -41,27 +41,27 @@ impl<'a> BodyParser<'a> {
 					return Err(ApiError::MissingContentType.into());
 				};
 
-				if mime == &APPLICATION_JSON {
+				if self.is_mime(&APPLICATION_JSON) {
 					return self.json(false);
 				}
 
-				if mime == &*APPLICATION_CBOR {
+				if self.is_mime(&APPLICATION_CBOR) {
 					return self.cbor(false);
 				}
 
-				if mime == &*APPLICATION_SDB_FB {
+				if self.is_mime(&APPLICATION_SDB_FB) {
 					return self.flatbuffers(false);
 				}
 
-				if mime == &TEXT_PLAIN {
+				if self.is_mime(&TEXT_PLAIN) {
 					return self.plain(false);
 				}
 
-				if mime == &APPLICATION_OCTET_STREAM {
+				if self.is_mime(&APPLICATION_OCTET_STREAM) {
 					return self.bytes(false);
 				}
 
-				if mime == &*APPLICATION_SDB_NATIVE {
+				if self.is_mime(&APPLICATION_SDB_NATIVE) {
 					return self.native(false);
 				}
 
@@ -71,7 +71,9 @@ impl<'a> BodyParser<'a> {
 	}
 
 	fn is_mime(&self, mime: &Mime) -> bool {
-		self.mime.as_ref().map(|x| x == mime).unwrap_or(false)
+		self.mime
+			.as_ref()
+			.is_some_and(|x| x.type_() == mime.type_() && x.subtype() == mime.subtype())
 	}
 
 	fn assert_mime(&self, mime: &Mime) -> Result<()> {

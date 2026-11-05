@@ -158,10 +158,12 @@ impl UnitValue {
 					quote!(surrealdb_types::Kind::Literal(surrealdb_types::KindLiteral::Float(#inner))),
 				)
 			}
-			_ => panic!(
-				"Invalid value: {}. Only literal boolean, string, integer, float, null and none are supported.",
-				inner
-			),
+			Lit::ByteStr(_) | Lit::CStr(_) | Lit::Byte(_) | Lit::Char(_) | Lit::Verbatim(_) | _ => {
+				panic!(
+					"Invalid value: {}. Only literal boolean, string, integer, float, null and none are supported.",
+					inner
+				)
+			}
 		};
 
 		UnitValue {

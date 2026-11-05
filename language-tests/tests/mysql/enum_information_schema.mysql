@@ -1,0 +1,19 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_shirts_schema.surql"]
+
+[test]
+reason = "information_schema.columns names an ENUM column enum and a SET column set, and lists their members in COLUMN_TYPE"
+
+[[test.results]]
+value = """[{ column_name: 'id', column_type: 'text', data_type: 'text' }, { column_name: 'size', column_type: "enum('small','medium','large')", data_type: 'enum' }]"""
+
+[[test.results]]
+value = """[{ column_name: 'id', column_type: 'text', data_type: 'text' }, { column_name: 'tags', column_type: "set('c','b','a')", data_type: 'set' }]"""
+*/
+
+SELECT column_name, data_type, column_type FROM information_schema.columns WHERE table_name = 'shirts' ORDER BY column_name;
+
+SELECT COLUMN_NAME, DATA_TYPE, COLUMN_TYPE FROM information_schema.columns WHERE table_name = 'prefs' ORDER BY column_name;

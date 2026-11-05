@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "TopK threshold pushdown EXPLAIN visibility on KV table scans: `topk_pushdown: yes` for ORDER BY <raw field> + literal LIMIT shapes, every plan-time bail reason (unsupported order, limit too large, tempfiles, computed fields), and attribute omission when no top-K opportunity exists (no ORDER BY, no LIMIT, RAND(), first key id, GROUP BY, SPLIT). Write-time `DEFINE FIELD ... VALUE` fields stay eligible (their result is stored in the record bytes); read-time `COMPUTED` fields — direct or nested under the ORDER BY root — disqualify."
+reason = "TopK threshold pushdown EXPLAIN visibility on KV table scans: `topk_pushdown: yes` when the first ORDER BY key is a plain field path under the default comparison and the LIMIT is a literal, whatever its size and with or without TEMPFILES; the attribute is omitted where the shape is not eligible (COLLATE or NUMERIC first key, array-index path, alias resolving to an expression, parameter limit, RAND(), first key id) and where no top-K opportunity exists (no ORDER BY, no LIMIT, GROUP BY, SPLIT). Write-time `DEFINE FIELD ... VALUE` fields stay eligible (their result is stored in the record bytes); read-time `COMPUTED` fields put a projection layer between the sort and the scan, which the probe cannot cross, so the scan carries no attribute."
 
 [[test.results]]
 value = "NONE"
@@ -17,61 +16,149 @@ value = "[{ a: 1, arr: [3, 1], b: 2, created_at: d'2024-01-01T00:00:00Z', id: t:
 value = "[{ a: 2, arr: [2, 5], b: 1, created_at: d'2024-01-02T00:00:00Z', id: t:2, outer: { rank: 2 }, st: 404, tags: ['y'] }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: created_at DESC, limit: 10]\n            TableScan [ctx: Db] [table: t, direction: Forward, predicate: st INSIDE [200, 201], pre_decode_filter: yes, topk_pushdown: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: created_at DESC, keep: 10]
+            TableScan [ctx: Db] [table: t, direction: Forward, predicate: st INSIDE [200, 201], pre_decode_filter: yes, topk_pushdown: yes]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: created_at DESC, limit: 10]\n            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: created_at DESC, keep: 10]
+            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: yes]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: created_at ASC, limit: 10]\n            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: created_at ASC, keep: 10]
+            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: yes]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: a DESC, b ASC, limit: 10]\n            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: a DESC, b ASC, keep: 10]
+            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: yes]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: outer.rank DESC, limit: 10]\n            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: outer.rank DESC, keep: 10]
+            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: yes]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: st DESC, limit: 10]\n            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: no (unsupported order)]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: st DESC COLLATE, keep: 10]
+            TableScan [ctx: Db] [table: t, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: st DESC, limit: 10]\n            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: no (unsupported order)]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: st DESC NUMERIC, keep: 10]
+            TableScan [ctx: Db] [table: t, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: arr[0] DESC, limit: 10]\n            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: no (unsupported order)]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: arr[0] DESC, keep: 10]
+            TableScan [ctx: Db] [table: t, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: fa]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: fa DESC, limit: 10]\n            Compute [ctx: Db] [fields: fa = math::floor(...)]\n                TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: no (unsupported order)]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: fa]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: math::floor(a) DESC, keep: 10]
+            TableScan [ctx: Db] [table: t, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 1001]\n        SortByKey [ctx: Db] [sort_keys: created_at DESC]\n            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: no (limit too large)]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 1001]
+        Sort [ctx: Db] [sort_keys: created_at DESC, keep: 1001]
+            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: yes]
+''''
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: $lim]\n        SortByKey [ctx: Db] [sort_keys: created_at DESC]\n            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: no (limit too large)]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: $lim]
+        Sort [ctx: Db] [sort_keys: created_at DESC]
+            TableScan [ctx: Db] [table: t, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        ExternalSortByKey [ctx: Db] [sort_keys: created_at DESC]\n            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: no (tempfiles)]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: created_at DESC, keep: 10]
+            TableScan [ctx: Db] [table: t, direction: Forward, topk_pushdown: yes]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    SortByKey [ctx: Db] [sort_keys: created_at DESC]\n        TableScan [ctx: Db] [table: t, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Sort [ctx: Db] [sort_keys: created_at DESC]
+        TableScan [ctx: Db] [table: t, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: t, direction: Forward, limit: 10]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: t, direction: Forward, limit: 10]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        RandomShuffle [ctx: Db] [order: RAND(), limit: 10]\n            TableScan [ctx: Db] [table: t, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: RAND(), keep: 10]
+            TableScan [ctx: Db] [table: t, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: t, direction: Backward, limit: 10]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: t, direction: Backward, limit: 10]
+''''
 
 [[test.results]]
-value = ''''Limit [ctx: Db] [limit: 10]\n    SortTopK [ctx: Db] [order_by: a DESC, limit: 10]\n        Aggregate [ctx: Db] [by: a]\n            TableScan [ctx: Db] [table: t, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: a DESC, keep: 10]
+            Aggregate [ctx: Db] [by: a]
+                TableScan [ctx: Db] [table: t, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: created_at DESC, limit: 10]\n            Split [ctx: Db] [on: tags]\n                TableScan [ctx: Db] [table: t, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: created_at DESC, keep: 10]
+            Split [ctx: Db] [targets: tags]
+                SelectProject [ctx: Db] [projections: *]
+                    TableScan [ctx: Db] [table: t, direction: Forward]
+''''
 
 [[test.results]]
 value = "NONE"
@@ -80,7 +167,12 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: score DESC, limit: 10]\n            TableScan [ctx: Db] [table: tv, direction: Forward, topk_pushdown: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: score DESC, keep: 10]
+            TableScan [ctx: Db] [table: tv, direction: Forward, topk_pushdown: yes]
+''''
 
 [[test.results]]
 value = "NONE"
@@ -89,7 +181,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 10]\n        SortTopKByKey [ctx: Db] [sort_keys: score DESC, limit: 10]\n            TableScan [ctx: Db] [table: tc, direction: Forward, topk_pushdown: no (computed fields)]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 10]
+        Sort [ctx: Db] [sort_keys: score DESC, keep: 10]
+            ProjectLayer [ctx: Db] [columns: score = 1 @computed]
+                TableScan [ctx: Db] [table: tc, direction: Forward]
+''''
 
 [[test.results]]
 value = "NONE"
@@ -121,12 +219,12 @@ EXPLAIN SELECT * FROM t ORDER BY arr[0] DESC LIMIT 10;
 -- Alias resolving to an expression is a synthetic post-decode sort key.
 EXPLAIN SELECT math::floor(a) AS fa FROM t ORDER BY fa DESC LIMIT 10;
 
--- Above the priority-queue cap the plan uses a full sort — no heap threshold.
+-- A large literal limit is as eligible as a small one.
 EXPLAIN SELECT * FROM t ORDER BY created_at DESC LIMIT 1001;
 -- Parameter limits cannot bound the heap at plan time.
 LET $lim = 10;
 EXPLAIN SELECT * FROM t ORDER BY created_at DESC LIMIT $lim;
--- TEMPFILES routes the sort to disk; no in-memory heap.
+-- TEMPFILES spills only a sort with no limit; a bounded sort keeps its heap.
 EXPLAIN SELECT * FROM t ORDER BY created_at DESC LIMIT 10 TEMPFILES;
 
 -- Attribute omitted: no top-K opportunity exists at all.
@@ -141,7 +239,8 @@ EXPLAIN SELECT * FROM t SPLIT tags ORDER BY created_at DESC LIMIT 10;
 DEFINE TABLE tv SCHEMALESS;
 DEFINE FIELD score ON tv VALUE 1;
 EXPLAIN SELECT * FROM tv ORDER BY score DESC LIMIT 10;
--- Read-time COMPUTED fields diverge from the stored bytes — disqualified.
+-- Read-time COMPUTED fields are derived by a projection layer above the scan;
+-- the sort cannot cross it, so the scan carries no probe.
 DEFINE TABLE tc SCHEMALESS;
 DEFINE FIELD score ON tc COMPUTED 1;
 EXPLAIN SELECT * FROM tc ORDER BY score DESC LIMIT 10;

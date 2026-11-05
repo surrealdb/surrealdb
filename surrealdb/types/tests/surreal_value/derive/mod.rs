@@ -1,3 +1,4 @@
+mod enum_crate_path_hygiene;
 mod enum_mixed_with_value;
 mod enum_tagged_skip_content;
 mod enum_tagged_tag;

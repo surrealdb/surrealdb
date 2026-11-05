@@ -77,6 +77,7 @@ pub fn service_edition() -> &'static str {
 pub struct Builder {
 	format: LogFormat,
 	filter: CustomFilter,
+	stdout_logs: bool,
 	socket: Option<String>,
 	// Filter options
 	file_filter: Option<CustomFilter>,
@@ -133,6 +134,7 @@ impl Default for Builder {
 				spans: std::collections::HashMap::new(),
 			},
 			format: LogFormat::Text,
+			stdout_logs: true,
 			socket: None,
 			// Filter options
 			file_filter: None,
@@ -243,6 +245,13 @@ impl Builder {
 		self
 	}
 
+	/// Whether INFO, DEBUG and TRACE terminal logs go to stdout (the default)
+	/// or, with WARN and ERROR, to stderr
+	pub fn with_stdout_logs(mut self, enabled: bool) -> Self {
+		self.stdout_logs = enabled;
+		self
+	}
+
 	/// Set the log file output format
 	pub fn with_file_format(mut self, format: LogFormat) -> Self {
 		self.file_format = format;
@@ -306,7 +315,8 @@ impl Builder {
 			.thread_name("surrealdb-logger-stderr")
 			.finish(std::io::stderr());
 		// Create the display destination layers (separate stdout/stderr)
-		let stdio_layers = logs::output(self.filter.clone(), stdout, stderr, self.format)?;
+		let stdio_layers =
+			logs::output(self.filter.clone(), stdout, stderr, self.format, self.stdout_logs)?;
 		// Setup a registry for composing layers
 		let registry = tracing_subscriber::registry();
 		// Setup stdio destination layers
@@ -519,9 +529,10 @@ pub fn filter_from_value(v: &str) -> std::result::Result<EnvFilter, ParseError> 
 			.add_directive("surrealdb=trace".parse()?)
 			.add_directive("surrealdb::core::kvs::tx=debug".parse()?)
 			.add_directive("surrealdb::core::kvs::tr=debug".parse()?)),
-		// Check if we should show all surreal logs
+		// Trace the surreal crates, including the kvs transaction layers. Other
+		// crates stay at warn, as in `trace`, so dependency internals stay quiet.
 		"full" => Ok(EnvFilter::default()
-			.add_directive(Level::DEBUG.into())
+			.add_directive(Level::WARN.into())
 			.add_directive("surreal=trace".parse()?)
 			.add_directive("surrealdb=trace".parse()?)
 			.add_directive("surrealdb::core::kvs::tx=trace".parse()?)
@@ -552,4 +563,48 @@ pub fn span_filters_from_value(v: &str) -> Vec<(String, LevelFilter)> {
 			Some((name.to_string(), level))
 		})
 		.collect()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn filter(value: &str) -> CustomFilter {
+		CustomFilter {
+			env: filter_from_value(value).expect("a valid log filter"),
+			spans: span_filters_from_value(value).into_iter().collect(),
+		}
+	}
+
+	/// The subscriber reports the most verbose level its filters admit.
+	/// `init` sets `log`'s max level from that hint, so a subscriber with no
+	/// hint makes every `log` record of every dependency reach the filters,
+	/// whatever the configured level.
+	#[test]
+	fn the_subscriber_reports_the_level_its_filters_admit() {
+		for (value, expected) in [
+			("error", LevelFilter::ERROR),
+			("warn", LevelFilter::WARN),
+			("info", LevelFilter::INFO),
+			("debug", LevelFilter::DEBUG),
+			("trace", LevelFilter::TRACE),
+			("surrealdb=info,[executor]=trace", LevelFilter::TRACE),
+		] {
+			for format in [LogFormat::Text, LogFormat::Json] {
+				for stdout_logs in [true, false] {
+					let (subscriber, _handles) = builder()
+						.with_filter(filter(value))
+						.with_log_format(format)
+						.with_stdout_logs(stdout_logs)
+						.build()
+						.expect("build the subscriber");
+					assert_eq!(
+						subscriber.max_level_hint(),
+						Some(expected),
+						"--log {value}, {format:?}, stdout_logs: {stdout_logs}"
+					);
+				}
+			}
+		}
+	}
 }

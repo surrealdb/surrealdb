@@ -22,8 +22,8 @@
 //! without a custom resolver.
 
 use std::error::Error;
+#[cfg(feature = "http")]
 use std::net::IpAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use ipnet::IpNet;
@@ -37,31 +37,6 @@ use crate::dbs::capabilities::{NetTarget, Targets};
 pub(crate) struct NetFilter {
 	pub(crate) allow: Targets<NetTarget>,
 	pub(crate) deny: Targets<NetTarget>,
-}
-
-/// Returns `true` for IP addresses that belong to private, loopback, link-local,
-/// or other special-use ranges defined in the IANA Special-Purpose Address
-/// Registries (RFC 5735 / RFC 6890 / RFC 4193 / RFC 3513).
-fn is_private_ip(ip: IpAddr) -> bool {
-	match ip.to_canonical() {
-		IpAddr::V4(v4) => {
-			v4.is_loopback()      // 127.0.0.0/8
-				|| v4.is_private()    // 10/8, 172.16/12, 192.168/16
-				|| v4.is_link_local() // 169.254.0.0/16
-				|| v4.is_broadcast()  // 255.255.255.255
-				|| v4.is_unspecified() // 0.0.0.0
-				// Shared address space (RFC 6598): 100.64.0.0/10
-				|| (u32::from(v4) & 0xFFC0_0000) == 0x6440_0000
-		}
-		IpAddr::V6(v6) => {
-			v6.is_loopback()       // ::1
-				|| v6.is_unspecified() // ::
-				// Unique local (fc00::/7)
-				|| (v6.segments()[0] & 0xFE00) == 0xFC00
-				// Link-local (fe80::/10)
-				|| (v6.segments()[0] & 0xFFC0) == 0xFE80
-		}
-	}
 }
 
 /// A `reqwest` DNS resolver that enforces network capabilities at the IP level.
@@ -87,17 +62,19 @@ impl Resolve for FilteringResolver {
 		let filter = Arc::clone(&self.filter);
 		let name_str = name.as_str().to_string();
 		Box::pin(async move {
-			// Check the domain name (if any) matches the allowlist
-			let name_target = NetTarget::from_str(&name_str)
+			// Check the domain name (if any) matches the allowlist. The name is
+			// read as a host, never through the rule parser, so a name spelled
+			// like a wildcard rule is matched as the one host it is.
+			let parsed_host = url::Host::parse(&name_str)
 				.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
+			let name_target = NetTarget::Host(NetTarget::canonical_host(parsed_host), None);
 			let name_is_allowed =
 				filter.allow.matches(&name_target) && !filter.deny.matches(&name_target);
 			// If the domain name itself is not allowed, return an error
 			if !name_is_allowed {
-				return Err(
-					Box::new(crate::err::Error::NetTargetNotAllowed(name_target.to_string()))
-						as Box<dyn Error + Send + Sync>,
-				);
+				return Err(Box::new(crate::dbs::capabilities::Error::NetTargetNotAllowed(
+					name_target.to_string(),
+				)) as Box<dyn Error + Send + Sync>);
 			}
 			// Resolve the addresses
 			let addrs: Vec<std::net::SocketAddr> = lookup_host((name_str, 0_u16))
@@ -110,7 +87,8 @@ impl Resolve for FilteringResolver {
 			let mut allowed = Vec::new();
 			let mut first_denied = None;
 			for addr in addrs {
-				let target = IpNet::from(addr.ip());
+				let ip = addr.ip().to_canonical();
+				let target = IpNet::from(ip);
 				let ip_target = NetTarget::IPNet(target);
 				if filter.deny.matches(&ip_target) {
 					// Explicitly denied by configuration.
@@ -118,12 +96,24 @@ impl Resolve for FilteringResolver {
 						first_denied = Some(target);
 					}
 				} else if !matches!(filter.allow, Targets::All)
-					&& is_private_ip(addr.ip())
+					&& common::net::is_special_use_ip(addr.ip())
 					&& !filter.allow.matches(&ip_target)
 				{
-					// A private/special IP that is not explicitly listed in the
+					// A special-use address that is not explicitly listed in the
 					// allow rules is blocked even when the originating hostname
-					// was allowed.  Skipped when `allow_net = all`.
+					// was allowed. Skipped when `allow_net = all`.
+					//
+					// The predicate is shared with the Surrealism DNS shim, which
+					// filters what a guest's `wasi:sockets` lookup hands back; the
+					// two enforcement points have to answer identically or a module
+					// reaches what a query cannot. Its membership is the whole IANA
+					// special-purpose registry, which is wider than "private" — the
+					// documentation blocks and the multicast ranges are in it too.
+					// Deliberately over-broad: refusing an address that is merely
+					// unusual costs a connection that almost certainly should not
+					// have been made, and admitting one that is not is an SSRF. A
+					// deployment that needs one of these names it in `--allow-net`,
+					// which is what the clause above checks.
 					if first_denied.is_none() {
 						first_denied = Some(target);
 					}
@@ -135,24 +125,82 @@ impl Resolve for FilteringResolver {
 			if allowed.is_empty()
 				&& let Some(denied) = first_denied
 			{
-				return Err(Box::new(crate::err::Error::NetTargetNotAllowed(denied.to_string()))
-					as Box<dyn Error + Send + Sync>);
+				return Err(Box::new(crate::dbs::capabilities::Error::NetTargetNotAllowed(
+					denied.to_string(),
+				)) as Box<dyn Error + Send + Sync>);
 			}
 			Ok(Box::new(allowed.into_iter()) as Addrs)
 		}) as Resolving
 	}
 }
 
+/// Resolves a [`NetTarget`] to the target forms its addresses must be checked
+/// against.
+///
+/// A `Host` target is resolved via DNS (port 80 when none is given) and each
+/// resolved address yields **two** targets, so callers can check every address a
+/// host actually points at against every rule shape:
+///
+/// * `NetTarget::IPNet` — matched by bare-IP and CIDR rules.
+/// * `NetTarget::Host(<ip>, Some(port))` — matched by port-bearing rules (`--deny-net IP:PORT`),
+///   which parse to `NetTarget::Host(_, Some(_))` and structurally never match an `IPNet`. Without
+///   this form an `IP:PORT` deny rule matched no resolved address at all, so a request to a
+///   hostname that resolves to the denied endpoint escaped it.
+///
+/// An `IPNet` target needs no resolution and yields an empty vector.
+///
+/// This resolves the *request* target, so an IP or CIDR deny rule is enforced
+/// against every address a hostname points at. It does not resolve the *rule*:
+/// a deny rule keyed on a hostname is matched only against the literal request
+/// host (in `check_allowed_net`, before this resolution), so a request
+/// addressed to the IP that hostname resolves to is not caught.
+/// Deny an endpoint by IP/CIDR to block it however it is addressed.
+#[cfg(feature = "http")]
+pub(crate) async fn resolve_net_target(
+	target: &NetTarget,
+) -> Result<Vec<NetTarget>, std::io::Error> {
+	match target {
+		NetTarget::Host(h, p) => {
+			let port = p.unwrap_or(80);
+			let mut out = Vec::new();
+			for a in tokio::net::lookup_host((h.to_string(), port)).await? {
+				let ip = a.ip().to_canonical();
+				out.push(NetTarget::IPNet(ip.into()));
+				out.push(NetTarget::Host(net_target_host_from_ip(ip), Some(port)));
+			}
+			Ok(out)
+		}
+		NetTarget::IPNet(_) => Ok(vec![]),
+		// A wildcard is only ever a rule; a request target is built from one
+		// URL host, so there is nothing to resolve.
+		NetTarget::Wildcard {
+			..
+		} => Ok(vec![]),
+	}
+}
+
+/// Renders an [`IpAddr`] as the [`url::Host`] form a [`NetTarget::Host`] carries,
+/// so a resolved address can be compared against a port-bearing rule whose own
+/// host was written as an IP literal.
+#[cfg(feature = "http")]
+fn net_target_host_from_ip(ip: IpAddr) -> url::Host<String> {
+	// `to_canonical` unwraps `::ffff:a.b.c.d` so a rule written as the IPv4
+	// literal still matches an address delivered in IPv4-mapped form.
+	match ip.to_canonical() {
+		IpAddr::V4(v4) => url::Host::Ipv4(v4),
+		IpAddr::V6(v6) => url::Host::Ipv6(v6),
+	}
+}
+
 #[cfg(test)]
 mod tests {
-	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 	use std::str::FromStr;
 	use std::sync::Arc;
 
 	use reqwest::dns::{Name, Resolve};
 
-	use super::{FilteringResolver, NetFilter, is_private_ip};
-	use crate::dbs::capabilities::{NetTarget, Targets};
+	use super::{FilteringResolver, NetFilter};
+	use crate::dbs::capabilities::{NetTarget, Target, Targets};
 
 	/// Helper: create a `FilteringResolver` with the given allow/deny configuration.
 	fn make_resolver(allow: Targets<NetTarget>, deny: Targets<NetTarget>) -> FilteringResolver {
@@ -198,70 +246,78 @@ mod tests {
 		assert!(result.is_ok(), "Expected resolution to succeed with allow_net = all");
 	}
 
-	#[test]
-	fn test_is_private_ip_loopback() {
-		assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
-		assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(127, 255, 255, 255))));
-		assert!(is_private_ip(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+	// An `IP:PORT` deny rule parses to `NetTarget::Host(_, Some(_))`, which
+	// structurally never matches a `NetTarget::IPNet`, so before the port-bearing
+	// `Host` form was emitted it matched no resolved address and a request to a
+	// hostname resolving to the denied endpoint escaped it. `resolve_net_target`
+	// now emits each resolved address in port-bearing `Host` form so the rule is
+	// enforced against every address the hostname points at.
+	#[tokio::test]
+	#[cfg(feature = "http")]
+	async fn test_net_target_resolve_emits_port_bearing_form() {
+		// `localhost:9999` resolves to the same endpoint an `IP:9999` rule names.
+		let via_name = super::resolve_net_target(&NetTarget::from_str("localhost:9999").unwrap())
+			.await
+			.unwrap();
+		// System configuration decides whether localhost resolves to v4, v6 or
+		// both; requiring one loopback form keeps the test portable.
+		let ipv4_rule = NetTarget::from_str("127.0.0.1:9999").unwrap();
+		let ipv6_rule = NetTarget::from_str("[::1]:9999").unwrap();
+		assert!(
+			via_name.iter().any(|t| ipv4_rule.matches(t))
+				|| via_name.iter().any(|t| ipv6_rule.matches(t)),
+			"a port-bearing IP rule must match a hostname that resolves to it, got: {via_name:?}"
+		);
+		// An IP-literal target resolves to the same two forms, so a port-bearing
+		// IP rule matches the resolved form of its own literal.
+		let via_ip = super::resolve_net_target(&NetTarget::from_str("127.0.0.1:9999").unwrap())
+			.await
+			.unwrap();
+		assert!(
+			via_ip.iter().any(|t| ipv4_rule.matches(t)),
+			"a port-bearing rule must match the resolved form of its own IP literal, got: {via_ip:?}"
+		);
+		// The boundary, asserted so it stays deliberate: only the *request*
+		// target is resolved, never the *rule*. A hostname deny rule is matched
+		// against the literal request host in `check_allowed_net`, so it does not
+		// match the resolved (IP-form) targets here — a request addressed to the
+		// IP a denied hostname resolves to is not caught. Block endpoints by
+		// IP/CIDR, not by hostname.
+		let hostname_rule = NetTarget::from_str("example.com:9999").unwrap();
+		assert!(
+			!via_ip.iter().any(|t| hostname_rule.matches(t)),
+			"a hostname rule matches only the literal request host, not resolved IPs: {via_ip:?}"
+		);
+		// Negative control: the rule must stay port-specific. A different port
+		// on the same host is not covered.
+		let other_port = NetTarget::from_str("127.0.0.1:1234").unwrap();
+		assert!(
+			!via_ip.iter().any(|t| other_port.matches(t)),
+			"a port-bearing rule must not match a different port, got: {via_ip:?}"
+		);
+		// Bare-IP and CIDR rules keep matching: the `IPNet` form is still emitted.
+		let bare = NetTarget::from_str("127.0.0.1").unwrap();
+		assert!(
+			via_ip.iter().any(|t| bare.matches(t)),
+			"a bare-IP rule must still match, got: {via_ip:?}"
+		);
 	}
 
-	#[test]
-	fn test_is_private_ip_rfc1918() {
-		assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))));
-		assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1))));
-		assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(172, 31, 255, 255))));
-		assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
-	}
-
-	#[test]
-	fn test_is_private_ip_link_local() {
-		assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 0, 1))));
-		assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254))));
-		// IPv6 link-local (fe80::/10)
-		assert!(is_private_ip(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1))));
-	}
-
-	#[test]
-	fn test_is_private_ip_shared_address_space() {
-		// 100.64.0.0/10 (RFC 6598)
-		assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(100, 64, 0, 1))));
-		assert!(is_private_ip(IpAddr::V4(Ipv4Addr::new(100, 127, 255, 255))));
-		assert!(!is_private_ip(IpAddr::V4(Ipv4Addr::new(100, 128, 0, 0))));
-	}
-
-	#[test]
-	fn test_is_private_ip_unspecified() {
-		assert!(is_private_ip(IpAddr::V4(Ipv4Addr::UNSPECIFIED)));
-		assert!(is_private_ip(IpAddr::V6(Ipv6Addr::UNSPECIFIED)));
-	}
-
-	#[test]
-	fn test_is_private_ip_ipv6_unique_local() {
-		// fc00::/7
-		assert!(is_private_ip(IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1))));
-		assert!(is_private_ip(IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1))));
-	}
-
-	#[test]
-	fn test_is_private_ip_ipv4_mapped_ipv6() {
-		// IPv4-mapped IPv6 addresses (::ffff:x.x.x.x) must be treated the same
-		// as their IPv4 equivalents after canonicalisation.
-		assert!(is_private_ip(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x7f00, 0x0001)))); // ::ffff:127.0.0.1
-		assert!(is_private_ip(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101)))); // ::ffff:192.168.1.1
-		assert!(is_private_ip(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xac10, 0x0001)))); // ::ffff:172.16.0.1
-		assert!(!is_private_ip(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x0101, 0x0101)))); // ::ffff:1.1.1.1
-	}
-
-	#[test]
-	fn test_is_private_ip_public_addresses() {
-		// Public IPs must not be flagged as private
-		assert!(!is_private_ip(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))));
-		assert!(!is_private_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
-		assert!(!is_private_ip(IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))));
-		assert!(!is_private_ip(IpAddr::V6(Ipv6Addr::new(
-			0x2001, 0x4860, 0x4860, 0, 0, 0, 0, 0x8888
-		))));
-		// 100.128.0.0 is NOT in shared address space (RFC 6598 ends at 100.127.255.255)
-		assert!(!is_private_ip(IpAddr::V4(Ipv4Addr::new(100, 128, 0, 1))));
+	#[tokio::test]
+	#[cfg(feature = "http")]
+	async fn test_net_target_resolve_async() {
+		// This test is dependent on system configuration.
+		// Some systems don't configure localhost to have an ipv6 address, and some
+		// don't resolve it to ipv4 either. We only require at least one loopback
+		// address to be present.
+		let r =
+			super::resolve_net_target(&NetTarget::from_str("localhost").unwrap()).await.unwrap();
+		let has_ipv4 = r.contains(&NetTarget::from_str("127.0.0.1").unwrap());
+		let has_ipv6 = r.contains(&NetTarget::from_str("::1/128").unwrap());
+		assert!(
+			has_ipv4 || has_ipv6,
+			"Expected localhost to resolve to at least 127.0.0.1 or ::1, got: {:?}",
+			r
+		);
 	}
 }

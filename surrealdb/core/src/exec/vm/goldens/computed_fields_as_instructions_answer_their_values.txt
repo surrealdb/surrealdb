@@ -1,0 +1,47 @@
+### owner: SELECT * FROM person ORDER BY id
+{ authored: [comment:1, comment:2], comments: [comment:1, comment:2], doubled: 2, first: 'x', friend_names: ['b', 'c'], friends: [person:2, person:3], id: person:1, label: 'a!', n: 1, name: 'a', pw: 'p1', quad: 4, sees_pw: 'p1', tags: ['x', 'y'], typed: 2 }
+{ authored: [], comments: [], doubled: 4, first: 'none', friend_names: [], friends: [], hidden: true, id: person:2, label: 'b!', n: 2, name: 'b', quad: 8, sees_pw: NONE, typed: 3 }
+{ authored: [comment:3], comments: [comment:3], doubled: 6, first: 'none', friend_names: [], friends: [], id: person:3, label: 'c!', n: 3, name: 'c', pw: 'p3', quad: 12, sees_pw: 'p3', typed: 4 }
+### owner: SELECT comments, authored, friends, friend_names FROM person ORDER BY id
+{ authored: [comment:1, comment:2], comments: [comment:1, comment:2], friend_names: ['b', 'c'], friends: [person:2, person:3] }
+{ authored: [], comments: [], friend_names: [], friends: [] }
+{ authored: [comment:3], comments: [comment:3], friend_names: [], friends: [] }
+### owner: SELECT label, doubled, quad, typed, first FROM person ORDER BY id
+{ doubled: 2, first: 'x', label: 'a!', quad: 4, typed: 2 }
+{ doubled: 4, first: 'none', label: 'b!', quad: 8, typed: 3 }
+{ doubled: 6, first: 'none', label: 'c!', quad: 12, typed: 4 }
+### owner: SELECT sees_pw, pw FROM person ORDER BY id
+{ pw: 'p1', sees_pw: 'p1' }
+{ pw: NONE, sees_pw: NONE }
+{ pw: 'p3', sees_pw: 'p3' }
+### owner: SELECT VALUE comments FROM ONLY person:1
+[comment:1, comment:2]
+### owner: SELECT VALUE friends FROM ONLY person:1
+[person:2, person:3]
+### owner: SELECT * FROM person WHERE doubled > 2 ORDER BY id
+{ authored: [], comments: [], doubled: 4, first: 'none', friend_names: [], friends: [], hidden: true, id: person:2, label: 'b!', n: 2, name: 'b', quad: 8, sees_pw: NONE, typed: 3 }
+{ authored: [comment:3], comments: [comment:3], doubled: 6, first: 'none', friend_names: [], friends: [], id: person:3, label: 'c!', n: 3, name: 'c', pw: 'p3', quad: 12, sees_pw: 'p3', typed: 4 }
+### owner: SELECT id, comments FROM person WHERE array::len(comments) > 0 ORDER BY id
+{ comments: [comment:1, comment:2], id: person:1 }
+{ comments: [comment:3], id: person:3 }
+### record user: SELECT * FROM person ORDER BY id
+{ authored: [comment:1], comments: [comment:1], doubled: 2, first: 'x', friend_names: ['c'], friends: [person:3], id: person:1, label: 'a!', n: 1, name: 'a', quad: 4, sees_pw: NONE, tags: ['x', 'y'], typed: 2 }
+{ authored: [comment:3], comments: [comment:3], doubled: 6, first: 'none', friend_names: [], friends: [], id: person:3, label: 'c!', n: 3, name: 'c', quad: 12, sees_pw: NONE, typed: 4 }
+### record user: SELECT comments, authored, friends, friend_names FROM person ORDER BY id
+{ authored: [comment:1], comments: [comment:1], friend_names: ['c'], friends: [person:3] }
+{ authored: [comment:3], comments: [comment:3], friend_names: [], friends: [] }
+### record user: SELECT label, doubled, quad, typed, first FROM person ORDER BY id
+{ doubled: 2, first: 'x', label: 'a!', quad: 4, typed: 2 }
+{ doubled: 6, first: 'none', label: 'c!', quad: 12, typed: 4 }
+### record user: SELECT sees_pw, pw FROM person ORDER BY id
+{ pw: NONE, sees_pw: NONE }
+{ pw: NONE, sees_pw: NONE }
+### record user: SELECT VALUE comments FROM ONLY person:1
+[comment:1]
+### record user: SELECT VALUE friends FROM ONLY person:1
+[person:3]
+### record user: SELECT * FROM person WHERE doubled > 2 ORDER BY id
+{ authored: [comment:3], comments: [comment:3], doubled: 6, first: 'none', friend_names: [], friends: [], id: person:3, label: 'c!', n: 3, name: 'c', quad: 12, sees_pw: NONE, typed: 4 }
+### record user: SELECT id, comments FROM person WHERE array::len(comments) > 0 ORDER BY id
+{ comments: [comment:1], id: person:1 }
+{ comments: [comment:3], id: person:3 }

@@ -2,9 +2,6 @@
 
 [test]
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 # 0: Info before any buckets
 [[test.results]]
 value = "{  }"

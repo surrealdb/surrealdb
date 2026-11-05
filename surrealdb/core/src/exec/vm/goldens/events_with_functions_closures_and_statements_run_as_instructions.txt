@@ -1,0 +1,185 @@
+### owner: CREATE stock:1 SET n = 1
+{ id: stock:1, n: 1 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f6fd904fbfd0b102 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 4d8378308393dbe8 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 32d37c698711b17a (33 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(1) }), "n": Number(Int(1))}))
+### owner: CREATE stock:2 SET n = 9
+{ id: stock:2, n: 9 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => f6fd984fbfd0be9a (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 19ba84bd1a4f9908 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => b9823a50d6776938 (31 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(2) }), "n": Number(Int(9))}))
+### owner: CREATE stock:3 SET n = 3
+{ id: stock:3, n: 3 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => f6fd8e4fbfd0ad9c (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => a90b52132b55aeec (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 9b19920a0e586ee2 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(3) }), "n": Number(Int(3))}))
+### owner: UPDATE stock:3 SET n = 5
+(no rows)
+keyspace:
+notified:
+### owner: UPDATE stock:3 SET n = 7
+(no rows)
+keyspace:
+notified:
+### owner: UPDATE stock SET n = n + 1
+(no rows)
+keyspace:
+notified:
+### owner: DELETE stock:3
+(no rows)
+keyspace:
+notified:
+### owner: DELETE stock
+(no rows)
+keyspace:
+notified:
+### owner: INSERT INTO stock { id: stock:4, n: 4 }
+{ id: stock:4, n: 4 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x04 => f6fd8d4fbfd0abe9 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => d97d24a38d75b2a8 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 73928540ddead74b (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(4) }), "n": Number(Int(4))}))
+### owner: UPSERT stock:5 SET n = 5
+{ id: stock:5, n: 5 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x05 => f6fd8c4fbfd0aa36 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 0a3c1caae80198e8 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => c65e98028350751c (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(5) }), "n": Number(Int(5))}))
+### owner: FOR $i IN 1..=3 { CREATE stock SET n = $i }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => f6fd904fbfd0b102 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => f6fd8f4fbfd0af4f (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => f6fd8e4fbfd0ad9c (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 4d8378308393dbe8 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => fb20d2665b3ed428 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => a90b52132b55aeec (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 9b19920a0e586ee2 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 32d37c698711b17a (33 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "n": Number(Int(1))}))
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "n": Number(Int(2))}))
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "n": Number(Int(3))}))
+### owner: { DEFINE EVENT extra ON stock THEN (CREATE trail SET kind = 'extra'); CREATE stock:6 SET n = 6; }
+[{ id: stock:6, n: 6 }]
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvstock\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbstock\x00 => affd8db39323a862 (173 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00!evextra\x00 => 3ab1d0c038fd595c (95 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x06 => f6fd8b4fbfd0a883 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 4a9a9a848faa9bd7 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 454b701097694560 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 41951a394e51a13d (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(6) }), "n": Number(Int(6))}))
+### owner: { CREATE stock:7 SET n = 7; REMOVE EVENT udf ON stock; UPDATE stock:7 SET n = 8; }
+[{ id: stock:7, n: 8 }]
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvstock\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbstock\x00 => affd8db39323a862 (173 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00!evudf\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x07 => f6fd994fbfd0c04d (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => e3dcc0f9accc5fe4 (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => e4c31ed15e096bcc (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 9635c91df1e36fa8 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => ab17b7f31247dc9e (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)
+<queued event> => 01952c1f99754c59 (1380 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(7) }), "n": Number(Int(7))}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(7) }), "n": Number(Int(8))}))
+### record user: CREATE stock:1 SET n = 1
+{ id: stock:1, n: 1 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f6fd904fbfd0b102 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 4d8378308393dbe8 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 32d37c698711b17a (33 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(1) }), "n": Number(Int(1))}))
+### record user: CREATE stock:2 SET n = 9
+{ id: stock:2, n: 9 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => f6fd984fbfd0be9a (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 19ba84bd1a4f9908 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => b9823a50d6776938 (31 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(2) }), "n": Number(Int(9))}))
+### record user: CREATE stock:3 SET n = 3
+{ id: stock:3, n: 3 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => f6fd8e4fbfd0ad9c (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => a90b52132b55aeec (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 9b19920a0e586ee2 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(3) }), "n": Number(Int(3))}))
+### record user: UPDATE stock:3 SET n = 5
+(no rows)
+keyspace:
+notified:
+### record user: UPDATE stock:3 SET n = 7
+(no rows)
+keyspace:
+notified:
+### record user: UPDATE stock SET n = n + 1
+(no rows)
+keyspace:
+notified:
+### record user: DELETE stock:3
+(no rows)
+keyspace:
+notified:
+### record user: DELETE stock
+(no rows)
+keyspace:
+notified:
+### record user: INSERT INTO stock { id: stock:4, n: 4 }
+{ id: stock:4, n: 4 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x04 => f6fd8d4fbfd0abe9 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => d97d24a38d75b2a8 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 73928540ddead74b (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(4) }), "n": Number(Int(4))}))
+### record user: UPSERT stock:5 SET n = 5
+{ id: stock:5, n: 5 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x05 => f6fd8c4fbfd0aa36 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 0a3c1caae80198e8 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => c65e98028350751c (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(5) }), "n": Number(Int(5))}))
+### record user: FOR $i IN 1..=3 { CREATE stock SET n = $i }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => f6fd904fbfd0b102 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => f6fd8f4fbfd0af4f (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => f6fd8e4fbfd0ad9c (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 4d8378308393dbe8 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => fb20d2665b3ed428 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => a90b52132b55aeec (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 9b19920a0e586ee2 (31 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 32d37c698711b17a (33 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 466943196deb0195 (36 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "n": Number(Int(1))}))
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "n": Number(Int(2))}))
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "n": Number(Int(3))}))
+### record user: { DEFINE EVENT extra ON stock THEN (CREATE trail SET kind = 'extra'); CREATE stock:6 SET n = 6; }
+error: IAM error: Not enough permissions to perform this action: Not enough permissions to perform this action
+keyspace:
+notified:
+### record user: { CREATE stock:7 SET n = 7; REMOVE EVENT udf ON stock; UPDATE stock:7 SET n = 8; }
+error: IAM error: Not enough permissions to perform this action: Not enough permissions to perform this action
+keyspace:
+notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(7) }), "n": Number(Int(7))}))

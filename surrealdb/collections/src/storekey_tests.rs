@@ -1,3 +1,5 @@
+#![cfg(feature = "storekey")]
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use storekey::{Writer, decode_borrow, encode_vec};
@@ -145,19 +147,39 @@ fn vec_map_storekey_decode_rejects_duplicate_keys() {
 }
 
 #[test]
-fn vec_set_storekey_decode_rejects_descending_elements() {
+fn vec_set_storekey_decode_sorts_descending_elements() {
 	let bytes = storekey_set_bytes_u32(&[2, 1]);
-	assert!(matches!(
-		decode_borrow::<VecSet<u32>>(&bytes),
-		Err(storekey::DecodeError::InvalidFormat)
-	));
+	let set = decode_borrow::<VecSet<u32>>(&bytes).unwrap();
+	assert_eq!(set.iter().copied().collect::<Vec<_>>(), [1, 2]);
 }
 
 #[test]
-fn vec_set_storekey_decode_rejects_duplicate_elements() {
+fn vec_set_storekey_decode_merges_duplicate_elements() {
 	let bytes = storekey_set_bytes_u32(&[1, 1]);
-	assert!(matches!(
-		decode_borrow::<VecSet<u32>>(&bytes),
-		Err(storekey::DecodeError::InvalidFormat)
-	));
+	let set = decode_borrow::<VecSet<u32>>(&bytes).unwrap();
+	assert_eq!(set.iter().copied().collect::<Vec<_>>(), [1]);
+}
+
+/// A map key is written as its own storekey encoding after the entry marker,
+/// so a key whose bytes begin with `0x00` or `0x01` carries only the slice
+/// escape. These bytes are what 3.3 wrote into record and index keys, and
+/// every later release must write and read them unchanged.
+#[test]
+fn vec_map_storekey_keys_starting_with_escaped_bytes_keep_their_encoding() {
+	let vm: VecMap<String, u32> =
+		[("\x00a".into(), 6u32), ("\x01a".into(), 7), ("b".into(), 8)].into_iter().collect();
+	let bytes = encode_vec(&vm).unwrap();
+	let expected: Vec<u8> = [
+		&[1u8, 0, b'a', 0][..],
+		&6u32.to_be_bytes(),
+		&[1, 1, b'a', 0],
+		&7u32.to_be_bytes(),
+		&[b'b', 0],
+		&8u32.to_be_bytes(),
+		&[0],
+	]
+	.concat();
+	assert_eq!(bytes, expected);
+	let decoded: VecMap<String, u32> = decode_borrow(&bytes).unwrap();
+	assert_eq!(decoded, vm);
 }

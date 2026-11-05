@@ -1,0 +1,1 @@
+DEFINE FIELD author ON post REFERENCE MATERIALISE INTO author.posts;

@@ -96,12 +96,10 @@ impl<'js> FromJs<'js> for QueryVariables {
 impl Query {
 	#[qjs(constructor)]
 	pub fn new(ctx: Ctx<'_>, text: String, variables: Opt<QueryVariables>) -> Result<Self> {
-		let query = syn::expr(&text)
-			.map_err(|e| {
-				let error_text = format!("{}", e);
-				Exception::throw_type(&ctx, &error_text)
-			})?
-			.into();
+		let query = syn::expr(&text).map_err(|e| {
+			let error_text = format!("{}", e);
+			Exception::throw_type(&ctx, &error_text)
+		})?;
 		let vars = variables.into_inner().map(|x| x.0);
 		Ok(Query {
 			query,

@@ -1,0 +1,110 @@
+use std::fmt;
+use std::fmt::Display;
+
+use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::val::stored::schema::Stored;
+
+/// The language a [`Tokenizer::Segment`] segments with.
+///
+/// Separate from [`crate::expr::Language`], which selects a Snowball stemming
+/// algorithm: the two vocabularies do not overlap. Snowball strips suffixes and
+/// has no CJK algorithms, while these languages are segmented by
+/// dictionary-driven morphological analysis and have no stemmer. Keeping them
+/// apart makes `SNOWBALL(KOREAN)` and `SEGMENT(ENGLISH)` unrepresentable rather
+/// than merely rejected.
+#[revisioned(revision = 1)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub enum SegmentLanguage {
+	#[stored(n = 1)]
+	Chinese,
+	#[stored(n = 2)]
+	Japanese,
+	#[stored(n = 3)]
+	Korean,
+}
+
+impl SegmentLanguage {
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Chinese => "CHINESE",
+			Self::Japanese => "JAPANESE",
+			Self::Korean => "KOREAN",
+		}
+	}
+}
+
+impl Display for SegmentLanguage {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.write_str(self.as_str())
+	}
+}
+
+#[revisioned(revision = 2)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub enum Tokenizer {
+	#[stored(n = 1)]
+	Blank,
+	#[stored(n = 2)]
+	Camel,
+	#[stored(n = 3)]
+	Class,
+	#[stored(n = 4)]
+	Punct,
+	/// Splits a span into words using a morphological dictionary.
+	///
+	/// Unlike the character-class tokenizers, which decide a boundary from the
+	/// pair of characters around it, this one needs the whole span at once: the
+	/// boundaries come from a lattice search over dictionary entries. It
+	/// therefore runs after the character-class tokenizers have produced spans,
+	/// segmenting each one further.
+	#[revision(start = 2)]
+	#[stored(n = 5)]
+	Segment(SegmentLanguage),
+}
+
+impl Display for Tokenizer {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Blank => f.write_str("BLANK"),
+			Self::Camel => f.write_str("CAMEL"),
+			Self::Class => f.write_str("CLASS"),
+			Self::Punct => f.write_str("PUNCT"),
+			Self::Segment(l) => write!(f, "SEGMENT({l})"),
+		}
+	}
+}
+
+impl ToSql for Tokenizer {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match self {
+			Self::Blank => f.push_str("BLANK"),
+			Self::Camel => f.push_str("CAMEL"),
+			Self::Class => f.push_str("CLASS"),
+			Self::Punct => f.push_str("PUNCT"),
+			Self::Segment(l) => write_sql!(f, sql_fmt, "SEGMENT({})", l),
+		}
+	}
+}
+
+impl ToSql for SegmentLanguage {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(self.as_str())
+	}
+}
+
+/// Writes tokenizer keywords separated by commas (no spaces), as in `TOKENIZERS BLANK,CAMEL`.
+pub fn write_tokenizers_sql<I>(f: &mut String, sql_fmt: SqlFormat, tokenizers: I)
+where
+	I: IntoIterator<Item = Tokenizer>,
+{
+	for (i, t) in tokenizers.into_iter().enumerate() {
+		if i > 0 {
+			f.push(',');
+		}
+		t.fmt_sql(f, sql_fmt);
+	}
+}

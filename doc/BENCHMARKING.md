@@ -67,14 +67,12 @@ The workflow tests multiple SurrealDB configurations:
 ### Networked Benchmarks
 These benchmarks test SurrealDB as a server using the binary built from your PR:
 1. **Memory:** SurrealDB server with in-memory storage (`surrealdb-memory`)
-2. **RocksDB:** SurrealDB server with RocksDB persistent storage (`surrealdb-rocksdb`)
-3. **SurrealKV:** SurrealDB server with SurrealKV storage (`surrealdb-surrealkv`)
+2. **SurrealKV:** SurrealDB server with SurrealKV storage (`surrealdb-surrealkv`)
 
 ### Embedded Benchmarks
 These benchmarks test the SurrealDB SDK embedded in the benchmark tool using Cargo patching:
 1. **Embedded Memory:** SurrealDB SDK with in-memory storage (`surrealdb` + `-e memory`)
-2. **Embedded RocksDB:** SurrealDB SDK with RocksDB storage (`surrealdb` + `-e rocksdb`)
-3. **Embedded SurrealKV:** SurrealDB SDK with SurrealKV storage (`surrealdb` + `-e surrealkv`)
+2. **Embedded SurrealKV:** SurrealDB SDK with SurrealKV storage (`surrealdb` + `-e surrealkv`)
 
 ### Other Database Engines
 The workflow also benchmarks:
@@ -115,7 +113,7 @@ Networked SurrealDB benchmarks require an `endpoint` field to specify the connec
 **How endpoints are used:**
 - **Networked SurrealDB** (`surrealdb-*`): Connection URL (e.g., `ws://localhost:8000`, `http://localhost:8000`)
   - Default if omitted: `ws://127.0.0.1:8000`
-- **Embedded SurrealDB** (`surrealdb`): Storage engine specification (e.g., `memory`, `rocksdb:~/data`)
+- **Embedded SurrealDB** (`surrealdb`): Storage engine specification (e.g., `memory`, `surrealkv:~/data`)
   - Default if omitted: `ws://127.0.0.1:8000` (not useful for embedded mode, so always specify!)
 - **SurrealKV/SurrealMX**: Not used (these are local embedded databases)
 
@@ -129,7 +127,7 @@ This flexibility allows you to:
 The workflow uses a **matrix strategy** to test each configuration with multiple key types:
 
 - **Matrix dimensions:**
-  - **Configurations:** 6 (memory, rocksdb, embedded-memory, embedded-rocksdb, surrealkv-local, surrealmx)
+  - **Configurations:** 6 (memory, surrealkv, embedded-memory, embedded-surrealkv, surrealkv-local, surrealmx)
   - **Key types:** 4 (integer, string26, string90, string250)
   - **Total jobs:** 24 (6 configs × 4 key types)
 
@@ -278,7 +276,7 @@ If you want to run fewer benchmarks:
 - Example:
   ```yaml
   exclude:
-    - config: rocksdb
+    - config: surrealkv
       key_type: string250
   ```
 
@@ -292,10 +290,10 @@ The workflow uses a **three-phase architecture** with shared binary builds:
 
 1. **build-surrealdb-binaries** (matrix job: 2 parallel builds)
    - Builds SurrealDB binaries with **minimal features** for each storage type
-   - Matrix dimensions: 2 configs (memory, rocksdb)
+   - Matrix dimensions: 2 configs (memory, surrealkv)
    - Features per build:
      - `memory`: `--no-default-features --features "storage-mem,http"`
-     - `rocksdb`: `--no-default-features --features "storage-rocksdb,http"`
+     - `surrealkv`: `--no-default-features --features "storage-surrealkv,http"`
    - Uploads binaries as artifacts: `surreal-binary-{config}`
    - Timeout: 15 minutes per build
    - **Expected time: ~3-4 minutes per build** (parallel)
@@ -346,7 +344,7 @@ The workflow ensures all benchmarks test your PR's code through **shared build j
    - The `build-surrealdb-binaries` job builds minimal-feature binaries from your PR
    - Each binary includes only the features needed for its storage type:
      - `memory`: In-memory storage + HTTP server
-     - `rocksdb`: RocksDB storage + HTTP server
+     - `surrealkv`: SurrealKV storage + HTTP server
    - Binaries are uploaded as artifacts and downloaded by benchmark jobs
    - This ensures networked benchmarks test your PR's server code
 
@@ -359,13 +357,13 @@ The workflow ensures all benchmarks test your PR's code through **shared build j
 
 #### Benchmark Phase
 
-**Networked Benchmarks (memory, rocksdb):**
+**Networked Benchmarks (memory, surrealkv):**
 1. Download storage-specific SurrealDB binary from build phase
 2. Start local SurrealDB server using the downloaded binary
 3. Download and run crud-bench binary (which also uses your PR's SDK)
 4. crud-bench connects to local server via `ws://localhost:8000`
 
-**Embedded Benchmarks (embedded-memory, embedded-rocksdb, surrealkv-local, surrealmx):**
+**Embedded Benchmarks (embedded-memory, embedded-surrealkv, surrealkv-local, surrealmx):**
 1. Download crud-bench binary from build phase (linked against your PR's SDK)
 2. Run crud-bench with embedded storage (no server needed)
 3. Benchmarks execute entirely within the SDK from your PR

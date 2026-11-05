@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ORM compatibility — nightly measurement on main
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Runs the targeted harness and the upstream Prisma, Drizzle and TypeORM suites
+# against the PostgreSQL wire listener and a PostgreSQL 18.4 control, and
+# uploads the results. Runs on schedule and manual dispatch only and is not a
+# required check: it measures, it does not gate. Pull requests run the fast
+# subset in the `orm-compat` job of ci.yml.
+# See tests/orm-compat/README.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: ORM compatibility
+
+run-name: "ORM compatibility '${{ github.ref_name }}'"
+
+on:
+  schedule:
+    # Run daily at 3:30 AM UTC
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  orm-compat:
+    name: Harness and upstream suites
+    if: github.ref == 'refs/heads/main'
+    runs-on: runner-amd-16-cores
+    timeout-minutes: 300
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # (Actions must be pinned by commit hash) v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Run the targeted harness
+        run: tests/orm-compat/run.sh harness
+        continue-on-error: true
+
+      - name: Run the upstream suites
+        env:
+          ORM_COMPAT_SUITE_CAP_S: '2400'
+        run: tests/orm-compat/run.sh upstream
+
+      - name: Summarise
+        if: always()
+        run: |
+          if [ -f tests/orm-compat/results/upstream/summary.md ]; then
+            cat tests/orm-compat/results/upstream/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Save results as artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: orm-compat-results
+          path: |
+            tests/orm-compat/results.json
+            tests/orm-compat/reference-results.json
+            tests/orm-compat/cli-results.json
+            tests/orm-compat/results/upstream/
+            target/orm-compat-logs/
+          if-no-files-found: ignore

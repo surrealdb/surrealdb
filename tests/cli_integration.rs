@@ -5,7 +5,6 @@ mod cli_integration {
 	use std::collections::HashMap;
 	use std::fs::File;
 	use std::io::Write;
-	#[cfg(unix)]
 	use std::time;
 
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
@@ -25,42 +24,539 @@ mod cli_integration {
 	use super::common::{self, PASS, StartServerArguments, USER};
 	use crate::remove_debug_info;
 
+	/// `<semver> for <os> on <arch>`, with a newline, and nothing else.
+	fn assert_release(text: &str) -> String {
+		let text = remove_debug_info(text.to_owned());
+		let version = text.split(' ').next().unwrap_or_default().to_owned();
+		assert!(semver::Version::parse(&version).is_ok(), "{text}");
+		assert_eq!(
+			text,
+			format!("{version} for {} on {}\n", std::env::consts::OS, std::env::consts::ARCH)
+		);
+		version
+	}
+
 	#[test]
 	fn version_command() {
-		common::run("version").output().unwrap();
+		assert_release(&common::run("version").output().unwrap());
+	}
+
+	/// `-v`, `--version` and the hidden `-V` print the release alone, the same
+	/// text as `version`, with no command and nothing on stderr.
+	#[test]
+	fn version_flags_print_the_release() {
+		let version = remove_debug_info(common::run("version").output().unwrap());
+		for args in ["-v", "--version", "-V", "--log debug --version"] {
+			let mut child = common::run(args);
+			let text = child.output().unwrap();
+			assert_release(&text);
+			assert_eq!(remove_debug_info(text), version, "{args}");
+			assert_eq!(child.stderr(), "", "{args}");
+		}
+	}
+
+	/// The flags work the same through the Surreal CLI, and `--version` runs
+	/// even where an environment variable gives clap a value.
+	#[test]
+	fn version_flag_through_the_launcher() {
+		let vars = HashMap::from([
+			("SURREAL_INVOKED_AS".to_owned(), "surreal db".to_owned()),
+			("SURREAL_ONLINE_VERSION_CHECK".to_owned(), "false".to_owned()),
+		]);
+		let text = common::run_internal::<String>("--version", None, Some(vars)).output().unwrap();
+		assert_release(&text);
+	}
+
+	/// Run the CLI as the Surreal CLI launcher would, with `SURREAL_INVOKED_AS`
+	/// set to `invoked_as`, or as a standalone install when it is `None`.
+	fn run_invoked_as(args: &str, invoked_as: Option<&str>) -> common::Child {
+		let vars = invoked_as.map(|invoked_as| {
+			HashMap::from([("SURREAL_INVOKED_AS".to_owned(), invoked_as.to_owned())])
+		});
+		common::run_internal::<String>(args, None, vars)
+	}
+
+	/// Run the command to completion, asserting it fails, and return its stderr.
+	/// Its stdout must carry nothing but the debug-build banner.
+	fn failure_stderr(mut child: common::Child) -> String {
+		assert!(child.output().is_err(), "the command should fail");
+		assert_eq!(remove_debug_info(child.stdout()).trim(), "", "nothing belongs on stdout");
+		child.stderr()
+	}
+
+	/// `surreal db` alone, as the Surreal CLI runs it, shows the help: the same
+	/// help `surreal help` prints, on stdout, exiting 0, even when an
+	/// environment variable bound to an argument — `SURREAL_ONLINE_VERSION_CHECK`,
+	/// which some Surreal CLI versions set — gives clap a value, so it does not
+	/// see the command line as empty.
+	#[test]
+	fn a_bare_invocation_shows_the_help_whatever_the_environment() {
+		let vars = HashMap::from([
+			("SURREAL_INVOKED_AS".to_owned(), "surreal db".to_owned()),
+			("SURREAL_ONLINE_VERSION_CHECK".to_owned(), "false".to_owned()),
+		]);
+		let bare = common::run_internal::<String>("", None, Some(vars.clone()))
+			.output()
+			.expect("a bare invocation shows the help and exits 0");
+		let help = common::run_internal::<String>("help", None, Some(vars))
+			.output()
+			.expect("`help` exits 0");
+		let bare = remove_debug_info(bare);
+		assert!(
+			bare.starts_with("Start, query, import and export SurrealDB from the command line"),
+			"{bare}"
+		);
+		assert!(bare.contains("Usage: surreal db"), "{bare}");
+		assert_eq!(
+			bare,
+			remove_debug_info(help),
+			"a bare invocation should print what `help` does"
+		);
+	}
+
+	/// A standalone install is told how to move to the Surreal CLI, with this
+	/// platform's install command. The message's full text is pinned by the
+	/// unit tests in `upgrade.rs`.
+	#[test]
+	fn upgrade_standalone_explains_how_to_move_to_the_surreal_cli() {
+		let stderr = failure_stderr(run_invoked_as("upgrade", None));
+		assert!(stderr.starts_with("Upgrading SurrealDB has moved to the Surreal CLI"), "{stderr}");
+		let install = if cfg!(windows) {
+			"irm https://download.surrealdb.com/cli/launcher/install.ps1 | iex\n"
+		} else {
+			"curl -sSf https://download.surrealdb.com/cli/launcher/install.sh | sh\n"
+		};
+		assert!(stderr.contains(install), "{stderr}");
 	}
 
 	#[test]
-	fn version_flag_short() {
-		common::run("-V").output().unwrap();
+	fn upgrade_removal_step_names_this_executable() {
+		let stderr = failure_stderr(run_invoked_as("upgrade", None));
+		let line = stderr
+			.lines()
+			.find(|line| line.contains("1. Remove this executable:"))
+			.expect("a removal step");
+		let exe = format!("surreal{}", std::env::consts::EXE_SUFFIX);
+		assert!(line.trim_end().trim_end_matches(['"', '\'']).ends_with(&exe), "{line}");
 	}
 
 	#[test]
-	fn version_flag_long() {
-		common::run("--version").output().unwrap();
+	fn upgrade_through_the_launcher_points_at_its_upgrade() {
+		let stderr = failure_stderr(run_invoked_as("upgrade", Some("surreal db")));
+		assert_eq!(
+			stderr.trim(),
+			"Upgrading is done by the Surreal CLI; run `surreal upgrade db`."
+		);
 	}
 
-	#[cfg(feature = "surrealism")]
 	#[test]
-	fn module_version_command() {
-		let output = common::run("module version").output().unwrap();
-		assert!(output.contains(surrealism_runtime::SDK_VERSION));
+	fn upgrade_accepts_its_options() {
+		for args in [
+			"upgrade --nightly",
+			"upgrade --alpha",
+			"upgrade --beta",
+			"upgrade --version 2.3.1",
+			"upgrade --version v3.0.0 --dry-run",
+		] {
+			let stderr = failure_stderr(run_invoked_as(args, Some("surreal db")));
+			assert_eq!(
+				stderr.trim(),
+				"Upgrading is done by the Surreal CLI; run `surreal upgrade db`.",
+				"`{args}` should explain, not fail to parse"
+			);
+		}
 	}
 
-	#[cfg(feature = "surrealism")]
 	#[test]
-	fn module_version_flag_short() {
-		let output = common::run("module -V").output().unwrap();
-		assert!(output.contains("Surrealism command-line interface"));
-		assert!(output.contains(surrealism_runtime::SDK_VERSION));
+	fn online_version_check_is_accepted() {
+		common::run("--online-version-check version").output().unwrap();
+		let vars = HashMap::from([("SURREAL_ONLINE_VERSION_CHECK".to_owned(), "false".to_owned())]);
+		common::run_internal::<String>("version", None, Some(vars)).output().unwrap();
 	}
 
-	#[cfg(feature = "surrealism")]
 	#[test]
-	fn module_version_flag_long() {
-		let output = common::run("module --version").output().unwrap();
-		assert!(output.contains("Surrealism command-line interface"));
-		assert!(output.contains(surrealism_runtime::SDK_VERSION));
+	fn usage_names_the_executable() {
+		let output = run_invoked_as("start --help", None).output().unwrap();
+		assert!(output.contains("Usage: surreal start "), "{output}");
+	}
+
+	#[test]
+	fn usage_names_the_launcher_command() {
+		let output = run_invoked_as("start --help", Some("surreal db")).output().unwrap();
+		assert!(output.contains("Usage: surreal db start "), "{output}");
+		let output = run_invoked_as("--help", Some("surreal db")).output().unwrap();
+		assert!(output.contains("Usage: surreal db [OPTIONS] <COMMAND>"), "{output}");
+	}
+
+	/// The install line the standalone explanations end with.
+	fn launcher_install() -> &'static str {
+		if cfg!(windows) {
+			"irm https://download.surrealdb.com/cli/launcher/install.ps1 | iex"
+		} else {
+			"curl -sSf https://download.surrealdb.com/cli/launcher/install.sh | sh"
+		}
+	}
+
+	/// Every old spelling of the extension tooling says how to install
+	/// `surreal ext`, naming what was typed, and runs nothing.
+	#[test]
+	fn extension_standalone_says_how_to_install_surreal_ext() {
+		let install = launcher_install();
+		for spelling in ["extension", "module", "mod"] {
+			let expected = format!(
+				"`surreal {spelling}` has moved to `surreal ext` in the Surreal CLI. Install it with: {install}\nthen run `surreal ext …`.\n"
+			);
+			for rest in ["", " version", " build --debug -o demo.surli .", " install color"] {
+				let args = format!("{spelling}{rest}");
+				let stderr = failure_stderr(run_invoked_as(&args, None));
+				assert_eq!(stderr, expected, "`{args}`");
+			}
+		}
+	}
+
+	/// `surreal ext` is already the new spelling; only where it runs moved.
+	#[test]
+	fn ext_standalone_says_where_it_runs() {
+		let stderr = failure_stderr(run_invoked_as("ext info x", None));
+		assert_eq!(
+			stderr,
+			format!(
+				"`surreal ext` has moved to the Surreal CLI. Install it with: {}\nthen run `surreal ext …`.\n",
+				launcher_install()
+			)
+		);
+	}
+
+	#[test]
+	fn extension_through_the_launcher_points_at_surreal_ext() {
+		for spelling in ["extension", "ext", "module", "mod"] {
+			for rest in [" build", " --help", " -h", " run --fnc f x.surli"] {
+				let args = format!("{spelling}{rest}");
+				let stderr = failure_stderr(run_invoked_as(&args, Some("surreal db")));
+				assert_eq!(
+					stderr,
+					format!(
+						"`surreal db {spelling}` has moved to `surreal ext`. Run `surreal ext …` instead.\n"
+					),
+					"`{args}`"
+				);
+			}
+		}
+	}
+
+	/// The launcher no longer runs `surreal module` itself, but if anything
+	/// still sets `SURREAL_INVOKED_AS=surreal`, the failure still explains itself.
+	#[test]
+	fn module_explains_itself_whatever_the_launcher_command() {
+		let stderr = failure_stderr(run_invoked_as("module version", Some("surreal")));
+		assert_eq!(
+			stderr,
+			"`surreal module` has moved to `surreal ext`. Run `surreal ext …` instead.\n"
+		);
+	}
+
+	/// Run the command to completion and return its exit code.
+	fn exit_code(child: &mut common::Child) -> Option<i32> {
+		let _ = child.output();
+		child.status().unwrap().expect("the command has exited").code()
+	}
+
+	/// Run the command to completion, asserting it succeeds with one JSON
+	/// document on stdout and nothing on stderr, and return the document.
+	fn json_success(mut child: common::Child) -> serde_json::Value {
+		let output = child.output();
+		assert!(output.is_ok(), "the command should succeed: {output:?}");
+		assert_eq!(child.stderr(), "", "nothing belongs on stderr");
+		serde_json::from_str(&child.stdout()).expect("stdout is one JSON document")
+	}
+
+	/// Run the command to completion, asserting it exits `code` with nothing on
+	/// stdout and one JSON error envelope on stderr, and return the envelope.
+	fn json_failure(mut child: common::Child, code: i32) -> serde_json::Value {
+		assert_eq!(exit_code(&mut child), Some(code), "{}", child.stderr());
+		assert_eq!(child.stdout(), "", "nothing belongs on stdout");
+		let envelope: serde_json::Value =
+			serde_json::from_str(&child.stderr()).expect("stderr is one JSON document");
+		for key in [
+			"kind",
+			"message",
+			"status",
+			"code",
+			"request_id",
+			"hint",
+			"command",
+			"docs",
+			"retry_after_secs",
+			"exit_code",
+		] {
+			assert!(envelope.get(key).is_some(), "the envelope has no `{key}`: {envelope}");
+		}
+		assert_eq!(envelope["exit_code"], code);
+		envelope
+	}
+
+	/// `version`'s text is the release, the OS and the architecture, and
+	/// `--json` reports the same three values.
+	#[test]
+	fn version_text_and_json_report_the_same_values() {
+		let document = json_success(common::run("version --json"));
+		assert_eq!(document["os"], std::env::consts::OS);
+		assert_eq!(document["arch"], std::env::consts::ARCH);
+		let version = document["version"].as_str().expect("a version string");
+		assert!(semver::Version::parse(version).is_ok(), "{version}");
+		assert!(document.get("server").is_none(), "{document}");
+
+		let text = remove_debug_info(common::run("version").output().unwrap());
+		assert_eq!(
+			text,
+			format!("{version} for {} on {}\n", std::env::consts::OS, std::env::consts::ARCH)
+		);
+	}
+
+	#[test]
+	fn version_json_short_flag() {
+		let document = json_success(common::run("version -j"));
+		assert!(document["version"].is_string(), "{document}");
+	}
+
+	/// Run the command, asserting it succeeds with the version document alone
+	/// on stdout, its keys `arch`, `os` and `version` in that order, and return
+	/// the document.
+	fn version_document(args: &str) -> serde_json::Value {
+		let mut child = common::run(args);
+		assert!(child.output().is_ok(), "`{args}` should succeed");
+		assert_eq!(child.stderr(), "", "{args}");
+		let stdout = child.stdout();
+		let keys: Vec<_> = stdout
+			.lines()
+			.filter_map(|line| line.trim().strip_prefix('"'))
+			.filter_map(|line| line.split('"').next())
+			.collect();
+		assert_eq!(keys, ["arch", "os", "version"], "{args}: {stdout}");
+		serde_json::from_str(&stdout).expect("stdout is one JSON document")
+	}
+
+	/// `--version --json`, in either order and either spelling, prints the
+	/// same document as `version --json`.
+	#[test]
+	fn version_flag_json_is_the_version_document() {
+		let expected = version_document("version --json");
+		for args in ["--version --json", "--json --version", "-v -j", "-j -v", "-V --json"] {
+			assert_eq!(version_document(args), expected, "{args}");
+		}
+	}
+
+	/// The root's `--json` goes with `--version`: before a command it is a
+	/// usage error, as it was before the root took it.
+	#[test]
+	fn root_json_without_the_version_flag_is_a_usage_error() {
+		let envelope = json_failure(common::run("--json version"), 2);
+		assert_eq!(envelope["kind"], "usage");
+		assert_eq!(envelope["command"], "surreal version --help");
+	}
+
+	/// With `--endpoint`, the text is the server's version alone, and `--json`
+	/// adds it under `server`.
+	#[test(tokio::test)]
+	async fn version_json_with_an_endpoint_reports_the_server() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let text = remove_debug_info(
+			common::run(&format!("version --endpoint http://{addr}")).output().unwrap(),
+		);
+		let document =
+			json_success(common::run(&format!("version --endpoint http://{addr} --json")));
+		assert_eq!(document["server"]["version"], text.trim(), "{document}");
+		assert!(document["version"].is_string(), "{document}");
+	}
+
+	#[test]
+	fn version_json_reports_an_unreachable_server_as_the_envelope() {
+		let envelope = json_failure(common::run("version --endpoint http://127.0.0.1:1 --json"), 1);
+		assert_eq!(envelope["kind"], "network");
+	}
+
+	#[test(tokio::test)]
+	async fn is_ready_json_reports_the_endpoint() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let output = remove_debug_info(
+			common::run(&format!("is-ready --endpoint http://{addr}")).output().unwrap(),
+		);
+		assert_eq!(output, "OK\n");
+		for command in ["is-ready", "isready"] {
+			let endpoint = format!("http://{addr}");
+			let document =
+				json_success(common::run(&format!("{command} --endpoint {endpoint} --json")));
+			assert_eq!(document, serde_json::json!({ "ready": true, "endpoint": endpoint }));
+		}
+	}
+
+	#[test]
+	fn is_ready_json_reports_an_unreachable_server_as_the_envelope() {
+		let envelope =
+			json_failure(common::run("is-ready --endpoint http://127.0.0.1:1 --json"), 1);
+		assert_eq!(envelope["kind"], "network");
+		assert_eq!(envelope["command"], serde_json::Value::Null);
+	}
+
+	#[test]
+	fn validate_json_reports_every_file() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+		temp_dir.child("a.surql").write_str("CREATE thing:success;").unwrap();
+		let document = json_success(common::run_in_dir("validate --json", &temp_dir));
+		assert_eq!(
+			document,
+			serde_json::json!({ "valid": true, "files": [{ "path": "a.surql", "valid": true }] })
+		);
+	}
+
+	#[test]
+	fn validate_json_reports_invalid_files_in_the_envelope() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+		temp_dir.child("a.surql").write_str("CREATE thing:success;").unwrap();
+		temp_dir.child("b.surql").write_str("CREATE $thing WHERE value = '';").unwrap();
+		let envelope = json_failure(common::run_in_dir("validate *.surql --json", &temp_dir), 1);
+		assert_eq!(envelope["kind"], "invalid");
+		assert_eq!(envelope["message"], "Some queries failed to validate");
+		let files = envelope["files"].as_array().expect("per-file results");
+		assert_eq!(files.len(), 2, "{envelope}");
+		assert_eq!(files[0], serde_json::json!({ "path": "a.surql", "valid": true }));
+		assert_eq!(files[1]["path"], "b.surql");
+		assert_eq!(files[1]["valid"], false);
+		assert!(files[1]["error"].is_string(), "{envelope}");
+	}
+
+	#[test]
+	fn validate_json_reads_stdin() {
+		let child = common::run("validate --stdin --json").input("CREATE thing:success;");
+		let document = json_success(child);
+		assert_eq!(
+			document,
+			serde_json::json!({ "valid": true, "files": [{ "path": "<stdin>", "valid": true }] })
+		);
+		let child = common::run("validate --stdin --json").input("CREATE $thing WHERE value = '';");
+		let envelope = json_failure(child, 1);
+		assert_eq!(envelope["kind"], "invalid");
+		assert_eq!(envelope["files"][0]["valid"], false);
+	}
+
+	#[test]
+	fn validate_json_reports_no_files_as_the_envelope() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+		let envelope = json_failure(common::run_in_dir("validate --json", &temp_dir), 1);
+		assert_eq!(envelope["kind"], "unknown");
+		assert_eq!(envelope["message"], "No files found");
+	}
+
+	/// Under `--json`, a file that cannot be read is `not_found` when it does
+	/// not exist and `unknown` for any other error, rather than `invalid`.
+	#[test]
+	fn validate_json_names_why_a_file_could_not_be_read() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+		std::fs::create_dir(temp_dir.path().join("a.surql")).unwrap();
+		let envelope = json_failure(common::run_in_dir("validate --json", &temp_dir), 1);
+		assert_eq!(envelope["kind"], "unknown", "{envelope}");
+		assert_eq!(envelope["files"][0]["valid"], false, "{envelope}");
+		#[cfg(unix)]
+		{
+			let temp_dir = assert_fs::TempDir::new().unwrap();
+			let link = temp_dir.path().join("b.surql");
+			std::os::unix::fs::symlink(temp_dir.path().join("missing"), link).unwrap();
+			let envelope = json_failure(common::run_in_dir("validate --json", &temp_dir), 1);
+			assert_eq!(envelope["kind"], "not_found", "{envelope}");
+		}
+	}
+
+	/// A pattern that is not a glob is a usage error under `--json`, exiting 2,
+	/// and without `--json` exits 1.
+	#[test]
+	fn validate_json_reports_a_bad_pattern_as_a_usage_error() {
+		let envelope = json_failure(run_invoked_as("validate [ --json", Some("surreal db")), 2);
+		assert_eq!(envelope["kind"], "usage", "{envelope}");
+		assert_eq!(envelope["command"], "surreal db validate --help", "{envelope}");
+		assert_eq!(exit_code(&mut common::run("validate [")), Some(1));
+	}
+
+	/// Under `--json`, stdout is the document alone however verbose the logs:
+	/// every log line goes to stderr, and a failure leaves stdout empty.
+	#[test]
+	fn json_stdout_carries_no_logs() {
+		let vars = HashMap::from([("SURREAL_LOG".to_owned(), "trace".to_owned())]);
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+		temp_dir.child("a.surql").write_str("CREATE thing:success;").unwrap();
+		let mut child =
+			common::run_internal("validate --json", Some(temp_dir.path()), Some(vars.clone()));
+		assert_eq!(exit_code(&mut child), Some(0), "{}", child.stderr());
+		let document: serde_json::Value =
+			serde_json::from_str(&child.stdout()).expect("stdout is one JSON document");
+		assert_eq!(document["valid"], true, "{document}");
+		assert!(child.stderr().contains("TRACE"), "the logs go to stderr: {}", child.stderr());
+
+		temp_dir.child("b.surql").write_str("CREATE $thing WHERE value = '';").unwrap();
+		for args in ["validate --json", "is-ready --endpoint http://127.0.0.1:1 --json"] {
+			let mut child = common::run_internal(args, Some(temp_dir.path()), Some(vars.clone()));
+			assert_eq!(exit_code(&mut child), Some(1), "{args}: {}", child.stderr());
+			assert_eq!(child.stdout(), "", "{args}: nothing belongs on stdout");
+		}
+	}
+
+	/// A usage error in a command that takes `--json` is the envelope, naming
+	/// that command's help as the launcher's user would type it.
+	#[test]
+	fn a_usage_error_under_json_is_the_envelope() {
+		for (args, command) in [
+			("version --bogus --json", "surreal db version --help"),
+			("is-ready -j --bogus", "surreal db is-ready --help"),
+			("isready --json --bogus", "surreal db is-ready --help"),
+			("validate --stdin --json x.surql", "surreal db validate --help"),
+			("version --endpoint nope --json", "surreal db version --help"),
+		] {
+			let envelope = json_failure(run_invoked_as(args, Some("surreal db")), 2);
+			assert_eq!(envelope["kind"], "usage", "{args}");
+			assert_eq!(envelope["hint"], "See the usage with:", "{args}");
+			assert_eq!(envelope["command"], command, "{args}");
+			let message = envelope["message"].as_str().unwrap();
+			assert!(!message.starts_with("error:"), "{args}: {message}");
+		}
+		let envelope = json_failure(run_invoked_as("version --bogus --json", None), 2);
+		assert_eq!(envelope["message"], "unexpected argument '--bogus' found");
+		assert_eq!(envelope["command"], "surreal version --help");
+	}
+
+	/// Without `--json`, or in a command that does not take it, a usage error
+	/// is clap's text.
+	#[test]
+	fn a_usage_error_without_json_is_text() {
+		for args in
+			["version --bogus", "export --json", "sql --json --bogus", "version --bogus -- --json"]
+		{
+			let mut child = common::run(args);
+			assert_eq!(exit_code(&mut child), Some(2), "{args}");
+			let stderr = child.stderr();
+			assert!(stderr.starts_with("error: "), "{args}: {stderr}");
+		}
+	}
+
+	/// Help never prints a credential an environment variable holds.
+	#[test]
+	fn help_hides_environment_values() {
+		let secret = "s3cr3t-value-in-the-environment";
+		let vars = HashMap::from(
+			[
+				"SURREAL_USER",
+				"SURREAL_PASS",
+				"SURREAL_TOKEN",
+				"SURREAL_KEY",
+				"SURREAL_NAMESPACE",
+				"SURREAL_DATABASE",
+			]
+			.map(|name| (name.to_owned(), secret.to_owned())),
+		);
+		for args in ["sql --help", "import --help", "export --help", "start --help", "--help"] {
+			let output =
+				common::run_internal::<String>(args, None, Some(vars.clone())).output().unwrap();
+			assert!(output.contains("SURREAL_PASS") || args == "--help", "{args}: {output}");
+			assert!(!output.contains(secret), "`{args}` printed a variable's value: {output}");
+		}
 	}
 
 	#[test]
@@ -86,6 +582,201 @@ mod cli_integration {
 	#[test]
 	fn nonexistent_option() {
 		assert!(common::run("version --turbo").output().is_err());
+	}
+
+	/// `--only` deselects every section except the database's own definition,
+	/// and the dump it writes is the same over every transport.
+	///
+	/// The gRPC wire format carries no field for that section, so a client asked
+	/// to leave it out refuses the export rather than answering with it anyway.
+	/// Deselecting it on the caller's behalf would make a plain `--only` a
+	/// transport-dependent command — a dump over HTTP, a refusal and no file at
+	/// all over gRPC — so `--only` leaves that one section alone. Excluding it
+	/// stays available, explicitly, and the refusal then belongs to a caller who
+	/// asked for it.
+	#[test(tokio::test)]
+	async fn export_only_writes_the_same_dump_over_every_transport() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let creds = format!("--user {USER} --pass {PASS}");
+		let ns = Ulid::new();
+		let db = Ulid::new();
+
+		// A clause of the database's own, so the section `--only` must not drop
+		// is one the export actually has something to write.
+		let args =
+			format!("sql --endpoint http://{addr} {creds} --ns {ns} --db {db} --hide-welcome");
+		common::run(&args)
+			.input(&format!("DEFINE DATABASE OVERWRITE `{db}` COMMENT 'kept'; CREATE thing:one;\n"))
+			.output()
+			.unwrap();
+
+		let mut dumps = Vec::new();
+		for scheme in ["http", "grpc"] {
+			let dump = common::tmp_file("only.surql");
+			let args = format!(
+				"export --endpoint {scheme}://{addr} {creds} --ns {ns} --db {db} --only --tables \
+				 thing --records true {dump}"
+			);
+			common::run(&args).output().unwrap_or_else(|err| {
+				panic!("`--only` must not be refused over {scheme}: {err:?}")
+			});
+			dumps.push(std::fs::read_to_string(&dump).unwrap());
+		}
+		assert_eq!(dumps[0], dumps[1], "`--only` wrote a different dump over gRPC than over HTTP");
+		assert!(
+			dumps[0]
+				.contains("DEFINE DATABASE OVERWRITE $session.db COMPATIBILITY 4 COMMENT 'kept'"),
+			"`--only` leaves the database definition selected, so the dump carries it: {}",
+			dumps[0]
+		);
+
+		// Asking for the exclusion is still the caller's to make, and is still
+		// what the gRPC transport cannot express.
+		let dump = common::tmp_file("only-no-db.surql");
+		let args = format!(
+			"export --endpoint http://{addr} {creds} --ns {ns} --db {db} --only --tables thing \
+			 --database-definition false {dump}"
+		);
+		common::run(&args).output().unwrap();
+		assert!(
+			!std::fs::read_to_string(&dump).unwrap().contains("DEFINE DATABASE"),
+			"an explicit exclusion must still drop the section"
+		);
+		let args = format!(
+			"export --endpoint grpc://{addr} {creds} --ns {ns} --db {db} --only --tables thing \
+			 --database-definition false {dump}"
+		);
+		assert!(
+			common::run(&args).output().is_err(),
+			"gRPC carries no field for the exclusion, so asking for it must still be refused"
+		);
+	}
+
+	/// `export` writing to stdout is the dump and nothing else: at the default
+	/// log level the command's own INFO lines go to stderr, so that redirecting
+	/// stdout to a file yields a file `import` reads back. Text outside ASCII
+	/// must come back unchanged.
+	#[test(tokio::test)]
+	async fn export_to_stdout_is_the_dump_alone() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let creds = format!("--user {USER} --pass {PASS}");
+		let ns = Ulid::new();
+		let db = Ulid::new();
+		let db2 = Ulid::new();
+
+		let args =
+			format!("sql --endpoint http://{addr} {creds} --ns {ns} --db {db} --hide-welcome");
+		common::run(&args)
+			.input("CREATE thing:one SET text = '✓ 🧘‍♀️ ⟨x⟩'; CREATE thing:two SET n = 2;\n")
+			.output()
+			.unwrap();
+
+		let args = format!("export --endpoint http://{addr} {creds} --ns {ns} --db {db}");
+		let mut child = common::run(&args);
+		child.output().unwrap();
+		let stdout = remove_debug_info(child.stdout());
+		assert!(
+			!stdout.lines().any(|line| line.contains(" INFO ")),
+			"log lines leaked into the dump on stdout:\n{stdout}"
+		);
+		assert!(stdout.starts_with("-- ---"), "the dump must begin with its own header:\n{stdout}");
+		assert!(child.stderr().contains("exported successfully"));
+
+		let dump = common::tmp_file("stdout-dump.surql");
+		std::fs::write(&dump, &stdout).unwrap();
+		let args = format!("import --endpoint http://{addr} {creds} --ns {ns} --db {db2} {dump}");
+		common::run(&args).output().unwrap_or_else(|err| panic!("{args}: {err:?}"));
+		let args =
+			format!("sql --endpoint http://{addr} {creds} --ns {ns} --db {db2} --hide-welcome");
+		let output = common::run(&args)
+			.input("SELECT VALUE text FROM thing:one; SELECT count() FROM thing GROUP ALL;\n")
+			.output()
+			.unwrap();
+		assert!(output.contains("'✓ 🧘‍♀️ ⟨x⟩'"), "{output}");
+		assert!(output.contains("count: 2"), "{output}");
+	}
+
+	/// `mcp` speaks JSON-RPC over stdout, so at the default log level its INFO
+	/// lines go to stderr and every line on stdout is a JSON-RPC message. A log
+	/// line on stdout (with ANSI colour codes under a terminal) breaks the client
+	/// (surrealdb/surrealdb#6740).
+	#[cfg(feature = "mcp")]
+	#[test(tokio::test)]
+	async fn mcp_stdout_is_json_rpc_alone() {
+		let request = json!({
+			"jsonrpc": "2.0",
+			"id": 1,
+			"method": "initialize",
+			"params": {
+				"protocolVersion": "2025-06-18",
+				"capabilities": {},
+				"clientInfo": { "name": "cli-test", "version": "0.0.0" }
+			}
+		});
+		let mut child = common::run("mcp memory --log info").input(&format!("{request}\n"));
+		let deadline = time::Instant::now() + time::Duration::from_secs(30);
+		while !child.stdout().contains("\"id\":1") && time::Instant::now() < deadline {
+			tokio::time::sleep(time::Duration::from_millis(100)).await;
+		}
+		let child = child.kill();
+		let stdout = remove_debug_info(child.stdout());
+		assert!(stdout.contains("\"id\":1"), "no reply to initialize on stdout:\n{stdout}");
+		for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+			serde_json::from_str::<serde_json::Value>(line)
+				.unwrap_or_else(|_| panic!("a line on stdout is not JSON-RPC: {line:?}"));
+		}
+		assert!(child.stderr().contains(" INFO "), "the log lines belong on stderr");
+	}
+
+	/// A record can hold a value nested deeper than a query may write as a
+	/// literal. Its export is read back by `import` in full, and an import that
+	/// does not apply says so in its exit status rather than reporting success.
+	#[test(tokio::test)]
+	async fn export_of_a_deeply_nested_value_imports_back() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let creds = format!("--user {USER} --pass {PASS}");
+		let ns = Ulid::new();
+		let db = Ulid::new();
+		let db2 = Ulid::new();
+
+		let args =
+			format!("sql --endpoint http://{addr} {creds} --ns {ns} --db {db} --hide-welcome");
+		common::run(&args)
+			.input(
+				"DEFINE TABLE a SCHEMALESS; CREATE a:1; DEFINE TABLE t SCHEMALESS; \
+				 CREATE t:deep SET content = {leaf: true}; \
+				 FOR $i IN 0..110 { UPDATE t:deep SET content = {children: [content]} RETURN NONE; }; \
+				 DEFINE TABLE b SCHEMALESS; CREATE b:1;\n",
+			)
+			.output()
+			.unwrap();
+
+		let dump = common::tmp_file("deep.surql");
+		let args = format!("export --endpoint http://{addr} {creds} --ns {ns} --db {db} {dump}");
+		common::run(&args).output().unwrap_or_else(|err| panic!("{args}: {err:?}"));
+		let args = format!("import --endpoint http://{addr} {creds} --ns {ns} --db {db2} {dump}");
+		common::run(&args).output().unwrap_or_else(|err| panic!("{args}: {err:?}"));
+
+		let args =
+			format!("sql --endpoint http://{addr} {creds} --ns {ns} --db {db2} --hide-welcome");
+		let output = common::run(&args)
+			.input(
+				"SELECT count() FROM a GROUP ALL; SELECT count() FROM t GROUP ALL; \
+				 SELECT count() FROM b GROUP ALL;\n",
+			)
+			.output()
+			.unwrap();
+		assert_eq!(output.matches("count: 1").count(), 3, "{output}");
+
+		// A dump with a statement that cannot apply fails the command.
+		let bad = common::tmp_file("bad.surql");
+		std::fs::write(
+			&bad,
+			"OPTION IMPORT;\nDEFINE TABLE x SCHEMALESS;\nINSERT [ { id: x:1 } ];\nCREATE x:1;\n",
+		)
+		.unwrap();
+		let args = format!("import --endpoint http://{addr} {creds} --ns {ns} --db {db2} {bad}");
+		assert!(common::run(&args).output().is_err(), "a failed statement must fail the import");
 	}
 
 	#[test(tokio::test)]
@@ -207,8 +898,7 @@ mod cli_integration {
 				CREATE thing:also_success;
 				",
 				)
-				.output()
-				.unwrap();
+				.output_even_on_failure();
 
 			assert!(output.contains("thing:success"), "missing success in {output}");
 			assert!(output.contains("rgument"), "missing argument error in {output}");
@@ -235,8 +925,7 @@ mod cli_integration {
 				COMMIT;
 				",
 				)
-				.output()
-				.unwrap();
+				.output_even_on_failure();
 
 			// BEGIN batch: failed txn, then cancelled (skipped stmts), then explicit COMMIT error
 			// (#7207).
@@ -360,8 +1049,7 @@ mod cli_integration {
 				.input(format!("DEFINE USER {USER} ON ROOT PASSWORD '{PASS}' ROLES OWNER;
                                                 DEFINE USER {USER} ON NAMESPACE PASSWORD '{PASS}' ROLES OWNER;
                                                 DEFINE USER {USER} ON DATABASE PASSWORD '{PASS}' ROLES OWNER;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 		}
 
 		info!("* Pass root auth level and access root info");
@@ -416,8 +1104,7 @@ mod cli_integration {
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"auth level namespace should not be able to access root info: {output}"
@@ -461,8 +1148,7 @@ mod cli_integration {
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"auth level database should not be able to access root info: {output}",
@@ -476,8 +1162,7 @@ mod cli_integration {
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"auth level database should not be able to access namespace info: {output}",
@@ -720,8 +1405,7 @@ mod cli_integration {
 				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_ns}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"namespace token should not be able to access root info: {output}"
@@ -762,8 +1446,7 @@ mod cli_integration {
 				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"database token should not be able to access root info: {output}",
@@ -776,8 +1459,7 @@ mod cli_integration {
 				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"database token should not be able to access namespace info: {output}",
@@ -1057,6 +1739,201 @@ mod cli_integration {
 		}
 	}
 
+	/// A startup import file need not open with `USE`: its statements apply to the
+	/// default namespace and database the server was started with.
+	#[test(tokio::test)]
+	async fn a_startup_import_applies_to_the_default_database() {
+		let import_file = common::tmp_file("no_use.surql");
+		std::fs::write(&import_file, "DEFINE TABLE hi; CREATE hi:1 SET greeting = 'hello';")
+			.unwrap();
+		let (addr, mut server) = common::start_server_with_import_file(&import_file).await.unwrap();
+		let args = format!(
+			"sql --endpoint http://{addr} --user {USER} --pass {PASS} --ns main --db main --hide-welcome"
+		);
+		let output = common::run(&args).input("SELECT * FROM hi;\n").output().expect("success");
+		assert!(output.contains("hello"), "the imported record is missing: {output}");
+		server.finish().unwrap();
+	}
+
+	/// The import runs in the default database the datastore records, which a
+	/// later start with different (or no) default flags must not override.
+	#[test(tokio::test)]
+	async fn a_startup_import_applies_to_the_recorded_default_database() {
+		let path = format!("surrealkv://{}", common::tmp_file("recorded_default.db"));
+		let (_addr, mut first) = common::start_server(common::StartServerArguments {
+			path: Some(path.clone()),
+			args: "--default-namespace acme --default-database prod".to_string(),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		first.finish().unwrap();
+
+		let import_file = common::tmp_file("recorded_default.surql");
+		std::fs::write(&import_file, "DEFINE TABLE hi; CREATE hi:1 SET greeting = 'hello';")
+			.unwrap();
+		let (addr, mut second) = common::start_server(common::StartServerArguments {
+			path: Some(path),
+			import_file: Some(import_file),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		let args = format!(
+			"sql --endpoint http://{addr} --user {USER} --pass {PASS} --ns acme --db prod --hide-welcome"
+		);
+		let output = common::run(&args).input("SELECT * FROM hi;\n").output().expect("success");
+		assert!(output.contains("hello"), "the imported record is missing: {output}");
+		second.finish().unwrap();
+	}
+
+	/// A startup import file that does not parse reads the same on every attempt,
+	/// so the failure must be reported at once rather than after the whole
+	/// startup retry budget, and the instance must not become ready.
+	#[test(tokio::test)]
+	async fn an_unparseable_import_file_is_reported_without_retrying() {
+		let import_file = common::tmp_file("unparseable.surql");
+		std::fs::write(&import_file, "DEFINE USER ON ROOT test PASSWORD 'secret';").unwrap();
+		let server = common::run(&format!(
+			"start --bind 127.0.0.1:0 memory --log trace --user {USER} --pass {PASS} --import-file {import_file}"
+		));
+		let started = time::Instant::now();
+		loop {
+			let output = server.stdout_and_stderr();
+			if output.contains("Startup failed; instance will not become ready") {
+				assert!(
+					!output.contains("Startup complete"),
+					"an instance whose import failed must not become ready:\n{output}"
+				);
+				break;
+			}
+			assert!(
+				started.elapsed() < time::Duration::from_secs(20),
+				"the server kept retrying an import file that can never parse:\n{output}"
+			);
+			tokio::time::sleep(time::Duration::from_millis(100)).await;
+		}
+	}
+
+	/// The shell reads back a record nested forty-eight levels deep over a
+	/// WebSocket, and the session stays usable after it.
+	#[test(tokio::test)]
+	async fn shell_reads_a_deeply_nested_record_over_websocket() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let creds = format!("--user {USER} --pass {PASS}");
+		let (ns, db) = (Ulid::new(), Ulid::new());
+		let mut nested = "{ name: 'first', inner: [] }".to_string();
+		for level in 1..=48 {
+			nested = format!("{{ level: {level}, inner: [{nested}] }}");
+		}
+
+		let args = format!("sql --endpoint ws://{addr} {creds} --ns {ns} --db {db}");
+		let input = format!(
+			"CREATE ws_article:1 CONTENT {nested} RETURN NONE;\nSELECT * FROM ws_article;\nRETURN 'still here';\n"
+		);
+		let output = common::run(&args).input(&input).output().unwrap();
+		assert!(output.contains("'first'"), "the innermost level should be printed: {output}");
+		assert!(output.contains("'still here'"), "the shell should answer after it: {output}");
+		assert!(!output.contains("Failed to deserialise"), "{output}");
+	}
+
+	/// The shell parses each line to validate it and to count the results it
+	/// should expect, then sends the line itself. Rendering the parsed
+	/// statements back instead would put every gap in `ToSql` between the user
+	/// and the server, silently changing what they asked for or sending
+	/// something the server rejects.
+	///
+	/// The probe is a parenthesised equality as a statement of its own, which
+	/// the renderer writes back without its parentheses — the server reads that
+	/// as an assignment and refuses it. The shell must not depend on the
+	/// renderer being faithful, which is what this asserts; the appended
+	/// capture expressions still have to line up with the results.
+	#[test(tokio::test)]
+	async fn shell_sends_the_statement_it_was_given() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let ns = Ulid::new();
+		let db = Ulid::new();
+		let args =
+			format!("sql --endpoint http://{addr} --user {USER} --pass {PASS} --ns {ns} --db {db}");
+
+		info!("* A statement the renderer does not round-trip still reaches the server");
+		{
+			let output =
+				common::run(&args).input("LET $p = 1;\n($p = 1);\n").output().expect("success");
+			assert!(
+				output.contains("true"),
+				"the shell sent something other than what it was given: {output}"
+			);
+		}
+
+		info!("* A LET is still read back into the session");
+		{
+			let output = common::run(&args)
+				.input("LET $x = 41;\nRETURN $x + 1;\n")
+				.output()
+				.expect("success");
+			assert!(output.contains("42"), "the session variable was lost: {output}");
+		}
+
+		info!("* A LET whose name needs escaping is read back too");
+		{
+			let output = common::run(&args)
+				.input("LET $`R-X` = 41;\nRETURN $`R-X` + 1;\n")
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("42"),
+				"the capture expression did not name the variable: {output}"
+			);
+		}
+
+		info!("* A trailing line comment cannot swallow the statements the shell appends");
+		{
+			let output = common::run(&args).input("RETURN 7 -- seven\n").output().expect("success");
+			assert!(output.contains('7'), "the commented line did not run: {output}");
+		}
+
+		info!("* A USE still switches the session");
+		{
+			let db2 = Ulid::new();
+			let output = common::run(&args)
+				.input(&format!("USE DB `{db2}`;\nCREATE ONLY thing:one;\n"))
+				.output()
+				.expect("success");
+			assert!(output.contains("thing:one"), "the USE did not take effect: {output}");
+		}
+	}
+
+	/// A script piping statements into `surreal sql` learns of a failure only
+	/// through the exit status: a statement that errors at runtime and a line that
+	/// does not parse must both end the command unsuccessfully, and a clean run
+	/// must still succeed.
+	#[test(tokio::test)]
+	async fn sql_with_piped_input_exits_nonzero_when_a_statement_fails() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let ns = Ulid::new();
+		let db = Ulid::new();
+		let args = format!(
+			"sql --endpoint http://{addr} --user {USER} --pass {PASS} --ns {ns} --db {db} --hide-welcome"
+		);
+
+		info!("* A runtime error fails the command");
+		let mut child = common::run(&args).input("THROW 'boom';\n");
+		assert!(child.output().is_err(), "a failed statement must not exit 0");
+
+		info!("* A statement that fails after earlier ones succeeded fails the command");
+		let mut child = common::run(&args).input("CREATE a:1;\nTHROW 'boom';\nCREATE a:2;\n");
+		assert!(child.output().is_err(), "a later failure must not be masked by earlier successes");
+
+		info!("* A parse error fails the command");
+		let mut child = common::run(&args).input("SELEKT 1;\n");
+		assert!(child.output().is_err(), "a parse error must not exit 0");
+
+		info!("* A clean run still succeeds");
+		let mut child = common::run(&args).input("CREATE b:1;\nRETURN 1;\n");
+		child.output().expect("success");
+	}
+
 	#[test(tokio::test)]
 	async fn node() {
 		// Commands without credentials when auth is disabled, should succeed
@@ -1294,14 +2171,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN http::get('http://127.0.0.1/');\n\n";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(
 				output.contains("Access to network target '127.0.0.1:80' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(
 				output.contains("Scripting functions are not allowed")
 					|| output.contains("Embedded functions are not enabled"),
@@ -1328,14 +2205,14 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'http::get' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(
 				output.contains("Scripting functions are not allowed")
 					|| output.contains("Embedded functions are not enabled"),
@@ -1361,11 +2238,11 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 
 			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(output.contains("['1']"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -1386,7 +2263,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(
 				output.contains("Scripting functions are not allowed")
 					|| output.contains("Embedded functions are not enabled"),
@@ -1410,7 +2287,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -1433,7 +2310,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -1454,7 +2331,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
@@ -1480,14 +2357,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -1508,14 +2385,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -1536,14 +2413,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -1566,14 +2443,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -1596,14 +2473,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::len' is not allowed"),
 				"unexpected output: {output:?}"
@@ -1627,7 +2504,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
@@ -1647,7 +2524,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
@@ -1667,7 +2544,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output
 					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
@@ -1691,7 +2568,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output
 					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
@@ -1715,7 +2592,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
@@ -1735,7 +2612,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output
 					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
@@ -1760,7 +2637,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
@@ -1781,7 +2658,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output
 					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
@@ -1805,7 +2682,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output
 					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
@@ -1830,7 +2707,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN 1;\n\n";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
@@ -1851,7 +2728,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN 1;\n\n";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(
 				output.contains("Not enough permissions to perform this action"),
 				"unexpected output: {output:?}"
@@ -1875,7 +2752,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN 1;\n\n";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
@@ -1961,12 +2838,14 @@ mod cli_integration {
 		}
 	}
 
-	#[tokio::test]
-	async fn test_slow_query_logging() {
+	/// Runs a query that outlasts the one-second slow-query threshold and binds
+	/// `$public = 'foo'` and `$secret = 'bar'` on a server started with `args`, and
+	/// returns the line the server logged for it.
+	async fn slow_query_log_entry(args: &str) -> String {
 		// Start the server
 		let (addr, mut server) = common::start_server(StartServerArguments {
 			auth: false,
-			args: "--slow-log-threshold=1s --slow-log-param-deny=secret".to_owned(),
+			args: format!("--slow-log-threshold=1s {args}"),
 			..Default::default()
 		})
 		.await
@@ -1987,13 +2866,47 @@ mod cli_integration {
 
 		// Extract the stderr
 		let stderr = server.finish().unwrap().stderr();
+		println!("{stderr}");
 
 		// Check the log is present
-		assert!(stderr.contains("Slow query detected - time: "));
-		assert!(stderr.contains(
-			"s - query: RETURN string::concat(`sleep`(1s200ms), '/', $public, '/', $secret) - params: [ $public='foo' ]"
-		));
-		println!("{stderr}");
+		stderr
+			.lines()
+			.find(|line| line.contains("Slow query detected - time: "))
+			.unwrap_or_else(|| panic!("no slow query entry in:\n{stderr}"))
+			.to_owned()
+	}
+
+	/// A slow-query entry lists the value of a parameter named by
+	/// `--slow-log-param-allow`, unless `--slow-log-param-deny` names it too.
+	#[tokio::test]
+	async fn test_slow_query_logging() {
+		let entry = slow_query_log_entry(
+			"--slow-log-param-allow=public,secret --slow-log-param-deny=secret",
+		)
+		.await;
+		assert!(
+			entry.contains(
+				"s - query: RETURN string::concat(`sleep`(1s200ms), '/', $public, '/', $secret) - params: [ $public='foo' ]"
+			),
+			"{entry}"
+		);
+		assert!(!entry.contains("bar"), "{entry}");
+	}
+
+	/// Without `--slow-log-param-allow` a slow-query entry lists no parameter
+	/// value, with or without a deny list.
+	#[tokio::test]
+	async fn test_slow_query_logging_without_allow_list() {
+		for args in ["", "--slow-log-param-deny=secret"] {
+			let entry = slow_query_log_entry(args).await;
+			assert!(
+				entry.contains(
+					"s - query: RETURN string::concat(`sleep`(1s200ms), '/', $public, '/', $secret) - params: [  ]"
+				),
+				"{args}: {entry}"
+			);
+			assert!(!entry.contains("foo") && !entry.contains("bar"), "{args}: {entry}");
+		}
 	}
 
 	/// `SURREAL_MEMORY_THRESHOLD` with a byte-suffix (e.g. `256m`) must start the

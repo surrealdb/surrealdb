@@ -13,7 +13,7 @@ backend = ["mem"]
 allow-eval-query = ["system"]
 
 [test]
-reason = "Self-referential eval recursion must stay bounded even when each level nests through control-flow operators (IF / FOR) and binding-carrying blocks, not just a bare RETURN. These are planned as deferred operators (IfElsePlan/ForeachPlan/SequencePlan) that re-plan their bodies at runtime; each records the planner's nesting depth and continues the count across the re-entry, so the recursion reaches max_computation_depth and errors cleanly instead of overflowing the native stack on the streaming engine."
+reason = "Self-referential eval recursion must stay bounded even when each level nests through control-flow operators (IF / FOR) and binding-carrying blocks, not just a bare RETURN. These are planned as deferred operators (IfElsePlan/ForeachPlan/SequencePlan) that re-plan their bodies at runtime; each records the planner's nesting depth and continues the count across the re-entry, so the recursion reaches max_computation_depth and errors cleanly instead of overflowing the native stack."
 
 [[test.results]]
 value = "NONE"

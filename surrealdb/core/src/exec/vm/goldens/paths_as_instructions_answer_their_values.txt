@@ -1,0 +1,234 @@
+### owner: SELECT VALUE id.{ name, n } FROM person ORDER BY id
+{ n: 1, name: 'a' }
+{ n: 2, name: 'b' }
+{ n: 3, name: 'c' }
+### owner: SELECT VALUE id.{ name, pw } FROM person ORDER BY id
+{ name: 'a', pw: 'p1' }
+{ name: 'b', pw: NONE }
+{ name: 'c', pw: 'p3' }
+### owner: [person:1, person:2, person:3, person:9].{ name, x: n * 2 }
+[{ name: 'a', x: 2 }, { name: 'b', x: 4 }, { name: 'c', x: 6 }, NONE]
+### owner: (SELECT * FROM person ORDER BY id).{ id, label: name + '!' }
+[{ id: person:1, label: 'a!' }, { id: person:2, label: 'b!' }, { id: person:3, label: 'c!' }]
+### owner: SELECT VALUE author.{ name, pw } FROM comment ORDER BY id
+{ name: 'a', pw: 'p1' }
+{ name: 'b', pw: NONE }
+NONE
+### owner: SELECT VALUE $this.{ author.*, text } FROM comment ORDER BY id
+{ author: { friend: person:2, id: person:1, n: 1, name: 'a', nest: { c: 1, d: 2 }, pw: 'p1', tags: ['x', 'y'] }, text: 'one' }
+{ author: { friend: person:3, hidden: true, id: person:2, n: 2, name: 'b' }, text: 'two' }
+{ text: 'three' }
+### owner: SELECT VALUE { text: text, a: author.{ name } } FROM comment ORDER BY id
+{ a: { name: 'a' }, text: 'one' }
+{ a: { name: 'b' }, text: 'two' }
+{ a: NONE, text: 'three' }
+### owner: person:1.{ nest.{ c, e }, tags }
+{ nest: { c: 1, e: NONE }, tags: ['x', 'y'] }
+### owner: { a: NONE, b: [1, { c: 2 }] }.{ a, b, z }
+{ a: NONE, b: [1, { c: 2 }], z: NONE }
+### owner: [1, [person:1, 'x'], { name: 'o' }].{ name }
+[NONE, [{ name: 'a' }, NONE], { name: 'o' }]
+### owner: 5.{ a }
+NONE
+### owner: SELECT VALUE tags.{ a } FROM person ORDER BY id
+[NONE, NONE]
+NONE
+NONE
+### owner: SELECT VALUE [type::field('name'), type::field('nest.c')] FROM person ORDER BY id
+['a', 1]
+['b', NONE]
+['c', 3]
+### owner: SELECT VALUE id FROM person WHERE type::field('n') > 1 ORDER BY id
+person:2
+person:3
+### owner: SELECT VALUE [type::fields(['name', 'n'])] FROM person ORDER BY id
+[['a', 1]]
+[['b', 2]]
+[['c', 3]]
+### owner: SELECT VALUE [@.id, n] FROM person ORDER BY id
+[person:1, 1]
+[person:2, 2]
+[person:3, 3]
+### owner: SELECT VALUE [@.name, n] FROM person ORDER BY id
+['a', 1]
+['b', 2]
+['c', 3]
+### owner: SELECT VALUE [author, @.author.name] FROM comment ORDER BY id
+[person:1, 'a']
+[person:2, 'b']
+[person:9, NONE]
+### owner: SELECT VALUE comments[WHERE @.id = comment:1] FROM (SELECT id, (SELECT * FROM comment) AS comments FROM person:1)
+[{ author: person:1, id: comment:1, text: 'one' }]
+### owner: SELECT VALUE nest.?.c FROM person ORDER BY id
+1
+NONE
+3
+### owner: SELECT VALUE [nest.?.c, nest.?.d.e, pw.?.len()] FROM person ORDER BY id
+[1, NONE, 2]
+[NONE, NONE, NONE]
+[3, NONE, 2]
+### owner: SELECT VALUE author.?.name FROM comment ORDER BY id
+'a'
+'b'
+NONE
+### owner: [NONE, NULL, { a: 1 }, 5].map(|$v| $v.?.a)
+[NONE, NULL, 1, NONE]
+### owner: { LET $o = { inc: |$x| $x + 1, v: 2 }; RETURN [$o.inc(1), $o.inc($o.v)] }
+[2, 3]
+### owner: { LET $o = { v: 2 }; RETURN $o.nope(1) }
+error: There was a problem running the nope() function. no such method found for the object type
+### owner: RETURN (5).nope()
+error: There was a problem running the nope() function. no such method found for the int type
+### owner: RETURN { f: |$x| $x * 2 }.f(3)
+6
+### owner: SELECT * FROM (BREAK)
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### owner: RETURN [1, CONTINUE]
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### owner: FOR $i IN [1, 2, 3] { IF $i = 2 { BREAK }; CREATE person SET n = $i; }
+error: Invalid statement: Cannot run CREATE on a read only transaction
+### owner: { FOR $i IN [1, 2, 3] { LET $x = [$i, IF $i = 2 { CONTINUE } ELSE { $i }]; }; RETURN 1 }
+1
+### owner: RETURN person:1.{1..3}.friend
+person:1
+### owner: RETURN person:1.{..}.friend
+error: Exceeded the idiom recursion limit of 256.
+### owner: RETURN person:1.{1..3+collect}.friend
+[person:2, person:3, person:1]
+### owner: RETURN person:1.{1..3+collect+inclusive}.friend
+[person:1, person:2, person:3]
+### owner: RETURN person:1.{1..3+path}.friend
+[[person:2, person:3, person:1]]
+### owner: RETURN person:1.{..+shortest=person:3}.friend
+[person:2, person:3]
+### owner: RETURN person:1.{2}.friend.name
+error: Expected a record ID during recursive traversal, but found `'b'`
+### owner: RETURN person:1.{1..2}(.friend).name
+'c'
+### owner: SELECT VALUE id.{1..3+collect}.friend FROM person ORDER BY id
+[person:2, person:3, person:1]
+[person:3, person:1, person:2]
+[person:1, person:2, person:3]
+### owner: RETURN person:1.{1..4}.{ id, next: friend }.next
+person:2
+### owner: RETURN |person:1..3|
+[person:1, person:2]
+### owner: RETURN array::len(|t:5|)
+5
+### owner: SELECT VALUE [|t:1..2|, n] FROM person ORDER BY id
+[[t:1], 1]
+[[t:1], 2]
+[[t:1], 3]
+### owner: RETURN |t:100000000000|
+error: Mock range exceeds allocation limit
+### record user: SELECT VALUE id.{ name, n } FROM person ORDER BY id
+{ n: 1, name: 'a' }
+{ n: 3, name: 'c' }
+### record user: SELECT VALUE id.{ name, pw } FROM person ORDER BY id
+{ name: 'a', pw: NONE }
+{ name: 'c', pw: NONE }
+### record user: [person:1, person:2, person:3, person:9].{ name, x: n * 2 }
+[{ name: 'a', x: 2 }, NONE, { name: 'c', x: 6 }, NONE]
+### record user: (SELECT * FROM person ORDER BY id).{ id, label: name + '!' }
+[{ id: person:1, label: 'a!' }, { id: person:3, label: 'c!' }]
+### record user: SELECT VALUE author.{ name, pw } FROM comment ORDER BY id
+{ name: 'a', pw: NONE }
+NONE
+NONE
+### record user: SELECT VALUE $this.{ author.*, text } FROM comment ORDER BY id
+{ author: { friend: person:2, id: person:1, n: 1, name: 'a', nest: { c: 1, d: 2 }, tags: ['x', 'y'] }, text: 'one' }
+{ text: 'two' }
+{ text: 'three' }
+### record user: SELECT VALUE { text: text, a: author.{ name } } FROM comment ORDER BY id
+{ a: { name: 'a' }, text: 'one' }
+{ a: NONE, text: 'two' }
+{ a: NONE, text: 'three' }
+### record user: person:1.{ nest.{ c, e }, tags }
+{ nest: { c: 1, e: NONE }, tags: ['x', 'y'] }
+### record user: { a: NONE, b: [1, { c: 2 }] }.{ a, b, z }
+{ a: NONE, b: [1, { c: 2 }], z: NONE }
+### record user: [1, [person:1, 'x'], { name: 'o' }].{ name }
+[NONE, [{ name: 'a' }, NONE], { name: 'o' }]
+### record user: 5.{ a }
+NONE
+### record user: SELECT VALUE tags.{ a } FROM person ORDER BY id
+[NONE, NONE]
+NONE
+### record user: SELECT VALUE [type::field('name'), type::field('nest.c')] FROM person ORDER BY id
+['a', 1]
+['c', 3]
+### record user: SELECT VALUE id FROM person WHERE type::field('n') > 1 ORDER BY id
+person:3
+### record user: SELECT VALUE [type::fields(['name', 'n'])] FROM person ORDER BY id
+[['a', 1]]
+[['c', 3]]
+### record user: SELECT VALUE [@.id, n] FROM person ORDER BY id
+[person:1, 1]
+[person:3, 3]
+### record user: SELECT VALUE [@.name, n] FROM person ORDER BY id
+['a', 1]
+['c', 3]
+### record user: SELECT VALUE [author, @.author.name] FROM comment ORDER BY id
+[person:1, 'a']
+[person:2, NONE]
+[person:9, NONE]
+### record user: SELECT VALUE comments[WHERE @.id = comment:1] FROM (SELECT id, (SELECT * FROM comment) AS comments FROM person:1)
+[{ author: person:1, id: comment:1, text: 'one' }]
+### record user: SELECT VALUE nest.?.c FROM person ORDER BY id
+1
+3
+### record user: SELECT VALUE [nest.?.c, nest.?.d.e, pw.?.len()] FROM person ORDER BY id
+[1, NONE, NONE]
+[3, NONE, NONE]
+### record user: SELECT VALUE author.?.name FROM comment ORDER BY id
+'a'
+NONE
+NONE
+### record user: [NONE, NULL, { a: 1 }, 5].map(|$v| $v.?.a)
+[NONE, NULL, 1, NONE]
+### record user: { LET $o = { inc: |$x| $x + 1, v: 2 }; RETURN [$o.inc(1), $o.inc($o.v)] }
+[2, 3]
+### record user: { LET $o = { v: 2 }; RETURN $o.nope(1) }
+error: There was a problem running the nope() function. no such method found for the object type
+### record user: RETURN (5).nope()
+error: There was a problem running the nope() function. no such method found for the int type
+### record user: RETURN { f: |$x| $x * 2 }.f(3)
+6
+### record user: SELECT * FROM (BREAK)
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### record user: RETURN [1, CONTINUE]
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### record user: FOR $i IN [1, 2, 3] { IF $i = 2 { BREAK }; CREATE person SET n = $i; }
+error: Invalid statement: Cannot run CREATE on a read only transaction
+### record user: { FOR $i IN [1, 2, 3] { LET $x = [$i, IF $i = 2 { CONTINUE } ELSE { $i }]; }; RETURN 1 }
+1
+### record user: RETURN person:1.{1..3}.friend
+person:2
+### record user: RETURN person:1.{..}.friend
+person:2
+### record user: RETURN person:1.{1..3+collect}.friend
+[person:2]
+### record user: RETURN person:1.{1..3+collect+inclusive}.friend
+[person:1, person:2]
+### record user: RETURN person:1.{1..3+path}.friend
+[[person:2]]
+### record user: RETURN person:1.{..+shortest=person:3}.friend
+NONE
+### record user: RETURN person:1.{2}.friend.name
+NONE
+### record user: RETURN person:1.{1..2}(.friend).name
+NONE
+### record user: SELECT VALUE id.{1..3+collect}.friend FROM person ORDER BY id
+[person:2]
+[person:1, person:2]
+### record user: RETURN person:1.{1..4}.{ id, next: friend }.next
+person:2
+### record user: RETURN |person:1..3|
+[person:1, person:2]
+### record user: RETURN array::len(|t:5|)
+5
+### record user: SELECT VALUE [|t:1..2|, n] FROM person ORDER BY id
+[[t:1], 1]
+[[t:1], 3]
+### record user: RETURN |t:100000000000|
+error: Mock range exceeds allocation limit

@@ -4,10 +4,10 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::str::FromStr;
 
-use regex::RegexBuilder;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::regex_engine::{self, RegexError};
 use crate::sql::{SqlFormat, ToSql};
 
 pub(crate) const REGEX_TOKEN: &str = "$surrealdb::public::Regex";
@@ -15,35 +15,36 @@ pub(crate) const REGEX_TOKEN: &str = "$surrealdb::public::Regex";
 /// Represents a regular expression in SurrealDB
 ///
 /// A regular expression is a pattern used for matching strings.
-/// This type wraps the `regex::Regex` type and provides custom serialization/deserialization.
+/// This type wraps the engine regex (`regex_engine::Regex`) and provides custom
+/// serialization/deserialization.
 #[derive(Clone)]
-pub struct Regex(pub(crate) ::regex::Regex);
+pub struct Regex(pub(crate) regex_engine::Regex);
 
 impl Regex {
 	/// Returns a reference to the underlying regex
 	///
 	/// Note: This method returns the regex without the '/' delimiters that are used in display.
-	pub fn regex(&self) -> &regex::Regex {
+	pub fn regex(&self) -> &regex_engine::Regex {
 		&self.0
 	}
 
-	/// Convert into the inner regex::Regex
-	pub fn into_inner(self) -> regex::Regex {
+	/// Convert into the inner engine regex
+	pub fn into_inner(self) -> regex_engine::Regex {
 		self.0
 	}
 }
 
-impl From<regex::Regex> for Regex {
-	fn from(regex: regex::Regex) -> Self {
+impl From<regex_engine::Regex> for Regex {
+	fn from(regex: regex_engine::Regex) -> Self {
 		Regex(regex)
 	}
 }
 
 impl FromStr for Regex {
-	type Err = <regex::Regex as FromStr>::Err;
+	type Err = RegexError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Ok(Regex(RegexBuilder::new(&s.replace("\\/", "/")).build()?))
+		Ok(Regex(regex_engine::compile(&s.replace("\\/", "/"), None)?))
 	}
 }
 
@@ -74,7 +75,7 @@ impl Hash for Regex {
 }
 
 impl Deref for Regex {
-	type Target = regex::Regex;
+	type Target = regex_engine::Regex;
 
 	fn deref(&self) -> &Self::Target {
 		&self.0
@@ -143,9 +144,9 @@ impl<'de> Deserialize<'de> for Regex {
 					where
 						E: de::Error,
 					{
-						regex::Regex::from_str(value)
+						regex_engine::compile(value, None)
 							.map(Regex)
-							.map_err(|_| de::Error::custom("invalid regex"))
+							.map_err(|e| de::Error::custom(format_args!("invalid regex: {e}")))
 					}
 				}
 
@@ -170,8 +171,8 @@ mod arb {
 			if src.is_empty() {
 				return Err(::arbitrary::Error::IncorrectFormat);
 			}
-			let regex =
-				RegexBuilder::new(src).build().map_err(|_| ::arbitrary::Error::IncorrectFormat)?;
+			let regex = regex_engine::compile(src, None)
+				.map_err(|_| ::arbitrary::Error::IncorrectFormat)?;
 			Ok(Regex(regex))
 		}
 	}

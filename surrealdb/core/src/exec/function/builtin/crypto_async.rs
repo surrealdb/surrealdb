@@ -1,15 +1,15 @@
-//! Async crypto functions for the streaming executor.
+//! Async crypto functions for the engine.
 //!
 //! These are CPU-intensive crypto functions (argon2, bcrypt, pbkdf2, scrypt)
 //! that are offloaded to a blocking thread pool to avoid blocking the async runtime.
 
 use anyhow::Result;
 
-use crate::exec::function::FunctionRegistry;
-use crate::exec::physical_expr::EvalContext;
+use crate::define_async_function;
+use crate::exec::EvalContext;
+use crate::exec::function::ScalarFunction;
 use crate::fnc::crypto::{argon2, bcrypt, pbkdf2, scrypt};
 use crate::val::Value;
-use crate::{define_async_function, register_functions};
 
 // =========================================================================
 // Helper to run CPU-intensive work
@@ -265,29 +265,32 @@ async fn scrypt_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Resul
 // Function definitions using the macro
 // =========================================================================
 
-define_async_function!(CryptoArgon2Compare, "crypto::argon2::compare", (hash: String, pass: String) -> Bool, argon2_compare_impl);
-define_async_function!(CryptoArgon2Generate, "crypto::argon2::generate", (pass: String) -> String, argon2_generate_impl);
-define_async_function!(CryptoBcryptCompare, "crypto::bcrypt::compare", (hash: String, pass: String) -> Bool, bcrypt_compare_impl);
-define_async_function!(CryptoBcryptGenerate, "crypto::bcrypt::generate", (pass: String) -> String, bcrypt_generate_impl);
-define_async_function!(CryptoPbkdf2Compare, "crypto::pbkdf2::compare", (hash: String, pass: String) -> Bool, pbkdf2_compare_impl);
-define_async_function!(CryptoPbkdf2Generate, "crypto::pbkdf2::generate", (pass: String) -> String, pbkdf2_generate_impl);
-define_async_function!(CryptoScryptCompare, "crypto::scrypt::compare", (hash: String, pass: String) -> Bool, scrypt_compare_impl);
-define_async_function!(CryptoScryptGenerate, "crypto::scrypt::generate", (pass: String) -> String, scrypt_generate_impl);
+define_async_function!(CryptoArgon2Compare, "crypto::argon2::compare", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (hash: String, pass: String) -> Bool, argon2_compare_impl);
+define_async_function!(CryptoArgon2Generate, "crypto::argon2::generate", effects: EffectSet::ENTROPY, fallibility: Fallibility::VALUE, (pass: String) -> String, argon2_generate_impl);
+define_async_function!(CryptoBcryptCompare, "crypto::bcrypt::compare", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (hash: String, pass: String) -> Bool, bcrypt_compare_impl);
+define_async_function!(CryptoBcryptGenerate, "crypto::bcrypt::generate", effects: EffectSet::ENTROPY, fallibility: Fallibility::VALUE, (pass: String) -> String, bcrypt_generate_impl);
+define_async_function!(CryptoPbkdf2Compare, "crypto::pbkdf2::compare", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (hash: String, pass: String) -> Bool, pbkdf2_compare_impl);
+define_async_function!(CryptoPbkdf2Generate, "crypto::pbkdf2::generate", effects: EffectSet::ENTROPY, fallibility: Fallibility::VALUE, (pass: String) -> String, pbkdf2_generate_impl);
+define_async_function!(CryptoScryptCompare, "crypto::scrypt::compare", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (hash: String, pass: String) -> Bool, scrypt_compare_impl);
+define_async_function!(CryptoScryptGenerate, "crypto::scrypt::generate", effects: EffectSet::ENTROPY, fallibility: Fallibility::VALUE, (pass: String) -> String, scrypt_generate_impl);
 
 // =========================================================================
 // Registration
 // =========================================================================
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		CryptoArgon2Compare,
-		CryptoArgon2Generate,
-		CryptoBcryptCompare,
-		CryptoBcryptGenerate,
-		CryptoPbkdf2Compare,
-		CryptoPbkdf2Generate,
-		CryptoScryptCompare,
-		CryptoScryptGenerate,
-	);
-}
+// Each `generate` draws a fresh salt, so the same password gives a different hash on every call.
+// It declares `EffectSet::ENTROPY`, so a rewrite must not copy one call's result into
+// several places or fold it into a constant.
+// Each `compare` reads the salt from the hash it is given, so it is pure and
+// declares `EffectSet::PURE`.
+/// The asynchronous `crypto::*` scalar builtins: password hashing and verification.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&CryptoArgon2Compare,
+	&CryptoArgon2Generate,
+	&CryptoBcryptCompare,
+	&CryptoBcryptGenerate,
+	&CryptoPbkdf2Compare,
+	&CryptoPbkdf2Generate,
+	&CryptoScryptCompare,
+	&CryptoScryptGenerate,
+];

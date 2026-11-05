@@ -1,0 +1,746 @@
+use anyhow::{Context as _, Result, bail};
+use revision::revisioned;
+use surrealdb_strand::TableName;
+use surrealdb_types::{SqlFormat, ToSql};
+
+use crate::catalog::aggregation::{AggregateFields, AggregationAnalysis};
+use crate::catalog::{Error, ExprText, FieldsText, FromStored, IdiomText, LogicalBody};
+use crate::expr as runtime;
+use crate::expr::logical::LogicalExpr;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{Cond, Expr, Fields, Group, Groups, View};
+use crate::stored::Stored;
+use crate::val::Value;
+
+/// Stored form of [`ViewDefinition`].
+///
+/// The clauses are stored one per field, each under a grammar that parses on its
+/// own, rather than as a single `AS SELECT ...` string. `AS SELECT ...` is not a
+/// SurrealQL construct in its own right, and one string leaves nowhere to record
+/// anything about a view that has no SurrealQL spelling; such metadata is added
+/// to [`Clauses`](StoredViewDefinition::Clauses), as further fields.
+///
+/// # Why this is still revision 1
+///
+/// The three variants before `Clauses` are the shape views were written in
+/// before the clauses became text, and they are still declared so their bytes
+/// still decode. Adding the new shape as a further variant rather than bumping
+/// the revision keeps the type at revision 1: a discriminant is as good a
+/// discriminator as a revision header, and reserving a revision for a shape the
+/// wire never needed to tell apart spends the compatibility ledger for nothing.
+///
+/// What that does not buy is backwards compatibility, and neither would a bump:
+/// a reader that predates `Clauses` rejects discriminant 3 exactly as it would
+/// reject revision 2. The gain is only that revision 1 keeps describing the one
+/// thing a view has ever been.
+///
+/// Only `Clauses` is ever written — [`ViewDefinition::to_stored`] produces
+/// nothing else, and `stored_views_are_always_written_as_clauses` holds it to
+/// that. The legacy variants are decode-only, and a table re-storing one
+/// migrates it in passing.
+///
+/// The stored grammar writes only `Clauses`: an encoder, a floor computation and a VM conversion
+/// first map a legacy variant through [`StoredViewDefinition::current`].
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0", legacy = "StoredViewDefinition::current")]
+pub enum StoredViewDefinition {
+	/// Decode-only: a materialized view, before the clauses became text.
+	#[stored(legacy)]
+	Materialized {
+		fields: Fields,
+		tables: Vec<TableName>,
+		condition: Option<Expr>,
+	},
+	/// Decode-only: an aggregated view, before the clauses became text. Carries
+	/// the aggregation analysis derived from `fields` and `groups`, which
+	/// compiling recomputes and so ignores.
+	#[stored(legacy)]
+	Aggregated {
+		analysis: AggregationAnalysis,
+		condition: Option<Expr>,
+		tables: Vec<TableName>,
+		groups: Groups,
+		fields: Fields,
+	},
+	/// Decode-only: a view classified as unmaintained, before the clauses became
+	/// text.
+	#[stored(legacy)]
+	Select {
+		fields: Fields,
+		tables: Vec<TableName>,
+		condition: Option<Expr>,
+		groups: Option<Groups>,
+	},
+	/// The clauses of the view's `AS SELECT ... FROM ... WHERE ... GROUP ...`.
+	#[stored(n = 1)]
+	Clauses {
+		/// The `SELECT` field list.
+		#[stored(n = 2)]
+		fields: FieldsText,
+		/// The tables the view reads from.
+		#[stored(n = 4)]
+		tables: Vec<TableName>,
+		/// The `WHERE` clause, if the view has one.
+		#[stored(n = 6)]
+		condition: Option<ExprText>,
+		/// The `GROUP` targets. `None` is a view with no `GROUP` clause; `Some`
+		/// with no targets is `GROUP ALL`.
+		#[stored(n = 8)]
+		groups: Option<Vec<IdiomText>>,
+	},
+}
+
+impl StoredViewDefinition {
+	/// The current form of this view: `Clauses` for every variant, built from the variant's own
+	/// clauses by rendering them to text, which cannot fail. `Clauses` maps to itself.
+	pub fn current(&self) -> Self {
+		match self {
+			Self::Clauses {
+				..
+			} => self.clone(),
+			Self::Materialized {
+				fields,
+				tables,
+				condition,
+			} => Self::clauses(fields, tables.clone(), condition.as_ref(), None),
+			Self::Aggregated {
+				analysis: _,
+				condition,
+				tables,
+				groups,
+				fields,
+			} => Self::clauses(fields, tables.clone(), condition.as_ref(), Some(groups)),
+			Self::Select {
+				fields,
+				tables,
+				condition,
+				groups,
+			} => Self::clauses(fields, tables.clone(), condition.as_ref(), groups.as_ref()),
+		}
+	}
+
+	/// Rebuilds the view's clauses as an AST, whichever shape they were stored
+	/// in. The legacy variants already hold ASTs, so only `Clauses` compiles.
+	fn to_view(&self) -> anyhow::Result<View> {
+		match self {
+			Self::Clauses {
+				fields,
+				tables,
+				condition,
+				groups,
+			} => Ok(View {
+				expr: fields.compile().context("the view's field list no longer compiles")?,
+				what: tables.clone(),
+				cond: condition
+					.as_ref()
+					.map(|c| c.compile().map(Cond))
+					.transpose()
+					.context("the view's condition no longer compiles")?,
+				group: groups
+					.as_ref()
+					.map(|g| {
+						g.iter()
+							.map(|i| i.compile().map(Group))
+							.collect::<anyhow::Result<Vec<_>>>()
+							.map(Groups)
+					})
+					.transpose()
+					.context("the view's group targets no longer compile")?,
+			}),
+			Self::Materialized {
+				fields,
+				tables,
+				condition,
+			} => Ok(View {
+				expr: fields.clone(),
+				what: tables.clone(),
+				cond: condition.clone().map(Cond),
+				group: None,
+			}),
+			Self::Aggregated {
+				analysis,
+				condition,
+				tables,
+				groups,
+				fields,
+			} => {
+				// The analysis is derived from the two clauses below it;
+				// classification derives it again.
+				let _ = analysis;
+				Ok(View {
+					expr: fields.clone(),
+					what: tables.clone(),
+					cond: condition.clone().map(Cond),
+					group: Some(groups.clone()),
+				})
+			}
+			Self::Select {
+				fields,
+				tables,
+				condition,
+				groups,
+			} => Ok(View {
+				expr: fields.clone(),
+				what: tables.clone(),
+				cond: condition.clone().map(Cond),
+				group: groups.clone(),
+			}),
+		}
+	}
+
+	/// Renders a view's clauses to the canonical text this type stores.
+	fn clauses(
+		fields: &Fields,
+		tables: Vec<TableName>,
+		condition: Option<&Expr>,
+		groups: Option<&Groups>,
+	) -> Self {
+		Self::Clauses {
+			fields: FieldsText::new(fields),
+			tables,
+			condition: condition.map(ExprText::new),
+			groups: groups.map(|g| g.0.iter().map(|g| IdiomText::new(&g.0)).collect()),
+		}
+	}
+}
+
+/// Classifies a parsed view.
+///
+/// Never yields [`ViewDefinition::Select`]. `AS SELECT ...` has no syntax for
+/// declaring a view that is not maintained, and never has, so every parsed view
+/// is [`ViewDefinition::Materialized`] or [`ViewDefinition::Aggregated`].
+/// `Select` is the inert classification a stored view degrades to when it fails
+/// the aggregation analysis below; [`ViewDefinition::from_stored`] builds it.
+pub fn view_to_definition(this: &View) -> Result<ViewDefinition> {
+	let Some(group) = this.group.as_ref() else {
+		// No group, nothing to aggregate.
+		let condition = this.cond.clone().map(|x| x.0);
+		return Ok(ViewDefinition::Materialized {
+			fields: this.expr.clone(),
+			tables: this.what.clone(),
+			condition_body: condition.as_ref().map(LogicalBody::of),
+			condition,
+		});
+	};
+
+	let analysis = AggregationAnalysis::analyze_fields_groups(&this.expr, group, true)?;
+	if let AggregateFields::Value(_) = analysis.fields {
+		bail!(Error::InvalidAggregation {
+			message: "the selector `VALUE` clause is not supported on DEFINE TABLE .. AS SELECT .. GROUP .. aggregates"
+				.to_string()
+		})
+	}
+
+	Ok(ViewDefinition::Aggregated {
+		groups: group.clone(),
+		fields: this.expr.clone(),
+		analysis,
+		tables: this.what.clone(),
+		condition: this.cond.clone().map(|x| x.0),
+	})
+}
+
+impl FromStored for ViewDefinition {
+	type Stored = StoredViewDefinition;
+
+	fn from_stored(stored: &StoredViewDefinition) -> anyhow::Result<ViewDefinition> {
+		let view = stored.to_view()?;
+
+		match view_to_definition(&view) {
+			Ok(definition) => Ok(definition),
+			// Whether a view can be maintained, and how, is decided here by the
+			// aggregation analysis rather than read from storage. Clauses that
+			// fail that analysis (possible for views defined before the analysis
+			// rejected their shape) degrade to the inert `Select`
+			// classification, which the pre-analysis runtime applied to such
+			// views. Failing instead would fail every read of the table
+			// definition, including the `INFO` and `REMOVE TABLE` needed to
+			// diagnose and drop the view, as well as every write to its source
+			// tables. The degrade loses no clause: `Select` carries all four, and
+			// storing it back writes the same ones.
+			//
+			// The consequence is that the view stops being maintained, so it is
+			// reported rather than applied silently. DEFINE-time validation is
+			// unaffected: it analyzes the statement's own AST before any
+			// definition is stored.
+			Err(err) => {
+				// Debug, not warn, and without the clauses: this runs on every
+				// `TableDefinition::from_stored`, so on every catalog-cache miss
+				// for the table, and the condition cannot self-heal. At warn
+				// level a hot source table re-logs the view on every write.
+				debug!(
+					"View cannot be maintained by this version and will not be updated on writes to its source tables: {err}"
+				);
+				Ok(ViewDefinition::Select {
+					fields: view.expr,
+					tables: view.what,
+					condition: view.cond.map(|c| c.0),
+					groups: view.group,
+				})
+			}
+		}
+	}
+}
+
+/// Runtime form of [`StoredViewDefinition`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum ViewDefinition {
+	/// The view is cached, and has no aggregation.
+	/// It is only updated any of the target tables are updated.
+	Materialized {
+		fields: Fields,
+		tables: Vec<TableName>,
+		condition: Option<Expr>,
+		/// The `WHERE` clause in logical form, compiled on first use; see
+		/// [`ViewDefinition::materialized_condition_logical`]. Derived from
+		/// `condition` and carrying the same clause: `Some` exactly when
+		/// `condition` is.
+		condition_body: Option<LogicalBody>,
+	},
+	/// The view has a group by and has a running compute.
+	Aggregated {
+		analysis: AggregationAnalysis,
+		condition: Option<Expr>,
+		tables: Vec<TableName>,
+		// fields below are only used for reconstructing the query.
+		groups: Groups,
+		fields: Fields,
+	},
+	/// The view is computed by doing another select query.
+	Select {
+		fields: Fields,
+		tables: Vec<TableName>,
+		condition: Option<Expr>,
+		groups: Option<Groups>,
+	},
+}
+
+impl ViewDefinition {
+	/// The source tables this view reads from (the `FROM` clause of the
+	/// `AS SELECT ...` definition), whichever maintenance strategy applies.
+	pub fn source_tables(&self) -> &[TableName] {
+		match self {
+			ViewDefinition::Materialized {
+				tables,
+				..
+			}
+			| ViewDefinition::Aggregated {
+				tables,
+				..
+			}
+			| ViewDefinition::Select {
+				tables,
+				..
+			} => tables,
+		}
+	}
+
+	/// Visit the clauses the view evaluates when a source table is written:
+	/// its field list, its `WHERE` condition and its `GROUP` targets, whichever
+	/// maintenance strategy applies.
+	pub fn visit_clauses<V: crate::expr::visit::Visitor>(
+		&self,
+		visitor: &mut V,
+	) -> Result<(), V::Error> {
+		use crate::expr::visit::Visit as _;
+		let (fields, condition, groups) = match self {
+			ViewDefinition::Materialized {
+				fields,
+				condition,
+				..
+			} => (fields, condition, None),
+			ViewDefinition::Aggregated {
+				fields,
+				condition,
+				groups,
+				..
+			} => (fields, condition, Some(groups)),
+			ViewDefinition::Select {
+				fields,
+				condition,
+				groups,
+				..
+			} => (fields, condition, groups.as_ref()),
+		};
+		fields.visit(visitor)?;
+		if let Some(condition) = condition {
+			condition.visit(visitor)?;
+		}
+		for group in groups.into_iter().flat_map(|groups| groups.0.iter()) {
+			group.0.visit(visitor)?;
+		}
+		Ok(())
+	}
+
+	/// Calls `f` with the name of every named type a type written in the view's clauses
+	/// ([`ViewDefinition::visit_clauses`]) names: a cast, or a type a nested statement declares.
+	pub fn each_named_type(&self, f: &mut dyn FnMut(&str)) {
+		let _ = self.visit_clauses(&mut crate::expr::visit::NamedTypes(f));
+	}
+
+	/// The tables the view's clauses ([`ViewDefinition::visit_clauses`]) name,
+	/// in the statements nested in them too: a table expression such as a
+	/// subquery's `FROM`, the table of a record id, and the subject of a graph
+	/// hop. The tables the view selects from are among them only where a clause
+	/// names them as well. A table a clause reaches through a name its text does
+	/// not hold (a computed table name, a record link, a function body) is not.
+	pub fn clause_tables(&self) -> std::collections::BTreeSet<TableName> {
+		use crate::expr::lookup::LookupSubject;
+		use crate::expr::visit::{Visit as _, Visitor};
+
+		#[derive(Default)]
+		struct Named(std::collections::BTreeSet<TableName>);
+
+		impl Visitor for Named {
+			type Error = std::convert::Infallible;
+
+			fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+				if let Expr::Table(table) = expr {
+					self.0.insert(table.clone());
+				}
+				expr.visit(self)
+			}
+
+			fn visit_record_id(
+				&mut self,
+				id: &crate::expr::RecordIdLit,
+			) -> Result<(), Self::Error> {
+				self.0.insert(id.table.clone());
+				id.visit(self)
+			}
+
+			fn visit_lookup_subject(&mut self, subject: &LookupSubject) -> Result<(), Self::Error> {
+				let (LookupSubject::Table {
+					table,
+					..
+				}
+				| LookupSubject::Range {
+					table,
+					..
+				}) = subject;
+				self.0.insert(table.clone());
+				subject.visit(self)
+			}
+		}
+
+		let mut named = Named::default();
+		let Ok(()) = self.visit_clauses(&mut named);
+		named.0
+	}
+
+	/// A materialized view's `WHERE` clause as the logical scalar the
+	/// streaming engine evaluates, compiled on first call.
+	///
+	/// `None` for a view with no condition, and for the two classifications
+	/// that carry one this does not compile: an aggregated view's condition
+	/// narrows the group its maintenance statement reads rather than judging
+	/// the written record on its own, and a `Select` view is not maintained at
+	/// all.
+	///
+	/// Errs when the clause has no logical form — a write statement, a mock
+	/// record set in scalar position — and the caller then evaluates the
+	/// [`Expr`] half instead.
+	pub fn materialized_condition_logical(&self) -> Option<anyhow::Result<&LogicalExpr>> {
+		match self {
+			ViewDefinition::Materialized {
+				condition_body,
+				..
+			} => condition_body.as_ref().map(LogicalBody::logical),
+			ViewDefinition::Aggregated {
+				..
+			}
+			| ViewDefinition::Select {
+				..
+			} => None,
+		}
+	}
+
+	pub fn to_stored(&self) -> StoredViewDefinition {
+		match self {
+			ViewDefinition::Materialized {
+				fields,
+				tables,
+				condition,
+				..
+			} => StoredViewDefinition::clauses(fields, tables.clone(), condition.as_ref(), None),
+			ViewDefinition::Aggregated {
+				fields,
+				tables,
+				condition,
+				groups,
+				..
+			} => StoredViewDefinition::clauses(
+				fields,
+				tables.clone(),
+				condition.as_ref(),
+				Some(groups),
+			),
+			ViewDefinition::Select {
+				fields,
+				tables,
+				condition,
+				groups,
+			} => StoredViewDefinition::clauses(
+				fields,
+				tables.clone(),
+				condition.as_ref(),
+				groups.as_ref(),
+			),
+		}
+	}
+
+	pub fn to_runtime_definition(&self) -> runtime::View {
+		match self {
+			ViewDefinition::Materialized {
+				fields,
+				tables,
+				condition,
+				..
+			} => runtime::View {
+				expr: fields.clone(),
+				what: tables.clone(),
+				cond: condition.clone().map(runtime::Cond),
+				group: None,
+			},
+			ViewDefinition::Aggregated {
+				tables,
+				condition,
+				groups,
+				fields,
+				..
+			} => runtime::View {
+				expr: fields.clone(),
+				what: tables.clone(),
+				cond: condition.clone().map(runtime::Cond),
+				group: Some(groups.clone()),
+			},
+			ViewDefinition::Select {
+				fields,
+				tables,
+				condition,
+				groups,
+			} => runtime::View {
+				expr: fields.clone(),
+				what: tables.clone(),
+				cond: condition.clone().map(runtime::Cond),
+				group: groups.clone(),
+			},
+		}
+	}
+}
+
+impl ToSql for ViewDefinition {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_runtime_definition().fmt_sql(f, fmt)
+	}
+}
+impl InfoStructure for ViewDefinition {
+	fn structure(self) -> Value {
+		self.to_sql().into()
+	}
+}
+
+/// The select that fills a materialized view over `tables` and `condition`.
+///
+/// It always yields `id`, ahead of the view's own fields, so that the key of
+/// the source record is known whatever field list the view projects.
+pub fn materialized_backfill_select(
+	fields: &Fields,
+	tables: &[TableName],
+	condition: Option<&Expr>,
+) -> crate::expr::SelectStatement {
+	use crate::expr::field::Selector;
+	use crate::expr::{Field, Idiom, Literal};
+	let init_fields = match fields {
+		Fields::Select(user_fields) => {
+			let id_field = Field::Single(Selector {
+				expr: Expr::Idiom(Idiom::from(crate::expr::paths::ID.to_vec())),
+				alias: None,
+			});
+			let mut all = vec![id_field];
+			all.extend(user_fields.iter().cloned());
+			Fields::Select(all)
+		}
+		other => other.clone(),
+	};
+	crate::expr::SelectStatement {
+		fields: init_fields,
+		what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
+		cond: condition.cloned().map(Cond),
+		omit: vec![],
+		only: false,
+		with: None,
+		split: None,
+		group: None,
+		order: None,
+		limit: None,
+		start: None,
+		fetch: None,
+		version: Expr::Literal(Literal::None),
+		timeout: Expr::Literal(Literal::None),
+		explain: None,
+		tempfiles: false,
+		for_update: false,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::expr::field::Selector;
+	use crate::expr::{Field, Idiom};
+
+	/// Every clause survives the round trip through stored text, including the
+	/// distinction between no `GROUP` clause and `GROUP ALL`.
+	#[test]
+	fn every_clause_round_trips() {
+		let definition = ViewDefinition::Select {
+			fields: Fields::Select(vec![Field::Single(Selector {
+				expr: Expr::Idiom(Idiom::field("amount".to_owned())),
+				alias: None,
+			})]),
+			tables: vec![TableName::from("orders")],
+			condition: Some(Expr::Idiom(Idiom::field("paid".to_owned()))),
+			groups: Some(Groups(vec![Group(Idiom::field("customer".to_owned()))])),
+		};
+
+		let compiled = ViewDefinition::from_stored(&definition.to_stored()).unwrap();
+		assert_eq!(compiled.to_stored(), definition.to_stored());
+		assert_eq!(compiled.to_sql(), definition.to_sql());
+	}
+
+	/// A materialized view's condition is carried twice from one source, and
+	/// only that classification has a logical form to offer: the other two are
+	/// maintained by something other than judging the written record.
+	#[test]
+	fn only_a_materialized_views_condition_compiles_to_a_logical_form() {
+		let clauses = |fields, groups| StoredViewDefinition::Clauses {
+			fields: FieldsText::from_raw(fields),
+			tables: vec![TableName::from("orders")],
+			condition: Some(ExprText::from_raw("paid")),
+			groups,
+		};
+
+		let materialized = ViewDefinition::from_stored(&clauses("*", None)).unwrap();
+		let body = materialized
+			.materialized_condition_logical()
+			.expect("a materialized view with a condition")
+			.unwrap();
+		assert_eq!(body.to_sql(), "paid");
+
+		let aggregated =
+			ViewDefinition::from_stored(&clauses("count()", Some(Vec::new()))).unwrap();
+		assert!(matches!(aggregated, ViewDefinition::Aggregated { .. }));
+		assert!(aggregated.materialized_condition_logical().is_none());
+
+		let unconditional = ViewDefinition::from_stored(&StoredViewDefinition::Clauses {
+			fields: FieldsText::from_raw("*"),
+			tables: vec![TableName::from("orders")],
+			condition: None,
+			groups: None,
+		})
+		.unwrap();
+		assert!(unconditional.materialized_condition_logical().is_none());
+	}
+
+	/// `GROUP ALL` groups everything into one row; no `GROUP` clause at all
+	/// groups nothing. Both hold an empty target list, so the stored form has to
+	/// keep them apart or a `GROUP ALL` view silently stops aggregating.
+	#[test]
+	fn group_all_is_distinguishable_from_an_absent_group_clause() {
+		let select = |groups| ViewDefinition::Select {
+			fields: Fields::all(),
+			tables: vec![TableName::from("orders")],
+			condition: None,
+			groups,
+		};
+		let group_all = select(Some(Groups::default()));
+		let no_group = select(None);
+
+		assert_eq!(group_all.to_sql(), "AS SELECT * FROM orders GROUP ALL");
+		assert_eq!(no_group.to_sql(), "AS SELECT * FROM orders");
+		assert_ne!(group_all.to_stored(), no_group.to_stored());
+	}
+
+	#[test]
+	fn an_unmaintainable_view_degrades_without_losing_a_clause() {
+		// A `VALUE` selector combined with `GROUP` is rejected by the current
+		// aggregation analysis but was definable before that rejection existed.
+		// Such a stored view compiles to the inert `Select` classification
+		// instead of failing, and because the classification is derived rather
+		// than stored, storing the degraded definition back reproduces the same
+		// clauses — re-storing the table cannot lose one.
+		let stored = StoredViewDefinition::Clauses {
+			fields: FieldsText::from_raw("VALUE math::sum(amount)"),
+			tables: vec![TableName::from("orders")],
+			condition: None,
+			groups: Some(Vec::new()),
+		};
+
+		let compiled = ViewDefinition::from_stored(&stored)
+			.expect("an unmaintainable view degrades rather than failing to compile");
+		assert!(
+			matches!(compiled, ViewDefinition::Select { .. }),
+			"expected the inert classification, got {compiled:?}"
+		);
+		assert_eq!(compiled.to_stored(), stored);
+	}
+	/// The legacy variants are decode-only. They are declared so revision 1's
+	/// bytes still decode, and nothing may write them: a `Materialized` or
+	/// `Aggregated` view stored in the old shape would carry a classification and
+	/// an analysis that this version derives rather than reads, and re-storing it
+	/// is what migrates it.
+	#[test]
+	fn stored_views_are_always_written_as_clauses() {
+		let aggregate: Fields =
+			FieldsText::from_raw("count()").compile().expect("`count()` is a field list");
+		let analysis =
+			AggregationAnalysis::analyze_fields_groups(&aggregate, &Groups::default(), false)
+				.expect("`SELECT count() GROUP ALL` analyzes");
+		let tables = vec![TableName::from("orders")];
+
+		for definition in [
+			ViewDefinition::Materialized {
+				fields: Fields::all(),
+				tables: tables.clone(),
+				condition: None,
+				condition_body: None,
+			},
+			ViewDefinition::Aggregated {
+				analysis,
+				condition: None,
+				tables: tables.clone(),
+				groups: Groups::default(),
+				fields: aggregate,
+			},
+			ViewDefinition::Select {
+				fields: Fields::all(),
+				tables,
+				condition: None,
+				groups: None,
+			},
+		] {
+			assert!(
+				matches!(definition.to_stored(), StoredViewDefinition::Clauses { .. }),
+				"{definition:?} stored as something other than its clauses"
+			);
+		}
+	}
+
+	/// Revision 1's own shapes still decode, and compiling one classifies it from
+	/// the clauses rather than trusting what it recorded — an `Aggregated` view
+	/// whose stored analysis is stale is re-analyzed, not believed.
+	#[test]
+	fn a_legacy_stored_view_compiles_and_migrates_on_the_way_back() {
+		let legacy = StoredViewDefinition::Materialized {
+			fields: Fields::all(),
+			tables: vec![TableName::from("orders")],
+			condition: Some(Expr::Idiom(Idiom::field("paid".to_owned()))),
+		};
+
+		let compiled = ViewDefinition::from_stored(&legacy).expect("a legacy view still compiles");
+		assert_eq!(compiled.to_sql(), "AS SELECT * FROM orders WHERE paid");
+		assert!(matches!(compiled.to_stored(), StoredViewDefinition::Clauses { .. }));
+	}
+}

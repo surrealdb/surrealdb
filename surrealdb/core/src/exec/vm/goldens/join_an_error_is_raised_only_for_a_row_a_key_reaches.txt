@@ -1,0 +1,10 @@
+### SELECT id, (SELECT VALUE <int> s FROM b WHERE k = $parent.k) AS n FROM a WHERE k = 2.0
+{ id: a:2, n: [3, 4] }
+### SELECT id, (SELECT VALUE <int> s FROM b WHERE k = $parent.k) AS n FROM a WHERE k = 1
+error: Could not cast into `int` using input `'two'`
+### SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k AND <int> s > 0) AS n FROM a WHERE k = 'one'
+{ id: a:3, n: [50] }
+### SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k AND <int> s > 0) AS n FROM a
+error: Could not cast into `int` using input `'two'`
+### SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k AND <int> s > 0) AS n FROM a WHERE k = 99
+(no rows)

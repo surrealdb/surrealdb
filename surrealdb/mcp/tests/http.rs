@@ -10,6 +10,8 @@
 #![cfg(feature = "server-http")]
 #![allow(clippy::unwrap_used)]
 #![recursion_limit = "256"]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 use std::sync::Arc;
 
@@ -19,16 +21,32 @@ use http_body_util::{BodyExt, Full};
 use serde_json::{Value, json};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_mcp::service::{McpHttpService, create_http_service};
+use surrealdb_mcp::cnf::McpConfig;
+use surrealdb_mcp::service::{
+	McpHttpService, create_http_service, create_http_service_with_config,
+};
 
 mod common;
-use common::test_datastore;
+use common::{root_session, test_datastore};
 
 /// Build a POST /mcp request carrying a JSON-RPC body.
 fn post_request(
 	body: &Value,
 	session_id: Option<&str>,
 	session: Option<Session>,
+) -> Request<Full<Bytes>> {
+	post_request_with_headers(body, session_id, session, &[])
+}
+
+/// [`post_request`] plus arbitrary extra headers, for the protocol-revision and
+/// SEP-2243 headers only a few tests need. The base header set is shared so an
+/// rmcp change to what `StreamableHttpService` requires of a POST is a one-line
+/// fix rather than one per hand-rolled builder.
+fn post_request_with_headers(
+	body: &Value,
+	session_id: Option<&str>,
+	session: Option<Session>,
+	extra_headers: &[(&str, &str)],
 ) -> Request<Full<Bytes>> {
 	let mut builder = Request::builder()
 		.method(Method::POST)
@@ -38,6 +56,9 @@ fn post_request(
 		.header("accept", "application/json, text/event-stream");
 	if let Some(id) = session_id {
 		builder = builder.header("mcp-session-id", id);
+	}
+	for (name, value) in extra_headers {
+		builder = builder.header(*name, *value);
 	}
 	let mut req = builder.body(Full::new(Bytes::from(body.to_string()))).unwrap();
 	if let Some(s) = session {
@@ -97,12 +118,23 @@ fn parse_sse_json(body: &str) -> Value {
 
 /// Send an `initialize` POST and return (session-id, parsed body).
 async fn initialize(service: &McpHttpService, attach_session: Option<Session>) -> (String, Value) {
+	initialize_with_version(service, "2025-06-18", attach_session).await
+}
+
+/// [`initialize`] naming a specific protocol revision. A revision outside
+/// `SUPPORTED_PROTOCOL_VERSIONS` exercises rmcp's negotiation fallback, which
+/// answers with the server's advertised revision.
+async fn initialize_with_version(
+	service: &McpHttpService,
+	version: &str,
+	attach_session: Option<Session>,
+) -> (String, Value) {
 	let body = json!({
 		"jsonrpc": "2.0",
 		"id": 1,
 		"method": "initialize",
 		"params": {
-			"protocolVersion": "2025-06-18",
+			"protocolVersion": version,
 			"capabilities": {},
 			"clientInfo": { "name": "http-test", "version": "0.0.0" },
 		},
@@ -123,6 +155,78 @@ async fn initialize(service: &McpHttpService, attach_session: Option<Session>) -
 
 fn setup_service(ds: Arc<Datastore>) -> McpHttpService {
 	create_http_service(ds)
+}
+
+/// Build an `initialize` POST carrying an explicit `Host` header, used to
+/// exercise rmcp's DNS-rebinding allowlist.
+fn initialize_with_host(host: &str) -> Request<Full<Bytes>> {
+	let body = json!({
+		"jsonrpc": "2.0",
+		"id": 1,
+		"method": "initialize",
+		"params": {
+			"protocolVersion": "2025-06-18",
+			"capabilities": {},
+			"clientInfo": { "name": "http-test", "version": "0.0.0" },
+		},
+	});
+	Request::builder()
+		.method(Method::POST)
+		.uri("/mcp")
+		.header("host", host)
+		.header("content-type", "application/json")
+		.header("accept", "application/json, text/event-stream")
+		.body(Full::new(Bytes::from(body.to_string())))
+		.unwrap()
+}
+
+/// Regression test for the "Host header 403": with the default
+/// (loopback-only) allowlist, a request carrying a real public `Host` is
+/// rejected by rmcp's DNS-rebinding guard before any SurrealDB logic runs.
+/// An explicit `McpConfig::default()` keeps this independent of ambient
+/// `SURREAL_MCP_*` env in the test process.
+#[tokio::test]
+async fn default_config_rejects_non_loopback_host() {
+	let ds = test_datastore().await;
+	let service = create_http_service_with_config(ds, None, Arc::new(McpConfig::default()));
+	let resp = service.handle(initialize_with_host("public.example.com")).await;
+	assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+	let body = body_to_string(resp).await;
+	assert!(
+		body.contains("Host header is not allowed"),
+		"expected rmcp host-guard body, got: {body:?}"
+	);
+}
+
+/// Option A: an explicit allowlist admits the configured public host that
+/// the default would have rejected.
+#[tokio::test]
+async fn configured_allowed_host_is_accepted() {
+	let ds = test_datastore().await;
+	let cfg = McpConfig {
+		allowed_hosts: vec!["public.example.com".to_string()],
+		..McpConfig::default()
+	};
+	let service = create_http_service_with_config(ds, None, Arc::new(cfg));
+	let resp = service.handle(initialize_with_host("public.example.com")).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	assert!(
+		resp.headers().get("mcp-session-id").is_some(),
+		"initialize should allocate a session id"
+	);
+}
+
+/// Option B: the disable toggle admits an arbitrary host.
+#[tokio::test]
+async fn allow_all_hosts_accepts_any_host() {
+	let ds = test_datastore().await;
+	let cfg = McpConfig {
+		allow_all_hosts: true,
+		..McpConfig::default()
+	};
+	let service = create_http_service_with_config(ds, None, Arc::new(cfg));
+	let resp = service.handle(initialize_with_host("anything.at.all")).await;
+	assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -153,13 +257,14 @@ async fn second_post_with_same_session_id_reuses_session_state() {
 	let resp = service.handle(post_request(&notif, Some(&session_id), None)).await;
 	assert_eq!(resp.status(), StatusCode::ACCEPTED, "notifications/initialized must be accepted");
 
-	// Now call `tools/list` with the same session id.
+	// Now call `tools/list` with the same session id. Follow-up requests on an
+	// authenticated session must present its credentials, `tools/list` included.
 	let req = json!({
 		"jsonrpc": "2.0",
 		"id": 2,
 		"method": "tools/list",
 	});
-	let resp = service.handle(post_request(&req, Some(&session_id), None)).await;
+	let resp = service.handle(post_request(&req, Some(&session_id), Some(owner_session()))).await;
 	assert_eq!(resp.status(), StatusCode::OK);
 	let body = body_to_string(resp).await;
 	let parsed = parse_sse_json(&body);
@@ -167,8 +272,38 @@ async fn second_post_with_same_session_id_reuses_session_state() {
 		.get("result")
 		.and_then(|r| r.get("tools"))
 		.and_then(|t| t.as_array())
-		.expect("tools/list must return a tools array");
+		.unwrap_or_else(|| panic!("tools/list must return a tools array; body: {body}"));
 	assert!(tools.iter().any(|t| t.get("name").and_then(|n| n.as_str()) == Some("query")));
+}
+
+/// `tools/list` is subject to the same binding as every other method. The
+/// listing is static, so the leak is the inference rather than the payload:
+/// answering it confirms the replayed `mcp-session-id` is live, which is exactly
+/// what possession of the id alone must not establish.
+#[tokio::test]
+async fn tools_list_without_credentials_on_existing_session_is_rejected() {
+	let ds = test_datastore().await;
+	let service = setup_service(ds);
+	let (session_id, _) = initialize(&service, Some(owner_session())).await;
+	complete_handshake(&service, &session_id).await;
+
+	let req = json!({
+		"jsonrpc": "2.0",
+		"id": 3,
+		"method": "tools/list",
+	});
+	let resp = service.handle(post_request(&req, Some(&session_id), None)).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let err = parsed
+		.get("error")
+		.unwrap_or_else(|| panic!("tools/list must not answer without credentials; body: {body}"));
+	let message = err.get("message").and_then(|v| v.as_str()).unwrap_or("");
+	assert!(
+		message.contains("Credentials required"),
+		"error message must mention missing credentials, got: {message}"
+	);
 }
 
 #[tokio::test]
@@ -303,7 +438,7 @@ fn owner_session() -> Session {
 /// initialize as user A and then replay a tool call as user B on the
 /// same session id.
 fn db_user_session() -> Session {
-	use surrealdb_core::iam::{Auth, Role};
+	use surrealdb_iam::{Auth, Role};
 	Session {
 		au: std::sync::Arc::new(Auth::for_db(Role::Editor, "test", "test")),
 		ns: Some("test".into()),
@@ -382,6 +517,277 @@ async fn missing_credentials_on_existing_session_is_rejected() {
 	assert!(
 		message.contains("Credentials required"),
 		"error message must mention missing credentials, got: {message}"
+	);
+}
+
+/// A handshake naming a revision this server does not implement is answered by
+/// downgrading to the newest supported revision that still carries an
+/// `initialize` handshake, and a session bound to the handshake's subject is
+/// issued. An `initialize` is never answered with the sessionless revision,
+/// which has no handshake of its own.
+///
+/// The resulting session reports a concrete revision from
+/// `ctx.protocol_version()` on every later request while holding both a session
+/// and a bound subject. Statelessness must be decided from the binding, not from
+/// that reported revision: a later request carrying only the session id and no
+/// credentials must not run as the bound subject. The binding, not the revision,
+/// is the discriminator.
+#[tokio::test]
+async fn credentialless_replay_on_a_negotiation_fallback_session_is_rejected() {
+	let ds = test_datastore().await;
+	let service = setup_service(ds);
+	// Any revision outside `SUPPORTED_PROTOCOL_VERSIONS` triggers the fallback.
+	// It must sort below the sessionless revision, or rmcp routes the handshake
+	// itself sessionlessly and never allocates the session id this needs.
+	let (session_id, init) =
+		initialize_with_version(&service, "2024-10-07", Some(owner_session())).await;
+	assert_eq!(
+		init.pointer("/result/protocolVersion").and_then(Value::as_str),
+		Some("2025-11-25"),
+		"fixture requires the initialize fallback to answer with the newest revision that has a handshake; body: {init}"
+	);
+	complete_handshake(&service, &session_id).await;
+
+	let req = json!({
+		"jsonrpc": "2.0",
+		"id": 10,
+		"method": "tools/call",
+		"params": {
+			"name": "query",
+			"arguments": { "query": "RETURN [session::ns(), session::db()]" },
+		},
+	});
+	let resp = service.handle(post_request(&req, Some(&session_id), None)).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let err = parsed.get("error").unwrap_or_else(|| {
+		panic!(
+			"credential-less replay on a negotiation-fallback session must be rejected, \
+			 not served as the bound owner; body: {body}"
+		)
+	});
+	let message = err.get("message").and_then(|v| v.as_str()).unwrap_or("");
+	assert!(
+		message.contains("Credentials required"),
+		"error message must mention missing credentials, got: {message}"
+	);
+
+	// Control: the same session still serves its own credentials, so the
+	// rejection above is about the credentials and not about the odd handshake.
+	let resp = service.handle(post_request(&req, Some(&session_id), Some(owner_session()))).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let scope = parsed
+		.pointer("/result/structuredContent/value")
+		.unwrap_or_else(|| panic!("matching credentials should return a scope; body: {body}"));
+	assert_eq!(
+		scope,
+		&json!(["test", "test"]),
+		"matching credentials must resolve the handshake scope; body: {body}"
+	);
+}
+
+/// The `_meta` and headers that make rmcp route a request sessionlessly.
+///
+/// `method`/`name` are the SEP-2243 `Mcp-Method` / `Mcp-Name` pair, which rmcp
+/// requires from this revision on and rejects the request without.
+fn sessionless_request(
+	body: &Value,
+	method: &str,
+	name: &str,
+	session_id: Option<&str>,
+) -> Request<Full<Bytes>> {
+	let mut body = body.clone();
+	body["params"]["_meta"] = json!({
+		// Fully-qualified keys: rmcp ignores a bare `protocolVersion`, which
+		// would leave the request legacy.
+		"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+		"io.modelcontextprotocol/clientCapabilities": {},
+	});
+	post_request_with_headers(
+		&body,
+		session_id,
+		None,
+		&[("mcp-protocol-version", "2026-07-28"), ("mcp-method", method), ("mcp-name", name)],
+	)
+}
+
+/// `resources/read` and `completion/complete` are advertised under the revision
+/// this server advertises by default, which allocates no session id. Reading the
+/// handshake session directly would fail both with "send `initialize` first" —
+/// advice a sessionless caller cannot act on, since there is no session to
+/// initialize.
+#[tokio::test]
+async fn resources_and_completions_are_served_without_a_handshake() {
+	let ds = test_datastore().await;
+	let service = setup_service(ds);
+
+	let read = json!({
+		"jsonrpc": "2.0",
+		"id": 20,
+		"method": "resources/read",
+		"params": { "uri": "surrealdb://info" },
+	});
+	let resp = service
+		.handle(sessionless_request(&read, "resources/read", "surrealdb://info", None))
+		.await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	assert!(
+		parsed.pointer("/result/contents").and_then(Value::as_array).is_some_and(|c| !c.is_empty()),
+		"a sessionless resources/read must return contents; body: {body}"
+	);
+
+	let complete = json!({
+		"jsonrpc": "2.0",
+		"id": 21,
+		"method": "completion/complete",
+		"params": {
+			"ref": { "type": "ref/prompt", "name": "query_builder" },
+			"argument": { "name": "namespace", "value": "" },
+		},
+	});
+	let resp = service
+		.handle(sessionless_request(&complete, "completion/complete", "query_builder", None))
+		.await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let values = parsed
+		.pointer("/result/completion/values")
+		.and_then(Value::as_array)
+		.unwrap_or_else(|| panic!("a sessionless completion must return values; body: {body}"));
+	assert!(
+		values.iter().any(|v| v.as_str() == Some("test")),
+		"completion should suggest the bootstrapped namespace; body: {body}"
+	);
+}
+
+/// `use` switches connection state, so it has to run against the handshake
+/// session itself. Scope resolution layers the `surreal-ns` / `surreal-db`
+/// headers over the connection's scope and hands back a derived copy when it
+/// does, and a switch applied to that copy is reported as successful and then
+/// dropped with it — leaving the caller believing it changed database while
+/// every later call still runs in the old one.
+#[tokio::test]
+async fn use_switches_the_connection_even_when_the_request_carries_a_scope_header() {
+	let ds = test_datastore().await;
+	ds.execute("DEFINE DATABASE other;", &root_session(), None).await.expect("bootstrap other db");
+	let service = setup_service(Arc::clone(&ds));
+	let (session_id, _) = initialize(&service, Some(owner_session())).await;
+	complete_handshake(&service, &session_id).await;
+
+	let switch = json!({
+		"jsonrpc": "2.0",
+		"id": 30,
+		"method": "tools/call",
+		"params": { "name": "use", "arguments": { "database": "other" } },
+	});
+	let resp = service
+		.handle(post_request_with_headers(
+			&switch,
+			Some(&session_id),
+			Some(owner_session()),
+			// The scope header a client may send on every request. `use` never
+			// names a scope of its own, so this is the only layer in play.
+			&[("surreal-ns", "test")],
+		))
+		.await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	assert_eq!(
+		parsed.pointer("/result/isError").and_then(Value::as_bool),
+		Some(false),
+		"use should report success; body: {body}"
+	);
+
+	// The switch must survive the call it was made in.
+	let probe = json!({
+		"jsonrpc": "2.0",
+		"id": 31,
+		"method": "tools/call",
+		"params": {
+			"name": "query",
+			"arguments": { "query": "RETURN [session::ns(), session::db()]" },
+		},
+	});
+	let resp = service.handle(post_request(&probe, Some(&session_id), Some(owner_session()))).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let scope = parsed
+		.pointer("/result/structuredContent/value")
+		.unwrap_or_else(|| panic!("probe should return a scope; body: {body}"));
+	assert_eq!(
+		scope,
+		&json!(["test", "other"]),
+		"the connection must still be on the database `use` switched to; body: {body}"
+	);
+}
+
+/// rmcp treats a request that names the sessionless revision in its own `_meta`
+/// as sessionless *regardless of any `mcp-session-id` it carries*: it builds a
+/// fresh service from the factory and never looks the id up. The handler's
+/// contract leans on that, so pin it — an rmcp change that started routing such
+/// a request to the named session would put a request claiming to be
+/// sessionless in front of a service that holds a session.
+///
+/// The scope of the resolved session is the discriminator. The handshake bound
+/// `test`/`test`; a request served sessionlessly resolves neither, since the
+/// HTTP factory configures no default namespace or database. Query success
+/// cannot discriminate — `test_datastore` runs with auth disabled, so an
+/// anonymous session executes the same statements as an owner one.
+#[tokio::test]
+async fn request_naming_the_sessionless_revision_is_not_served_by_a_replayed_session() {
+	let ds = test_datastore().await;
+	let service = setup_service(ds);
+	let (session_id, _) = initialize(&service, Some(owner_session())).await;
+	complete_handshake(&service, &session_id).await;
+
+	let scope_probe = json!({
+		"jsonrpc": "2.0",
+		"id": 10,
+		"method": "tools/call",
+		"params": {
+			"_meta": {
+				// Fully-qualified keys: rmcp ignores a bare `protocolVersion`,
+				// which would leave the request legacy and defuse this test.
+				"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+				"io.modelcontextprotocol/clientCapabilities": {},
+			},
+			"name": "query",
+			"arguments": { "query": "RETURN [session::ns(), session::db()]" },
+		},
+	});
+	// A sessionless-revision request must carry the agreeing protocol header and
+	// the SEP-2243 method/name headers, or rmcp rejects it before dispatch and
+	// the assertion below would pass without exercising anything.
+	let resp = service
+		.handle(post_request_with_headers(
+			&scope_probe,
+			Some(&session_id),
+			None,
+			&[
+				("mcp-protocol-version", "2026-07-28"),
+				("mcp-method", "tools/call"),
+				("mcp-name", "query"),
+			],
+		))
+		.await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let scope = parsed
+		.pointer("/result/structuredContent/value")
+		.unwrap_or_else(|| panic!("sessionless call should return a scope; body: {body}"));
+	assert_eq!(
+		scope,
+		&json!([null, null]),
+		"a sessionless-revision request must not inherit the replayed session's scope; body: {body}"
 	);
 }
 

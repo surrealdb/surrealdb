@@ -1,0 +1,8 @@
+proc-macro2
+quote
+surrealdb-mysql
+surrealdb-sqlfront-derive
+syn
+thiserror
+thiserror-impl
+unicode-ident

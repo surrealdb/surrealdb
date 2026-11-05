@@ -1,0 +1,81 @@
+//! Helpers for analyzer `FUNCTION` clause references (`fn::` and `ext::`).
+//!
+//! An analyzer stores an extension function as `mod::path`, a fixed storage
+//! form that every release reads; SurrealQL writes it as `ext::path`.
+
+use common::fmt::EscapeKwFreeIdent;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+pub fn fmt_analyzer_function(f: &mut String, sql_fmt: SqlFormat, name: &str) {
+	let (kind, path) = if let Some(rest) = name.strip_prefix("mod::") {
+		("ext", rest)
+	} else if let Some(rest) = name.strip_prefix("fn::") {
+		("fn", rest)
+	} else {
+		("fn", name)
+	};
+
+	write_sql!(f, sql_fmt, " FUNCTION {kind}");
+	for segment in path.split("::") {
+		f.push_str("::");
+		EscapeKwFreeIdent(segment).fmt_sql(f, sql_fmt);
+	}
+}
+
+/// The name of a stored analyzer function reference as SurrealQL spells it.
+pub fn qualified_name(name: &str) -> String {
+	if let Some(rest) = name.strip_prefix("mod::") {
+		format!("ext::{rest}")
+	} else if name.starts_with("fn::") {
+		name.to_owned()
+	} else {
+		format!("fn::{name}")
+	}
+}
+
+/// Converts a stored analyzer function reference into an executable function.
+pub fn function_from_storage(name: &str) -> crate::expr::Function {
+	if let Some(rest) = name.strip_prefix("mod::") {
+		let mut parts = rest.split("::");
+		let module = parts.next().unwrap_or_default().to_owned();
+		let sub = parts.collect::<Vec<_>>().join("::");
+		let sub = if sub.is_empty() {
+			None
+		} else {
+			Some(sub)
+		};
+		crate::expr::Function::Module(module, sub, crate::expr::ExtPrefix::Ext)
+	} else {
+		let name = name.strip_prefix("fn::").unwrap_or(name);
+		crate::expr::Function::Custom(name.to_owned())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn function_from_storage_fn_legacy() {
+		assert!(matches!(
+			function_from_storage("foo::bar"),
+			crate::expr::Function::Custom(s) if s == "foo::bar"
+		));
+	}
+
+	#[test]
+	fn function_from_storage_fn_prefix() {
+		assert!(matches!(
+			function_from_storage("fn::foo::bar"),
+			crate::expr::Function::Custom(s) if s == "foo::bar"
+		));
+	}
+
+	#[test]
+	fn function_from_storage_mod() {
+		assert!(matches!(
+			function_from_storage("mod::demo::math::add"),
+			crate::expr::Function::Module(m, Some(s), _) if m == "demo" && s == "math::add"
+		));
+	}
+}

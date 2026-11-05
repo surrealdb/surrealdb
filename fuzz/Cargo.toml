@@ -13,8 +13,18 @@ tokio = "1.52.1"
 
 [dependencies.surrealdb-core]
 path = "../surrealdb/core"
-features = ["kv-mem", "arbitrary", "gql"]
+features = ["kv-mem", "regex-unicode", "collate", "geo", "scram", "text-diff", "url", "maintenance-tasks", "api", "files", "search", "encoding", "arbitrary", "gql", "crypto-digest", "crypto-password", "html-sanitize", "cjk-tokenizer", "observability", "vector-index", "fulltext", "egraph"]
 default-features = false
+
+[dependencies.surrealdb-gql]
+path = "../surrealdb/gql"
+
+[dependencies.surrealdb-expr]
+path = "../surrealdb/expr"
+
+[dependencies.surrealdb-catalog]
+path = "../surrealdb/catalog"
+
 
 [dependencies.surrealdb-types]
 path = "../surrealdb/types"
@@ -55,7 +65,37 @@ doc = false
 
 
 [[bin]]
+name = "fuzz_vm_executor"
+path = "fuzz_targets/fuzz_vm_executor.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "fuzz_format"
 path = "fuzz_targets/fuzz_format.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_stored_decode"
+path = "fuzz_targets/fuzz_stored_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_stored_roundtrip"
+path = "fuzz_targets/fuzz_stored_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_record_envelope"
+path = "fuzz_targets/fuzz_record_envelope.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_packed_row"
+path = "fuzz_targets/fuzz_packed_row.rs"
 test = false
 doc = false

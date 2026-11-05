@@ -3,7 +3,6 @@
 reason = "GROUP BY + ORDER BY + TEMPFILES produces sums and a stable ordering for each group. Sister test: order_by_tempfiles_new_executor.surql covers the non-grouped path."
 
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [[test.results]]
 value = "NONE"

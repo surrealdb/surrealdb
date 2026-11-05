@@ -1,0 +1,53 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A MySQL statement that defines several things (a table with its columns and its keys, several tables dropped by one DROP TABLE) is answered once, as MySQL answers it with one OK packet"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ age: 40i32, email: 'tobie@example.com', id: 1, name: 'Tobie' }]"
+
+[[test.results]]
+error = "Database index `ddl_once_person_email_uniq` already contains 'tobie@example.com', with record `ddl_once_person:1`"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "The table 'ddl_once_a' does not exist"
+*/
+
+CREATE TABLE ddl_once_person (id INT PRIMARY KEY, name VARCHAR(50), email VARCHAR(50) UNIQUE, age INT);
+
+CREATE TABLE IF NOT EXISTS ddl_once_person (id INT PRIMARY KEY, name VARCHAR(50), email VARCHAR(50) UNIQUE, age INT);
+
+CREATE TABLE ddl_once_a (x INT);
+
+CREATE TABLE ddl_once_b (y INT);
+
+INSERT INTO ddl_once_person (id, name, email, age) VALUES (1, 'Tobie', 'tobie@example.com', 40);
+
+INSERT INTO ddl_once_person (id, name, email, age) VALUES (2, 'Other', 'tobie@example.com', 41);
+
+DROP TABLE ddl_once_a, ddl_once_b;
+
+DROP TABLE IF EXISTS ddl_once_a, ddl_once_b;
+
+SELECT x FROM ddl_once_a;

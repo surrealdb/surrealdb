@@ -1,0 +1,49 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_shirts_schema.surql"]
+
+[test]
+reason = "A string written to a MySQL SET column is split into members, judged against the declared members, and read back as the comma-joined members in declaration order"
+
+[[test.results]]
+value = "[{ id: 1, tags: {'a', 'c'} }, { id: 2, tags: {,} }, { id: 3, tags: {'b',} }]"
+
+[[test.results]]
+value = "[{ id: 1, tags: {'a', 'c'} }, { id: 2, tags: {,} }, { id: 3, tags: {'b',} }]"
+
+[[test.results]]
+error = "Couldn't coerce value for field `tags` of `prefs:4`: Expected `none | null | set<enum<'c', 'b', 'a'>>` but found `['a', 'z']`"
+
+[[test.results]]
+value = "[{ id: 3, tags: {'a', 'b'} }]"
+
+[[test.results]]
+value = "[{ tags: {'a', 'b'} }]"
+
+[[test.results]]
+value = "[{ id: 1 }]"
+
+[[test.results]]
+value = "[{ id: 2 }]"
+
+[[test.results]]
+value = "[{ id: 2 }, { id: 3 }]"
+*/
+
+INSERT INTO prefs (id, tags) VALUES (1, 'c,a'), (2, ''), (3, 'b');
+
+SELECT id, tags FROM prefs ORDER BY id;
+
+INSERT INTO prefs (id, tags) VALUES (4, 'a,z');
+
+UPDATE prefs SET tags = 'b,a' WHERE id = 3;
+
+SELECT tags FROM prefs WHERE id = 3;
+
+SELECT id FROM prefs WHERE tags = 'a,c';
+
+SELECT id FROM prefs WHERE tags = '';
+
+SELECT id FROM prefs WHERE tags <> 'a,c' ORDER BY id;

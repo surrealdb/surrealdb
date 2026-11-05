@@ -4,27 +4,34 @@ Essential context for AI assistants working with the host runtime.
 
 ## Architecture
 
-- **Engine:** Shared global `wasmtime::Engine` via `epoch.rs`. One background thread ticks the epoch for cooperative preemption.
-- **Runtime:** Per-module. Compiles WASM once, owns controller pool, KV store, config. Thread-safe, `Arc<Runtime>`.
-- **Controller:** Per-invocation. Single-threaded. Holds Store + Instance; can be reused by swapping host context.
+- **Engines:** `epoch.rs`. A pool of up to two `wasmtime::Engine`s (guarded and fast) per `EngineSettings`, shared process-wide by every holder of the same settings. Both use the pooling allocator with copy-on-write memory images. One ticker thread per guarded engine advances the epoch.
+- **Runtime:** One compiled archive. Holds the `InstancePre` per engine flavour, the exports manifest and a `WasiTemplate` (the attached filesystem, opened once). No tenant or request state. Thread-safe, `Arc<Runtime>`.
+- **Controller:** One fresh instance serving one invocation, dropped when it returns.
 
-## Pooling Model
+## Isolation Model
 
-Controllers are pooled and reused. Flow:
+Every invocation runs in fresh memory:
 
-1. **Acquire** — pop from pool or create new, run init() if new.
-2. **Set context** — install `InvocationContext` (auth, KV, sql/run handlers).
-3. **Invoke** — call `invoke(name, args)`.
-4. **Clear context** — replace with `NullContext` (no per-request state retained).
-5. **Release** — return to pool. Do not release after a WASM trap; drop the controller.
+1. **Slot** — `Engines::acquire_slot`. The slot count is
+   `EngineSettings::max_concurrent_invocations`, the pooling allocator's size.
+   A top-level invocation waits, bounded by its caller's deadline, and
+   top-level invocations together hold at most all but
+   `EngineSettings::nested_reserve` slots (a quarter, at least one). A nested
+   one (`Call::nested`) takes any free slot, reserved or not, or fails at once
+   with `NestedInvocationNoSlot`, because the slots may all be held by callers
+   waiting on it.
+2. **Instantiate** — from the `InstancePre` into the slot (a component that
+   still exports `init` was refused when it was compiled), with the
+   invocation's own `InstanceSettings`: network policy, memory limit, execution
+   time limit, engine flavour, stdio.
+3. **Invoke** — once per row. Each row is lent its own `Transaction` entry in
+   the resource table, deleted on every path including a trap.
+4. **Drop** — the store goes, and the slot returns with its memory reset to
+   the module's image.
 
-When idle, pooled controllers have `NullContext`; WASM linear memory and statics persist across calls.
-
-## Controller Lifecycle
-
-`acquire_controller(context)` → `set_context` (if reused) → `invoke` / `invoke_with_timeout` → `clear_context` → `release_controller`
-
-On trap: drop controller; do not release to pool.
+Nothing written survives the invocation: linear memory, globals, tables, the
+resource table and stdio buffers are all per store. The rows of one invocation
+share its memory.
 
 ## Host Function Contract
 
@@ -32,24 +39,49 @@ On trap: drop controller; do not release to pool.
 
 - `sql(query, vars)` — run SurrealQL
 - `run(fnc, version, args)` — call another surrealism function by FQN
-- `kv()` — per-module KV store
-- `stdout` / `stderr` — logging output
+- `stdout_callback` / `stderr_callback` — WASI stdio logging
 
-Host functions in `host.rs` read `StoreData.context` and delegate to the current `InvocationContext`.
+The `binding(name)` import (ABI 5, `Features::BINDINGS`) is not on the handle. It answers from the
+`Bindings` an invocation's `InstanceSettings::bindings` carries into
+`StoreData::bindings`, so a function lent no transaction can still read one,
+and a value never outlives the store it was read in. `None` refuses every read.
+
+Methods take `&self` and the trait is shared as `Arc<dyn InvocationContext>`,
+because a guest may hold several host calls in flight and the store is handed
+back to the guest while any is pending.
+
+`host.rs` registers `sql`/`run` as methods on the `transaction` resource with
+`func_wrap_concurrent`. Each resolves the handle into its context through the
+store's resource table **before** the first await — `Accessor::with` is
+synchronous and cannot span one.
+
+That resolution also takes a place among the calls in flight through the handle,
+capped at `MAX_IN_FLIGHT_HOST_CALLS`, and releases it on every path out. The cap
+bounds the fan-out; it does not order it. Whether two calls may run at the same
+time is a question about the statements they carry, so the `InvocationContext`
+decides it — see `Host::order` in `surrealdb/core/src/surrealism/host.rs`.
 
 ## Capability Enforcement
 
-- `allow_functions`: `FunctionTargets` enum — `None` (deny all), `All`, or `Some(patterns)`.
-- `run()` checks `config.capabilities.allow_functions.allows(fnc)` before executing.
-- `allow_arbitrary_queries` for `sql()`; `allow_net` for WASI networking.
+Capabilities belong to the invocation, not the compiled component: two
+definitions of one archive may grant different ones.
 
-## KV Semantics
-
-- Per-module `Arc<BTreeMapStore>` shared across all invocations.
-- **Volatile:** Data lives only in process memory. Lost on server restart, module eviction from cache, or `Runtime` drop. Not suitable for durable state.
-- Limits: `max_kv_entries`, `max_kv_value_bytes` (from config and server), `MAX_KV_KEY_BYTES` (1024 bytes, hardcoded).
-- Keys are UTF-8 strings (max 1024 bytes); values are FlatBuffers-serialized SurrealDB values.
-- Uses `parking_lot::RwLock` for interior mutability (non-poisoning).
+- `sql` / `run` permissions are checked by the `InvocationContext`, which holds
+  the invocation's grant.
+- The granted `net` targets gate networking twice, both from one `NetPolicy` (`net_allow.rs`)
+  carried in `StoreData::net`: by **name** in `dns.rs`, which shadows
+  `wasi:sockets/ip-name-lookup` and reads the policy from the store on each
+  lookup, and by **address** in WASI's `socket_addr_check`. Each invocation gets
+  a fresh copy (`NetPolicy::for_invocation`), so addresses vended to one are not
+  recognised in another. Allowed names are not pre-resolved; loopback/private/link-local
+  results are dropped unless an explicit IP rule covers them.
+- An operator's hostname deny rule refuses the name at the DNS shim. When the
+  grant also allows by address (`*`, a CIDR or an IP), `for_invocation`
+  resolves each denied hostname once for the invocation and refuses those
+  addresses too, so a guest cannot reach a denied host by its IP literal. If a
+  denied name does not resolve within `DENY_RESOLVE_TIMEOUT`, or a deny rule is
+  a wildcard (`*.example.com`, whose hosts cannot be enumerated), the
+  invocation may connect only to addresses the DNS shim vended.
 
 ## Epoch-Based Timeouts (Two-Engine Model)
 
@@ -58,24 +90,31 @@ Two wasmtime engines are maintained in `epoch.rs`:
 - **Guarded engine**: `epoch_interruption(true)`. Compiles epoch checks into WASM at every loop back-edge and function call. Enables accurate timeout enforcement but adds ~10% overhead on typical code, up to ~2x on tight numerical loops (e.g. ML inference).
 - **Fast engine**: No epoch interruption. Full native speed, no timeout enforcement.
 
-Modules choose via `strict_timeout` in `surrealism.toml` (default `true` → guarded). Compute-heavy trusted modules set `strict_timeout = false` for the fast engine. **Security:** `strict_timeout = false` means no timeout enforcement at all; the module can run indefinitely. Only explicitly trusted modules should use this. Code signing (planned) will gate access.
+Both use Cranelift, in every profile: Winch rejects
+`wasm_component_model_async`, which `invoke` and the `transaction` methods
+require.
 
-- Guarded: shared global ticker increments epoch every `EPOCH_TICK_MS` (10ms).
+The invocation's `InstanceSettings::strict_timeout` picks the engine (default `true` → guarded); a flavour is compiled on first use (`Runtime::prepare`). A definition asks for the fast engine with `CAPABILITIES { strict_timeout: false }`, and gets it only on a server started with `SURREAL_SURREALISM_ALLOW_UNBOUNDED_EXECUTION=true`. **Security:** the fast engine enforces no timeout at all; the module can run indefinitely and hold its slot and worker thread.
+
+- Guarded: the ticker increments the epoch every `EPOCH_TICK_MS` (10ms) until the engine is dropped.
 - Effective timeout = `min(context_remaining, module_limit, server_cap)`.
-- `store.set_epoch_deadline(ticks)`; trap `Trap::Interrupt` maps to `SurrealismError::Timeout`.
+- Every guarded store's epoch deadline is one tick away; `epoch::yield_until_deadline` yields to the executor on each tick and traps with `Trap::Interrupt` once `StoreData::deadline` is reached, which maps to `SurrealismError::Timeout`. A guest computing without host calls so gives its worker thread back every tick.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `runtime.rs` | Runtime, pool, `acquire_controller` / `release_controller`, `new_controller` |
-| `controller.rs` | Per-execution controller, invoke, init, list/args/returns |
-| `store.rs` | `StoreData` (wasi, table, config, context, limiter) |
-| `host.rs` | `InvocationContext`, `NullContext`, `implement_host_functions` |
-| `epoch.rs` | Two shared engines (fast + guarded), `shared_engine(guarded)`, epoch ticker |
-| `kv.rs` | `BTreeMapStore`, `KVStore` trait |
+| `runtime.rs` | `Runtime`, `Call`, `InstanceSettings`; `invoke` (slot, instantiate, init, rows, drop) |
+| `controller.rs` | One fresh instance: invoke, init, list/args/returns |
+| `store.rs` | `StoreData` (wasi, table, net policy, limiter) |
+| `host.rs` | `InvocationContext`, `Transaction`, `implement_host_functions` |
+| `epoch.rs` | `Engines` (pooled fast + guarded), `EngineSettings`, slots, epoch ticker |
 | `capabilities.rs` | `SurrealismCapabilities`, `FunctionTargets` |
+| `abi.rs` | `Abi` (supported ABIs), `Features`, the imports each feature gates |
 | `config.rs` | `SurrealismConfig`, `AbiVersion` |
 | `package.rs` | `SurrealismPackage`, pack/unpack `.surli` |
 | `exports.rs` | `ExportsManifest`, `FunctionExport` |
-| `wasi_context.rs` | Build WASI ctx for preopened dirs, networking |
+| `net_allow.rs` | `NetPolicy`, `NetRule` — one policy for both network checks |
+| `dns.rs` | Name-filtering replacement for `wasi:sockets/ip-name-lookup` |
+| `http.rs` | `wasi:http` request sender that answers to the same `NetPolicy` |
+| `wasi_context.rs` | `WasiTemplate`: per-archive filesystem, per-invocation WASI context |

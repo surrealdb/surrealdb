@@ -115,7 +115,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-		RecordIdKey, Regex, Table, Uuid, object,
+		RecordIdKey, Table, Uuid, object,
 	};
 
 	#[rstest]
@@ -153,7 +153,7 @@ mod tests {
 	#[case::record_id(Value::RecordId(RecordId::new("test_table", "test_key")))]
 	#[case::record_id(Value::RecordId(RecordId::new(
 		"test_table", 
-		RecordIdKey::Object(Object(std::collections::BTreeMap::from([
+		RecordIdKey::Object(Object::from(std::collections::BTreeMap::from([
 			("key".to_string(), Value::String("value".to_string()))
 		])))
 	)))]
@@ -172,14 +172,14 @@ mod tests {
 		std::collections::Bound::Included(Value::Number(Number::Int(43)))
 	))))]
 	// Regex
-	#[case::regex(Value::Regex(Regex(regex::Regex::new("").unwrap())))]
-	#[case::regex(Value::Regex(Regex(regex::Regex::new("test_regex").unwrap())))]
+	#[case::regex(Value::Regex("".parse().unwrap()))]
+	#[case::regex(Value::Regex("test_regex".parse().unwrap()))]
 	// Array
 	#[case::array(Value::Array(Array::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
 	// Object
 	#[case::object(Value::Object(object! { "key": "value".to_string() }))]
 	// Geometry
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))))]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))))]
 	fn test_encode_decode(#[case] input: Value) {
 		let encoded = encode(&input).expect("Failed to encode");
 		let decoded = decode::<Value>(&encoded).expect("Failed to decode");

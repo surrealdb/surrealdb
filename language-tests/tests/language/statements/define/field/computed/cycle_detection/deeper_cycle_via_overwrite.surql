@@ -11,7 +11,7 @@ reason = "Deeper cycle introduced by OVERWRITE: a -> d -> b -> a"
 value = "'OK'"
 
 [[test.results]]
-error = "Cyclic dependency detected among computed fields: a -> d -> b -> a"
+error = "Cyclic dependency detected among field clauses: a -> d -> b -> a"
 
 */
 

@@ -1,0 +1,18 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_schema.surql"]
+
+[test]
+reason = "MySQL LIKE and NOT LIKE pattern matching"
+
+[[test.results]]
+value = "[{ name: 'Alice' }]"
+
+[[test.results]]
+value = "[{ name: 'Bob' }]"
+*/
+
+SELECT u.name FROM users u WHERE u.name LIKE 'A%' ORDER BY u.name ASC;
+SELECT u.name FROM users u WHERE u.name NOT LIKE '%e' ORDER BY u.name ASC;

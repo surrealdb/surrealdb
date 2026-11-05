@@ -1,0 +1,13 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A write refuses an argument to CURDATE, which takes none, as a read does"
+
+[test.results]
+request-error = "MySQL INSERT lowering error: function \"curdate\" requires at most 0 arguments, but 1 were provided"
+*/
+
+INSERT INTO days (id, at) VALUES (3, CURDATE(1));

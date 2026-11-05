@@ -1,0 +1,14 @@
+### function() { return 1; }
+error: Problem with embedded script function. Embedded functions are not enabled.
+### function($limit) { return arguments[0]; }
+error: Problem with embedded script function. Embedded functions are not enabled.
+### SELECT VALUE function() { return this.name; } FROM person
+error: Problem with embedded script function. Embedded functions are not enabled.
+### ml::foo<1.0.0>(1)
+error: Problem with machine learning computation. Machine learning computation is not enabled.
+### SELECT VALUE ml::foo<1.0.0>({ age: age }) FROM person
+error: Problem with machine learning computation. Machine learning computation is not enabled.
+### function(<int> 'x') { return 1; }
+error: Problem with embedded script function. Embedded functions are not enabled.
+### ml::foo<1.0.0>(<int> 'x')
+error: Problem with machine learning computation. Machine learning computation is not enabled.

@@ -1,0 +1,70 @@
+[package]
+name = "surrealdb-mywire"
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+version.workspace = true
+description = "MySQL wire protocol server for SurrealDB"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = ["listener"]
+# The TCP listener (`start`): needs a native runtime. Without it the crate serves any async byte stream
+# through `serve` and builds for `wasm32-unknown-unknown`.
+listener = ["dep:axum-server", "tokio/net", "tls"]
+# TLS for the connections `serve` takes (`ServeOptions::tls`, `Start::Tls`). Without it the crate links no
+# TLS implementation and serves connections in clear, for a host that ends TLS before handing them over
+# (`Start::Secured`).
+tls = ["dep:tokio-rustls", "dep:ring", "dep:rustls-pki-types"]
+
+[dependencies]
+common = { workspace = true }
+surrealdb-core = { workspace = true, features = ["mysql"] }
+surrealdb-datastore = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-kvs = { workspace = true }
+surrealdb-mysql = { workspace = true }
+surrealdb-sqlplan = { workspace = true }
+surrealdb-rpc = { workspace = true }
+surrealdb-types = { workspace = true }
+
+anyhow = { workspace = true }
+axum-server = { workspace = true, optional = true }
+rand = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["sync", "io-util", "macros"] }
+tokio-rustls = { workspace = true, optional = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+# The password exchange of `caching_sha2_password` on a connection without TLS (not built for wasm).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rsa = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
+
+# TLS on `wasm32-unknown-unknown`: ring is the crypto provider, and it and the certificate time source
+# read the host's JavaScript clock and entropy.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ring = { workspace = true, features = ["wasm32_unknown_unknown_js"], optional = true }
+rustls-pki-types = { workspace = true, features = ["web"], optional = true }
+tokio-rustls = { workspace = true, features = ["ring"], optional = true }
+
+[dev-dependencies]
+# The integration tests drive the TCP listener, whatever features the build as a whole selects.
+surrealdb-mywire = { path = ".", features = ["listener"] }
+bytes = { workspace = true }
+rcgen = { workspace = true }
+surrealdb-core = { workspace = true, features = ["kv-mem"] }
+surrealdb-pgwire = { workspace = true, features = ["listener"] }
+tempfile = { workspace = true }
+# The TLS tests install the same process-wide provider the server does.
+tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }
+
+[lints]
+workspace = true
+

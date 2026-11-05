@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use surrealdb_types_derive::write_sql;
 
 use crate::utils::display::format_seperated;
+use crate::utils::escape::QuoteStr;
 use crate::{self as surrealdb_types, SqlFormat, Table, ToSql};
 
 /// The kind of a SurrealDB value.
@@ -28,15 +29,41 @@ pub enum Kind {
 	Bytes,
 	/// Datetime type.
 	Datetime,
+	/// Calendar date type, without a time zone.
+	Date,
+	/// Time of day type, without a date or time zone.
+	Time,
+	/// Date and time of day type, without a time zone.
+	Timestamp,
+	/// Calendar-aware interval type of months, days, and microseconds.
+	Interval,
 	/// Decimal type.
 	Decimal,
 	/// Duration type.
 	Duration,
+	/// 16-bit floating point type.
+	F16,
+	/// 32-bit floating point type.
+	F32,
 	/// 64-bit floating point type.
 	Float,
+	/// 8-bit signed integer type.
+	I8,
+	/// 16-bit signed integer type.
+	I16,
+	/// 32-bit signed integer type.
+	I32,
 	/// 64-bit signed integer type.
 	Int,
-	/// Number type, can be either a float, int or decimal.
+	/// 8-bit unsigned integer type.
+	U8,
+	/// 16-bit unsigned integer type.
+	U16,
+	/// 32-bit unsigned integer type.
+	U32,
+	/// 64-bit unsigned integer type.
+	U64,
+	/// Number type, can be any integer, float or decimal kind.
 	/// This is the most generic type for numbers.
 	Number,
 	/// Object type.
@@ -76,14 +103,22 @@ pub enum Kind {
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<String>),
+	/// An inline enum type: a string constrained to an ordered set of labels, in declaration
+	/// order.
+	Enum(Vec<String>),
+	/// A type declared by `DEFINE TYPE`, by name.
+	Named(String),
+	/// Arbitrary-precision decimal type, with no bound on digits or scale.
+	BigDecimal,
 }
 
 impl Kind {
 	/// Recursively flatten a kind into a vector of kinds.
 	pub fn flatten(self) -> Vec<Kind> {
-		match self {
-			Kind::Either(x) => x.into_iter().flat_map(|k| k.flatten()).collect(),
-			_ => vec![self],
+		if let Kind::Either(x) = self {
+			x.into_iter().flat_map(|k| k.flatten()).collect()
+		} else {
+			vec![self]
 		}
 	}
 
@@ -110,6 +145,57 @@ impl Kind {
 	pub fn option(kind: Kind) -> Kind {
 		Kind::either(vec![Kind::None, kind])
 	}
+
+	/// All sized numeric kinds (`i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `u64`, `f16`, `f32`).
+	pub const SIZED: [Kind; 9] = [
+		Kind::I8,
+		Kind::U8,
+		Kind::I16,
+		Kind::U16,
+		Kind::I32,
+		Kind::U32,
+		Kind::U64,
+		Kind::F16,
+		Kind::F32,
+	];
+
+	/// All numeric kinds (`int`, `float`, `decimal`, `bigdecimal`, `number`, and all
+	/// [`Self::SIZED`] kinds).
+	pub const NUMERIC: [Kind; 14] = [
+		Kind::Int,
+		Kind::Float,
+		Kind::Decimal,
+		Kind::BigDecimal,
+		Kind::Number,
+		Kind::I8,
+		Kind::U8,
+		Kind::I16,
+		Kind::U16,
+		Kind::I32,
+		Kind::U32,
+		Kind::U64,
+		Kind::F16,
+		Kind::F32,
+	];
+
+	/// Returns `true` if this kind is one of the sized numeric kinds (`i8`..`f32`).
+	pub const fn is_sized_number(&self) -> bool {
+		matches!(
+			self,
+			Kind::I8
+				| Kind::U8 | Kind::I16
+				| Kind::U16 | Kind::I32
+				| Kind::U32 | Kind::U64
+				| Kind::F16 | Kind::F32
+		)
+	}
+
+	/// Returns `true` if this kind admits only numbers (`int`, `float`, `decimal`, `bigdecimal`,
+	/// `number`, or a sized numeric kind).
+	pub const fn is_numeric(&self) -> bool {
+		matches!(self, Kind::Int | Kind::Float | Kind::Decimal | Kind::BigDecimal | Kind::Number)
+			|| self.is_sized_number()
+	}
 }
 
 impl ToSql for Kind {
@@ -121,10 +207,24 @@ impl ToSql for Kind {
 			Kind::Bool => f.push_str("bool"),
 			Kind::Bytes => f.push_str("bytes"),
 			Kind::Datetime => f.push_str("datetime"),
+			Kind::Date => f.push_str("date"),
+			Kind::Time => f.push_str("time"),
+			Kind::Timestamp => f.push_str("timestamp"),
+			Kind::Interval => f.push_str("interval"),
 			Kind::Decimal => f.push_str("decimal"),
+			Kind::BigDecimal => f.push_str("bigdecimal"),
 			Kind::Duration => f.push_str("duration"),
+			Kind::F16 => f.push_str("f16"),
+			Kind::F32 => f.push_str("f32"),
 			Kind::Float => f.push_str("float"),
+			Kind::I8 => f.push_str("i8"),
+			Kind::I16 => f.push_str("i16"),
+			Kind::I32 => f.push_str("i32"),
 			Kind::Int => f.push_str("int"),
+			Kind::U8 => f.push_str("u8"),
+			Kind::U16 => f.push_str("u16"),
+			Kind::U32 => f.push_str("u32"),
+			Kind::U64 => f.push_str("u64"),
 			Kind::Number => f.push_str("number"),
 			Kind::Object => f.push_str("object"),
 			Kind::String => f.push_str("string"),
@@ -169,6 +269,19 @@ impl ToSql for Kind {
 				} else {
 					write_sql!(f, fmt, "file<{}>", format_seperated(bucket, " | "))
 				}
+			}
+			Kind::Enum(labels) => {
+				f.push_str("enum<");
+				for (i, label) in labels.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					write_sql!(f, fmt, "{}", QuoteStr(label));
+				}
+				f.push('>');
+			}
+			Kind::Named(name) => {
+				write_sql!(f, fmt, "{}", crate::utils::escape::EscapeSqonIdent(name));
 			}
 		}
 	}

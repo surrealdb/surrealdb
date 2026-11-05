@@ -1,0 +1,34 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_cast_nulls.surql"]
+
+[test]
+reason = "Casting NULL, a literal or a column, gives NULL whatever the target type; a text 'NULL' or '' is not NULL"
+
+[[test.results]]
+value = "[{ i: NULL, t: NULL }]"
+
+[[test.results]]
+value = "[{ i: 36, n: 36dec, t: '36' }, { i: NULL, n: NULL, t: NULL }, { i: 29, n: 29dec, t: '29' }, { i: NULL, n: NULL, t: NULL }, { i: NULL, n: NULL, t: NULL }]"
+
+[[test.results]]
+value = "[{ i: 36 }, { i: NULL }, { i: 29 }, { i: NULL }, { i: NULL }]"
+
+[[test.results]]
+value = "[{ k: 2 }, { k: 4 }, { k: 5 }]"
+
+[[test.results]]
+value = "[{ k: 2 }, { k: 4 }, { k: 5 }, { k: 3 }, { k: 1 }]"
+
+[[test.results]]
+value = "[{ a: 'NULL', b: '' }]"
+*/
+
+SELECT CAST(NULL AS SIGNED) AS i, CAST(NULL AS CHAR) AS t;
+SELECT CAST(age AS SIGNED) AS i, CAST(age AS CHAR) AS t, CAST(age AS DECIMAL) AS n FROM agg_t ORDER BY k;
+SELECT CAST(CAST(age AS CHAR) AS SIGNED) AS i FROM agg_t ORDER BY k;
+SELECT k FROM agg_t WHERE CAST(age AS SIGNED) IS NULL ORDER BY k;
+SELECT k FROM agg_t ORDER BY CAST(age AS SIGNED), k;
+SELECT CAST('NULL' AS CHAR) AS a, CAST('' AS CHAR) AS b FROM agg_t WHERE k = 1;

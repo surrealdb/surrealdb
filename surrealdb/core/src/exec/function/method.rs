@@ -39,6 +39,10 @@ pub enum ValueKind {
 	Bytes,
 	Duration,
 	Datetime,
+	Date,
+	Time,
+	Timestamp,
+	Interval,
 	Number,
 	Geometry,
 	Record,
@@ -46,6 +50,12 @@ pub enum ValueKind {
 }
 
 impl ValueKind {
+	/// The kind's bit in a mask of kinds: [`MethodDescriptor::kind_mask`] holds
+	/// one per kind the method implements.
+	pub const fn bit(self) -> u16 {
+		1 << (self as u8)
+	}
+
 	/// Extract the coarse kind from a Value, if it has type-specific methods.
 	///
 	/// Returns `None` for types that only support generic methods
@@ -59,11 +69,22 @@ impl ValueKind {
 			Value::Bytes(_) => Some(ValueKind::Bytes),
 			Value::Duration(_) => Some(ValueKind::Duration),
 			Value::Datetime(_) => Some(ValueKind::Datetime),
+			Value::Date(_) => Some(ValueKind::Date),
+			Value::Time(_) => Some(ValueKind::Time),
+			Value::Timestamp(_) => Some(ValueKind::Timestamp),
+			Value::Interval(_) => Some(ValueKind::Interval),
 			Value::Number(_) => Some(ValueKind::Number),
 			Value::Geometry(_) => Some(ValueKind::Geometry),
 			Value::RecordId(_) => Some(ValueKind::Record),
 			Value::File(_) => Some(ValueKind::File),
-			_ => None,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Uuid(_)
+			| Value::Table(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => None,
 		}
 	}
 }
@@ -82,39 +103,52 @@ pub struct MethodDescriptor {
 	/// The method name (for error messages).
 	pub name: &'static str,
 	/// Per-type implementations. Checked in order; first matching kind wins.
-	pub type_impls: Vec<(ValueKind, Arc<dyn ScalarFunction>)>,
+	pub type_impls: Vec<(ValueKind, &'static dyn ScalarFunction)>,
 	/// Fallback function used when no type-specific impl matches.
 	/// This is the typical path for generic methods (to_string, type_of, etc.).
-	pub fallback: Option<Arc<dyn ScalarFunction>>,
+	pub fallback: Option<&'static dyn ScalarFunction>,
 }
 
 impl MethodDescriptor {
 	/// Resolve the method to a concrete function for the given value.
 	///
 	/// Checks type-specific implementations first, then falls back to the
-	/// generic fallback. Returns an error if no implementation is found.
-	pub fn resolve(&self, value: &Value) -> anyhow::Result<&Arc<dyn ScalarFunction>> {
+	/// generic fallback. Returns `None` when no implementation exists for the
+	/// value's type; the caller decides how to degrade (method calls fall back
+	/// to closure-field-call semantics).
+	/// Whether an object receiver is guaranteed to reach a builtin, so that
+	/// the closure-field degradation in [`MethodPart`](crate::exec::parts::MethodPart)
+	/// is unreachable for this name.
+	///
+	/// A closure can only be stored in a field, and only an object carries
+	/// fields, so an object receiver is the whole of that path: a name that
+	/// dispatches for one runs a body the call site can see, whatever the
+	/// receiver turns out to hold.
+	pub fn dispatches_for_an_object(&self) -> bool {
+		self.fallback.is_some()
+			|| self.type_impls.iter().any(|(kind, _)| *kind == ValueKind::Object)
+	}
+
+	/// The kinds with a type-specific implementation, as a mask of
+	/// [`ValueKind::bit`]s.
+	pub fn kind_mask(&self) -> u16 {
+		self.type_impls.iter().fold(0, |mask, (kind, _)| mask | kind.bit())
+	}
+
+	pub fn resolve(&self, value: &Value) -> Option<&'static dyn ScalarFunction> {
 		let kind = ValueKind::of(value);
 
 		// Check type-specific implementations first
 		if let Some(kind) = kind {
 			for (k, func) in &self.type_impls {
 				if *k == kind {
-					return Ok(func);
+					return Some(*func);
 				}
 			}
 		}
 
 		// Fall back to generic implementation
-		if let Some(ref func) = self.fallback {
-			return Ok(func);
-		}
-
-		Err(anyhow::anyhow!(
-			"Method '{}' cannot be called on value of type '{}'",
-			self.name,
-			value.kind_of()
-		))
+		self.fallback
 	}
 }
 
@@ -138,11 +172,23 @@ impl MethodRegistry {
 		self.methods.get(name)
 	}
 
+	/// Iterate over every registered method name.
+	#[cfg(test)]
+	pub fn names(&self) -> impl Iterator<Item = &'static str> + '_ {
+		self.methods.keys().copied()
+	}
+
+	/// Iterate over every registered method descriptor.
+	#[cfg(test)]
+	pub fn descriptors(&self) -> impl Iterator<Item = &Arc<MethodDescriptor>> + '_ {
+		self.methods.values()
+	}
+
 	/// Register a method that works on all types via a single fallback function.
 	///
 	/// If a descriptor already exists for this method (e.g. from a prior
 	/// `register_typed` call), the fallback is set on the existing descriptor.
-	fn register_generic(&mut self, method: &'static str, func: Arc<dyn ScalarFunction>) {
+	fn register_generic(&mut self, method: &'static str, func: &'static dyn ScalarFunction) {
 		let entry = self.methods.entry(method).or_insert_with(|| {
 			Arc::new(MethodDescriptor {
 				name: method,
@@ -162,7 +208,7 @@ impl MethodRegistry {
 		&mut self,
 		method: &'static str,
 		value_kind: ValueKind,
-		func: Arc<dyn ScalarFunction>,
+		func: &'static dyn ScalarFunction,
 	) {
 		let entry = self.methods.entry(method).or_insert_with(|| {
 			Arc::new(MethodDescriptor {
@@ -195,12 +241,10 @@ impl MethodRegistry {
 
 /// Helper to look up a function from the registry, panicking if not found.
 /// Since these are all builtins, a missing function indicates a registration bug.
-fn get(funcs: &FunctionRegistry, name: &str) -> Arc<dyn ScalarFunction> {
-	Arc::clone(
-		funcs
-			.get(name)
-			.unwrap_or_else(|| panic!("Expected builtin function '{}' to be registered", name)),
-	)
+fn get(funcs: &FunctionRegistry, name: &str) -> &'static dyn ScalarFunction {
+	funcs
+		.get(name)
+		.unwrap_or_else(|| panic!("Expected builtin function '{}' to be registered", name))
 }
 
 /// Build the method registry from the function registry.
@@ -218,6 +262,10 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_generic("to_array", get(funcs, "type::array"));
 	m.register_generic("to_bool", get(funcs, "type::bool"));
 	m.register_generic("to_bytes", get(funcs, "type::bytes"));
+	m.register_generic("to_date", get(funcs, "type::date"));
+	m.register_generic("to_time", get(funcs, "type::time"));
+	m.register_generic("to_timestamp", get(funcs, "type::timestamp"));
+	m.register_generic("to_interval", get(funcs, "type::interval"));
 	m.register_generic("to_datetime", get(funcs, "type::datetime"));
 	m.register_generic("to_decimal", get(funcs, "type::decimal"));
 	m.register_generic("to_duration", get(funcs, "type::duration"));
@@ -242,6 +290,10 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_generic("is_bool", get(funcs, "type::is_bool"));
 	m.register_generic("is_bytes", get(funcs, "type::is_bytes"));
 	m.register_generic("is_collection", get(funcs, "type::is_collection"));
+	m.register_generic("is_date", get(funcs, "type::is_date"));
+	m.register_generic("is_time", get(funcs, "type::is_time"));
+	m.register_generic("is_timestamp", get(funcs, "type::is_timestamp"));
+	m.register_generic("is_interval", get(funcs, "type::is_interval"));
 	m.register_generic("is_datetime", get(funcs, "type::is_datetime"));
 	m.register_generic("is_decimal", get(funcs, "type::is_decimal"));
 	m.register_generic("is_duration", get(funcs, "type::is_duration"));
@@ -482,10 +534,16 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_typed("vector_project", ValueKind::Array, get(funcs, "vector::project"));
 	m.register_typed("vector_scale", ValueKind::Array, get(funcs, "vector::scale"));
 	m.register_typed("vector_subtract", ValueKind::Array, get(funcs, "vector::subtract"));
+	m.register_typed("vector_sum", ValueKind::Array, get(funcs, "vector::sum"));
 	m.register_typed(
 		"vector_distance_chebyshev",
 		ValueKind::Array,
 		get(funcs, "vector::distance::chebyshev"),
+	);
+	m.register_typed(
+		"vector_distance_cosine",
+		ValueKind::Array,
+		get(funcs, "vector::distance::cosine"),
 	);
 	m.register_typed(
 		"vector_distance_euclidean",
@@ -662,27 +720,111 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_typed("set_minute", ValueKind::Datetime, get(funcs, "time::set_minute"));
 	m.register_typed("set_second", ValueKind::Datetime, get(funcs, "time::set_second"));
 	m.register_typed("set_nanosecond", ValueKind::Datetime, get(funcs, "time::set_nanosecond"));
+	m.register_typed("extract", ValueKind::Datetime, get(funcs, "time::extract"));
+	m.register_typed("trunc", ValueKind::Datetime, get(funcs, "time::trunc"));
+	m.register_typed("age", ValueKind::Datetime, get(funcs, "time::age"));
+	m.register_typed("day", ValueKind::Date, get(funcs, "time::day"));
+	m.register_typed("format", ValueKind::Date, get(funcs, "time::format"));
+	m.register_typed("group", ValueKind::Date, get(funcs, "time::group"));
+	m.register_typed("is_leap_year", ValueKind::Date, get(funcs, "time::is_leap_year"));
+	m.register_typed("month", ValueKind::Date, get(funcs, "time::month"));
+	m.register_typed("round", ValueKind::Date, get(funcs, "time::round"));
+	m.register_typed("wday", ValueKind::Date, get(funcs, "time::wday"));
+	m.register_typed("week", ValueKind::Date, get(funcs, "time::week"));
+	m.register_typed("yday", ValueKind::Date, get(funcs, "time::yday"));
+	m.register_typed("year", ValueKind::Date, get(funcs, "time::year"));
+	m.register_typed("ceil", ValueKind::Date, get(funcs, "time::ceil"));
+	m.register_typed("floor", ValueKind::Date, get(funcs, "time::floor"));
+	m.register_typed("set_year", ValueKind::Date, get(funcs, "time::set_year"));
+	m.register_typed("set_month", ValueKind::Date, get(funcs, "time::set_month"));
+	m.register_typed("set_day", ValueKind::Date, get(funcs, "time::set_day"));
+	m.register_typed("extract", ValueKind::Date, get(funcs, "time::extract"));
+	m.register_typed("trunc", ValueKind::Date, get(funcs, "time::trunc"));
+	m.register_typed("age", ValueKind::Date, get(funcs, "time::age"));
+	m.register_typed("day", ValueKind::Timestamp, get(funcs, "time::day"));
+	m.register_typed("format", ValueKind::Timestamp, get(funcs, "time::format"));
+	m.register_typed("group", ValueKind::Timestamp, get(funcs, "time::group"));
+	m.register_typed("is_leap_year", ValueKind::Timestamp, get(funcs, "time::is_leap_year"));
+	m.register_typed("month", ValueKind::Timestamp, get(funcs, "time::month"));
+	m.register_typed("round", ValueKind::Timestamp, get(funcs, "time::round"));
+	m.register_typed("wday", ValueKind::Timestamp, get(funcs, "time::wday"));
+	m.register_typed("week", ValueKind::Timestamp, get(funcs, "time::week"));
+	m.register_typed("yday", ValueKind::Timestamp, get(funcs, "time::yday"));
+	m.register_typed("year", ValueKind::Timestamp, get(funcs, "time::year"));
+	m.register_typed("ceil", ValueKind::Timestamp, get(funcs, "time::ceil"));
+	m.register_typed("floor", ValueKind::Timestamp, get(funcs, "time::floor"));
+	m.register_typed("set_year", ValueKind::Timestamp, get(funcs, "time::set_year"));
+	m.register_typed("set_month", ValueKind::Timestamp, get(funcs, "time::set_month"));
+	m.register_typed("set_day", ValueKind::Timestamp, get(funcs, "time::set_day"));
+	m.register_typed("extract", ValueKind::Timestamp, get(funcs, "time::extract"));
+	m.register_typed("trunc", ValueKind::Timestamp, get(funcs, "time::trunc"));
+	m.register_typed("age", ValueKind::Timestamp, get(funcs, "time::age"));
+	m.register_typed("set_hour", ValueKind::Timestamp, get(funcs, "time::set_hour"));
+	m.register_typed("set_minute", ValueKind::Timestamp, get(funcs, "time::set_minute"));
+	m.register_typed("set_second", ValueKind::Timestamp, get(funcs, "time::set_second"));
+	m.register_typed("set_nanosecond", ValueKind::Timestamp, get(funcs, "time::set_nanosecond"));
+	m.register_typed("hour", ValueKind::Time, get(funcs, "time::hour"));
+	m.register_typed("minute", ValueKind::Time, get(funcs, "time::minute"));
+	m.register_typed("second", ValueKind::Time, get(funcs, "time::second"));
+	m.register_typed("nano", ValueKind::Time, get(funcs, "time::nano"));
+	m.register_typed("micros", ValueKind::Time, get(funcs, "time::micros"));
+	m.register_typed("millis", ValueKind::Time, get(funcs, "time::millis"));
+	m.register_typed("trunc", ValueKind::Time, get(funcs, "time::trunc"));
+	m.register_typed("extract", ValueKind::Time, get(funcs, "time::extract"));
+	m.register_typed("hour", ValueKind::Timestamp, get(funcs, "time::hour"));
+	m.register_typed("minute", ValueKind::Timestamp, get(funcs, "time::minute"));
+	m.register_typed("second", ValueKind::Timestamp, get(funcs, "time::second"));
+	m.register_typed("nano", ValueKind::Timestamp, get(funcs, "time::nano"));
+	m.register_typed("micros", ValueKind::Timestamp, get(funcs, "time::micros"));
+	m.register_typed("millis", ValueKind::Timestamp, get(funcs, "time::millis"));
+	m.register_typed("years", ValueKind::Interval, get(funcs, "interval::years"));
+	m.register_typed("months", ValueKind::Interval, get(funcs, "interval::months"));
+	m.register_typed("days", ValueKind::Interval, get(funcs, "interval::days"));
+	m.register_typed("hours", ValueKind::Interval, get(funcs, "interval::hours"));
+	m.register_typed("mins", ValueKind::Interval, get(funcs, "interval::mins"));
+	m.register_typed("secs", ValueKind::Interval, get(funcs, "interval::secs"));
+	m.register_typed("micros", ValueKind::Interval, get(funcs, "interval::micros"));
+	m.register_typed("justify_hours", ValueKind::Interval, get(funcs, "interval::justify_hours"));
+	m.register_typed("justify_days", ValueKind::Interval, get(funcs, "interval::justify_days"));
+	m.register_typed(
+		"justify_interval",
+		ValueKind::Interval,
+		get(funcs, "interval::justify_interval"),
+	);
 
 	// =====================================================================
 	// File methods
 	// =====================================================================
-	m.register_typed("bucket", ValueKind::File, get(funcs, "file::bucket"));
-	m.register_typed("key", ValueKind::File, get(funcs, "file::key"));
-	m.register_typed("put", ValueKind::File, get(funcs, "file::put"));
-	m.register_typed("put_if_not_exists", ValueKind::File, get(funcs, "file::put_if_not_exists"));
-	m.register_typed("get", ValueKind::File, get(funcs, "file::get"));
-	m.register_typed("head", ValueKind::File, get(funcs, "file::head"));
-	m.register_typed("delete", ValueKind::File, get(funcs, "file::delete"));
-	m.register_typed("copy", ValueKind::File, get(funcs, "file::copy"));
-	m.register_typed("copy_if_not_exists", ValueKind::File, get(funcs, "file::copy_if_not_exists"));
-	m.register_typed("rename", ValueKind::File, get(funcs, "file::rename"));
-	m.register_typed(
-		"rename_if_not_exists",
-		ValueKind::File,
-		get(funcs, "file::rename_if_not_exists"),
-	);
-	m.register_typed("exists", ValueKind::File, get(funcs, "file::exists"));
-	m.register_typed("list", ValueKind::File, get(funcs, "file::list"));
+	// A registry without the file family (the edge builtins) has no file methods.
+	if funcs.get("file::bucket").is_some() {
+		m.register_typed("bucket", ValueKind::File, get(funcs, "file::bucket"));
+		m.register_typed("key", ValueKind::File, get(funcs, "file::key"));
+		m.register_typed("put", ValueKind::File, get(funcs, "file::put"));
+		m.register_typed(
+			"put_if_not_exists",
+			ValueKind::File,
+			get(funcs, "file::put_if_not_exists"),
+		);
+		m.register_typed("get", ValueKind::File, get(funcs, "file::get"));
+		m.register_typed("head", ValueKind::File, get(funcs, "file::head"));
+		m.register_typed("delete", ValueKind::File, get(funcs, "file::delete"));
+		m.register_typed("copy", ValueKind::File, get(funcs, "file::copy"));
+		m.register_typed(
+			"copy_if_not_exists",
+			ValueKind::File,
+			get(funcs, "file::copy_if_not_exists"),
+		);
+		m.register_typed("rename", ValueKind::File, get(funcs, "file::rename"));
+		m.register_typed(
+			"rename_if_not_exists",
+			ValueKind::File,
+			get(funcs, "file::rename_if_not_exists"),
+		);
+		m.register_typed("exists", ValueKind::File, get(funcs, "file::exists"));
+		m.register_typed("list", ValueKind::File, get(funcs, "file::list"));
+		m.register_typed("presign_get", ValueKind::File, get(funcs, "file::presign_get"));
+		m.register_typed("presign_put", ValueKind::File, get(funcs, "file::presign_put"));
+	}
 
 	// =====================================================================
 	// Aliases
@@ -694,4 +836,68 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_alias("index_of", "find_index"); // array.index_of() → array::find_index
 
 	m
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A method with no implementation for the receiver's type degrades to
+	/// invoking a closure stored in a field of that name, and only an object
+	/// carries fields — so a name an object receiver dispatches for cannot
+	/// reach a body the call site did not write, and every other name can.
+	///
+	/// SECURITY: [`MethodDescriptor::dispatches_for_an_object`] is what the
+	/// analyzer asks before it lets a call move below a field-permission
+	/// layer. It is asserted here on names of each shape so that a change to
+	/// how a method is registered cannot quietly widen the exemption: a name
+	/// gaining an object arm or a generic fallback is a name gaining it.
+	#[test]
+	fn only_a_name_an_object_dispatches_for_cannot_reach_a_closure() {
+		let registry = FunctionRegistry::with_builtins();
+		let dispatches = |name: &str| {
+			registry
+				.get_method(name)
+				.unwrap_or_else(|| panic!("{name} should be a registered method"))
+				.dispatches_for_an_object()
+		};
+
+		// Registered with an object arm, and with a generic fallback.
+		assert!(dispatches("len"));
+		assert!(dispatches("is_empty"));
+		assert!(dispatches("type_of"));
+		assert!(dispatches("to_string"));
+
+		// Registered for other types alone: an object receiver reaches the
+		// closure-field path instead.
+		assert!(!dispatches("get"));
+		assert!(!dispatches("split"));
+		assert!(!dispatches("starts_with"));
+
+		// A name the registry does not know at all was never exempt.
+		assert!(registry.get_method("check").is_none());
+	}
+
+	/// Read-only classification treats a method call as read-only exactly when
+	/// its name dispatches to a builtin; an unregistered name resolves to a
+	/// closure stored on the receiver, whose body is invisible at that point,
+	/// and must be classified writable. Both the surface AST and the
+	/// expression tree read that distinction from
+	/// `surrealdb_expr::expr::method::BUILTIN_METHOD_NAMES`, a static mirror of this
+	/// registry (the layers below cannot depend on this one). The two must
+	/// stay identical: a name missing from the mirror costs every use of that
+	/// method its read transaction, and a stale extra name lets a writing
+	/// closure body reach a read-only transaction.
+	#[test]
+	fn the_name_mirror_matches_the_registry() {
+		let registry = FunctionRegistry::with_builtins();
+		let mut registered: Vec<&str> = registry.methods().names().collect();
+		registered.sort_unstable();
+		assert_eq!(
+			registered,
+			crate::expr::method::BUILTIN_METHOD_NAMES,
+			"keep `surrealdb_expr::expr::method::BUILTIN_METHOD_NAMES` identical to the \
+			 names registered in `build_method_registry`"
+		);
+	}
 }

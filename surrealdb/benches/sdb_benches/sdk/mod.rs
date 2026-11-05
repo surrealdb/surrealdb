@@ -23,18 +23,6 @@ pub(super) async fn init(target: &str) {
 		"sdk-mem" => {
 			DB.connect("memory").await.unwrap();
 		}
-		#[cfg(feature = "kv-rocksdb")]
-		"sdk-rocksdb" => {
-			let path = format!(
-				"rocksdb://sdk-rocksdb-{}.db",
-				web_time::SystemTime::now()
-					.duration_since(web_time::UNIX_EPOCH)
-					.unwrap()
-					.as_millis()
-			);
-			println!("\n### Using path: {} ###\n", path);
-			DB.connect(&path).await.unwrap();
-		}
 		#[cfg(feature = "kv-surrealkv")]
 		"sdk-surrealkv" => {
 			let path = format!(

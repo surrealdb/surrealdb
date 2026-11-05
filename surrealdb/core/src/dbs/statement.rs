@@ -1,638 +1,143 @@
-use std::borrow::Cow;
+//! The `FOR UPDATE` admission rules and their rejection messages.
 
-use anyhow::Result;
-use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql};
+/// Rejection message for a `FOR UPDATE` FROM target that is not a
+/// specific record id. Shared by the plan-time guards and the runtime
+/// re-validation in the scan operators so both executors report the same
+/// error for the same query.
+pub(crate) const FOR_UPDATE_TARGETS_ERROR: &str =
+	"SELECT ... FOR UPDATE requires record ids as targets";
 
-use crate::catalog::{Permission, TableDefinition};
-use crate::ctx::{Context, FrozenContext};
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::expr::cond::Cond;
-use crate::expr::data::Data;
-use crate::expr::fetch::Fetchs;
-use crate::expr::field::Fields;
-use crate::expr::group::Groups;
-use crate::expr::limit::Limit;
-use crate::expr::order::Ordering;
-use crate::expr::output::Output;
-use crate::expr::parameterize::exprs_to_fields;
-use crate::expr::split::Splits;
-use crate::expr::start::Start;
-use crate::expr::statements::LiveFields;
-use crate::expr::statements::access::AccessStatement;
-use crate::expr::statements::create::CreateStatement;
-use crate::expr::statements::delete::DeleteStatement;
-use crate::expr::statements::insert::InsertStatement;
-use crate::expr::statements::live::LiveStatement;
-use crate::expr::statements::relate::RelateStatement;
-use crate::expr::statements::select::SelectStatement;
-use crate::expr::statements::show::ShowStatement;
-use crate::expr::statements::update::UpdateStatement;
-use crate::expr::statements::upsert::UpsertStatement;
-use crate::expr::{Explain, Expr, FlowResultExt, Idiom, With};
-use crate::idx::planner::QueryPlanner;
-use crate::val::Duration;
+/// Rejection message for a `FOR UPDATE` read combined with a version,
+/// whether from a statement-level VERSION clause or an enclosing version
+/// scope. Shared for the same reason as [`FOR_UPDATE_TARGETS_ERROR`].
+pub(crate) const FOR_UPDATE_VERSION_ERROR: &str =
+	"SELECT ... FOR UPDATE cannot be combined with VERSION";
 
-#[derive(Clone, Debug)]
-pub(crate) enum Statement<'a> {
-	Live(&'a LiveStatement),
-	Show(&'a ShowStatement),
-	Select {
-		stmt: &'a SelectStatement,
-		/// Fields to omit from the result.
-		omit: Vec<Idiom>,
-		/// Rewritten condition with optimizations (e.g., count(->edge) > 0 -> LIMIT 1).
-		/// When present, this replaces `stmt.cond` for evaluation.
-		rewritten_cond: Option<Cond>,
-	},
-	Create(&'a CreateStatement),
-	Upsert(&'a UpsertStatement),
-	Update(&'a UpdateStatement),
-	Relate(&'a RelateStatement),
-	Delete(&'a DeleteStatement),
-	Insert(&'a InsertStatement),
-	Access(&'a AccessStatement),
-}
+/// Rejection message for a `FOR UPDATE` read that groups or splits its rows.
+/// Shared for the same reason as [`FOR_UPDATE_TARGETS_ERROR`].
+pub(crate) const FOR_UPDATE_GROUP_ERROR: &str =
+	"SELECT ... FOR UPDATE cannot be combined with GROUP BY or SPLIT";
 
-impl<'a> From<&'a LiveStatement> for Statement<'a> {
-	fn from(v: &'a LiveStatement) -> Self {
-		Statement::Live(v)
+/// Rejection message for a `FOR UPDATE` read with a `LIMIT` over more than
+/// one target. Shared for the same reason as [`FOR_UPDATE_TARGETS_ERROR`].
+pub(crate) const FOR_UPDATE_LIMIT_ERROR: &str =
+	"SELECT ... FOR UPDATE cannot be combined with LIMIT over multiple targets";
+
+/// Validate the clause combinations a `FOR UPDATE` SELECT permits.
+///
+/// `FOR UPDATE` locks the selected records for the duration of the
+/// enclosing transaction, so it only supports plain reads of specific
+/// records: VERSION, GROUP BY, and SPLIT are rejected, and every FROM
+/// target must be a record id (see [`check_for_update_targets`]).
+///
+/// LIMIT is also rejected alongside more than one FROM target: the executor
+/// stops pulling from the sources once the limit is filled, so the targets
+/// past that point would never be read and never registered for conflict
+/// detection. A single target is unaffected — it is read before the limit
+/// discards its row.
+///
+/// The executor validates before lowering, so the surface statement is the
+/// form the rules are checked on. A `SELECT` in `FROM` position is a
+/// statement in its own right, with its own clauses to validate: lowering
+/// flattens the two into one plan and distributes `FOR UPDATE` onto the
+/// stored sources it finds, so a statement whose only source is a subquery
+/// leaves no trace of the clause in the plan.
+///
+/// A no-op when the statement does not carry `FOR UPDATE`.
+pub(crate) fn validate_for_update(
+	stm: &crate::expr::statements::SelectStatement,
+) -> std::result::Result<(), crate::exec::Error> {
+	use crate::expr::{Expr, Literal};
+	for expr in &stm.what {
+		if let Expr::Select(inner) = expr {
+			validate_for_update(inner)?;
+		}
 	}
-}
-
-impl<'a> From<&'a ShowStatement> for Statement<'a> {
-	fn from(v: &'a ShowStatement) -> Self {
-		Statement::Show(v)
+	if !stm.for_update {
+		return Ok(());
 	}
-}
-
-impl<'a> From<&'a CreateStatement> for Statement<'a> {
-	fn from(v: &'a CreateStatement) -> Self {
-		Statement::Create(v)
+	if !matches!(stm.version, Expr::Literal(Literal::None)) {
+		return Err(crate::exec::Error::Query {
+			message: FOR_UPDATE_VERSION_ERROR.to_string(),
+		});
 	}
-}
-
-impl<'a> From<&'a UpsertStatement> for Statement<'a> {
-	fn from(v: &'a UpsertStatement) -> Self {
-		Statement::Upsert(v)
+	if stm.group.is_some() || stm.split.is_some() {
+		return Err(crate::exec::Error::Query {
+			message: FOR_UPDATE_GROUP_ERROR.to_string(),
+		});
 	}
-}
-
-impl<'a> From<&'a UpdateStatement> for Statement<'a> {
-	fn from(v: &'a UpdateStatement) -> Self {
-		Statement::Update(v)
+	if stm.limit.is_some() && stm.what.len() > 1 {
+		return Err(crate::exec::Error::Query {
+			message: FOR_UPDATE_LIMIT_ERROR.to_string(),
+		});
 	}
+	check_for_update_targets(&stm.what)
 }
 
-impl<'a> From<&'a RelateStatement> for Statement<'a> {
-	fn from(v: &'a RelateStatement) -> Self {
-		Statement::Relate(v)
-	}
-}
-
-impl<'a> From<&'a DeleteStatement> for Statement<'a> {
-	fn from(v: &'a DeleteStatement) -> Self {
-		Statement::Delete(v)
-	}
-}
-
-impl<'a> From<&'a InsertStatement> for Statement<'a> {
-	fn from(v: &'a InsertStatement) -> Self {
-		Statement::Insert(v)
-	}
-}
-
-impl<'a> From<&'a AccessStatement> for Statement<'a> {
-	fn from(v: &'a AccessStatement) -> Self {
-		Statement::Access(v)
-	}
-}
-
-impl ToSql for Statement<'_> {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		match self {
-			Statement::Live(v) => {
-				let sql_stmt: crate::sql::statements::LiveStatement = (*v).clone().into();
-				sql_stmt.fmt_sql(f, fmt);
+/// Check that every statically-classifiable FROM target of a `FOR UPDATE`
+/// SELECT is a specific (non-range) record id.
+///
+/// Targets whose shape is only known at runtime — params, function calls, and
+/// call/method postfix expressions — pass this check and must be re-validated
+/// at the site where they resolve to a value.
+fn check_for_update_targets<'a>(
+	what: impl IntoIterator<Item = &'a crate::expr::Expr>,
+) -> std::result::Result<(), crate::exec::Error> {
+	use crate::expr::operator::PostfixOperator;
+	use crate::expr::{Expr, Literal, RecordIdKeyLit};
+	for expr in what {
+		match expr {
+			Expr::Literal(Literal::RecordId(rid))
+				if !matches!(rid.key, RecordIdKeyLit::Range(_)) => {}
+			Expr::Param(_) | Expr::FunctionCall(_) => {}
+			Expr::Postfix {
+				op: PostfixOperator::MethodCall(..) | PostfixOperator::Call(..),
+				..
+			} => {}
+			Expr::Literal(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
 			}
-			Statement::Show(v) => {
-				let sql_stmt: crate::sql::statements::ShowStatement = (*v).clone().into();
-				sql_stmt.fmt_sql(f, fmt);
+			| Expr::Postfix {
+				..
 			}
-			Statement::Select {
-				stmt,
+			| Expr::Binary {
+				..
+			}
+			| Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Return(_)
+			| Expr::Throw(_)
+			| Expr::IfElse(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Upsert(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
 				..
 			} => {
-				let sql_stmt: crate::sql::statements::SelectStatement = (*stmt).clone().into();
-				sql_stmt.fmt_sql(f, fmt);
-			}
-			Statement::Create(v) => {
-				let sql_stmt: crate::sql::statements::CreateStatement = (*v).clone().into();
-				sql_stmt.fmt_sql(f, fmt);
-			}
-			Statement::Upsert(v) => {
-				let sql_stmt: crate::sql::statements::UpsertStatement = (*v).clone().into();
-				sql_stmt.fmt_sql(f, fmt);
-			}
-			Statement::Update(v) => {
-				let sql_stmt: crate::sql::statements::UpdateStatement = (*v).clone().into();
-				sql_stmt.fmt_sql(f, fmt);
-			}
-			Statement::Relate(v) => {
-				let sql_stmt: crate::sql::statements::RelateStatement = (*v).clone().into();
-				sql_stmt.fmt_sql(f, fmt);
-			}
-			Statement::Delete(v) => {
-				let sql_stmt: crate::sql::statements::DeleteStatement = (*v).clone().into();
-				sql_stmt.fmt_sql(f, fmt);
-			}
-			Statement::Insert(v) => {
-				let sql_stmt: crate::sql::statements::InsertStatement = (*v).clone().into();
-				sql_stmt.fmt_sql(f, fmt);
-			}
-			Statement::Access(v) => {
-				let sql_stmt: crate::sql::statements::AccessStatement = (*v).clone().into();
-				sql_stmt.fmt_sql(f, fmt);
+				return Err(crate::exec::Error::Query {
+					message: FOR_UPDATE_TARGETS_ERROR.to_string(),
+				});
 			}
 		}
 	}
-}
-
-impl Statement<'_> {
-	/// Check if this is a SELECT statement
-	pub(crate) fn is_select(&self) -> bool {
-		matches!(self, Statement::Select { .. })
-	}
-
-	/// Check if this is a CREATE statement
-	pub(crate) fn is_create(&self) -> bool {
-		matches!(self, Statement::Create(_))
-	}
-
-	/// Check if this is a DELETE statement
-	pub(crate) fn is_delete(&self) -> bool {
-		matches!(self, Statement::Delete(_))
-	}
-
-	/// Check if this statement mutates the document storage. CREATE,
-	/// UPSERT, UPDATE, RELATE, DELETE, and INSERT all do; SELECT, LIVE,
-	/// SHOW, and ACCESS do not. Used by the planner to decide whether to
-	/// populate the read-only [`crate::doc::NsDbTbCtx`] or the mutating
-	/// [`crate::doc::NsDbTbMutCtx`] when building the per-table catalog
-	/// context.
-	pub(crate) fn is_mutation(&self) -> bool {
-		matches!(
-			self,
-			Statement::Create(_)
-				| Statement::Upsert(_)
-				| Statement::Update(_)
-				| Statement::Relate(_)
-				| Statement::Delete(_)
-				| Statement::Insert(_)
-		)
-	}
-
-	/// Returns whether the document retrieval for
-	/// this statement can be deferred. This is used
-	/// in the following instances:
-	///
-	/// CREATE some;
-	/// CREATE some:thing;
-	/// CREATE |some:1000|;
-	/// CREATE |some:1..1000|;
-	/// CREATE { id: some:thing };
-	/// UPSERT some;
-	/// UPSERT some:thing;
-	/// UPSERT |some:1000|;
-	/// UPSERT |some:1..1000|;
-	/// UPSERT { id: some:thing };
-	///
-	/// Importantly, when a WHERE clause condition is
-	/// specified on an UPSERT clause, then we do
-	/// first retrieve the document from storage, and
-	/// this function will return false in the
-	/// following instances:
-	///
-	/// UPSERT some WHERE test = true;
-	/// UPSERT some:thing WHERE test = true;
-	/// UPSERT |some:1000| WHERE test = true;
-	/// UPSERT |some:1..1000| WHERE test = true;
-	/// UPSERT { id: some:thing } WHERE test = true;
-	pub(crate) fn is_deferable(&self) -> bool {
-		match self {
-			Statement::Upsert(v) if v.cond.is_none() => true,
-			Statement::Create(_) => true,
-			_ => false,
-		}
-	}
-
-	/// Returns whether the document retrieval for
-	/// this statement potentially depends on the
-	/// initial value for this document, and can
-	/// therefore be retried as an update. This will
-	/// be true in the following instances:
-	///
-	/// UPSERT some UNSET test;
-	/// UPSERT some SET test = true;
-	/// UPSERT some MERGE { test: true };
-	/// UPSERT some PATCH [{ op: 'replace', path: '/', value: { test: true } }];
-	/// UPSERT some:thing UNSET test;
-	/// UPSERT some:thing SET test = true;
-	/// UPSERT some:thing MERGE { test: true };
-	/// UPSERT some:thing PATCH [{ op: 'replace', path: '/', value: { test: true
-	/// } }]; UPSERT |some:1000| UNSET test;
-	/// UPSERT |some:1000| SET test = true;
-	/// UPSERT |some:1000| MERGE { test: true };
-	/// UPSERT |some:1000| PATCH [{ op: 'replace', path: '/', value: { test:
-	/// true } }]; UPSERT |some:1..1000| UNSET test;
-	/// UPSERT |some:1..1000| SET test = true;
-	/// UPSERT |some:1..1000| MERGE { test: true };
-	/// UPSERT |some:1..1000| PATCH [{ op: 'replace', path: '/', value: { test:
-	/// true } }];
-	///
-	/// Importantly, when a WHERE clause condition is
-	/// specified on an UPSERT clause, then we do
-	/// first retrieve the document from storage, and
-	/// this function will return false in the
-	/// following instances:
-	///
-	/// UPSERT some WHERE test = true;
-	/// UPSERT some:thing WHERE test = true;
-	/// UPSERT |some:1000| WHERE test = true;
-	/// UPSERT |some:1..1000| WHERE test = true;
-	/// UPSERT { id: some:thing } WHERE test = true;
-	pub(crate) fn is_repeatable(&self) -> bool {
-		match self {
-			Statement::Upsert(v) if v.cond.is_none() => match v.data {
-				// We are setting the entire record content
-				// so there is no need to fetch the value
-				// from the storage engine, if it exists.
-				Some(Data::ContentExpression(_)) => false,
-				// We are setting the entire record content
-				// so there is no need to fetch the value
-				// from the storage engine, if it exists.
-				Some(Data::ReplaceExpression(_)) => false,
-				// We likely have a MERGE or SET clause on
-				// this UPSERT statement, and so we might
-				// potentially need to access fields from
-				// the initial value already existing in
-				// the database. Therefore we need to fetch
-				// the initial value from storage.
-				Some(_) => true,
-				// We have no data clause, so we don't need
-				// to check if the record exists initially.
-				None => false,
-			},
-			_ => false,
-		}
-	}
-
-	/// Returns whether the statement requires the table to exist in the database
-	/// before executing or if it may be able to create it if it doesn't exist.
-	///
-	/// SELECT statements, for example, require the table to exist in the database
-	/// before executing, regardless of whether the db is strict or not.
-	///
-	/// UPSERT statements, on the other hand, may be allowed to create the table if it doesn't exist
-	/// depending on the db's strictness.
-	pub(crate) fn requires_table_existence(&self) -> bool {
-		match self {
-			Statement::Live(_)
-			| Statement::Show(_)
-			| Statement::Select {
-				..
-			}
-			| Statement::Update {
-				..
-			}
-			| Statement::Access(_)
-			| Statement::Delete(_) => true,
-			Statement::Create(_)
-			| Statement::Upsert(_)
-			| Statement::Relate(_)
-			| Statement::Insert(_) => false,
-		}
-	}
-
-	/// Returns whether the document retrieval for
-	/// this statement should attempt to loop over
-	/// existing document to update, or is guaranteed
-	/// to create a record, if none exists. This is
-	/// used in the following instances when the WHERE
-	/// clause does not find any matching documents in
-	/// the storage engine, and therefore a new record
-	/// must be upserted:
-	///
-	/// UPSERT some WHERE test = true;
-	pub(crate) fn is_guaranteed(&self) -> bool {
-		matches!(self, Statement::Upsert(v) if v.cond.is_some())
-	}
-
-	/// Returns any query fields if specified
-	pub(crate) fn expr(&self) -> Option<&Fields> {
-		match self {
-			Statement::Select {
-				stmt,
-				..
-			} => Some(&stmt.fields),
-			Statement::Live(v) => match &v.fields {
-				LiveFields::Diff => None,
-				LiveFields::Select(x) => Some(x),
-			},
-			_ => None,
-		}
-	}
-
-	/// Returns any SET, CONTENT, or MERGE clause if specified
-	pub(crate) fn data(&self) -> Option<&Data> {
-		match self {
-			Statement::Create(v) => v.data.as_ref(),
-			Statement::Upsert(v) => v.data.as_ref(),
-			Statement::Update(v) => v.data.as_ref(),
-			Statement::Relate(v) => v.data.as_ref(),
-			Statement::Insert(v) => v.update.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns any WHERE clause if specified
-	pub(crate) fn cond(&self) -> Option<&Cond> {
-		match self {
-			Statement::Live(v) => v.cond.as_ref(),
-			Statement::Select {
-				stmt,
-				rewritten_cond,
-				..
-			} => rewritten_cond.as_ref().or(stmt.cond.as_ref()),
-			Statement::Upsert(v) => v.cond.as_ref(),
-			Statement::Update(v) => v.cond.as_ref(),
-			Statement::Delete(v) => v.cond.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns any SPLIT clause if specified
-	pub(crate) fn split(&self) -> Option<&Splits> {
-		match self {
-			Statement::Select {
-				stmt,
-				..
-			} => stmt.split.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns any GROUP clause if specified
-	pub(crate) fn group(&self) -> Option<&Groups> {
-		match self {
-			Statement::Select {
-				stmt,
-				..
-			} => stmt.group.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns any ORDER clause if specified
-	pub(crate) fn order(&self) -> Option<&Ordering> {
-		match self {
-			Statement::Select {
-				stmt,
-				..
-			} => stmt.order.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns any WITH clause if specified
-	pub(crate) fn with(&self) -> Option<&With> {
-		match self {
-			Statement::Select {
-				stmt,
-				..
-			} => stmt.with.as_ref(),
-			Statement::Update(s) => s.with.as_ref(),
-			Statement::Upsert(s) => s.with.as_ref(),
-			Statement::Delete(s) => s.with.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns any FETCH clause if specified
-	pub(crate) fn fetch(&self) -> Option<&Fetchs> {
-		match self {
-			Statement::Select {
-				stmt,
-				..
-			} => stmt.fetch.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns any START clause if specified
-	pub(crate) fn start(&self) -> Option<&Start> {
-		match self {
-			Statement::Select {
-				stmt,
-				..
-			} => stmt.start.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns any LIMIT clause if specified
-	pub(crate) fn limit(&self) -> Option<&Limit> {
-		match self {
-			Statement::Select {
-				stmt,
-				..
-			} => stmt.limit.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns any ON DUPLICATE KEY clause if specified
-	pub(crate) fn update(&self) -> Option<&Data> {
-		match self {
-			Statement::Insert(v) => v.update.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns any OMIT fields if specified
-	pub(crate) fn omit(&self) -> &[Idiom] {
-		match self {
-			Statement::Select {
-				omit,
-				..
-			} => omit.as_slice(),
-			_ => &[],
-		}
-	}
-
-	/// Returns whether this statement has an ONLY clause
-	pub(crate) fn is_only(&self) -> bool {
-		match self {
-			Statement::Create(v) => v.only,
-			Statement::Delete(v) => v.only,
-			Statement::Relate(v) => v.only,
-			Statement::Upsert(v) => v.only,
-			Statement::Update(v) => v.only,
-			Statement::Select {
-				stmt,
-				..
-			} => stmt.only,
-			_ => false,
-		}
-	}
-
-	/// Returns whether this statement has an IGNORE clause
-	pub(crate) fn is_ignore(&self) -> bool {
-		match self {
-			Statement::Insert(v) => v.ignore,
-			_ => false,
-		}
-	}
-
-	/// Returns any RETURN clause if specified
-	pub(crate) fn output(&self) -> Option<&Output> {
-		match self {
-			Statement::Create(v) => v.output.as_ref(),
-			Statement::Upsert(v) => v.output.as_ref(),
-			Statement::Update(v) => v.output.as_ref(),
-			Statement::Relate(v) => v.output.as_ref(),
-			Statement::Delete(v) => v.output.as_ref(),
-			Statement::Insert(v) => v.output.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns any TEMPFILES clause if specified
-	#[cfg(storage)]
-	pub(crate) fn tempfiles(&self) -> bool {
-		match self {
-			Statement::Select {
-				stmt,
-				..
-			} => stmt.tempfiles,
-			_ => false,
-		}
-	}
-
-	/// Returns any EXPLAIN clause if specified
-	pub(crate) fn explain(&self) -> Option<&Explain> {
-		match self {
-			Statement::Select {
-				stmt,
-				..
-			} => stmt.explain.as_ref(),
-			Statement::Update(s) => s.explain.as_ref(),
-			Statement::Upsert(s) => s.explain.as_ref(),
-			Statement::Delete(s) => s.explain.as_ref(),
-			_ => None,
-		}
-	}
-
-	/// Returns a reference to the appropriate `Permission` field within the
-	/// `TableDefinition` structure based on the type of the statement.
-	pub(crate) fn permissions<'b>(
-		&self,
-		table: &'b TableDefinition,
-		doc_is_new: bool,
-	) -> &'b Permission {
-		if self.is_delete() {
-			&table.permissions.delete
-		} else if self.is_select() {
-			&table.permissions.select
-		} else if doc_is_new {
-			&table.permissions.create
-		} else {
-			&table.permissions.update
-		}
-	}
-
-	pub(crate) fn timeout(&self) -> Option<&Expr> {
-		match self {
-			Statement::Create(s) => Some(&s.timeout),
-			Statement::Delete(s) => Some(&s.timeout),
-			Statement::Insert(s) => Some(&s.timeout),
-			Statement::Select {
-				stmt,
-				..
-			} => Some(&stmt.timeout),
-			Statement::Update(s) => Some(&s.timeout),
-			Statement::Upsert(s) => Some(&s.timeout),
-			_ => None,
-		}
-	}
-	pub(crate) async fn setup_timeout<'a>(
-		&self,
-		stk: &mut Stk,
-		ctx: &'a FrozenContext,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Cow<'a, FrozenContext>> {
-		if let Some(t) = self.timeout() {
-			let Some(x) = stk
-				.run(|stk| t.compute(stk, ctx, opt, doc))
-				.await
-				.catch_return()?
-				.cast_to::<Option<Duration>>()?
-			else {
-				return Ok(Cow::Borrowed(ctx));
-			};
-			let mut ctx = Context::new_child(ctx);
-			ctx.add_timeout(x.0)?;
-			Ok(Cow::Owned(ctx.freeze()))
-		} else {
-			Ok(Cow::Borrowed(ctx))
-		}
-	}
-
-	pub(crate) fn setup_query_planner<'a>(
-		&self,
-		planner: QueryPlanner,
-		ctx: Cow<'a, FrozenContext>,
-	) -> Cow<'a, FrozenContext> {
-		// Add query executors if any
-		if planner.has_executors() {
-			// Create a new context
-			let mut ctx = Context::new_child(&ctx);
-			ctx.set_query_planner(planner);
-			Cow::Owned(ctx.freeze())
-		} else {
-			ctx
-		}
-	}
-
-	pub(crate) async fn from_select<'a>(
-		stk: &mut Stk,
-		ctx: &FrozenContext,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		stmt: &'a SelectStatement,
-	) -> Result<Statement<'a>> {
-		use crate::expr::visit::MutVisitor;
-		use crate::idx::planner::count_exists_rewriter::CountLimitRewriter;
-
-		let omit = exprs_to_fields(stk, ctx, opt, doc, stmt.omit.as_slice()).await?;
-
-		let rewritten_cond = if let Some(cond) = &stmt.cond {
-			let mut cond_expr = cond.0.clone();
-			if CountLimitRewriter.visit_mut_expr(&mut cond_expr).is_ok() && cond_expr != cond.0 {
-				Some(Cond(cond_expr))
-			} else {
-				None
-			}
-		} else {
-			None
-		};
-
-		Ok(Statement::Select {
-			stmt,
-			omit,
-			rewritten_cond,
-		})
-	}
+	Ok(())
 }

@@ -44,7 +44,12 @@ impl Strategy {
 			s @ Self::TagKey {
 				..
 			} => s,
-			_ => panic!(
+			Self::VariantKey {
+				..
+			}
+			| Self::Value {
+				..
+			} => panic!(
 				"#[surreal(skip_content)] / #[surreal(skip_content_if)] can only be used on variants of enums with a tag"
 			),
 		}

@@ -55,21 +55,19 @@
 //! states/provinces, then cities), with no duplicates even if the graph has cycles.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
-use super::common::{eval_buffered, is_recursion_target};
+use super::common::{DepthBody, RecursionBounds, eval_buffered, is_recursion_target};
 use crate::exec::FlowResult;
+use crate::exec::parts::is_final;
 use crate::exec::parts::recurse::value_hash;
-use crate::exec::parts::{evaluate_physical_path, is_final};
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::val::Value;
 
 /// Collect recursion: gather all unique nodes encountered during BFS traversal.
 ///
 /// Collects every distinct node reachable by a walk whose length falls in
-/// `[min_depth, max_depth]`, matching the legacy compute engine. Walks may
+/// `[min_depth, max_depth]`. Walks may
 /// revisit nodes, so cycle pruning must not lose nodes whose only in-range
 /// walk passes through an already-visited node:
 ///
@@ -81,14 +79,14 @@ use crate::val::Value;
 ///   first occurrence. This also bounds unbounded recursion on cyclic graphs.
 ///
 /// Fully iterative -- frontier-based BFS loop.
-pub(crate) async fn evaluate_recurse_collect(
+pub(crate) async fn evaluate_recurse_collect_with(
 	start: &Value,
-	path: &[Arc<dyn PhysicalExpr>],
-	min_depth: u32,
-	max_depth: u32,
+	body: &impl DepthBody,
+	bounds: RecursionBounds,
 	inclusive: bool,
-	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
+	let min_depth = bounds.min;
+	let max_depth = bounds.cap();
 	let mut collected = Vec::new();
 	// Nodes already collected (output dedup). The inclusive start is seeded
 	// here so it is not collected again if re-reached through a cycle.
@@ -114,10 +112,7 @@ pub(crate) async fn evaluate_recurse_collect(
 		let mut level_seen: HashSet<u64> = HashSet::new();
 
 		// Phase 1: Evaluate all frontier values concurrently (bounded).
-		let futures: Vec<_> = frontier
-			.iter()
-			.map(|value| evaluate_physical_path(value, path, ctx.with_value(value)))
-			.collect();
+		let futures: Vec<_> = frontier.iter().map(|value| body.eval(value)).collect();
 		let eval_results = eval_buffered(futures).await?;
 
 		// Phase 2: Aggregate results sequentially (fast, no I/O).
@@ -127,7 +122,26 @@ pub(crate) async fn evaluate_recurse_collect(
 			let values = match result {
 				Value::Array(arr) => arr.0,
 				Value::None | Value::Null => continue,
-				other => vec![other],
+				other @ (Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_)) => vec![other],
 			};
 
 			for v in values {
@@ -139,7 +153,7 @@ pub(crate) async fn evaluate_recurse_collect(
 				// Non-RecordId values during recursion are an error --
 				// recursion is intended purely for record graph traversal.
 				if !is_recursion_target(&v) {
-					return Err(crate::err::Error::InvalidRecursionTarget {
+					return Err(crate::exec::Error::InvalidRecursionTarget {
 						value: v.to_sql(),
 					}
 					.into());
@@ -165,6 +179,15 @@ pub(crate) async fn evaluate_recurse_collect(
 
 		frontier = next_frontier;
 		depth += 1;
+	}
+
+	// Unbounded recursion truncated at the system limit with the frontier still
+	// non-empty: hard error (see `RecursionBounds`).
+	if bounds.errors_on_limit() && !frontier.is_empty() {
+		return Err(crate::exec::Error::IdiomRecursionLimitExceeded {
+			limit: bounds.system_limit,
+		}
+		.into());
 	}
 
 	Ok(Value::Array(collected.into()))

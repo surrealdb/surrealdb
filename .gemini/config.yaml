@@ -1,0 +1,8 @@
+ignore_patterns:
+  - "Cargo.lock"
+  - "revision.lock"
+  - "supply-chain/**"
+  - "surrealdb/core/src/exec/vm/goldens/**"
+  - "surrealdb/parser-next/tests/golden/**"
+code_review:
+  comment_severity_threshold: MEDIUM

@@ -1,0 +1,21 @@
+target = "rust"
+
+[package]
+organisation = "surrealdb"
+name = "demo"
+version = "1.0.0"
+
+[capabilities]
+allow_arbitrary_queries = true
+allow_functions = ["fn::*", "file::*", "sequence::*", "ext::*"]
+# `localhost` is matched by name by the DNS shim; `127.0.0.1` is the explicit
+# IP rule that readmits the loopback address the name resolves to, which the
+# shim would otherwise reject as special.
+allow_net = ["localhost", "127.0.0.1"]
+
+[attach]
+fs = "fs"
+
+# Read by `bound_greeting`. Optional, so a definition need not bind it.
+[bindings]
+greeting = { type = "option<string>", description = "What bound_greeting returns" }

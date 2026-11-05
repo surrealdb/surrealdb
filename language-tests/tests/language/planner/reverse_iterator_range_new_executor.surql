@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Tests reverse iteration with range queries using ORDER BY DESC (new executor)"
+reason = "Tests reverse iteration with range queries using ORDER BY DESC"
 
 [[test.results]]
 value = "'OK'"
@@ -15,10 +14,11 @@ value = "[{ id: t:[10] }, { id: t:[9] }, { id: t:[8] }]"
 value = "[{ id: t:[9] }, { id: t:[8] }, { id: t:[7] }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 3}
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 3}
     Limit [ctx: Db] [limit: 3] {rows: 3}
-        SortTopKByKey [ctx: Db] [sort_keys: id DESC, limit: 3] {rows: 3}
-            RecordIdScan [ctx: Db] [record_id: t:[5]..=[10]] {rows: 6}
+        Sort [ctx: Db] [sort_keys: id DESC, keep: 3] {rows: 3}
+            RecordIdScan [ctx: Db] [record_id: t:[5]..=[10]] {rows: 3}
 
 Total rows: 3''''
 */

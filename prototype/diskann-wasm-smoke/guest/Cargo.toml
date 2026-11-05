@@ -1,0 +1,12 @@
+[package]
+name = "diskann-wasi-guest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[dependencies]
+surrealdb-core = { path = "../../../surrealdb/core", default-features = false, features = ["kv-mem"] }
+surrealdb-types = { path = "../../../surrealdb/types" }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+tokio-util = "0.7"
+anyhow = "1"
+[workspace]

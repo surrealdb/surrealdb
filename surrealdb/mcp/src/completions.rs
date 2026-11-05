@@ -1,7 +1,7 @@
 //! Auto-completion support for MCP tool arguments.
 
 use rmcp::model::{CompleteRequestParams, CompleteResult, CompletionInfo};
-use surrealdb_core::dbs::QueryResult;
+use surrealdb_rpc::QueryResult;
 
 use crate::session::McpSession;
 
@@ -72,7 +72,6 @@ fn extract_keys(results: Vec<QueryResult>, subtree: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-	use std::sync::Arc;
 
 	use rmcp::model::{ArgumentInfo, CompleteRequestParams, Reference};
 	use surrealdb_core::dbs::Session;
@@ -81,7 +80,7 @@ mod tests {
 	use super::*;
 
 	async fn seeded_session() -> McpSession {
-		let ds = Arc::new(Datastore::new("memory").await.expect("datastore"));
+		let ds = Datastore::new("memory").await.expect("datastore");
 		ds.execute("DEFINE NAMESPACE test;", &Session::owner(), None).await.expect("ns");
 		ds.execute("DEFINE DATABASE test;", &Session::owner().with_ns("test"), None)
 			.await
@@ -127,10 +126,7 @@ mod tests {
 	fn make_request(name: &str) -> CompleteRequestParams {
 		CompleteRequestParams::new(
 			Reference::for_prompt("any"),
-			ArgumentInfo {
-				name: name.to_string(),
-				value: String::new(),
-			},
+			ArgumentInfo::new(name.to_string(), String::new()),
 		)
 	}
 

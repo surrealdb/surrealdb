@@ -6,67 +6,86 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-#[cfg(feature = "surrealism")]
-use anyhow::Context as _;
 use anyhow::{Result, bail};
+use surrealdb_cnf::PROTECTED_PARAM_NAMES;
+use surrealdb_cnf::dynamic::DynamicConfiguration;
 use surrealdb_strand::Strand;
-#[cfg(feature = "surrealism")]
-use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
-#[cfg(feature = "surrealism")]
-use surrealism_runtime::runtime::Runtime;
 #[cfg(feature = "http")]
 use url::Url;
 use uuid::Uuid;
 use web_time::Instant;
 
+use crate::buc::Error as BucError;
 use crate::buc::manager::BucketsManager;
-#[cfg(feature = "surrealism")]
-use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
-use crate::cnf::dynamic::DynamicConfiguration;
-use crate::cnf::{CommonConfig, PROTECTED_PARAM_NAMES};
+use crate::catalog::{DatabaseId, Error as CatalogError, NamespaceId};
+use crate::config::RuntimeConfig;
 use crate::ctx::cancel::CancelHandle;
+#[cfg(test)]
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
+use crate::dbs::capabilities::Error as CapabilitiesError;
 #[cfg(feature = "surrealism")]
 use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-#[cfg(all(feature = "http", feature = "surrealism"))]
-use crate::dbs::capabilities::Targets;
-use crate::dbs::{
-	Capabilities, MessageBroker, NewPlannerStrategy, Options, Session, StatementCounters, Variables,
-};
-use crate::err::Error;
+use crate::dbs::{Capabilities, MessageBroker, Options, Session, StatementCounters, Variables};
+use crate::err::{EngineError, Error};
+use crate::exec::Error as ExecError;
+use crate::exec::context::ForbiddenRow;
 use crate::exec::function::FunctionRegistry;
+use crate::exec::planner::placement::Policy;
+use crate::exec::surface::Surface;
+use crate::exec::vm::morsel::places;
 use crate::expr::Base;
+#[cfg(feature = "surrealism")]
+use crate::extension::archive::{ArchiveSource, fetch_archive};
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
 use crate::iam::{Action, ResourceKind};
-use crate::idx::planner::executor::QueryExecutor;
-use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
+use crate::kvs::{DatastoreError, Transaction};
 use crate::mem::ALLOC;
-use crate::sql::expression::convert_public_value_to_internal;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCachedModule};
 use crate::types::PublicVariables;
-use crate::val::Value;
+use crate::val::convert_public::convert_public_value_to_internal;
+use crate::val::{Datetime, Value};
 
 pub type FrozenContext = Arc<Context>;
+
+/// The names of the values a frame binds around the code it runs rather than
+/// the query binding them: the row a statement reads (`$this`, `$self`,
+/// `$parent`) and the names an event, a live notification or a field clause
+/// binds. A function body called from such a frame reads them through the
+/// whole context chain, as it reads the protected names; they are not a
+/// caller's `LET` or `FOR` bindings.
+const ROW_PARAM_NAMES: &[&str] =
+	&["this", "self", "parent", "before", "after", "event", "value", "input"];
+
+/// What a parameter name is bound to in a context's chain
+/// ([`Context::binding`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Binding<'a> {
+	/// A value.
+	Value(&'a Arc<Value>),
+	/// A KNN query vector's row being scanned, which a statement or a body
+	/// entered from the vector's evaluation binds as its `$parent` and
+	/// `$this`: the parameter has no value, and a read of it fails with the
+	/// row's refusal ([`ForbiddenRow::error`]).
+	Forbidden(&'a Arc<ForbiddenRow>),
+}
 
 /// Ambient state for one query batch: datastore handles, cancellation, capabilities,
 /// and **request-wide** configuration (node id, auth enabled, dynamic config, live/broker).
 ///
 /// Stored behind [`FrozenContext`] (`Arc<Context>`) with optional parent links for scoped
-/// deadlines, planner state, and parameters. Per-statement toggles live on [`Options`], not here.
+/// deadlines and parameters. Per-statement toggles live on [`Options`], not here.
 pub struct Context {
 	// An optional parent context.
 	parent: Option<FrozenContext>,
@@ -85,40 +104,24 @@ pub struct Context {
 	// cancel instead of running to completion. `None` for contexts without
 	// an external cancel source (embedded callers, internal use).
 	cancel_token: Option<tokio_util::sync::CancellationToken>,
-	// A collection of read only values stored in this context.
-	values: HashMap<Strand, Arc<Value>>,
-	// An optional query planner
-	query_planner: Option<Arc<QueryPlanner>>,
-	// An optional query executor
-	query_executor: Option<QueryExecutor>,
-	// An optional iteration stage
-	iteration_stage: Option<IterationStage>,
-	// An optional datastore cache
-	cache: Option<Arc<DatastoreCache>>,
-	// The index store
-	index_stores: IndexStores,
-	// The index concurrent builders
-	index_builder: Option<IndexBuilder>,
-	// The sequences
-	sequences: Option<Sequences>,
+	// A collection of read only values stored in this context. Shared with the
+	// snapshots taken of it, and copied on the first write made while one is held.
+	values: Arc<HashMap<Strand, Arc<Value>>>,
+	// The parameter names this context binds to a KNN query vector's row being
+	// scanned rather than to a value ([`Binding::Forbidden`]). A name is in
+	// at most one of `values` and `forbidden` at one level.
+	forbidden: Vec<(Strand, Arc<ForbiddenRow>)>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
-	#[cfg(storage)]
-	// The temporary directory
-	temporary_directory: Option<Arc<PathBuf>>,
 	// An optional transaction
 	transaction: Option<Arc<Transaction>>,
 	// Does not read from parent `values`.
 	isolated: bool,
-	// A map of bucket connections
-	buckets: Option<BucketsManager>,
-	// The surrealism cache
+	/// How many extension invocations enclose this context: zero for a query,
+	/// one inside a host call an extension made, and so on. A child context
+	/// carries its parent's.
 	#[cfg(feature = "surrealism")]
-	surrealism_cache: Option<Arc<SurrealismCache>>,
-	// Function registry for built-in and custom functions
-	function_registry: Arc<FunctionRegistry>,
-	// Strategy for the new streaming planner/executor
-	new_planner_strategy: NewPlannerStrategy,
+	extension_depth: u8,
 	// When true, EXPLAIN ANALYZE omits elapsed durations for deterministic test output
 	redact_volatile_explain_attrs: bool,
 	// Per-statement counters, shared with the executor so it can read the
@@ -126,31 +129,158 @@ pub struct Context {
 	// the corresponding `StatementEvent`. Replaced by the executor before
 	// each top-level statement; `None` outside an active statement.
 	statement_counters: Option<Arc<StatementCounters>>,
+	// The instant every CLOCK read of the running top-level statement answers.
+	// Installed by the executor before each top-level statement and copied by
+	// every context derived from this one, so a subquery, a function or closure
+	// body, triggered code and a nested query (`eval::*`, a script's
+	// `surrealdb.query()`) read their statement's instant. `None` where no
+	// statement installed one: a read then takes the wall clock at the call.
+	statement_clock: Option<Datetime>,
+	// The parameters the request was made with: the client's bind parameters
+	// and the session's variables, as attached by [`Self::attach_session`],
+	// [`Self::attach_variables`] and [`Self::attach_public_variables`], which
+	// a function body reads past its call boundary ([`Self::lexical_value`]).
+	// A `LET` or `FOR` binding is never among them. A child context carries
+	// its parent's; an isolated context holds none of its parent's, as it
+	// holds none of its other values.
+	request_params: Option<Arc<HashMap<Strand, Arc<Value>>>>,
+	// Whether this node is the scope of a function body entered by a call
+	// ([`Self::mark_call_boundary`]): the node [`Self::lexical_value`] stops
+	// at before it answers from the request parameters.
+	call_boundary: bool,
 	// Pre-resolved tenant identity (namespace, database, user, session id,
 	// client ip) derived from the active session at `attach_session` time.
 	// Read by the executor and the transaction layer to populate the
 	// `*Ctx` half of every emitted [`crate::observe`] event without
 	// re-walking the session value tree on every emit.
 	tenant_identity: Option<Arc<crate::observe::TenantIdentity>>,
-	// Matches context for index functions (search::highlight, search::score, etc.)
-	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
-	// KNN context for index functions (vector::distance::knn)
-	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
-	/// Client for making http requests.
-	#[cfg(feature = "http")]
-	http_client: Arc<HttpClient>,
-	/// Stable node id for this datastore instance (live routing, queue keys, etc.).
-	node_id: Uuid,
+	/// The statement families the entry that started the query serves. Set on
+	/// the root context and copied by every derivation, so stored code run
+	/// under a descendant is lowered and run under the same surface.
+	surface: &'static Surface,
+	/// The unit table of the function bundle whose body is executing around
+	/// this context: the arena a nested program with none of its own finds the
+	/// units its ids name in ([`crate::exec::vm::UnitTable`]). A child context
+	/// carries its parent's.
+	vm_units: Option<crate::exec::vm::UnitTable>,
+	/// The per-table units the program executing around this context reads
+	/// records by id through ([`crate::exec::vm::Deref`]). A child context
+	/// carries its parent's.
+	vm_deref: Option<Arc<crate::exec::vm::Deref>>,
+	/// The late-bound statements the program executing around this context
+	/// serves when a block reaches them, if any.
+	vm_served: Option<crate::exec::vm::ServedStatements>,
+	/// The metrics an `EXPLAIN ANALYZE` plan reports for the program running
+	/// around this context, which the program's host steps record their
+	/// counters into. A child context carries its parent's.
+	vm_metrics: Option<Arc<crate::exec::metrics::OperatorMetrics>>,
+	/// What the statement running around this context reports to a query
+	/// trace (`crate::exec::trace`), when its request asked for one. A child
+	/// context carries its parent's.
+	query_trace: Option<Arc<crate::exec::trace::StatementTrace>>,
+	/// The edge cascade a delete is running the stages of a record of an
+	/// edge beneath: the bundle an edge cascade of those stages runs again
+	/// (`crate::exec::vm::write_cascade`). A child context carries its
+	/// parent's.
+	vm_edge_cascade: Option<Arc<crate::exec::vm::program::Program>>,
+	/// The closure-body units the programs executing around this context
+	/// lowered ([`crate::exec::vm::closure::ClosureUnits`]), which an
+	/// invocation of a closure value looks its unit up in. A child context
+	/// carries its parent's.
+	vm_closures: Option<Arc<crate::exec::vm::closure::ClosureUnits>>,
 	/// Whether authentication is required for non-anonymous access (datastore boot flag).
 	pub(crate) auth_enabled: bool,
-	/// Runtime-adjustable configuration (e.g. global query timeout).
-	dynamic_configuration: DynamicConfiguration,
 	/// Whether this session may use realtime (`LIVE` / `KILL LIVE`).
 	live: bool,
 	/// Optional broker for cross-node live query notifications.
 	broker: Option<Arc<dyn MessageBroker>>,
-	// Executor config
-	pub config: Arc<CommonConfig>,
+	/// Where the writes of the transaction the broker buffers for are noted,
+	/// installed and cleared with it ([`crate::dbs::live_recheck`]).
+	live_recheck: Option<Arc<crate::dbs::live_recheck::LiveRecheck>>,
+	/// The host-provided `SHOW CHANGES` source, when the datastore has one.
+	changefeed_source: Option<Arc<dyn crate::lq::external::ChangeFeedSource>>,
+	/// How a running program gives up its thread once it has spent its
+	/// quantum; the default scheduler when `None`. A child context carries
+	/// its parent's.
+	scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
+	/// The host's places a morsel pipeline's morsels may run at besides the node's own; none
+	/// when `None`. A child context carries its parent's.
+	morsel_places: Option<Arc<dyn crate::exec::places::MorselPlaces>>,
+	/// The node whose async event queue an event queued by a write in this context joins; `None`
+	/// for this context's own node ([`Self::node_id`]).
+	event_queue_node: Option<Uuid>,
+	/// The query's memory: its lease from the node's governor and the store
+	/// its breakers spill to. `None` outside a datastore query, where nothing
+	/// is bounded. A child context carries its parent's.
+	memory: Option<Arc<crate::exec::memory::QueryMemory>>,
+	/// The ticket the index engines' parallel work takes its places through:
+	/// a blocking statement's own registration, the background compactor's,
+	/// or a build's. A child, isolated or snapshot context shares its parent's
+	/// cell, since its work belongs to the same statement, so whichever of
+	/// them asks first registers for all; a background or concurrent context
+	/// starts with a cell of its own. With none set, the first request for the
+	/// ticket registers with the node's pool, and every later one hands out
+	/// that registration ([`crate::idx::env::IndexEnv::places`]). Setting a
+	/// ticket replaces this context's cell alone, and what is derived from it
+	/// afterwards.
+	index_places: Arc<std::sync::OnceLock<crate::idx::places::Ticket>>,
+	/// The per-layer configuration a running query reads. Crate-internal: these
+	/// are operator knobs, not API.
+	pub(crate) config: Arc<RuntimeConfig>,
+	/// Client for making http requests.
+	#[cfg(feature = "http")]
+	http_client: Arc<HttpClient>,
+	/// What every context of the datastore holds alike: what the datastore
+	/// was built with. Held once and shared, so a context is derived without
+	/// counting a reference to each, which every core would contend for.
+	shared: Arc<Shared>,
+}
+
+/// The parts of a [`Context`] the datastore it was built from holds, which
+/// every context derived from it shares.
+#[derive(Clone)]
+struct Shared {
+	// An optional datastore cache
+	cache: Option<Arc<DatastoreCache>>,
+	// The index store
+	index_stores: IndexStores,
+	// The index concurrent builders. Held behind an `Arc` so that deriving a child context
+	// is one reference-count bump rather than one per handle the builder carries.
+	index_builder: Option<Arc<IndexBuilder>>,
+	// The sequences, behind an `Arc` for the same reason.
+	sequences: Option<Arc<Sequences>>,
+	#[cfg(storage)]
+	// The temporary directory
+	temporary_directory: Option<Arc<PathBuf>>,
+	// A map of bucket connections
+	buckets: Option<BucketsManager>,
+	// The surrealism cache
+	#[cfg(feature = "surrealism")]
+	surrealism_cache: Option<Arc<SurrealismCache>>,
+	/// The datastore's capabilities when this context's root was created.
+	/// Unlike [`Context::capabilities`], an extension's host call never narrows
+	/// it, so it is what an extension's `CAPABILITIES` are intersected with.
+	#[cfg(feature = "surrealism")]
+	server_capabilities: Arc<Capabilities>,
+	/// The datastore's function registry.
+	///
+	/// A function is resolved by name against one registry per datastore, so
+	/// this is the datastore's and is carried rather than rebuilt. It reaches
+	/// the context because compiling an expression needs it and not every
+	/// compiler holds an [`crate::exec::ExecutionContext`]: a schema
+	/// statement's clauses are compiled wherever the statement is reached,
+	/// which includes the evaluator that owns the catalog writes.
+	function_registry: Arc<FunctionRegistry>,
+	/// The live-subscription units this node has compiled for the VM
+	/// (`crate::exec::vm::live`), carried as the function registry is.
+	live_units: Option<Arc<crate::exec::vm::live::LiveUnits>>,
+	/// The function-body units this node has compiled (`crate::exec::vm::units`),
+	/// carried as the live-subscription units are.
+	compiled_units: Option<Arc<crate::exec::vm::units::CompiledUnits>>,
+	/// Stable node id for this datastore instance (live routing, queue keys, etc.).
+	node_id: Uuid,
+	/// Runtime-adjustable configuration (e.g. global query timeout).
+	dynamic_configuration: DynamicConfiguration,
 }
 
 impl Debug for Context {
@@ -160,53 +290,84 @@ impl Debug for Context {
 			.field("deadline", &self.deadline)
 			.field("cancelled", &self.cancelled)
 			.field("values", &self.values)
+			.field("forbidden", &self.forbidden)
 			.finish()
 	}
 }
 
 impl Context {
-	/// Creates a new empty background context.
+	/// Creates a new empty background context. It carries the parent's
+	/// statement clock: the work it runs, a live subscription's clauses for one
+	/// write, belongs to the statement that built it. It holds none of the
+	/// parent's values, so it carries none of its request parameters either.
 	pub(crate) fn background(parent: &Context) -> Self {
 		Self {
-			values: HashMap::default(),
+			values: Arc::default(),
+			forbidden: Vec::new(),
 			parent: None,
 			deadline: None,
 			slow_log: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: None,
-			query_executor: None,
-			iteration_stage: None,
 			capabilities: Arc::clone(&parent.capabilities),
-			index_stores: IndexStores::new(
-				parent.config.hnsw_cache_size,
-				parent.config.diskann_cache_size,
-			),
-			cache: None,
-			index_builder: None,
-			sequences: None,
-			#[cfg(storage)]
-			temporary_directory: None,
 			transaction: None,
 			isolated: false,
-			buckets: None,
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: None,
-			function_registry: Arc::clone(&parent.function_registry),
-			new_planner_strategy: NewPlannerStrategy::default(),
+			extension_depth: 0,
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
-			matches_context: None,
-			knn_context: None,
+			statement_clock: parent.statement_clock,
+			request_params: None,
+			call_boundary: false,
 			config: Arc::clone(&parent.config),
-			#[cfg(feature = "http")]
-			http_client: Arc::clone(&parent.http_client),
+			surface: parent.surface,
+			vm_units: parent.vm_units.clone(),
+			vm_deref: parent.vm_deref.clone(),
+			vm_served: parent.vm_served.clone(),
+			vm_metrics: parent.vm_metrics.clone(),
+			query_trace: parent.query_trace.clone(),
+			vm_edge_cascade: parent.vm_edge_cascade.clone(),
+			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: None,
-			node_id: parent.node_id,
 			auth_enabled: parent.auth_enabled,
-			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			live_recheck: parent.live_recheck.clone(),
+			changefeed_source: parent.changefeed_source.clone(),
+			scheduler: parent.scheduler.clone(),
+			morsel_places: parent.morsel_places.clone(),
+			event_queue_node: parent.event_queue_node,
+			memory: parent.memory.clone(),
+			index_places: Arc::new(std::sync::OnceLock::new()),
+			#[cfg(feature = "http")]
+			http_client: Arc::clone(&parent.http_client),
+			shared: Arc::new(Shared {
+				// Derived rather than new: this context is built per unit of work
+				// (one LIVE query delivery), and a segmentation dictionary is far
+				// too expensive to load and drop that often, so those are shared
+				// with the parent while the other caches stay isolated.
+				index_stores: parent.shared.index_stores.derive(
+					parent.config.idx.hnsw_cache_size,
+					parent.config.idx.diskann_cache_size,
+					parent.config.idx.graph_resolve_cache_size,
+					parent.config.idx.fulltext_cache_size,
+				),
+				cache: None,
+				index_builder: None,
+				sequences: None,
+				#[cfg(storage)]
+				temporary_directory: None,
+				buckets: None,
+				#[cfg(feature = "surrealism")]
+				surrealism_cache: None,
+				#[cfg(feature = "surrealism")]
+				server_capabilities: Arc::clone(&parent.shared.server_capabilities),
+				function_registry: Arc::clone(&parent.shared.function_registry),
+				live_units: parent.shared.live_units.clone(),
+				compiled_units: parent.shared.compiled_units.clone(),
+				node_id: parent.shared.node_id,
+				dynamic_configuration: parent.shared.dynamic_configuration.clone(),
+			}),
 		}
 	}
 
@@ -229,86 +390,97 @@ impl Context {
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 	) -> Self {
 		Context {
-			values: HashMap::default(),
+			values: Arc::default(),
+			forbidden: Vec::new(),
 			deadline: parent.deadline,
 			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: parent.query_planner.clone(),
-			query_executor: parent.query_executor.clone(),
-			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: cap,
-			index_stores: parent.index_stores.clone(),
-			cache: parent.cache.clone(),
-			index_builder: parent.index_builder.clone(),
-			sequences: parent.sequences.clone(),
-			#[cfg(storage)]
-			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
 			isolated: false,
 			parent: Some(Arc::clone(parent)),
-			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: parent.surrealism_cache.clone(),
-			function_registry: Arc::clone(&parent.function_registry),
-			new_planner_strategy: parent.new_planner_strategy,
+			extension_depth: parent.extension_depth,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
-			matches_context: parent.matches_context.clone(),
-			knn_context: parent.knn_context.clone(),
+			statement_clock: parent.statement_clock,
+			request_params: parent.request_params.clone(),
+			call_boundary: false,
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client,
+			surface: parent.surface,
+			vm_units: parent.vm_units.clone(),
+			vm_deref: parent.vm_deref.clone(),
+			vm_served: parent.vm_served.clone(),
+			vm_metrics: parent.vm_metrics.clone(),
+			query_trace: parent.query_trace.clone(),
+			vm_edge_cascade: parent.vm_edge_cascade.clone(),
+			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: parent.tenant_identity.clone(),
-			node_id: parent.node_id,
 			auth_enabled: parent.auth_enabled,
-			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			live_recheck: parent.live_recheck.clone(),
+			changefeed_source: parent.changefeed_source.clone(),
+			scheduler: parent.scheduler.clone(),
+			morsel_places: parent.morsel_places.clone(),
+			event_queue_node: parent.event_queue_node,
+			memory: parent.memory.clone(),
+			index_places: Arc::clone(&parent.index_places),
+			shared: Arc::clone(&parent.shared),
 		}
 	}
 
 	/// Create a new context from a frozen parent context.
 	/// This context is isolated, and values specified on
-	/// any parent contexts will not be accessible.
+	/// any parent contexts will not be accessible: the protected names
+	/// (`$auth`, `$access`, `$token`, `$session`) aside, which are read through
+	/// the parent chain. The parent's request parameters are values too, so
+	/// the context holds none until it attaches its own.
 	pub(crate) fn new_isolated(parent: &FrozenContext) -> Self {
 		Self {
-			values: HashMap::default(),
+			values: Arc::default(),
+			forbidden: Vec::new(),
 			deadline: parent.deadline,
 			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: parent.query_planner.clone(),
-			query_executor: parent.query_executor.clone(),
-			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: Arc::clone(&parent.capabilities),
-			index_stores: parent.index_stores.clone(),
-			cache: parent.cache.clone(),
-			index_builder: parent.index_builder.clone(),
-			sequences: parent.sequences.clone(),
-			#[cfg(storage)]
-			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
 			isolated: true,
 			parent: Some(Arc::clone(parent)),
-			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: parent.surrealism_cache.clone(),
-			function_registry: Arc::clone(&parent.function_registry),
-			new_planner_strategy: parent.new_planner_strategy,
+			extension_depth: parent.extension_depth,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
-			matches_context: parent.matches_context.clone(),
-			knn_context: parent.knn_context.clone(),
+			statement_clock: parent.statement_clock,
+			request_params: None,
+			call_boundary: false,
 			config: Arc::clone(&parent.config),
-			#[cfg(feature = "http")]
-			http_client: Arc::clone(&parent.http_client),
+			surface: parent.surface,
+			vm_units: parent.vm_units.clone(),
+			vm_deref: parent.vm_deref.clone(),
+			vm_served: parent.vm_served.clone(),
+			vm_metrics: parent.vm_metrics.clone(),
+			query_trace: parent.query_trace.clone(),
+			vm_edge_cascade: parent.vm_edge_cascade.clone(),
+			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: parent.tenant_identity.clone(),
-			node_id: parent.node_id,
 			auth_enabled: parent.auth_enabled,
-			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			live_recheck: parent.live_recheck.clone(),
+			changefeed_source: parent.changefeed_source.clone(),
+			scheduler: parent.scheduler.clone(),
+			morsel_places: parent.morsel_places.clone(),
+			event_queue_node: parent.event_queue_node,
+			memory: parent.memory.clone(),
+			index_places: Arc::clone(&parent.index_places),
+			#[cfg(feature = "http")]
+			http_client: Arc::clone(&parent.http_client),
+			shared: Arc::clone(&parent.shared),
 		}
 	}
 
@@ -318,58 +490,74 @@ impl Context {
 	/// `values` map and sets `parent: None`, so the returned context does
 	/// **not** hold an `Arc` reference to the original parent.
 	///
-	/// This is used by the streaming executor to give the operator pipeline
+	/// This is used by the engine to give the operator pipeline
 	/// its own `Arc<Context>` that won't interfere with the executor's
 	/// `Arc::get_mut` requirements between statements.
 	///
 	/// The cancellation flag and awaitable token are **cloned** from the
 	/// source rather than allocated fresh. Without this, any operator that
-	/// bridges back into legacy `Context::done` / `is_done` checks — e.g.
-	/// the streaming-exec KNN operator calling into
+	/// polls `Context::done` / `is_done` — e.g.
+	/// the KNN operator calling into
 	/// `idx::trees::hnsw::knn_search` / `idx::trees::diskann::knn_search`,
 	/// whose inner loops poll `frozen_ctx.is_done(Some(count))` — would
 	/// observe the snapshot's local (never-tripped) flag instead of the
 	/// connection-level cancel handle installed on the source root, and
 	/// would not abort on WebSocket disconnect.
+	///
+	/// A snapshot of a context inside a function body keeps the body's view:
+	/// it holds the bindings [`Self::lexical_value`] answers there and is
+	/// itself a call boundary, so what the body could not read the snapshot
+	/// does not hold.
 	pub(crate) fn snapshot(from: &FrozenContext) -> Self {
+		let in_call_body = from.in_call_body();
 		Self {
 			// Flatten all values from the parent chain into this context
-			values: from.collect_values(HashMap::default()),
+			values: match (in_call_body, &from.parent) {
+				(true, _) => Arc::new(from.lexical_values()),
+				// A context with no parent holds every value it answers: the
+				// snapshot shares them rather than copying each.
+				(false, None) => Arc::clone(&from.values),
+				(false, Some(_)) => Arc::new(from.collect_values(HashMap::default())),
+			},
+			forbidden: from.collect_forbidden(),
 			deadline: from.deadline,
 			slow_log: from.slow_log.clone(),
 			cancelled: Arc::clone(&from.cancelled),
 			cancel_token: from.cancel_token.clone(),
-			query_planner: from.query_planner.clone(),
-			query_executor: from.query_executor.clone(),
-			iteration_stage: from.iteration_stage.clone(),
 			capabilities: Arc::clone(&from.capabilities),
-			index_stores: from.index_stores.clone(),
-			cache: from.cache.clone(),
-			index_builder: from.index_builder.clone(),
-			sequences: from.sequences.clone(),
-			#[cfg(storage)]
-			temporary_directory: from.temporary_directory.clone(),
 			transaction: from.transaction.clone(),
 			isolated: false,
 			parent: None, // No parent reference — fully independent
-			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: from.surrealism_cache.clone(),
-			function_registry: Arc::clone(&from.function_registry),
-			new_planner_strategy: from.new_planner_strategy,
+			extension_depth: from.extension_depth,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
-			matches_context: from.matches_context.clone(),
-			knn_context: from.knn_context.clone(),
+			statement_clock: from.statement_clock,
+			request_params: from.request_params.clone(),
+			call_boundary: in_call_body,
 			config: Arc::clone(&from.config),
-			#[cfg(feature = "http")]
-			http_client: Arc::clone(&from.http_client),
+			surface: from.surface,
+			vm_units: from.vm_units.clone(),
+			vm_deref: from.vm_deref.clone(),
+			vm_served: from.vm_served.clone(),
+			vm_metrics: from.vm_metrics.clone(),
+			query_trace: from.query_trace.clone(),
+			vm_edge_cascade: from.vm_edge_cascade.clone(),
+			vm_closures: from.vm_closures.clone(),
 			tenant_identity: from.tenant_identity.clone(),
-			node_id: from.node_id,
 			auth_enabled: from.auth_enabled,
-			dynamic_configuration: from.dynamic_configuration.clone(),
 			live: from.live,
 			broker: from.broker.clone(),
+			live_recheck: from.live_recheck.clone(),
+			changefeed_source: from.changefeed_source.clone(),
+			scheduler: from.scheduler.clone(),
+			morsel_places: from.morsel_places.clone(),
+			event_queue_node: from.event_queue_node,
+			memory: from.memory.clone(),
+			index_places: Arc::clone(&from.index_places),
+			#[cfg(feature = "http")]
+			http_client: Arc::clone(&from.http_client),
+			shared: Arc::clone(&from.shared),
 		}
 	}
 
@@ -377,51 +565,86 @@ impl Context {
 	/// This context is not linked to the parent context,
 	/// and won't be cancelled if the parent is cancelled.
 	///
+	/// No statement clock and no statement counters are carried: the context
+	/// runs a background task of its own, outside any top-level statement, and
+	/// nothing written beneath it is a row the statement that started the task
+	/// affected.
+	///
+	/// No query memory is carried either. A query's memory holds its lease from
+	/// the node's governor, and the lease, with the minimum the governor
+	/// guarantees it, stays reserved until the last context holding that memory
+	/// drops. This context outlives the query `from` belongs to — the
+	/// `Building` holding it lives for as long as the `IndexBuilder` remembers
+	/// the build — so it would keep that lease from every other query. Work
+	/// beneath it is bounded by a query memory installed in a context derived
+	/// from it, as each build batch's context holds one of its own, whose lease
+	/// closes when that context drops.
+	///
 	/// `index_builder` is intentionally cleared: the only caller is the
 	/// background index `Building` task, which lives inside the
 	/// `IndexBuilder`'s HashMap. Cloning the back-reference would form an
 	/// `Arc<RwLock<HashMap<.., Arc<Building>>>>` cycle that pins the
-	/// `Datastore` (and its storage handles, ~7 file descriptors per RocksDB
-	/// instance, ~3 per SurrealKV) until process exit — see issue
-	/// surrealdb/surrealdb#7304.
+	/// `Datastore` (and its storage handles, ~3 file descriptors per SurrealKV
+	/// instance) until process exit.
+	///
+	/// `vm_closures` is cleared too. That table belongs to the run of the
+	/// program `from` was made in, and a unit linked into it keeps a handle on
+	/// the transaction it last checked its catalog reads in, so a context that
+	/// outlives the run — the `Building` does, for as long as the
+	/// `IndexBuilder` remembers it — would keep that transaction open with it.
+	/// A closure invoked beneath this context links its unit into a table
+	/// installed beneath it, as each build batch's context installs one, or
+	/// into a table of the invocation's own.
+	///
+	/// `live_recheck` is not carried either: it notes the writes of the
+	/// transaction `from` runs in, and holds what that transaction wrote until
+	/// it has committed, while this context runs transactions of its own.
 	pub(crate) fn new_concurrent(from: &FrozenContext) -> Self {
 		Self {
-			values: HashMap::default(),
+			values: Arc::default(),
+			forbidden: Vec::new(),
 			deadline: None,
 			slow_log: from.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: from.query_planner.clone(),
-			query_executor: from.query_executor.clone(),
-			iteration_stage: from.iteration_stage.clone(),
 			capabilities: Arc::clone(&from.capabilities),
-			index_stores: from.index_stores.clone(),
-			cache: from.cache.clone(),
-			index_builder: None,
-			sequences: from.sequences.clone(),
-			#[cfg(storage)]
-			temporary_directory: from.temporary_directory.clone(),
 			transaction: None,
 			isolated: false,
 			parent: None,
-			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: from.surrealism_cache.clone(),
-			function_registry: Arc::clone(&from.function_registry),
-			new_planner_strategy: from.new_planner_strategy,
+			extension_depth: from.extension_depth,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
-			statement_counters: from.statement_counters.clone(),
-			matches_context: from.matches_context.clone(),
-			knn_context: from.knn_context.clone(),
+			statement_counters: None,
+			statement_clock: None,
+			request_params: None,
+			call_boundary: false,
 			config: Arc::clone(&from.config),
-			#[cfg(feature = "http")]
-			http_client: Arc::clone(&from.http_client),
+			surface: from.surface,
+			vm_units: from.vm_units.clone(),
+			vm_deref: from.vm_deref.clone(),
+			vm_served: from.vm_served.clone(),
+			vm_metrics: from.vm_metrics.clone(),
+			query_trace: from.query_trace.clone(),
+			vm_edge_cascade: from.vm_edge_cascade.clone(),
+			vm_closures: None,
 			tenant_identity: from.tenant_identity.clone(),
-			node_id: from.node_id,
 			auth_enabled: from.auth_enabled,
-			dynamic_configuration: from.dynamic_configuration.clone(),
 			live: from.live,
 			broker: from.broker.clone(),
+			live_recheck: None,
+			changefeed_source: from.changefeed_source.clone(),
+			scheduler: from.scheduler.clone(),
+			morsel_places: from.morsel_places.clone(),
+			event_queue_node: from.event_queue_node,
+			memory: None,
+			index_places: Arc::new(std::sync::OnceLock::new()),
+			#[cfg(feature = "http")]
+			http_client: Arc::clone(&from.http_client),
+			// The index builder is not carried, as above.
+			shared: Arc::new(Shared {
+				index_builder: None,
+				..Shared::clone(&from.shared)
+			}),
 		}
 	}
 
@@ -438,51 +661,76 @@ impl Context {
 		index_builder: IndexBuilder,
 		sequences: Sequences,
 		cache: Arc<DatastoreCache>,
-		function_registry: Arc<FunctionRegistry>,
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
+		function_registry: Arc<FunctionRegistry>,
+		surface: &'static Surface,
+		live_units: Arc<crate::exec::vm::live::LiveUnits>,
+		compiled_units: Arc<crate::exec::vm::units::CompiledUnits>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
-		config: Arc<CommonConfig>,
+		config: Arc<RuntimeConfig>,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<Context> {
-		let planner_strategy = *capabilities.planner_strategy();
+		#[cfg(feature = "surrealism")]
+		let server_capabilities = Arc::clone(&capabilities);
 		let mut ctx = Self {
-			values: HashMap::default(),
+			values: Arc::default(),
+			forbidden: Vec::new(),
 			parent: None,
 			deadline: None,
 			slow_log,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: None,
-			query_executor: None,
-			iteration_stage: None,
 			capabilities,
-			index_stores,
-			cache: Some(cache),
-			index_builder: Some(index_builder),
-			sequences: Some(sequences),
-			#[cfg(storage)]
-			temporary_directory,
 			transaction: None,
 			isolated: false,
-			buckets: Some(buckets),
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: Some(surrealism_cache),
-			function_registry,
-			new_planner_strategy: planner_strategy,
+			extension_depth: 0,
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
-			matches_context: None,
-			knn_context: None,
+			statement_clock: None,
+			request_params: None,
+			call_boundary: false,
 			config,
 			#[cfg(feature = "http")]
 			http_client,
+			surface,
+			vm_units: None,
+			vm_deref: None,
+			vm_served: None,
+			vm_metrics: None,
+			query_trace: None,
+			vm_edge_cascade: None,
+			vm_closures: None,
 			tenant_identity: None,
-			node_id,
 			auth_enabled,
-			dynamic_configuration,
 			live: false,
 			broker: None,
+			live_recheck: None,
+			changefeed_source: None,
+			scheduler: None,
+			morsel_places: None,
+			event_queue_node: None,
+			memory: None,
+			index_places: Arc::new(std::sync::OnceLock::new()),
+			shared: Arc::new(Shared {
+				index_stores,
+				cache: Some(cache),
+				index_builder: Some(Arc::new(index_builder)),
+				sequences: Some(Arc::new(sequences)),
+				buckets: Some(buckets),
+				#[cfg(feature = "surrealism")]
+				surrealism_cache: Some(surrealism_cache),
+				#[cfg(storage)]
+				temporary_directory,
+				#[cfg(feature = "surrealism")]
+				server_capabilities,
+				function_registry,
+				live_units: Some(live_units),
+				compiled_units: Some(compiled_units),
+				node_id,
+				dynamic_configuration,
+			}),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -494,34 +742,43 @@ impl Context {
 	#[cfg(test)]
 	pub(crate) fn new_test() -> Context {
 		Self {
-			values: HashMap::default(),
+			values: Arc::default(),
+			forbidden: Vec::new(),
 			parent: None,
 			deadline: None,
 			slow_log: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: None,
-			query_executor: None,
-			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::new(256 * 1024 * 1024, 256 * 1024 * 1024),
-			cache: None,
-			index_builder: None,
-			sequences: None,
-			#[cfg(storage)]
-			temporary_directory: None,
 			transaction: None,
 			isolated: false,
-			buckets: None,
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: None,
-			function_registry: Arc::new(FunctionRegistry::with_builtins()),
-			new_planner_strategy: NewPlannerStrategy::default(),
+			extension_depth: 0,
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
-			matches_context: None,
-			knn_context: None,
+			statement_clock: None,
+			request_params: None,
+			call_boundary: false,
 			config: Default::default(),
+			surface: &crate::exec::surface::FULL,
+			vm_units: None,
+			vm_deref: None,
+			vm_served: None,
+			vm_metrics: None,
+			query_trace: None,
+			vm_edge_cascade: None,
+			vm_closures: None,
+			tenant_identity: None,
+			auth_enabled: true,
+			live: false,
+			broker: None,
+			live_recheck: None,
+			changefeed_source: None,
+			scheduler: None,
+			morsel_places: None,
+			event_queue_node: None,
+			memory: None,
+			index_places: Arc::new(std::sync::OnceLock::new()),
 			#[cfg(feature = "http")]
 			http_client: Arc::new(
 				HttpClient::new(
@@ -531,12 +788,30 @@ impl Context {
 				)
 				.expect("http client to be created"),
 			),
-			tenant_identity: None,
-			node_id: Uuid::nil(),
-			auth_enabled: true,
-			dynamic_configuration: DynamicConfiguration::default(),
-			live: false,
-			broker: None,
+			shared: Arc::new(Shared {
+				index_stores: IndexStores::new(
+					256 * 1024 * 1024,
+					256 * 1024 * 1024,
+					64 * 1024 * 1024,
+					128 * 1024 * 1024,
+					None,
+				),
+				cache: None,
+				index_builder: None,
+				sequences: None,
+				#[cfg(storage)]
+				temporary_directory: None,
+				buckets: None,
+				#[cfg(feature = "surrealism")]
+				surrealism_cache: None,
+				#[cfg(feature = "surrealism")]
+				server_capabilities: Arc::new(Capabilities::default()),
+				function_registry: Arc::new(FunctionRegistry::with_builtins()),
+				live_units: None,
+				compiled_units: None,
+				node_id: Uuid::nil(),
+				dynamic_configuration: DynamicConfiguration::default(),
+			}),
 		}
 	}
 
@@ -545,17 +820,117 @@ impl Context {
 		Arc::new(self)
 	}
 
-	/// Unfreezes this context, allowing it to be edited and configured.
-	pub(crate) fn unfreeze(ctx: FrozenContext) -> Result<Context> {
-		let Some(x) = Arc::into_inner(ctx) else {
-			fail!("Tried to unfreeze a Context with multiple references")
-		};
-		Ok(x)
+	#[inline]
+	/// The datastore's function registry, for a caller compiling an
+	/// expression that may name a function.
+	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
+		&self.shared.function_registry
 	}
 
+	/// The statement families the entry that started the query serves.
 	#[inline]
+	pub(crate) fn surface(&self) -> &'static Surface {
+		self.surface
+	}
+
+	/// The live-subscription units this node has compiled for the VM, or
+	/// `None` for a context made without a datastore.
+	pub(crate) fn live_units(&self) -> Option<Arc<crate::exec::vm::live::LiveUnits>> {
+		self.shared.live_units.clone()
+	}
+
+	/// The unit table of the function bundle executing around this context,
+	/// if any.
+	pub(crate) fn vm_units(&self) -> Option<&crate::exec::vm::UnitTable> {
+		self.vm_units.as_ref()
+	}
+
+	/// Make the units of `units` the ones the nested programs of this context
+	/// find their ids in.
+	pub(crate) fn set_vm_units(&mut self, units: crate::exec::vm::UnitTable) {
+		self.vm_units = Some(units);
+	}
+
+	/// The late-bound statements the program executing around this context
+	/// serves, if any.
+	pub(crate) fn vm_served(&self) -> Option<&crate::exec::vm::ServedStatements> {
+		self.vm_served.as_ref()
+	}
+
+	/// Make `served` the late-bound statements the program executing around
+	/// this context serves.
+	pub(crate) fn set_vm_served(&mut self, served: crate::exec::vm::ServedStatements) {
+		self.vm_served = Some(served);
+	}
+
+	/// The per-table units the program executing around this context reads
+	/// records by id through, if any.
+	pub(crate) fn vm_deref(&self) -> Option<&Arc<crate::exec::vm::Deref>> {
+		self.vm_deref.as_ref()
+	}
+
+	/// Make `deref` the per-table units the record reads of this context go
+	/// through.
+	pub(crate) fn set_vm_deref(&mut self, deref: Arc<crate::exec::vm::Deref>) {
+		self.vm_deref = Some(deref);
+	}
+
+	/// The metrics the program running around this context records into, when
+	/// its plan is analysed.
+	pub(crate) fn vm_metrics(&self) -> Option<&Arc<crate::exec::metrics::OperatorMetrics>> {
+		self.vm_metrics.as_ref()
+	}
+
+	/// Make `metrics` the ones the program running around this context
+	/// records into.
+	pub(crate) fn set_vm_metrics(&mut self, metrics: Arc<crate::exec::metrics::OperatorMetrics>) {
+		self.vm_metrics = Some(metrics);
+	}
+
+	/// The query trace the statement running around this context reports to,
+	/// when its request asked for one.
+	pub(crate) fn query_trace(&self) -> Option<&Arc<crate::exec::trace::StatementTrace>> {
+		self.query_trace.as_ref()
+	}
+
+	/// Make `trace` the query trace the statement running around this context
+	/// reports to.
+	pub(crate) fn set_query_trace(&mut self, trace: Arc<crate::exec::trace::StatementTrace>) {
+		self.query_trace = Some(trace);
+	}
+
+	/// The edge cascade running around this context, if any.
+	pub(crate) fn vm_edge_cascade(&self) -> Option<&Arc<crate::exec::vm::program::Program>> {
+		self.vm_edge_cascade.as_ref()
+	}
+
+	/// Make `cascade` the edge cascade running around this context.
+	pub(crate) fn set_vm_edge_cascade(&mut self, cascade: Arc<crate::exec::vm::program::Program>) {
+		self.vm_edge_cascade = Some(cascade);
+	}
+
+	/// The closure-body units registered around this context, if any.
+	pub(crate) fn vm_closures(&self) -> Option<&Arc<crate::exec::vm::closure::ClosureUnits>> {
+		self.vm_closures.as_ref()
+	}
+
+	/// Make `closures` the registry the closure invocations of this context
+	/// find their units in.
+	pub(crate) fn set_vm_closures(
+		&mut self,
+		closures: Arc<crate::exec::vm::closure::ClosureUnits>,
+	) {
+		self.vm_closures = Some(closures);
+	}
+
+	/// The function-body units this node has compiled, or `None` for a
+	/// context made without a datastore.
+	pub(crate) fn compiled_units(&self) -> Option<&Arc<crate::exec::vm::units::CompiledUnits>> {
+		self.shared.compiled_units.as_ref()
+	}
+
 	pub fn node_id(&self) -> Uuid {
-		self.node_id
+		self.shared.node_id
 	}
 
 	#[inline]
@@ -564,14 +939,14 @@ impl Context {
 	}
 
 	pub(crate) fn dynamic_configuration(&self) -> &DynamicConfiguration {
-		&self.dynamic_configuration
+		&self.shared.dynamic_configuration
 	}
 
 	/// Whether this session may open `LIVE` queries or `KILL LIVE` (from [`Session::live`]
 	/// applied in [`Context::attach_session`]).
 	pub(crate) fn realtime(&self) -> Result<()> {
 		if !self.live {
-			bail!(Error::RealtimeDisabled);
+			bail!(DatastoreError::RealtimeDisabled);
 		}
 		Ok(())
 	}
@@ -580,8 +955,96 @@ impl Context {
 		self.broker.as_ref()
 	}
 
+	/// Install `broker`, or clear the broker with `None`. Either way the context
+	/// no longer notes writes for a recheck ([`Self::set_live_recheck`]).
 	pub(crate) fn set_broker(&mut self, broker: Option<Arc<dyn MessageBroker>>) {
 		self.broker = broker;
+		self.live_recheck = None;
+	}
+
+	/// Where a write notes what it wrote, for the subscriptions its snapshot
+	/// did not hold to be told once it commits.
+	pub(crate) fn live_recheck(&self) -> Option<&Arc<crate::dbs::live_recheck::LiveRecheck>> {
+		self.live_recheck.as_ref()
+	}
+
+	/// Note this context's writes in `recheck`, until the broker is next set.
+	pub(crate) fn set_live_recheck(
+		&mut self,
+		recheck: Option<Arc<crate::dbs::live_recheck::LiveRecheck>>,
+	) {
+		self.live_recheck = recheck;
+	}
+
+	/// The host-provided `SHOW CHANGES` source, if one was installed.
+	pub(crate) fn changefeed_source(
+		&self,
+	) -> Option<&Arc<dyn crate::lq::external::ChangeFeedSource>> {
+		self.changefeed_source.as_ref()
+	}
+
+	pub(crate) fn set_changefeed_source(
+		&mut self,
+		source: Option<Arc<dyn crate::lq::external::ChangeFeedSource>>,
+	) {
+		self.changefeed_source = source;
+	}
+
+	/// The scheduler a running program yields through, `None` for the
+	/// default.
+	pub(crate) fn scheduler(&self) -> Option<&Arc<dyn crate::exec::scheduler::Scheduler>> {
+		self.scheduler.as_ref()
+	}
+
+	pub(crate) fn set_scheduler(
+		&mut self,
+		scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
+	) {
+		self.scheduler = scheduler;
+	}
+
+	/// The host's places a morsel pipeline's morsels may run at, `None` where the host gives
+	/// none.
+	pub(crate) fn morsel_places(&self) -> Option<&Arc<dyn crate::exec::places::MorselPlaces>> {
+		self.morsel_places.as_ref()
+	}
+
+	/// The node whose async event queue an event queued by a write in this context joins: the
+	/// node the datastore was told to queue under, else this context's own.
+	pub(crate) fn event_queue_node(&self) -> Uuid {
+		self.event_queue_node.unwrap_or(self.shared.node_id)
+	}
+
+	pub(crate) fn set_event_queue_node(&mut self, node: Option<Uuid>) {
+		self.event_queue_node = node;
+	}
+
+	pub(crate) fn set_morsel_places(
+		&mut self,
+		places: Option<Arc<dyn crate::exec::places::MorselPlaces>>,
+	) {
+		self.morsel_places = places;
+	}
+
+	/// The ticket the index engines' parallel work takes its places through,
+	/// when one is set on this context.
+	pub(crate) fn index_places(&self) -> Option<&crate::idx::places::Ticket> {
+		self.index_places.get()
+	}
+
+	/// Sets the ticket the index engines' parallel work takes its places
+	/// through; see [`IndexPlaces`].
+	pub(crate) fn set_index_places(&mut self, places: crate::idx::places::Ticket) {
+		self.index_places = Arc::new(std::sync::OnceLock::from(places));
+	}
+
+	/// The query's memory, `None` where nothing is bounded.
+	pub(crate) fn memory(&self) -> Option<&Arc<crate::exec::memory::QueryMemory>> {
+		self.memory.as_ref()
+	}
+
+	pub(crate) fn set_memory(&mut self, memory: Option<Arc<crate::exec::memory::QueryMemory>>) {
+		self.memory = memory;
 	}
 
 	/// IAM check using auth from [`Options`] and the datastore auth toggle on this context.
@@ -605,10 +1068,35 @@ impl Context {
 			return Ok(());
 		}
 
-		opt.auth.is_allowed(action, &res)
+		Ok(opt.auth.is_allowed(action, &res).map_err(crate::err::Error::from)?)
 	}
 
-	/// Table-level permission check frequency (mirrors former [`Options::check_perms`]).
+	/// Whether a caller acting on a bucket at `level` is judged by the bucket
+	/// rather than exempt by its role: [`Self::check_perms`] for a database's
+	/// bucket, and for a bucket at the root or the session's namespace the role
+	/// the caller holds at that level or above it.
+	pub(crate) fn check_bucket_perms(
+		&self,
+		opt: &Options,
+		action: Action,
+		level: crate::catalog::BucketLevel,
+	) -> Result<bool> {
+		let ns = match level {
+			crate::catalog::BucketLevel::Db(..) => return self.check_perms(opt, action),
+			crate::catalog::BucketLevel::Ns(_) => Some(opt.ns()?),
+			crate::catalog::BucketLevel::Root => None,
+		};
+		Ok(opt.perms
+			&& crate::exec::permission::action_is_checked(
+				self.auth_enabled,
+				&opt.auth,
+				action,
+				ns,
+				None,
+			))
+	}
+
+	/// Table-level permission check, which the options' `perms` flag gates.
 	pub fn check_perms(&self, opt: &Options, action: Action) -> Result<bool> {
 		if !opt.perms {
 			return Ok(false);
@@ -640,6 +1128,18 @@ impl Context {
 	pub(crate) async fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
 		let tx = self.tx();
+		// Creating a missing namespace to hold a definition needs the same
+		// authority as an explicit DEFINE NAMESPACE (Edit on Namespace at root),
+		// matching the USE path, so a database-level principal cannot recreate a
+		// removed namespace through an ordinary DDL statement
+		// (GHSA-3287-hpm5-3f8r). The existence read runs unsealed because this is
+		// reached from sealed work (e.g. view maintenance); an authorization
+		// check of the live catalog is orthogonal to that work's snapshot.
+		let ns_present =
+			crate::kvs::catalog_reads::sealed(false, tx.get_ns_by_name(ns, None)).await?.is_some();
+		if !ns_present {
+			self.is_allowed(opt, Action::Edit, ResourceKind::Namespace, Base::Root)?;
+		}
 		let ns_def = tx.get_or_add_ns(Some(self), ns).await?;
 		Ok(ns_def.namespace_id)
 	}
@@ -649,7 +1149,7 @@ impl Context {
 	pub(crate) async fn expect_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
 		let Some(ns_def) = self.tx().get_ns_by_name(ns, None).await? else {
-			return Err(Error::NsNotFound {
+			return Err(CatalogError::NsNotFound {
 				name: ns.to_string(),
 			}
 			.into());
@@ -662,22 +1162,48 @@ impl Context {
 	/// created based on the `strict` option.
 	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
-		let db_def = self.tx().ensure_ns_db(Some(self), ns, db).await?;
+		let txn = self.tx();
+		// Creating a missing namespace or database to hold a definition needs
+		// the same authority as creating it explicitly (Edit on Namespace at
+		// root / Edit on Database at the namespace), matching the USE path, so a
+		// database-level principal cannot recreate a removed namespace or
+		// database through an ordinary DDL statement (GHSA-3287-hpm5-3f8r). The
+		// existence reads run unsealed because this is reached from sealed work
+		// (e.g. view maintenance); an authorization check of the live catalog is
+		// orthogonal to that work's snapshot.
+		let ns_present =
+			crate::kvs::catalog_reads::sealed(false, txn.get_ns_by_name(ns, None)).await?.is_some();
+		if !ns_present {
+			self.is_allowed(opt, Action::Edit, ResourceKind::Namespace, Base::Root)?;
+		} else {
+			let db_present =
+				crate::kvs::catalog_reads::sealed(false, txn.get_db_by_name(ns, db, None))
+					.await?
+					.is_some();
+			if !db_present {
+				self.is_allowed(opt, Action::Edit, ResourceKind::Database, Base::Ns)?;
+			}
+		}
+		let db_def =
+			crate::exec::vm::descriptor::object(txn.ensure_ns_db(Some(self), ns, db)).await?;
 		Ok((db_def.namespace_id, db_def.database_id))
 	}
 
-	/// Get the namespace and database ids for the current context.
-	/// If the namespace or database does not exist, it will be try to be
-	/// created based on the `strict` option.
-	pub(crate) async fn try_ns_db_ids(
+	/// The level of the buckets the current context reaches: the session's
+	/// database when one is selected, else its namespace, else the root. A
+	/// selected namespace or database that does not exist is an error.
+	pub(crate) async fn expect_bucket_level(
 		&self,
 		opt: &Options,
-	) -> Result<Option<(NamespaceId, DatabaseId)>> {
-		let (ns, db) = opt.ns_db()?;
-		let Some(db_def) = self.tx().get_db_by_name(ns, db, None).await? else {
-			return Ok(None);
-		};
-		Ok(Some((db_def.namespace_id, db_def.database_id)))
+	) -> Result<crate::catalog::BucketLevel> {
+		if opt.db.is_some() {
+			let (ns, db) = self.expect_ns_db_ids(opt).await?;
+			Ok(crate::catalog::BucketLevel::Db(ns, db))
+		} else if opt.ns.is_some() {
+			Ok(crate::catalog::BucketLevel::Ns(self.expect_ns_id(opt).await?))
+		} else {
+			Ok(crate::catalog::BucketLevel::Root)
+		}
 	}
 
 	/// Get the namespace and database ids for the current context.
@@ -687,19 +1213,16 @@ impl Context {
 		opt: &Options,
 	) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
-		let Some(db_def) = self.tx().get_db_by_name(ns, db, None).await? else {
-			return Err(Error::DbNotFound {
+		let txn = self.tx();
+		let Some(db_def) =
+			crate::exec::vm::descriptor::object(txn.get_db_by_name(ns, db, None)).await?
+		else {
+			return Err(CatalogError::DbNotFound {
 				name: db.to_string(),
 			}
 			.into());
 		};
 		Ok((db_def.namespace_id, db_def.database_id))
-	}
-
-	pub(crate) async fn get_db(&self, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
-		let (ns, db) = opt.ns_db()?;
-		let db_def = self.tx().ensure_ns_db(Some(self), ns, db).await?;
-		Ok(db_def)
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -708,7 +1231,23 @@ impl Context {
 	where
 		K: Into<Strand>,
 	{
-		self.values.insert(key.into(), value);
+		let key = key.into();
+		if !self.forbidden.is_empty() {
+			self.forbidden.retain(|(name, _)| *name != key);
+		}
+		Arc::make_mut(&mut self.values).insert(key, value);
+	}
+
+	/// Bind each of `names` to `row`, a KNN query vector's row being scanned,
+	/// rather than to a value: [`Self::binding`] answers
+	/// [`Binding::Forbidden`] for it, and a value bound at this level after it,
+	/// or at a deeper one, shadows it.
+	pub(crate) fn add_forbidden(&mut self, names: &[&str], row: &Arc<ForbiddenRow>) {
+		for name in names {
+			Arc::make_mut(&mut self.values).remove(*name);
+			self.forbidden.retain(|(bound, _)| bound.as_str() != *name);
+			self.forbidden.push((Strand::from(*name), Arc::clone(row)));
+		}
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -719,9 +1258,12 @@ impl Context {
 		K: Into<Strand>,
 		V: Into<Arc<Value>>,
 	{
-		self.values.extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())))
+		for (key, value) in iter {
+			self.add_value(key, value.into());
+		}
 	}
 
+	#[cfg(test)]
 	/// Add cancellation to the context. The value that is returned will cancel
 	/// the context and it's children once called.
 	pub(crate) fn add_cancel(&mut self) -> Canceller {
@@ -777,31 +1319,14 @@ impl Context {
 	/// Add a timeout to the context. If the current timeout is sooner than
 	/// the provided timeout, this method does nothing. If the result of the
 	/// addition causes an overflow, this method returns an error.
-	pub(crate) fn add_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
+	pub(crate) fn add_timeout(&mut self, timeout: Duration) -> Result<(), DatastoreError> {
 		match Instant::now().checked_add(timeout) {
 			Some(deadline) => {
 				self.add_deadline(deadline, timeout);
 				Ok(())
 			}
-			None => Err(Error::InvalidTimeout(timeout.as_secs())),
+			None => Err(DatastoreError::InvalidTimeout(timeout.as_secs())),
 		}
-	}
-
-	pub(crate) fn set_query_planner(&mut self, qp: QueryPlanner) {
-		self.query_planner = Some(Arc::new(qp));
-	}
-
-	/// Cache a table-specific QueryExecutor in the Context.
-	///
-	/// This is set by the collector/processor when iterating over a specific
-	/// table or index so that downstream per-record operations can access the
-	/// executor without repeatedly looking it up from the QueryPlanner.
-	pub(crate) fn set_query_executor(&mut self, qe: QueryExecutor) {
-		self.query_executor = Some(qe);
-	}
-
-	pub(crate) fn set_iteration_stage(&mut self, is: IterationStage) {
-		self.iteration_stage = Some(is);
 	}
 
 	pub(crate) fn set_transaction(&mut self, txn: Arc<Transaction>) {
@@ -823,6 +1348,21 @@ impl Context {
 		self.statement_counters.as_ref()
 	}
 
+	/// Install the instant every CLOCK read answers while the statement about
+	/// to run executes. Called by the executor once per top-level statement
+	/// and by a block for each of its statements when it starts, so a `sleep`
+	/// inside the statement does not advance it. Contexts derived afterwards
+	/// carry it.
+	pub(crate) fn set_statement_clock(&mut self, clock: Datetime) {
+		self.statement_clock = Some(clock);
+	}
+
+	/// The instant of the statement running around this context, or `None`
+	/// where no statement installed one.
+	pub(crate) fn statement_clock(&self) -> Option<&Datetime> {
+		self.statement_clock.as_ref()
+	}
+
 	pub(crate) fn tx(&self) -> Arc<Transaction> {
 		self.transaction
 			.clone()
@@ -840,52 +1380,46 @@ impl Context {
 		self.deadline.map(|(v, _)| v.saturating_duration_since(Instant::now()))
 	}
 
+	/// The timeout this context's deadline was set from, if it has one: what a
+	/// caller reports once [`Self::timeout`] has run out.
+	pub(crate) fn deadline_timeout(&self) -> Option<Duration> {
+		self.deadline.map(|(_, timeout)| timeout)
+	}
+
 	/// Returns the slow log configuration, if any, attached to this context.
 	/// The executor consults this to decide whether to emit slow-query log lines.
 	pub(crate) fn slow_log(&self) -> Option<&SlowLog> {
 		self.slow_log.as_ref()
 	}
 
-	pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
-		self.query_planner.as_ref().map(|qp| qp.as_ref())
-	}
-
-	/// Get the cached QueryExecutor (if any) attached by the current iteration
-	/// context.
-	pub(crate) fn get_query_executor(&self) -> Option<&QueryExecutor> {
-		self.query_executor.as_ref()
-	}
-
-	pub(crate) fn get_iteration_stage(&self) -> Option<&IterationStage> {
-		self.iteration_stage.as_ref()
-	}
-
 	/// Get the index_store for this context/ds
 	pub(crate) fn get_index_stores(&self) -> &IndexStores {
-		&self.index_stores
+		&self.shared.index_stores
 	}
 
 	/// Get the index_builder for this context/ds
 	pub(crate) fn get_index_builder(&self) -> Option<&IndexBuilder> {
-		self.index_builder.as_ref()
+		self.shared.index_builder.as_deref()
 	}
 
 	/// Return the sequences manager
 	pub(crate) fn get_sequences(&self) -> Option<&Sequences> {
-		self.sequences.as_ref()
+		self.shared.sequences.as_deref()
 	}
 
 	pub(crate) fn try_get_sequences(&self) -> Result<&Sequences> {
 		if let Some(sqs) = self.get_sequences() {
 			Ok(sqs)
 		} else {
-			bail!(Error::Internal("Sequences are not supported in this context.".to_string(),))
+			bail!(
+				EngineError::Internal("Sequences are not supported in this context.".to_string(),)
+			)
 		}
 	}
 
 	// Get the current datastore cache
 	pub(crate) fn get_cache(&self) -> Option<Arc<DatastoreCache>> {
-		self.cache.clone()
+		self.shared.cache.clone()
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may
@@ -917,12 +1451,18 @@ impl Context {
 			return Ok(Some(Reason::Canceled));
 		}
 		if deep_check {
+			#[cfg(test)]
+			crate::kvs::testing::maybe_inject_non_retryable_error(
+				crate::kvs::testing::NonRetryableErrorSite::ContextDeepCheckMemoryThreshold,
+				self.shared.node_id,
+			)?;
 			if ALLOC.is_beyond_threshold() {
-				bail!(Error::QueryBeyondMemoryThreshold);
+				crate::mem::record_refusal(crate::mem::RefusalSite::Query);
+				bail!(DatastoreError::QueryBeyondMemoryThreshold);
 			}
-			let now = Instant::now();
+			// The clock is read only by a context that holds a deadline.
 			if let Some((deadline, timeout)) = self.deadline
-				&& deadline <= now
+				&& deadline <= Instant::now()
 			{
 				return Ok(Some(Reason::Timedout(timeout.into())));
 			}
@@ -981,7 +1521,7 @@ impl Context {
 
 	pub(crate) async fn expect_not_timedout(&self) -> Result<()> {
 		if let Some(d) = self.is_timedout().await? {
-			bail!(Error::QueryTimedout(d.into()))
+			bail!(EngineError::QueryTimedout(d))
 		} else {
 			Ok(())
 		}
@@ -990,39 +1530,280 @@ impl Context {
 	#[cfg(storage)]
 	/// Return the location of the temporary directory if any
 	pub(crate) fn temporary_directory(&self) -> Option<&Arc<PathBuf>> {
-		self.temporary_directory.as_ref()
+		self.shared.temporary_directory.as_ref()
 	}
 
 	/// Get a value from the context. If no value is stored under the
 	/// provided key, then this will return None.
+	///
+	/// A name bound to a KNN query vector's row being scanned holds no value
+	/// and answers `None` here: an expression's read of a parameter resolves
+	/// it through [`Self::binding`], which refuses it.
 	pub(crate) fn value(&self, key: &str) -> Option<&Value> {
-		match self.values.get(key) {
-			Some(v) => Some(v.as_ref()),
-			None if PROTECTED_PARAM_NAMES.contains(&key) || !self.isolated => match &self.parent {
-				Some(p) => p.value(key),
-				_ => None,
-			},
-			None => None,
+		self.shared_value(key).map(Arc::as_ref)
+	}
+
+	/// Whether `key` reads here as a request parameter: the request bound it
+	/// and no binding made since, a `LET` or a `FOR`, has replaced it.
+	pub(crate) fn is_request_param(&self, key: &str) -> bool {
+		match (
+			self.request_params.as_ref().and_then(|params| params.get(key)),
+			self.shared_value(key),
+		) {
+			(Some(param), Some(visible)) => Arc::ptr_eq(param, visible),
+			_ => false,
 		}
 	}
 
-	/// Collect context values into the provided map, walking up parent contexts
-	/// unless this context is isolated.
+	/// This context's own binding of `key`, with no walk to the parent
+	/// contexts. [`Self::value`] cannot tell an own binding from an inherited
+	/// one, which an exact restore of a binding needs.
+	pub(crate) fn own_value(&self, key: &str) -> Option<&Arc<Value>> {
+		self.values.get(key)
+	}
+
+	/// The address of this context's value map, for a test asserting that a
+	/// write was made in place rather than to a copy.
+	#[cfg(test)]
+	pub(crate) fn values_addr(&self) -> usize {
+		Arc::as_ptr(&self.values) as *const () as usize
+	}
+
+	/// Puts the own binding of `key` back to `prev`: inserts the value, or
+	/// removes the binding when `prev` is `None`. A removed binding leaves the
+	/// name unbound here, so a parent's binding or a `DEFINE PARAM` of the same
+	/// name is answered again instead of a shadowing `NONE`.
+	pub(crate) fn restore_value(&mut self, key: &str, prev: Option<Arc<Value>>) {
+		match prev {
+			Some(value) => {
+				Arc::make_mut(&mut self.values).insert(Strand::from(key), value);
+			}
+			None => {
+				Arc::make_mut(&mut self.values).remove(key);
+			}
+		}
+	}
+
+	/// The allocation [`Self::value`] answers for `key`.
+	pub(crate) fn shared_value(&self, key: &str) -> Option<&Arc<Value>> {
+		match self.binding(key) {
+			Some(Binding::Value(value)) => Some(value),
+			Some(Binding::Forbidden(_)) | None => None,
+		}
+	}
+
+	/// What `key` is bound to in this context's chain: the innermost binding,
+	/// a value or a forbidden row, or `None` where no level binds it. An
+	/// isolated context reads only the protected names (`$auth`, `$access`,
+	/// `$token`, `$session`) from its parents.
+	pub(crate) fn binding(&self, key: &str) -> Option<Binding<'_>> {
+		if let Some(value) = self.values.get(key) {
+			return Some(Binding::Value(value));
+		}
+		if let Some((_, row)) = self.forbidden.iter().find(|(name, _)| name.as_str() == key) {
+			return Some(Binding::Forbidden(row));
+		}
+		match &self.parent {
+			Some(p) if PROTECTED_PARAM_NAMES.contains(&key) || !self.isolated => p.binding(key),
+			_ => None,
+		}
+	}
+
+	/// The names [`Self::binding`] answers [`Binding::Forbidden`] for, with
+	/// the row each is bound to, for a snapshot that flattens the chain.
+	fn collect_forbidden(&self) -> Vec<(Strand, Arc<ForbiddenRow>)> {
+		let mut names = Vec::new();
+		let mut level = Some(self);
+		while let Some(ctx) = level {
+			for (name, _) in &ctx.forbidden {
+				if !names.contains(name) {
+					names.push(name.clone());
+				}
+			}
+			level = match &ctx.parent {
+				Some(p) if !ctx.isolated => Some(p.as_ref()),
+				_ => None,
+			};
+		}
+		names
+			.into_iter()
+			.filter_map(|name| match self.binding(name.as_str()) {
+				Some(Binding::Forbidden(row)) => Some((name, Arc::clone(row))),
+				Some(Binding::Value(_)) | None => None,
+			})
+			.collect()
+	}
+
+	/// Collect context values into the provided map: every value
+	/// [`Self::value`] answers, so the parent chain's values, or of an isolated
+	/// context's chain only the protected ones (`$auth`, `$access`, `$token`,
+	/// `$session`), under this context's own.
 	pub(crate) fn collect_values(
 		&self,
 		map: HashMap<Strand, Arc<Value>>,
 	) -> HashMap<Strand, Arc<Value>> {
-		let mut map = if !self.isolated
-			&& let Some(p) = &self.parent
-		{
-			p.collect_values(map)
-		} else {
-			map
+		let mut map = match &self.parent {
+			Some(p) if !self.isolated => {
+				let mut map = p.collect_values(map);
+				// A name this level binds to a forbidden row shadows the
+				// parents' value of it.
+				for (name, _) in &self.forbidden {
+					map.remove(name);
+				}
+				map
+			}
+			Some(p) => {
+				let mut map = map;
+				for name in PROTECTED_PARAM_NAMES {
+					if let Some(value) = p.shared_value(name) {
+						map.insert(Strand::from(*name), Arc::clone(value));
+					}
+				}
+				map
+			}
+			None => map,
 		};
 		self.values.iter().for_each(|(k, v)| {
 			map.insert(k.clone(), Arc::clone(v));
 		});
 		map
+	}
+
+	/// Marks this node as the scope of a function body entered by a call. The
+	/// node holds the arguments, and [`Self::lexical_value`] answers from it
+	/// and from what is bound below it, then from the request parameters,
+	/// never from what the caller bound above it.
+	pub(crate) fn mark_call_boundary(&mut self) {
+		self.call_boundary = true;
+	}
+
+	/// Whether this context is, or is derived from, the scope of a function
+	/// body ([`Self::mark_call_boundary`]).
+	pub(crate) fn in_call_body(&self) -> bool {
+		std::iter::successors(Some(self), |ctx| ctx.parent.as_deref()).any(|ctx| ctx.call_boundary)
+	}
+
+	/// The value `key` holds in a frame running in this context, as the code
+	/// of a function body reads it.
+	///
+	/// With no call boundary on the chain it is [`Self::value`]. Otherwise
+	/// the chain is walked as `value` walks it up to and including the
+	/// nearest boundary ([`Self::mark_call_boundary`]), so the arguments of
+	/// the call and every binding made inside the body are read, and past it
+	/// the answer is:
+	///
+	/// - for the protected names (`$auth`, `$access`, `$token`, `$session`) and the row names
+	///   (`$this`, `$self`, `$parent`, `$before`, `$after`, `$event`, `$value`, `$input`), the
+	///   nearest value of the whole chain;
+	/// - for every other name, the request parameter of that name, if any.
+	///
+	/// A caller's `LET` or `FOR` binding is therefore never read by the body,
+	/// at any depth of calls, and a name no binding of the body or of the
+	/// request holds is left to a `DEFINE PARAM` of the database.
+	///
+	/// A name bound to a KNN query vector's row being scanned holds no value
+	/// and answers `None` here; [`Self::lexical_binding`] tells it apart.
+	pub(crate) fn lexical_value(&self, key: &str) -> Option<&Arc<Value>> {
+		match self.lexical_binding(key) {
+			Some(Binding::Value(value)) => Some(value),
+			Some(Binding::Forbidden(_)) | None => None,
+		}
+	}
+
+	/// What `key` is bound to as the code of a function body reads it
+	/// ([`Self::lexical_value`]): a value, a KNN query vector's row being
+	/// scanned ([`Binding::Forbidden`]), or nothing.
+	pub(crate) fn lexical_binding(&self, key: &str) -> Option<Binding<'_>> {
+		let mut node = self;
+		loop {
+			if let Some(value) = node.values.get(key) {
+				return Some(Binding::Value(value));
+			}
+			if let Some((_, row)) = node.forbidden.iter().find(|(name, _)| name.as_str() == key) {
+				return Some(Binding::Forbidden(row));
+			}
+			if node.call_boundary {
+				return node.beyond_boundary(key);
+			}
+			match &node.parent {
+				Some(parent) if PROTECTED_PARAM_NAMES.contains(&key) || !node.isolated => {
+					node = parent;
+				}
+				_ => return None,
+			}
+		}
+	}
+
+	/// What a read of `key` answers past this call boundary, once the node's own
+	/// bindings do not hold it; see [`Self::lexical_value`].
+	fn beyond_boundary(&self, key: &str) -> Option<Binding<'_>> {
+		if PROTECTED_PARAM_NAMES.contains(&key) || ROW_PARAM_NAMES.contains(&key) {
+			self.parent.as_ref()?.binding(key)
+		} else {
+			self.request_params.as_ref()?.get(key).map(Binding::Value)
+		}
+	}
+
+	/// The names a read in this context may find a value under: those
+	/// [`Self::value`] answers and the request parameters.
+	fn visible_names(&self) -> Vec<Strand> {
+		let mut names: Vec<Strand> = self.collect_values(HashMap::default()).into_keys().collect();
+		if let Some(params) = &self.request_params {
+			names.extend(params.keys().cloned());
+		}
+		names
+	}
+
+	/// Every binding [`Self::lexical_value`] answers in this context.
+	fn lexical_values(&self) -> HashMap<Strand, Arc<Value>> {
+		self.visible_names()
+			.into_iter()
+			.filter_map(|name| {
+				let value = Arc::clone(self.lexical_value(&name)?);
+				Some((name, value))
+			})
+			.collect()
+	}
+
+	/// The context a function body entered from `parent` is planned in: an
+	/// isolated, call-boundary child of it that holds the request parameters
+	/// and the row names of `parent` and reads the protected names through it.
+	/// A binding the caller made with `LET` or `FOR` is not among them, so a
+	/// plan made in it folds none, and a name no binding holds is looked up
+	/// among the database's parameters.
+	///
+	/// The request parameters are shared with `parent`, never copied: a request
+	/// variable is never a protected or a row name ([`bound_name_refused`]), so
+	/// the scope holds them as they are, and the row names `parent` binds, when
+	/// it binds any, are held by a child node of their own above them. Entering
+	/// a body costs the row names, not the number of variables the request holds.
+	pub(crate) fn new_call_scope(parent: &FrozenContext) -> Self {
+		let mut scope = Self::new_isolated(parent);
+		scope.request_params.clone_from(&parent.request_params);
+		if let Some(params) = &parent.request_params {
+			scope.values = Arc::clone(params);
+		}
+		// What the body reads under a row name is `parent`'s binding of it.
+		let mut rows = Vec::new();
+		let mut forbidden = Vec::new();
+		for name in ROW_PARAM_NAMES {
+			match parent.binding(name) {
+				Some(Binding::Value(value)) => rows.push((Strand::from(*name), Arc::clone(value))),
+				Some(Binding::Forbidden(row)) => {
+					forbidden.push((Strand::from(*name), Arc::clone(row)))
+				}
+				None => {}
+			}
+		}
+		if rows.is_empty() && forbidden.is_empty() {
+			scope.call_boundary = true;
+			return scope;
+		}
+		let mut held = Self::new_child(&scope.freeze());
+		held.call_boundary = true;
+		held.values = Arc::new(rows.into_iter().collect());
+		held.forbidden = forbidden;
+		held
 	}
 
 	/// Get a 'static view into the cancellation status.
@@ -1037,16 +1818,14 @@ impl Context {
 	}
 
 	/// Attach a session to the context and add any session variables to the
-	/// context.
+	/// context, as request parameters ([`Self::attach_variables`]).
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.live = session.live();
-		self.add_values(session.values());
-		// Only override the planner strategy if the session explicitly sets a
-		// non-default value (e.g. language tests). Otherwise the capability-level
-		// strategy (set via from_ds) is preserved.
-		if session.new_planner_strategy != NewPlannerStrategy::default() {
-			self.new_planner_strategy = session.new_planner_strategy;
-		}
+		let values = session.values();
+		// Room for the session's values and variables at once, rather than a
+		// table grown and rehashed as they are added one by one.
+		Arc::make_mut(&mut self.values).reserve(values.len() + session.variables.len());
+		self.add_values(values);
 		// Propagate duration redaction flag from session.
 		if session.redact_volatile_explain_attrs {
 			self.redact_volatile_explain_attrs = true;
@@ -1056,8 +1835,7 @@ impl Context {
 		}
 		// Pre-resolve the tenant identity so emit sites do not need to
 		// re-walk the session value tree on every event dispatch.
-		self.tenant_identity =
-			Some(Arc::new(crate::observe::TenantIdentity::from_session(session)));
+		self.tenant_identity = Some(Arc::new(crate::observe::TenantIdentity::from(session)));
 		Ok(())
 	}
 
@@ -1066,27 +1844,77 @@ impl Context {
 		self.tenant_identity.as_ref()
 	}
 
-	/// Attach variables to the context.
+	/// Attach variables to the context. They are the request's parameters: a
+	/// function body reads them past its call boundary
+	/// ([`Self::lexical_value`]), where it reads no `LET` or `FOR` binding.
+	///
+	/// A protected name is refused. A name the system binds in a frame
+	/// (`$this`, `$value`, ...) is not: the frame binds it on a context of its
+	/// own and [`Self::value`] prefers the nearer binding, so the frame's
+	/// value is what its code reads, and outside such a frame the request's
+	/// own binding is read. Refusing it here would refuse the ordinary
+	/// parameters clients bind.
 	pub(crate) fn attach_variables(&mut self, vars: Variables) -> Result<(), Error> {
+		self.bind_variables(vars, true)
+	}
+
+	/// Binds the captures of a closure as values of this context, refusing a
+	/// protected name as [`Self::attach_variables`] does. A capture is the
+	/// closure's own binding, not a request parameter, so a function the
+	/// closure's body calls does not read it. A capture may be named as a
+	/// value the system binds (`$this`, `$value`, ...), which is the frame's
+	/// binding that the closure captured.
+	pub(crate) fn attach_captures(&mut self, vars: Variables) -> Result<(), Error> {
+		self.bind_variables(vars, false)
+	}
+
+	fn bind_variables(&mut self, vars: Variables, request: bool) -> Result<(), Error> {
+		Arc::make_mut(&mut self.values).reserve(vars.0.len());
+		if request {
+			Arc::make_mut(self.request_params.get_or_insert_with(Default::default))
+				.reserve(vars.0.len());
+		}
 		for (name, val) in vars {
 			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
-				return Err(Error::InvalidParam {
+				return Err(ExecError::InvalidParam {
 					name: name.into_string(),
-				});
+				}
+				.into());
 			}
-			self.add_value(name, Arc::new(val));
+			match request {
+				true => self.add_request_param(name, Arc::new(val)),
+				false => self.add_value(name, Arc::new(val)),
+			}
 		}
 		Ok(())
 	}
 
+	/// Carries the request parameters of `from` onto this context, which a
+	/// frame built isolated from `from` does to keep the request's
+	/// parameters readable to the function bodies it runs.
+	pub(crate) fn inherit_request_params(&mut self, from: &Context) {
+		self.request_params.clone_from(&from.request_params);
+	}
+
+	/// Adds a request parameter: a value of the context that a function body
+	/// reads past its call boundary ([`Self::lexical_value`]).
+	fn add_request_param(&mut self, name: Strand, value: Arc<Value>) {
+		Arc::make_mut(self.request_params.get_or_insert_with(Default::default))
+			.insert(name.clone(), Arc::clone(&value));
+		Arc::make_mut(&mut self.values).insert(name, value);
+	}
+
+	/// Attach variables of the public type to the context, as
+	/// [`Self::attach_variables`] attaches them.
 	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
 		for (name, val) in vars {
 			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
-				return Err(Error::InvalidParam {
+				return Err(ExecError::InvalidParam {
 					name,
-				});
+				}
+				.into());
 			}
-			self.add_value(name, Arc::new(convert_public_value_to_internal(val)));
+			self.add_request_param(name.into(), Arc::new(convert_public_value_to_internal(val)));
 		}
 		Ok(())
 	}
@@ -1100,38 +1928,6 @@ impl Context {
 		Arc::clone(&self.capabilities)
 	}
 
-	/// Get the function registry for this context
-	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
-		&self.function_registry
-	}
-
-	/// Set the matches context for index functions (search::highlight, etc.)
-	pub(crate) fn set_matches_context(&mut self, ctx: crate::exec::function::MatchesContext) {
-		self.matches_context = Some(Arc::new(ctx));
-	}
-
-	/// Get the matches context for index functions
-	pub(crate) fn get_matches_context(
-		&self,
-	) -> Option<&Arc<crate::exec::function::MatchesContext>> {
-		self.matches_context.as_ref()
-	}
-
-	/// Set the KNN context for index functions (vector::distance::knn)
-	pub(crate) fn set_knn_context(&mut self, ctx: Arc<crate::exec::function::KnnContext>) {
-		self.knn_context = Some(ctx);
-	}
-
-	/// Get the KNN context for index functions
-	pub(crate) fn get_knn_context(&self) -> Option<&Arc<crate::exec::function::KnnContext>> {
-		self.knn_context.as_ref()
-	}
-
-	/// Get the new planner strategy for this context
-	pub(crate) fn new_planner_strategy(&self) -> &NewPlannerStrategy {
-		&self.new_planner_strategy
-	}
-
 	/// Whether EXPLAIN ANALYZE should redact elapsed durations.
 	pub(crate) fn redact_volatile_explain_attrs(&self) -> bool {
 		self.redact_volatile_explain_attrs
@@ -1142,19 +1938,9 @@ impl Context {
 	pub(crate) fn check_allowed_scripting(&self) -> Result<()> {
 		if !self.capabilities.allows_scripting() {
 			warn!("Capabilities denied scripting attempt");
-			bail!(Error::ScriptingNotAllowed);
+			bail!(CapabilitiesError::ScriptingNotAllowed);
 		}
 		trace!("Capabilities allowed scripting");
-		Ok(())
-	}
-
-	/// Check if a function is allowed
-	pub(crate) fn check_allowed_function(&self, target: &str) -> Result<()> {
-		if !self.capabilities.allows_function_name(target) {
-			warn!("Capabilities denied function execution attempt, target: '{target}'");
-			bail!(Error::FunctionNotAllowed(target.to_string()));
-		}
-		trace!("Capabilities allowed function execution, target: '{target}'");
 		Ok(())
 	}
 
@@ -1199,28 +1985,29 @@ impl Context {
 		let match_any_deny_net = |t| {
 			if self.capabilities.matches_any_deny_net(t) {
 				warn!("Capabilities denied outgoing network connection attempt, target: '{t}'");
-				bail!(Error::NetTargetNotAllowed(t.to_string()));
+				bail!(CapabilitiesError::NetTargetNotAllowed(t.to_string()));
 			}
 			Ok(())
 		};
 		match url.host() {
 			Some(host) => {
-				let target = NetTarget::Host(host.to_owned(), url.port_or_known_default());
+				let target =
+					NetTarget::Host(NetTarget::canonical_host(host), url.port_or_known_default());
 				// Check the domain name (if any) matches the allow list
 				let host_allowed = self.capabilities.matches_any_allow_net(&target);
 				if !host_allowed {
 					warn!(
 						"Capabilities denied outgoing network connection attempt, target: '{target}'"
 					);
-					bail!(Error::NetTargetNotAllowed(target.to_string()));
+					bail!(CapabilitiesError::NetTargetNotAllowed(target.to_string()));
 				}
 				// Check against the deny list
 				match_any_deny_net(&target)?;
 				// Resolve the domain name to a vector of IP addresses
 				#[cfg(not(target_family = "wasm"))]
-				let targets = target.resolve().await?;
+				let targets = crate::net::resolve_net_target(&target).await?;
 				#[cfg(target_family = "wasm")]
-				let targets = target.resolve()?;
+				let targets = crate::net::resolve_net_target(&target)?;
 				for t in &targets {
 					match_any_deny_net(t)?;
 				}
@@ -1232,147 +2019,284 @@ impl Context {
 	}
 
 	pub(crate) fn get_buckets(&self) -> Option<&BucketsManager> {
-		self.buckets.as_ref()
+		self.shared.buckets.as_ref()
 	}
 
 	/// Obtain the connection for a bucket
 	pub(crate) async fn get_bucket_store(
 		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
+		level: crate::catalog::BucketLevel,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Do we have a buckets context?
-		if let Some(buckets) = &self.buckets {
-			buckets.get_bucket_store(&self.tx(), ns, db, bu).await
+		if let Some(buckets) = &self.shared.buckets {
+			buckets.get_bucket_store(&self.tx(), level, bu).await
 		} else {
-			bail!(Error::BucketUnavailable(bu.into()))
+			bail!(BucError::BucketUnavailable(bu.into()))
 		}
 	}
 
 	#[cfg(feature = "surrealism")]
 	pub(crate) fn get_surrealism_cache(&self) -> Option<Arc<SurrealismCache>> {
-		self.surrealism_cache.as_ref().map(Arc::clone)
+		self.shared.surrealism_cache.as_ref().map(Arc::clone)
 	}
 
+	/// How many extension invocations enclose this context.
+	#[cfg(feature = "surrealism")]
+	pub(crate) fn extension_depth(&self) -> u8 {
+		self.extension_depth
+	}
+
+	/// Mark this context as running inside one more extension invocation.
+	#[cfg(feature = "surrealism")]
+	pub(crate) fn enter_extension(&mut self) {
+		self.extension_depth = self.extension_depth.saturating_add(1);
+	}
+
+	/// The datastore's capabilities, which no extension's host call narrows.
+	#[cfg(feature = "surrealism")]
+	pub(crate) fn server_capabilities(&self) -> &Arc<Capabilities> {
+		&self.shared.server_capabilities
+	}
+
+	/// The definition behind `lookup`, prepared, once its archive may run
+	/// under `trust`, the definition being called.
+	///
+	/// The check is [`TrustStore::ensure`](crate::extension::trust::TrustStore::ensure):
+	/// before an archive is prepared, and again on every call, since one
+	/// prepared entry serves every definition whose archive has the same
+	/// digest, in any namespace or database, and those definitions can name
+	/// different signers.
+	///
+	/// A failure to load the definition is recorded per database, source,
+	/// `DIGEST` and signer, and repeated without refetching for
+	/// `surrealism_refetch_after_refusal`
+	/// ([`REFETCH_AFTER_REFUSAL`](crate::extension::trust::REFETCH_AFTER_REFUSAL)),
+	/// so a failing definition does not fetch, unpack and verify its archive on
+	/// every call.
 	#[cfg(feature = "surrealism")]
 	pub(crate) async fn get_surrealism_module(
 		&self,
 		lookup: SurrealismCacheLookup<'_>,
+		trust: crate::extension::trust::Trust<'_>,
+	) -> Result<SurrealismCachedModule> {
+		self.get_surrealism_module_from(lookup, trust, None).await
+	}
+
+	/// As [`Self::get_surrealism_module`], preparing `prefetched`, the
+	/// archive's bytes, when they were just fetched and checked, rather than
+	/// fetching them again.
+	#[cfg(feature = "surrealism")]
+	pub(crate) async fn get_surrealism_module_from(
+		&self,
+		lookup: SurrealismCacheLookup<'_>,
+		trust: crate::extension::trust::Trust<'_>,
+		prefetched: Option<bytes::Bytes>,
 	) -> Result<SurrealismCachedModule> {
 		if !self.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
 			bail!(
 				"Failed to get surrealism runtime: Experimental capability `surrealism` is not enabled"
 			);
 		}
+		let pinned = trust.pinned()?;
 
 		let Some(cache) = self.get_surrealism_cache() else {
 			bail!("Surrealism cache is not available");
 		};
-		let max_pool_size = self.config.surrealism_max_pool_size;
-		let max_memory = self.config.surrealism_max_memory;
-		let max_execution_time =
-			self.config.surrealism_max_execution_time.map(Duration::from_millis);
-		let max_kv_entries = self.config.surrealism_max_kv_entries;
-		let max_kv_value_bytes = self.config.surrealism_max_kv_value_bytes;
-		#[cfg(feature = "http")]
-		let config = Arc::clone(&self.config);
 
+		let source = match lookup {
+			SurrealismCacheLookup::File(_, _, bucket, key) => ArchiveSource::File {
+				bucket,
+				key,
+			},
+			SurrealismCacheLookup::Silo(_, _, organisation, package, major, minor, patch) => {
+				ArchiveSource::Silo {
+					organisation,
+					package,
+					major,
+					minor,
+					patch,
+				}
+			}
+		};
+		let (ns, db) = match lookup {
+			SurrealismCacheLookup::File(ns, db, ..) | SurrealismCacheLookup::Silo(ns, db, ..) => {
+				(*ns, *db)
+			}
+		};
+
+		let refusal = crate::extension::trust::RefusalKey::new(ns, db, source, pinned, &trust);
 		cache
-			.get_or_insert_with(&lookup, async || {
-				let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
-					bail!("silo lookups are not supported yet");
-				};
+			.trust()
+			.check_refusal(&refusal, self.config.surrealism.surrealism_refetch_after_refusal)?;
 
-				let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
-				let key = ObjectKey::new(key);
-				let surli = bucket
-					.get(&key)
-					.await
-					.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
-
-				let Some(surli) = surli else {
-					bail!("file not found");
-				};
-
-				let safe_key = key.to_string().replace(['/', '\\'], "_");
-				let temp_prefix = format!("SURREAL_MODFS_{ns}_{db}_{safe_key}_");
-				let unpack_opts = UnpackOptions {
-					#[cfg(storage)]
-					temp_base: self.temporary_directory().map(|p| p.as_path()),
-					#[cfg(not(storage))]
-					temp_base: None,
-					temp_prefix: &temp_prefix,
-					max_fs_bytes: self.config.surrealism_max_fs_bytes,
-				};
-				let package =
-					SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)?;
-
-				self.get_capabilities()
-					.validate_surrealism_capabilities(&package.config.capabilities)?;
-
-				let org = package.config.meta.organisation.clone();
-				let name = package.config.meta.name.clone();
-
-				#[cfg(feature = "http")]
-				let module_net_targets =
-					crate::surrealism::host::module_allow_net_targets(&package.config.capabilities);
-
-				let runtime = tokio::task::spawn_blocking(move || {
-					Runtime::new(
-						package,
-						max_pool_size,
-						max_memory,
-						max_execution_time,
-						max_kv_entries,
-						max_kv_value_bytes,
-					)
-				})
-				.await
-				.context("WASM compile task aborted")??;
-				let runtime = Arc::new(runtime);
-
-				let module_display_name: Arc<str> = format!("{org}::{name}").into();
-
-				#[cfg(feature = "http")]
-				let client = if module_net_targets.is_empty() {
-					Arc::new(
-						HttpClient::new(Targets::None, Targets::All, &config)
-							.context("Failed to create http client for WASM module")?,
-					)
-				} else {
-					let allow = Targets::Some(module_net_targets);
-					Arc::new(
-						HttpClient::new(
-							allow,
-							self.capabilities.denied_network_targets_ref().clone(),
-							&config,
-						)
-						.context("Failed to create http client for WASM module")?,
-					)
-				};
-
-				Ok(SurrealismCachedModule {
-					runtime,
-					module_display_name,
-					#[cfg(feature = "http")]
-					client,
-				})
+		// Nothing is prepared until the archive is the pinned one and, with a
+		// SIGNER, a signature proves it. Only MANIFEST and SIGNATURE are read
+		// for that. The archive was fetched from the definition's source just
+		// now, so its SIGNATURE is the current one and nothing is fetched
+		// again. Decompressing is CPU work, so it runs off the async task.
+		let prefetched = parking_lot::Mutex::new(prefetched);
+		let fetch = async || {
+			let prefetched = prefetched.lock().take();
+			let archive = match prefetched {
+				Some(archive) => archive,
+				None => fetch_archive(self, ns, db, source).await?,
+			};
+			let max_fs_bytes = self.config.surrealism.surrealism_max_fs_bytes;
+			let read = archive.clone();
+			let files = tokio::task::spawn_blocking(move || {
+				surrealism_runtime::package::trust_files_from_reader(read.as_ref(), max_fs_bytes)
 			})
 			.await
+			.map_err(|e| anyhow::anyhow!("archive read task aborted: {e}"))??;
+			let digest = files.manifest.digest().0;
+			cache
+				.trust()
+				.ensure(self, ns, db, None, &digest, files.signature.as_deref(), trust)
+				.await?;
+			Ok(crate::surrealism::runner::VerifiedSource {
+				digest: crate::expr::ManifestDigest::sha256(digest),
+				archive,
+				#[cfg(storage)]
+				temp_base: self.temporary_directory().map(|p| p.as_path().to_path_buf()),
+				#[cfg(not(storage))]
+				temp_base: None,
+				max_fs_bytes,
+				signature: files.signature.map(Arc::from),
+			})
+		};
+		let built =
+			cache.get_or_load(&lookup, &crate::expr::ManifestDigest::sha256(pinned), fetch).await;
+		if built.is_err() {
+			cache.trust().record(refusal, &built);
+		}
+		let module = built?;
+		let digest = crate::extension::trust::digest_bytes(&module.digest)?;
+		// The module may have been prepared for another definition of the same
+		// source, so its source's signature is checked against this one's
+		// SIGNER. When the source has been re-signed since, the current
+		// signature proves it and the source entry is dropped, so the next load
+		// takes that signature with it.
+		let resigned = cache
+			.trust()
+			.ensure(self, ns, db, Some(source), &digest, module.signature.as_deref(), trust)
+			.await?;
+		if resigned {
+			cache.remove(&lookup, pinned);
+		}
+		Ok(module)
 	}
 
 	#[cfg(feature = "http")]
 	pub(crate) fn http_client(&self) -> Arc<HttpClient> {
 		Arc::clone(&self.http_client)
 	}
+}
 
-	#[cfg(feature = "surrealism")]
-	pub(crate) async fn get_surrealism_runtime(
-		&self,
-		lookup: SurrealismCacheLookup<'_>,
-	) -> Result<Arc<Runtime>> {
-		Ok(self.get_surrealism_module(lookup).await?.runtime)
+impl crate::catalog::providers::CancellationProbe for Context {
+	fn expect_not_timedout(&self) -> crate::catalog::providers::BoxProviderFut<'_, Result<()>> {
+		Box::pin(Context::expect_not_timedout(self))
+	}
+}
+
+/// The context is the index engines' environment.
+///
+/// A `&FrozenContext` — what every caller into the engines already holds —
+/// coerces straight to `&dyn IndexEnv`: both `IndexEnv` and its supertrait
+/// `CancellationProbe` declare a blanket `Arc` forward beside the trait itself.
+impl crate::idx::env::IndexEnv for Context {
+	fn tx(&self) -> Arc<Transaction> {
+		Context::tx(self)
+	}
+
+	fn is_done(&self, count: Option<usize>) -> crate::idx::env::BoxEnvFut<'_> {
+		Box::pin(Context::is_done(self, count))
+	}
+
+	fn index_stores(&self) -> &IndexStores {
+		Context::get_index_stores(self)
+	}
+
+	fn node_id(&self) -> Uuid {
+		Context::node_id(self)
+	}
+
+	fn sequences(&self) -> Result<&Sequences> {
+		Context::try_get_sequences(self)
+	}
+
+	fn config(&self) -> &crate::idx::config::IdxConfig {
+		&self.config.idx
+	}
+
+	/// The ticket set on this context, or else this context's own
+	/// registration with the node's pool under the datastore's morsel policy,
+	/// made on the first call and handed out by every later one.
+	fn places(&self) -> crate::idx::places::Ticket {
+		self.index_places
+			.get_or_init(|| IndexPlaces::node(Policy::from_config(&self.config.exec)))
+			.clone()
+	}
+}
+
+/// A registration with the morsel place pool, as the index engines take places
+/// through it ([`crate::idx::places::PlaceSource`]).
+///
+/// Places are granted, refused and owed exactly as they are to a statement's
+/// morsel workers, under the same [`Policy`]: its OLTP reserve, its place cap
+/// and its quantum. Three kinds of registration are wrapped:
+///
+/// * **foreground**: a blocking statement's own registration ([`Self::statement`]), so the workers
+///   of its index work count as the statement's places;
+/// * **background**: the compaction ticket the index compaction loop registers for its run
+///   ([`Self::node`]);
+/// * **build**: a ticket a build registers for itself ([`Self::node`]), or the registration of the
+///   blocking statement waiting on it.
+///
+/// On targets without worker threads the registration never holds a place, so
+/// the index engines' work runs on the calling task.
+#[derive(Debug)]
+pub(crate) struct IndexPlaces {
+	statement: places::Statement,
+	policy: Policy,
+}
+
+impl IndexPlaces {
+	/// A ticket over an existing registration: the places its workers take are
+	/// counted against `statement`.
+	pub(crate) fn statement(
+		statement: places::Statement,
+		policy: Policy,
+	) -> crate::idx::places::Ticket {
+		crate::idx::places::Ticket::new(Self {
+			statement,
+			policy,
+		})
+	}
+
+	/// A ticket over a new registration with the node's pool.
+	pub(crate) fn node(policy: Policy) -> crate::idx::places::Ticket {
+		Self::statement(places::register(), policy)
+	}
+}
+
+impl crate::idx::places::PlaceSource for IndexPlaces {
+	fn acquire(&self, keep_waiting: bool) -> Option<crate::idx::places::Place> {
+		self.statement
+			.acquire_keeping_waiting(self.policy, keep_waiting)
+			.map(crate::idx::places::Place::new)
+	}
+
+	fn others_wait(&self) -> bool {
+		self.statement.others_wait()
+	}
+
+	fn stop_waiting(&self) {
+		self.statement.stop_waiting()
+	}
+
+	fn quantum(&self) -> u32 {
+		self.policy.place_quantum()
 	}
 }
 
@@ -1380,14 +2304,15 @@ impl Context {
 mod tests {
 	#[cfg(feature = "http")]
 	use std::str::FromStr;
+	use std::sync::Arc;
 	use std::time::Duration;
 
+	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
+	use surrealdb_cnf::MEMORY_THRESHOLD;
 	#[cfg(feature = "http")]
 	use url::Url;
 
-	use crate::cnf::CommonConfig;
-	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
-	use crate::cnf::MEMORY_THRESHOLD;
+	use super::Binding;
 	use crate::ctx::Context;
 	use crate::ctx::reason::Reason;
 	#[cfg(feature = "http")]
@@ -1395,12 +2320,13 @@ mod tests {
 	use crate::dbs::Options;
 	#[cfg(feature = "http")]
 	use crate::dbs::capabilities::{NetTarget, Targets};
+	use crate::exec::context::ForbiddenRow;
 	use crate::expr::Base;
 	use crate::iam::{Action, Auth, ResourceKind, Role};
 
 	#[test]
 	fn is_allowed_respects_context_auth_toggle_and_base() {
-		let config = CommonConfig::default();
+		let config = crate::exec::config::ExecConfig::default();
 
 		// Auth disabled: anonymous allowed without IAM; still needs valid NS/DB for bases.
 		{
@@ -1455,6 +2381,49 @@ mod tests {
 		);
 	}
 
+	/// A wildcard rule is decided on the request host before any DNS lookup.
+	#[cfg(feature = "http")]
+	#[tokio::test]
+	async fn test_context_check_allowed_net_wildcard() {
+		let check = |cap: Capabilities, url: &'static str| async move {
+			let mut ctx = Context::new_test();
+			ctx.capabilities = cap.into();
+			let ctx = ctx.freeze();
+			ctx.check_allowed_net(&Url::parse(url).unwrap()).await
+		};
+		let not_allowed =
+			|target: &str| format!("Access to network target '{target}' is not allowed");
+
+		// A wildcard deny under a global allow refuses a subdomain
+		let deny = Capabilities::all().without_network_targets(Targets::Some(
+			[NetTarget::from_str("*.example.com").unwrap()].into(),
+		));
+		let r = check(deny, "http://api.example.com/").await;
+		assert_eq!(r.unwrap_err().to_string(), not_allowed("api.example.com:80"));
+
+		// A wildcard allow does not cover its apex or a lookalike domain
+		let allow = Capabilities::default().with_network_targets(Targets::Some(
+			[NetTarget::from_str("*.example.com").unwrap()].into(),
+		));
+		let r = check(allow.clone(), "https://example.com/").await;
+		assert_eq!(r.unwrap_err().to_string(), not_allowed("example.com:443"));
+		let r = check(allow, "https://evilexample.com/").await;
+		assert_eq!(r.unwrap_err().to_string(), not_allowed("evilexample.com:443"));
+
+		// A wildcard allow admits a subdomain past the capability check. The
+		// `.invalid` name (RFC 6761) never resolves, so whatever is reported
+		// next comes from DNS, not from the capabilities.
+		let allow = Capabilities::default().with_network_targets(Targets::Some(
+			[NetTarget::from_str("*.test.invalid").unwrap()].into(),
+		));
+		if let Err(e) = check(allow, "https://api.test.invalid/").await {
+			assert!(
+				!e.to_string().contains("Access to network target"),
+				"the wildcard allow should have passed the capability check: {e}"
+			);
+		}
+	}
+
 	#[tokio::test]
 	async fn test_context_cancellation_priority() {
 		// Test that cancellation is detected even when a deadline is set and exceeded
@@ -1493,6 +2462,47 @@ mod tests {
 		let result = ctx.done(true);
 		assert!(result.is_ok());
 		assert!(matches!(result.unwrap(), Some(Reason::Timedout(_))));
+	}
+
+	/// The index engines stop a loop through `expect_not_done`, which must name
+	/// the reason this context gives, not just that it is done.
+	#[tokio::test]
+	async fn index_checkpoint_names_a_deadline_as_a_timeout() {
+		let mut ctx = Context::new_test();
+		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
+		tokio::time::sleep(Duration::from_millis(10)).await;
+		let ctx = ctx.freeze();
+		let err = crate::idx::env::expect_not_done(&ctx, None).await.unwrap_err();
+		assert!(crate::err::is_query_timedout(&err), "expected a timeout, got {err:#}");
+	}
+
+	#[tokio::test]
+	async fn index_checkpoint_names_a_cancellation_as_a_cancellation() {
+		let mut ctx = Context::new_test();
+		ctx.add_cancel().cancel();
+		let ctx = ctx.freeze();
+		let err = crate::idx::env::expect_not_done(&ctx, None).await.unwrap_err();
+		assert!(crate::err::is_query_cancelled(&err), "expected a cancellation, got {err:#}");
+	}
+
+	/// A child context carries a statement's `TIMEOUT` while its parent carries
+	/// none, so the reason comes from whichever context set the deadline.
+	#[tokio::test]
+	async fn index_checkpoint_names_a_statement_deadline_as_a_timeout() {
+		let parent = Context::new_test().freeze();
+		let mut ctx = Context::new_child(&parent);
+		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
+		tokio::time::sleep(Duration::from_millis(10)).await;
+		let ctx = ctx.freeze();
+		let err = crate::idx::env::expect_not_done(&ctx, Some(64)).await.unwrap_err();
+		assert!(crate::err::is_query_timedout(&err), "expected a timeout, got {err:#}");
+		assert!(parent.done(true).unwrap().is_none(), "the parent is not done");
+	}
+
+	#[tokio::test]
+	async fn index_checkpoint_passes_a_live_context() {
+		let ctx = Context::new_test().freeze();
+		crate::idx::env::expect_not_done(&ctx, None).await.unwrap();
 	}
 
 	#[tokio::test]
@@ -1565,14 +2575,13 @@ mod tests {
 		assert_eq!(result.unwrap(), true);
 	}
 
-	/// `Context::snapshot` is called by the streaming executor at
+	/// `Context::snapshot` is called by the engine at
 	/// `dbs::Executor::execute_operator_plan` and produces a ctx with
-	/// `parent: None`. Operators that bridge back into legacy
-	/// `Context::done` / `is_done` checks (HNSW/DiskANN KNN search inner
-	/// loops, etc.) read the snapshot's own `cancelled` flag — without
-	/// parent walk to fall back to. If `snapshot` allocated a fresh
-	/// `Arc<AtomicBool>` instead of sharing the source's, those legacy
-	/// checks would never observe a connection-level cancel installed
+	/// `parent: None`. Operators that poll `Context::done` / `is_done`
+	/// (HNSW/DiskANN KNN search inner loops, etc.) read the snapshot's own
+	/// `cancelled` flag — with no parent to fall back on. If `snapshot`
+	/// allocated a fresh `Arc<AtomicBool>` instead of sharing the source's,
+	/// those checks would never observe a connection-level cancel installed
 	/// via `set_cancellation`, and a WS disconnect during e.g. a KNN
 	/// search would not abort the operation — the read loop's drain
 	/// would block until the search finished.
@@ -1595,13 +2604,13 @@ mod tests {
 		assert_eq!(
 			snap.is_done(Some(1)).await.unwrap(),
 			true,
-			"snapshot did not observe external cancel after trip — legacy `is_done` on \
-			 streaming-exec snapshot would silently miss WebSocket disconnect"
+			"snapshot did not observe external cancel after trip — `is_done` on an \
+			 execution snapshot would silently miss WebSocket disconnect"
 		);
 		assert!(
 			snap.cancel_token().is_some(),
 			"snapshot lost the awaitable cancel token — bare-await sites reached via \
-			 the snapshot (legacy SLEEP fallback, etc.) could not `select!` against cancel"
+			 the snapshot (`SLEEP`, etc.) could not `select!` against cancel"
 		);
 	}
 
@@ -1624,7 +2633,7 @@ mod tests {
 		// 3. Deadline (checked when deep_check=true, returns Reason::Timedout)
 
 		// When ALLOC.is_beyond_threshold() returns true, done() will bail with
-		// Error::QueryBeyondMemoryThreshold before checking the deadline.
+		// DatastoreError::QueryBeyondMemoryThreshold before checking the deadline.
 		// This ensures memory violations are always detected before timeout errors.
 
 		let ctx = Context::new_test();
@@ -1636,98 +2645,546 @@ mod tests {
 		assert_eq!(result.unwrap(), None);
 	}
 
-	/// Integration test that actually tests memory threshold detection.
+	/// A crossed memory threshold makes `done` bail with
+	/// [`DatastoreError::QueryBeyondMemoryThreshold`].
 	///
-	/// This test requires:
-	/// 1. The "allocation-tracking" feature to be enabled
-	/// 2. The "allocator" feature to be enabled (for tracking to work)
-	/// 3. Running with #[serial] to avoid interference from other tests
+	/// `MEMORY_THRESHOLD` is a process-wide `LazyLock` read once on first use,
+	/// and this binary's other tests assert the no-pressure path, so the
+	/// threshold has to come from the environment rather than be installed
+	/// here. Ignored by default so that it reports as skipped rather than
+	/// passing without asserting anything:
 	///
-	/// The test sets SURREAL_MEMORY_THRESHOLD environment variable, allocates memory
-	/// to exceed the threshold, and verifies that context.done(true) detects the violation.
+	/// ```text
+	/// SURREAL_MEMORY_THRESHOLD=1mb cargo test -p surrealdb-core \
+	///   --features allocator,allocation-tracking \
+	///   test_context_memory_threshold_enforced
+	/// ```
 	#[tokio::test]
 	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
-	#[serial_test::serial]
-	async fn test_context_memory_threshold_integration() {
-		use crate::err::Error;
-		use crate::str::ParseBytes;
+	#[ignore = "requires SURREAL_MEMORY_THRESHOLD in the process environment"]
+	async fn test_context_memory_threshold_enforced() {
+		use crate::kvs::DatastoreError;
 
-		// Set a low memory threshold (1MB) before MEMORY_THRESHOLD is accessed
-		// This must happen before any code accesses cnf::MEMORY_THRESHOLD
-		// Safety: This test runs with #[serial] ensuring no other tests run concurrently,
-		// so there's no risk of data races when modifying the environment variable.
-		unsafe {
-			std::env::set_var(
-				"SURREAL_MEMORY_THRESHOLD",
-				"1MB".parse_bytes::<u64>().unwrap().to_string(),
+		// The most this test will allocate to cross the threshold. Reaching a
+		// production-shaped threshold would mean allocating that much for real,
+		// so the environment is not allowed to ask for more than this: crossing
+		// the guard at a small threshold proves the same code path.
+		const BALLAST_LIMIT: usize = 256 * 1024 * 1024;
+		const BALLAST_CHUNK: usize = 1024 * 1024;
+
+		let threshold = *MEMORY_THRESHOLD;
+		assert_ne!(
+			threshold, 0,
+			"SURREAL_MEMORY_THRESHOLD must be set in this process for the guard to be enforceable"
+		);
+		assert!(
+			threshold <= BALLAST_LIMIT,
+			"SURREAL_MEMORY_THRESHOLD is {threshold} bytes, above the {BALLAST_LIMIT}-byte ceiling \
+			 this test will allocate to cross it; re-run with a smaller value"
+		);
+
+		// Cross the threshold in bounded steps. A single threshold-sized
+		// request would route an allocation failure to `handle_alloc_error`,
+		// aborting the binary with no failure message.
+		let mut ballast: Vec<Vec<u8>> = Vec::new();
+		while crate::mem::ALLOC.memory_allocated() <= threshold {
+			ballast.push(vec![0u8; BALLAST_CHUNK]);
+			assert!(
+				ballast.len().saturating_mul(BALLAST_CHUNK) <= BALLAST_LIMIT,
+				"allocated {BALLAST_LIMIT} bytes without the {threshold}-byte guard tripping"
 			);
 		}
-		// Assert that SURREAL_MEMORY_THRESHOLD shows up as MEMORY_THRESHOLD with the expected value
-		assert_eq!(*MEMORY_THRESHOLD, 1048576);
+		let ctx = Context::new_test().freeze();
 
-		// Force reinitialization by dropping and recreating (this won't work with LazyLock)
-		// Instead, we rely on this test running in isolation with #[serial]
-		// and being run in a fresh process where MEMORY_THRESHOLD hasn't been accessed yet
+		let err = ctx.done(true).expect_err("expected the memory threshold to be enforced");
+		assert!(
+			matches!(
+				err.downcast_ref::<DatastoreError>(),
+				Some(DatastoreError::QueryBeyondMemoryThreshold)
+			),
+			"expected QueryBeyondMemoryThreshold, got: {err:?}"
+		);
+	}
 
-		// Note: This test may not work reliably if MEMORY_THRESHOLD was already accessed
-		// elsewhere in the test suite. The #[serial] attribute ensures tests run one at a time,
-		// but doesn't guarantee a fresh process. For reliable testing, this should be run
-		// as a separate integration test binary.
+	/// A context derived from one that carries a statement clock reads the same
+	/// instant, whichever way it is derived, and installs none of its own.
+	#[test]
+	fn a_derived_context_inherits_the_statement_clock() {
+		use crate::val::Datetime;
 
-		// Allocate a large vector (10MB) to exceed the threshold
-		// Using Vec::with_capacity to ensure the memory is actually allocated
-		let _large_allocation: Vec<u8> = Vec::with_capacity(20 * 1024 * 1024);
+		let mut root = Context::new_test();
+		assert!(root.statement_clock().is_none());
+		let now = Datetime::now();
+		root.set_statement_clock(now);
+		let root = root.freeze();
+		assert_eq!(Context::new_child(&root).statement_clock(), Some(&now));
+		assert_eq!(Context::new_isolated(&root).statement_clock(), Some(&now));
+		assert_eq!(Context::snapshot(&root).statement_clock(), Some(&now));
+	}
 
-		// Give the allocator tracking time to register the allocation
-		tokio::time::sleep(Duration::from_millis(10)).await;
+	/// A binding put back as absent leaves the name unbound in this context, so
+	/// the binding of a parent shows through again instead of a shadowing `NONE`.
+	#[test]
+	fn restoring_an_absent_binding_removes_it() {
+		use std::sync::Arc;
 
-		let ctx = Context::new_test();
-		let ctx = ctx.freeze();
+		use crate::val::Value;
 
-		// The memory threshold check should detect that we've exceeded the limit
-		let result = ctx.done(true);
+		let mut parent = Context::new_test();
+		parent.add_value("x", Arc::new(Value::from(1)));
+		let parent = parent.freeze();
+		let mut child = Context::new_child(&parent);
+		assert!(child.own_value("x").is_none(), "an inherited binding is not the child's own");
+		let before = child.own_value("x").cloned();
+		child.add_value("x", Arc::new(Value::from(2)));
+		assert_eq!(child.value("x"), Some(&Value::from(2)));
+		child.restore_value("x", before);
+		assert!(child.own_value("x").is_none());
+		assert_eq!(child.value("x"), Some(&Value::from(1)), "the parent's binding answers again");
+		let held = Arc::new(Value::from(3));
+		child.restore_value("x", Some(Arc::clone(&held)));
+		assert_eq!(child.own_value("x"), Some(&held));
+	}
+	fn int(n: i64) -> std::sync::Arc<crate::val::Value> {
+		std::sync::Arc::new(crate::val::Value::from(n))
+	}
 
-		// We expect either:
-		// 1. An error if memory tracking properly detected the threshold violation
-		// 2. Ok(None) if MEMORY_THRESHOLD was already initialized with default (0) before we set
-		//    the environment variable
-		match result {
-			Err(e) => {
-				// Verify it's the correct error type
-				match e.downcast_ref::<Error>() {
-					Some(Error::QueryBeyondMemoryThreshold) => {
-						// Success! Memory threshold was properly detected
-						println!("✓ Memory threshold violation detected as expected");
-					}
-					other => {
-						panic!("Expected QueryBeyondMemoryThreshold error, got: {:?}", other);
-					}
-				}
-			}
-			Ok(None) => {
-				// This means MEMORY_THRESHOLD was already initialized before we set the env var
-				// This is expected behavior in the test suite - document it
-				println!(
-					"⚠ Memory threshold not enforced - MEMORY_THRESHOLD was already initialized"
-				);
-				println!("  This is expected when running as part of the full test suite.");
-				println!(
-					"  To properly test memory threshold enforcement, run this test in isolation:"
-				);
-				println!(
-					"  cargo test --package surrealdb-core --features allocation-tracking,allocator test_context_memory_threshold_integration"
-				);
-				panic!("MEMORY_THRESHOLD was already initialized")
-			}
-			Ok(Some(reason)) => {
-				panic!("Unexpected reason returned: {:?}", reason);
-			}
+	/// A request with the bind parameter `$q = 1`, a caller's `LET $q = 5` and
+	/// `LET $l = 7`, and the body of a call with the argument `$a` over a row.
+	fn a_call_body() -> std::sync::Arc<Context> {
+		use crate::dbs::Variables;
+		use crate::val::Value;
+
+		let mut request = Context::new_test();
+		let mut vars = Variables::new();
+		vars.insert("q", Value::from(1));
+		request.attach_variables(vars).expect("variables attach");
+		request.add_value("q", int(5));
+		request.add_value("l", int(7));
+		request.add_value("session", int(9));
+		let request = request.freeze();
+		let mut caller = Context::new_child(&request);
+		caller.add_value("f", int(8));
+		let caller = caller.freeze();
+		let mut body = Context::new_child(&caller);
+		body.add_value("a", int(2));
+		body.add_value("this", int(3));
+		body.mark_call_boundary();
+		let mut inside = Context::new_child(&body.freeze());
+		inside.add_value("b", int(4));
+		inside.freeze()
+	}
+
+	/// A body reads its arguments, what it binds, the request parameters, the
+	/// protected names and the row names, and never a binding of its caller.
+	#[test]
+	fn a_body_reads_its_arguments_row_names_and_request_parameters_only() {
+		let body = a_call_body();
+		assert_eq!(body.lexical_value("a"), Some(&int(2)));
+		assert_eq!(body.lexical_value("b"), Some(&int(4)));
+		assert_eq!(body.lexical_value("this"), Some(&int(3)));
+		assert_eq!(body.lexical_value("session"), Some(&int(9)));
+		assert_eq!(body.lexical_value("q"), Some(&int(1)), "the request's q, not the caller's LET");
+		assert_eq!(body.lexical_value("l"), None);
+		assert_eq!(body.lexical_value("f"), None);
+		// `value` is the plain chain walk.
+		assert_eq!(body.value("l"), Some(&crate::val::Value::from(7)));
+	}
+
+	/// With no boundary on the chain a read is the chain walk.
+	#[test]
+	fn without_a_boundary_a_lexical_read_is_a_chain_read() {
+		let mut root = Context::new_test();
+		root.add_value("l", int(7));
+		let root = root.freeze();
+		let child = Context::new_child(&root).freeze();
+		assert!(!child.in_call_body());
+		assert_eq!(child.lexical_value("l"), Some(&int(7)));
+		assert_eq!(child.lexical_value("none"), None);
+	}
+
+	/// An isolated context holds none of its parent's request parameters, so a
+	/// body entered from a privileged frame reads none, and the ones it attaches
+	/// are its own.
+	#[test]
+	fn an_isolated_context_holds_no_request_parameters_of_its_parent() {
+		use crate::dbs::Variables;
+		use crate::val::Value;
+
+		let mut request = Context::new_test();
+		let mut vars = Variables::new();
+		vars.insert("q", Value::from(1));
+		request.attach_variables(vars).expect("variables attach");
+		let request = request.freeze();
+		let mut frame = Context::new_isolated(&request);
+		frame.mark_call_boundary();
+		assert_eq!(frame.lexical_value("q"), None);
+		let mut own = Variables::new();
+		own.insert("p", Value::from(2));
+		frame.attach_variables(own).expect("variables attach");
+		assert_eq!(frame.lexical_value("p"), Some(&int(2)));
+		assert_eq!(frame.lexical_value("q"), None);
+	}
+
+	/// A request's variables, and a closure's captures, refuse a protected name alone. A name
+	/// the system binds in a frame is bound per frame and shadowed there, so a client may bind
+	/// one as a parameter of its request: refusing it would refuse `$value`, `$input` and the
+	/// rest as ordinary parameter names, which every SDK lets a caller bind.
+	#[test]
+	fn variables_refuse_a_protected_name_and_no_other() {
+		use crate::dbs::Variables;
+		use crate::val::Value;
+
+		for name in surrealdb_cnf::PROTECTED_PARAM_NAMES {
+			let mut vars = Variables::new();
+			vars.insert(*name, Value::from(1));
+			assert!(
+				Context::new_test().attach_variables(vars.clone()).is_err(),
+				"`{name}` bound as a request variable"
+			);
+			assert!(
+				Context::new_test().attach_captures(vars).is_err(),
+				"`{name}` bound as a capture"
+			);
+		}
+		for name in surrealdb_cnf::SYSTEM_BOUND_PARAM_NAMES.iter().chain(["limit"].iter()) {
+			let mut vars = Variables::new();
+			vars.insert(*name, Value::from(1));
+			Context::new_test()
+				.attach_variables(vars.clone())
+				.unwrap_or_else(|_| panic!("`{name}` attaches as a request variable"));
+			Context::new_test()
+				.attach_captures(vars)
+				.unwrap_or_else(|_| panic!("`{name}` attaches as a capture"));
+		}
+	}
+
+	/// A frame's own binding of a name the system binds is what its code reads, whatever the
+	/// request bound under that name: the nearer binding wins.
+	#[test]
+	fn a_frame_binding_shadows_a_request_variable_of_the_same_name() {
+		use std::sync::Arc;
+
+		use crate::dbs::Variables;
+		use crate::val::Value;
+
+		let mut vars = Variables::new();
+		vars.insert("value", Value::from(1));
+		let mut request = Context::new_test();
+		request.attach_variables(vars).expect("`value` attaches as a request variable");
+		let request = request.freeze();
+		assert_eq!(request.value("value"), Some(&Value::from(1)));
+
+		let mut frame = Context::new_child(&request);
+		frame.add_value("value", Arc::new(Value::from(2)));
+		assert_eq!(frame.value("value"), Some(&Value::from(2)));
+	}
+
+	/// The scope a body is planned in holds the request parameters and the
+	/// row names of the context it is entered from, and no binding of it.
+	#[test]
+	fn a_call_scope_holds_request_parameters_and_row_names_only() {
+		let body = a_call_body();
+		let scope = Context::new_call_scope(&body).freeze();
+		assert_eq!(scope.value("q"), Some(&crate::val::Value::from(1)));
+		assert_eq!(scope.value("this"), Some(&crate::val::Value::from(3)));
+		assert_eq!(scope.value("session"), Some(&crate::val::Value::from(9)));
+		for name in ["a", "b", "l", "f"] {
+			assert_eq!(scope.value(name), None, "{name} reached a body's plan");
+			assert_eq!(scope.lexical_value(name), None);
+		}
+	}
+
+	/// A request of `n` bound variables, as a frozen context.
+	fn a_request_of(n: i64) -> std::sync::Arc<Context> {
+		use crate::dbs::Variables;
+		use crate::val::Value;
+
+		let mut request = Context::new_test();
+		let mut vars = Variables::new();
+		for i in 0..n {
+			vars.insert(format!("v{i}"), Value::from(i));
+		}
+		request.attach_variables(vars).expect("variables attach");
+		request.add_value("session", int(9));
+		request.freeze()
+	}
+
+	/// A call scope entered from a frame that binds no row name is one node
+	/// that shares the request's parameters: entering a body copies none of
+	/// them, however many the request holds.
+	#[test]
+	fn a_call_scope_shares_the_request_parameters() {
+		let request = a_request_of(1000);
+		let mut caller = Context::new_child(&request);
+		caller.add_value("l", int(7));
+		let caller = caller.freeze();
+		let scope = Context::new_call_scope(&caller);
+		let params = request.request_params.as_ref().expect("the request holds parameters");
+		assert!(Arc::ptr_eq(&scope.values, params), "the request's parameters were copied");
+		assert_eq!(scope.lexical_value("v999"), Some(&int(999)));
+		assert_eq!(scope.lexical_value("session"), Some(&int(9)));
+		assert_eq!(scope.lexical_value("l"), None);
+		assert_eq!(scope.value("l"), None);
+	}
+
+	/// A call scope entered from a frame that binds row names holds them in a
+	/// node of their own, above the shared request parameters, and reads as
+	/// the scope entered from a frame that binds none, with the row names.
+	#[test]
+	fn a_call_scope_holds_row_names_above_the_shared_parameters() {
+		let request = a_request_of(1000);
+		let mut row = Context::new_child(&request);
+		row.add_value("this", int(3));
+		row.add_value("l", int(7));
+		let row = row.freeze();
+		let scope = Context::new_call_scope(&row);
+		let params = request.request_params.as_ref().expect("the request holds parameters");
+		let below = scope.parent.as_ref().expect("the row names sit above the parameters");
+		assert!(Arc::ptr_eq(&below.values, params), "the request's parameters were copied");
+		assert_eq!(scope.values.len(), 1, "the row node holds only the row names");
+		assert!(scope.in_call_body());
+		assert_eq!(scope.lexical_value("this"), Some(&int(3)));
+		assert_eq!(scope.value("this"), Some(&*int(3)));
+		assert_eq!(scope.lexical_value("v0"), Some(&int(0)));
+		assert_eq!(scope.lexical_value("session"), Some(&int(9)));
+		assert_eq!(scope.lexical_value("parent"), None);
+		assert_eq!(scope.lexical_value("l"), None);
+		assert_eq!(scope.value("l"), None);
+		let mut names: Vec<_> = scope.visible_names().into_iter().map(|n| n.to_string()).collect();
+		names.sort();
+		names.dedup();
+		assert_eq!(names.len(), 1002, "the parameters, `session` and `this`: {names:?}");
+	}
+
+	/// A row name the frame binds to a KNN query vector's row being scanned
+	/// is bound so in the scope: a read of it is refused, not answered by a
+	/// value or by nothing.
+	#[test]
+	fn a_call_scope_keeps_a_forbidden_row_name_forbidden() {
+		let request = a_request_of(3);
+		let mut row = Context::new_child(&request);
+		row.add_value("this", int(3));
+		row.add_forbidden(&["parent"], &Arc::new(ForbiddenRow::for_test("$parent.v")));
+		let row = row.freeze();
+		let scope = Context::new_call_scope(&row);
+		assert!(matches!(scope.lexical_binding("parent"), Some(Binding::Forbidden(_))));
+		assert!(matches!(scope.binding("parent"), Some(Binding::Forbidden(_))));
+		assert_eq!(scope.value("parent"), None);
+		assert_eq!(scope.lexical_value("this"), Some(&int(3)));
+		assert_eq!(scope.lexical_value("v2"), Some(&int(2)));
+	}
+
+	/// A snapshot of a context with no parent shares its values, and each
+	/// write to either side after it is the writer's own: the other side reads
+	/// what it read before.
+	#[test]
+	fn a_snapshot_shares_values_and_writes_after_it_stay_apart() {
+		let mut root = Context::new_test();
+		root.add_value("a", int(1));
+		root.add_value("b", int(2));
+		let root = root.freeze();
+		let mut snapshot = Context::snapshot(&root);
+		assert!(Arc::ptr_eq(&snapshot.values, &root.values), "the values were copied");
+
+		snapshot.add_value("a", int(10));
+		snapshot.restore_value("b", None);
+		snapshot.add_forbidden(&["c"], &Arc::new(ForbiddenRow::for_test("$c")));
+		assert_eq!(snapshot.value("a"), Some(&*int(10)));
+		assert_eq!(snapshot.value("b"), None);
+		assert_eq!(root.value("a"), Some(&*int(1)), "a write to the snapshot reached the root");
+		assert_eq!(root.value("b"), Some(&*int(2)), "a removal from the snapshot reached the root");
+		assert!(root.binding("c").is_none());
+
+		let snapshot = snapshot.freeze();
+		let mut again = Context::snapshot(&snapshot);
+		again.add_value("a", int(20));
+		assert_eq!(snapshot.value("a"), Some(&*int(10)));
+		assert_eq!(again.value("a"), Some(&*int(20)));
+	}
+
+	/// A snapshot of a context inside a body is the body's view of it.
+	#[test]
+	fn a_snapshot_inside_a_body_keeps_the_lexical_view() {
+		let body = a_call_body();
+		let snapshot = Context::snapshot(&body);
+		assert_eq!(snapshot.lexical_value("a"), Some(&int(2)));
+		assert_eq!(snapshot.lexical_value("q"), Some(&int(1)));
+		assert_eq!(snapshot.lexical_value("l"), None);
+		assert_eq!(snapshot.value("l"), None);
+	}
+
+	/// The index engines' places, taken from a pool of their own so the books
+	/// hold nothing but the test's registrations.
+	#[cfg(not(target_family = "wasm"))]
+	mod index_places {
+		use crate::ctx::{Context, IndexPlaces};
+		use crate::exec::config::ExecConfig;
+		use crate::exec::planner::placement::Policy;
+		use crate::exec::vm::morsel::places::Pool;
+		use crate::idx::env::IndexEnv;
+
+		/// A morsel policy with a place cap of `cap` and an OLTP reserve of
+		/// `reserve`.
+		fn policy(cap: usize, reserve: usize) -> Policy {
+			Policy::from_config(&ExecConfig {
+				morsel_places: cap,
+				morsel_oltp_reserve: reserve,
+				..ExecConfig::default()
+			})
 		}
 
-		// Clean up the environment variable
-		// Safety: Same as above - #[serial] ensures no concurrent access
-		unsafe {
-			std::env::remove_var("SURREAL_MEMORY_THRESHOLD");
+		/// An up-front grant on a pool with `F` usable places takes exactly
+		/// `min(max, F)`, at once. The books show the grant on the caller's
+		/// registration while it is held and nothing once it is dropped, and
+		/// the pool's reserve is never handed out.
+		#[test]
+		fn an_up_front_grant_takes_min_of_max_and_the_usable_places() {
+			let pool = Pool::new(6);
+			let statement = pool.register();
+			let places = IndexPlaces::statement(statement.clone(), policy(usize::MAX, 2));
+			let grant = places.acquire_places(3);
+			assert_eq!(grant.len(), 3);
+			assert_eq!(statement.held(), 3);
+			drop(grant);
+			assert_eq!(statement.held(), 0);
+			let grant = places.acquire_places(10);
+			assert_eq!(grant.len(), 4, "six places less a reserve of two");
+			assert_eq!(statement.held(), 4);
+			assert_eq!(pool.free(), 2, "the reserve stays free");
+			assert!(!statement.waiting(), "a short grant leaves no waiting mark");
+			drop(grant);
+			assert_eq!(statement.held(), 0);
+			assert_eq!(pool.free(), 6);
+			let capped = IndexPlaces::statement(pool.register(), policy(1, 0));
+			assert_eq!(capped.acquire_places(4).len(), 1, "the cap bounds a grant");
+			let none = IndexPlaces::statement(pool.register(), policy(0, 0));
+			assert!(none.acquire_places(4).is_empty(), "a grant of none is a grant");
 		}
+
+		/// Two places free, and a registration holding none asks for them
+		/// through `take`, with or without an earlier registration waiting.
+		/// Returns what it got and its registration.
+		fn trimmed(
+			waiter: bool,
+			take: impl Fn(&crate::idx::places::Ticket) -> usize,
+		) -> (usize, crate::exec::vm::morsel::places::Statement) {
+			let pool = Pool::new(4);
+			let waiting = pool.register();
+			let asker = pool.register();
+			let filler = pool.register();
+			let unreserved = policy(usize::MAX, 0);
+			let mut held: Vec<_> =
+				(0..4).map(|_| filler.acquire(unreserved).expect("free")).collect();
+			if waiter {
+				assert!(waiting.acquire(unreserved).is_none());
+				assert!(waiting.waiting());
+			}
+			held.truncate(2);
+			let got = take(&IndexPlaces::statement(asker.clone(), unreserved));
+			drop(held);
+			(got, asker)
+		}
+
+		/// With an earlier registration waiting, a grant is trimmed by the
+		/// pool's fairness exactly as a run of per-job asks is, and the grant
+		/// leaves no waiting mark that would hold a freed place back from the
+		/// waiting registration.
+		#[test]
+		fn a_grant_is_trimmed_by_fairness_as_a_per_job_ask_is() {
+			let grant = |places: &crate::idx::places::Ticket| places.acquire_places(4).len();
+			let per_job = |places: &crate::idx::places::Ticket| {
+				let held: Vec<_> = std::iter::from_fn(|| places.acquire()).collect();
+				places.stop_waiting();
+				held.len()
+			};
+			assert_eq!(trimmed(false, grant).0, 2, "with nothing waiting, both free places");
+			let (granted, asker) = trimmed(true, grant);
+			assert_eq!(granted, 1, "one free place is owed to the waiting registration");
+			assert!(!asker.waiting(), "the grant left no waiting mark behind");
+			assert_eq!(trimmed(true, per_job).0, granted, "the same trim as per-job asks");
+		}
+
+		/// A grant to one user of a ticket while another still waits leaves the
+		/// registration marked waiting under the grant's own lock, so a later
+		/// registration holding as many places is refused the next free place:
+		/// it is owed to the ticket, which registered first.
+		#[test]
+		fn a_grant_keeps_a_ticket_with_a_waiting_user_owed() {
+			let pool = Pool::new(3);
+			let unreserved = policy(usize::MAX, 0);
+			let filler = pool.register();
+			let statement = pool.register();
+			let later = pool.register();
+			let places = IndexPlaces::statement(statement.clone(), unreserved);
+			let _later_held = later.acquire(unreserved).expect("free");
+			let mut filled: Vec<_> =
+				(0..2).map(|_| filler.acquire(unreserved).expect("free")).collect();
+			let (waiting, other) = (places.asking(), places.asking());
+			assert!(waiting.acquire().is_none(), "refused while the pool is full");
+			drop(filled.pop());
+			let _granted = other.acquire().expect("the freed place");
+			assert!(statement.waiting(), "the grant left the registration waiting");
+			drop(filled.pop());
+			assert!(later.acquire(unreserved).is_none(), "the free place is owed to the ticket");
+			drop(waiting);
+			assert!(!statement.waiting(), "once no user waits, neither does the registration");
+		}
+
+		/// A ticket set on a statement's context counts the places taken
+		/// through it against the statement's own registration, and every
+		/// context deriving the statement's work hands the same ticket on; a
+		/// background or concurrent context does not.
+		#[test]
+		fn a_statement_ticket_counts_against_its_registration() {
+			let pool = Pool::new(4);
+			let statement = pool.register();
+			let lent = IndexPlaces::statement(statement.clone(), policy(usize::MAX, 0));
+			let mut ctx = Context::new_test();
+			ctx.set_index_places(lent.clone());
+			let ctx = ctx.freeze();
+			for derived in [
+				Context::new_child(&ctx).freeze(),
+				Context::new_isolated(&ctx).freeze(),
+				Context::snapshot(&ctx).freeze(),
+			] {
+				assert!(IndexEnv::places(&*derived).same(&lent));
+			}
+			assert!(Context::background(&ctx).index_places().is_none());
+			assert!(Context::new_concurrent(&ctx).index_places().is_none());
+			let child = Context::new_child(&ctx).freeze();
+			let grant = IndexEnv::places(&*child).acquire_places(3);
+			assert_eq!(grant.len(), 3);
+			assert_eq!(statement.held(), 3, "the places are the statement's");
+			assert_eq!(pool.registrations(), 1, "no other registration was made");
+		}
+	}
+
+	/// A context with no ticket set hands out one registration of its own,
+	/// however often it is asked, rather than a new one per ask. A child,
+	/// isolated or snapshot context hands out the same one, even when derived
+	/// before the first ask; a ticket set on a derived context replaces it for
+	/// that context alone.
+	#[test]
+	fn a_context_without_a_ticket_hands_out_one_registration() {
+		use crate::idx::env::IndexEnv;
+
+		let ctx = Context::new_test().freeze();
+		let derived = [
+			Context::new_child(&ctx).freeze(),
+			Context::new_isolated(&ctx).freeze(),
+			Context::snapshot(&ctx).freeze(),
+		];
+		let places = IndexEnv::places(&*ctx);
+		assert!(IndexEnv::places(&*ctx).same(&places));
+		for derived in &derived {
+			assert!(IndexEnv::places(&**derived).same(&places), "derived before the first ask");
+		}
+		let mut lent = Context::new_child(&ctx);
+		lent.set_index_places(crate::idx::places::Ticket::serial());
+		let lent = lent.freeze();
+		assert!(!IndexEnv::places(&*lent).same(&places), "the lent ticket is the child's");
+		assert!(IndexEnv::places(&*ctx).same(&places), "the parent keeps its own");
+		assert!(IndexEnv::places(&*derived[0]).same(&places), "and so do its other children");
 	}
 }

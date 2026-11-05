@@ -1,0 +1,53 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL CURRENT_TIMESTAMP, CURRENT_DATE and CURRENT_USER call their function without parentheses, and the date is the start of a day, in a write as in a read; a quoted current_date is a column"
+
+[[test.results]]
+value = "[{ ts: true, midnight: true, who: 'root', same: true }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+match = "array::len($result) == 2 && array::all($result, |$row| $row.at == time::floor($row.at, 1d))"
+
+[[test.results]]
+match = "array::len($result) == 1 && array::all($result, |$row| $row.at == time::floor($row.at, 1d))"
+
+[[test.results]]
+match = "array::len($result) == 1 && array::all($result, |$row| $row.at == time::floor($row.at, 1d))"
+
+[[test.results]]
+value = "[{ id: 1, midnight: true }, { id: 2, midnight: true }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ current_date: 7i32, id: 1 }]"
+
+[[test.results]]
+value = "[{ quoted: 7i32, called: true }]"
+*/
+
+SELECT current_timestamp IS NOT NULL AS ts, unix_timestamp(current_date) % 86400 = 0 AS midnight, current_user AS who, current_date = current_date() AS same;
+
+CREATE TABLE days (id INT, at DATETIME);
+
+INSERT INTO days (id, at) VALUES (1, CURRENT_DATE), (2, CURDATE());
+
+UPDATE days SET at = CURRENT_DATE WHERE id = 1;
+
+UPDATE days SET at = CURDATE() WHERE id = 2;
+
+SELECT id, unix_timestamp(at) % 86400 = 0 AS midnight FROM days ORDER BY id;
+
+CREATE TABLE events (id INT, `current_date` INT);
+
+INSERT INTO events (id, `current_date`) VALUES (1, 7);
+
+SELECT `current_date` AS quoted, current_date <= now() AS called FROM events;

@@ -1,6 +1,7 @@
 /**
 [env]
 auth = { namespace = "bla", database = "bla", level = "viewer" }
+remote-skip = "asserts $token/$session, which over the API reflect a real signin (a JWT and a per-connection id); the embedded harness injects a connection-less session with neither"
 
 [test]
 

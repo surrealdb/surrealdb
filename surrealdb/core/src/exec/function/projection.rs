@@ -1,4 +1,4 @@
-//! Projection function system for the streaming executor.
+//! Projection function system for the engine.
 //!
 //! This module provides traits for projection functions that produce field bindings
 //! rather than single values. These functions affect the structure of output objects
@@ -16,8 +16,8 @@ use std::fmt::Debug;
 use anyhow::Result;
 
 use super::Signature;
-use crate::exec::physical_expr::EvalContext;
-use crate::exec::{BoxFut, ContextLevel, SendSyncRequirement};
+use crate::exec::ir::iface::Fallibility;
+use crate::exec::{BoxFut, ContextLevel, EvalContext};
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
 use crate::val::Value;
@@ -29,7 +29,7 @@ use crate::val::Value;
 ///
 /// For example, `SELECT type::field("name") FROM person` produces `{ name: "value" }`
 /// rather than `{ "type::field": "value" }`.
-pub trait ProjectionFunction: SendSyncRequirement + Debug {
+pub trait ProjectionFunction: Send + Sync + Debug {
 	/// The fully qualified function name (e.g., "type::field", "type::fields")
 	fn name(&self) -> &'static str;
 
@@ -51,6 +51,15 @@ pub trait ProjectionFunction: SendSyncRequirement + Debug {
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Database
 	}
+
+	/// What a call's failure can depend on: the failure classes of the body
+	/// for arguments of the signature's kinds. Arity and kind coercion of the
+	/// arguments is done by the call site, not by the function.
+	///
+	/// A class is a superset when unsure. Every implementor declares a
+	/// class; there is no default, so an undeclared one does not compile.
+	#[allow(unused)]
+	fn fallibility(&self) -> Fallibility;
 
 	/// Evaluate and return field-value bindings for the output object.
 	///

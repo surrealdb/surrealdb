@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 issue = 5581
@@ -10,10 +9,15 @@ reason = "Check that SELECT COUNT() with index uses the right iteration operatio
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[]"
 
 [[test.results]]
-value = '''"IndexCountScan [ctx: Db] [source: test, condition: indexedField = 'cake'] {rows: 1}
+value = '''
+"SelectProject [ctx: Db] [projections: *] {rows: 1}
+    IndexCountScan [ctx: Db] [source: test, condition: indexedField = 'cake'] {rows: 1}
 
 Total rows: 1"'''
 
@@ -24,9 +28,11 @@ value = "[{ count: 10 }]"
 value = "[{ count: 10 }]"
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
-    Filter [ctx: Db] [predicate: unindexedField = false] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_indexedField, access: = 'cake', direction: Forward] {rows: 10}
+value = '''
+"SelectProject [ctx: Db] [projections: *] {rows: 1}
+    Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
+        Filter [ctx: Db] [predicate: unindexedField = false] {rows: 1}
+            IndexScan [ctx: Db] [table: test, index: idx_indexedField, access: = 'cake', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -38,6 +44,8 @@ value = "[{ count: 0 }]"
 
 */
 
+-- Index keys are counted only for a column declared to hold no array.
+DEFINE FIELD indexedField ON test TYPE string;
 DEFINE INDEX idx_indexedField ON test FIELDS indexedField;
 CREATE |test:10| CONTENT { indexedField: 'cake', unindexedField: true} RETURN NONE;
 

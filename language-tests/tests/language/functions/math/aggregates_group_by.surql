@@ -1,9 +1,8 @@
 /**
 [test]
-reason = "Every math aggregate (sum/mean/min/max/stddev/variance/median) over a GROUP BY across two groups. Streaming planner only — its stddev/variance use Welford's online algorithm and differ slightly from the legacy path."
+reason = "Every math aggregate (sum/mean/min/max/stddev/variance/median) over a GROUP BY across two groups. Its stddev and variance use Welford's online algorithm."
 
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [[test.results]]
 value = "NONE"
@@ -21,10 +20,10 @@ value = "[{ category: 'a', smallest: 2 }, { category: 'b', smallest: 5 }]"
 value = "[{ category: 'a', largest: 5 }, { category: 'b', largest: 20 }]"
 
 [[test.results]]
-value = "[{ category: 'a', spread: 1.5275252316519465f }, { category: 'b', spread: 7.637626158259733f }]"
+value = "[{ category: 'a', spread: 1.5275252316519468f }, { category: 'b', spread: 7.637626158259733f }]"
 
 [[test.results]]
-value = "[{ category: 'a', variance: 2.333333333333333f }, { category: 'b', variance: 58.33333333333333f }]"
+value = "[{ category: 'a', variance: 2.3333333333333335f }, { category: 'b', variance: 58.33333333333333f }]"
 
 [[test.results]]
 value = "[{ category: 'a', mid: 3f }, { category: 'b', mid: 10f }]"

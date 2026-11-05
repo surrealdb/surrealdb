@@ -1,13 +1,15 @@
 //! Value functions
 
 use anyhow::Result;
-use reblessive::tree::TreeStack;
 
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
-use crate::exec::physical_expr::EvalContext;
+use crate::exec::EvalContext;
+use crate::exec::function::{ScalarFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
+use crate::exec::vm::calls::StreamingClosureEvaluator;
 use crate::expr::Kind;
+use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
-use crate::val::Value;
+use crate::val::{ClosureEvaluator, Value};
 
 // =========================================================================
 // value::diff - Compute JSON patch diff between two values
@@ -19,6 +21,14 @@ pub struct ValueDiff;
 impl ScalarFunction for ValueDiff {
 	fn name(&self) -> &'static str {
 		"value::diff"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "value::diff", Fallibility::INFALLIBLE)
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
 	}
 
 	fn signature(&self) -> Signature {
@@ -61,6 +71,14 @@ impl ScalarFunction for ValuePatch {
 		"value::patch"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "value::patch", Fallibility::VALUE)
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new().arg("value", Kind::Any).arg("patch", Kind::Any).returns(Kind::Any)
 	}
@@ -92,6 +110,12 @@ impl ScalarFunction for ValuePatch {
 // =========================================================================
 // value::chain - Chain a value through a closure
 // =========================================================================
+//
+// `value::chain` and `value::expect` run the closure passed as their second
+// argument against the row the call is evaluated on. Both declare that
+// argument position through `closure_args`, so the closure is checked as code
+// that runs against the calling row, not as a plain value. The builtins
+// themselves are pure.
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ValueChain;
@@ -99,6 +123,18 @@ pub struct ValueChain;
 impl ScalarFunction for ValueChain {
 	fn name(&self) -> &'static str {
 		"value::chain"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "value::chain", Fallibility::VALUE)
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
+	}
+
+	fn closure_args(&self) -> &'static [usize] {
+		&[1]
 	}
 
 	fn signature(&self) -> Signature {
@@ -123,27 +159,16 @@ impl ScalarFunction for ValueChain {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
-			use crate::doc::CursorDoc;
 			let args = FromArgs::from_args("value::chain", args)?;
-			let frozen = ctx.exec_ctx.ctx();
-			let opt = ctx.exec_ctx.options();
-			let doc = ctx
-				.document_root
-				.or(ctx.current_value)
-				.map(|v| CursorDoc::new(None, None, v.clone()));
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| async move {
-					crate::fnc::value::chain((stk, frozen, opt, doc.as_ref()), args).await
-				})
-				.finish()
-				.await
+			let evaluator = StreamingClosureEvaluator::new(ctx);
+			let ev = Some(&evaluator as &dyn ClosureEvaluator);
+			crate::fnc::value::chain(ev, args).await
 		})
 	}
 }
 
-// value::expect: Assert a value with a closure returning bool
-// Original value is passed on if closure returns true
+// `value::expect` asserts a value with a closure that returns bool.
+// The original value is returned unchanged when the closure returns true.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ValueExpect;
 
@@ -152,11 +177,23 @@ impl ScalarFunction for ValueExpect {
 		"value::expect"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "value::expect", Fallibility::VALUE)
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
+	}
+
+	fn closure_args(&self) -> &'static [usize] {
+		&[1]
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new()
 			.arg("value", Kind::Any)
 			.arg("closure", Kind::Any)
-			.optional("message", Kind::String)
+			.optional("message", Kind::Any)
 			.returns(Kind::Any)
 	}
 
@@ -178,28 +215,14 @@ impl ScalarFunction for ValueExpect {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
-			use crate::doc::CursorDoc;
 			let args = FromArgs::from_args("value::expect", args)?;
-			let frozen = ctx.exec_ctx.ctx();
-			let opt = ctx.exec_ctx.options();
-			let doc = ctx
-				.document_root
-				.or(ctx.current_value)
-				.map(|v| CursorDoc::new(None, None, v.clone()));
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| async move {
-					crate::fnc::value::expect((stk, frozen, opt, doc.as_ref()), args).await
-				})
-				.finish()
-				.await
+			let evaluator = StreamingClosureEvaluator::new(ctx);
+			let ev = Some(&evaluator as &dyn ClosureEvaluator);
+			crate::fnc::value::expect(ev, args).await
 		})
 	}
 }
 
-pub fn register(registry: &mut FunctionRegistry) {
-	registry.register(ValueDiff);
-	registry.register(ValuePatch);
-	registry.register(ValueChain);
-	registry.register(ValueExpect);
-}
+/// The `value::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] =
+	&[&ValueDiff, &ValuePatch, &ValueChain, &ValueExpect];

@@ -1,0 +1,6 @@
+### SELECT * FROM post ORDER BY id FETCH author
+[{ author: { id: other:1, label: 'other o', name: 'o' }, id: post:1, loose: person:1, many: [person:1] }, { author: { id: other:1, label: 'other o', name: 'o' }, id: post:2, loose: other:1, many: [person:1] }]
+### SELECT * FROM post ORDER BY id FETCH author #2
+[{ author: { id: other:1, label: 'other o', name: 'o' }, id: post:1, loose: person:1, many: [person:1] }, { author: { id: other:1, label: 'other o', name: 'o' }, id: post:2, loose: other:1, many: [person:1] }]
+### SELECT * FROM post ORDER BY id FETCH many, loose
+[{ author: other:1, id: post:1, loose: { id: person:1, name: 'p' }, many: [{ id: person:1, name: 'p' }] }, { author: other:1, id: post:2, loose: { id: other:1, label: 'other o', name: 'o' }, many: [{ id: person:1, name: 'p' }] }]

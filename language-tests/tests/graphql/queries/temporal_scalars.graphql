@@ -1,0 +1,20 @@
+/**
+[env]
+imports = ["../_temporal_schema.surql"]
+
+[test]
+reason = "Date, time, timestamp and interval fields serialise through GraphQL as their text forms and are exposed as scalars of those names"
+
+[[test.results]]
+value = "{ shift: { at: '2026-10-26T06:30:00', day: '2026-10-26', label: 'early', length: 'PT8H', starts: '06:30:00' } }"
+
+*/
+query {
+	shift(id: "early") {
+		label
+		day
+		starts
+		at
+		length
+	}
+}

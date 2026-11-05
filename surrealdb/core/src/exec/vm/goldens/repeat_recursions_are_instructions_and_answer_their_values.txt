@@ -1,0 +1,18 @@
+### n:1.{..}.{ id, next: next.@ }
+{ id: n:1, next: [{ id: n:2, next: [{ id: n:4, next: NONE }] }, { id: n:3, next: [] }] }
+### n:1.{1..2}.{ name, kids: next.@ }
+{ kids: [{ kids: [n:4], name: 'two' }, { kids: [], name: 'three' }], name: 'one' }
+### n:1.{2}.{ id, kids: next.@ }
+{ id: n:1, kids: [{ id: n:2, kids: [n:4] }, { id: n:3, kids: [] }] }
+### n:1.{..3}.{ id, deep: { inner: next.@ } }
+error: Tried to use a `@` repeat recurse symbol in a position where it is not supported
+### n:1.{..}.next.@
+[]
+### n:1.{..}.{ id, kids: next.@.chain(|$v| $v ?? []) }
+{ id: n:1, kids: [{ id: n:2, kids: [{ id: n:4, kids: [] }] }, { id: n:3, kids: [] }] }
+### n:1.{..+shortest=$target}.next
+[n:2, n:4]
+### n:1.{..+shortest=$target+inclusive}.next
+[n:1, n:2, n:4]
+### n:1.@
+error: Tried to use a `@` repeat recurse symbol in a position where it is not supported

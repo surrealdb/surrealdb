@@ -1,6 +1,6 @@
 /**
 [env]
-backend = ["mem", "rocksdb", "surrealkv"]
+backend = ["mem", "surrealkv"]
 versioned = true
 timeout = 5000
 
@@ -11,7 +11,7 @@ reason = "VERSION clause queries at epoch timestamp show empty schema via INFO F
 value = "[{ id: test:1, val: 1 }]"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: {  }, users: {  } }"
 
 */
 

@@ -1,0 +1,38 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_truncate_table.surql"]
+
+[test]
+reason = "TRUNCATE TABLE removes every row of the table it names, with or without the TABLE keyword, returns none of them, and leaves other tables alone"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ n: 0 }]"
+
+[[test.results]]
+value = "[{ n: 1 }]"
+
+[[test.results]]
+value = "[{ a: 9, id: 3 }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ n: 1 }]"
+
+[[test.results]]
+value = "[{ n: 0 }]"
+*/
+
+TRUNCATE TABLE truncate_a;
+SELECT count(*) AS n FROM truncate_a;
+SELECT count(*) AS n FROM truncate_b;
+INSERT INTO truncate_a (id, a) VALUES (3, 9);
+TRUNCATE truncate_b;
+SELECT count(*) AS n FROM truncate_a;
+SELECT count(*) AS n FROM truncate_b;

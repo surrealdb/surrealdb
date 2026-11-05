@@ -1,0 +1,13 @@
+/**
+[env]
+imports = ["gql/_mutate_perm_update_import.surql"]
+auth = { namespace = "test", database = "test", access = "user", rid = "person:1" }
+
+[test]
+reason = "SECURITY (write == UPDATE): the write a SET makes is gated by the table's own update permission for the session principal, as a hand-written UPDATE of each record is. person:1 may update only its own record, so the SET lands on alice and is denied on bob and carol."
+
+[[test.results]]
+value = "[{ age: NONE, name: NONE }, { age: NONE, name: NONE }, { age: 1, name: 'alice' }]"
+*/
+
+MATCH (n:person) SET n.age = 1 RETURN n.name AS name, n.age AS age ORDER BY name

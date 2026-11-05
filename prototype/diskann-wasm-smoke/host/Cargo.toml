@@ -1,0 +1,11 @@
+[package]
+name = "diskann-wasi-host"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[dependencies]
+wasmtime = { version = "48.0.8", default-features = false, features = ["async", "cranelift", "runtime", "std", "component-model"] }
+wasmtime-wasi = { version = "48.0.8", features = ["p2"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+anyhow = "1"
+[workspace]

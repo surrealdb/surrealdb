@@ -1,0 +1,45 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "SELECT @@name reads a system variable of the server under every scope and spelling, as a number or as text according to its value, beside other columns and under LIMIT and WHERE; a variable MySQL has and the server does not model, such as one that names a path of the host, reads as NULL"
+
+[[test.results]]
+value = "[{ a: 1, b: 1, c: 1, d: 1, e: 1 }]"
+
+[[test.results]]
+match = "$result.len() == 1 && $result[0] == { buffer: 16384, packet: 67108864, perf: 0, version: '8.0.35-SurrealDB' } && type::is_int($result[0].buffer) && type::is_int($result[0].packet) && type::is_int($result[0].perf) && type::is_string($result[0].version)"
+
+[[test.results]]
+value = "[{ c: 'SurrealDB', iso: 'REPEATABLE-READ', lic: 'GPL', m: 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION', tz: 'SYSTEM', v: '8.0.35-SurrealDB' }]"
+
+[[test.results]]
+value = "[{ same: true }]"
+
+[[test.results]]
+value = "[{ big: true, one: 1, shout: 'SurrealDB!' }]"
+
+[[test.results]]
+value = "[{ datadir: NULL, missing: NULL, missing_global: NULL, os: NULL }]"
+
+[[test.results]]
+value = "[{ c: 'SurrealDB' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+*/
+
+SELECT @@autocommit AS a, @@session.autocommit AS b, @@local.autocommit AS c, @@global.autocommit AS d, @@AUTOCOMMIT AS e;
+SELECT @@max_allowed_packet AS packet, @@net_buffer_length AS buffer, @@performance_schema AS perf, @@version AS version;
+SELECT @@version AS v, @@version_comment AS c, @@sql_mode AS m, @@time_zone AS tz, @@transaction_isolation AS iso, @@license AS lic;
+SELECT @@version = VERSION() AS same;
+SELECT @@max_allowed_packet > 1000 AS big, CONCAT(@@version_comment, '!') AS shout, 1 AS one;
+SELECT @@max_connections AS missing, @@global.max_connections AS missing_global, @@datadir AS datadir, @@version_compile_os AS os;
+SELECT @@version_comment AS c LIMIT 1;
+SELECT @@version_comment AS c LIMIT 1 OFFSET 1;
+SELECT @@version_comment AS c WHERE 1 = 0;

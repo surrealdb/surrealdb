@@ -1,0 +1,114 @@
+### owner: { LET $f = |$x| $x * 2; RETURN $f(21) }
+42
+### owner: (|$x: int| $x + 1)(1)
+2
+### owner: { LET $f = || (SELECT VALUE n FROM item ORDER BY n); RETURN $f() }
+[1, 2, 3]
+### owner: { LET $f = |$id| (SELECT secret, twice FROM ONLY $id); RETURN [$f(item:1), $f(item:3)] }
+[{ secret: 's1', twice: 2 }, { secret: NONE, twice: 6 }]
+### owner: array::map([1, 2, 3], |$v| (SELECT VALUE twice FROM item WHERE n = $v))
+[[2], [4], [6]]
+### owner: { LET $y = 10; LET $f = |$x| $x + $y; RETURN array::map([1, 2], $f) }
+[11, 12]
+### owner: { LET $y = 10; LET $f = |$x| $x + $y; LET $y = 20; RETURN $f(1) }
+11
+### owner: SELECT n, (|$m| $m + n)(1) AS k FROM item ORDER BY n
+{ k: 2, n: 1 }
+{ k: 3, n: 2 }
+{ k: 4, n: 3 }
+### owner: SELECT VALUE tags.map(|$x| $x + n) FROM item ORDER BY n
+error: There was a problem running the map() function. no such method found for the none type
+### owner: SELECT VALUE ['n'].map(|$x| type::field($x)) FROM item ORDER BY n
+[1]
+[2]
+[3]
+### owner: { LET $f = |$x| { IF $x > 1 { RETURN 'big' }; 'small' }; RETURN [$f(1), $f(2)] }
+['small', 'big']
+### owner: (|| { BREAK })()
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### owner: (|$x: int| $x)('a')
+error: Incorrect arguments for function ANONYMOUS(). Expected a value of type 'int' for argument $x
+### owner: (|$x| -> int { $x })('nope')
+error: Couldn't coerce return value from function `ANONYMOUS`: Expected `int` but found `'nope'`
+### owner: (|$x| -> int { $x })(7)
+7
+### owner: (|$x: option<int>| $x)()
+NONE
+### owner: { LET $f = |$s, $n| IF $n = 0 { 0 } ELSE { $s($s, $n - 1) }; RETURN $f($f, 3) }
+0
+### owner: { LET $f = |$s| $s($s); RETURN $f($f) }
+error: Reached excessive computation depth due to functions, subqueries, or computed values
+### owner: { LET $f = |$s| array::map([0], |$i| $s($s)); RETURN $f($f) }
+error: Reached excessive computation depth due to functions, subqueries, or computed values
+### owner: { LET $f = || (SELECT VALUE n FROM item WHERE time::now() > d'2000-01-01'); RETURN $f() }
+[1, 2, 3]
+### owner: { LET $f = || fn::v(); RETURN $f() }
+1
+### owner: (|$r| $r->nothing)(item:1)
+[]
+### owner: { LET $f = || $this; RETURN $f() }
+NONE
+### owner: { LET $f = || $auth.id; RETURN $f() }
+NONE
+### owner: SELECT VALUE (|| $parent.n)() FROM item ORDER BY n
+1
+2
+3
+### owner: array::fold([1, 2, 3], 0, |$acc, $v| $acc + (SELECT VALUE n FROM ONLY item:1))
+3
+### record user: { LET $f = |$x| $x * 2; RETURN $f(21) }
+42
+### record user: (|$x: int| $x + 1)(1)
+2
+### record user: { LET $f = || (SELECT VALUE n FROM item ORDER BY n); RETURN $f() }
+[1, 2]
+### record user: { LET $f = |$id| (SELECT secret, twice FROM ONLY $id); RETURN [$f(item:1), $f(item:3)] }
+[{ secret: NONE, twice: 2 }, NONE]
+### record user: array::map([1, 2, 3], |$v| (SELECT VALUE twice FROM item WHERE n = $v))
+[[2], [4], []]
+### record user: { LET $y = 10; LET $f = |$x| $x + $y; RETURN array::map([1, 2], $f) }
+[11, 12]
+### record user: { LET $y = 10; LET $f = |$x| $x + $y; LET $y = 20; RETURN $f(1) }
+11
+### record user: SELECT n, (|$m| $m + n)(1) AS k FROM item ORDER BY n
+{ k: 2, n: 1 }
+{ k: 3, n: 2 }
+### record user: SELECT VALUE tags.map(|$x| $x + n) FROM item ORDER BY n
+[2, 3]
+[5]
+### record user: SELECT VALUE ['n'].map(|$x| type::field($x)) FROM item ORDER BY n
+[1]
+[2]
+### record user: { LET $f = |$x| { IF $x > 1 { RETURN 'big' }; 'small' }; RETURN [$f(1), $f(2)] }
+['small', 'big']
+### record user: (|| { BREAK })()
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### record user: (|$x: int| $x)('a')
+error: Incorrect arguments for function ANONYMOUS(). Expected a value of type 'int' for argument $x
+### record user: (|$x| -> int { $x })('nope')
+error: Couldn't coerce return value from function `ANONYMOUS`: Expected `int` but found `'nope'`
+### record user: (|$x| -> int { $x })(7)
+7
+### record user: (|$x: option<int>| $x)()
+NONE
+### record user: { LET $f = |$s, $n| IF $n = 0 { 0 } ELSE { $s($s, $n - 1) }; RETURN $f($f, 3) }
+0
+### record user: { LET $f = |$s| $s($s); RETURN $f($f) }
+error: Reached excessive computation depth due to functions, subqueries, or computed values
+### record user: { LET $f = |$s| array::map([0], |$i| $s($s)); RETURN $f($f) }
+error: Reached excessive computation depth due to functions, subqueries, or computed values
+### record user: { LET $f = || (SELECT VALUE n FROM item WHERE time::now() > d'2000-01-01'); RETURN $f() }
+[1, 2]
+### record user: { LET $f = || fn::v(); RETURN $f() }
+1
+### record user: (|$r| $r->nothing)(item:1)
+[]
+### record user: { LET $f = || $this; RETURN $f() }
+NONE
+### record user: { LET $f = || $auth.id; RETURN $f() }
+NONE
+### record user: SELECT VALUE (|| $parent.n)() FROM item ORDER BY n
+1
+2
+### record user: array::fold([1, 2, 3], 0, |$acc, $v| $acc + (SELECT VALUE n FROM ONLY item:1))
+3

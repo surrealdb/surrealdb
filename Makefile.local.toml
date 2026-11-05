@@ -1,5 +1,5 @@
 [env]
-RUSTFLAGS = { value = "-D warnings", condition = { env_not_set = [
+RUSTFLAGS = { value = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}", condition = { env_not_set = [
     "RUSTFLAGS",
 ] } }
 
@@ -21,7 +21,7 @@ args = [
     "--package",
     "surrealdb",
     "--features",
-    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-surrealkv,http,scripting,jwks",
 ]
 
 [tasks.fmt]
@@ -134,4 +134,10 @@ args = [
 category = "LOCAL USAGE"
 description = "Measure a single language-test bench"
 command = "scripts/bench/bench.sh"
+args = ["${@}"]
+
+[tasks.orm-compat]
+category = "LOCAL USAGE"
+description = "Run the ORM compatibility checks (harness [--record] | upstream [orm...]) against the PostgreSQL wire listener"
+command = "tests/orm-compat/run.sh"
 args = ["${@}"]

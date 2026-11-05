@@ -103,7 +103,62 @@ impl RemoteStore {
 
 		this.login().await.context("Failed to login to remote datastore")?;
 
+		// Migrate only a store that is behind. `--store-user` defaults to a
+		// read-only account, and a run that only compares against a baseline must
+		// keep working against a store someone else has already migrated, so no
+		// connection issues DDL it does not need.
+		if !this.schema_is_current().await? {
+			this.apply_schema().await.context(
+				"The benchmark store does not carry the current definitions and this \
+				 account could not apply them; connect once with an account that may DEFINE",
+			)?;
+		}
+
 		Ok(this)
+	}
+
+	/// Whether the store already carries the current definitions.
+	///
+	/// `fn::last_measurement` taking a transport is both what the read path
+	/// depends on and the last thing a migration establishes, so a successful
+	/// call stands in for the schema version. The probe reads: it returns NONE
+	/// for a path no measurement was ever stored under.
+	async fn schema_is_current(&self) -> Result<bool> {
+		let res = self
+			.cmd_authed("query", vec!["RETURN fn::last_measurement('','','')".into_value()])
+			.await?
+			.into_array()?;
+
+		let mut res = res.into_vec();
+		if res.len() != 1 {
+			bail!("Got invalid result when probing the benchmark schema")
+		}
+		let res = QueryResult::from_value(res.pop().unwrap())
+			.context("Failed to deserialize the schema probe result")?;
+
+		Ok(res.status == "OK")
+	}
+
+	/// Bring the store's definitions up to date.
+	///
+	/// The schema is idempotent — `IF NOT EXISTS` for anything whose shape has
+	/// never changed, `OVERWRITE` for the pieces a migration rewrites — so it is
+	/// applied on every connection. A store last written by an older harness is
+	/// migrated here, before the first query that depends on the current shape;
+	/// without this a signature change such as `fn::last_measurement` gaining an
+	/// argument would fail against every existing store.
+	async fn apply_schema(&self) -> Result<()> {
+		let res = self.cmd_authed("query", vec![super::SCHEMA.into_value()]).await?.into_array()?;
+
+		for (idx, value) in res.into_vec().into_iter().enumerate() {
+			let res = QueryResult::from_value(value)
+				.context("Failed to deserialize a schema statement result")?;
+			if res.status == "ERR" {
+				bail!("Schema statement {idx} failed: {}", res.result.into_string()?)
+			}
+		}
+
+		Ok(())
 	}
 
 	async fn cmd(&self, method: &str, params: Vec<Value>) -> Result<Value> {
@@ -205,17 +260,13 @@ impl RemoteStore {
 						);
 					}
 					Message::Binary(bytes) => {
-						let res =
-							match surrealdb_core::rpc::format::flatbuffers::decode::<Value>(&bytes)
-							{
-								Ok(x) => x,
-								Err(e) => {
-									println!(
-										"Warning, remote datastore returned invalid format: {e}"
-									);
-									continue;
-								}
-							};
+						let res = match surrealdb_types::decode::<Value>(&bytes) {
+							Ok(x) => x,
+							Err(e) => {
+								println!("Warning, remote datastore returned invalid format: {e}");
+								continue;
+							}
+						};
 
 						let resp = match Response::from_value(res) {
 							Err(e) => {
@@ -265,9 +316,7 @@ impl RemoteStore {
 						};
 						req_id += 1;
 
-						let bytes =
-							surrealdb_core::rpc::format::flatbuffers::encode(&req.into_value())
-								.unwrap();
+						let bytes = surrealdb_types::encode(&req.into_value()).unwrap();
 						if let Err(e) = s.send(Message::Binary(bytes.into())).await {
 							ws_error(e);
 						}
@@ -301,9 +350,9 @@ fn is_session_expired(e: &anyhow::Error) -> bool {
 impl BenchDataStore for RemoteStore {
 	async fn add(&mut self, run: super::BenchMarkRun) -> Result<()> {
 		let mut params = Object::new();
-		params.insert("path", run.path.into_value());
+		params.insert("path", run.path.clone().into_value());
 		params.insert("backend", run.backend.into_value());
-		params.insert("value", run.measurement.into_value());
+		params.insert("value", run.into_content_value());
 
 		let res = self
 			.cmd_authed(
@@ -332,15 +381,20 @@ impl BenchDataStore for RemoteStore {
 		&'a mut self,
 		path: &'a str,
 		backend: Backend,
-	) -> Result<Option<MeasurementData>> {
+		transport: &'a str,
+	) -> Result<Option<super::Baseline>> {
 		let mut params = Object::new();
 		params.insert("path", path.into_value());
 		params.insert("backend", backend.into_value());
+		params.insert("transport", transport.into_value());
 
 		let res = self
 			.cmd_authed(
 				"query",
-				vec!["fn::last_measurement($path,$backend)".into_value(), params.into_value()],
+				vec![
+					"fn::last_measurement($path,$backend,$transport)".into_value(),
+					params.into_value(),
+				],
 			)
 			.await?
 			.into_array()?;
@@ -353,8 +407,15 @@ impl BenchDataStore for RemoteStore {
 		if res.status == "ERR" {
 			bail!("Got error trying to fetch latest measurement: {}", res.result.into_string()?)
 		}
-		Option::<MeasurementData>::from_value(res.result)
-			.context("Failed to deserialize latest measurement")
+		let (commit, datetime, rows) = super::baseline_meta(&res.result);
+		let measurement = Option::<MeasurementData>::from_value(res.result)
+			.context("Failed to deserialize latest measurement")?;
+		Ok(measurement.map(|measurement| super::Baseline {
+			measurement,
+			commit,
+			datetime,
+			rows,
+		}))
 	}
 
 	async fn close(&mut self) -> Result<()> {

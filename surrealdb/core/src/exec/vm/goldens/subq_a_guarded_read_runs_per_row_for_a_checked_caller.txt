@@ -1,0 +1,8 @@
+### owner: SELECT n, (SELECT VALUE secret FROM item) AS s FROM open
+{ n: 10, s: ['s1', 's2', NONE] }
+{ n: 20, s: ['s1', 's2', NONE] }
+{ n: 2, s: ['s1', 's2', NONE] }
+### record user: SELECT n, (SELECT VALUE secret FROM item) AS s FROM open
+{ n: 10, s: [NONE, NONE] }
+{ n: 20, s: [NONE, NONE] }
+{ n: 2, s: [NONE, NONE] }

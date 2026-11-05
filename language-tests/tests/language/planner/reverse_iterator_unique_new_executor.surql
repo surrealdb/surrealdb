@@ -1,16 +1,16 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Tests reverse iteration with a unique index using ORDER BY DESC (new executor)"
+reason = "Tests reverse iteration with a unique index using ORDER BY DESC"
 
 [[test.results]]
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: v] {rows: 3}
-    IndexScan [ctx: Db] [index: idx, access: >5, direction: Backward, limit: 3] {rows: 3}
+value = '''
+'SelectProject [ctx: Db] [projections: v] {rows: 3}
+    IndexScan [ctx: Db] [table: i, index: idx, access: >5, direction: Backward, limit: 3] {rows: 3}
 
 Total rows: 3''''
 
@@ -18,8 +18,9 @@ Total rows: 3''''
 value = "[{ v: 15 }, { v: 14 }, { v: 13 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: v] {rows: 3}
-    IndexScan [ctx: Db] [index: idx, access: , direction: Backward, limit: 3] {rows: 3}
+value = '''
+'SelectProject [ctx: Db] [projections: v] {rows: 3}
+    IndexScan [ctx: Db] [table: i, index: idx, direction: Backward, limit: 3] {rows: 3}
 
 Total rows: 3''''
 
@@ -27,8 +28,9 @@ Total rows: 3''''
 value = "[{ v: 15 }, { v: 14 }, { v: 13 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: v] {rows: 15}
-    IndexScan [ctx: Db] [index: idx, access: , direction: Backward] {rows: 15}
+value = '''
+'SelectProject [ctx: Db] [projections: v] {rows: 15}
+    IndexScan [ctx: Db] [table: i, index: idx, direction: Backward] {rows: 15}
 
 Total rows: 15''''
 
@@ -38,6 +40,10 @@ value = "[{ v: 15 }, { v: 14 }, { v: 13 }, { v: 12 }, { v: 11 }, { v: 10 }, { v:
 
 {
     DEFINE INDEX idx ON TABLE i COLUMNS v UNIQUE;
+    -- The indexed column is declared a scalar kind, so its index holds one
+    -- entry per record and a scan of it delivers its order: a plain column
+    -- that may hold an array is stored once per element and orders nothing.
+    DEFINE FIELD v ON i TYPE option<int>;
     FOR $i IN 1..=15 { CREATE i:[$i] SET v = $i; };
     RETURN "OK";
 };

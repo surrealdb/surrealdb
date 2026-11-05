@@ -1,0 +1,128 @@
+### owner: UPDATE type::table('doc') SET n += 1
+{ echoed: 's1', id: doc:1, n: 2, open: 1, secret: 's1', twice: 4, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 2, open: 1, secret: 's1', twice: 4, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+### owner: UPDATE type::table('doc') SET n += 1 RETURN BEFORE
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 2, open: 1, secret: 's1', twice: 4, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+### owner: UPDATE doc:1, other:1 SET n = 5
+{ echoed: 's1', id: doc:1, n: 5, open: 1, secret: 's1', twice: 10, veiled: 'v1' }
+{ id: other:1, n: 5 }
+records:
+{ echoed: 's1', id: doc:1, n: 5, open: 1, secret: 's1', twice: 10, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE type::record('doc', 2) SET n = 7 RETURN DIFF
+[{ op: 'replace', path: '/n', value: 7 }, { op: 'replace', path: '/twice', value: 14 }]
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 7, open: 2, secret: 's2', twice: 14, veiled: 'v2' }
+### owner: CREATE type::record('doc', 5) SET n = 5, secret = 'z' RETURN AFTER
+{ echoed: 'z', id: doc:5, n: 5, secret: 'z', twice: 10 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: 'z', id: doc:5, n: 5, secret: 'z', twice: 10 }
+### owner: CREATE doc:6, other:6 SET n = 6
+{ echoed: NONE, id: doc:6, n: 6, twice: 12 }
+{ id: other:6, n: 6 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:6, n: 6, twice: 12 }
+### owner: UPSERT type::record('doc', 9) SET n = 9
+{ echoed: NONE, id: doc:9, n: 9, twice: 18 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:9, n: 9, twice: 18 }
+### owner: DELETE type::table('doc') RETURN BEFORE
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+records:
+### owner: INSERT { id: doc:8, n: 8, secret: 'i' }
+{ echoed: 'i', id: doc:8, n: 8, secret: 'i', twice: 16 }
+records:
+{ echoed: 'i', id: doc:8, n: 8, secret: 'i', twice: 16 }
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE doc:1, doc:2 SET open = 4 RETURN n, secret
+{ n: 1, secret: 's1' }
+{ n: 2, secret: 's2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 4, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 4, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: UPDATE (SELECT VALUE id FROM doc) SET open = 4 RETURN n, secret
+{ n: 1, secret: 's1' }
+{ n: 2, secret: 's2' }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 4, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 4, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE type::table('doc') SET n += 1
+{ echoed: NONE, id: doc:1, n: 2, open: 1, twice: 4 }
+{ echoed: NONE, id: doc:2, n: 3, open: 2, twice: 6, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 2, open: 1, secret: 's1', twice: 4, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+### record user: UPDATE type::table('doc') SET n += 1 RETURN BEFORE
+{ id: doc:1, n: 1, open: 1, twice: 2 }
+{ echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+{ echoed: 's1', id: doc:1, n: 2, open: 1, secret: 's1', twice: 4, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+### record user: UPDATE doc:1, other:1 SET n = 5
+{ echoed: NONE, id: doc:1, n: 5, open: 1, twice: 10 }
+{ id: other:1, n: 5 }
+records:
+{ echoed: 's1', id: doc:1, n: 5, open: 1, secret: 's1', twice: 10, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE type::record('doc', 2) SET n = 7 RETURN DIFF
+[{ op: 'replace', path: '/n', value: 7 }, { op: 'replace', path: '/twice', value: 14 }]
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 7, open: 2, secret: 's2', twice: 14, veiled: 'v2' }
+### record user: CREATE type::record('doc', 5) SET n = 5, secret = 'z' RETURN AFTER
+{ echoed: NONE, id: doc:5, n: 5, twice: 10 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: 'z', id: doc:5, n: 5, secret: 'z', twice: 10 }
+### record user: CREATE doc:6, other:6 SET n = 6
+{ echoed: NONE, id: doc:6, n: 6, twice: 12 }
+{ id: other:6, n: 6 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:6, n: 6, twice: 12 }
+### record user: UPSERT type::record('doc', 9) SET n = 9
+{ echoed: NONE, id: doc:9, n: 9, twice: 18 }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+{ echoed: NONE, id: doc:9, n: 9, twice: 18 }
+### record user: DELETE type::table('doc') RETURN BEFORE
+{ id: doc:1, n: 1, open: 1, twice: 2 }
+{ echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }
+records:
+### record user: INSERT { id: doc:8, n: 8, secret: 'i' }
+{ echoed: NONE, id: doc:8, n: 8, twice: 16 }
+records:
+{ echoed: 'i', id: doc:8, n: 8, secret: 'i', twice: 16 }
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE doc:1, doc:2 SET open = 4 RETURN n, secret
+{ n: 1, secret: NONE }
+{ n: 2, secret: NONE }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 4, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 4, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: UPDATE (SELECT VALUE id FROM doc) SET open = 4 RETURN n, secret
+{ n: 1, secret: NONE }
+{ n: 2, secret: NONE }
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 4, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 4, secret: 's2', twice: 4, veiled: 'v2' }

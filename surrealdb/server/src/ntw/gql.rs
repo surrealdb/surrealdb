@@ -1,9 +1,8 @@
-//! Experimental ISO GQL (ISO/IEC 39075) query endpoint. Accepts a raw GQL
-//! query via `POST /gql` and executes it through the same session, capability,
-//! and output-negotiation plumbing as the `/sql` endpoint. The language itself
-//! is gated by the `gql` experimental capability at the datastore layer,
-//! so requests fail with a clear error unless the server is started with
-//! `--allow-experimental gql`.
+//! ISO GQL (ISO/IEC 39075) query endpoint. Accepts a raw GQL query via
+//! `POST /gql` and executes it through the same session, capability, and
+//! output-negotiation plumbing as the `/sql` endpoint. Enabled by default,
+//! gated only by the `RouteTarget::Gql` route capability like the other
+//! query endpoints.
 
 use std::collections::BTreeMap;
 
@@ -14,7 +13,8 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_core::kvs::{QueryRequest, QuerySource};
+use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_types::{Array, SurrealValue, Value, Variables};
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -25,6 +25,7 @@ use super::output::Output;
 use crate::cnf::HTTP_MAX_GQL_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::ntw::input::bytes_to_utf8;
+use crate::ntw::timeout::with_query_timeout;
 
 pub fn router<S>() -> Router<S>
 where
@@ -57,8 +58,10 @@ async fn post_handler(
 	}
 	// Convert the received gql query
 	let gql = bytes_to_utf8(&gql).context("Non UTF-8 request body").map_err(ResponseError)?;
-	// Execute the received gql query
-	match db.execute_gql(gql, &session, Some(vars)).await {
+	// Execute the received gql query under the configured wall-clock query
+	// timeout (default off), reusing `--query-timeout` as the guard duration.
+	let request = QueryRequest::new(QuerySource::gql(gql), &session).with_variables(Some(vars));
+	match with_query_timeout(db.query_timeout(), db.run(request)).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
 			None | Some(Accept::ApplicationJson) => {

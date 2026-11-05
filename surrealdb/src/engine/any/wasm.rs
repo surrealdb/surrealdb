@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use tokio::sync::watch;
+#[cfg(browser)]
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use wasm_bindgen_futures::spawn_local;
 
@@ -39,37 +40,20 @@ impl conn::Sealed for Any {
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 			let mut features = HashSet::new();
 
-			match EndpointKind::from(address.url.scheme()) {
-				EndpointKind::IndxDb => {
-					#[cfg(feature = "kv-indxdb")]
-					{
-						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
-							conn_tx,
-							route_rx,
-							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
-					}
-
-					#[cfg(not(feature = "kv-indxdb"))]
-				return Err(
-					Error::internal("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-				);
-				}
-
+			let endpoint_kind = EndpointKind::from(address.url.scheme());
+			match endpoint_kind {
 				EndpointKind::Memory => {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
-							conn_tx,
-							route_rx,
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -78,34 +62,18 @@ impl conn::Sealed for Any {
 				);
 				}
 
-				EndpointKind::RocksDb => {
-					#[cfg(feature = "kv-rocksdb")]
-					{
-						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
-							conn_tx,
-							route_rx,
-							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
-					}
-
-					#[cfg(not(feature = "kv-rocksdb"))]
-			return Err(Error::internal("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-				}
-
 				EndpointKind::SurrealKv => {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
-							conn_tx,
-							route_rx,
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
@@ -115,43 +83,30 @@ impl conn::Sealed for Any {
 				}
 
 				EndpointKind::TiKv => {
-					#[cfg(feature = "kv-tikv")]
-					{
-						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
-							conn_tx,
-							route_rx,
-							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
-					}
-
-					#[cfg(not(feature = "kv-tikv"))]
-				return Err(
-					Error::internal("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-				);
+					return Err(Error::internal(
+						"The `tikv` storage engine is not available in the SDK. Connect to a SurrealDB server built with TiKV support over `ws://` or `http://` instead".to_owned(),
+					));
 				}
 
 				EndpointKind::Http | EndpointKind::Https => {
-					#[cfg(feature = "protocol-http")]
+					#[cfg(http_engine)]
 					{
 						spawn_local(engine::remote::http::wasm::run_router(
 							address,
 							conn_tx,
 							route_rx,
-							session_clone.receiver.clone(),
+							session_clone.router_receiver(),
 						));
 					}
 
-					#[cfg(not(feature = "protocol-http"))]
+					#[cfg(not(http_engine))]
 				return Err(Error::internal(
-					"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
+					"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB or not available on this target".to_owned(),
 				));
 				}
 
 				EndpointKind::Ws | EndpointKind::Wss => {
-					#[cfg(feature = "protocol-ws")]
+					#[cfg(ws_engine)]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						let mut endpoint = address;
@@ -163,14 +118,14 @@ impl conn::Sealed for Any {
 							endpoint,
 							conn_tx,
 							route_rx,
-							session_clone.receiver.clone(),
+							session_clone.router_receiver(),
 						));
 						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
-					#[cfg(not(feature = "protocol-ws"))]
+					#[cfg(not(ws_engine))]
 				return Err(Error::internal(
-					"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
+					"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB or not available on this target".to_owned(),
 				));
 				}
 
@@ -180,11 +135,7 @@ impl conn::Sealed for Any {
 			}
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})

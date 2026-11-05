@@ -1,12 +1,18 @@
 #![allow(clippy::needless_pass_by_value)]
+// Makes `attribute_preserved` a compile-time guard rather than a convention:
+// see its doc comment.
+#![deny(deprecated)]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::TcpStream;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use anyhow::Result;
 use surrealdb_types::SurrealValue;
-use surrealism::surrealism;
+use surrealism::{ReadWrite, Transaction, surrealism};
 
 /// Check whether a person is old enough to drive.
 #[surrealism]
@@ -22,14 +28,111 @@ struct User {
 }
 
 /// Create a new user record if one does not already exist.
-#[surrealism(writeable)]
-fn create_user(user: User) -> Result<String> {
-	let exists: bool =
-		surrealism::run("fn::user_exists".to_string(), None, (user.name.clone(), user.age))?;
+///
+/// Writes are opted into through the parameter type: `Transaction<ReadWrite>` is
+/// what makes this function report `writeable` in the exports manifest, so the
+/// host lends it a writeable transaction.
+#[surrealism]
+async fn create_user(tx: Transaction<ReadWrite>, user: User) -> Result<String> {
+	let exists: bool = tx.run("fn::user_exists", (user.name.clone(), user.age)).await?;
 	if exists {
 		return Ok(format!("User {} already exists", user.name));
 	}
 	Ok(format!("Created user {} of age {}. Enabled? {}", user.name, user.age, user.enabled))
+}
+
+/// Two host calls awaited together, to show that they overlap rather than
+/// running back to back. Each `tx` call is a component-model subtask, so the
+/// host resolves both while the guest waits once.
+#[surrealism]
+async fn concurrent_queries(tx: Transaction) -> Result<Vec<surrealdb_types::Value>> {
+	let (a, b) = futures::future::try_join(
+		tx.sql::<surrealdb_types::Value>("SELECT * FROM ONLY { value: 1 }"),
+		tx.sql::<surrealdb_types::Value>("SELECT * FROM ONLY { value: 2 }"),
+	)
+	.await?;
+	Ok(vec![a, b])
+}
+
+/// Two reads awaited together, each of which takes `millis` to answer.
+///
+/// The host runs the calls of one invocation side by side when neither can
+/// write, so this takes about `millis` rather than twice that. Paired with
+/// [`concurrent_runs`] in the test suite, which measures the same shape for
+/// calls the host has to serialise.
+#[surrealism]
+async fn concurrent_sleeps(tx: Transaction, millis: i64) -> Result<i64> {
+	futures::future::try_join(
+		tx.sql::<surrealdb_types::Value>(format!("SLEEP {millis}ms")),
+		tx.sql::<surrealdb_types::Value>(format!("SLEEP {millis}ms")),
+	)
+	.await?;
+	Ok(2)
+}
+
+/// Two calls to `fn::slow` awaited together, each of which takes `millis`.
+///
+/// A function body is opaque to the host, so it cannot know the call does not
+/// write, and these run one at a time: about twice `millis`.
+#[surrealism]
+async fn concurrent_runs(tx: Transaction, millis: i64) -> Result<i64> {
+	futures::future::try_join(
+		tx.run::<surrealdb_types::Value>("fn::slow", (millis,)),
+		tx.run::<surrealdb_types::Value>("fn::slow", (millis,)),
+	)
+	.await?;
+	Ok(2)
+}
+
+/// The definition's binding for `greeting`, or `NONE` when it binds none.
+///
+/// Declares no transaction: a binding is read through its own host import,
+/// not through the handle.
+#[surrealism]
+async fn bound_greeting() -> Result<Option<String>> {
+	surrealism::binding("greeting").await
+}
+
+/// Advance a sequence through a read-only transaction.
+///
+/// `sequence::nextval` modifies durable state without any statement appearing
+/// in the query: it is a function call, and the counter it moves is not
+/// snapshotted by the transaction. A refusal that looked only for statement
+/// forms would let this through, which is why it has its own fixture.
+#[surrealism]
+async fn sneaky_sequence(tx: Transaction) -> Result<surrealdb_types::Value> {
+	tx.sql("RETURN sequence::nextval('order_no')").await
+}
+
+/// Attempt a bucket write through a read-only transaction, in *method* form.
+///
+/// `f'bucket:/k'.put(..)` is a `Part::Method`, not a function call: it
+/// dispatches straight into the builtin with only its arguments going back
+/// through the expression walk, so it reaches `file::put` by a route the
+/// call-form fixtures above cannot exercise. Exists to hold that refusal.
+#[surrealism]
+async fn sneaky_file_method(tx: Transaction, bucket: String) -> Result<surrealdb_types::Value> {
+	tx.sql(format!("RETURN f'{bucket}:/evil.txt'.put('data')")).await
+}
+
+/// Fetch a URL through the host's `http::get`, by way of `tx.sql`.
+///
+/// This is the host-mediated route to the network, as opposed to the guest's
+/// own sockets in [`fetch_pokemon`]: the request is made by the server under
+/// the definition's network grant.
+#[surrealism]
+async fn host_http_get(tx: Transaction, url: String) -> Result<surrealdb_types::Value> {
+	tx.sql_with_vars("RETURN http::get($url)", [("url", url)]).await
+}
+
+/// Attempt a write through a read-only transaction.
+///
+/// The mode marker cannot prevent this on its own: `sql` takes a string. The
+/// host refuses it, because this function declared `Transaction` rather than
+/// `Transaction<ReadWrite>`. Exists to hold that behaviour in the test suite.
+#[surrealism]
+async fn sneaky_write(tx: Transaction) -> Result<surrealdb_types::Value> {
+	tx.sql("CREATE customer SET name = 'mallory'").await
 }
 
 #[surrealism(name = "other")]
@@ -73,100 +176,6 @@ fn result(should_fail: bool) -> Result<String> {
 }
 
 #[surrealism]
-fn test_kv() -> Result<()> {
-	surrealism::kv::set("test", 0).expect("set test");
-	let tmp: Option<i64> = surrealism::kv::get("test").expect("get test");
-	assert_eq!(tmp, Some(0), "get test value");
-	surrealism::kv::del("test").expect("del test");
-	let exists = surrealism::kv::exists("test").expect("exists test");
-	assert!(!exists, "test should not exist after delete");
-
-	surrealism::kv::set("test1", 1).expect("set test1");
-	surrealism::kv::set("test2", 2).expect("set test2");
-	surrealism::kv::set("test3", 3).expect("set test3");
-	surrealism::kv::set("test4", 4).expect("set test4");
-	surrealism::kv::set("test5", 5).expect("set test5");
-	surrealism::kv::set("test6", 6).expect("set test6");
-
-	let keys = surrealism::kv::keys(..).expect("keys");
-	assert_eq!(keys, vec!["test1", "test2", "test3", "test4", "test5", "test6"], "keys");
-	let values: Vec<i64> = surrealism::kv::values(..).expect("values");
-	assert_eq!(values, vec![1, 2, 3, 4, 5, 6], "values");
-	let entries: Vec<(String, i64)> = surrealism::kv::entries(..).expect("entries");
-	assert_eq!(
-		entries,
-		vec![
-			("test1".to_string(), 1),
-			("test2".to_string(), 2),
-			("test3".to_string(), 3),
-			("test4".to_string(), 4),
-			("test5".to_string(), 5),
-			("test6".to_string(), 6),
-		],
-		"entries"
-	);
-	let count = surrealism::kv::count(..).expect("count");
-	assert_eq!(count, 6, "count");
-
-	let keys_to_4 = surrealism::kv::keys(.."test4".to_string()).expect("keys_to_4");
-	assert_eq!(keys_to_4, vec!["test1", "test2", "test3"], "keys_to_4");
-	let values_to_4: Vec<i64> = surrealism::kv::values(.."test4".to_string()).expect("values_to_4");
-	assert_eq!(values_to_4, vec![1, 2, 3], "values_to_4");
-	let entries_to_4: Vec<(String, i64)> =
-		surrealism::kv::entries(.."test4".to_string()).expect("entries_to_4");
-	assert_eq!(
-		entries_to_4,
-		vec![("test1".to_string(), 1), ("test2".to_string(), 2), ("test3".to_string(), 3),],
-		"entries_to_4"
-	);
-	let count_to_4 = surrealism::kv::count(.."test4".to_string()).expect("count_to_4");
-	assert_eq!(count_to_4, 3, "count_to_4");
-
-	let batch = surrealism::kv::get_batch(vec!["test1", "test3", "test5"]).expect("get_batch");
-	assert_eq!(batch, vec![Some(1), Some(3), Some(5)], "get_batch values");
-	surrealism::kv::set_batch(vec![("test1", 10), ("test3", 30), ("test5", 50)])
-		.expect("set_batch");
-	let values: Vec<i64> = surrealism::kv::values(..).expect("values after set_batch");
-	assert_eq!(values, vec![10, 2, 30, 4, 50, 6], "values after set_batch");
-	surrealism::kv::del_batch(vec!["test2", "test4", "test6"]).expect("del_batch");
-	let values: Vec<i64> = surrealism::kv::values(..).expect("values after del_batch");
-	assert_eq!(values, vec![10, 30, 50], "values after del_batch");
-
-	surrealism::kv::del_rng(.."test4".to_string()).expect("del_rng_to_4");
-	let values: Vec<i64> = surrealism::kv::values(..).expect("values after del_rng_to_4");
-	assert_eq!(values, vec![50], "values after del_rng_to_4");
-	surrealism::kv::del_rng(..).expect("del_rng");
-	let count = surrealism::kv::count(..).expect("count after del_rng");
-	assert_eq!(count, 0, "count after del_rng");
-
-	surrealism::kv::set("a", 1).expect("set a");
-	surrealism::kv::set("b", 2).expect("set b");
-	surrealism::kv::set("c", 3).expect("set c");
-	surrealism::kv::set("test", 10).expect("set test");
-	surrealism::kv::set("z", 26).expect("set z");
-
-	let values_a_z: Vec<i64> =
-		surrealism::kv::values("a".to_string().."z".to_string()).expect("values a..z");
-	assert_eq!(values_a_z, vec![1, 2, 3, 10], "values a..z");
-	let values_a_ze: Vec<i64> =
-		surrealism::kv::values("a".to_string()..="z".to_string()).expect("values a..=z");
-	assert_eq!(values_a_ze, vec![1, 2, 3, 10, 26], "values a..=z");
-	let values_test_on: Vec<i64> =
-		surrealism::kv::values("test".to_string()..).expect("values test..");
-	assert_eq!(values_test_on, vec![10, 26], "values test..");
-	let values_to_test: Vec<i64> =
-		surrealism::kv::values(.."test".to_string()).expect("values ..test");
-	assert_eq!(values_to_test, vec![1, 2, 3], "values ..test");
-	let values_to_teste: Vec<i64> =
-		surrealism::kv::values(..="test".to_string()).expect("values ..=test");
-	assert_eq!(values_to_teste, vec![1, 2, 3, 10], "values ..=test");
-
-	println!("kv test passed");
-
-	Ok(())
-}
-
-#[surrealism]
 fn test_io() -> Result<String> {
 	println!("This is a test message to stdout");
 	eprintln!("This is a test message to stderr");
@@ -178,10 +187,85 @@ fn test_none_value() -> Result<Vec<surrealdb_types::Value>> {
 	Ok(vec![surrealdb_types::Value::None])
 }
 
+/// Mutable state in linear memory. Every invocation starts from the module's
+/// initial image, so a write here is visible to nothing after the invocation
+/// that made it — not a later call, and not another tenant.
+static TENANT_STATE: AtomicI64 = AtomicI64::new(0);
+
+/// Store a value in linear memory and return the value it replaced.
+#[surrealism]
+fn set_state(value: i64) -> i64 {
+	TENANT_STATE.swap(value, Ordering::SeqCst)
+}
+
+/// Read back whatever `set_state` stored earlier in this invocation.
+#[surrealism]
+fn get_state() -> i64 {
+	TENANT_STATE.load(Ordering::SeqCst)
+}
+
+static HITS: AtomicI64 = AtomicI64::new(0);
+
+/// Count a call and return how many came before it in this memory. Fresh
+/// memory per invocation makes that zero every time.
+#[surrealism]
+fn hit() -> i64 {
+	HITS.fetch_add(1, Ordering::SeqCst)
+}
+
+/// Call `hit` through the host, as an extension calling an extension.
+#[surrealism]
+async fn nested_hit(tx: Transaction) -> Result<i64> {
+	tx.run("ext::demo::hit", ()).await
+}
+
+/// Call itself through the host `depth` times, and return how deep it got.
+#[surrealism]
+async fn recurse(tx: Transaction, depth: i64) -> Result<i64> {
+	if depth <= 0 {
+		return Ok(0);
+	}
+	let inner: i64 = tx.run("ext::demo::recurse", (depth - 1,)).await?;
+	Ok(inner + 1)
+}
+
+/// Fetch a Pokémon through `fetch_pokemon` of the extension named `ext`,
+/// called through the host: an extension calling another one that may reach
+/// the network when the caller may not.
+#[surrealism]
+async fn fetch_via(tx: Transaction, ext: String, api_base: String, name: String) -> Result<String> {
+	tx.run(format!("ext::{ext}::fetch_pokemon"), (api_base, name)).await
+}
+
+/// Allocate `mib` MiB, touch every page, and return how many bytes it holds:
+/// for a definition's `memory` limit to stop.
+#[surrealism]
+fn allocate(mib: i64) -> Result<i64> {
+	let bytes = usize::try_from(mib)? * 1024 * 1024;
+	let mut held = vec![0u8; bytes];
+	for page in held.chunks_mut(64 * 1024) {
+		page[0] = 1;
+	}
+	Ok(held.iter().map(|b| i64::from(*b)).sum::<i64>() * 64 * 1024)
+}
+
+/// Busy-loop for `millis` milliseconds, reading only the clock, and return
+/// how many rounds it ran: for a definition's `timeout` to stop.
+#[surrealism]
+fn spin(millis: i64) -> Result<i64> {
+	let until =
+		std::time::Instant::now() + std::time::Duration::from_millis(u64::try_from(millis)?);
+	let mut rounds = 0i64;
+	while std::time::Instant::now() < until {
+		rounds = rounds.wrapping_add(1);
+	}
+	Ok(rounds)
+}
+
 static GREETING_CACHE: OnceLock<String> = OnceLock::new();
 
 #[surrealism(init)]
-fn init_greeting() -> Result<()> {
+fn init() -> Result<()> {
 	GREETING_CACHE.get_or_init(|| match std::fs::read_to_string("/greeting.txt") {
 		Ok(content) => content,
 		Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -193,7 +277,75 @@ fn init_greeting() -> Result<()> {
 			"Hello".to_string()
 		}
 	});
-	Ok(())
+	register_functions()
+}
+
+// ---------------------------------------------------------------------------
+// Functions registered at run time, from `init`
+// ---------------------------------------------------------------------------
+
+/// Add functions that have no `#[surrealism]` definition.
+///
+/// An engine that compiles scripts from the attached filesystem registers its
+/// functions this way. They appear in `exports.toml` and are called exactly
+/// like the macro's: `mod::demo::registered::shout('hi')`.
+fn register_functions() -> Result<()> {
+	use surrealdb_types::{Kind, Value};
+	use surrealism::{FunctionMeta, register};
+
+	fn one_string(args: &[Value]) -> Result<String> {
+		match args {
+			[Value::String(s)] => Ok(s.clone()),
+			_ => anyhow::bail!("expected one string argument"),
+		}
+	}
+
+	register(
+		Some("registered::shout"),
+		FunctionMeta {
+			args: vec![("text".into(), Kind::String)],
+			returns: Kind::String,
+			comment: Some("Upper-case a string.".into()),
+			..Default::default()
+		},
+		|_tx, args| async move { Ok(Value::String(one_string(&args)?.to_uppercase())) },
+	)?;
+
+	// Declares a writeable transaction, so the host lends one without the
+	// read-only frame.
+	register(
+		Some("registered::add_note"),
+		FunctionMeta {
+			args: vec![("text".into(), Kind::String)],
+			returns: Kind::Any,
+			writeable: true,
+			declares_transaction: true,
+			comment: Some("Store a note and return it.".into()),
+		},
+		|tx, args| async move {
+			let tx = tx.ok_or_else(|| anyhow::anyhow!("no transaction"))?;
+			let text = one_string(&args)?;
+			tx.sql_with_vars(
+				"CREATE ONLY note SET text = $text RETURN VALUE text",
+				[("text", text)],
+			)
+			.await
+		},
+	)?;
+
+	// Declares a read-only transaction, so the host refuses the write.
+	register(
+		Some("registered::sneaky_write"),
+		FunctionMeta {
+			returns: Kind::Any,
+			declares_transaction: true,
+			..Default::default()
+		},
+		|tx, _args| async move {
+			let tx = tx.ok_or_else(|| anyhow::anyhow!("no transaction"))?;
+			tx.sql("CREATE note SET text = 'mallory'").await
+		},
+	)
 }
 
 #[surrealism]
@@ -229,17 +381,6 @@ fn list_fs_root() -> Result<Vec<String>> {
 	Ok(entries)
 }
 
-#[surrealism]
-fn kv_set_value(key: String, value: i64) -> Result<()> {
-	surrealism::kv::set(&key, value)?;
-	Ok(())
-}
-
-#[surrealism]
-fn kv_get_value(key: String) -> Result<Option<i64>> {
-	surrealism::kv::get(&key)
-}
-
 /// Echo the input asynchronously, demonstrating async fn support.
 #[surrealism]
 async fn async_echo(input: String) -> String {
@@ -257,28 +398,29 @@ async fn async_result(should_fail: bool) -> Result<String> {
 }
 
 /// Fetch a Pokémon's name from a small JSON API by Pokémon name or Pokédex ID.
-/// Requires `allow_net = ["127.0.0.1"]` in surrealism.toml.
+///
+/// `api_base` may name a host rather than an address: the guest resolves it
+/// through `wasi:sockets/ip-name-lookup`, which the host filters against the
+/// definition's `CAPABILITIES { net: [...] }`.
 #[surrealism]
 async fn fetch_pokemon(api_base: String, name: String) -> Result<String> {
-	surrealism::tokio::task::yield_now().await;
-
-	let url =
-		format!("{}/pokemon/{}", api_base.trim_end_matches('/'), name.trim_start_matches('/'));
-	let url = reqwest::Url::parse(&url).map_err(|e| anyhow::anyhow!("Invalid API URL: {e}"))?;
+	let url = url::Url::parse(&format!(
+		"{}/pokemon/{}",
+		api_base.trim_end_matches('/'),
+		name.trim_start_matches('/')
+	))
+	.map_err(|e| anyhow::anyhow!("Invalid API URL: {e}"))?;
 	let host = url.host_str().ok_or_else(|| anyhow::anyhow!("API URL missing host"))?;
 	let port =
 		url.port_or_known_default().ok_or_else(|| anyhow::anyhow!("API URL missing port"))?;
-	let socket_addr: SocketAddr = format!("{host}:{port}")
-		.parse()
-		.map_err(|e| anyhow::anyhow!("Invalid API socket address: {e}"))?;
-	// Reqwest's native wasip2 connector currently goes through socket2, so
-	// keep the transport minimal while validating WASI socket access.
-	let mut stream =
-		TcpStream::connect(socket_addr).map_err(|e| anyhow::anyhow!("HTTP connect failed: {e}"))?;
-	let path = if let Some(query) = url.query() {
-		format!("{}?{query}", url.path())
-	} else {
-		url.path().to_string()
+
+	// `connect` takes `(host, port)` and resolves the name itself, so this works
+	// against a real hostname and not just a literal address.
+	let mut stream = TcpStream::connect((host, port))
+		.map_err(|e| anyhow::anyhow!("HTTP connect to {host}:{port} failed: {e}"))?;
+	let path = match url.query() {
+		Some(query) => format!("{}?{query}", url.path()),
+		None => url.path().to_string(),
 	};
 	// Build the whole request up front and send it in one `write_all` so it
 	// leaves as a single segment where possible, rather than the several small
@@ -304,14 +446,35 @@ async fn fetch_pokemon(api_base: String, name: String) -> Result<String> {
 		.and_then(|code| code.parse::<u16>().ok())
 		.ok_or_else(|| anyhow::anyhow!("HTTP response missing status"))?;
 	if !(200..300).contains(&status) {
-		anyhow::bail!("Pokémon API returned {status}");
+		anyhow::bail!("API returned HTTP {status}");
 	}
-	let json: serde_json::Value =
-		serde_json::from_str(body).map_err(|e| anyhow::anyhow!("Failed to parse JSON: {e}"))?;
-	json["name"]
+	let parsed: serde_json::Value =
+		serde_json::from_str(body).map_err(|e| anyhow::anyhow!("Invalid JSON from API: {e}"))?;
+	parsed["name"]
 		.as_str()
-		.map(|s| s.to_string())
-		.ok_or_else(|| anyhow::anyhow!("Pokémon API response missing 'name' field"))
+		.map(str::to_string)
+		.ok_or_else(|| anyhow::anyhow!("API response missing 'name'"))
+}
+
+/// Deprecated on purpose, so that [`attribute_preserved`] has something its
+/// `#[allow]` must suppress.
+#[deprecated(note = "exists only to give the attribute-preservation guard a target")]
+fn deprecated_helper() -> i64 {
+	1
+}
+
+/// Standing guard that the macro emits the author's own attributes.
+///
+/// The crate denies `deprecated`, so calling [`deprecated_helper`] compiles
+/// only while the `#[allow]` below reaches the emitted function. A macro that
+/// rebuilt the item from its visibility, signature and block would drop it, and
+/// this stops compiling — which is the failure mode that once ate
+/// `#[tokio::main]` and left a tokio-shaped export with no runtime entered,
+/// silently, because nothing else in the tree fails when an attribute is lost.
+#[surrealism]
+#[allow(deprecated)]
+fn attribute_preserved() -> i64 {
+	deprecated_helper()
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +492,22 @@ mod math {
 	#[surrealism]
 	fn add(a: i64, b: i64) -> i64 {
 		a + b
+	}
+
+	/// An export gated by a Cargo feature, inside a `#[surrealism]` mod.
+	///
+	/// The `extra` feature is off in every ordinary build, so this function is
+	/// absent from the built component — and so must be everything the macro
+	/// emits for it. Inside a mod is where that can go wrong: the mod's own
+	/// attribute macro receives these items with their `#[cfg]` still on them
+	/// and walks them itself, so it emits a registration for a function that
+	/// the later cfg-strip then removes. (A `#[cfg]` on a *free* function is
+	/// evaluated before the attribute macro runs, so that case never reaches
+	/// codegen at all.)
+	#[surrealism]
+	#[cfg(feature = "extra")]
+	fn gated(x: i64) -> i64 {
+		x
 	}
 
 	#[surrealism(name = "multiply")]

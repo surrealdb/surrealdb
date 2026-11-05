@@ -1,0 +1,2 @@
+### SELECT * FROM person
+error: You don't have permission to change to the test namespace

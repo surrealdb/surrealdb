@@ -1,0 +1,3375 @@
+#![allow(clippy::derive_ord_xor_partial_ord)]
+
+use std::borrow::Cow;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
+use std::ops::Bound;
+use std::time::Duration as StdDuration;
+
+use anyhow::{Result, bail};
+use chrono::{DateTime, Utc};
+use common::fmt::QuoteStr;
+use geo_types::Point;
+use revision::optimised::tag::{SizeClass, Tag, read_tag, write_tag};
+use revision::{
+	DeserializeRevisioned, Error as RevisionError, SerializeRevisioned, SkipCheckRevisioned,
+	revisioned,
+};
+use rust_decimal::prelude::*;
+use storekey::{BorrowDecode, Encode};
+use surrealdb_collections::{VecMap, bounded};
+pub use surrealdb_strand::Strand;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::expr;
+use crate::expr::Error;
+use crate::expr::kind::GeometryKind;
+use crate::expr::statements::info::InfoStructure;
+use crate::val::table_name_public::IntoPublicTable;
+use crate::val::teardown::{Discard, Node, discard_all, discard_node};
+
+pub mod array;
+pub mod bounded_duration;
+pub mod bytes;
+pub mod closure;
+pub mod convert_public;
+pub mod datetime;
+pub mod duration;
+pub mod evaluator;
+pub mod field_path;
+pub mod file;
+pub mod geometry;
+pub mod identical;
+pub mod key_encoding;
+pub mod key_read;
+pub mod number;
+pub mod object;
+pub mod range;
+pub mod record_id;
+pub mod regex;
+pub mod rnd;
+pub mod set;
+pub mod stored;
+pub mod table_name_public;
+mod teardown;
+mod temporal;
+mod temporal_ops;
+pub mod uuid;
+pub mod value;
+
+pub use surrealdb_strand::TableName;
+pub use teardown::discard_value;
+
+pub use self::array::Array;
+pub use self::bounded_duration::BoundedDuration;
+pub use self::bytes::Bytes;
+pub use self::closure::Closure;
+pub use self::convert_public::convert_public_value_to_internal;
+pub use self::datetime::Datetime;
+pub use self::duration::Duration;
+pub use self::evaluator::{BoxInvokeFut, ClosureEvaluator};
+pub use self::file::File;
+pub use self::geometry::Geometry;
+pub use self::identical::{same_object_except, same_record_id, same_record_key, same_value};
+pub use self::key_encoding::{
+	encode_datetime_second_prefix, try_array_key_prefix, try_encode_component,
+};
+pub use self::number::{Number, NumberKind, Wide};
+pub use self::object::Object;
+pub use self::range::Range;
+pub use self::record_id::{RecordAddress, RecordId, RecordIdKey, RecordIdKeyRange, RecordIdentity};
+pub use self::regex::Regex;
+pub use self::set::Set;
+pub use self::temporal::{Date, Interval, Time, Timestamp};
+pub use self::uuid::Uuid;
+pub use self::value::{CastError, CoerceError};
+
+/// Marker type for a different serialization format for value which does not encode type
+/// information which is not required for indexing.
+///
+/// A `Datetime` under this format is its seconds and nanoseconds since the
+/// Unix epoch, whose bytes sort chronologically. A b-tree index spells its
+/// indexed values under this format when its format-version stamp is
+/// `DATETIME_ORDER_FORMAT_VERSION` or later, and under [`IndexIdFormat`]
+/// below it; each index holds the one spelling its stamp selects.
+pub enum IndexFormat {}
+
+/// Marker type for the index format with a `Datetime` spelled as RFC 3339
+/// text, the text a record key spells it with.
+///
+/// It is [`IndexFormat`] for every value but a `Datetime`. It spells:
+///
+/// - a record id inside any index key: a [`RecordIdKey`] encoded under [`IndexFormat`] encodes its
+///   contents under this format, so a `Datetime` in an id is the same text in every index key,
+///   whatever the index's stamp;
+/// - the indexed values of a b-tree index stamped below `DATETIME_ORDER_FORMAT_VERSION`.
+pub enum IndexIdFormat {}
+
+/// Marker type for value conversions from Value::None
+#[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
+pub struct SqlNone;
+
+/// Marker type for value conversions from Value::Null
+#[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
+pub struct Null;
+
+// `revision(1)` is the legacy on-disk format (varint discriminant +
+// payload). `revision(2, optimised)` wraps each value in a
+// 1-byte tag (variant id + size class) so walkers can skip any value in
+// O(1) via the `u32_le` length prefix on varlen variants.
+//
+// Optimised enum walkers are "materialised" — they don't expose
+// `into_<variant>()` for streaming descent. Instead the macro emits
+// `<variant>_view()` accessors that return `OwnedVariantView<T>` carrying
+// a `Cow<'r, [u8]>` over the variant body. With the `WalkRevisioned:
+// BorrowedReader` bound the source is slice-backed, so the Cow is
+// borrowed — no `Vec<u8>` allocation per descent. The caller then
+// constructs a fresh walker on the borrowed bytes:
+//
+//     let view = walker.object_view()?;          // zero-alloc borrow
+//     let mut r: &[u8] = view.as_bytes();
+//     let inner = Object::walk_revisioned(&mut r)?; // streaming Object walker
+//
+// This recovers fully streaming descent at the Value level while picking
+// up the rev-2 wire compactness. Combined with rev-2 `Object`/`Array`/
+// `Set` indexed prologues, the planner hot path gets O(log n) Map
+// binary search, O(1) Array random access, and O(1) skip past any Value
+// — all zero-alloc through the descent chain.
+#[revisioned(
+	revision(1),
+	revision(2, optimised),
+	revision(3, optimised),
+	serialize = false,
+	deserialize = false,
+	skip = true,
+	walk = true
+)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
+pub enum Value {
+	#[default]
+	#[revision(size = "inline")]
+	None,
+	#[revision(size = "inline")]
+	Null,
+	#[revision(size = "fixed(1)")]
+	Bool(bool),
+	#[revision(size = "varlen")]
+	Number(Number),
+	#[revision(size = "varlen")]
+	String(Strand),
+	#[revision(size = "varlen")]
+	Duration(Duration),
+	#[revision(size = "varlen")]
+	Datetime(Datetime),
+	#[revision(size = "varlen")]
+	Uuid(Uuid),
+	#[revision(size = "varlen")]
+	Array(Array),
+	#[revision(size = "varlen")]
+	Set(Set),
+	#[revision(size = "varlen")]
+	Object(Object),
+	#[revision(size = "varlen")]
+	Geometry(Geometry),
+	#[revision(size = "varlen")]
+	Bytes(Bytes),
+	#[revision(size = "varlen")]
+	Table(TableName),
+	#[revision(size = "varlen")]
+	RecordId(RecordId),
+	#[revision(size = "varlen")]
+	File(File),
+	#[revision(size = "varlen")]
+	Regex(Regex),
+	#[revision(size = "varlen")]
+	Range(Box<Range>),
+	// Closure's manual `SerializeRevisioned` impl errors regardless of the
+	// envelope. Mark `varlen` for completeness; the macro requires every
+	// variant to declare a size class under `optimised`.
+	#[revision(size = "varlen")]
+	Closure(Box<Closure>),
+	#[revision(start = 3, size = "varlen")]
+	Date(Date),
+	#[revision(start = 3, size = "varlen")]
+	Time(Time),
+	#[revision(start = 3, size = "varlen")]
+	Timestamp(Timestamp),
+	#[revision(start = 3, size = "varlen")]
+	Interval(Interval),
+	// Add new variants here
+}
+
+/// Writes a value in the `optimised` envelope: the revision, the tag, and for a variable-length
+/// variant the `u32` payload length and the payload.
+///
+/// A variant that exists at revision 2 is written as revision 2, byte for byte as 3.x writes it,
+/// so a value with none of the newer variants stays readable by a 3.x release. `Date`, `Time`,
+/// `Timestamp` and `Interval` are written as revision 3, which a 3.x release refuses.
+impl SerializeRevisioned for Value {
+	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), RevisionError> {
+		fn header<W: std::io::Write>(
+			writer: &mut W,
+			revision: u16,
+			id: u8,
+			size: SizeClass,
+		) -> Result<(), RevisionError> {
+			revision.serialize_revisioned(writer)?;
+			write_tag(writer, Tag::new(id, size))
+		}
+		fn varlen<W: std::io::Write, T: SerializeRevisioned>(
+			writer: &mut W,
+			revision: u16,
+			id: u8,
+			payload: &T,
+		) -> Result<(), RevisionError> {
+			header(writer, revision, id, SizeClass::Varlen)?;
+			let mut scratch: Vec<u8> = Vec::new();
+			payload.serialize_revisioned(&mut scratch)?;
+			let len: u32 = scratch.len().try_into().map_err(|_| {
+				RevisionError::Serialize(
+					"optimised varlen variant payload exceeds u32::MAX bytes".into(),
+				)
+			})?;
+			writer.write_all(&len.to_le_bytes()).map_err(RevisionError::Io)?;
+			writer.write_all(&scratch).map_err(RevisionError::Io)
+		}
+		match self {
+			Value::None => header(writer, 2, 0, SizeClass::Inline),
+			Value::Null => header(writer, 2, 1, SizeClass::Inline),
+			Value::Bool(v) => {
+				header(writer, 2, 2, SizeClass::Fixed)?;
+				v.serialize_revisioned(writer)
+			}
+			Value::Number(v) => varlen(writer, 2, 3, v),
+			Value::String(v) => varlen(writer, 2, 4, v),
+			Value::Duration(v) => varlen(writer, 2, 5, v),
+			Value::Datetime(v) => varlen(writer, 2, 6, v),
+			Value::Uuid(v) => varlen(writer, 2, 7, v),
+			Value::Array(v) => varlen(writer, 2, 8, v),
+			Value::Set(v) => varlen(writer, 2, 9, v),
+			Value::Object(v) => varlen(writer, 2, 10, v),
+			Value::Geometry(v) => varlen(writer, 2, 11, v),
+			Value::Bytes(v) => varlen(writer, 2, 12, v),
+			Value::Table(v) => varlen(writer, 2, 13, v),
+			Value::RecordId(v) => varlen(writer, 2, 14, v),
+			Value::File(v) => varlen(writer, 2, 15, v),
+			Value::Regex(v) => varlen(writer, 2, 16, v),
+			Value::Range(v) => varlen(writer, 2, 17, v),
+			Value::Closure(v) => varlen(writer, 2, 18, v),
+			Value::Date(v) => varlen(writer, 3, 19, v),
+			Value::Time(v) => varlen(writer, 3, 20, v),
+			Value::Timestamp(v) => varlen(writer, 3, 21, v),
+			Value::Interval(v) => varlen(writer, 3, 22, v),
+		}
+	}
+}
+
+/// Reads exactly what the serializer above writes.
+///
+/// Revision 1 is a `u32` variant and the variant's value. Revisions 2 and 3 are an `optimised` tag:
+/// `None` and `Null` are inline, `Bool` is one fixed byte, and every other variant is a `u32`
+/// payload length and the payload, which is read through [`bounded::read_payload`], decoded from
+/// the slice and refused if bytes are left over. A tag with its reserved bit set, or with a size
+/// class that is not its variant's, is refused. A variant is refused in a revision before the one
+/// that introduced it: `Date`, `Time`, `Timestamp` and `Interval` start at revision 3. A closure
+/// is never stored and is always refused.
+impl DeserializeRevisioned for Value {
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, RevisionError> {
+		let revision = bounded::read_revision(reader, "Value", 3)?;
+		match revision {
+			1 => {
+				let variant = u32::deserialize_revisioned(reader)?;
+				if variant > LAST_VARIANT_REVISION_2 {
+					return Err(RevisionError::Deserialize(format!(
+						"Invalid discriminant `{variant}` for enum `Value` revision `1`"
+					)));
+				}
+				read_variant(variant, reader)
+			}
+			_ => {
+				let last_variant = if revision == 2 {
+					LAST_VARIANT_REVISION_2
+				} else {
+					LAST_VARIANT_REVISION_3
+				};
+				let tag = read_tag(reader)?;
+				if tag.is_extended() {
+					return Err(RevisionError::InvalidOptimisedTag(tag.0));
+				}
+				let variant = u32::from(tag.variant_id());
+				match (variant, tag.size_class()?) {
+					(0 | 1, SizeClass::Inline) | (2, SizeClass::Fixed) => {
+						read_variant(variant, reader)
+					}
+					(3..=22, SizeClass::Varlen) if variant <= last_variant => {
+						let payload = bounded::read_payload(reader)?;
+						let mut body = payload.as_slice();
+						let value = read_variant(variant, &mut body)?;
+						bounded::finish(body)?;
+						Ok(value)
+					}
+					_ => Err(RevisionError::Deserialize(format!(
+						"Invalid tag for enum `Value` revision `{revision}`"
+					))),
+				}
+			}
+		}
+	}
+}
+
+/// The last variant a revision 1 or 2 value can hold (`Closure`).
+const LAST_VARIANT_REVISION_2: u32 = 18;
+/// The last variant a revision 3 value can hold (`Interval`).
+const LAST_VARIANT_REVISION_3: u32 = 22;
+
+impl SkipCheckRevisioned for Value {
+	fn skip_check_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), RevisionError> {
+		Self::deserialize_revisioned(reader).map(drop)
+	}
+}
+
+/// Refuses a payload whose fields are outside the domain of its type.
+fn valid<T>(value: T, is_valid: bool, name: &str) -> Result<T, RevisionError> {
+	if is_valid {
+		Ok(value)
+	} else {
+		Err(RevisionError::Deserialize(format!("Out of range `{name}` in enum `Value`")))
+	}
+}
+
+/// Reads the value of the variant numbered `variant`, in declaration order.
+fn read_variant<R: std::io::Read>(variant: u32, reader: &mut R) -> Result<Value, RevisionError> {
+	Ok(match variant {
+		0 => Value::None,
+		1 => Value::Null,
+		2 => Value::Bool(bool::deserialize_revisioned(reader)?),
+		3 => Value::Number(Number::deserialize_revisioned(reader)?),
+		4 => Value::String(Strand::deserialize_revisioned(reader)?),
+		5 => Value::Duration(Duration::deserialize_revisioned(reader)?),
+		6 => Value::Datetime(Datetime::deserialize_revisioned(reader)?),
+		7 => Value::Uuid(Uuid::deserialize_revisioned(reader)?),
+		8 => Value::Array(Array::deserialize_revisioned(reader)?),
+		9 => Value::Set(Set::deserialize_revisioned(reader)?),
+		10 => Value::Object(Object::deserialize_revisioned(reader)?),
+		11 => Value::Geometry(Geometry::deserialize_revisioned(reader)?),
+		12 => Value::Bytes(Bytes::deserialize_revisioned(reader)?),
+		13 => Value::Table(TableName::deserialize_revisioned(reader)?),
+		14 => Value::RecordId(RecordId::deserialize_revisioned(reader)?),
+		15 => Value::File(File::deserialize_revisioned(reader)?),
+		16 => Value::Regex(Regex::deserialize_revisioned(reader)?),
+		17 => Value::Range(Box::<Range>::deserialize_revisioned(reader)?),
+		18 => Value::Closure(Box::<Closure>::deserialize_revisioned(reader)?),
+		19 => {
+			let v = Date::deserialize_revisioned(reader)?;
+			Value::Date(valid(v, v.is_valid(), "Date")?)
+		}
+		20 => {
+			let v = Time::deserialize_revisioned(reader)?;
+			Value::Time(valid(v, v.is_valid(), "Time")?)
+		}
+		21 => {
+			let v = Timestamp::deserialize_revisioned(reader)?;
+			Value::Timestamp(valid(v, v.is_valid(), "Timestamp")?)
+		}
+		22 => Value::Interval(Interval::deserialize_revisioned(reader)?),
+		x => {
+			return Err(RevisionError::Deserialize(format!(
+				"Invalid discriminant `{x}` for enum `Value`"
+			)));
+		}
+	})
+}
+
+impl Eq for Value {}
+
+impl Ord for Value {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.partial_cmp(other).unwrap_or(Ordering::Equal)
+	}
+}
+
+impl Value {
+	/// Whether a `HashMap`/`HashSet` **miss** on this value proves the collection
+	/// does not hold it — i.e. whether this value's [`Hash`](std::hash::Hash) is
+	/// consistent with its [`PartialEq`].
+	///
+	/// Variants whose hash/equality pairing is not established — [`Value::Geometry`]
+	/// (hashes `f64` coordinates), [`Value::Range`] and [`Value::Closure`] —
+	/// report `false`, at any depth, so callers take the conservative path. Every
+	/// other value hashes alike when equal, a [`Number`] of any kind included.
+	///
+	/// For `==` a probe is decisive as soon as *either* side reports `true`,
+	/// because `==` requires matching variants at every level: two values can
+	/// only hash apart while comparing equal if both carry such a variant in the
+	/// same position. So a caller judging `==` may trust a miss when this returns
+	/// `true` for the probed value, *or* when it returns `true` for every element
+	/// of the collection.
+	///
+	/// [`Value::equal`] — what `=`, `IN` and the `CONTAINS` family compare by —
+	/// is wider than `==` in one place: it matches a top-level [`Value::String`]
+	/// against a top-level [`Value::Regex`] by running the regex, and the two
+	/// hash apart. [`Value::Regex`] reports `false` for that reason, although its
+	/// own hash and `==` agree. A caller judging `equal` may trust a miss when
+	/// this returns `true` on *both* sides. The either-side rule does not carry
+	/// over, since a string reports `true`: it would trust a regex's miss against
+	/// a set of the strings it matches, unless the caller rules that pairing out
+	/// itself.
+	pub fn hash_agrees_with_eq(&self) -> bool {
+		match self {
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Bytes(_)
+			| Value::Number(_)
+			| Value::Table(_)
+			| Value::File(_) => true,
+			Value::Geometry(_) | Value::Regex(_) | Value::Range(_) | Value::Closure(_) => false,
+			Value::Array(a) => a.iter().all(Value::hash_agrees_with_eq),
+			Value::Set(s) => s.iter().all(Value::hash_agrees_with_eq),
+			// An `Object`'s equality covers its keys too, but those are `Strand`
+			// (hash is `as_str().hash`), so only the values can disagree.
+			Value::Object(o) => o.values().all(Value::hash_agrees_with_eq),
+			Value::RecordId(r) => r.key.hash_agrees_with_eq(),
+		}
+	}
+
+	/// Whether [`IndexFormat`] spells this value as the storage format does. The
+	/// index format drops a number's kind (`1`, `1f` and `1dec` share bytes),
+	/// so a value holding a [`Number`] at any depth reports `false`, as do the
+	/// variants whose spelling under both formats is not established
+	/// ([`Value::Geometry`], [`Value::Regex`], [`Value::Range`],
+	/// [`Value::Closure`]). `true` proves the two spellings are one; `false`
+	/// leaves the caller to compare them.
+	pub fn index_format_spells_alike(&self) -> bool {
+		match self {
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::File(_) => true,
+			Value::Number(_)
+			| Value::Geometry(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => false,
+			Value::Array(a) => a.iter().all(Value::index_format_spells_alike),
+			Value::Set(s) => s.iter().all(Value::index_format_spells_alike),
+			Value::Object(o) => o.values().all(Value::index_format_spells_alike),
+			Value::RecordId(r) => r.key.index_format_spells_alike(),
+		}
+	}
+
+	/// Whether [`Value::cmp`] agrees with [`Value::equal`] for this value
+	/// against any other value that also agrees: `a.equal(b) == (a.cmp(b) ==
+	/// Equal)`. It holds for exactly the values whose hash agrees with their
+	/// equality ([`Value::hash_agrees_with_eq`]). A value for which it does not
+	/// must be compared with `equal`: a regex, which `equal` matches against
+	/// strings; a closure, which orders equal to every other closure while `==`
+	/// compares what it holds; a range, whose order compares its bounds by
+	/// [`Value::cmp`] rather than by `equal`; and a geometry, totally ordered,
+	/// but whose order equates NaN coordinates that `equal` does not.
+	///
+	/// A [`Number`] agrees at any depth: `Number`'s equality and order both
+	/// treat `1`, `1.0` and `1dec` as one value, `-0.0` as `0.0`, every NaN as
+	/// one value whatever its sign and payload, and a float and a decimal as one
+	/// value only when they are the same number. `NONE` and `NULL` agree, since
+	/// they are distinct variants that order apart.
+	pub fn ord_agrees_with_equal(&self) -> bool {
+		self.hash_agrees_with_eq()
+	}
+
+	pub const NONE: Self = Self::None;
+
+	// -----------------------------------
+	// Initial record value
+	// -----------------------------------
+
+	/// Create an empty Object Value
+	pub fn empty_object() -> Self {
+		Value::Object(Object::default())
+	}
+
+	// -----------------------------------
+	// Simple value detection
+	// -----------------------------------
+
+	/// Check if this Value is not NONE
+	pub fn is_some(&self) -> bool {
+		!matches!(self, Value::None)
+	}
+
+	/// Check if this Value is NONE or NULL
+	pub fn is_nullish(&self) -> bool {
+		matches!(self, Value::None | Value::Null)
+	}
+
+	/// Check if this Value is NONE
+	pub fn is_empty_array(&self) -> bool {
+		if let Value::Array(v) = self {
+			v.is_empty()
+		} else {
+			false
+		}
+	}
+
+	/// Check if this Value is truthy
+	pub fn is_truthy(&self) -> bool {
+		match self {
+			Value::Bool(v) => *v,
+			Value::Uuid(_)
+			| Value::RecordId(_)
+			| Value::Geometry(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_) => true,
+			Value::Bytes(v) => !v.is_empty(),
+			Value::Array(v) => !v.is_empty(),
+			Value::Set(v) => !v.is_empty(),
+			Value::Object(v) => !v.is_empty(),
+			Value::String(v) => !v.is_empty(),
+			Value::Number(v) => v.is_truthy(),
+			Value::Duration(v) => v.as_nanos() > 0,
+			Value::None
+			| Value::Null
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => false,
+		}
+	}
+
+	/// Check if this Value is an int Number
+	pub fn is_int(&self) -> bool {
+		matches!(self, Value::Number(Number::Int(_)))
+	}
+
+	/// Check if this Value is a float Number
+	pub fn is_float(&self) -> bool {
+		matches!(self, Value::Number(Number::Float(_)))
+	}
+
+	/// Check if this Value is a decimal Number
+	pub fn is_decimal(&self) -> bool {
+		matches!(self, Value::Number(Number::Decimal(_)))
+	}
+
+	/// Check if this Value is a RecordId of a specific type
+	pub fn is_record_type(&self, types: &[TableName]) -> bool {
+		self.is_record_and(|v| v.is_table_type(types))
+	}
+
+	/// Check if this Value is a Geometry of a specific type
+	pub fn is_geometry_type(&self, types: &[GeometryKind]) -> bool {
+		self.is_geometry_and(|v| v.is_geometry_type(types))
+	}
+
+	// -----------------------------------
+	// Simple conversion of value
+	// -----------------------------------
+
+	/// Converts this Value into an unquoted String
+	pub fn into_raw_string(self) -> String {
+		match self {
+			Value::String(v) => v.into_string(),
+			Value::Uuid(v) => v.to_string(),
+			Value::Datetime(v) => v.to_string(),
+			Value::Date(v) => v.to_string(),
+			Value::Time(v) => v.to_string(),
+			Value::Timestamp(v) => v.to_string(),
+			Value::Interval(v) => v.to_string(),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => self.to_sql(),
+		}
+	}
+
+	/// Converts this Value into an unquoted String
+	pub fn to_raw_string(&self) -> String {
+		match self {
+			Value::String(v) => v.as_str().to_owned(),
+			Value::Uuid(v) => v.to_string(),
+			Value::Datetime(v) => v.to_string(),
+			Value::Date(v) => v.to_string(),
+			Value::Time(v) => v.to_string(),
+			Value::Timestamp(v) => v.to_string(),
+			Value::Interval(v) => v.to_string(),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => self.to_sql(),
+		}
+	}
+
+	/// Returns the surql representation of the kind of the value as a string.
+	///
+	/// # Warning
+	/// This function is not fully implement for all variants, make sure you
+	/// don't accidentally use it where it can return an invalid value.
+	pub fn kind_of(&self) -> &'static str {
+		match self {
+			Self::None => "none",
+			Self::Null => "null",
+			Self::Bool(_) => "bool",
+			Self::Uuid(_) => "uuid",
+			Self::Array(_) => "array",
+			Self::Set(_) => "set",
+			Self::Object(_) => "object",
+			Self::String(_) => "string",
+			Self::Duration(_) => "duration",
+			Self::Datetime(_) => "datetime",
+			Self::Date(_) => "date",
+			Self::Time(_) => "time",
+			Self::Timestamp(_) => "timestamp",
+			Self::Interval(_) => "interval",
+			Self::Closure(_) => "function",
+			Self::Number(Number::Int(_)) => "int",
+			Self::Number(Number::Float(_)) => "float",
+			Self::Number(Number::Decimal(_)) => "decimal",
+			Self::Number(Number::BigDecimal(_)) => "bigdecimal",
+			Self::Number(Number::I8(_)) => "i8",
+			Self::Number(Number::U8(_)) => "u8",
+			Self::Number(Number::I16(_)) => "i16",
+			Self::Number(Number::U16(_)) => "u16",
+			Self::Number(Number::I32(_)) => "i32",
+			Self::Number(Number::U32(_)) => "u32",
+			Self::Number(Number::U64(_)) => "u64",
+			Self::Number(Number::F16(_)) => "f16",
+			Self::Number(Number::F32(_)) => "f32",
+			Self::Geometry(Geometry::Point(_)) => "geometry<point>",
+			Self::Geometry(Geometry::Line(_)) => "geometry<line>",
+			Self::Geometry(Geometry::Polygon(_)) => "geometry<polygon>",
+			Self::Geometry(Geometry::MultiPoint(_)) => "geometry<multipoint>",
+			Self::Geometry(Geometry::MultiLine(_)) => "geometry<multiline>",
+			Self::Geometry(Geometry::MultiPolygon(_)) => "geometry<multipolygon>",
+			Self::Geometry(Geometry::Collection(_)) => "geometry<collection>",
+			Self::Regex(_) => "regex",
+			Self::File(_) => "file",
+			Self::Bytes(_) => "bytes",
+			Self::Range(_) => "range",
+			Self::RecordId(_) => "record",
+			Self::Table(_) => "table",
+		}
+	}
+
+	// -----------------------------------
+	// Value operations
+	// -----------------------------------
+
+	/// Check if this Value is equal to another Value
+	pub fn equal(&self, other: &Value) -> bool {
+		match self {
+			Value::None => other.is_none(),
+			Value::Null => other.is_null(),
+			Value::Bool(v) => other.is_bool_and(|w| v == w),
+			Value::Uuid(v) => other.is_uuid_and(|w| v == w),
+			Value::RecordId(v) => other.is_record_and(|w| v == w),
+			Value::String(v) => {
+				other.is_strand_and(|w| v == w)
+					|| other.is_regex_and(|w| w.inner().is_match(v.as_str()))
+			}
+			Value::Regex(v) => {
+				other.is_regex_and(|w| v == w)
+					|| other.is_strand_and(|w| v.inner().is_match(w.as_str()))
+			}
+			Value::Array(v) => other.is_array_and(|w| v == w),
+			Value::Set(v) => other.is_set_and(|w| v == w),
+			Value::Object(v) => other.is_object_and(|w| v == w),
+			Value::Number(v) => other.is_number_and(|w| v == w),
+			Value::Geometry(v) => other.is_geometry_and(|w| v == w),
+			Value::Duration(v) => other.is_duration_and(|w| v == w),
+			Value::Datetime(v) => other.is_datetime_and(|w| v == w),
+			Value::Date(v) => matches!(other, Value::Date(w) if v == w),
+			Value::Time(v) => matches!(other, Value::Time(w) if v == w),
+			Value::Timestamp(v) => matches!(other, Value::Timestamp(w) if v == w),
+			Value::Interval(v) => matches!(other, Value::Interval(w) if v == w),
+			Value::Bytes(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Closure(_) => self == other,
+		}
+	}
+
+	/// Check if all Values in an Array are equal to another Value
+	pub fn all_equal(&self, other: &Value) -> bool {
+		match self {
+			Value::Array(v) => v.iter().all(|v| v.equal(other)),
+			Value::Set(v) => v.iter().all(|v| v.equal(other)),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => self.equal(other),
+		}
+	}
+
+	/// Check if any Values in an Array are equal to another Value
+	pub fn any_equal(&self, other: &Value) -> bool {
+		match self {
+			Value::Array(v) => v.iter().any(|v| v.equal(other)),
+			Value::Set(v) => v.iter().any(|v| v.equal(other)),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => self.equal(other),
+		}
+	}
+
+	/// The geometry a geometry operator reads from this value: the value
+	/// itself, or the geometry an object that is exactly GeoJSON describes
+	/// ([`Geometry::try_from_object`]). That is the form a geometry takes as
+	/// data, such as a query parameter, so `$point INSIDE area` answers the
+	/// same whether `$point` was written as a literal or sent by a client.
+	pub fn geometry_operand(&self) -> Option<Cow<'_, Geometry>> {
+		match self {
+			Value::Geometry(v) => Some(Cow::Borrowed(v)),
+			Value::Object(v) => Geometry::try_from_object(v).map(Cow::Owned),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => None,
+		}
+	}
+
+	/// Whether this value and `other` are both geometries, or GeoJSON objects
+	/// describing them, and this one contains the other.
+	#[cfg(feature = "geo")]
+	fn geometry_contains(&self, other: &Value) -> bool {
+		self.geometry_operand().zip(other.geometry_operand()).is_some_and(|(v, w)| v.contains(&w))
+	}
+
+	/// Check if this Value contains another Value. Without the `geo` feature
+	/// no geometry contains anything; the operators that reach this fail first.
+	pub fn contains(&self, other: &Value) -> bool {
+		match self {
+			Value::Array(v) => v.iter().any(|v| v.equal(other)),
+			Value::Set(v) => v.contains(other),
+			Value::Uuid(v) => other.is_strand_and(|w| v.to_string().contains(w.as_str())),
+			Value::String(v) => other.is_strand_and(|w| v.contains(w.as_str())),
+			#[cfg(feature = "geo")]
+			Value::Geometry(_) => self.geometry_contains(other),
+			#[cfg(not(feature = "geo"))]
+			Value::Geometry(_) => false,
+			// A string is a key. Anything else is a geometry, if the object is GeoJSON.
+			Value::Object(v) => match other {
+				Value::String(w) => v.contains_key(w.as_str()),
+				#[cfg(feature = "geo")]
+				Value::Object(_) | Value::Geometry(_) => self.geometry_contains(other),
+				#[cfg(not(feature = "geo"))]
+				Value::Object(_) | Value::Geometry(_) => false,
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Set(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => false,
+			},
+			Value::Range(r) => {
+				let beg = match &r.start {
+					Bound::Unbounded => true,
+					Bound::Included(beg) => beg.le(other),
+					Bound::Excluded(beg) => beg.lt(other),
+				};
+
+				beg && match &r.end {
+					Bound::Unbounded => true,
+					Bound::Included(end) => end.ge(other),
+					Bound::Excluded(end) => end.gt(other),
+				}
+			}
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Closure(_) => false,
+		}
+	}
+
+	fn collection_or_geometry_contains(&self, elem: &Value) -> bool {
+		match self {
+			Value::Array(w) => w.iter().any(|w| elem.equal(w)),
+			Value::Set(w) => w.iter().any(|w| elem.equal(w)),
+			Value::Geometry(_) => self.contains(elem),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Object(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => false,
+		}
+	}
+
+	/// An object that is exactly GeoJSON, as the geometry it describes. A
+	/// container is read through this once, before its elements are checked,
+	/// rather than once per element.
+	#[cfg(feature = "geo")]
+	fn geojson_as_geometry(&self) -> Option<Value> {
+		let Value::Object(v) = self else {
+			return None;
+		};
+		Geometry::try_from_object(v).map(Value::Geometry)
+	}
+
+	/// Check if all Values in an Array, Set or String contain another Value
+	pub fn contains_all(&self, other: &Value) -> bool {
+		#[cfg(feature = "geo")]
+		if let Some(geometry) = self.geojson_as_geometry() {
+			return geometry.contains_all(other);
+		}
+		match other {
+			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+				// confirmed as strand so all return false is unreachable
+				let Value::String(this) = self else {
+					return false;
+				};
+				v.iter().all(|s| {
+					let Value::String(other_string) = s else {
+						return false;
+					};
+					this.contains(&**other_string)
+				})
+			}
+			Value::Set(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+				// confirmed as strand so all return false is unreachable
+				let Value::String(this) = self else {
+					return false;
+				};
+				v.iter().all(|s| {
+					let Value::String(other_string) = s else {
+						return false;
+					};
+					this.contains(&**other_string)
+				})
+			}
+			Value::Array(v) => v.iter().all(|v| self.collection_or_geometry_contains(v)),
+			Value::Set(v) => v.iter().all(|v| self.collection_or_geometry_contains(v)),
+			Value::String(other_strand) => self.is_strand_and(|s| s.contains(&**other_strand)),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => false,
+		}
+	}
+
+	/// Check if any Values in an Array, Set or String contain another Value
+	pub fn contains_any(&self, other: &Value) -> bool {
+		#[cfg(feature = "geo")]
+		if let Some(geometry) = self.geojson_as_geometry() {
+			return geometry.contains_any(other);
+		}
+		match other {
+			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+				// confirmed as strand so all return false is unreachable
+				let Value::String(this) = self else {
+					return false;
+				};
+				v.iter().any(|s| {
+					let Value::String(other_string) = s else {
+						return false;
+					};
+					this.contains(&**other_string)
+				})
+			}
+			Value::Set(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+				// confirmed as strand so all return false is unreachable
+				let Value::String(this) = self else {
+					return false;
+				};
+				v.iter().any(|s| {
+					let Value::String(other_string) = s else {
+						return false;
+					};
+					this.contains(&**other_string)
+				})
+			}
+			Value::Array(v) => v.iter().any(|v| self.collection_or_geometry_contains(v)),
+			Value::Set(v) => v.iter().any(|v| self.collection_or_geometry_contains(v)),
+			Value::String(other_strand) => self.is_strand_and(|s| s.contains(&**other_strand)),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => false,
+		}
+	}
+
+	/// Check if this Geometry intersects another Value, either of them possibly
+	/// a GeoJSON object. Without the `geo` feature no geometry intersects
+	/// anything; the operators that reach this fail first.
+	pub fn intersects(&self, other: &Value) -> bool {
+		#[cfg(feature = "geo")]
+		if let (Some(v), Some(w)) = (self.geometry_operand(), other.geometry_operand()) {
+			return v.intersects(&w);
+		}
+		#[cfg(not(feature = "geo"))]
+		let _ = other;
+		false
+	}
+
+	// -----------------------------------
+	// Sorting operations
+	// -----------------------------------
+
+	/// Compare this Value to another Value lexicographically
+	#[cfg(feature = "collate")]
+	pub fn lexical_cmp(&self, other: &Value) -> Option<Ordering> {
+		match (self, other) {
+			(Value::String(a), Value::String(b)) => Some(lexicmp::lexical_cmp(a, b)),
+			_ => self.partial_cmp(other),
+		}
+	}
+
+	/// Compare this Value to another Value using natural numerical comparison
+	pub fn natural_cmp(&self, other: &Value) -> Option<Ordering> {
+		match (self, other) {
+			(Value::String(a), Value::String(b)) => Some(lexicmp::natural_cmp(a, b)),
+			_ => self.partial_cmp(other),
+		}
+	}
+
+	/// Compare this Value to another Value lexicographically and using natural
+	/// numerical comparison
+	#[cfg(feature = "collate")]
+	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
+		match (self, other) {
+			(Value::String(a), Value::String(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
+			_ => self.partial_cmp(other),
+		}
+	}
+
+	/// Turns this value into a literal evaluating to the same value.
+	pub fn into_literal(self) -> expr::Expr {
+		match self {
+			Value::None => expr::Expr::Literal(expr::Literal::None),
+			Value::Null => expr::Expr::Literal(expr::Literal::Null),
+			Value::Bool(x) => expr::Expr::Literal(expr::Literal::Bool(x)),
+			Value::Number(Number::Int(i)) => expr::Expr::Literal(expr::Literal::Integer(i)),
+			Value::Number(Number::Float(f)) => expr::Expr::Literal(expr::Literal::Float(f)),
+			Value::Number(Number::Decimal(d)) => expr::Expr::Literal(expr::Literal::Decimal(d)),
+			Value::Number(Number::BigDecimal(b)) => {
+				expr::Expr::Literal(expr::Literal::BigDecimal(b))
+			}
+			Value::Number(Number::I8(i)) => expr::Expr::Literal(expr::Literal::I8(i)),
+			Value::Number(Number::U8(u)) => expr::Expr::Literal(expr::Literal::U8(u)),
+			Value::Number(Number::I16(i)) => expr::Expr::Literal(expr::Literal::I16(i)),
+			Value::Number(Number::U16(u)) => expr::Expr::Literal(expr::Literal::U16(u)),
+			Value::Number(Number::I32(i)) => expr::Expr::Literal(expr::Literal::I32(i)),
+			Value::Number(Number::U32(u)) => expr::Expr::Literal(expr::Literal::U32(u)),
+			Value::Number(Number::U64(u)) => expr::Expr::Literal(expr::Literal::U64(u)),
+			Value::Number(Number::F16(f)) => expr::Expr::Literal(expr::Literal::F16(f)),
+			Value::Number(Number::F32(f)) => expr::Expr::Literal(expr::Literal::F32(f)),
+			Value::String(strand) => expr::Expr::Literal(expr::Literal::String(strand)),
+			Value::Duration(duration) => expr::Expr::Literal(expr::Literal::Duration(duration)),
+			Value::Datetime(datetime) => expr::Expr::Literal(expr::Literal::Datetime(datetime)),
+			Value::Date(v) => expr::Expr::Literal(expr::Literal::Date(v)),
+			Value::Time(v) => expr::Expr::Literal(expr::Literal::Time(v)),
+			Value::Timestamp(v) => expr::Expr::Literal(expr::Literal::Timestamp(v)),
+			Value::Interval(v) => expr::Expr::Literal(expr::Literal::Interval(v)),
+			Value::Uuid(uuid) => expr::Expr::Literal(expr::Literal::Uuid(uuid)),
+			Value::Array(array) => expr::Expr::Literal(expr::Literal::Array(array.into_literal())),
+			Value::Set(set) => {
+				// Convert set to array for literal representation since there's no set literal
+				// syntax
+				expr::Expr::Literal(expr::Literal::Array(set.into_literal()))
+			}
+			Value::Object(object) => {
+				expr::Expr::Literal(expr::Literal::Object(object.into_literal()))
+			}
+			Value::Geometry(geometry) => expr::Expr::Literal(expr::Literal::Geometry(geometry)),
+			Value::Bytes(bytes) => expr::Expr::Literal(expr::Literal::Bytes(bytes)),
+			Value::RecordId(record_id) => {
+				expr::Expr::Literal(expr::Literal::RecordId(record_id.into_literal()))
+			}
+			Value::Regex(regex) => expr::Expr::Literal(expr::Literal::Regex(regex)),
+			Value::File(file) => expr::Expr::Literal(expr::Literal::File(file)),
+			Value::Closure(closure) => closure.into_expr(),
+			Value::Range(range) => range.into_literal(),
+			Value::Table(t) => expr::Expr::Table(t),
+		}
+	}
+}
+
+impl ToSql for Value {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match self {
+			Value::None => f.push_str("NONE"),
+			Value::Null => f.push_str("NULL"),
+			Value::Bool(v) => v.fmt_sql(f, sql_fmt),
+			Value::Number(v) => v.fmt_sql(f, sql_fmt),
+			Value::String(v) => write_sql!(f, sql_fmt, "{}", QuoteStr(v.as_str())),
+			Value::Duration(v) => v.fmt_sql(f, sql_fmt),
+			Value::Datetime(v) => v.fmt_sql(f, sql_fmt),
+			Value::Date(v) => v.fmt_sql(f, sql_fmt),
+			Value::Time(v) => v.fmt_sql(f, sql_fmt),
+			Value::Timestamp(v) => v.fmt_sql(f, sql_fmt),
+			Value::Interval(v) => v.fmt_sql(f, sql_fmt),
+			Value::Uuid(v) => v.fmt_sql(f, sql_fmt),
+			Value::Array(v) => v.fmt_sql(f, sql_fmt),
+			Value::Set(v) => v.fmt_sql(f, sql_fmt),
+			Value::Object(v) => v.fmt_sql(f, sql_fmt),
+			Value::Geometry(v) => v.fmt_sql(f, sql_fmt),
+			Value::Bytes(v) => v.fmt_sql(f, sql_fmt),
+			// SurrealQL has no literal for a table value: a bare name parses as a
+			// field or identifier, so the value is written as the function that builds
+			// it, which reads back as the same table.
+			Value::Table(v) => write_sql!(f, sql_fmt, "type::table({})", QuoteStr(v.as_str())),
+			Value::RecordId(v) => v.fmt_sql(f, sql_fmt),
+			Value::File(v) => v.fmt_sql(f, sql_fmt),
+			Value::Regex(v) => v.fmt_sql(f, sql_fmt),
+			Value::Range(v) => v.fmt_sql(f, sql_fmt),
+			Value::Closure(v) => v.fmt_sql(f, sql_fmt),
+		}
+	}
+}
+
+impl InfoStructure for Value {
+	fn structure(self) -> Value {
+		self.to_sql().into()
+	}
+}
+
+// ------------------------------
+
+pub trait TryAdd<Rhs = Self> {
+	type Output;
+	fn try_add(self, rhs: Rhs) -> Result<Self::Output>;
+}
+
+use std::ops::Add;
+
+impl TryAdd for Value {
+	type Output = Self;
+	fn try_add(self, other: Self) -> Result<Self> {
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
+			(Self::String(v), Self::String(w)) => {
+				let mut s = String::with_capacity(v.len() + w.len());
+				s.push_str(v.as_str());
+				s.push_str(w.as_str());
+				Value::String(s.into())
+			}
+			(Self::Datetime(v), Self::Duration(_)) | (Self::Duration(_), Self::Datetime(v))
+				if v.is_infinite() =>
+			{
+				Self::Datetime(v)
+			}
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
+			(Self::Array(v), Self::Array(w)) => Self::Array(v.concat(w)),
+			(Self::Array(v), Self::Set(w)) => Self::Array(v.concat_set(w)),
+
+			(Self::Set(mut v), Self::Set(w)) => {
+				v.0.extend(w.0);
+				Self::Set(v)
+			}
+			(Self::Set(mut v), Self::Array(w)) => {
+				v.0.extend(w.0);
+				Self::Set(v)
+			}
+			(Self::Object(v), Self::Object(w)) => Self::Object(v.add(w)),
+			(v, w) => {
+				if let Some(r) = temporal_ops::add(&v, &w) {
+					return r;
+				}
+				bail!(Error::TryAdd(v.kind_of().to_owned(), w.kind_of().to_owned()))
+			}
+		})
+	}
+}
+
+// ------------------------------
+
+pub trait TrySub<Rhs = Self> {
+	type Output;
+	fn try_sub(self, v: Rhs) -> Result<Self::Output>;
+}
+
+impl TrySub for Value {
+	type Output = Self;
+	fn try_sub(self, other: Self) -> Result<Self> {
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
+			(Self::Datetime(v), Self::Datetime(w)) if v.is_infinite() || w.is_infinite() => {
+				bail!(Error::ArithmeticOverflow(format!("{v} - {w}")))
+			}
+			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v.try_sub(w)?),
+			(Self::Datetime(v), Self::Duration(_)) if v.is_infinite() => Self::Datetime(v),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_sub(v)?),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),
+			(Self::Array(v), Self::Array(x)) => Self::from(v.remove_all(&x.0)),
+			(Self::Array(v), Self::Set(x)) => Self::from(v.remove_all_set(&x)),
+			(Self::Set(mut v), Self::Array(x)) => {
+				for item in x.0 {
+					v.remove(&item);
+				}
+				Self::from(v)
+			}
+			(Self::Set(mut v), Self::Set(x)) => {
+				for item in x {
+					v.remove(&item);
+				}
+				Self::from(v)
+			}
+			(v, w) => {
+				if let Some(r) = temporal_ops::sub(&v, &w) {
+					return r;
+				}
+				bail!(Error::TrySub(v.kind_of().to_owned(), w.kind_of().to_owned()))
+			}
+		})
+	}
+}
+
+// ------------------------------
+
+pub trait TryMul<Rhs = Self> {
+	type Output;
+	fn try_mul(self, v: Self) -> Result<Self::Output>;
+}
+
+impl TryMul for Value {
+	type Output = Self;
+	fn try_mul(self, other: Self) -> Result<Self> {
+		match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Ok(Self::Number(v.try_mul(w)?)),
+			(Self::Duration(d), Self::Number(n)) => match n.wide() {
+				crate::val::number::Wide::Int(i) => {
+					if i < 0 {
+						bail!("Cannot multiply a duration with a negative number");
+					}
+
+					let overflow = || Error::ArithmeticOverflow(format!("{d} * {n}"));
+					let nanos = d.0.as_nanos().checked_mul(i as u128).ok_or_else(overflow)?;
+					let secs = u64::try_from(nanos / 1_000_000_000).map_err(|_| overflow())?;
+					let res = StdDuration::new(secs, (nanos % 1_000_000_000) as u32);
+
+					Ok(Value::Duration(Duration(res)))
+				}
+				crate::val::number::Wide::BigDecimal(_) => {
+					bail!("A duration cannot be multiplied or divided by a bigdecimal");
+				}
+				crate::val::number::Wide::Float(f) => {
+					if !(f.is_finite() && f >= 0.0) {
+						bail!("Cannot multiply a duration with a non-finite or negative number");
+					}
+
+					let secs = d.0.as_secs_f64() * f;
+					let res = StdDuration::try_from_secs_f64(secs)
+						.map_err(|_| Error::ArithmeticOverflow(format!("{d} * {n}")))?;
+
+					Ok(Value::Duration(Duration(res)))
+				}
+				crate::val::number::Wide::Decimal(dec) => {
+					if !dec.is_sign_positive() && !dec.is_zero() {
+						bail!("Cannot multiply a duration with a negative number");
+					}
+
+					let nanos: Decimal = d.nanos().into();
+					let scaled = nanos
+						.checked_mul(dec)
+						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} * {dec}")))?
+						.trunc();
+
+					let scaled_nanos: u128 = scaled
+						.to_u128()
+						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} * {dec}")))?;
+
+					let secs: u64 = (scaled_nanos / 1_000_000_000)
+						.try_into()
+						.map_err(|_| Error::ArithmeticOverflow(format!("{d} * {dec}")))?;
+
+					let subsec_nanos: u32 = (scaled_nanos % 1_000_000_000).try_into()?;
+
+					Ok(Value::Duration(Duration(StdDuration::new(secs, subsec_nanos))))
+				}
+			},
+			(v, w) => {
+				if let Some(r) = temporal_ops::mul(&v, &w) {
+					return r;
+				}
+				bail!(Error::TryMul(v.kind_of().to_owned(), w.kind_of().to_owned()))
+			}
+		}
+	}
+}
+
+// ------------------------------
+
+pub trait TryDiv<Rhs = Self> {
+	type Output;
+	fn try_div(self, v: Self) -> Result<Self::Output>;
+}
+
+impl TryDiv for Value {
+	type Output = Self;
+	fn try_div(self, other: Self) -> Result<Self> {
+		match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Ok(Self::Number(v.try_div(w)?)),
+			(Self::Duration(d), Self::Number(n)) => match n.wide() {
+				crate::val::number::Wide::Int(i) => {
+					if i <= 0 {
+						bail!("A duration can only be divided by a value greater than 0.");
+					}
+
+					let denom: u32 = i.try_into()?;
+					let res = d.0 / denom;
+					Ok(Value::Duration(Duration(res)))
+				}
+				crate::val::number::Wide::BigDecimal(_) => {
+					bail!("A duration cannot be multiplied or divided by a bigdecimal");
+				}
+				crate::val::number::Wide::Float(f) => {
+					if !(f.is_finite() && f > 0.0) {
+						bail!("A duration can only be divided by a finite value greater than 0.");
+					}
+					let secs = d.as_secs_f64() / f;
+
+					let res = StdDuration::try_from_secs_f64(secs)?;
+					Ok(Value::Duration(Duration(res)))
+				}
+				crate::val::number::Wide::Decimal(dec) => {
+					if !dec.is_sign_positive() || dec.is_zero() {
+						bail!("A duration can only be divided by a value greater than 0.");
+					}
+
+					let nanos: Decimal = d.nanos().into();
+
+					let divided = nanos
+						.checked_div(dec)
+						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} / {dec}")))?
+						.trunc();
+
+					let divided_nanos: u128 = divided
+						.to_u128()
+						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} / {dec}")))?;
+
+					let secs: u64 = (divided_nanos / 1_000_000_000)
+						.try_into()
+						.map_err(|_| Error::ArithmeticOverflow(format!("{d} / {dec}")))?;
+
+					let subsec_nanos: u32 = (divided_nanos % 1_000_000_000).try_into()?;
+
+					Ok(Value::Duration(Duration(StdDuration::new(secs, subsec_nanos))))
+				}
+			},
+
+			(v, w) => {
+				if let Some(r) = temporal_ops::div(&v, &w) {
+					return r;
+				}
+				bail!(Error::TryDiv(v.kind_of().to_owned(), w.kind_of().to_owned()))
+			}
+		}
+	}
+}
+
+// ------------------------------
+
+pub trait TryFloatDiv<Rhs = Self> {
+	type Output;
+	fn try_float_div(self, v: Self) -> Result<Self::Output>;
+}
+
+impl TryFloatDiv for Value {
+	type Output = Self;
+	fn try_float_div(self, other: Self) -> Result<Self::Output> {
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_float_div(w)?),
+			(v, w) => bail!(Error::TryDiv(v.kind_of().to_owned(), w.kind_of().to_owned())),
+		})
+	}
+}
+
+// ------------------------------
+
+pub trait TryRem<Rhs = Self> {
+	type Output;
+	fn try_rem(self, v: Self) -> Result<Self::Output>;
+}
+
+impl TryRem for Value {
+	type Output = Self;
+	fn try_rem(self, other: Self) -> Result<Self> {
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_rem(w)?),
+			(v, w) => bail!(Error::TryRem(v.kind_of().to_owned(), w.kind_of().to_owned())),
+		})
+	}
+}
+
+// ------------------------------
+
+pub trait TryPow<Rhs = Self> {
+	type Output;
+	fn try_pow(self, v: Self) -> Result<Self::Output>;
+}
+
+impl TryPow for Value {
+	type Output = Self;
+	fn try_pow(self, other: Self) -> Result<Self> {
+		Ok(match (self, other) {
+			(Value::Number(v), Value::Number(w)) => Self::Number(v.try_pow(w)?),
+			(v, w) => bail!(Error::TryPow(v.kind_of().to_owned(), w.kind_of().to_owned())),
+		})
+	}
+}
+
+// ------------------------------
+
+pub trait TryNeg<Rhs = Self> {
+	type Output;
+	fn try_neg(self) -> Result<Self::Output>;
+}
+
+impl TryNeg for Value {
+	type Output = Self;
+	fn try_neg(self) -> Result<Self> {
+		if let Self::Number(n) = self {
+			Ok(Self::Number(n.try_neg()?))
+		} else if let Some(r) = temporal_ops::neg(&self) {
+			r
+		} else {
+			bail!(Error::TryNeg(self.kind_of().to_owned()))
+		}
+	}
+}
+
+// Conversion methods.
+
+/// Macro implementing conversion methods for the variants of the value enum.
+macro_rules! subtypes {
+	($($name:ident$( ( $($t:tt)* ) )? => ($is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident)),*$(,)?) => {
+		impl Value {
+			$(
+				subtypes!{@method $name $( ($($t)*) )? => $is,$is_and,$as,$as_mut,$into,$try_into}
+			)*
+		}
+
+			$(
+				subtypes!{@from $name $( ($($t)*) )? => $is,$is_and,$as,$as_mut,$into,$try_into}
+			)*
+
+	};
+
+	(@pat $name:ident($t:ty)) => {
+		Value::$name(_)
+	};
+
+	(@pat $name:ident) => {
+		Value::$name
+	};
+
+	(@method $name:ident($t:ty) => $is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident) => {
+		#[doc = concat!("Check if the value is a [`",stringify!($name),"`]")]
+		#[allow(dead_code)]
+		pub fn $is(&self) -> bool{
+			matches!(self,Value::$name(_))
+		}
+
+		#[doc = concat!("Check if the value is a [`",stringify!($name),"`] and satisfies the predicate")]
+		#[allow(dead_code)]
+		pub fn $is_and(&self, f: impl FnOnce(&$t) -> bool) -> bool{
+			self.$as().is_some_and(f)
+		}
+
+		#[doc = concat!("Return a reference to [`",stringify!($name),"`] if the value is of that type")]
+		#[allow(dead_code)]
+		pub fn $as(&self) -> Option<&$t>{
+			if let Value::$name(x) = self{
+				Some(x)
+			}else{
+				None
+			}
+		}
+
+		#[doc = concat!("Return a mutable reference to [`",stringify!($name),"`] if the value is of that type")]
+		#[allow(dead_code)]
+		pub fn $as_mut(&mut self) -> Option<&mut $t>{
+			if let Value::$name(x) = self{
+				Some(x)
+			}else{
+				None
+			}
+		}
+
+		#[doc = concat!("Turns the value into a [`",stringify!($name),"`] returning None if the value is not of that type")]
+		#[allow(dead_code)]
+		pub fn $into(self) -> Option<$t>{
+			if let Value::$name(x) = self{
+				Some(x)
+			}else{
+				None
+			}
+		}
+
+		#[doc = concat!("Turns the value into a [`",stringify!($name),"`] returning `Err(self)` if the value is not of that type")]
+		#[allow(dead_code)]
+		pub fn $try_into(self) -> std::result::Result<$t, Value>{
+			if let Value::$name(x) = self{
+				Ok(x)
+			}else{
+				Err(self)
+			}
+		}
+	};
+
+	(@method $name:ident => $is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident) => {
+		#[doc = concat!("Check if the value is a [`",stringify!($name),"`]")]
+		#[allow(dead_code)]
+		pub fn $is(&self) -> bool{
+			matches!(self,Value::$name)
+		}
+	};
+
+
+	(@from $name:ident(Box<$inner:ident>) => $is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident) => {
+		impl From<$inner> for Value {
+			fn from(v: $inner) -> Self{
+				Value::$name(Box::new(v))
+			}
+		}
+
+		impl From<Box<$inner>> for Value {
+			fn from(v: Box<$inner>) -> Self{
+				Value::$name(v)
+			}
+		}
+	};
+
+	(@from $name:ident($t:ident) => $is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident) => {
+		impl From<$t> for Value {
+			fn from(v: $t) -> Self{
+				Value::$name(v)
+			}
+		}
+	};
+
+	(@from $name:ident => $is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident) => {
+		// skip
+	};
+
+}
+
+subtypes! {
+	None => (is_none,_unused,_unused,_unused,_unused,_unused),
+	Null => (is_null,_unused,_unused,_unused,_unused,_unused),
+	Bool(bool) => (is_bool,is_bool_and,as_bool,as_bool_mut,into_bool,try_into_bool),
+	Number(Number) => (is_number,is_number_and,as_number,as_number_mut,into_number,try_into_number),
+	String(Strand) => (is_strand,is_strand_and,as_strand,as_strand_mut,into_strand,try_into_strand),
+	Table(TableName) => (is_table,is_table_and,as_table,as_table_mut,into_table,try_into_table),
+	Duration(Duration) => (is_duration,is_duration_and,as_duration,as_duration_mut,into_duration,try_into_duration),
+	Datetime(Datetime) => (is_datetime,is_datetime_and,as_datetime,as_datetime_mut,into_datetime,try_into_datetime),
+	Uuid(Uuid) => (is_uuid,is_uuid_and,as_uuid,as_uuid_mut,into_uuid,try_into_uuid),
+	Array(Array) => (is_array,is_array_and,as_array,as_array_mut,into_array,try_into_array),
+	Set(Set) => (is_set,is_set_and,as_set,as_set_mut,into_set,try_into_set),
+	Object(Object) => (is_object,is_object_and,as_object,as_object_mut,into_object,try_into_object),
+	Geometry(Geometry) => (is_geometry,is_geometry_and,as_geometry,as_geometry_mut,into_geometry,try_into_geometry),
+	Bytes(Bytes) => (is_bytes,is_bytes_and,as_bytes,as_bytes_mut,into_bytes,try_into_bytes),
+	RecordId(RecordId) => (is_record,is_record_and,as_record,as_record_mut,into_record,try_into_record),
+	Regex(Regex) => (is_regex,is_regex_and,as_regex,as_regex_mut,into_regex,try_into_regex),
+	Range(Box<Range>) => (is_range,is_range_and,as_range,as_range_mut,into_range,try_into_range),
+	Closure(Box<Closure>) => (is_closure,is_closure_and,as_closure,as_closure_mut,into_closure,try_into_closure),
+	File(File) => (is_file,is_file_and,as_file,as_file_mut,into_file,try_into_file),
+	Date(Date) => (is_date,is_date_and,as_date,as_date_mut,into_date,try_into_date),
+	Time(Time) => (is_time,is_time_and,as_time,as_time_mut,into_time,try_into_time),
+	Timestamp(Timestamp) => (is_timestamp,is_timestamp_and,as_timestamp,as_timestamp_mut,into_timestamp,try_into_timestamp),
+	Interval(Interval) => (is_interval,is_interval_and,as_interval,as_interval_mut,into_interval,try_into_interval),
+}
+
+macro_rules! impl_from_number {
+	($($n:ident),*$(,)?) => {
+		$(
+			impl From<$n> for Value{
+				fn from(v: $n) -> Self{
+					Value::Number(Number::from(v))
+				}
+			}
+		)*
+	};
+}
+impl_from_number!(i8, i16, i32, i64, u8, u16, u32, isize, f32, f64, Decimal);
+
+impl From<half::f16> for Value {
+	fn from(v: half::f16) -> Self {
+		Value::Number(Number::from(v))
+	}
+}
+
+impl From<Vec<Value>> for Value {
+	fn from(value: Vec<Value>) -> Self {
+		Value::Array(Array(value))
+	}
+}
+
+impl From<Null> for Value {
+	fn from(_v: Null) -> Self {
+		Value::Null
+	}
+}
+
+// `u64`/`usize` always fit losslessly into a Number (as an Int, or a Decimal
+// when they exceed i64), so these conversions are infallible.
+impl From<u64> for Value {
+	fn from(v: u64) -> Self {
+		Value::Number(Number::from(v))
+	}
+}
+
+impl From<usize> for Value {
+	fn from(v: usize) -> Self {
+		Value::Number(Number::from(v))
+	}
+}
+
+// `i128`/`u128` can exceed Decimal's range, so these conversions are fallible
+// and error rather than truncate when the value is too large to represent.
+impl TryFrom<i128> for Value {
+	type Error = Error;
+	fn try_from(v: i128) -> Result<Self, Self::Error> {
+		Ok(Value::Number(Number::try_from(v)?))
+	}
+}
+
+impl TryFrom<u128> for Value {
+	type Error = Error;
+	fn try_from(v: u128) -> Result<Self, Self::Error> {
+		Ok(Value::Number(Number::try_from(v)?))
+	}
+}
+
+impl From<&str> for Value {
+	fn from(v: &str) -> Self {
+		Self::String(Strand::from(v))
+	}
+}
+
+impl From<String> for Value {
+	fn from(v: String) -> Self {
+		Self::String(Strand::from(v))
+	}
+}
+
+impl From<::uuid::Uuid> for Value {
+	fn from(v: ::uuid::Uuid) -> Self {
+		Value::Uuid(Uuid::from(v))
+	}
+}
+
+impl From<DateTime<Utc>> for Value {
+	fn from(v: DateTime<Utc>) -> Self {
+		Value::Datetime(Datetime::from(v))
+	}
+}
+
+impl From<Point<f64>> for Value {
+	fn from(v: Point<f64>) -> Self {
+		Value::Geometry(Geometry::from(v))
+	}
+}
+
+impl From<HashMap<&str, Value>> for Value {
+	fn from(v: HashMap<&str, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
+impl From<HashMap<String, Value>> for Value {
+	fn from(v: HashMap<String, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
+impl From<BTreeMap<String, Value>> for Value {
+	fn from(v: BTreeMap<String, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
+impl From<VecMap<String, Value>> for Value {
+	fn from(v: VecMap<String, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
+impl From<VecMap<Strand, Value>> for Value {
+	fn from(v: VecMap<Strand, Value>) -> Self {
+		Value::Object(Object(v))
+	}
+}
+
+impl From<VecMap<&str, Value>> for Value {
+	fn from(v: VecMap<&str, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
+impl From<BTreeMap<&str, Value>> for Value {
+	fn from(v: BTreeMap<&str, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
+impl TryFrom<Value> for crate::types::PublicValue {
+	type Error = anyhow::Error;
+
+	fn try_from(s: Value) -> Result<Self, Self::Error> {
+		convert_value_to_public_value(s)
+	}
+}
+
+impl From<crate::types::PublicValue> for Value {
+	fn from(s: crate::types::PublicValue) -> Self {
+		convert_public_value_to_internal(s)
+	}
+}
+
+impl FromIterator<Value> for Value {
+	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
+		Value::Array(Array(iter.into_iter().collect()))
+	}
+}
+
+impl FromIterator<(String, Value)> for Value {
+	fn from_iter<I: IntoIterator<Item = (String, Value)>>(iter: I) -> Self {
+		Value::Object(Object::from_iter(iter))
+	}
+}
+
+/// Convert our internal value `crate::val::Value` to the public value `surrealdb_types::Value`.
+///
+/// In the future, as the two types diverge, this function will need access to the context in order
+/// to convert certain values to the public value.
+/// Maximum nesting depth a [`Value`] may carry.
+///
+/// Several code paths walk a value with native recursion — the public-value
+/// conversion every query result passes through, the SQL formatter used by
+/// export and `INFO`, and the derived `revision` storage codec. None can carry
+/// its own cumulative depth counter across the others, and `surrealdb-core` is
+/// built with `panic = "abort"` under the release profile, so a stack overflow
+/// in any of them is an unconditional process abort rather than a failed
+/// request.
+///
+/// The parser's own caps do not bound this: they are per-parse, and a value is
+/// grown one level per request by a read-modify-write loop
+/// (`UPDATE deep:1 SET v = [v]`) that stays far under them at every step. The
+/// compute cap (`max_computation_depth`) bounds expression nesting, not the
+/// runtime nesting of a value being cloned or serialised.
+///
+/// Sized well above any legitimate document and far below the depth at which
+/// the recursive walks approach a thread stack.
+pub const MAX_VALUE_DEPTH: usize = 256;
+
+/// A node in the iterative depth walk. Nesting reaches a `Value` through several
+/// wrappers that are not themselves `Value`s - a record id's key, a
+/// `GeometryCollection`, and a closure's captured variables - so the worklist
+/// carries any of them.
+enum DepthNode<'a> {
+	Value(&'a Value),
+	Key(&'a crate::val::RecordIdKey),
+	Geo(&'a crate::val::Geometry),
+	Closure(&'a crate::val::Closure),
+}
+
+/// How far [`within_shallow_depth`] recurses before it leaves a value to the
+/// iterative walk of [`check_value_depth`]. Well below [`MAX_VALUE_DEPTH`],
+/// and shallow enough that the recursion is safe on any thread stack.
+const SHALLOW_VALUE_DEPTH: usize = 32;
+
+/// Whether `value`, standing at `depth`, nests nothing deeper than
+/// [`SHALLOW_VALUE_DEPTH`], decided without allocating. The recursion stops
+/// at that depth, so it is stack-safe on any input. `true` proves the value
+/// within [`MAX_VALUE_DEPTH`]; `false` proves nothing, and leaves the value
+/// to the iterative walk, as does any range, geometry, closure, or record id
+/// with a compound key.
+fn within_shallow_depth(value: &Value, depth: usize) -> bool {
+	use crate::val::RecordIdKey;
+	if depth > SHALLOW_VALUE_DEPTH {
+		return false;
+	}
+	match value {
+		Value::Array(v) => v.0.iter().all(|v| within_shallow_depth(v, depth + 1)),
+		Value::Set(v) => v.0.iter().all(|v| within_shallow_depth(v, depth + 1)),
+		Value::Object(v) => v.0.values().all(|v| within_shallow_depth(v, depth + 1)),
+		Value::RecordId(v) => {
+			matches!(v.key, RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_))
+		}
+		Value::Range(_) | Value::Geometry(_) | Value::Closure(_) => false,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
+		| Value::Uuid(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_) => true,
+	}
+}
+
+/// Rejects a [`Value`] nested deeper than [`MAX_VALUE_DEPTH`].
+///
+/// Deliberately iterative: a recursive checker would overflow the stack on
+/// exactly the input it exists to reject. Traversal stops at the first node
+/// past the cap, so a deeply-nested value is rejected without being walked in
+/// full.
+///
+/// A record id's key is walked too, and a geometry's `GeometryCollection`
+/// nesting. The derived storage codec, the SQL formatter and the recursive drop
+/// all descend into a compound key (`t:[[[...]]]`) and into a nested collection,
+/// so anything deep enough to overflow them must be rejected at the same point a
+/// deep field value is.
+pub fn check_value_depth(value: &Value) -> Result<()> {
+	check_value_depth_from(value, 1)
+}
+
+/// [`check_value_depth`] for a value that stands at `base` levels inside a
+/// larger one, so its own nesting counts on top of the levels around it.
+pub fn check_value_depth_from(value: &Value, base: usize) -> Result<()> {
+	use crate::val::RecordIdKey;
+	// Fast path: a value that nests nothing is depth 1 and cannot exceed the
+	// cap, so skip allocating the traversal stack. This keeps the check
+	// allocation-free for the common scalar case - e.g. a `fold` / `reduce`
+	// accumulator that reduces to a number, which is checked every iteration.
+	// `Geometry` (a `GeometryCollection` nests) and `Closure` (its captures hold
+	// values) are containers here.
+	if !matches!(
+		value,
+		Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Range(_)
+			| Value::RecordId(_)
+			| Value::Geometry(_)
+			| Value::Closure(_)
+	) {
+		return Ok(());
+	}
+	if within_shallow_depth(value, base) {
+		return Ok(());
+	}
+	// (node, depth of that node)
+	let mut stack: Vec<(DepthNode<'_>, usize)> = vec![(DepthNode::Value(value), base)];
+	while let Some((node, depth)) = stack.pop() {
+		if depth > MAX_VALUE_DEPTH {
+			bail!(Error::ValueTooDeep {
+				max: MAX_VALUE_DEPTH,
+			});
+		}
+		match node {
+			DepthNode::Value(value) => match value {
+				Value::Array(v) => {
+					stack.extend(v.0.iter().map(|v| (DepthNode::Value(v), depth + 1)))
+				}
+				Value::Set(v) => stack.extend(v.0.iter().map(|v| (DepthNode::Value(v), depth + 1))),
+				Value::Object(v) => {
+					stack.extend(v.0.values().map(|v| (DepthNode::Value(v), depth + 1)))
+				}
+				Value::Range(v) => {
+					for bound in [&v.start, &v.end] {
+						match bound {
+							Bound::Included(v) | Bound::Excluded(v) => {
+								stack.push((DepthNode::Value(v), depth + 1))
+							}
+							Bound::Unbounded => {}
+						}
+					}
+				}
+				Value::RecordId(v) => stack.push((DepthNode::Key(&v.key), depth + 1)),
+				// A geometry and a closure nest within themselves, not within
+				// `Value`, so the wrapper is pushed at `depth` (it is not itself a
+				// level) and recurses via its own node below.
+				Value::Geometry(g) => stack.push((DepthNode::Geo(g), depth)),
+				Value::Closure(c) => stack.push((DepthNode::Closure(c), depth)),
+				// Leaves, listed explicitly so a new nesting `Value` variant is a
+				// compile error here rather than a silent hole.
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Date(_)
+				| Value::Time(_)
+				| Value::Timestamp(_)
+				| Value::Interval(_)
+				| Value::Uuid(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::File(_)
+				| Value::Regex(_) => {}
+			},
+			DepthNode::Key(key) => match key {
+				RecordIdKey::Array(a) => {
+					stack.extend(a.0.iter().map(|v| (DepthNode::Value(v), depth + 1)))
+				}
+				RecordIdKey::Object(o) => {
+					stack.extend(o.0.values().map(|v| (DepthNode::Value(v), depth + 1)))
+				}
+				RecordIdKey::Range(r) => {
+					for bound in [&r.start, &r.end] {
+						match bound {
+							Bound::Included(k) | Bound::Excluded(k) => {
+								stack.push((DepthNode::Key(k), depth + 1))
+							}
+							Bound::Unbounded => {}
+						}
+					}
+				}
+				RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => {}
+			},
+			DepthNode::Geo(geo) => {
+				// Only a `GeometryCollection` nests further geometries; the
+				// point/line/polygon variants are bounded-depth primitives.
+				if let crate::val::Geometry::Collection(geoms) = geo {
+					stack.extend(geoms.iter().map(|g| (DepthNode::Geo(g), depth + 1)));
+				}
+			}
+			DepthNode::Closure(closure) => {
+				// A closure captures the values it references, so a closure
+				// capturing a closure nests. The `body` / `args` are parse-bounded
+				// AST, not runtime values; only the captures grow. A `Builtin`
+				// closure (the compiled form the engine produces) holds
+				// its captures behind the trait, so walk them through
+				// `captured_values` rather than treating it as a leaf.
+				match closure {
+					crate::val::Closure::Expr {
+						captures,
+						..
+					} => {
+						stack.extend(captures.0.values().map(|v| (DepthNode::Value(v), depth + 1)));
+					}
+					crate::val::Closure::Builtin(builtin) => {
+						stack.extend(
+							builtin
+								.captured_values()
+								.into_iter()
+								.map(|v| (DepthNode::Value(v), depth + 1)),
+						);
+					}
+				}
+			}
+		}
+	}
+	Ok(())
+}
+
+pub fn convert_value_to_public_value(value: crate::val::Value) -> Result<surrealdb_types::Value> {
+	convert_value_to_public_value_at(value, 1)
+}
+
+/// Converts a row-shaped statement result (the array of rows a non-`ONLY`
+/// `SELECT` and friends emit) to a public value, treating the enclosing array as
+/// a transport envelope rather than a nesting level: each row is converted as
+/// its own root at depth 1.
+///
+/// This is the anchor the storage write guard uses - `check_value_depth` runs on
+/// a record's value with the record at depth 1 - and the one the engine's read
+/// path already uses (it converts each row as it is emitted). Converting the
+/// whole result array at depth 1 instead would charge every row an extra level,
+/// so a record whose deepest field sits exactly at [`MAX_VALUE_DEPTH`] would
+/// store and stream fine yet fail a collected read. A `Scalar` result (a single
+/// value, e.g. `SELECT ... ONLY` or `RETURN`) is its own root and must go
+/// through [`convert_value_to_public_value`] instead.
+pub fn convert_result_rows_to_public(value: crate::val::Value) -> Result<surrealdb_types::Value> {
+	let crate::val::Value::Array(rows) = value else {
+		// A row-shaped result is always the array of emitted rows; any other
+		// shape is converted as its own root (defensive - not expected).
+		return convert_value_to_public_value(value);
+	};
+	let converted =
+		rows.0.into_iter().map(convert_value_to_public_value).collect::<Result<Vec<_>>>()?;
+	Ok(surrealdb_types::Value::Array(surrealdb_types::Array::from(converted)))
+}
+
+/// [`convert_value_to_public_value`] carrying the depth of `value`.
+///
+/// The depth is threaded through the mutual recursion rather than checked by a
+/// separate pass so the universal query-result path pays only a counter, and so
+/// a value already in storage from before [`MAX_VALUE_DEPTH`] was enforced
+/// surfaces an error here instead of aborting the process.
+fn convert_value_to_public_value_at(
+	value: crate::val::Value,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
+	if depth > MAX_VALUE_DEPTH {
+		discard_value(value);
+		bail!(Error::ValueTooDeep {
+			max: MAX_VALUE_DEPTH,
+		});
+	}
+	match value {
+		crate::val::Value::None => Ok(surrealdb_types::Value::None),
+		crate::val::Value::Null => Ok(surrealdb_types::Value::Null),
+		crate::val::Value::Bool(value) => Ok(surrealdb_types::Value::Bool(value)),
+		crate::val::Value::Number(value) => convert_number_to_public(value),
+		crate::val::Value::String(value) => Ok(surrealdb_types::Value::String(value.into())),
+		crate::val::Value::Datetime(value) => convert_datetime_to_public(value),
+		crate::val::Value::Date(v) => Ok(surrealdb_types::Value::Date(v.into())),
+		crate::val::Value::Time(v) => Ok(surrealdb_types::Value::Time(v.into())),
+		crate::val::Value::Timestamp(v) => Ok(surrealdb_types::Value::Timestamp(v.into())),
+		crate::val::Value::Interval(v) => Ok(surrealdb_types::Value::Interval(v.into())),
+		crate::val::Value::Duration(value) => convert_duration_to_public(value),
+		crate::val::Value::Uuid(value) => convert_uuid_to_public(value),
+		crate::val::Value::Array(value) => convert_array_to_public(value, depth),
+		crate::val::Value::Set(value) => convert_set_to_public(value, depth),
+		crate::val::Value::Object(value) => convert_object_to_public(value, depth),
+		crate::val::Value::Geometry(value) => convert_geometry_to_public(value, depth),
+		crate::val::Value::Bytes(value) => convert_bytes_to_public(value),
+		crate::val::Value::RecordId(value) => convert_record_id_to_public(value, depth),
+		crate::val::Value::File(value) => convert_file_to_public(value),
+		crate::val::Value::Range(value) => convert_range_to_public(*value, depth),
+		crate::val::Value::Regex(value) => convert_regex_to_public(value),
+		crate::val::Value::Table(value) => {
+			Ok(surrealdb_types::Value::Table(value.into_public_table()))
+		}
+		crate::val::Value::Closure(value) => {
+			discard_value(crate::val::Value::Closure(value));
+			Err(anyhow::anyhow!("Closure values cannot be converted to public value"))
+		}
+	}
+}
+
+fn convert_number_to_public(value: crate::val::Number) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::Number(surrealdb_types::Number::from(value)))
+}
+
+fn convert_datetime_to_public(value: crate::val::Datetime) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::Datetime(surrealdb_types::Datetime::from(value.0)))
+}
+
+fn convert_duration_to_public(value: crate::val::Duration) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::Duration(surrealdb_types::Duration::from_std(value.0)))
+}
+
+fn convert_uuid_to_public(value: crate::val::Uuid) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::Uuid(surrealdb_types::Uuid::from(value.0)))
+}
+
+fn convert_bytes_to_public(value: crate::val::Bytes) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::Bytes(surrealdb_types::Bytes::from(value.0)))
+}
+
+fn convert_regex_to_public(value: crate::val::Regex) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::Regex(surrealdb_types::Regex::from(value.0)))
+}
+
+fn convert_file_to_public(value: crate::val::File) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::File(surrealdb_types::File::new(value.bucket, value.key)))
+}
+
+fn convert_geometry_to_public(
+	value: crate::val::Geometry,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
+	// A `GeometryCollection` nests, so carry the depth through it as the other
+	// container arms do; the storage guard (`check_value_depth`) rejects a deep
+	// geometry at write, and this keeps the read path in step.
+	if depth > MAX_VALUE_DEPTH {
+		discard_node(Node::Geo(value));
+		bail!(Error::ValueTooDeep {
+			max: MAX_VALUE_DEPTH,
+		});
+	}
+	use surrealdb_types::Geometry as PublicGeometry;
+	let geometry = match value {
+		crate::val::Geometry::Point(p) => PublicGeometry::Point(p),
+		crate::val::Geometry::Line(l) => PublicGeometry::Line(l),
+		crate::val::Geometry::Polygon(p) => PublicGeometry::Polygon(p),
+		crate::val::Geometry::MultiPoint(mp) => PublicGeometry::MultiPoint(mp),
+		crate::val::Geometry::MultiLine(ml) => PublicGeometry::MultiLine(ml),
+		crate::val::Geometry::MultiPolygon(mp) => PublicGeometry::MultiPolygon(mp),
+		crate::val::Geometry::Collection(c) => {
+			let converted: Vec<_> = collect_or_discard(c, |g| {
+				if let surrealdb_types::Value::Geometry(g) =
+					convert_geometry_to_public(g, depth + 1)?
+				{
+					Ok(g)
+				} else {
+					Err(anyhow::anyhow!("Failed to convert geometry collection item"))
+				}
+			})?;
+			PublicGeometry::Collection(converted)
+		}
+	};
+	Ok(surrealdb_types::Value::Geometry(geometry))
+}
+
+fn convert_array_to_public(
+	value: crate::val::Array,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
+	let converted: Vec<_> =
+		collect_or_discard(value.0, |v| convert_value_to_public_value_at(v, depth + 1))?;
+	Ok(surrealdb_types::Value::Array(surrealdb_types::Array::from(converted)))
+}
+
+fn convert_set_to_public(value: crate::val::Set, depth: usize) -> Result<surrealdb_types::Value> {
+	// Set is stored as a sorted Vec internally
+	let converted: Vec<surrealdb_types::Value> =
+		collect_or_discard(value.0, |v| convert_value_to_public_value_at(v, depth + 1))?;
+	Ok(surrealdb_types::Value::Set(surrealdb_types::Set::from(converted)))
+}
+
+fn convert_object_to_public(
+	value: crate::val::Object,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
+	let converted = convert_object_to_public_map_at(value, depth)?;
+	Ok(surrealdb_types::Value::Object(surrealdb_types::Object::from(converted)))
+}
+
+pub fn convert_object_to_public_map(
+	value: crate::val::Object,
+) -> Result<BTreeMap<String, surrealdb_types::Value>> {
+	convert_object_to_public_map_at(value, 1)
+}
+
+fn convert_object_to_public_map_at(
+	value: crate::val::Object,
+	depth: usize,
+) -> Result<BTreeMap<String, surrealdb_types::Value>> {
+	collect_or_discard(value.0, |(k, v)| {
+		convert_value_to_public_value_at(v, depth + 1).map(|v| (k.into_string(), v))
+	})
+}
+
+fn convert_record_id_to_public(
+	value: crate::val::RecordId,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
+	// A record id's key nests one level under it, matching `check_value_depth`'s
+	// `Key` node at `depth + 1`, so continue the count there. Without the `+ 1`
+	// the read path accepts ~2x the record-id nesting the storage guard rejects.
+	let key = convert_record_id_key_to_public(value.key, depth + 1)?;
+	Ok(surrealdb_types::Value::RecordId(surrealdb_types::RecordId {
+		table: value.table.into_public_table(),
+		key,
+	}))
+}
+
+fn convert_record_id_key_to_public(
+	key: crate::val::RecordIdKey,
+	depth: usize,
+) -> Result<surrealdb_types::RecordIdKey> {
+	if depth > MAX_VALUE_DEPTH {
+		discard_node(Node::Key(key));
+		bail!(Error::ValueTooDeep {
+			max: MAX_VALUE_DEPTH,
+		});
+	}
+	match key {
+		crate::val::RecordIdKey::Number(n) => Ok(surrealdb_types::RecordIdKey::Number(n)),
+		crate::val::RecordIdKey::String(s) => Ok(surrealdb_types::RecordIdKey::String(s.into())),
+		crate::val::RecordIdKey::Uuid(u) => {
+			Ok(surrealdb_types::RecordIdKey::Uuid(surrealdb_types::Uuid::from(u.0)))
+		}
+		crate::val::RecordIdKey::Array(a) => {
+			let converted_array = convert_array_to_public(a, depth)?;
+			if let surrealdb_types::Value::Array(arr) = converted_array {
+				Ok(surrealdb_types::RecordIdKey::Array(arr))
+			} else {
+				Err(anyhow::anyhow!("Failed to convert record id key array"))
+			}
+		}
+		crate::val::RecordIdKey::Object(o) => {
+			let converted_object = convert_object_to_public(o, depth)?;
+			if let surrealdb_types::Value::Object(obj) = converted_object {
+				Ok(surrealdb_types::RecordIdKey::Object(obj))
+			} else {
+				Err(anyhow::anyhow!("Failed to convert record id key object"))
+			}
+		}
+		crate::val::RecordIdKey::Range(r) => {
+			let crate::val::record_id::RecordIdKeyRange {
+				start,
+				end,
+			} = *r;
+			let (start, end) = convert_bounds_or_discard(start, end, |k| {
+				convert_record_id_key_to_public(k, depth + 1)
+			})?;
+			Ok(surrealdb_types::RecordIdKey::Range(Box::new(surrealdb_types::RecordIdKeyRange {
+				start,
+				end,
+			})))
+		}
+	}
+}
+
+fn convert_range_to_public(
+	value: crate::val::Range,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
+	// A range's bounds nest one level under it, so continue the depth count
+	// through them (`depth + 1`) as the array/object arms do. This keeps the read
+	// path in agreement with `check_value_depth`, which also descends into range
+	// bounds, so a bound whose value sits at the cap makes the range one past it
+	// and is rejected rather than converted through a deeper recursion.
+	let (start, end) = convert_bounds_or_discard(value.start, value.end, |v| {
+		convert_value_to_public_value_at(v, depth + 1)
+	})?;
+	Ok(surrealdb_types::Value::Range(Box::new(surrealdb_types::Range {
+		start,
+		end,
+	})))
+}
+
+/// Converts the two bounds of a range with `convert`, `start` first.
+///
+/// When `start` fails to convert, `end` has not been consumed yet and is torn
+/// down without recursing into its nesting; the failed `start` is `convert`'s
+/// to dispose of.
+fn convert_bounds_or_discard<T: Discard, U>(
+	start: Bound<T>,
+	end: Bound<T>,
+	mut convert: impl FnMut(T) -> Result<U>,
+) -> Result<(Bound<U>, Bound<U>)> {
+	let mut convert_bound = |bound: Bound<T>| -> Result<Bound<U>> {
+		Ok(match bound {
+			Bound::Included(v) => Bound::Included(convert(v)?),
+			Bound::Excluded(v) => Bound::Excluded(convert(v)?),
+			Bound::Unbounded => Bound::Unbounded,
+		})
+	};
+	let start = match convert_bound(start) {
+		Ok(start) => start,
+		Err(e) => {
+			discard_node(end.into_node());
+			return Err(e);
+		}
+	};
+	Ok((start, convert_bound(end)?))
+}
+
+/// Maps `items` through `convert` into a collection, stopping at the first
+/// error.
+///
+/// On failure the items not yet converted are torn down without recursing into
+/// their nesting, so a deep sibling of the failing item cannot overflow the
+/// stack as the iterator unwinds. Collecting costs the same as collecting a
+/// `Result`: the adapter reports no size hint either way.
+fn collect_or_discard<T: Discard, U, C: FromIterator<U>>(
+	items: impl IntoIterator<Item = T>,
+	mut convert: impl FnMut(T) -> Result<U>,
+) -> Result<C> {
+	let mut items = items.into_iter();
+	let mut failure = None;
+	let collected: C = std::iter::from_fn(|| {
+		let item = items.next()?;
+		match convert(item) {
+			Ok(converted) => Some(converted),
+			Err(e) => {
+				failure = Some(e);
+				None
+			}
+		}
+	})
+	.collect();
+	match failure {
+		None => Ok(collected),
+		Some(e) => {
+			discard_all(items);
+			Err(e)
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{MAX_VALUE_DEPTH, check_value_depth, convert_value_to_public_value};
+	use crate::val::{Array, Object, Value};
+
+	/// Builds a value nested `depth` levels deep: `depth` of 1 is a bare
+	/// integer, 2 is `[1]`, 3 is `[[1]]`, and so on.
+	fn nested_array(depth: usize) -> Value {
+		let mut value = Value::from(1i64);
+		for _ in 1..depth {
+			value = Value::Array(Array::from(vec![value]));
+		}
+		value
+	}
+
+	fn nested_object(depth: usize) -> Value {
+		let mut value = Value::from(1i64);
+		for _ in 1..depth {
+			let mut obj = Object::default();
+			obj.insert("v".to_owned(), value);
+			value = Value::Object(obj);
+		}
+		value
+	}
+
+	// The recursion sinks that walk a `Value` — the public-value conversion, the
+	// SQL formatter, and the derived storage codec — carry no depth guard of
+	// their own, and a stack overflow in any of them aborts the process under
+	// the release profile's `panic = "abort"`. A value is grown one level per
+	// request by a read-modify-write loop, so the parser's per-parse caps never
+	// fire during accumulation; the depth of the value itself has to be bounded.
+	#[test]
+	fn value_depth_within_the_cap_is_accepted() {
+		check_value_depth(&nested_array(MAX_VALUE_DEPTH))
+			.expect("a value exactly at the cap must be accepted");
+		check_value_depth(&nested_object(MAX_VALUE_DEPTH))
+			.expect("objects nest the same way as arrays");
+		check_value_depth(&Value::from(1i64)).expect("a scalar is depth 1");
+	}
+
+	#[test]
+	fn value_depth_past_the_cap_is_rejected() {
+		let err = check_value_depth(&nested_array(MAX_VALUE_DEPTH + 1))
+			.expect_err("a value one level past the cap must be rejected");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+		assert!(check_value_depth(&nested_object(MAX_VALUE_DEPTH + 1)).is_err());
+	}
+
+	// The check must survive the input it exists to reject: a recursive
+	// implementation would overflow the stack rather than return an error. The
+	// depth used is far past any thread stack's tolerance for a recursive walk,
+	// so this test aborts rather than fails if the check regresses to recursion.
+	//
+	// The value is leaked deliberately. `Value`'s derived `Drop` is itself
+	// recursive, so releasing a value this deep overflows the stack whatever
+	// this check does — which is the reason the depth cap is enforced when a
+	// record is written rather than only where the recursive walks are: a value
+	// past the cap must never come to exist, because merely dropping one is
+	// fatal.
+	#[test]
+	fn value_depth_check_does_not_recurse() {
+		let deep = std::mem::ManuallyDrop::new(nested_array(200_000));
+		assert!(
+			check_value_depth(&deep).is_err(),
+			"a very deeply nested value must be rejected, not overflow the stack"
+		);
+	}
+
+	// The conversion every query result passes through carries the depth
+	// through its own mutual recursion, so a value already in storage from
+	// before the cap was enforced surfaces an error rather than aborting.
+	#[test]
+	fn public_value_conversion_rejects_values_past_the_cap() {
+		convert_value_to_public_value(nested_array(MAX_VALUE_DEPTH))
+			.expect("a value at the cap must still convert");
+		let err = convert_value_to_public_value(nested_array(MAX_VALUE_DEPTH + 1))
+			.expect_err("a value past the cap must not convert");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+	}
+
+	// A collected row-shaped result is an array of rows, each its own root at the
+	// depth the storage guard used (a record at depth 1). Converting the whole
+	// result array charges every row an extra level, so a row at exactly the cap
+	// fails that way but must convert when treated as a row - the collected-read
+	// half of the storage/read agreement.
+	#[test]
+	fn result_rows_conversion_does_not_charge_the_envelope() {
+		use super::convert_result_rows_to_public;
+
+		let row = nested_array(MAX_VALUE_DEPTH);
+		let result = Value::Array(Array::from(vec![row]));
+
+		// Whole-array conversion puts the row at depth 2 and rejects it.
+		assert!(
+			convert_value_to_public_value(result.clone()).is_err(),
+			"the envelope-charging path must reject a row at the cap"
+		);
+		// Per-row conversion accepts it, matching storage and the engine's own row conversion.
+		convert_result_rows_to_public(result).expect("a row at the cap must convert as a row");
+	}
+
+	// A range's bounds nest one level under it, so the conversion carries the
+	// depth through them: a bound holding a value already at the cap makes the
+	// whole value one past it and must be rejected rather than converted through
+	// a deeper recursion.
+	#[test]
+	fn public_value_conversion_threads_depth_through_ranges() {
+		use std::ops::Bound;
+
+		use crate::val::Range;
+
+		let range_bound = |v: Value| {
+			Value::Range(Box::new(Range {
+				start: Bound::Included(v),
+				end: Bound::Unbounded,
+			}))
+		};
+
+		// A shallow value inside a range still converts.
+		convert_value_to_public_value(range_bound(nested_array(8)))
+			.expect("a shallow range-nested value must convert");
+		// A range whose bound is at the cap makes the whole value one past it.
+		let err = convert_value_to_public_value(range_bound(nested_array(MAX_VALUE_DEPTH)))
+			.expect_err("a range-nested value past the cap must not convert");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+	}
+
+	/// A `GeometryCollection` nests further geometries, and both the SQL
+	/// formatter and the derived `Drop` recurse into it, so the depth guard must
+	/// walk it rather than treat a `Geometry` as a leaf, and the conversion must
+	/// carry the depth through it.
+	#[test]
+	fn geometry_collection_depth_is_walked() {
+		use crate::val::Geometry;
+
+		// `depth` collections deep, innermost an empty collection.
+		fn nested_geometry(depth: usize) -> Value {
+			let mut g = Geometry::Collection(vec![]);
+			for _ in 1..depth {
+				g = Geometry::Collection(vec![g]);
+			}
+			Value::Geometry(g)
+		}
+
+		// The `Value::Geometry` wrapper and its outermost collection share a level
+		// (the geometry nests within itself, not within `Value`), so `depth`
+		// collections deep is exactly `depth` levels: the cap is the boundary for
+		// both the walk and the conversion, and they must agree to the level.
+		check_value_depth(&nested_geometry(MAX_VALUE_DEPTH))
+			.expect("a geometry collection exactly at the cap must be accepted");
+		convert_value_to_public_value(nested_geometry(MAX_VALUE_DEPTH))
+			.expect("a geometry collection at the cap must also convert");
+		let err = check_value_depth(&nested_geometry(MAX_VALUE_DEPTH + 1))
+			.expect_err("a geometry one level past the cap must be rejected");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+		let err = convert_value_to_public_value(nested_geometry(MAX_VALUE_DEPTH + 1))
+			.expect_err("a geometry one level past the cap must not convert");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+
+		// The walk stays iterative: a geometry too deep to drop recursively is
+		// still rejected rather than overflowing the checker. Leaked because its
+		// own `Drop` is recursive.
+		let deep = std::mem::ManuallyDrop::new(nested_geometry(200_000));
+		assert!(
+			check_value_depth(&deep).is_err(),
+			"a very deep geometry must be rejected, not overflow the stack"
+		);
+	}
+
+	/// A record id nests through its key, which the storage codec and the
+	/// recursive drop both descend into, so the key must be walked like any other
+	/// nested value rather than treated as a leaf. The walk and the conversion
+	/// must agree on the boundary: a record id counts one level for the id itself
+	/// and one for the key array before its nested contents, so a key holding a
+	/// value nested `MAX_VALUE_DEPTH - 2` levels sits exactly at the cap.
+	#[test]
+	fn record_id_key_depth_is_walked() {
+		use crate::val::{RecordId, RecordIdKey};
+
+		// A record id whose key wraps an array nested `inner` levels.
+		fn record_id_with_nested_key(inner: usize) -> Value {
+			Value::RecordId(RecordId {
+				table: "t".into(),
+				key: RecordIdKey::Array(Array::from(vec![nested_array(inner)])),
+			})
+		}
+
+		check_value_depth(&record_id_with_nested_key(MAX_VALUE_DEPTH - 2))
+			.expect("a compound key exactly at the cap must be accepted");
+		convert_value_to_public_value(record_id_with_nested_key(MAX_VALUE_DEPTH - 2))
+			.expect("a compound key at the cap must also convert");
+		let err = check_value_depth(&record_id_with_nested_key(MAX_VALUE_DEPTH - 1))
+			.expect_err("a record id whose key nests one past the cap must be rejected");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+		let err = convert_value_to_public_value(record_id_with_nested_key(MAX_VALUE_DEPTH - 1))
+			.expect_err("a record id whose key nests one past the cap must not convert");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+	}
+
+	/// `array::fold` can thread a closure-valued accumulator that captures itself
+	/// each turn (`|$a, $_| |$x| $a`), growing the closure's capture nesting
+	/// without bound, so the walk must descend into a closure's captures rather
+	/// than treat it as a leaf. A closure cannot be converted to a public value
+	/// or stored, so the walk the fold cap runs is the only guard on this shape.
+	#[test]
+	fn closure_capture_depth_is_walked() {
+		use crate::expr::Expr;
+		use crate::expr::variables::Variables;
+		use crate::val::Closure;
+
+		// A closure whose single capture holds a value nested `inner` levels. The
+		// closure shares a level with its `Value` wrapper and the capture nests
+		// one under it, so a capture at `MAX_VALUE_DEPTH - 1` sits at the cap.
+		fn closure_with_nested_capture(inner: usize) -> Value {
+			let mut captures = Variables::default();
+			captures.insert("a", nested_array(inner));
+			Value::Closure(Box::new(Closure::Expr {
+				args: vec![],
+				returns: None,
+				body: Expr::Break,
+				captures,
+			}))
+		}
+
+		check_value_depth(&closure_with_nested_capture(MAX_VALUE_DEPTH - 1))
+			.expect("a closure whose capture sits at the cap must be accepted");
+		let err = check_value_depth(&closure_with_nested_capture(MAX_VALUE_DEPTH))
+			.expect_err("a closure whose capture nests past the cap must be rejected");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+
+		// The walk stays iterative on a closure too deep to drop recursively.
+		let deep = std::mem::ManuallyDrop::new(closure_with_nested_capture(200_000));
+		assert!(
+			check_value_depth(&deep).is_err(),
+			"a very deep closure capture must be rejected, not overflow the stack"
+		);
+	}
+
+	/// The engine represents a runtime closure as a `Closure::Builtin`
+	/// whose captures live behind the `BuiltinClosureObj` trait, not a
+	/// `Closure::Expr`, so the walk must reach them through `captured_values` or a
+	/// closure-valued accumulator escapes the cap. The captures
+	/// nest exactly as `Closure::Expr`'s do, so the boundary is the same.
+	#[test]
+	fn builtin_closure_captures_are_walked() {
+		use std::sync::Arc;
+
+		use crate::val::Closure;
+		use crate::val::closure::BuiltinClosureObj;
+
+		// A builtin closure that captured `values` by cloning them, the shape a
+		// compiled closure takes.
+		#[derive(Debug)]
+		struct Captured(Vec<Value>);
+		impl BuiltinClosureObj for Captured {
+			fn as_any(&self) -> &dyn std::any::Any {
+				self
+			}
+			fn captured_values(&self) -> Vec<&Value> {
+				self.0.iter().collect()
+			}
+		}
+		fn builtin_capturing(inner: usize) -> Value {
+			Value::Closure(Box::new(Closure::Builtin(Arc::new(Captured(vec![nested_array(
+				inner,
+			)])))))
+		}
+
+		check_value_depth(&builtin_capturing(MAX_VALUE_DEPTH - 1))
+			.expect("a builtin closure whose capture sits at the cap must be accepted");
+		let err = check_value_depth(&builtin_capturing(MAX_VALUE_DEPTH))
+			.expect_err("a builtin closure whose capture nests past the cap must be rejected");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+	}
+
+	/// The index format drops a number's kind, so any value that can reach a
+	/// number must report that its spelling there may differ.
+	#[test]
+	fn index_format_spells_alike_flags_numbers_at_any_depth() {
+		use std::collections::BTreeMap;
+
+		use crate::val::{Number, Object, RecordId, RecordIdKey, Value};
+
+		let num = Value::Number(Number::Float(0.1));
+		let nested =
+			|v: Value| Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v)])));
+
+		for v in [
+			Value::None,
+			Value::Null,
+			Value::Bool(true),
+			Value::String("x".into()),
+			Value::from(vec![Value::String("x".into())]),
+			nested(Value::String("x".into())),
+			Value::RecordId(RecordId {
+				table: "t".into(),
+				key: RecordIdKey::Number(1),
+			}),
+		] {
+			assert!(v.index_format_spells_alike(), "{v:?}");
+		}
+
+		for v in [
+			num.clone(),
+			Value::from(vec![num.clone()]),
+			nested(num.clone()),
+			nested(Value::from(vec![num.clone()])),
+			Value::RecordId(RecordId {
+				table: "t".into(),
+				key: RecordIdKey::Array(vec![num].into()),
+			}),
+		] {
+			assert!(!v.index_format_spells_alike(), "{v:?}");
+		}
+	}
+
+	/// Equal numbers hash alike whatever their kinds, so a hash miss on a value
+	/// holding one is decisive; a geometry or a regex at any depth is not.
+	#[test]
+	fn hash_agrees_with_eq_holds_for_numbers_and_flags_geometries_and_regexes() {
+		use std::collections::BTreeMap;
+
+		use crate::val::{Geometry, Number, Object, RecordId, RecordIdKey, Regex, Value};
+
+		let nested =
+			|v: Value| Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v)])));
+
+		for num in [Number::Int(1), Number::Float(0.1), Number::Decimal(1.into())] {
+			let num = Value::Number(num);
+			for v in [
+				num.clone(),
+				Value::from(vec![num.clone()]),
+				nested(Value::from(vec![num.clone()])),
+				Value::RecordId(RecordId {
+					table: "t".into(),
+					key: RecordIdKey::Array(vec![num].into()),
+				}),
+			] {
+				assert!(v.hash_agrees_with_eq(), "{v:?}");
+			}
+		}
+
+		let geometry = Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0)));
+		let regex = Value::Regex(Regex(crate::val::regex::regex_new("a").expect("a regex")));
+		for v in [geometry, regex] {
+			for v in [v.clone(), Value::from(vec![v.clone()]), nested(v)] {
+				assert!(!v.hash_agrees_with_eq(), "{v:?}");
+			}
+		}
+	}
+
+	/// The values `Value::ord_agrees_with_equal` is judged over: every kind of
+	/// number (a float and a decimal that are one number and two that print
+	/// alike but are not, and NaNs of several payloads), the two nothings, strings and a regex that
+	/// matches one, a geometry with a NaN coordinate, and the collections and record ids that
+	/// hold them.
+	fn ord_corpus() -> Vec<crate::val::Value> {
+		use std::collections::BTreeMap;
+
+		use rust_decimal::Decimal;
+		use surrealdb_strand::Strand;
+
+		use crate::val::{Geometry, Number, Object, RecordId, RecordIdKey, Regex, Value};
+
+		let float = |f: f64| Value::Number(Number::Float(f));
+		let decimal = |i: i64| Value::Number(Number::Decimal(Decimal::from(i)));
+		let regex =
+			|text: &str| Value::Regex(Regex(crate::val::regex::regex_new(text).expect("a regex")));
+		let object = |entries: Vec<(&str, Value)>| {
+			Value::Object(Object::from(
+				entries
+					.into_iter()
+					.map(|(key, value)| (Strand::from(key), value))
+					.collect::<BTreeMap<_, _>>(),
+			))
+		};
+		let record = |key: RecordIdKey| {
+			Value::RecordId(RecordId {
+				table: "t".into(),
+				key,
+			})
+		};
+		vec![
+			Value::None,
+			Value::Null,
+			Value::Bool(true),
+			Value::Bool(false),
+			Value::from(0i64),
+			Value::from(1i64),
+			Value::from(2i64),
+			float(0.0),
+			float(-0.0),
+			float(1.0),
+			float(1.5),
+			float(0.1),
+			float(f64::NAN),
+			float(f64::from_bits(0x7ff8_0000_0000_0002)),
+			float(-f64::NAN),
+			float(f64::INFINITY),
+			decimal(0),
+			decimal(1),
+			decimal(2),
+			Value::Number(Number::Decimal("0.1".parse().expect("a decimal"))),
+			Value::Number(Number::Decimal("1.5".parse().expect("a decimal"))),
+			Value::Number(Number::Decimal("1.50".parse().expect("a decimal"))),
+			Value::String("a".into()),
+			Value::String("abc".into()),
+			Value::String("b".into()),
+			regex("^a"),
+			regex("^b"),
+			Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
+			Value::Geometry(Geometry::Point(geo_types::Point::new(f64::NAN, 2.0))),
+			Value::from(vec![Value::from(1i64), float(2.0)]),
+			Value::from(vec![float(1.0), Value::from(2i64)]),
+			Value::from(vec![Value::from(1i64), decimal(2)]),
+			Value::from(vec![regex("^a")]),
+			Value::from(vec![Value::Geometry(Geometry::Point(geo_types::Point::new(
+				f64::NAN,
+				2.0,
+			)))]),
+			object(vec![("a", decimal(1))]),
+			object(vec![("a", Value::from(1i64))]),
+			object(vec![("a", Value::None)]),
+			object(vec![("a", Value::Null)]),
+			object(vec![("a", regex("^a"))]),
+			record(RecordIdKey::Number(1)),
+			record(RecordIdKey::String("x".into())),
+			record(RecordIdKey::Array(vec![Value::from(1i64)].into())),
+			record(RecordIdKey::Array(vec![float(1.0)].into())),
+			record(RecordIdKey::Object(Object::from(BTreeMap::from([(
+				Strand::from("k"),
+				decimal(1),
+			)])))),
+		]
+	}
+
+	/// For every pair of values whose order agrees with their equality, the
+	/// two give one answer, whichever way round the pair is taken.
+	#[test]
+	fn ord_agrees_with_equal_is_faithful() {
+		use std::cmp::Ordering;
+
+		let corpus = ord_corpus();
+		let agreeing: Vec<_> = corpus.iter().filter(|v| v.ord_agrees_with_equal()).collect();
+		assert!(agreeing.len() > 20, "the corpus holds too few agreeing values");
+		for a in &agreeing {
+			for b in &agreeing {
+				assert_eq!(
+					a.equal(b),
+					a.cmp(b) == Ordering::Equal,
+					"{a:?} against {b:?}: equal and cmp disagree"
+				);
+			}
+		}
+		// A value that holds a regex, a geometry, a range or a closure, at any
+		// depth, does not claim to agree.
+		for v in &corpus {
+			let holds = format!("{v:?}");
+			if holds.contains("Regex") || holds.contains("Geometry") {
+				assert!(!v.ord_agrees_with_equal(), "{v:?}");
+			}
+		}
+	}
+
+	#[test]
+	fn table_value_renders_as_the_function_that_builds_it() {
+		use surrealdb_types::ToSql;
+
+		use crate::val::{TableName, Value};
+
+		assert_eq!(Value::Table(TableName::from("users")).to_sql(), "type::table('users')");
+		assert_eq!(Value::Table(TableName::from("table")).to_sql(), "type::table('table')");
+		assert_eq!(Value::Table(TableName::from("a b")).to_sql(), "type::table('a b')");
+	}
+	use chrono::{TimeZone, Utc};
+	use geo_types::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};
+	use rstest::rstest;
+	use rust_decimal::Decimal;
+	use serde_json::{Value as Json, json};
+
+	use super::*;
+	use crate::syn;
+	use crate::types::{
+		PublicArray, PublicBytes, PublicDatetime, PublicDuration, PublicGeometry, PublicNumber,
+		PublicObject, PublicRecordId, PublicRecordIdKey, PublicUuid, PublicValue,
+	};
+	use crate::val::Uuid;
+
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
+	#[test]
+	fn check_none() {
+		assert!(Value::None.is_none());
+		assert!(!Value::Null.is_none());
+		assert!(!Value::from(1).is_none());
+	}
+
+	#[test]
+	fn check_null() {
+		assert!(Value::Null.is_null());
+		assert!(!Value::None.is_null());
+		assert!(!Value::from(1).is_null());
+	}
+
+	#[test]
+	fn convert_truthy() {
+		assert!(!Value::None.is_truthy());
+		assert!(!Value::Null.is_truthy());
+		assert!(Value::Bool(true).is_truthy());
+		assert!(!Value::Bool(false).is_truthy());
+		assert!(!Value::from(0).is_truthy());
+		assert!(Value::from(1).is_truthy());
+		assert!(Value::from(-1).is_truthy());
+		assert!(Value::from(1.1).is_truthy());
+		assert!(Value::from(-1.1).is_truthy());
+		assert!(Value::from("true").is_truthy());
+		assert!(Value::from("false").is_truthy());
+		assert!(Value::from("falsey").is_truthy());
+		assert!(Value::from("something").is_truthy());
+		assert!(Value::from(Uuid::nil()).is_truthy());
+		assert!(Value::from(Utc.with_ymd_and_hms(1948, 12, 3, 0, 0, 0).unwrap()).is_truthy());
+	}
+
+	#[test]
+	fn convert_string() {
+		assert_eq!(String::from("NONE"), Value::None.into_raw_string());
+		assert_eq!(String::from("NULL"), Value::Null.into_raw_string());
+		assert_eq!(String::from("true"), Value::Bool(true).into_raw_string());
+		assert_eq!(String::from("false"), Value::Bool(false).into_raw_string());
+		assert_eq!(String::from("0"), Value::from(0).into_raw_string());
+		assert_eq!(String::from("1"), Value::from(1).into_raw_string());
+		assert_eq!(String::from("-1"), Value::from(-1).into_raw_string());
+		assert_eq!(String::from("1.1f"), Value::from(1.1).into_raw_string());
+		assert_eq!(String::from("-1.1f"), Value::from(-1.1).into_raw_string());
+		assert_eq!(String::from("3"), Value::from("3").into_raw_string());
+		assert_eq!(String::from("true"), Value::from("true").into_raw_string());
+		assert_eq!(String::from("false"), Value::from("false").into_raw_string());
+		assert_eq!(String::from("something"), Value::from("something").into_raw_string());
+	}
+
+	#[test]
+	fn check_size() {
+		assert!(64 >= std::mem::size_of::<Value>(), "size of value too big");
+	}
+
+	#[rstest]
+	// Rev-2 Value envelope overhead: every varlen variant pays 1 tag byte
+	// + 4 bytes `u32_le` payload length on top of the legacy `u16 rev` +
+	// `u32 disc`. Inline variants (`None`, `Null`) are the entire encoding
+	// in a single tag byte. `Bool` is `fixed(1)` -> tag + 1 byte.
+	#[case::none(Value::None, 2)]
+	#[case::null(Value::Null, 2)]
+	#[case::bool(Value::Bool(true), 3)]
+	#[case::bool(Value::Bool(false), 3)]
+	// String wire shape under rev-2 varlen: rev (1) + tag (1) + u32_le
+	// payload_length (4) + Strand wire (`usize len || utf8`) = 6 + Strand.
+	// "test" is 4 utf8 bytes + 1 length varint = 5 bytes, so 11 total.
+	#[case::string(Value::from("test"), 11)]
+	// Objects under rev-2 Value + rev-2 Object `indexed_map`:
+	//   Value envelope:  rev=2 (1) + tag (1) + u32_le payload_length (4) = 6
+	//   Object envelope: rev=2 (1) + u32_le payload_length (4) = 5
+	//   indexed_map body (sub-threshold): flag (1) + varint len + (K, V)*
+	// Total delta vs rev-1 Value + rev-1 Object: +13 bytes per Object Value
+	// (Value envelope +6, Object envelope +5, indexed_map flag +1, minus
+	// 4 bytes the rev-1 framing was paying). The Wire-repr zero-copy
+	// `walk_field_0` removed the need for a single-field offset table.
+	#[case::object(Value::from(syn::value("{ hello: 'world' }").unwrap()), 31)]
+	#[case::object(Value::from(syn::value("{ compact: true, schema: 0 }").unwrap()), 40)]
+	fn check_serialize(#[case] value: Value, #[case] expected: usize) {
+		let enc: Vec<u8> = revision::to_vec(&value).unwrap();
+		assert_eq!(expected, enc.len());
+	}
+
+	#[test]
+	fn serialize_deserialize() {
+		let val = parse_val!(
+			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: null }] } }"
+		);
+		let res = parse_val!(
+			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: null }] } }"
+		);
+		let enc: Vec<u8> = revision::to_vec(&val).unwrap();
+		let dec: Value = revision::from_slice(&enc).unwrap();
+		assert_eq!(res, dec);
+	}
+
+	#[rstest]
+	#[case::none(PublicValue::None, json!(null), PublicValue::Null)]
+	#[case::null(PublicValue::Null, json!(null), PublicValue::Null)]
+	#[case::bool(PublicValue::Bool(true), json!(true), PublicValue::Bool(true))]
+	#[case::bool(PublicValue::Bool(false), json!(false), PublicValue::Bool(false))]
+	#[case::number(
+		PublicValue::Number(PublicNumber::Int(i64::MIN)),
+		json!(i64::MIN),
+		PublicValue::Number(PublicNumber::Int(i64::MIN)),
+	)]
+	#[case::number(
+		PublicValue::Number(PublicNumber::Int(i64::MAX)),
+		json!(i64::MAX),
+		PublicValue::Number(PublicNumber::Int(i64::MAX)),
+	)]
+	#[case::number(
+		PublicValue::Number(PublicNumber::Float(1.23)),
+		json!(1.23),
+		PublicValue::Number(PublicNumber::Float(1.23)),
+	)]
+	#[case::number(
+		PublicValue::Number(PublicNumber::Float(f64::NEG_INFINITY)),
+		json!(null),
+		PublicValue::Null,
+	)]
+	#[case::number(
+		PublicValue::Number(PublicNumber::Float(f64::MIN)),
+		json!(-1.7976931348623157e308),
+		PublicValue::Number(PublicNumber::Float(f64::MIN)),
+	)]
+	#[case::number(
+		PublicValue::Number(PublicNumber::Float(0.0)),
+		json!(0.0),
+		PublicValue::Number(PublicNumber::Float(0.0)),
+	)]
+	#[case::number(
+		PublicValue::Number(PublicNumber::Float(f64::MAX)),
+		json!(1.7976931348623157e308),
+		PublicValue::Number(PublicNumber::Float(f64::MAX)),
+	)]
+	#[case::number(
+		PublicValue::Number(PublicNumber::Float(f64::INFINITY)),
+		json!(null),
+		PublicValue::Null,
+	)]
+	#[case::number(
+		PublicValue::Number(PublicNumber::Float(f64::NAN)),
+		json!(null),
+		PublicValue::Null,
+	)]
+	#[case::number(
+		PublicValue::Number(PublicNumber::Decimal(Decimal::new(123, 2))),
+		json!("1.23"),
+		PublicValue::String("1.23".to_string()),
+	)]
+	#[case::strand(
+		PublicValue::String("".to_string()),
+		json!(""),
+		PublicValue::String("".to_string()),
+	)]
+	#[case::strand(
+		PublicValue::String("foo".to_string()),
+		json!("foo"),
+		PublicValue::String("foo".to_string()),
+	)]
+	#[case::duration(
+		PublicValue::Duration(PublicDuration::ZERO),
+		json!("0ns"),
+		PublicValue::String("0ns".to_string()),
+	)]
+	#[case::duration(
+		PublicValue::Duration(PublicDuration::MAX),
+		json!("584942417355y3w5d7h15s999ms999µs999ns"),
+		PublicValue::String("584942417355y3w5d7h15s999ms999µs999ns".to_string()),
+	)]
+	#[case::datetime(
+		PublicValue::Datetime(PublicDatetime::MIN_UTC),
+		json!("-262143-01-01T00:00:00Z"),
+		PublicValue::Datetime(PublicDatetime::MIN_UTC),
+	)]
+	#[case::datetime(
+		PublicValue::Datetime(PublicDatetime::MAX_UTC),
+		json!("+262142-12-31T23:59:59.999999999Z"),
+		PublicValue::Datetime(PublicDatetime::MAX_UTC),
+	)]
+	#[case::uuid(
+		PublicValue::Uuid(PublicUuid::nil()),
+		json!("00000000-0000-0000-0000-000000000000"),
+		PublicValue::Uuid(PublicUuid::nil()),
+	)]
+	#[case::uuid(
+		PublicValue::Uuid(PublicUuid::max()),
+		json!("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+		PublicValue::Uuid(PublicUuid::max()),
+	)]
+	#[case::bytes(
+		PublicValue::Bytes(PublicBytes::default()),
+		json!([]),
+		PublicValue::Array(PublicArray::new()),
+	)]
+	#[case::bytes(
+		PublicValue::Bytes(PublicBytes::from(b"foo".to_vec())),
+		json!([102, 111, 111]),
+		PublicValue::Array(PublicArray::from(vec![
+			PublicValue::Number(PublicNumber::Int(102)),
+			PublicValue::Number(PublicNumber::Int(111)),
+			PublicValue::Number(PublicNumber::Int(111)),
+		])),
+	)]
+	#[case::record_id(
+		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".to_string()))) ,
+		json!("foo:bar"),
+		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".to_string()))) ,
+	)]
+	#[case::array(
+		PublicValue::Array(PublicArray::new()),
+		json!([]),
+		PublicValue::Array(PublicArray::new()),
+	)]
+	#[case::array(
+		PublicValue::Array(PublicArray::from(vec![PublicValue::Bool(true), PublicValue::Bool(false)])),
+		json!([true, false]),
+		PublicValue::Array(PublicArray::from(vec![PublicValue::Bool(true), PublicValue::Bool(false)])),
+	)]
+	#[case::object(
+		PublicValue::Object(PublicObject::new()),
+		json!({}),
+		PublicValue::Object(PublicObject::new()),
+	)]
+	#[case::object(
+		PublicValue::Object(PublicObject::from_iter([("done".to_owned(), PublicValue::Bool(true))])),
+		json!({"done": true}),
+		PublicValue::Object(PublicObject::from_iter([("done".to_owned(), PublicValue::Bool(true))])),
+	)]
+	#[case::geometry_point(
+		PublicValue::Geometry(PublicGeometry::Point(point! { x: 10., y: 20. })),
+		json!({ "type": "Point", "coordinates": [10., 20.]}),
+		PublicValue::Geometry(PublicGeometry::Point(point! { x: 10., y: 20. })),
+	)]
+	#[case::geometry_line(
+		PublicValue::Geometry(PublicGeometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])),
+		json!({ "type": "LineString", "coordinates": [[0., 0.], [10., 0.]]}),
+		PublicValue::Geometry(PublicGeometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])),
+	)]
+	#[case::geometry_polygon(
+		PublicValue::Geometry(PublicGeometry::Polygon(polygon![
+			(x: -111., y: 45.),
+			(x: -111., y: 41.),
+			(x: -104., y: 41.),
+			(x: -104., y: 45.),
+		])),
+		json!({ "type": "Polygon", "coordinates": [[
+			[-111., 45.],
+			[-111., 41.],
+			[-104., 41.],
+			[-104., 45.],
+			[-111., 45.],
+		]]}),
+		PublicValue::Geometry(PublicGeometry::Polygon(polygon![
+			(x: -111., y: 45.),
+			(x: -111., y: 41.),
+			(x: -104., y: 41.),
+			(x: -104., y: 45.),
+		])),
+	)]
+	#[case::geometry_multi_point(
+		PublicValue::Geometry(PublicGeometry::MultiPoint(MultiPoint::new(vec![
+			point! { x: 0., y: 0. },
+			point! { x: 1., y: 2. },
+		]))),
+		json!({ "type": "MultiPoint", "coordinates": [[0., 0.], [1., 2.]]}),
+		PublicValue::Geometry(PublicGeometry::MultiPoint(MultiPoint::new(vec![
+			point! { x: 0., y: 0. },
+			point! { x: 1., y: 2. },
+		]))),
+	)]
+	#[case::geometry_multi_line(
+		PublicValue::Geometry(
+			PublicGeometry::MultiLine(
+				MultiLineString::new(vec![
+					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
+				])
+			)
+		),
+		json!({ "type": "MultiLineString", "coordinates": [[[0., 0.], [1., 2.]]]}),
+		PublicValue::Geometry(
+			PublicGeometry::MultiLine(
+				MultiLineString::new(vec![
+					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
+				])
+			)
+		),
+	)]
+	#[case::geometry_multi_polygon(
+		PublicValue::Geometry(PublicGeometry::MultiPolygon(MultiPolygon::new(vec![
+			polygon![
+				(x: -111., y: 45.),
+				(x: -111., y: 41.),
+				(x: -104., y: 41.),
+				(x: -104., y: 45.),
+			],
+		]))),
+		json!({ "type": "MultiPolygon", "coordinates": [[[
+			[-111., 45.],
+			[-111., 41.],
+			[-104., 41.],
+			[-104., 45.],
+			[-111., 45.],
+		]]]})
+	,	PublicValue::Geometry(PublicGeometry::MultiPolygon(MultiPolygon::new(vec![
+			polygon![
+				(x: -111., y: 45.),
+				(x: -111., y: 41.),
+				(x: -104., y: 41.),
+				(x: -104., y: 45.),
+			],
+		]))),
+	)]
+	#[case::geometry_collection(
+		PublicValue::Geometry(PublicGeometry::Collection(vec![])),
+		json!({
+			"type": "GeometryCollection",
+			"geometries": [],
+		}),
+		PublicValue::Geometry(PublicGeometry::Collection(vec![])),
+	)]
+	#[case::geometry_collection_with_point(
+		PublicValue::Geometry(PublicGeometry::Collection(vec![PublicGeometry::Point(point! { x: 10., y: 20. })])),
+		json!({
+		"type": "GeometryCollection",
+		"geometries": [ { "type": "Point", "coordinates": [10., 20.] } ],
+	}),
+		PublicValue::Geometry(PublicGeometry::Collection(vec![PublicGeometry::Point(point! { x: 10., y: 20. })])),
+	)]
+	#[case::geometry_collection_with_line(
+		PublicValue::Geometry(PublicGeometry::Collection(vec![PublicGeometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])])),
+		json!({
+			"type": "GeometryCollection",
+			"geometries": [ { "type": "LineString", "coordinates": [[0., 0.], [10., 0.]] } ],
+		}),
+		PublicValue::Geometry(PublicGeometry::Collection(vec![PublicGeometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])])),
+	)]
+
+	fn test_json(
+		#[case] value: PublicValue,
+		#[case] expected: Json,
+		#[case] expected_deserialized: PublicValue,
+	) {
+		use crate::parser::ParserConfig;
+
+		let json_value = value.into_json_value();
+		assert_eq!(json_value, expected);
+
+		let json_str = serde_json::to_string(&json_value).expect("Failed to serialize to JSON");
+		let deserialized_sql_value =
+			crate::syn::value_legacy_strand(&json_str, &ParserConfig::default()).unwrap();
+		assert_eq!(deserialized_sql_value, expected_deserialized);
+	}
+
+	#[test]
+	fn duration_decimal_mul_and_div_overflow_return_error() {
+		let one_sec = Value::Duration(Duration::new(1, 0));
+		let huge_dec: Decimal = "100000000000000000000".parse().unwrap();
+		let mul_err = one_sec.try_mul(Value::Number(Number::Decimal(huge_dec))).unwrap_err();
+		assert!(matches!(mul_err.downcast_ref::<Error>(), Some(Error::ArithmeticOverflow(_))));
+
+		let max_dur = Value::Duration(Duration::MAX);
+		let tiny_dec: Decimal = "0.0000000000000000000000000001".parse().unwrap();
+		let div_err = max_dur.try_div(Value::Number(Number::Decimal(tiny_dec))).unwrap_err();
+		assert!(matches!(div_err.downcast_ref::<Error>(), Some(Error::ArithmeticOverflow(_))));
+	}
+}
+
+#[cfg(test)]
+mod revision_tests {
+	use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
+
+	use super::*;
+
+	/// The variants `Value` had at revision 2, declared through the derive, as the reference for
+	/// the bytes the hand-written serializer writes for them.
+	#[revisioned(revision(1), revision(2, optimised))]
+	enum Rev2 {
+		#[revision(size = "inline")]
+		None,
+		#[revision(size = "inline")]
+		Null,
+		#[revision(size = "fixed(1)")]
+		Bool(bool),
+		#[revision(size = "varlen")]
+		Number(Number),
+		#[revision(size = "varlen")]
+		String(Strand),
+		#[revision(size = "varlen")]
+		Duration(Duration),
+		#[revision(size = "varlen")]
+		Datetime(Datetime),
+		#[revision(size = "varlen")]
+		Uuid(Uuid),
+		#[revision(size = "varlen")]
+		Array(Array),
+		#[revision(size = "varlen")]
+		Bytes(Bytes),
+	}
+
+	fn bytes<T: SerializeRevisioned>(v: &T) -> Vec<u8> {
+		let mut out = Vec::new();
+		v.serialize_revisioned(&mut out).unwrap();
+		out
+	}
+
+	fn read(bytes: &[u8]) -> Result<Value, revision::Error> {
+		Value::deserialize_revisioned(&mut &bytes[..])
+	}
+
+	#[test]
+	fn revision_2_variants_are_written_as_revision_2() {
+		let cases: Vec<(Value, Rev2)> = vec![
+			(Value::None, Rev2::None),
+			(Value::Null, Rev2::Null),
+			(Value::Bool(true), Rev2::Bool(true)),
+			(Value::Number(Number::Int(7)), Rev2::Number(Number::Int(7))),
+			(Value::String(Strand::new("a")), Rev2::String(Strand::new("a"))),
+			(Value::Datetime(Datetime::MIN_UTC), Rev2::Datetime(Datetime::MIN_UTC)),
+			(Value::Array(Array(vec![Value::Null])), Rev2::Array(Array(vec![Value::Null]))),
+		];
+		for (value, reference) in cases {
+			let written = bytes(&value);
+			assert_eq!(written[0], 2, "{value:?}");
+			assert_eq!(read(&written).unwrap(), value);
+			// The reference writes revision 2 for every variant, as the derive does.
+			let mut expected = bytes(&reference);
+			expected[0] = 2;
+			assert_eq!(&written[1..], &expected[1..], "{value:?}");
+		}
+	}
+
+	#[test]
+	fn new_variants_round_trip_as_revision_3() {
+		let values = [
+			Value::Date(Date(-5)),
+			Value::Time(Time(Time::NANOS_PER_DAY)),
+			Value::Timestamp(Timestamp {
+				secs: -1,
+				nanos: 3,
+			}),
+			Value::Interval(Interval::new(-1, 2, -3)),
+			Value::Array(Array(vec![Value::Date(Date(1)), Value::Null])),
+		];
+		for value in values {
+			let written = bytes(&value);
+			let back = read(&written).unwrap();
+			assert!(same_value(&back, &value), "{value:?}");
+			if !matches!(value, Value::Array(_)) {
+				assert_eq!(written[0], 3);
+			}
+		}
+	}
+
+	#[test]
+	fn older_revisions_refuse_the_new_variants() {
+		let written = bytes(&Value::Date(Date(1)));
+		assert_eq!(written[0], 3);
+		let mut as_rev2 = written;
+		as_rev2[0] = 2;
+		assert!(read(&as_rev2).is_err());
+		let mut as_rev1 = vec![1u8];
+		as_rev1.extend_from_slice(&19u32.to_le_bytes());
+		assert!(read(&as_rev1).is_err());
+		assert!(read(&[4, 0]).is_err());
+	}
+
+	#[test]
+	fn out_of_range_payloads_are_refused() {
+		let bad = [
+			Value::Date(Date(i32::MAX)),
+			Value::Time(Time(u64::MAX)),
+			Value::Timestamp(Timestamp {
+				secs: i64::MAX,
+				nanos: 0,
+			}),
+		];
+		for value in bad {
+			assert!(read(&bytes(&value)).is_err(), "{value:?}");
+		}
+	}
+
+	#[test]
+	fn temporal_values_order_after_every_other_variant() {
+		let ordered = [
+			Value::Range(Box::new(Range::unbounded())),
+			Value::Date(Date(i32::MIN + 1_000_000_000)),
+			Value::Time(Time(0)),
+			Value::Timestamp(Timestamp {
+				secs: 0,
+				nanos: 0,
+			}),
+			Value::Interval(Interval::new(0, 0, 0)),
+		];
+		for pair in ordered.windows(2) {
+			assert!(pair[0] < pair[1], "{:?} < {:?}", pair[0], pair[1]);
+		}
+		assert!(Value::Datetime(Datetime::MAX_UTC) < Value::Date(Date(0)));
+		assert!(Value::Date(Date(-1)) < Value::Date(Date(0)));
+		assert_eq!(
+			Value::Interval(Interval::new(1, 0, 0)),
+			Value::Interval(Interval::new(0, 30, 0))
+		);
+		assert!(!same_value(
+			&Value::Interval(Interval::new(1, 0, 0)),
+			&Value::Interval(Interval::new(0, 30, 0))
+		));
+		assert!(Value::Date(Date(1)).hash_agrees_with_eq());
+		assert!(
+			Value::Interval(Interval::new(1, 0, 0))
+				.equal(&Value::Interval(Interval::new(0, 30, 0)))
+		);
+		assert!(!Value::Date(Date(0)).equal(&Value::Time(Time(0))));
+	}
+}

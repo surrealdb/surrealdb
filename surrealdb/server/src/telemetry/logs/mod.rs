@@ -60,21 +60,30 @@ where
 /// detection. Each stream independently checks whether it is a TTY and
 /// respects the `NO_COLOR` environment variable (https://no-color.org).
 /// JSON output never emits ANSI escape codes regardless of TTY state.
+///
+/// WARN and ERROR go to stderr. INFO, DEBUG and TRACE go to stdout, unless
+/// `stdout_logs` is false, when they go to stderr too and nothing is written
+/// to stdout: a command whose stdout is data, a JSON document or a dump, owns all of it.
 pub fn output<S>(
 	filter: CustomFilter,
 	stdout: NonBlocking,
 	stderr: NonBlocking,
 	format: LogFormat,
+	stdout_logs: bool,
 ) -> Result<Vec<Box<dyn Layer<S> + Send + Sync>>>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
 	let no_color = std::env::var_os("NO_COLOR").is_some();
-	let ansi_stdout =
-		!no_color && std::io::stdout().is_terminal() && matches!(format, LogFormat::Text);
 	let ansi_stderr =
 		!no_color && std::io::stderr().is_terminal() && matches!(format, LogFormat::Text);
-	// Route WARN/ERROR to stderr, INFO/DEBUG/TRACE to stdout
+	let (stdout, ansi_stdout) = if stdout_logs {
+		let ansi_stdout =
+			!no_color && std::io::stdout().is_terminal() && matches!(format, LogFormat::Text);
+		(stdout, ansi_stdout)
+	} else {
+		(stderr.clone(), ansi_stderr)
+	};
 	let stderr_writer = stderr.with_max_level(Level::WARN);
 	let stdout_writer = stdout.with_min_level(Level::INFO);
 	// Include source location in debug builds only
@@ -82,7 +91,8 @@ where
 	let (show_file, show_line) = (false, false);
 	#[cfg(debug_assertions)]
 	let (show_file, show_line) = (true, true);
-	// Build the stderr layer (WARN and ERROR)
+	// Build the stderr layer (WARN and ERROR). The span filter is outermost so
+	// the layer reports the configured level as its hint, not WARN.
 	let stderr_filter = filter.clone();
 	let stderr_layer = {
 		let layer = tracing_subscriber::fmt::layer();
@@ -97,9 +107,9 @@ where
 				.with_thread_names(false)
 				.with_span_events(FmtSpan::NONE)
 				.with_writer(stderr_writer)
+				.with_filter(LevelFilter::WARN)
 				.with_filter(stderr_filter.env())
 				.with_filter(stderr_filter.span_filter::<S>())
-				.with_filter(LevelFilter::WARN)
 				.boxed(),
 			LogFormat::Text => layer
 				.compact()
@@ -111,17 +121,23 @@ where
 				.with_thread_names(false)
 				.with_span_events(FmtSpan::NONE)
 				.with_writer(stderr_writer)
+				.with_filter(LevelFilter::WARN)
 				.with_filter(stderr_filter.env())
 				.with_filter(stderr_filter.span_filter::<S>())
-				.with_filter(LevelFilter::WARN)
 				.boxed(),
 		}
 	};
-	// Build the stdout layer (INFO, DEBUG, and TRACE)
+	// Build the stdout layer (INFO, DEBUG, and TRACE), which writes to stderr
+	// when `stdout_logs` is false
 	let stdout_layer = {
 		let layer = tracing_subscriber::fmt::layer();
+		// Applied over `filter`, so it admits at most what `filter` does.
 		let level_filter =
 			tracing_subscriber::filter::filter_fn(|meta| *meta.level() > Level::WARN);
+		let level_filter = match filter.max_level_hint() {
+			Some(hint) => level_filter.with_max_level_hint(hint),
+			None => level_filter,
+		};
 		match format {
 			LogFormat::Json => layer
 				.json()

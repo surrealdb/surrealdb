@@ -2,29 +2,29 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use surrealism_types::args::Args;
 use surrealism_types::err::{SurrealismError, SurrealismResult};
-use tokio::sync::OwnedSemaphorePermit;
+use wasmtime::component::Resource;
 use wasmtime::*;
-use web_time::Instant;
 
-use crate::epoch::EPOCH_TICK_MS;
-use crate::host::{InvocationContext, NullContext};
+use crate::host::{InvocationContext, Transaction};
 use crate::store::StoreData;
 
-fn effective_timeout(
+pub(crate) fn effective_timeout(
 	context_remaining: Option<Duration>,
 	module_limit: Option<Duration>,
 ) -> Option<Duration> {
 	[context_remaining, module_limit].into_iter().flatten().min()
 }
 
-/// Per-execution controller. Not thread-safe — use one at a time.
-/// Can be reused across invocations by swapping the host context.
-/// WASM linear memory persists between calls, so Rust statics survive.
+/// One instance of a component, serving one invocation.
+///
+/// Created fresh from the component's `InstancePre` and dropped when the
+/// invocation returns, which hands its pool slot back with its memory reset to
+/// the module's image. Nothing it wrote — linear memory, globals, tables, the
+/// WASI resource table — survives it. Not thread-safe; use one at a time.
 pub struct Controller {
 	store: Store<StoreData>,
 	invoke_fn: component::Func,
@@ -36,18 +36,19 @@ pub struct Controller {
 	list_fn: Option<component::Func>,
 	/// Only present when the module exports the `function-writeable` function.
 	writeable_fn: Option<component::Func>,
+	/// Only present when the module exports `function-declares-transaction`.
+	declares_tx_fn: Option<component::Func>,
 	/// Only present when the module exports the `function-comment` function.
 	comment_fn: Option<component::Func>,
-	init_fn: Option<component::Func>,
-	/// Effective execution time limit from module config + server cap (without
-	/// context timeout, which varies per invocation).
+	/// The execution time limit this invocation was granted, without the
+	/// caller's remaining query time, which is applied per call.
 	module_execution_time: Option<Duration>,
-	/// Shared epoch counter from the global engine, used to compute safe epoch deltas.
+	/// Shared epoch counter from the engine pool, used to compute safe epoch deltas.
 	epoch_counter: Arc<std::sync::atomic::AtomicU64>,
-	/// While [`None`], this controller is idle in the pool and does **not** consume a slot on
-	/// [`Runtime`](crate::runtime::Runtime)'s controller semaphore. While [`Some`], the permit
-	/// counts toward the concurrent-instance cap.
-	controller_slot: Option<OwnedSemaphorePermit>,
+	/// The invocation slot this instance occupies, released on drop. `None`
+	/// for an instance created outside the slot accounting, such as the build
+	/// tool's.
+	_slot: Option<crate::epoch::SlotPermit>,
 }
 
 impl fmt::Debug for Controller {
@@ -65,11 +66,11 @@ impl Controller {
 		returns_fn: Option<component::Func>,
 		list_fn: Option<component::Func>,
 		writeable_fn: Option<component::Func>,
+		declares_tx_fn: Option<component::Func>,
 		comment_fn: Option<component::Func>,
-		init_fn: Option<component::Func>,
 		module_execution_time: Option<Duration>,
 		epoch_counter: Arc<std::sync::atomic::AtomicU64>,
-		controller_slot: OwnedSemaphorePermit,
+		slot: Option<crate::epoch::SlotPermit>,
 	) -> Self {
 		Self {
 			store,
@@ -78,117 +79,48 @@ impl Controller {
 			returns_fn,
 			list_fn,
 			writeable_fn,
+			declares_tx_fn,
 			comment_fn,
-			init_fn,
 			module_execution_time,
 			epoch_counter,
-			controller_slot: Some(controller_slot),
+			_slot: slot,
 		}
 	}
 
-	/// Attach a semaphore permit after taking this controller from the idle pool.
-	pub(crate) fn attach_controller_slot(&mut self, permit: OwnedSemaphorePermit) {
-		debug_assert!(self.controller_slot.is_none(), "controller already holds a slot permit");
-		self.controller_slot = Some(permit);
+	/// Trap the next call `timeout` from now, or never for `None`. Takes
+	/// effect on the guarded engine only; the fast engine has no epoch checks.
+	fn set_deadline(&mut self, timeout: Option<Duration>) {
+		let deadline = timeout.map(|t| crate::epoch::deadline_after(&self.epoch_counter, t));
+		self.store.data_mut().deadline = deadline;
 	}
 
-	/// Remove and return the slot permit so the controller can sit in the pool without holding
-	/// capacity on the runtime semaphore.
-	pub(crate) fn take_controller_slot(&mut self) -> Option<OwnedSemaphorePermit> {
-		self.controller_slot.take()
-	}
-
-	/// Replace the invocation context. Used when reusing a pooled controller
-	/// for a new request with different permissions. Also updates the WASI
-	/// stdio callbacks so guest `println!` output routes through the same
-	/// structured logging path as the WIT `stdout`/`stderr` imports.
-	pub fn set_context(&mut self, context: Box<dyn InvocationContext>) {
-		let data = self.store.data_mut();
-		*data.stdout_cb.lock() = context.stdout_callback();
-		*data.stderr_cb.lock() = context.stderr_callback();
-		data.context = context;
-	}
-
-	/// Clear the invocation context, replacing it with a NullContext.
-	/// Called before returning a controller to the pool so no per-request state
-	/// (auth, permissions, KV) is retained. Resets WASI stdio to host defaults.
-	pub fn clear_context(&mut self) {
-		let data = self.store.data_mut();
-		*data.stdout_cb.lock() = Arc::new(|output| print!("{}", output));
-		*data.stderr_cb.lock() = Arc::new(|output| eprint!("{}", output));
-		data.context = Box::new(NullContext);
-	}
-
-	/// Reset the epoch deadline to the maximum safe value. Wasmtime internally
-	/// computes `current_epoch + delta` with wrapping arithmetic, so passing
-	/// `u64::MAX` overflows once the epoch advances past 0. We subtract the
-	/// shadow counter (always >= engine epoch thanks to the ticker thread
-	/// increment ordering) plus a small margin so that a concurrent tick
-	/// between the load and the `set_epoch_deadline` call cannot overflow.
-	pub fn reset_epoch_deadline(&mut self) {
-		let epoch = self.epoch_counter.load(Ordering::Acquire);
-		self.store.set_epoch_deadline(u64::MAX.saturating_sub(epoch).saturating_sub(1));
-	}
-
-	/// Apply the module-level execution time limit as an epoch deadline.
-	/// If no limit is configured, resets to the maximum safe value.
+	/// Apply the module-level execution time limit as the deadline.
 	fn apply_module_deadline(&mut self) {
-		match self.module_execution_time {
-			Some(timeout) => {
-				let ticks = (timeout.as_millis() as u64) / EPOCH_TICK_MS;
-				self.store.set_epoch_deadline(ticks.max(1));
-			}
-			None => self.reset_epoch_deadline(),
-		}
-	}
-
-	#[tracing::instrument(skip_all)]
-	pub async fn init(&mut self) -> SurrealismResult<()> {
-		let t0 = Instant::now();
-		let Some(func) = self.init_fn else {
-			tracing::debug!("controller.init(): no init_fn, skipping");
-			return Ok(());
-		};
-		self.apply_module_deadline();
-		tracing::info!(
-			module_execution_time = ?self.module_execution_time,
-			"controller.init(): calling init function..."
-		);
-		let typed = func.typed::<(), (Result<(), String>,)>(&self.store)?;
-		match typed.call_async(&mut self.store, ()).await {
-			Ok((result,)) => {
-				tracing::info!(elapsed = ?t0.elapsed(), ok = result.is_ok(), "controller.init(): completed");
-				result.map_err(SurrealismError::FunctionCallError)
-			}
-			Err(e) => {
-				if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
-					tracing::error!(elapsed = ?t0.elapsed(), "controller.init(): timed out");
-					return Err(SurrealismError::Timeout {
-						effective: self.module_execution_time,
-						context_timeout: None,
-						module_limit: self.module_execution_time,
-					});
-				}
-				tracing::error!(elapsed = ?t0.elapsed(), error = %e, "controller.init(): WASM TRAP");
-				Err(e.into())
-			}
-		}
+		self.set_deadline(self.module_execution_time);
 	}
 
 	#[tracing::instrument(skip_all, fields(name))]
 	pub async fn invoke<A: Args>(
 		&mut self,
+		context: Option<Arc<dyn InvocationContext>>,
 		name: Option<String>,
 		args: A,
 	) -> SurrealismResult<surrealdb_types::Value> {
-		self.invoke_with_timeout(name, args, None).await
+		self.invoke_with_timeout(context, name, args, None).await
 	}
 
 	/// Invoke with an optional context-level timeout. The effective deadline is
 	/// `min(context_remaining, module_config, server_cap)`.
+	///
+	/// `context` is lent to the guest as a `transaction` handle for the duration
+	/// of the call and revoked before returning, on every path including a trap
+	/// and including a failure to build the typed view of `invoke`.
+	/// Pass `None` for a function that declared no transaction parameter: it then
+	/// receives no handle and has no route to the datastore.
 	#[tracing::instrument(skip_all, fields(name))]
 	pub async fn invoke_with_timeout<A: Args>(
 		&mut self,
+		context: Option<Arc<dyn InvocationContext>>,
 		name: Option<String>,
 		args: A,
 		context_timeout: Option<Duration>,
@@ -196,40 +128,80 @@ impl Controller {
 		let display_name = name.as_deref().unwrap_or("<default>");
 		let effective = effective_timeout(context_timeout, self.module_execution_time);
 
-		match effective {
-			Some(timeout) => {
-				let ticks = (timeout.as_millis() as u64) / EPOCH_TICK_MS;
-				self.store.set_epoch_deadline(ticks.max(1));
-			}
-			None => {
-				self.reset_epoch_deadline();
-			}
-		}
+		self.set_deadline(effective);
 
 		let args_values = args.to_values();
 		let args_bytes = surrealdb_types::encode_value_list(&args_values)?;
 
-		let typed = self
-			.invoke_fn
-			.typed::<(Option<&str>, &[u8]), (Result<Vec<u8>, String>,)>(&self.store)?;
+		// Lend the capability for exactly this call. The counter it carries
+		// bounds how many host calls the guest may hold in flight through it;
+		// which of them may run at the same time is the context's decision,
+		// because only the context can read what each statement does.
+		let owned = match context {
+			Some(context) => Some(
+				self.store
+					.data_mut()
+					.table
+					.push(Transaction {
+						context,
+						in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+					})
+					.map_err(|e| SurrealismError::Other(e.into()))?,
+			),
+			None => None,
+		};
+		let borrowed = owned.as_ref().map(|rep| Resource::<Transaction>::new_borrow(rep.rep()));
 
-		let call_result = typed.call_async(&mut self.store, (name.as_deref(), &args_bytes)).await;
+		// Nothing between lending the handle and revoking it may return early,
+		// or the handle outlives the call it was lent to. So the fallible step
+		// that builds the typed view is folded into the same result the call
+		// produces, rather than propagated with `?` from here.
+		let call_result: SurrealismResult<(Result<Vec<u8>, String>,)> = match self
+			.invoke_fn
+			.typed::<(Option<Resource<Transaction>>, Option<&str>, &[u8]), (Result<Vec<u8>, String>,)>(
+				&self.store,
+			) {
+			Ok(typed) => typed
+				.call_async(&mut self.store, (borrowed, name.as_deref(), &args_bytes))
+				.await
+				.map_err(|e| {
+					if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
+						SurrealismError::Timeout {
+							effective,
+							context_timeout,
+							module_limit: self.module_execution_time,
+						}
+					} else {
+						SurrealismError::from(e)
+					}
+				}),
+			Err(e) => Err(SurrealismError::from(e)),
+		};
+
+		// Revoke it before anything else can observe the result, including on the
+		// trap path. A retained handle then refers to nothing and traps on use;
+		// within a batch, the next row is lent a handle of its own.
+		//
+		// Logged rather than propagated: the delete can fail for reasons that say
+		// nothing about the call — the destructor already removed the entry, or
+		// borrow accounting still holds a child after an async-lifted `invoke`
+		// unwinds. Letting that replace `call_result` would throw away the
+		// `Trap`/`Timeout` the caller needs.
+		if let Some(rep) = owned
+			&& let Err(e) = self.store.data_mut().table.delete(rep)
+		{
+			tracing::error!(
+				name = %display_name,
+				error = %e,
+				"invoke_with_timeout: could not revoke the transaction handle"
+			);
+		}
 
 		if let Err(e) = &call_result {
 			tracing::error!(name = %display_name, error = %e, "invoke_with_timeout: call_async FAILED");
 		}
 
-		let (result,) = call_result.map_err(|e| {
-			if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
-				SurrealismError::Timeout {
-					effective,
-					context_timeout,
-					module_limit: self.module_execution_time,
-				}
-			} else {
-				SurrealismError::from(e)
-			}
-		})?;
+		let (result,) = call_result?;
 
 		if let Err(guest_err) = &result {
 			tracing::warn!(name = %display_name, guest_error = %guest_err, "invoke_with_timeout: guest returned Err");
@@ -332,6 +304,28 @@ impl Controller {
 				tracing::error!(name = %display_name, error = %e, error_debug = ?e, "controller.writeable(): WASM TRAP");
 				Err(self.trap_to_timeout(e))
 			}
+		}
+	}
+
+	/// Query whether a function declared a transaction parameter, via the WASM
+	/// export. Only available when the module has the
+	/// `function-declares-transaction` export (build tool).
+	///
+	/// Used to *write* the exports manifest, never to check one: the serve path
+	/// reads [`FunctionExport::declares_transaction`](crate::exports::FunctionExport::declares_transaction)
+	/// and lends the handle on that alone.
+	#[tracing::instrument(skip_all, fields(name))]
+	pub async fn declares_transaction(&mut self, name: Option<String>) -> SurrealismResult<bool> {
+		let Some(func) = self.declares_tx_fn else {
+			return Err(SurrealismError::Other(anyhow::anyhow!(
+				"function-declares-transaction export not available"
+			)));
+		};
+		self.apply_module_deadline();
+		let typed = func.typed::<(Option<&str>,), (Result<bool, String>,)>(&self.store)?;
+		match typed.call_async(&mut self.store, (name.as_deref(),)).await {
+			Ok((result,)) => result.map_err(SurrealismError::FunctionCallError),
+			Err(e) => Err(self.trap_to_timeout(e)),
 		}
 	}
 

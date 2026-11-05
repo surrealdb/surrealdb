@@ -1,0 +1,22 @@
+/**
+[env]
+namespace = true
+database = "shop"
+imports = ["mysql/_show_shop.surql"]
+
+[test]
+reason = "A table name or a LIKE pattern that closes its quotes does not run what follows, and the statement that follows it still sees the table"
+
+[[test.results]]
+error = "An error occurred: Table 'show_ledger`'; REMOVE TABLE show_accounts; ' doesn't exist"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'show_accounts' }, { Tables_in_shop: 'show_ledger' }]"
+*/
+
+SHOW COLUMNS FROM `show_ledger``'; REMOVE TABLE show_accounts; `;
+SHOW TABLES LIKE 'x''; REMOVE TABLE show_accounts; ';
+SHOW TABLES;

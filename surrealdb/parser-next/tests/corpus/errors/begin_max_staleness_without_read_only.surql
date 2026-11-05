@@ -1,0 +1,2 @@
+-- MAX STALENESS is a clause of READ ONLY.
+BEGIN MAX STALENESS 5s;

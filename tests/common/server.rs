@@ -75,6 +75,13 @@ impl Child {
 		output
 	}
 
+	/// Wait for the child and read its stdout concatenated with its stderr,
+	/// whatever its exit status. For tests that assert on an error a command
+	/// reports and exits non-zero for.
+	pub fn output_even_on_failure(&mut self) -> String {
+		self.output().unwrap_or_else(|output| output)
+	}
+
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the
 	/// child returns successfully, Err otherwise.
 	pub fn output(&mut self) -> Result<String, String> {
@@ -118,8 +125,9 @@ pub fn run_internal<P: AsRef<Path>>(
 		assert!(path.pop());
 	}
 
-	// Note: Cargo automatically builds this binary for integration tests.
-	path.push(format!("{}{}", env!("CARGO_PKG_NAME"), std::env::consts::EXE_SUFFIX));
+	// Note: Cargo automatically builds this binary for integration tests. The
+	// binary is `surreal`, which is not the package's name.
+	path.push(format!("surreal{}", std::env::consts::EXE_SUFFIX));
 
 	let mut cmd = Command::new(path);
 	if let Some(dir) = current_dir {
@@ -159,8 +167,13 @@ pub fn run_in_dir<P: AsRef<Path>>(args: &str, current_dir: P) -> Child {
 	run_internal(args, Some(current_dir), None)
 }
 
+/// A unique path under the system temp directory, resolved at run time.
+///
+/// The directory must not be a compile-time path such as `env!("OUT_DIR")`:
+/// CI runs these tests from a nextest archive on runners that never built
+/// them, so the build's target directory does not exist there.
 pub fn tmp_file(name: &str) -> String {
-	let path = Path::new(env!("OUT_DIR")).join(format!("{}-{}", rand::random::<u32>(), name));
+	let path = std::env::temp_dir().join(format!("{}-{}", rand::random::<u32>(), name));
 	path.to_string_lossy().into_owned()
 }
 
@@ -229,8 +242,11 @@ pub async fn start_server_with_import_file(path: &str) -> Result<(String, Child)
 }
 
 pub async fn start_server_with_versioning() -> Result<(String, Child), Box<dyn Error>> {
+	// The memory backend no longer supports versioning after the surrealmx 0.23
+	// upgrade; use the surrealkv backend, which retains native versioning.
+	let path = tmp_file("versioned.db");
 	start_server(StartServerArguments {
-		path: Some("memory?versioned=true".to_string()),
+		path: Some(format!("surrealkv://{path}?versioned=true&retention=1h")),
 		auth: false,
 		..Default::default()
 	})
@@ -286,7 +302,7 @@ pub async fn start_server(
 		let addr = format!("127.0.0.1:{port}");
 
 		let start_args = format!(
-			"start --bind {addr} {path} --no-banner --log trace --user {USER} --pass {PASS} {extra_args}"
+			"start --bind {addr} {path} --log trace --user {USER} --pass {PASS} {extra_args}"
 		);
 
 		info!("starting server with args: {start_args}");

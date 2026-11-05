@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Wire-fast canonical-byte-eq path covers more than tag-only literals: Datetime, Uuid, Duration literals are pre-encoded into LiteralWire::Canonical so WHERE created = d'...' / id = u'...' / dur = 5s memcmp against the leaf's wire bytes — no decode."
@@ -13,37 +12,35 @@ value = "{ at: d'2024-05-21T00:00:00Z', dur: 5s, id: pfcanon:1, uid: u'00000000-
 [[test.results]]
 value = "{ at: d'2024-05-22T00:00:00Z', dur: 10s, id: pfcanon:2, uid: u'00000000-0000-0000-0000-0000000000a2' }"
 
-# WHERE at = d'2024-05-21...'
 [[test.results]]
 value = "[{ id: pfcanon:1 }]"
 
-# WHERE uid = u'0...a2'
 [[test.results]]
 value = "[{ id: pfcanon:2 }]"
 
-# WHERE dur = 5s
 [[test.results]]
 value = "[{ id: pfcanon:1 }]"
 
-# WHERE at != d'2024-05-21...'
 [[test.results]]
 value = "[{ id: pfcanon:2 }]"
 
-# EXPLAIN: all three predicate shapes report pre_decode_filter: yes
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]
+value = '''
+"SelectProject [ctx: Db] [projections: id]
     TableScan [ctx: Db] [table: pfcanon, direction: Forward, predicate: at = d'2024-05-21T00:00:00Z', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]
+value = '''
+"SelectProject [ctx: Db] [projections: id]
     TableScan [ctx: Db] [table: pfcanon, direction: Forward, predicate: uid = u'00000000-0000-0000-0000-0000000000a2', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]
+value = '''
+'SelectProject [ctx: Db] [projections: id]
     TableScan [ctx: Db] [table: pfcanon, direction: Forward, predicate: dur = 5s, pre_decode_filter: yes]
-"'''
+''''
 
 */
 

@@ -1,0 +1,770 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
+use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::str::FromStr;
+
+use common::fmt::{EscapeIdent, EscapeKwFreeIdent};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use surrealdb_strand::Strand;
+use surrealdb_types::{ToSql, write_sql};
+
+use crate::expr::paths::{ID, IN, OUT};
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{Expr, Literal, Part, Value};
+
+pub mod recursion;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[allow(dead_code)]
+pub struct Idioms(pub Vec<Idiom>);
+
+impl Deref for Idioms {
+	type Target = Vec<Idiom>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl IntoIterator for Idioms {
+	type Item = Idiom;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
+
+impl PartialOrd for Idioms {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for Idioms {
+	fn cmp(&self, other: &Self) -> Ordering {
+		for (a, b) in self.0.iter().zip(other.0.iter()) {
+			let o = a.cmp(b);
+			if o != Ordering::Equal {
+				return o;
+			}
+		}
+		Ordering::Equal
+	}
+}
+
+/// An idiom defines a way to reference a field, reference, or other part of the document graph.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub struct Idiom(pub Vec<Part>);
+
+impl Idiom {
+	/// Returns an idiom for a field of the given name.
+	pub fn field(field_name: impl Into<Strand>) -> Self {
+		Idiom(vec![Part::Field(field_name.into())])
+	}
+
+	/// Appends a part to the end of this Idiom
+	pub fn push(mut self, n: Part) -> Idiom {
+		self.0.push(n);
+		self
+	}
+	/// Simplifies this Idiom for use in object keys
+	pub fn simplify(&self) -> Idiom {
+		self.0
+			.iter()
+			.filter(|&p| matches!(p, Part::Field(_) | Part::Start(_) | Part::Lookup(_)))
+			.cloned()
+			.collect::<Vec<_>>()
+			.into()
+	}
+	/// Check if this Idiom is an 'id' field
+	pub fn is_id(&self) -> bool {
+		self.0.len() == 1 && self.0[0].eq(&ID[0])
+	}
+	/// Check if this Idiom names a place inside the `id` field (`id.foo`,
+	/// `id[0]`) rather than `id` itself: a part of the record-id key.
+	pub fn is_id_subpath(&self) -> bool {
+		self.0.len() > 1 && self.0[0].eq(&ID[0])
+	}
+	/// Check if this Idiom is a special field such as `id`, `in` or `out`.
+	pub fn is_special(&self) -> bool {
+		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0]].contains(&&self.0[0])
+	}
+
+	/// The name of the record field this idiom names, unescaped: the key a
+	/// record holds the field under, and the name another field's clause reads
+	/// it by ([`crate::expr::computed_deps::extract_computed_deps`]). `None`
+	/// unless the idiom is exactly one field part: a longer path names a
+	/// position inside a field's value, not a key of the record.
+	///
+	/// This is not [`Self::to_raw_string`], which is the path's canonical text.
+	/// A name that would not parse bare (a space, a hyphen, a non-ASCII
+	/// character, a leading digit, a dot) comes back from that backticked, so
+	/// as a record key or a name to look a field up by it matches nothing.
+	pub fn field_name(&self) -> Option<&str> {
+		match self.0.as_slice() {
+			[Part::Field(name)] => Some(name.as_str()),
+			_ => None,
+		}
+	}
+
+	/// The canonical text of this idiom: each field part is escaped only as far
+	/// as it must be for the text to parse back as the same path
+	/// (`EscapeKwFreeIdent`), so a field named `a.b` reads `` `a.b` `` and is
+	/// told apart from the nested path `a.b`. A reserved word is left bare.
+	///
+	/// It is the key the catalog holds a field definition under and the text
+	/// stored field paths carry. It is not a record key: see
+	/// [`Self::field_name`].
+	pub fn to_raw_string(&self) -> String {
+		use std::fmt::Write;
+
+		let mut s = String::new();
+
+		let mut iter = self.0.iter();
+		match iter.next() {
+			Some(Part::Field(v)) => {
+				write!(&mut s, "{}", EscapeKwFreeIdent(v).to_sql()).expect("writing to string")
+			}
+			Some(x) => s.push_str(&x.to_raw_string()),
+			None => {}
+		};
+
+		for p in iter {
+			s.push_str(&p.to_raw_string());
+		}
+
+		s
+	}
+
+	/// Check if this is an expression with multiple yields
+	pub fn is_multi_yield(&self) -> bool {
+		self.iter().any(Self::part_is_multi_yield)
+	}
+	/// Check if the path part is a yield in a multi-yield expression
+	pub fn part_is_multi_yield(v: &Part) -> bool {
+		matches!(v, Part::Lookup(g) if g.alias.is_some())
+	}
+
+	/// Check if this Idiom starts with a specific path part
+	pub fn starts_with(&self, other: &[Part]) -> bool {
+		self.0.starts_with(other)
+	}
+
+	/// Check if we require a writeable transaction
+	pub fn read_only(&self) -> bool {
+		self.0.iter().all(|v| v.read_only())
+	}
+
+	/// Validate that this idiom is a valid "local" field path. Returns an
+	/// error describing the offending part otherwise. The `into` argument is
+	/// used in the error message to identify the kind of path being checked
+	/// (e.g. "field name").
+	pub fn validate_local(&self, into: &str) -> anyhow::Result<()> {
+		for part in self.iter() {
+			match part {
+				Part::Field(_) | Part::All | Part::Flatten | Part::First | Part::Last => {}
+				Part::Value(Expr::Literal(lit)) => {
+					if !matches!(lit, Literal::Integer(_) | Literal::String(_)) {
+						return Err(anyhow::anyhow!(
+							"Invalid {into}: Field path index must evaluate to an integer or string"
+						));
+					}
+				}
+				Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => {
+					return Err(anyhow::anyhow!(
+						"Invalid {into}: contains a part that is not allowed in a field path"
+					));
+				}
+			}
+		}
+		Ok(())
+	}
+}
+
+impl Deref for Idiom {
+	type Target = [Part];
+	fn deref(&self) -> &Self::Target {
+		self.0.as_slice()
+	}
+}
+
+impl From<Vec<Part>> for Idiom {
+	fn from(v: Vec<Part>) -> Self {
+		Self(v)
+	}
+}
+
+impl PartialOrd for Idiom {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for Idiom {
+	fn cmp(&self, other: &Self) -> Ordering {
+		for (a, b) in self.0.iter().zip(other.0.iter()) {
+			let o = a.partial_cmp(b).unwrap_or(Ordering::Equal);
+			if o != Ordering::Equal {
+				return o;
+			}
+		}
+
+		// If all parts match so far, shorter idiom comes first
+		// This ensures that `a` < `a.b`
+		self.0.len().cmp(&other.0.len())
+	}
+}
+
+impl surrealdb_types::ToSql for Idiom {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let mut iter = self.0.iter();
+		match iter.next() {
+			Some(Part::Field(v)) => EscapeIdent(v).fmt_sql(f, fmt),
+			Some(Part::Start(x)) => {
+				// A nested idiom must keep its parentheses: the parts that
+				// follow would otherwise extend the inner path instead of
+				// applying to its result, and `([{ a: [1] }, { a: [2] }].a)[0]`
+				// would reparse as `[{ a: [1] }, { a: [2] }].a[0]` — a
+				// different value.
+				if x.needs_parentheses()
+					|| matches!(
+						x,
+						Expr::Binary { .. }
+							| Expr::Prefix { .. } | Expr::Postfix { .. }
+							| Expr::Idiom(_)
+					) {
+					write_sql!(f, fmt, "({x})");
+				} else if let Expr::Literal(Literal::Decimal(d)) = x
+					&& d.is_sign_negative()
+				{
+					write_sql!(f, fmt, "({x})");
+				} else if let Expr::Literal(Literal::Integer(i)) = x
+					&& i.is_negative()
+				{
+					write_sql!(f, fmt, "({x})");
+				} else if let Expr::Literal(Literal::Float(float)) = x
+					&& float.is_sign_negative()
+				{
+					write_sql!(f, fmt, "({x})");
+				} else {
+					write_sql!(f, fmt, "{x}");
+				}
+			}
+			Some(x) => x.fmt_sql(f, fmt),
+			None => {}
+		};
+		for p in iter {
+			p.fmt_sql(f, fmt);
+		}
+	}
+}
+
+impl Idiom {
+	/// Shared parse for the two string forms of an idiom: fresh runtime
+	/// strings ([`FromStr`], default limits) and the engine-rendered wire
+	/// encoding ([`DeserializeRevisioned`],
+	/// [`crate::syn::ParserSettings::STORED_TEXT`]).
+	///
+	/// Parses the idiom grammar, which is what both forms are: a field path.
+	/// It has to be that grammar rather than the expression one, because a
+	/// leading field is escaped with `EscapeKwFreeIdent` — which backticks only
+	/// a name that would not lex as an identifier, and so leaves a reserved
+	/// keyword such as `function` bare. Read as an expression, that bare
+	/// keyword is the start of a call or a statement and fails to parse. This
+	/// is the same parser, and the same reasoning, as the catalog's funnel for
+	/// the equivalent stored text (`syn::idiom_for_definition`).
+	///
+	/// The idiom grammar admits only an identifier or a graph edge at the
+	/// start, so an idiom rooted in a [`Part::Start`] expression (`$param.x`,
+	/// `person:test.x`) is rejected rather than accepted as some other path.
+	/// Nothing that reaches here can hold one: every persisted idiom is a field
+	/// name or index column (stored as `IdiomText` and parsed by the same idiom
+	/// grammar) or a `Selector` alias in a pre-v2 subscription's field list
+	/// (parsed by `parse_plain_idiom`), and `Value` — the one stored type that
+	/// carries arbitrary user data — has no `Idiom` variant. A runtime-resolved
+	/// field name is not a valid field path either, so failing is the useful
+	/// answer there.
+	///
+	/// The whole input must be consumed. Without that, trailing content after a
+	/// valid idiom prefix would be silently dropped (e.g. "foo bogus" would
+	/// parse to just "foo"), which is a footgun for any caller that resolves a
+	/// string at runtime and re-parses it as an idiom.
+	fn parse_str_with_settings(
+		s: &str,
+		settings: crate::syn::ParserSettings,
+	) -> Result<Self, revision::Error> {
+		let idiom = crate::syn::idiom_with_settings(s, settings, true)
+			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		Ok(idiom)
+	}
+}
+
+impl FromStr for Idiom {
+	type Err = revision::Error;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		// Fresh input (e.g. a runtime-evaluated field name): parse under the
+		// default limits, not the stored-text profile.
+		Self::parse_str_with_settings(
+			s,
+			crate::syn::ParserSettings::default_with_experimental(true),
+		)
+	}
+}
+
+impl Revisioned for Idiom {
+	fn revision() -> u16 {
+		1
+	}
+}
+
+impl SerializeRevisioned for Idiom {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		SerializeRevisioned::serialize_revisioned(&self.to_stored_sql(), writer)
+	}
+}
+
+impl DeserializeRevisioned for Idiom {
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let s: String = DeserializeRevisioned::deserialize_revisioned(reader)?;
+		// The wire format is engine-rendered SurrealQL text; see the constant
+		// for why decode is capability- and limit-independent.
+		Idiom::parse_str_with_settings(&s, crate::syn::ParserSettings::STORED_TEXT)
+	}
+}
+
+impl revision::SkipRevisioned for Idiom {
+	fn skip_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
+		<String as revision::SkipRevisioned>::skip_revisioned(reader)
+	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		<String as revision::SkipRevisioned>::skip_revisioned_slice(reader)
+	}
+}
+
+impl revision::WalkRevisioned for Idiom {
+	type Walker<'r, R: revision::BorrowedReader + 'r> = revision::LeafWalker<'r, Idiom, R>;
+
+	fn walk_revisioned<'r, R: revision::BorrowedReader>(
+		reader: &'r mut R,
+	) -> Result<Self::Walker<'r, R>, revision::Error> {
+		Ok(revision::LeafWalker::new(reader))
+	}
+}
+
+impl revision::LengthPrefixedBytes for Idiom {}
+
+impl InfoStructure for Idiom {
+	fn structure(self) -> Value {
+		self.to_sql().into()
+	}
+}
+
+/// A trie structure for storing idioms.
+///
+/// This is used for efficient searching and retrieval of idioms based on their
+/// path parts.
+///
+/// Note: This is a simplified version of a trie and does not implement all the
+/// features of a full trie.
+#[derive(Debug)]
+pub struct IdiomTrie<T> {
+	/// The children of this node, indexed by their path part.
+	pub children: HashMap<Part, IdiomTrie<T>>,
+	/// The data associated with this node, if any.
+	pub data: Option<T>,
+}
+
+impl<T: Clone + std::fmt::Debug> Default for IdiomTrie<T> {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+impl<T: Clone + std::fmt::Debug> IdiomTrie<T> {
+	/// Creates a new empty [`IdiomTrie`].
+	pub fn new() -> Self {
+		IdiomTrie {
+			children: HashMap::new(),
+			data: None,
+		}
+	}
+
+	/// Inserts a new path and associated data into the trie.
+	pub fn insert(&mut self, path: &[Part], data: T) {
+		let mut node = self;
+		for part in path {
+			node = node.children.entry(part.clone()).or_default();
+		}
+		node.data = Some(data);
+	}
+
+	/// Checks if the trie contains a path and returns the associated data.
+	///
+	/// If the path is found, it returns [`IdiomTrieContains::Exact`].
+	/// If the path is not found but an ancestor is found, it returns
+	/// [`IdiomTrieContains::Ancestor`]. If an ancestor is not found, it
+	/// returns [`IdiomTrieContains::None`].
+	pub fn contains(&self, path: &[Part]) -> IdiomTrieContains<T> {
+		let mut node = self;
+		let mut last_node_had_data = false;
+
+		for part in path {
+			if let Some(child) = node.children.get(part) {
+				last_node_had_data = child.data.is_some();
+				node = child;
+			} else {
+				// No more children, stop searching
+				last_node_had_data = false;
+				break;
+			}
+		}
+
+		if let Some(data) = node.data.as_ref() {
+			if last_node_had_data {
+				IdiomTrieContains::Exact(data.clone())
+			} else {
+				IdiomTrieContains::Ancestor(data.clone())
+			}
+		} else {
+			IdiomTrieContains::None
+		}
+	}
+}
+
+/// The result of a search in the [`IdiomTrie`].
+pub enum IdiomTrieContains<T> {
+	/// The path was not found and none of it had no ancestors in the trie.
+	None,
+	/// The path was found and the data is associated with it.
+	Exact(T),
+	/// The path was not found, but an ancestor was found.
+	Ancestor(T),
+}
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+
+	#[rstest]
+	#[case(Idiom::from(vec![Part::Field(Strand::new_static("name"))]), "name")]
+	#[case(Idiom::from(vec![Part::Field(Strand::new_static("nested")), Part::Field(Strand::new_static("nested")), Part::Field(Strand::new_static("name"))]), "nested.nested.name")]
+	#[case(Idiom::from(vec![Part::Field(Strand::new_static("nested")), Part::Field(Strand::new_static("nested")), Part::Field(Strand::new_static("value"))]), "nested.nested.value")]
+	#[case(Idiom::from(vec![Part::Field(Strand::new_static("value"))]), "`value`")]
+	fn test_idiom_to_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
+		assert_eq!(idiom.to_sql(), expected.to_string());
+	}
+
+	#[rstest]
+	#[case(Idiom::from(vec![Part::Field(Strand::new_static("name"))]), "name")]
+	#[case(Idiom::from(vec![Part::Field(Strand::new_static("nested")), Part::Field(Strand::new_static("nested")), Part::Field(Strand::new_static("name"))]), "nested.nested.name")]
+	#[case(Idiom::from(vec![Part::Field(Strand::new_static("nested")), Part::Field(Strand::new_static("nested")), Part::Field(Strand::new_static("value"))]), "nested.nested.value")]
+	#[case(Idiom::from(vec![Part::Field(Strand::new_static("value"))]), "value")]
+	fn test_idiom_to_raw_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
+		assert_eq!(idiom.to_raw_string(), expected.to_string());
+	}
+
+	/// The name a record holds a field under is the name itself, where the
+	/// canonical text backticks one that would not parse bare. Only a single
+	/// field part has such a name: a longer path is a position inside a value.
+	#[rstest]
+	#[case("name", Some("name"), "name")]
+	#[case("`the x`", Some("the x"), "`the x`")]
+	#[case("`a-b`", Some("a-b"), "`a-b`")]
+	#[case("`café`", Some("café"), "`café`")]
+	#[case("`1st`", Some("1st"), "`1st`")]
+	#[case("`a.b`", Some("a.b"), "`a.b`")]
+	#[case("MixedCase", Some("MixedCase"), "MixedCase")]
+	#[case("a.b", None, "a.b")]
+	#[case("`the x`.y", None, "`the x`.y")]
+	#[case("tags[0]", None, "tags[0]")]
+	#[case("tags.*", None, "tags.*")]
+	fn test_idiom_field_name(
+		#[case] text: &str,
+		#[case] name: Option<&str>,
+		#[case] raw_string: &str,
+	) {
+		let idiom = Idiom::from_str(text).unwrap();
+		assert_eq!(idiom.field_name(), name);
+		assert_eq!(idiom.to_raw_string(), raw_string);
+	}
+
+	/// A place inside the record-id key is a path that starts at `id` and goes
+	/// further; `id` itself and a field merely named like it are not.
+	#[rstest]
+	#[case("id.name", true)]
+	#[case("id[0]", true)]
+	#[case("id.parent.name", true)]
+	#[case("id.*", true)]
+	#[case("id", false)]
+	#[case("name.id", false)]
+	#[case("ids.name", false)]
+	fn test_idiom_is_id_subpath(#[case] text: &str, #[case] expected: bool) {
+		assert_eq!(Idiom::from_str(text).unwrap().is_id_subpath(), expected);
+	}
+
+	#[rstest]
+	// Test b, a ==> a, b (alphabetical ordering)
+	#[case(
+		vec![Idiom::from(vec![Part::Field(Strand::new_static("b"))]), Idiom::from(vec![Part::Field(Strand::new_static("a"))])],
+		vec![Idiom::from(vec![Part::Field(Strand::new_static("a"))]), Idiom::from(vec![Part::Field(Strand::new_static("b"))])]
+	)]
+	// Test a.b, a ==> a, a.b (prefix comes first)
+	#[case(
+		vec![Idiom::from(vec![Part::Field(Strand::new_static("a")), Part::Field(Strand::new_static("b"))]), Idiom::from(vec![Part::Field(Strand::new_static("a"))])],
+		vec![Idiom::from(vec![Part::Field(Strand::new_static("a"))]), Idiom::from(vec![Part::Field(Strand::new_static("a")), Part::Field(Strand::new_static("b"))])]
+	)]
+	// Test complex nested case: author.company, author ==> author, author.company
+	#[case(
+		vec![
+			Idiom::from(vec![Part::Field(Strand::new_static("author")), Part::Field(Strand::new_static("company"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("author"))])
+		],
+		vec![
+			Idiom::from(vec![Part::Field(Strand::new_static("author"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("author")), Part::Field(Strand::new_static("company"))])
+		]
+	)]
+	// Test deeply nested: author.company.address, author, author.company ==> author,
+	// author.company, author.company.address
+	#[case(
+		vec![
+			Idiom::from(vec![Part::Field(Strand::new_static("author")), Part::Field(Strand::new_static("company")), Part::Field(Strand::new_static("address"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("author"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("author")), Part::Field(Strand::new_static("company"))])
+		],
+		vec![
+			Idiom::from(vec![Part::Field(Strand::new_static("author"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("author")), Part::Field(Strand::new_static("company"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("author")), Part::Field(Strand::new_static("company")), Part::Field(Strand::new_static("address"))])
+		]
+	)]
+	// Test mixed alphabetical and nested: d, a.b.c, b, a, a.b ==> a, a.b, a.b.c, b, d
+	#[case(
+		vec![
+			Idiom::from(vec![Part::Field(Strand::new_static("d"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("a")), Part::Field(Strand::new_static("b")), Part::Field(Strand::new_static("c"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("b"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("a"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("a")), Part::Field(Strand::new_static("b"))])
+		],
+		vec![
+			Idiom::from(vec![Part::Field(Strand::new_static("a"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("a")), Part::Field(Strand::new_static("b"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("a")), Part::Field(Strand::new_static("b")), Part::Field(Strand::new_static("c"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("b"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("d"))])
+		]
+	)]
+	// Test with different Part variants: Field comes before All
+	#[case(
+		vec![
+			Idiom::from(vec![Part::Field(Strand::new_static("a")), Part::All]),
+			Idiom::from(vec![Part::Field(Strand::new_static("a")), Part::Field(Strand::new_static("b"))])
+		],
+		vec![
+			Idiom::from(vec![Part::Field(Strand::new_static("a")), Part::Field(Strand::new_static("b"))]),
+			Idiom::from(vec![Part::Field(Strand::new_static("a")), Part::All])
+		]
+	)]
+	fn test_idiom_sorting(#[case] mut idioms: Vec<Idiom>, #[case] expected: Vec<Idiom>) {
+		idioms.sort();
+		assert_eq!(idioms, expected);
+	}
+
+	// Tests for Idiom::validate_local
+
+	fn field(name: &'static str) -> Part {
+		Part::Field(Strand::new_static(name))
+	}
+	fn lit_int(n: i64) -> Part {
+		Part::Value(Expr::Literal(Literal::Integer(n)))
+	}
+	fn lit_str(s: &'static str) -> Part {
+		Part::Value(Expr::Literal(Literal::String(Strand::new_static(s))))
+	}
+	fn lit_bool(b: bool) -> Part {
+		Part::Value(Expr::Literal(Literal::Bool(b)))
+	}
+
+	fn lit_float(f: f64) -> Part {
+		Part::Value(Expr::Literal(Literal::Float(f)))
+	}
+
+	#[rstest]
+	// Plain field
+	#[case(Idiom::from(vec![field("foo")]), true)]
+	// Nested fields
+	#[case(Idiom::from(vec![field("foo"), field("bar")]), true)]
+	// Integer index
+	#[case(Idiom::from(vec![field("foo"), lit_int(0)]), true)]
+	// String index
+	#[case(Idiom::from(vec![field("foo"), lit_str("city")]), true)]
+	// Wildcard
+	#[case(Idiom::from(vec![field("foo"), Part::All]), true)]
+	// Flatten / First / Last markers
+	#[case(Idiom::from(vec![field("foo"), Part::Flatten]), true)]
+	#[case(Idiom::from(vec![field("foo"), Part::First]), true)]
+	#[case(Idiom::from(vec![field("foo"), Part::Last]), true)]
+	// Optional is not a static schema-key concept
+	#[case(Idiom::from(vec![field("foo"), Part::Optional]), false)]
+	// Float / decimal indices are not meaningful as array indices or object keys
+	#[case(Idiom::from(vec![field("foo"), lit_float(1.5)]), false)]
+	// Bool index is not a valid local idiom
+	#[case(Idiom::from(vec![field("foo"), lit_bool(true)]), false)]
+	// Non-literal Part::Value (un-substituted) is not a valid local idiom
+	#[case(Idiom::from(vec![field("foo"), Part::Value(Expr::Param(crate::expr::Param::from("n".to_owned())))]), false)]
+	// Where clause is not allowed in a field path
+	#[case(Idiom::from(vec![field("foo"), Part::Where(Expr::Literal(Literal::Bool(true)))]), false)]
+	// Method call is not allowed in a field path
+	#[case(Idiom::from(vec![field("foo"), Part::Method(Strand::new_static("bar"), vec![])]), false)]
+	fn test_idiom_validate_local(#[case] idiom: Idiom, #[case] expected: bool) {
+		assert_eq!(idiom.validate_local("field name").is_ok(), expected);
+	}
+
+	#[test]
+	fn test_validate_local_error_message_for_bracket() {
+		let idiom = Idiom::from(vec![field("foo"), lit_bool(true)]);
+		let err = idiom.validate_local("field name").unwrap_err().to_string();
+		assert!(
+			err.contains("Field path index must evaluate to an integer"),
+			"unexpected error: {err}"
+		);
+	}
+
+	#[test]
+	fn test_validate_local_error_message_for_disallowed_part() {
+		let idiom =
+			Idiom::from(vec![field("foo"), Part::Method(Strand::new_static("bar"), vec![])]);
+		let err = idiom.validate_local("field name").unwrap_err().to_string();
+		assert!(err.contains("not allowed in a field path"), "unexpected error: {err}");
+	}
+
+	#[test]
+	fn idiom_with_bytes_matches_serialize() {
+		use revision::{SerializeRevisioned, WalkRevisioned};
+
+		let idiom = Idiom::from(vec![Part::Field(Strand::new_static("foo"))]);
+		let mut bytes = Vec::new();
+		idiom.serialize_revisioned(&mut bytes).unwrap();
+		let expected_raw = idiom.to_raw_string();
+		let mut r = bytes.as_slice();
+		let walker = Idiom::walk_revisioned(&mut r).unwrap();
+		let observed = walker.with_bytes(|raw| raw.to_vec()).unwrap();
+		assert_eq!(observed.as_slice(), expected_raw.as_bytes());
+		assert!(r.is_empty());
+	}
+
+	// Round-trip via SerializeRevisioned -> DeserializeRevisioned exercises the
+	// `Idiom::from_str` path used to read stored idioms back from the catalog.
+	// Covers every parser-producible part kind that can be persisted (via
+	// DEFINE FIELD, DEFINE INDEX FIELDS, etc.) so the strict `assert_finished`
+	// check in `from_str` can't silently regress on a part whose
+	// `to_raw_string` round-trip drifts. `Part::First` is omitted because the
+	// parser produces `Part::Value(Literal::Integer(0))` for `[0]` instead.
+	#[rstest]
+	#[case::field(Idiom::from(vec![field("foo")]))]
+	#[case::nested_field(Idiom::from(vec![field("foo"), field("bar")]))]
+	#[case::int_index(Idiom::from(vec![field("data"), lit_int(0)]))]
+	#[case::all(Idiom::from(vec![field("foo"), Part::All]))]
+	#[case::last(Idiom::from(vec![field("foo"), Part::Last]))]
+	#[case::flatten(Idiom::from(vec![field("foo"), Part::Flatten]))]
+	#[case::method(Idiom::from(vec![field("id"), Part::Method(Strand::new_static("id"), vec![]), field("val")]))]
+	#[case::destructure(Idiom::from(vec![
+		field("addr"),
+		Part::Destructure(vec![
+			crate::expr::part::DestructurePart::Field(Strand::new_static("city")),
+			crate::expr::part::DestructurePart::Field(Strand::new_static("zip")),
+		]),
+	]))]
+	// A reserved keyword is rendered bare when it leads the path, so the
+	// decoder has to read it as a field rather than as the statement or call
+	// the same word starts. `function` and `select` are the two shapes that
+	// fail differently as expressions (a call needing `(`, and a statement
+	// needing a field list).
+	#[case::keyword_field(Idiom::from(vec![field("function")]))]
+	#[case::keyword_field_select(Idiom::from(vec![field("select")]))]
+	#[case::keyword_field_nested(Idiom::from(vec![field("function"), field("sub")]))]
+	#[case::keyword_field_tail(Idiom::from(vec![field("meta"), field("function")]))]
+	#[case::keyword_field_index(Idiom::from(vec![field("select"), lit_int(0)]))]
+	fn idiom_revisioned_roundtrip(#[case] idiom: Idiom) {
+		let mut bytes = Vec::new();
+		idiom.serialize_revisioned(&mut bytes).unwrap();
+		let parsed = Idiom::deserialize_revisioned(&mut bytes.as_slice())
+			.unwrap_or_else(|e| panic!("round-trip failed for {idiom:?}: {e}"));
+		assert_eq!(idiom, parsed, "round-trip mismatch for {idiom:?}");
+	}
+
+	/// Every reserved keyword must survive the wire round-trip as a leading
+	/// field name, both alone and with a tail. The rendering leaves a leading
+	/// keyword bare, so this is the property that keeps the two halves of
+	/// `Idiom`'s wire format agreeing; pinning the whole keyword set rather
+	/// than samples means a word added to `RESERVED_KEYWORD` cannot introduce
+	/// a name that stores but does not load.
+	#[test]
+	fn every_reserved_keyword_round_trips_as_a_field_name() {
+		for kw in common::keywords::RESERVED_KEYWORD.iter() {
+			let kw = kw.into_inner();
+			for idiom in [
+				Idiom::from(vec![field(kw)]),
+				Idiom::from(vec![field(kw), field("tail")]),
+				Idiom::from(vec![field("head"), field(kw)]),
+			] {
+				let mut bytes = Vec::new();
+				idiom.serialize_revisioned(&mut bytes).unwrap();
+				let parsed =
+					Idiom::deserialize_revisioned(&mut bytes.as_slice()).unwrap_or_else(|e| {
+						panic!("keyword `{kw}` did not survive the wire round-trip: {e}")
+					});
+				assert_eq!(idiom, parsed, "round-trip mismatch for keyword `{kw}`");
+			}
+		}
+	}
+
+	/// A string that merely *starts* with a valid idiom is rejected rather than
+	/// truncated to that prefix, so a caller resolving a field path at runtime
+	/// cannot silently address a shorter path than the one it was given.
+	/// An idiom rooted in a `Part::Start` expression renders as that
+	/// expression, which is not a field path and so does not read back. This is
+	/// pinned rather than left implicit: nothing that reaches this funnel can
+	/// hold such a part (see `parse_str_with_settings`), so the useful contract
+	/// is that the string is rejected outright instead of being accepted as a
+	/// different path.
+	#[test]
+	fn an_expression_rooted_idiom_is_not_a_field_path() {
+		let idiom = Idiom::from(vec![
+			Part::Start(Expr::Param(crate::expr::Param::from("test".to_string()))),
+			field("temporary"),
+		]);
+		assert_eq!(idiom.to_raw_string(), "$test.temporary");
+		assert!(
+			Idiom::from_str(&idiom.to_raw_string()).is_err(),
+			"an expression-rooted idiom should not parse as a field path"
+		);
+	}
+
+	#[test]
+	fn trailing_content_after_an_idiom_is_rejected() {
+		for s in ["foo bogus", "function bogus", "foo.bar baz"] {
+			assert!(Idiom::from_str(s).is_err(), "`{s}` should not parse to just its idiom prefix");
+		}
+	}
+}

@@ -1,0 +1,68 @@
+### SELECT * FROM t ORDER BY k TEMPFILES
+{ id: t:0, k: 0, n: 0, s: '0' }
+{ id: t:7, k: 0, n: 7, s: '7' }
+{ id: t:14, k: 0, n: 14, s: '1' }
+{ id: t:21, k: 0, n: 21, s: '8' }
+{ id: t:28, k: 0, n: 28, s: '2' }
+{ id: t:35, k: 0, n: 35, s: '9' }
+... 3000 rows, digest 34a830f2ae427cae ...
+{ id: t:2960, k: 6, n: 2960, s: '9' }
+{ id: t:2967, k: 6, n: 2967, s: '3' }
+{ id: t:2974, k: 6, n: 2974, s: '10' }
+{ id: t:2981, k: 6, n: 2981, s: '4' }
+{ id: t:2988, k: 6, n: 2988, s: '11' }
+{ id: t:2995, k: 6, n: 2995, s: '5' }
+### SELECT n, k FROM t ORDER BY k DESC, s TEMPFILES
+{ k: 6, n: 13 }
+{ k: 6, n: 104 }
+{ k: 6, n: 195 }
+{ k: 6, n: 286 }
+{ k: 6, n: 377 }
+{ k: 6, n: 468 }
+... 3000 rows, digest c0e99210b9a06ce3 ...
+{ k: 0, n: 2492 }
+{ k: 0, n: 2583 }
+{ k: 0, n: 2674 }
+{ k: 0, n: 2765 }
+{ k: 0, n: 2856 }
+{ k: 0, n: 2947 }
+### SELECT VALUE n FROM t ORDER BY s COLLATE, k TEMPFILES
+0
+91
+182
+273
+364
+455
+... 3000 rows, digest a31dd1316d6f6d6b ...
+2505
+2596
+2687
+2778
+2869
+2960
+### SELECT n FROM t WHERE n % 3 = 0 ORDER BY k TEMPFILES
+{ n: 0 }
+{ n: 21 }
+{ n: 42 }
+{ n: 63 }
+{ n: 84 }
+{ n: 105 }
+... 1000 rows, digest 9af869d971515094 ...
+{ n: 2883 }
+{ n: 2904 }
+{ n: 2925 }
+{ n: 2946 }
+{ n: 2967 }
+{ n: 2988 }
+### SELECT n FROM t ORDER BY k LIMIT 5 START 2000 TEMPFILES
+{ n: 1992 }
+{ n: 1999 }
+{ n: 2006 }
+{ n: 2013 }
+{ n: 2020 }
+### SELECT n FROM t ORDER BY k LIMIT 5 TEMPFILES
+{ n: 0 }
+{ n: 7 }
+{ n: 14 }
+{ n: 21 }
+{ n: 28 }

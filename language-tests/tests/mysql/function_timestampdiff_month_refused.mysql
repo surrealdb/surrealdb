@@ -1,0 +1,13 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL timestampdiff refuses a unit that is not of a fixed length"
+
+[test.results]
+request-error = "MySQL SELECT lowering error: unsupported expression: timestampdiff with the unit MONTH"
+*/
+
+SELECT timestampdiff(MONTH, '2024-01-31', '2024-03-01');

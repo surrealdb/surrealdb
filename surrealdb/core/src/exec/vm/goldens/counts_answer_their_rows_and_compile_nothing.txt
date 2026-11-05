@@ -1,0 +1,384 @@
+### owner: SELECT VALUE count() FROM counted GROUP ALL
+24
+### owner: SELECT VALUE count() FROM counted WHERE n % 2 = 0 GROUP ALL
+12
+### owner: SELECT VALUE count() FROM locked GROUP ALL
+24
+### owner: SELECT VALUE count() FROM locked WHERE n % 2 = 0 GROUP ALL
+12
+### owner: SELECT VALUE count() FROM mine GROUP ALL
+24
+### owner: SELECT VALUE count() FROM mine WHERE n % 2 = 0 GROUP ALL
+12
+### owner: SELECT VALUE count() FROM plain GROUP ALL
+24
+### owner: SELECT VALUE count() FROM plain WHERE n % 2 = 0 GROUP ALL
+12
+### owner: SELECT count() AS c FROM counted GROUP ALL
+{ c: 24 }
+### owner: SELECT count() AS c FROM locked GROUP ALL
+{ c: 24 }
+### owner: SELECT count() AS c FROM mine GROUP ALL
+{ c: 24 }
+### owner: SELECT count() AS c FROM plain GROUP ALL
+{ c: 24 }
+### owner: SELECT count() FROM counted GROUP ALL
+{ count: 24 }
+### owner: SELECT count() FROM counted GROUP ALL LIMIT 0
+(no rows)
+### owner: SELECT count() FROM counted GROUP ALL START 1
+(no rows)
+### owner: SELECT count() FROM counted WHERE n % 2 = 0 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM counted WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 1 }
+### owner: SELECT count() FROM counted WHERE n = 1 GROUP ALL
+{ count: 6 }
+### owner: SELECT count() FROM counted WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### owner: SELECT count() FROM counted WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM counted WHERE n > 1 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM counted:2..9 GROUP ALL
+{ count: 7 }
+### owner: SELECT count() FROM counted:2..=9 GROUP ALL
+{ count: 8 }
+### owner: SELECT count() FROM counted:3 GROUP ALL
+{ count: 1 }
+### owner: SELECT count() FROM counted:99 GROUP ALL
+{ count: 0 }
+### owner: SELECT count() FROM locked GROUP ALL
+{ count: 24 }
+### owner: SELECT count() FROM locked GROUP ALL LIMIT 0
+(no rows)
+### owner: SELECT count() FROM locked GROUP ALL START 1
+(no rows)
+### owner: SELECT count() FROM locked WHERE n % 2 = 0 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM locked WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 1 }
+### owner: SELECT count() FROM locked WHERE n = 1 GROUP ALL
+{ count: 6 }
+### owner: SELECT count() FROM locked WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### owner: SELECT count() FROM locked WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM locked WHERE n > 1 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM locked:2..9 GROUP ALL
+{ count: 7 }
+### owner: SELECT count() FROM locked:2..=9 GROUP ALL
+{ count: 8 }
+### owner: SELECT count() FROM locked:3 GROUP ALL
+{ count: 1 }
+### owner: SELECT count() FROM locked:99 GROUP ALL
+{ count: 0 }
+### owner: SELECT count() FROM mine GROUP ALL
+{ count: 24 }
+### owner: SELECT count() FROM mine GROUP ALL LIMIT 0
+(no rows)
+### owner: SELECT count() FROM mine GROUP ALL START 1
+(no rows)
+### owner: SELECT count() FROM mine WHERE n % 2 = 0 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM mine WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 1 }
+### owner: SELECT count() FROM mine WHERE n = 1 GROUP ALL
+{ count: 6 }
+### owner: SELECT count() FROM mine WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### owner: SELECT count() FROM mine WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM mine WHERE n > 1 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM mine:2..9 GROUP ALL
+{ count: 7 }
+### owner: SELECT count() FROM mine:2..=9 GROUP ALL
+{ count: 8 }
+### owner: SELECT count() FROM mine:3 GROUP ALL
+{ count: 1 }
+### owner: SELECT count() FROM mine:99 GROUP ALL
+{ count: 0 }
+### owner: SELECT count() FROM plain GROUP ALL
+{ count: 24 }
+### owner: SELECT count() FROM plain GROUP ALL LIMIT 0
+(no rows)
+### owner: SELECT count() FROM plain GROUP ALL START 1
+(no rows)
+### owner: SELECT count() FROM plain WHERE n % 2 = 0 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM plain WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 1 }
+### owner: SELECT count() FROM plain WHERE n = 1 GROUP ALL
+{ count: 6 }
+### owner: SELECT count() FROM plain WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### owner: SELECT count() FROM plain WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM plain WHERE n > 1 GROUP ALL
+{ count: 12 }
+### owner: SELECT count() FROM plain:2..9 GROUP ALL
+{ count: 7 }
+### owner: SELECT count() FROM plain:2..=9 GROUP ALL
+{ count: 8 }
+### owner: SELECT count() FROM plain:3 GROUP ALL
+{ count: 1 }
+### owner: SELECT count() FROM plain:99 GROUP ALL
+{ count: 0 }
+### alice: SELECT VALUE count() FROM counted GROUP ALL
+24
+### alice: SELECT VALUE count() FROM counted WHERE n % 2 = 0 GROUP ALL
+12
+### alice: SELECT VALUE count() FROM locked GROUP ALL
+0
+### alice: SELECT VALUE count() FROM locked WHERE n % 2 = 0 GROUP ALL
+0
+### alice: SELECT VALUE count() FROM mine GROUP ALL
+12
+### alice: SELECT VALUE count() FROM mine WHERE n % 2 = 0 GROUP ALL
+12
+### alice: SELECT VALUE count() FROM plain GROUP ALL
+24
+### alice: SELECT VALUE count() FROM plain WHERE n % 2 = 0 GROUP ALL
+12
+### alice: SELECT count() AS c FROM counted GROUP ALL
+{ c: 24 }
+### alice: SELECT count() AS c FROM locked GROUP ALL
+{ c: 0 }
+### alice: SELECT count() AS c FROM mine GROUP ALL
+{ c: 12 }
+### alice: SELECT count() AS c FROM plain GROUP ALL
+{ c: 24 }
+### alice: SELECT count() FROM counted GROUP ALL
+{ count: 24 }
+### alice: SELECT count() FROM counted GROUP ALL LIMIT 0
+(no rows)
+### alice: SELECT count() FROM counted GROUP ALL START 1
+(no rows)
+### alice: SELECT count() FROM counted WHERE n % 2 = 0 GROUP ALL
+{ count: 12 }
+### alice: SELECT count() FROM counted WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 1 }
+### alice: SELECT count() FROM counted WHERE n = 1 GROUP ALL
+{ count: 6 }
+### alice: SELECT count() FROM counted WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### alice: SELECT count() FROM counted WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 12 }
+### alice: SELECT count() FROM counted WHERE n > 1 GROUP ALL
+{ count: 12 }
+### alice: SELECT count() FROM counted:2..9 GROUP ALL
+{ count: 7 }
+### alice: SELECT count() FROM counted:2..=9 GROUP ALL
+{ count: 8 }
+### alice: SELECT count() FROM counted:3 GROUP ALL
+{ count: 1 }
+### alice: SELECT count() FROM counted:99 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked GROUP ALL LIMIT 0
+(no rows)
+### alice: SELECT count() FROM locked GROUP ALL START 1
+(no rows)
+### alice: SELECT count() FROM locked WHERE n % 2 = 0 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked WHERE n = 1 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked WHERE n > 1 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked:2..9 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked:2..=9 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked:3 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked:99 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM mine GROUP ALL
+{ count: 12 }
+### alice: SELECT count() FROM mine GROUP ALL LIMIT 0
+(no rows)
+### alice: SELECT count() FROM mine GROUP ALL START 1
+(no rows)
+### alice: SELECT count() FROM mine WHERE n % 2 = 0 GROUP ALL
+{ count: 12 }
+### alice: SELECT count() FROM mine WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM mine WHERE n = 1 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM mine WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 3 }
+### alice: SELECT count() FROM mine WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 6 }
+### alice: SELECT count() FROM mine WHERE n > 1 GROUP ALL
+{ count: 6 }
+### alice: SELECT count() FROM mine:2..9 GROUP ALL
+{ count: 4 }
+### alice: SELECT count() FROM mine:2..=9 GROUP ALL
+{ count: 4 }
+### alice: SELECT count() FROM mine:3 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM mine:99 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM plain GROUP ALL
+{ count: 24 }
+### alice: SELECT count() FROM plain GROUP ALL LIMIT 0
+(no rows)
+### alice: SELECT count() FROM plain GROUP ALL START 1
+(no rows)
+### alice: SELECT count() FROM plain WHERE n % 2 = 0 GROUP ALL
+{ count: 12 }
+### alice: SELECT count() FROM plain WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 1 }
+### alice: SELECT count() FROM plain WHERE n = 1 GROUP ALL
+{ count: 6 }
+### alice: SELECT count() FROM plain WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### alice: SELECT count() FROM plain WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 12 }
+### alice: SELECT count() FROM plain WHERE n > 1 GROUP ALL
+{ count: 12 }
+### alice: SELECT count() FROM plain:2..9 GROUP ALL
+{ count: 7 }
+### alice: SELECT count() FROM plain:2..=9 GROUP ALL
+{ count: 8 }
+### alice: SELECT count() FROM plain:3 GROUP ALL
+{ count: 1 }
+### alice: SELECT count() FROM plain:99 GROUP ALL
+{ count: 0 }
+### bob: SELECT VALUE count() FROM counted GROUP ALL
+24
+### bob: SELECT VALUE count() FROM counted WHERE n % 2 = 0 GROUP ALL
+12
+### bob: SELECT VALUE count() FROM locked GROUP ALL
+0
+### bob: SELECT VALUE count() FROM locked WHERE n % 2 = 0 GROUP ALL
+0
+### bob: SELECT VALUE count() FROM mine GROUP ALL
+12
+### bob: SELECT VALUE count() FROM mine WHERE n % 2 = 0 GROUP ALL
+0
+### bob: SELECT VALUE count() FROM plain GROUP ALL
+24
+### bob: SELECT VALUE count() FROM plain WHERE n % 2 = 0 GROUP ALL
+12
+### bob: SELECT count() AS c FROM counted GROUP ALL
+{ c: 24 }
+### bob: SELECT count() AS c FROM locked GROUP ALL
+{ c: 0 }
+### bob: SELECT count() AS c FROM mine GROUP ALL
+{ c: 12 }
+### bob: SELECT count() AS c FROM plain GROUP ALL
+{ c: 24 }
+### bob: SELECT count() FROM counted GROUP ALL
+{ count: 24 }
+### bob: SELECT count() FROM counted GROUP ALL LIMIT 0
+(no rows)
+### bob: SELECT count() FROM counted GROUP ALL START 1
+(no rows)
+### bob: SELECT count() FROM counted WHERE n % 2 = 0 GROUP ALL
+{ count: 12 }
+### bob: SELECT count() FROM counted WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 1 }
+### bob: SELECT count() FROM counted WHERE n = 1 GROUP ALL
+{ count: 6 }
+### bob: SELECT count() FROM counted WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### bob: SELECT count() FROM counted WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 12 }
+### bob: SELECT count() FROM counted WHERE n > 1 GROUP ALL
+{ count: 12 }
+### bob: SELECT count() FROM counted:2..9 GROUP ALL
+{ count: 7 }
+### bob: SELECT count() FROM counted:2..=9 GROUP ALL
+{ count: 8 }
+### bob: SELECT count() FROM counted:3 GROUP ALL
+{ count: 1 }
+### bob: SELECT count() FROM counted:99 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked GROUP ALL LIMIT 0
+(no rows)
+### bob: SELECT count() FROM locked GROUP ALL START 1
+(no rows)
+### bob: SELECT count() FROM locked WHERE n % 2 = 0 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked WHERE n = 1 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked WHERE n > 1 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked:2..9 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked:2..=9 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked:3 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked:99 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM mine GROUP ALL
+{ count: 12 }
+### bob: SELECT count() FROM mine GROUP ALL LIMIT 0
+(no rows)
+### bob: SELECT count() FROM mine GROUP ALL START 1
+(no rows)
+### bob: SELECT count() FROM mine WHERE n % 2 = 0 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM mine WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 1 }
+### bob: SELECT count() FROM mine WHERE n = 1 GROUP ALL
+{ count: 6 }
+### bob: SELECT count() FROM mine WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 7 }
+### bob: SELECT count() FROM mine WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 6 }
+### bob: SELECT count() FROM mine WHERE n > 1 GROUP ALL
+{ count: 6 }
+### bob: SELECT count() FROM mine:2..9 GROUP ALL
+{ count: 3 }
+### bob: SELECT count() FROM mine:2..=9 GROUP ALL
+{ count: 4 }
+### bob: SELECT count() FROM mine:3 GROUP ALL
+{ count: 1 }
+### bob: SELECT count() FROM mine:99 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM plain GROUP ALL
+{ count: 24 }
+### bob: SELECT count() FROM plain GROUP ALL LIMIT 0
+(no rows)
+### bob: SELECT count() FROM plain GROUP ALL START 1
+(no rows)
+### bob: SELECT count() FROM plain WHERE n % 2 = 0 GROUP ALL
+{ count: 12 }
+### bob: SELECT count() FROM plain WHERE n = 1 AND m = 2 GROUP ALL
+{ count: 1 }
+### bob: SELECT count() FROM plain WHERE n = 1 GROUP ALL
+{ count: 6 }
+### bob: SELECT count() FROM plain WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### bob: SELECT count() FROM plain WHERE n > 0 AND n < 3 GROUP ALL
+{ count: 12 }
+### bob: SELECT count() FROM plain WHERE n > 1 GROUP ALL
+{ count: 12 }
+### bob: SELECT count() FROM plain:2..9 GROUP ALL
+{ count: 7 }
+### bob: SELECT count() FROM plain:2..=9 GROUP ALL
+{ count: 8 }
+### bob: SELECT count() FROM plain:3 GROUP ALL
+{ count: 1 }
+### bob: SELECT count() FROM plain:99 GROUP ALL
+{ count: 0 }

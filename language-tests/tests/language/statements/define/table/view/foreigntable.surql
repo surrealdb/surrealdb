@@ -1,4 +1,7 @@
 /**
+[env]
+compatibility = 3
+
 [test]
 
 [[test.results]]
@@ -8,14 +11,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE', view: 'DEFINE TABLE view TYPE ANY SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 3, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE', view: 'DEFINE TABLE view TYPE ANY SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE' }, types: {  }, users: {  } }"
 
 [[test.results]]
 value = "{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: { view: 'DEFINE TABLE view TYPE ANY SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE' } }"
 
 [[test.results]]
-value = "[]"
-
+value = "[{ count: 0, id: view:[] }]"
 [[test.results]]
 value = "[{ id: test:awx1vt2p5722v4siq2ny }]"
 skip-record-id-key = true
@@ -31,7 +33,7 @@ value = "[{ count: 2, id: view:[] }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 3, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' }, types: {  }, users: {  } }"
 
 [[test.results]]
 value = "{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"

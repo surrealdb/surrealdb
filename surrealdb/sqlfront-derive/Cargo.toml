@@ -1,0 +1,29 @@
+[package]
+name = "surrealdb-sqlfront-derive"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description = "Derive macro for SurrealDB SQL front-end AST nodes"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["full", "extra-traits"] }
+
+[package.metadata.cargo-machete]
+ignored = [
+    "proc-macro2",
+    "quote",
+    "syn",
+]
+
+[lints]
+workspace = true

@@ -2,8 +2,11 @@
 //!
 //! This module provides shared infrastructure for all benchmark files including:
 
-use surrealdb_core::dbs::{Capabilities, Session};
+use std::sync::Arc;
+
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
 use tokio::runtime::Runtime;
 
 /// Create a new multithreaded Tokio runtime for benchmarks
@@ -110,9 +113,10 @@ macro_rules! bench {
 /// let (dbs, ses) = setup_datastore().await;
 /// ```
 #[allow(dead_code)]
-pub async fn setup_datastore() -> (Datastore, Session) {
+pub async fn setup_datastore() -> (Arc<Datastore>, Session) {
 	// Setup the in-memory datastore
 	let dbs = Datastore::builder()
+		.without_maintenance_tasks()
 		.with_capabilities(Capabilities::all())
 		.build_with_path("memory")
 		.await
@@ -132,9 +136,10 @@ pub async fn setup_datastore() -> (Datastore, Session) {
 /// let (dbs, ses) = setup_datastore_with_query("CREATE person:tobie;").await;
 /// ```
 #[allow(dead_code)]
-pub async fn setup_datastore_with_query(query: &str) -> (Datastore, Session) {
+pub async fn setup_datastore_with_query(query: &str) -> (Arc<Datastore>, Session) {
 	// Setup the in-memory datastore
 	let dbs = Datastore::builder()
+		.without_maintenance_tasks()
 		.with_capabilities(Capabilities::all())
 		.build_with_path("memory")
 		.await
@@ -156,9 +161,10 @@ pub async fn setup_datastore_with_query(query: &str) -> (Datastore, Session) {
 /// let (dbs, ses) = setup_datastore_with_records(100_000).await;
 /// ```
 #[allow(dead_code)]
-pub async fn setup_datastore_with_records(count: u64) -> (Datastore, Session) {
+pub async fn setup_datastore_with_records(count: u64) -> (Arc<Datastore>, Session) {
 	// Setup the in-memory datastore
 	let dbs = Datastore::builder()
+		.without_maintenance_tasks()
 		.with_capabilities(Capabilities::all())
 		.build_with_path("memory")
 		.await

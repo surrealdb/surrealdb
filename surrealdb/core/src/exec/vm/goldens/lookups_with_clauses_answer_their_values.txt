@@ -1,0 +1,132 @@
+### owner: SELECT VALUE ->(SELECT since FROM knows) FROM person:a
+[{ since: 2020 }, { since: 2021 }, { since: 1990 }, { since: 2000 }]
+### owner: SELECT VALUE ->(SELECT since, note FROM knows WHERE since > 1995) FROM person:a
+[{ note: 'n1', since: 2020 }, { note: NONE, since: 2021 }, { note: NONE, since: 2000 }]
+### owner: SELECT VALUE ->(SELECT * FROM knows ORDER BY since DESC) FROM person:a
+[{ id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }, { id: knows:k1, in: person:a, note: 'n1', out: person:b, since: 2020, tag: 'x' }, { id: knows:k4, in: person:a, out: person:b, secret: true, since: 2000, tag: 'x' }, { id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }]
+### owner: SELECT VALUE ->(SELECT * FROM knows ORDER BY since LIMIT 2) FROM person:a
+[{ id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }, { id: knows:k4, in: person:a, out: person:b, secret: true, since: 2000, tag: 'x' }]
+### owner: SELECT VALUE ->(SELECT * FROM knows LIMIT 1 START 1) FROM person:a
+[{ id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }]
+### owner: SELECT VALUE ->(SELECT * FROM knows WHERE tag = 'x' ORDER BY since LIMIT 1) FROM person:a
+[{ id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }]
+### owner: SELECT VALUE ->(SELECT tag, count() AS c FROM knows GROUP BY tag) FROM person:a
+[{ c: 3, tag: 'x' }, { c: 1, tag: 'y' }]
+### owner: SELECT VALUE ->(SELECT count() FROM knows GROUP ALL) FROM person
+[{ count: 4 }]
+[{ count: 1 }]
+[{ count: 0 }]
+[{ count: 0 }]
+### owner: SELECT VALUE ->(SELECT * FROM knows SPLIT tag) FROM person:a
+[{ id: knows:k1, in: person:a, note: 'n1', out: person:b, since: 2020, tag: 'x' }, { id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }, { id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }, { id: knows:k4, in: person:a, out: person:b, secret: true, since: 2000, tag: 'x' }]
+### owner: SELECT VALUE ->(SELECT VALUE id FROM knows ORDER BY since LIMIT 2) FROM person:a
+[knows:k3, knows:k4]
+### owner: SELECT VALUE ->(SELECT id FROM knows ORDER BY since LIMIT 2) FROM person:a
+[{ id: knows:k3 }, { id: knows:k4 }]
+### owner: SELECT VALUE ->(SELECT VALUE out FROM knows ORDER BY since) FROM person:a
+[person:c, person:b, person:b, person:h]
+### owner: SELECT VALUE ->(SELECT VALUE since FROM ONLY knows LIMIT 1) FROM person:a
+2020
+### owner: SELECT VALUE ->(SELECT since FROM knows WHERE since > $parent.n * 2000) FROM person
+[{ since: 2020 }, { since: 2021 }]
+[]
+[]
+[]
+### owner: SELECT id, ->(SELECT * FROM knows ORDER BY since DESC LIMIT 1)->person.name AS latest FROM person ORDER BY id
+{ id: person:a, latest: ['h'] }
+{ id: person:b, latest: ['c'] }
+{ id: person:c, latest: [] }
+{ id: person:h, latest: [] }
+### owner: SELECT VALUE ->knows->(SELECT * FROM person ORDER BY n DESC) FROM person:a
+[{ id: person:c, n: 3, name: 'c' }, { id: person:b, n: 2, name: 'b' }, { id: person:b, n: 2, name: 'b' }, { hidden: true, id: person:h, name: 'h' }]
+### owner: SELECT VALUE <~(SELECT n FROM post ORDER BY n) FROM person:a
+[{ n: 1 }, { n: 5 }]
+### owner: SELECT VALUE <~(SELECT * FROM post LIMIT 1) FROM person
+[{ author: person:a, id: post:1, n: 5 }]
+[{ author: person:b, id: post:3, n: 3 }]
+[]
+[]
+### owner: RETURN person:a->(SELECT * FROM knows ORDER BY since LIMIT 2)
+[{ id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }, { id: knows:k4, in: person:a, out: person:b, secret: true, since: 2000, tag: 'x' }]
+### owner: SELECT VALUE ->(SELECT * FROM knows) FROM person:a
+[{ id: knows:k1, in: person:a, note: 'n1', out: person:b, since: 2020, tag: 'x' }, { id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }, { id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }, { id: knows:k4, in: person:a, out: person:b, secret: true, since: 2000, tag: 'x' }]
+### owner: SELECT VALUE ->(SELECT VALUE id FROM ONLY knows LIMIT 1)->person FROM ONLY person:a
+person:b
+### owner: SELECT VALUE ->knows->(SELECT VALUE id FROM ONLY person LIMIT 1) FROM ONLY person:a
+person:b
+### owner: SELECT VALUE ->(SELECT VALUE id FROM ONLY knows LIMIT 1)->(SELECT VALUE id FROM ONLY person LIMIT 1) FROM ONLY person:a
+person:b
+### owner: SELECT VALUE array::len(->knows->person->(SELECT VALUE out FROM knows LIMIT 1)) FROM ONLY person:a
+1
+### owner: SELECT VALUE ->(SELECT * FROM knows WHERE since > 2000) FROM person:a
+[{ id: knows:k1, in: person:a, note: 'n1', out: person:b, since: 2020, tag: 'x' }, { id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }]
+### owner: SELECT VALUE ->(SELECT * FROM knows)->person FROM person:a
+[person:b, person:h, person:c, person:b]
+### owner: SELECT VALUE <~(SELECT * FROM post) FROM person:a
+[{ author: person:a, id: post:1, n: 5 }, { author: person:a, id: post:2, n: 1 }]
+### owner: SELECT VALUE ->(SELECT * FROM knows LIMIT $limit) FROM person:a
+[{ id: knows:k1, in: person:a, note: 'n1', out: person:b, since: 2020, tag: 'x' }, { id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }]
+### record user: SELECT VALUE ->(SELECT since FROM knows) FROM person:a
+[{ since: 2020 }, { since: 2021 }, { since: 1990 }]
+### record user: SELECT VALUE ->(SELECT since, note FROM knows WHERE since > 1995) FROM person:a
+[{ note: NONE, since: 2020 }, { note: NONE, since: 2021 }]
+### record user: SELECT VALUE ->(SELECT * FROM knows ORDER BY since DESC) FROM person:a
+[{ id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }, { id: knows:k1, in: person:a, out: person:b, since: 2020, tag: 'x' }, { id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }]
+### record user: SELECT VALUE ->(SELECT * FROM knows ORDER BY since LIMIT 2) FROM person:a
+[{ id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }, { id: knows:k1, in: person:a, out: person:b, since: 2020, tag: 'x' }]
+### record user: SELECT VALUE ->(SELECT * FROM knows LIMIT 1 START 1) FROM person:a
+[{ id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }]
+### record user: SELECT VALUE ->(SELECT * FROM knows WHERE tag = 'x' ORDER BY since LIMIT 1) FROM person:a
+[{ id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }]
+### record user: SELECT VALUE ->(SELECT tag, count() AS c FROM knows GROUP BY tag) FROM person:a
+[{ c: 2, tag: 'x' }, { c: 1, tag: 'y' }]
+### record user: SELECT VALUE ->(SELECT count() FROM knows GROUP ALL) FROM person
+[{ count: 3 }]
+[{ count: 1 }]
+[{ count: 0 }]
+### record user: SELECT VALUE ->(SELECT * FROM knows SPLIT tag) FROM person:a
+[{ id: knows:k1, in: person:a, out: person:b, since: 2020, tag: 'x' }, { id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }, { id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }]
+### record user: SELECT VALUE ->(SELECT VALUE id FROM knows ORDER BY since LIMIT 2) FROM person:a
+[knows:k3, knows:k1]
+### record user: SELECT VALUE ->(SELECT id FROM knows ORDER BY since LIMIT 2) FROM person:a
+[{ id: knows:k3 }, { id: knows:k1 }]
+### record user: SELECT VALUE ->(SELECT VALUE out FROM knows ORDER BY since) FROM person:a
+[person:c, person:b, person:h]
+### record user: SELECT VALUE ->(SELECT VALUE since FROM ONLY knows LIMIT 1) FROM person:a
+2020
+### record user: SELECT VALUE ->(SELECT since FROM knows WHERE since > $parent.n * 2000) FROM person
+[{ since: 2020 }, { since: 2021 }]
+[]
+[]
+### record user: SELECT id, ->(SELECT * FROM knows ORDER BY since DESC LIMIT 1)->person.name AS latest FROM person ORDER BY id
+{ id: person:a, latest: [] }
+{ id: person:b, latest: ['c'] }
+{ id: person:c, latest: [] }
+### record user: SELECT VALUE ->knows->(SELECT * FROM person ORDER BY n DESC) FROM person:a
+[{ id: person:c, n: 3, name: 'c' }, { id: person:b, n: 2, name: 'b' }]
+### record user: SELECT VALUE <~(SELECT n FROM post ORDER BY n) FROM person:a
+[{ n: 1 }, { n: 5 }]
+### record user: SELECT VALUE <~(SELECT * FROM post LIMIT 1) FROM person
+[{ author: person:a, id: post:1, n: 5 }]
+[{ author: person:b, id: post:3, n: 3 }]
+[]
+### record user: RETURN person:a->(SELECT * FROM knows ORDER BY since LIMIT 2)
+[{ id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }, { id: knows:k1, in: person:a, out: person:b, since: 2020, tag: 'x' }]
+### record user: SELECT VALUE ->(SELECT * FROM knows) FROM person:a
+[{ id: knows:k1, in: person:a, out: person:b, since: 2020, tag: 'x' }, { id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }, { id: knows:k3, in: person:a, out: person:c, since: 1990, tag: 'x' }]
+### record user: SELECT VALUE ->(SELECT VALUE id FROM ONLY knows LIMIT 1)->person FROM ONLY person:a
+person:b
+### record user: SELECT VALUE ->knows->(SELECT VALUE id FROM ONLY person LIMIT 1) FROM ONLY person:a
+person:b
+### record user: SELECT VALUE ->(SELECT VALUE id FROM ONLY knows LIMIT 1)->(SELECT VALUE id FROM ONLY person LIMIT 1) FROM ONLY person:a
+person:b
+### record user: SELECT VALUE array::len(->knows->person->(SELECT VALUE out FROM knows LIMIT 1)) FROM ONLY person:a
+1
+### record user: SELECT VALUE ->(SELECT * FROM knows WHERE since > 2000) FROM person:a
+[{ id: knows:k1, in: person:a, out: person:b, since: 2020, tag: 'x' }, { id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }]
+### record user: SELECT VALUE ->(SELECT * FROM knows)->person FROM person:a
+[person:b, person:c]
+### record user: SELECT VALUE <~(SELECT * FROM post) FROM person:a
+[{ author: person:a, id: post:1, n: 5 }, { author: person:a, id: post:2, n: 1 }]
+### record user: SELECT VALUE ->(SELECT * FROM knows LIMIT $limit) FROM person:a
+[{ id: knows:k1, in: person:a, out: person:b, since: 2020, tag: 'x' }, { id: knows:k2, in: person:a, out: person:h, since: 2021, tag: 'y' }]

@@ -110,8 +110,8 @@ should update their queries.
 | `surrealdb_query_errors_total` | `surrealdb_query_total{outcome="error"}` |
 | `surrealdb_query_duration_seconds` | `surrealdb_query_duration_seconds{outcome,namespace,database,user}` |
 | `surrealdb_query_dim_duration_seconds` | `surrealdb_query_duration_seconds` |
-| `surrealdb_transactions_completed_total` | `surrealdb_transaction_total{outcome="success"}` |
-| `surrealdb_transaction_writes_total` | `surrealdb_transaction_total{write="true",outcome="success"}` |
+| `surrealdb_transactions_completed_total` | `surrealdb_transaction_total{outcome=~"success\|cancelled"}` |
+| `surrealdb_transaction_writes_total` | `surrealdb_transaction_total{write="true",outcome=~"success\|cancelled"}` |
 | `surrealdb_transaction_errors_total` | `surrealdb_transaction_total{outcome="error"}` |
 | `surrealdb_rpcs_completed_total` | `surrealdb_rpc_total{outcome="success"}` |
 | `surrealdb_rpc_errors_total` | `surrealdb_rpc_total{outcome="error"}` |
@@ -210,6 +210,14 @@ no per-call, per-tenant, or per-protocol detail.
 | `target_info` | gauge | resource attrs | Emitted by the OTel SDK from the process Resource. Carries `service_edition`. |
 | `otel_scope_info` | gauge | scope attrs | Emitted by the OTel SDK per instrumentation scope. |
 
+On `surrealdb.transaction`, `outcome` separates durable work from discarded
+work. `success` counts transactions that committed, `cancelled` those that
+rolled back, and `error` those whose commit or cancel itself failed. A rollback
+is an ordinary outcome rather than a fault — read-only work and internal probes
+routinely end that way — so a query for every transaction that *finished* has to
+admit `cancelled` alongside `success`, as the two rows above do. Only `success`
+counts work that reached durability.
+
 ### Authenticated-only — primary signal families
 
 Recorded by the unified
@@ -247,6 +255,29 @@ applicable. Sentinel `"-"` values appear when ctx is unresolved.
 | `surrealdb_http_active_requests` | `surrealdb.http` | gauge | `http_request_method, http_route` (attribute-stripped to keep the gauge balanced) |
 | `surrealdb_live_query_active` | `surrealdb.live_query` | gauge | none |
 | `surrealdb_live_query_notifications_total` | `surrealdb.live_query` | counter | none |
+| `surrealdb_process_memory_allocated_bytes` | `surrealdb.process` | gauge | none |
+| `surrealdb_process_memory_requested_bytes` | `surrealdb.process` | gauge | none |
+| `surrealdb_process_memory_reserved_bytes` | `surrealdb.process` | gauge | none |
+| `surrealdb_process_memory_threshold_bytes` | `surrealdb.process` | gauge | none |
+
+The three memory gauges are deliberately **not** on the public allowlist,
+unlike `surrealdb_process_memory_bytes`: read together they describe how
+close the instance is to refusing queries, which is closer to capacity
+intelligence than the aggregate RSS figure is.
+
+Read as a set they answer three different questions:
+
+- `memory_allocated / memory_threshold` — how close this instance is to refusing queries. A
+  sustained ratio near `1` is the signal that preceded a `ServerOverloaded` refusal; alert on it.
+  When the threshold gauge reads `0` the guard is disabled and no refusal will ever happen.
+- `memory_bytes − memory_allocated` — resident memory the tracker cannot see (allocator overhead,
+  storage-engine memory outside its caches, mapped WebAssembly memory, thread stacks). This is the
+  headroom a memory threshold must leave below a container memory limit, and measuring it is how
+  that headroom should be chosen rather than guessed.
+- `memory_reserved − memory_requested` — internal fragmentation, the space the allocator reserved
+  beyond what was asked for. Use the reserved figure, not `memory_allocated`: that one also carries
+  the external reporters, so subtracting requested from it would report the whole storage-engine cache as
+  fragmentation.
 
 ### Authenticated-only — pipeline self-metrics
 
@@ -293,6 +324,114 @@ Storage backends publish a manifest of `u64` metrics through
 The server bridge registers each entry as an OTel observable gauge under
 the `surrealdb.storage.<backend>.<metric>` namespace; the Prometheus
 exporter renders them as `surrealdb_storage_<backend>_<metric>`.
+
+### Index compaction (`surrealdb.index` scope)
+
+Indexes that compact in the background — count, full-text, HNSW and
+DiskANN — queue each write as a pending delta, and a compaction pass later
+folds the queued deltas into the index. A query merges the deltas still
+pending into what it reads. These families describe both sides. They are
+labelled by index kind, never by index, so their cardinality is fixed. All
+of them require authentication: the pass rate by kind follows write activity
+on those indexes, and the `fenced` and `not_visible` outcomes show when a
+vector-index build runs.
+
+| Family (Prom name) | Type | Labels | Notes |
+| --- | --- | --- | --- |
+| `surrealdb_index_compaction_pass_total` | counter | `kind, trigger, outcome` | One per compaction pass over one index. |
+| `surrealdb_index_compaction_pass_duration_seconds` | histogram | `kind, trigger, outcome` | Pass duration, on the second-scale `*.duration` buckets. |
+| `surrealdb_index_compaction_plans_total` | counter | `kind, mode` | Committed plans that folded at least one pending key. A plan that folded none, such as an HNSW or DiskANN guard-only step, records nothing. |
+| `surrealdb_index_compaction_plan_duration_seconds` | histogram | `kind, mode` | Duration of those plans. |
+| `surrealdb_index_compaction_pending_keys_folded_total` | counter | `kind, mode` | Pending delta keys those plans folded. |
+| `surrealdb_index_compaction_retries_total` | counter | `kind, reason` | Plan attempts that had to be retried. |
+| `surrealdb_index_compaction_unqueued_total` | counter | `kind, trigger` | Passes that stopped with work remaining and failed to queue a fresh compaction request for it, so that work rests on the requests that started the pass. Alert on any increase. |
+| `surrealdb_index_hnsw_cache_discards_total` | counter | none | In-place HNSW plans whose commit failed after they changed the resident graph, so the graph was discarded and is reloaded from storage on next use. |
+| `surrealdb_index_pending_keys_read` | histogram | `kind` | Pending delta keys merged by one query-time pending-delta read. A read that merged none records no sample, so `_count` counts reads that met a backlog, not lookups. A BM25 full-text lookup makes up to two such reads: its terms' changes, and the document-statistics deltas its scorer sums. Buckets: `1, 4, 16, 64, 256, 512, 1024, 4096, 16384`. |
+
+Label values:
+
+- `kind`: `count`, `fulltext`, `hnsw`, `diskann`. A pass that ended before it
+  resolved the index definition (`not_visible`, and an early `fenced` or
+  `error`) reports the `"-"` sentinel.
+- `trigger`: `queue` (the background drain of queued compaction requests,
+  on its periodic tick or woken by a commit that queued compaction) or
+  `after_commit` (the wait of a blocking `DEFINE INDEX` or `REBUILD INDEX`
+  after its commit, which runs compaction passes inline until its index is
+  materialised).
+- `outcome` on the pass families is the pass outcome, not the
+  `success` / `error` / `cancelled` set the other families use:
+  - `empty`: nothing was pending, or the index was removed.
+  - `short`: everything the pass saw was folded within its budget.
+  - `budget`: the pass reached its plan budget, or lost its lease, with work
+    remaining, and queued the index again.
+  - `lost_race`: another compactor kept changing the plan's input, and the pass
+    ran out of retries and queued the index again.
+  - `fenced`: a running build owns the vector index, so the pass deferred to it
+    and kept the request.
+  - `not_visible`: the index definition is not yet visible at this node's
+    snapshot while a build owns it, so the pass kept the request.
+  - `error`: the pass failed.
+  - `cancelled`: the pass was cancelled, at shutdown for instance.
+- `mode`: `folded` (deltas folded in a guarded write transaction: count,
+  full-text, and DiskANN), `staged` (an HNSW add-only
+  batch linked against the committed graph and published on commit), or
+  `in_place` (an HNSW batch applied to the resident graph under its write
+  lock).
+- `reason`: `txn_conflict` (the write transaction conflicted at commit) or
+  `lost_race` (a concurrent compactor folded part of the batch first).
+
+A sustained rate of `budget` passes, or a rising
+`surrealdb_index_pending_keys_read` sum, means compaction is not keeping up
+with writes, and queries pay to merge the backlog. `INFO FOR INDEX` reports
+the state of one index: its `building` object carries `compacting`,
+`queued` (a compaction request is stored or buffered for it), `active` (a
+compaction pass over it runs on the queried node; another node may be
+compacting it while this reads `false`), and `armed_shards` (HNSW and
+DiskANN pending-state guard shards that report pending entries).
+
+### Not a metric — index pending-queue depth
+
+Indexes that compact in the background (full-text, HNSW, DiskANN) queue
+each write and drain it later. The depth of that queue is what predicts
+a read's cost against the index, but it is deliberately **not** exposed
+as a gauge, for two reasons:
+
+- **Cardinality.** The only meaningful key is the index, so the series
+  would be labelled by namespace, database, table and index — all
+  user-chosen and unbounded. `PUBLIC_METRICS` aside, this is the
+  cardinality shape the rest of this document exists to avoid.
+- **Scrape cost.** No counter of queue depth is maintained; the depth is
+  the length of a key range. An observable gauge would therefore run a
+  range scan per index on every collection — the same O(backlog) work
+  the depth is a warning about.
+
+The per-kind `surrealdb_index_pending_keys_read` histogram above shows the
+backlog that queries merge, but not which index holds it. The per-index
+signal is published as a **log record** instead, from the read path
+that already walks the queue and so counts it for free. An HNSW or
+DiskANN kNN search emits a `WARN` naming the index and the engine the
+first time one of its scans reads more pending data than a single
+materialisation batch holds — either because the entry count passed what
+one batch admits, or because admitting the current value alongside the
+cursor page and buffered candidates would force the batch to roll over.
+The second crossing is taken from the rollover predicate rather than from
+a byte threshold, because a batch shares its residency budget with the
+cursor page it is filled from: a queue of wide entries costs several
+batches well before its raw values add up to the budget, and a threshold
+over raw bytes would say nothing about it. This pre-check is conservative:
+it counts the already-read value even when decoding or an allow-list later
+discards it, just as the entry-count threshold counts discarded values.
+
+The record is emitted at that crossing rather than at the end of the
+scan, and the entry it crosses on is accounted before the scan's
+cancellation checkpoint for that entry, so a search that goes on to
+exhaust its deadline still reports. The entry count it carries is what
+the scan had read by then, which is a lower bound on the queue's depth.
+It fires once per crossing, not once per query: a sustained backlog
+produces one record, and a scan that completes inside both budgets
+re-arms it only if no newer scan observed another crossing after that
+scan began. The threshold is per index family, and each index re-arms
+its own.
 
 ---
 

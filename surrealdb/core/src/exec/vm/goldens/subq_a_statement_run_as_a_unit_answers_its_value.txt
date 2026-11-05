@@ -1,0 +1,35 @@
+### owner: SELECT * FROM open ORDER BY n LIMIT (SELECT VALUE count() FROM item GROUP ALL)[0]
+{ id: open:3, n: 2, of: item:9 }
+{ id: open:1, n: 10, of: item:1 }
+{ id: open:2, n: 20, of: item:3 }
+### owner: SELECT * FROM open ORDER BY n LIMIT 1 START (RETURN 1)
+1
+### owner: SELECT (RETURN n + 1) AS m FROM open
+{ m: 11 }
+{ m: 21 }
+{ m: 3 }
+### owner: SELECT ({ LET $a = n; RETURN $a }) AS m FROM open
+{ m: 10 }
+{ m: 20 }
+{ m: 2 }
+### owner: SELECT (INFO FOR DB).tables AS t FROM open LIMIT 1
+{ t: { closed: 'DEFINE TABLE closed TYPE ANY SCHEMALESS PERMISSIONS NONE', cs: 'DEFINE TABLE cs TYPE ANY SCHEMALESS PERMISSIONS FULL', item: 'DEFINE TABLE item TYPE ANY SCHEMALESS PERMISSIONS FOR select WHERE hidden != true, FOR create, update, delete NONE', log: 'DEFINE TABLE log TYPE ANY SCHEMALESS PERMISSIONS FULL', node: 'DEFINE TABLE node TYPE NORMAL SCHEMAFULL PERMISSIONS FOR select WHERE (SELECT VALUE label FROM node WHERE id = $this.next LIMIT 1) != NONE, FOR create, update, delete FULL', open: 'DEFINE TABLE open TYPE ANY SCHEMALESS PERMISSIONS FULL', seen: 'DEFINE TABLE seen TYPE ANY SCHEMALESS PERMISSIONS FULL' } }
+### owner: SELECT * FROM cs
+{ id: cs:1, total: 3 }
+### record user: SELECT * FROM open ORDER BY n LIMIT (SELECT VALUE count() FROM item GROUP ALL)[0]
+{ id: open:3, n: 2, of: item:9 }
+{ id: open:1, n: 10, of: item:1 }
+### record user: SELECT * FROM open ORDER BY n LIMIT 1 START (RETURN 1)
+1
+### record user: SELECT (RETURN n + 1) AS m FROM open
+{ m: 11 }
+{ m: 21 }
+{ m: 3 }
+### record user: SELECT ({ LET $a = n; RETURN $a }) AS m FROM open
+{ m: 10 }
+{ m: 20 }
+{ m: 2 }
+### record user: SELECT (INFO FOR DB).tables AS t FROM open LIMIT 1
+error: IAM error: Not enough permissions to perform this action: Not enough permissions to perform this action
+### record user: SELECT * FROM cs
+{ id: cs:1, total: 2 }

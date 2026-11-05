@@ -4,7 +4,6 @@ namespace = true
 database = true
 auth = { level = "owner" }
 
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Computed fields containing foreign SELECTs should not cause severe performance regressions or timeouts"
@@ -31,10 +30,7 @@ value = "[{ id: finding:1, name: 'f1' }]"
 value = "NONE"
 
 [[test.results]]
-value = """
-[{ id: finding:1, name: 'f1', test: 'SelectProject [ctx: Db] [projections: *]
-    DynamicScan [ctx: Db] [source: finding_annotation, predicate: finding = $value, limit: 1, pre_decode_filter: no (unsupported predicate)]
-' }]"""
+value = '''[{ id: finding:1, name: 'f1', test: 'SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 1]\n        Filter [ctx: Db] [predicate: finding = $value]\n            TableScan [ctx: Db] [table: finding_annotation, direction: Forward]\n' }]'''
 
 [[test.results]]
 value = "NONE"
@@ -46,10 +42,7 @@ value = "[{ id: finding:1, name: 'f1', test: [] }]"
 value = "NONE"
 
 [[test.results]]
-value = """
-[{ id: finding:1, name: 'f1', test: 'SelectProject [ctx: Db] [projections: *]
-    DynamicScan [ctx: Db] [source: finding_annotation, limit: 1]
-' }]"""
+value = '''[{ id: finding:1, name: 'f1', test: 'SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: finding_annotation, direction: Forward, limit: 1]\n' }]'''
 
 [[test.results]]
 value = "NONE"

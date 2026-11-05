@@ -1,0 +1,329 @@
+### owner: CREATE item:3 SET n = 3
+{ id: item:3, n: 3 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 17b97cff36bcd4ae (60 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => f6fd8e4fbfd0ad9c (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => c1a1af817c7dce6c (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => a010d670313689d0 (50 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(3) }), "n": Number(Int(3))}))
+### owner: UPDATE item:1 SET n += 1
+{ id: item:1, n: 2, secret: 's1' }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => b2ab4946172fffe6 (76 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 9f101d4018b7d7d4 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 0e68ca25e1040dfb (70 bytes)
+<queued event> => 3b5b4f17ce1a4117 (1457 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(2)), "secret": String("s1")}))
+### owner: UPDATE item SET n = 21
+{ id: item:1, n: 21, secret: 's1' }
+{ id: item:2, n: 21, secret: 's2' }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 19a8b31574e979a6 (145 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f06089c17d6c1c5d (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => f06086c17d6c1744 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 4d58a1d2ecfff990 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 889d34a0d9bd2758 (11 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 889d34a0d9bd2758 (11 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 00f99fca900fa74a (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 00f99fca900fa74a (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => e4b68dbc692dbfce (70 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 02bb81a6f1662a47 (70 bytes)
+<queued event> => afbdc36596d57cba (1461 bytes)
+<queued event> => 1abed7d3085f203a (1461 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(21)), "secret": String("s1")}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(21)), "secret": String("s2")}))
+### owner: UPDATE item:1 SET n = 1
+{ id: item:1, n: 1, secret: 's1' }
+keyspace:
+notified:
+### owner: UPDATE item:2 SET n = 7
+{ id: item:2, n: 7, secret: 's2' }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => ab7faf47d4819798 (145 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => e1debf664f516c62 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => a02a6ce2ea9acb9a (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 2d1ba4268d484ac8 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => cb245143c3e8da77 (70 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 678bcf9e0dfa3eb2 (70 bytes)
+<queued event> => 026a2cde2f1571c0 (1457 bytes)
+<queued event> => fdd8c3f1ae61d378 (1457 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(8)), "secret": String("s1")}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(7)), "secret": String("s2")}))
+### owner: UPDATE item:1 SET n = 13
+error: Error while processing event boom: An error occurred: unlucky
+keyspace:
+notified:
+### owner: UPDATE item:1 SET n = 5
+{ id: item:1, n: 5, secret: 's1' }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 5f8210812fd530c0 (76 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => e55a833aabc7b08d (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 086f40faeb4cb950 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 24639220676b40bd (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 1a5dda7d7f6d70ae (70 bytes)
+<queued event> => 44131e8f26e566be (1457 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(5)), "secret": String("s1")}))
+### owner: UPDATE item:2 SET n = 4 RETURN AFTER
+{ id: item:2, n: 4, secret: 's2' }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => f9af822e67f44beb (76 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 57ff86618aecd8f3 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => f5ced8defa49d388 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 97c990c287e004bb (70 bytes)
+<queued event> => 7a82044634c9d802 (1457 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(4)), "secret": String("s2")}))
+### owner: DELETE item:1
+(no rows)
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => dcafcc32de4dd7ff (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 3003a3c4dad23454 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => fdbd20381cc0b908 (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 6d0e5246394c9849 (38 bytes)notified:
+Delete Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(1)), "secret": String("s1")}))
+### owner: DELETE item
+(no rows)
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 1869dc64e10787fb (29 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => fdbd20381cc0b908 (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => fdbd23381cc0be21 (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 6d0e5246394c9849 (38 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => f4131e645816c9b1 (38 bytes)notified:
+Delete Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(1)), "secret": String("s1")}))
+Delete Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "secret": String("s2")}))
+### owner: INSERT INTO item { id: item:9, n: 9 }
+{ id: item:9, n: 9 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 6a52e4729e8c79e2 (60 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\t => f6fd984fbfd0be9a (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 93226b5dfb7709cc (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 9fc42ea56065339a (37 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(9))}))
+### owner: UPSERT item:8 SET n = 22
+{ id: item:8, n: 22 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 6ed60f70adba5704 (60 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x08 => f6fd7b4fbfd08d53 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 971349dd702a2a9c (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 889d37a0d9bd2c71 (11 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 00f99fca900fa74a (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 64fd1810fd8dc949 (50 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(8) }), "n": Number(Int(22))}))
+### owner: UPDATE item:1 MERGE { m: 1 } RETURN NONE
+(no rows)
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 90534eeefb292f2c (87 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 573761109729f71d (24 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => ac57a052b98d7a01 (70 bytes)
+<queued event> => dc5c46ed7804ece6 (1530 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "m": Number(Int(1)), "n": Number(Int(1)), "secret": String("s1")}))
+### owner: RELATE item:1->link->item:2 SET w = 1
+{ id: link:generated, in: item:1, out: item:2, w: 1 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvlink\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnlink\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tblink\x00 => bc4545dde88d1f13 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00~\x02\x80\x00\x00\x00\x00\x00\x00\x01\x03link\x00\x03xxxxxxxxxxxxxxxxxxxx\x00item\x00\x02\x80\x00\x00\x00\x00\x00\x00\x02 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00~\x02\x80\x00\x00\x00\x00\x00\x00\x02\x02link\x00\x03xxxxxxxxxxxxxxxxxxxx\x00item\x00\x02\x80\x00\x00\x00\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*link\x00!lg\x00\x01 => 09a91dce754faf3a (21 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*link\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*link\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 59913c2d3aa3ebad (32 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*link\x00~\x03xxxxxxxxxxxxxxxxxxxx\x00\x02item\x00\x02\x80\x00\x00\x00\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*link\x00~\x03xxxxxxxxxxxxxxxxxxxx\x00\x03item\x00\x02\x80\x00\x00\x00\x00\x00\x00\x02 => cbf29ce484222325 (0 bytes)notified:
+### owner: UPDATE type::table('item') SET n += 1
+{ id: item:1, n: 2, secret: 's1' }
+{ id: item:2, n: 3, secret: 's2' }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 97d7113edeb57bec (145 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 9f101d4018b7d7d4 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 91ae3ecc6aeefb3e (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 8efbcdf3146af018 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 0e68ca25e1040dfb (70 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => ccd4bbda3079868d (70 bytes)
+<queued event> => 3b5b4f17ce1a4117 (1457 bytes)
+<queued event> => e29c8c52e599ff82 (1457 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(2)), "secret": String("s1")}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(3)), "secret": String("s2")}))
+### owner: UPDATE (SELECT VALUE id FROM item) SET n = 21
+{ id: item:1, n: 21, secret: 's1' }
+{ id: item:2, n: 21, secret: 's2' }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 19a8b31574e979a6 (145 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f06089c17d6c1c5d (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => f06086c17d6c1744 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 4d58a1d2ecfff990 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 889d34a0d9bd2758 (11 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 889d34a0d9bd2758 (11 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 00f99fca900fa74a (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 00f99fca900fa74a (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => e4b68dbc692dbfce (70 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 02bb81a6f1662a47 (70 bytes)
+<queued event> => afbdc36596d57cba (1461 bytes)
+<queued event> => 1abed7d3085f203a (1461 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(21)), "secret": String("s1")}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(21)), "secret": String("s2")}))
+### record user: CREATE item:3 SET n = 3
+{ id: item:3, n: 3 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 17b97cff36bcd4ae (60 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => f6fd8e4fbfd0ad9c (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => c1a1af817c7dce6c (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => a010d670313689d0 (50 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(3) }), "n": Number(Int(3))}))
+### record user: UPDATE item:1 SET n += 1
+{ id: item:1, n: 2 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => b2ab4946172fffe6 (76 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 9f101d4018b7d7d4 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 0e68ca25e1040dfb (70 bytes)
+<queued event> => 9b84f59d43c9b7e9 (1621 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(2)), "secret": String("s1")}))
+### record user: UPDATE item SET n = 21
+{ id: item:1, n: 21 }
+{ id: item:2, n: 21 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 19a8b31574e979a6 (145 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f06089c17d6c1c5d (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => f06086c17d6c1744 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 4d58a1d2ecfff990 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 889d34a0d9bd2758 (11 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 889d34a0d9bd2758 (11 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 00f99fca900fa74a (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 00f99fca900fa74a (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => e4b68dbc692dbfce (70 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 02bb81a6f1662a47 (70 bytes)
+<queued event> => 9e756f2298bde69c (1625 bytes)
+<queued event> => c8ed591ca2ee71f0 (1625 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(21)), "secret": String("s1")}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(21)), "secret": String("s2")}))
+### record user: UPDATE item:1 SET n = 1
+{ id: item:1, n: 1 }
+keyspace:
+notified:
+### record user: UPDATE item:2 SET n = 7
+{ id: item:2, n: 7 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => ab7faf47d4819798 (145 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => e1debf664f516c62 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => a02a6ce2ea9acb9a (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 2d1ba4268d484ac8 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => cb245143c3e8da77 (70 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 678bcf9e0dfa3eb2 (70 bytes)
+<queued event> => 3880d801dc7d9426 (1621 bytes)
+<queued event> => a98831a6f7997802 (1621 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(8)), "secret": String("s1")}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(7)), "secret": String("s2")}))
+### record user: UPDATE item:1 SET n = 13
+error: Error while processing event boom: An error occurred: unlucky
+keyspace:
+notified:
+### record user: UPDATE item:1 SET n = 5
+{ id: item:1, n: 5 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 5f8210812fd530c0 (76 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => e55a833aabc7b08d (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 086f40faeb4cb950 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 24639220676b40bd (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 1a5dda7d7f6d70ae (70 bytes)
+<queued event> => d3ecfb70d9c25960 (1621 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(5)), "secret": String("s1")}))
+### record user: UPDATE item:2 SET n = 4 RETURN AFTER
+{ id: item:2, n: 4 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => f9af822e67f44beb (76 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 57ff86618aecd8f3 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => f5ced8defa49d388 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 97c990c287e004bb (70 bytes)
+<queued event> => ab7cb5e4a753c154 (1621 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(4)), "secret": String("s2")}))
+### record user: DELETE item:1
+(no rows)
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => dcafcc32de4dd7ff (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 3003a3c4dad23454 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => fdbd20381cc0b908 (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 6d0e5246394c9849 (38 bytes)notified:
+Delete Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(1)), "secret": String("s1")}))
+### record user: DELETE item
+(no rows)
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 1869dc64e10787fb (29 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => fdbd20381cc0b908 (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => fdbd23381cc0be21 (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 6d0e5246394c9849 (38 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => f4131e645816c9b1 (38 bytes)notified:
+Delete Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(1)), "secret": String("s1")}))
+Delete Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "secret": String("s2")}))
+### record user: INSERT INTO item { id: item:9, n: 9 }
+{ id: item:9, n: 9 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 6a52e4729e8c79e2 (60 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\t => f6fd984fbfd0be9a (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 93226b5dfb7709cc (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 9fc42ea56065339a (37 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(9))}))
+### record user: UPSERT item:8 SET n = 22
+{ id: item:8, n: 22 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 6ed60f70adba5704 (60 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x08 => f6fd7b4fbfd08d53 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 971349dd702a2a9c (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 889d37a0d9bd2c71 (11 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 00f99fca900fa74a (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 64fd1810fd8dc949 (50 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(8) }), "n": Number(Int(22))}))
+### record user: UPDATE item:1 MERGE { m: 1 } RETURN NONE
+(no rows)
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 90534eeefb292f2c (87 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 573761109729f71d (24 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => ac57a052b98d7a01 (70 bytes)
+<queued event> => f172352c7c151916 (1694 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "m": Number(Int(1)), "n": Number(Int(1)), "secret": String("s1")}))
+### record user: RELATE item:1->link->item:2 SET w = 1
+(no rows)
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvlink\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnlink\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tblink\x00 => bc4545dde88d1f13 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*link\x00!lg\x00\x01 => 09a91dce754faf3a (21 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*link\x00!mi => d7876502b7aabd4b (16 bytes)notified:
+### record user: UPDATE type::table('item') SET n += 1
+{ id: item:1, n: 2 }
+{ id: item:2, n: 3 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 97d7113edeb57bec (145 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 9f101d4018b7d7d4 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 91ae3ecc6aeefb3e (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 8efbcdf3146af018 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 0e68ca25e1040dfb (70 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => ccd4bbda3079868d (70 bytes)
+<queued event> => 9b84f59d43c9b7e9 (1621 bytes)
+<queued event> => 22a0f531a6b68094 (1621 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(2)), "secret": String("s1")}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(3)), "secret": String("s2")}))
+### record user: UPDATE (SELECT VALUE id FROM item) SET n = 21
+{ id: item:1, n: 21 }
+{ id: item:2, n: 21 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*item\x00 => 19a8b31574e979a6 (145 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f06089c17d6c1c5d (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => f06086c17d6c1744 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*item_count\x00*\x05\x00 => 4d58a1d2ecfff990 (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 889d34a0d9bd2758 (11 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 889d34a0d9bd2758 (11 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 00f99fca900fa74a (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 00f99fca900fa74a (13 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => e4b68dbc692dbfce (70 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 02bb81a6f1662a47 (70 bytes)
+<queued event> => 9e756f2298bde69c (1625 bytes)
+<queued event> => c8ed591ca2ee71f0 (1625 bytes)notified:
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "n": Number(Int(21)), "secret": String("s1")}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(21)), "secret": String("s2")}))

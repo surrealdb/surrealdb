@@ -1,4 +1,0 @@
-# Python dependencies for the surrealml Python package.
-# All entries must include a --hash=sha256: pin.
-# When adding dependencies, generate hashes with:
-#   pip-compile --generate-hashes requirements.in

@@ -1,39 +1,45 @@
 //! Plan-time pre-encoded literals for byte-level predicate evaluation.
 //!
-//! Under rev-2 every [`Value`] wire is canonical (`u16 rev || tag || payload`):
-//! two values are equal iff their wire bytes are equal. We exploit this by
-//! pre-encoding the literal side of every predicate **once at plan time** so
-//! the hot loop only does `memcmp` (eq), `memchr::memmem::find` (contains),
-//! or a `HashMap` probe (set membership).
+//! The literal side of every predicate is pre-encoded into its rev-2 [`Value`]
+//! wire (`u16 rev || tag || payload`) **once at plan time** so the hot loop only
+//! does `memcmp` (eq), `memchr::memmem::find` (contains), or a `HashMap` probe
+//! (set membership).
 //!
-//! Cross-type and cross-Number-variant operators (e.g. `Int(1) == Float(1.0)`)
-//! cannot be decided by byte-eq; callers must fall back to full decode +
-//! [`crate::fnc::operate`] for those. [`LiteralWire::Other`] and
-//! [`LiteralSet::fallback`] carry the original [`Value`] so the fallback path
-//! always has a decoded literal to compare against.
+//! Byte equality is value equality only for a value with one encoding: a
+//! string, an integer, and the variants [`LiteralWire::Canonical`] lists. A
+//! decimal's encoding carries its scale and the sign of a zero (`2.0` and `2`,
+//! `-0` and `0`, are equal but byte-different), so a decimal is compared by its
+//! decoded value. Cross-type and cross-Number-variant operators (e.g.
+//! `Int(1) == Float(1.0)`) cannot be decided from the bytes; callers must fall
+//! back to full decode + [`crate::fnc::operate`] for those. [`LiteralWire::Other`]
+//! and [`LiteralSet::fallback`] carry the original [`Value`] so the fallback
+//! path always has a decoded literal to compare against.
 
 use std::collections::HashSet;
+use std::hash::BuildHasher;
 use std::ops::Range;
 use std::sync::Arc;
 
 use revision::SerializeRevisioned;
+use rust_decimal::Decimal;
 
 use crate::val::{Number, Value};
 
-/// Inner [`Number`] discriminant on the rev-1 wire. Mirrors the
+/// Inner [`Number`] discriminant on the rev-1 / rev-2 wire. Mirrors the
 /// declaration order of [`crate::val::Number`] and is what
 /// `<Number as SerializeRevisioned>` emits as a single varint byte for
-/// values `< 251` (which the three variants we have today always satisfy).
+/// values `< 251` (which the twelve variants we have today always satisfy).
 ///
 /// Used by [`LiteralWire::Number`] to pre-extract the literal's
-/// sub-variant at plan time so the wire comparator can short-circuit
-/// same-sub-variant `Int` / `Decimal` byte mismatches as definitively
-/// unequal instead of bailing to a full Value decode.
+/// sub-variant at plan time, so the wire comparator can decide a
+/// same-sub-variant comparison without decoding the `Value`: an `Int` by its
+/// bytes, a `Decimal` by its decoded body. A `Float` is left to the fallback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum NumberSubVariant {
 	Int = 0,
 	Float = 1,
 	Decimal = 2,
+	Sized = 3,
 }
 
 impl NumberSubVariant {
@@ -43,11 +49,21 @@ impl NumberSubVariant {
 			Number::Int(_) => NumberSubVariant::Int,
 			Number::Float(_) => NumberSubVariant::Float,
 			Number::Decimal(_) => NumberSubVariant::Decimal,
+			Number::I8(_)
+			| Number::I16(_)
+			| Number::I32(_)
+			| Number::U8(_)
+			| Number::U16(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_)
+			| Number::BigDecimal(_) => NumberSubVariant::Sized,
 		}
 	}
 
 	/// Decode a sub-variant from a raw wire byte, returning [`None`] for
-	/// any value not in `{0, 1, 2}`. Hardens against truncated /
+	/// any value not in `0..=11`. Hardens against truncated /
 	/// corrupted Number payloads — a non-matching byte means we can't
 	/// claim same-sub-variant safely.
 	#[inline]
@@ -56,18 +72,44 @@ impl NumberSubVariant {
 			0 => Some(NumberSubVariant::Int),
 			1 => Some(NumberSubVariant::Float),
 			2 => Some(NumberSubVariant::Decimal),
+			3..=11 => Some(NumberSubVariant::Sized),
 			_ => None,
 		}
 	}
+}
 
-	/// `true` if same-sub-variant byte equality decides value equality.
-	/// `Int` and `Decimal` qualify (canonical-per-value byte encoding);
-	/// `Float` doesn't (`+0.0 / -0.0` byte-differ but compare equal under
-	/// `f64::PartialEq`, NaN bit patterns may compare either way).
-	#[inline]
-	pub(crate) fn byte_eq_decides_value_eq(self) -> bool {
-		matches!(self, NumberSubVariant::Int | NumberSubVariant::Decimal)
-	}
+/// Whether a `HashSet<Value>` / `HashMap<Value, _>` **miss** on `value` proves
+/// that no element of `set` is [`Value::equal`] to it, the equality `IN` and
+/// `CONTAINSANY` / `CONTAINSALL` / `CONTAINSNONE` judge membership by.
+///
+/// The single rule every decode-fallback membership probe in this module
+/// shares. The probe compares with `==`, so a miss proves that much only when
+/// both of these hold:
+///
+/// - **No element is `==` to `value`.** The miss proves this as soon as one side of the probe
+///   hashes as it compares: see [`Value::hash_agrees_with_eq`] for the values that may not, and
+///   [`LiteralSet::hash_agrees_with_eq`] for the set side.
+/// - **No element is `Value::equal` to `value` without being `==` to it.** The two differ only
+///   between a top-level string and a top-level regex, which `Value::equal` matches by running the
+///   regex over the string. A regex's miss is therefore decisive only against a set holding no
+///   string, and a string's only against a set holding no regex.
+///
+/// A hit needs neither: a probe hits only an element `==` to `value`, and `==`
+/// implies `Value::equal` for every pair of values. Whether a hit is
+/// **reproducible** is decided by the first condition alone. When it fails, an
+/// entry `==` to `value` may hash apart from it, and whether the probe still
+/// meets that entry depends on the hasher's seed.
+#[inline]
+pub(crate) fn hash_miss_is_decisive(value: &Value, set: &LiteralSet) -> bool {
+	let miss_rules_out_eq = set.hash_agrees_with_eq() || value.hash_agrees_with_eq();
+	let eq_decides_equal = if let Value::String(_) = value {
+		!set.has_strand_asymmetric_match()
+	} else if let Value::Regex(_) = value {
+		set.has_no_strings()
+	} else {
+		true
+	};
+	miss_rules_out_eq && eq_decides_equal
 }
 
 /// One predicate literal, optionally pre-encoded into rev-2 wire bytes.
@@ -91,34 +133,37 @@ pub(crate) enum LiteralWire {
 	/// only short-circuits when the runtime value's variant matches the
 	/// literal's. The fallback path catches cross-variant cases.
 	///
-	/// `sub_variant_id` is the inner [`crate::val::Number`] discriminant
-	/// (`0 = Int`, `1 = Float`, `2 = Decimal`), pre-extracted at plan time
+	/// `sub_variant_id` is the inner [`crate::val::Number`] sub-variant class
+	/// (`Int`, `Float`, `Decimal`, or `Sized`), pre-extracted at plan time
 	/// so the per-row wire comparator can peek the runtime value's
 	/// sub-variant in one byte read and decide:
 	///
 	/// - **Different sub-variants** → bail to fallback decode (`Int(1)` ↔ `Float(1.0)`
 	///   cross-variant equality needs `Number::PartialEq`).
-	/// - **Same `Int` / `Decimal` sub-variant, byte match** → equal.
-	/// - **Same `Int` / `Decimal` sub-variant, byte mismatch** → unequal (canonical-per-value byte
-	///   representation).
-	/// - **Same `Float` sub-variant** → bail to fallback regardless of byte equality: `+0.0` vs
-	///   `-0.0` byte-differ but compare equal under `f64::PartialEq`, and `NaN` bit patterns may
-	///   compare equal or unequal depending on the `Value::equal` arm. Cheap to defer the few
-	///   Float-eq predicates and keep wire-eq correct.
+	/// - **Same `Int` sub-variant** → byte equality decides: an integer has one encoding.
+	/// - **Same `Decimal` sub-variant** → the runtime value's decimal body is decoded and compared
+	///   with `decimal_value`. The bytes carry a decimal's scale and the sign of a zero, which
+	///   `Decimal`'s equality ignores: `2.0` equals `2`, and `-0` equals `0`.
+	/// - **Same `Float` sub-variant** → a byte match is equal, a float comparing by its bits (every
+	///   NaN one value); a mismatch bails to fallback decode, since `+0.0` vs `-0.0` byte-differ
+	///   but compare equal, as do NaNs of different payloads.
 	///
 	/// `int_value` is the literal's `i64` body, pre-decoded at plan time
 	/// for the wire-fast same-sub-variant **range** comparator
 	/// (`<` / `<=` / `>` / `>=` against the runtime value). `Some` only
 	/// for `Number::Int` literals; `None` for `Float` (NaN / ±0 makes
 	/// total ordering unsafe via byte / `f64::PartialOrd` compare) and
-	/// `Decimal` (the wire form isn't lexicographically ordered by its
-	/// binary encoding — decode would be required, killing the
-	/// wire-fast win). The wire comparator bails on `None` so the
-	/// fallback path handles those sub-variants.
+	/// `Decimal` (its bytes are not ordered by value). The wire
+	/// comparator bails on `None` so the fallback path handles those
+	/// sub-variants.
+	///
+	/// `decimal_value` is the literal's decimal for the same-sub-variant
+	/// equality comparator: `Some` only for `Number::Decimal` literals.
 	Number {
 		full_wire: Vec<u8>,
 		sub_variant_id: NumberSubVariant,
 		int_value: Option<i64>,
+		decimal_value: Option<Decimal>,
 	},
 	/// "Canonical byte-eq" literal: the full rev-2 `Value` wire **is** the
 	/// equality criterion. Covers every variant where:
@@ -141,13 +186,19 @@ pub(crate) enum LiteralWire {
 	Canonical {
 		full_wire: Vec<u8>,
 	},
-	/// `Value::Regex(_)` literal. The pre-compiled `regex::Regex` is kept
-	/// alive in an `Arc` so cloned `PredNode`s share it. Eval matches the
-	/// field's `Strand` value against the regex via a zero-copy `&str`
-	/// view over the wire-borrowed UTF-8 bytes (see
-	/// [`crate::exec::pre_decode_filter::wire_cmp::strand_payload_str_unchecked`]).
+	/// `Value::Regex(_)` literal. `=` and `==` compare it differently, and
+	/// each operator reads its own field:
+	///
+	/// * `regex` — the pre-compiled pattern, kept alive in an `Arc` so cloned `PredNode`s share it.
+	///   `Value::equal` (`=`, `!=`) matches a string against a regex, so a `Strand` field is
+	///   matched against it through a zero-copy `&str` view over the wire-borrowed UTF-8 bytes (see
+	///   [`crate::exec::pre_decode_filter::wire_cmp::strand_payload_str`]).
+	/// * `full_wire` — the full rev-2 `Value` wire. `Value`'s derived `PartialEq` (`==`) equates a
+	///   regex only with a regex of the same pattern, and a regex's wire holds its pattern and
+	///   nothing else, so byte equality against it decides `==` for every field.
 	Regex {
 		regex: Arc<crate::val::Regex>,
+		full_wire: Vec<u8>,
 	},
 	/// Everything else — the wire-fast path doesn't apply. Callers retain
 	/// the original [`Value`] separately (on `PredNode::Leaf::literal`,
@@ -186,18 +237,49 @@ impl LiteralWire {
 					utf8_range: start..end,
 				}
 			}
-			Value::Number(n) => {
+			Value::Number(
+				Number::I8(_)
+				| Number::U8(_)
+				| Number::I16(_)
+				| Number::U16(_)
+				| Number::I32(_)
+				| Number::U32(_)
+				| Number::U64(_)
+				| Number::F16(_)
+				| Number::F32(_)
+				| Number::BigDecimal(_),
+			) => LiteralWire::Other,
+			Value::Number(Number::Int(i)) => {
 				let mut full = Vec::new();
 				lit.serialize_revisioned(&mut full)
 					.expect("serialize Value::Number never errors into Vec");
-				let int_value = match n {
-					Number::Int(i) => Some(*i),
-					Number::Float(_) | Number::Decimal(_) => None,
-				};
 				LiteralWire::Number {
 					full_wire: full,
-					sub_variant_id: NumberSubVariant::from_number(n),
-					int_value,
+					sub_variant_id: NumberSubVariant::Int,
+					int_value: Some(*i),
+					decimal_value: None,
+				}
+			}
+			Value::Number(Number::Float(_)) => {
+				let mut full = Vec::new();
+				lit.serialize_revisioned(&mut full)
+					.expect("serialize Value::Number never errors into Vec");
+				LiteralWire::Number {
+					full_wire: full,
+					sub_variant_id: NumberSubVariant::Float,
+					int_value: None,
+					decimal_value: None,
+				}
+			}
+			Value::Number(Number::Decimal(d)) => {
+				let mut full = Vec::new();
+				lit.serialize_revisioned(&mut full)
+					.expect("serialize Value::Number never errors into Vec");
+				LiteralWire::Number {
+					full_wire: full,
+					sub_variant_id: NumberSubVariant::Decimal,
+					int_value: None,
+					decimal_value: Some(*d),
 				}
 			}
 			Value::None
@@ -213,10 +295,29 @@ impl LiteralWire {
 					full_wire: full,
 				}
 			}
-			Value::Regex(r) => LiteralWire::Regex {
-				regex: Arc::new(r.clone()),
-			},
-			_ => LiteralWire::Other,
+			Value::Regex(r) => {
+				let mut full = Vec::new();
+				lit.serialize_revisioned(&mut full)
+					.expect("serialize Value::Regex never errors into Vec");
+				LiteralWire::Regex {
+					regex: Arc::new(r.clone()),
+					full_wire: full,
+				}
+			}
+			Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Closure(_) => LiteralWire::Other,
 		}
 	}
 
@@ -224,12 +325,14 @@ impl LiteralWire {
 	/// substring search path consumes these as the `memchr::memmem` needle.
 	/// Returns `None` for any other variant.
 	pub(crate) fn strand_utf8(&self) -> Option<&[u8]> {
-		match self {
-			LiteralWire::Strand {
-				full_wire,
-				utf8_range,
-			} => Some(&full_wire[utf8_range.clone()]),
-			_ => None,
+		if let LiteralWire::Strand {
+			full_wire,
+			utf8_range,
+		} = self
+		{
+			Some(&full_wire[utf8_range.clone()])
+		} else {
+			None
 		}
 	}
 }
@@ -238,9 +341,10 @@ impl LiteralWire {
 ///
 /// Strand and Number elements have their full rev-2 Value wire bytes as keys
 /// of dedicated `HashSet<Vec<u8>>` partitions — probing the right partition
-/// from the navigated value's tag is one hash lookup with no decode. Compound
-/// or non-byte-eq-safe elements (Object, Array, RecordId, ...) fall through
-/// to `fallback`, which decoders use directly.
+/// from the navigated value's tag is one hash lookup with no decode. Decimal
+/// elements are also kept as decimals, which a decimal value is probed against
+/// by value. Compound or non-byte-eq-safe elements (Object, Array, RecordId,
+/// ...) fall through to `fallback`, which decoders use directly.
 ///
 /// **Memory note:** elements are kept in both the caller-owned `HashSet<Value>`
 /// (preserved on `PredNode::LeafSetMembership::set` for the fallback path)
@@ -249,70 +353,103 @@ impl LiteralWire {
 /// trade buys per-row probes with zero allocation, which is the right call
 /// for the hot scan path but is worth knowing if a future change wants to
 /// drop the redundancy.
+/// **Invariant:** the three derived flags below ([`Self::strand_asymmetric`],
+/// [`Self::number_sub_variants`], [`Self::hash_eq_mismatch`]) describe the
+/// partitions and are computed once in [`Self::from_set`]. The partitions are
+/// private so no other code can add an element without the flags being
+/// recomputed — a stale flag would silently restore the wrong-results behaviour
+/// each flag exists to prevent. Readers use the accessors.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LiteralSet {
-	pub(crate) strands: HashSet<Vec<u8>>,
-	pub(crate) numbers: HashSet<Vec<u8>>,
-	pub(crate) fallback: HashSet<Value>,
+	strands: HashSet<Vec<u8>>,
+	numbers: HashSet<Vec<u8>>,
+	/// The `Decimal` elements of [`Self::numbers`], as decimals. Equal decimals
+	/// can be stored as different bytes, since the encoding carries the scale
+	/// and the sign of a zero. `Decimal`'s `Hash` normalises both and agrees
+	/// with its `Eq`, so a probe with a decoded decimal decides membership.
+	decimals: HashSet<Decimal>,
+	fallback: HashSet<Value>,
 	/// True iff any element in `fallback` could equal-match a Strand-tagged
 	/// value asymmetrically via `Value::equal` (today: `Value::Regex`). When
 	/// set, `wire_cmp::wire_value_in_set` must hand a Strand-tag miss off to
-	/// the decode-fallback path rather than answering `Some(false)`.
+	/// the decode-fallback path rather than answering `Some(false)`, and
+	/// [`hash_miss_is_decisive`] does not trust that path's miss either.
 	strand_asymmetric: bool,
 	/// Bitmask of [`NumberSubVariant`]s present in [`Self::numbers`]
-	/// (bit 0 = `Int`, bit 1 = `Float`, bit 2 = `Decimal`).
+	/// (bit 0 = `Int`, bit 1 = `Float`, bit 2 = `Decimal`, bit 3 = `Sized`).
 	///
 	/// `Number::PartialEq` is cross-variant — `Int(1) == Float(1.0) ==
-	/// Decimal(1)` — and `Number::Hash` agrees, so `HashSet<Value>`
-	/// collapses cross-variant duplicates to a single stored sub-variant
-	/// (whichever was inserted first). Knowing exactly which
-	/// sub-variants are in the set lets `wire_cmp::wire_value_in_set`
+	/// Decimal(1)` — so one equivalence class can be spelled three ways and a
+	/// byte partition stores whichever spellings were inserted. Knowing exactly
+	/// which sub-variants are in the set lets `wire_cmp::wire_value_in_set`
 	/// decide a Number-tag miss precisely:
 	///
-	/// - **Runtime sub-variant matches a stored one AND is byte-canonical (`Int` / `Decimal`)** →
-	///   byte miss is definitive value miss (`Some(false)`).
-	/// - **Runtime sub-variant is `Float`** → defer to fallback (NaN / ±0 edge cases).
-	/// - **Runtime sub-variant is *not* in the set's sub-variants AND the set holds *some*
-	///   Number** → cross-variant value equality may still hold (`Number::PartialEq`), defer to
-	///   fallback.
+	/// - **Runtime sub-variant is the set's only one** → an `Int` byte miss is a value miss
+	///   (`Some(false)`); a `Decimal` is decided by probing [`Self::decimals`] with its decoded
+	///   value; a `Float` defers to fallback (NaN / ±0 edge cases).
+	/// - **The set holds another sub-variant** → a stored entry of that sub-variant may still be
+	///   cross-variant `==` to the runtime value (`Number::PartialEq`), defer to fallback.
 	number_sub_variants: u8,
+	/// True iff some element's `Hash` may disagree with its `PartialEq` (see
+	/// [`Value::hash_agrees_with_eq`]). When set, a `HashSet<Value>` miss
+	/// against this set does **not** prove that no element is `==` to the
+	/// probed value, and the decode-fallback path must treat it as
+	/// inconclusive unless the probed value's own hash agrees with its
+	/// equality (see [`hash_miss_is_decisive`]).
+	hash_eq_mismatch: bool,
 }
 
 impl LiteralSet {
-	pub(crate) fn from_set(set: &HashSet<Value>) -> Self {
+	pub(crate) fn from_set<S: BuildHasher>(set: &HashSet<Value, S>) -> Self {
 		let mut out = LiteralSet::default();
 		for v in set {
-			match v {
-				Value::String(_) => {
-					let mut full = Vec::new();
-					v.serialize_revisioned(&mut full).expect("serialize Strand into Vec");
-					out.strands.insert(full);
+			out.hash_eq_mismatch |= !v.hash_agrees_with_eq();
+			if let Value::String(_) = v {
+				let mut full = Vec::new();
+				v.serialize_revisioned(&mut full).expect("serialize Strand into Vec");
+				out.strands.insert(full);
+			} else if let Value::Number(n) = v {
+				match n {
+					Number::I8(_)
+					| Number::U8(_)
+					| Number::I16(_)
+					| Number::U16(_)
+					| Number::I32(_)
+					| Number::U32(_)
+					| Number::U64(_)
+					| Number::F16(_)
+					| Number::F32(_)
+					| Number::BigDecimal(_) => {
+						out.number_sub_variants |= 1u8 << (NumberSubVariant::Sized as u8);
+						out.fallback.insert(v.clone());
+					}
+					Number::Int(_) | Number::Float(_) | Number::Decimal(_) => {
+						out.number_sub_variants |= 1u8 << (NumberSubVariant::from_number(n) as u8);
+						if let Number::Decimal(d) = n {
+							out.decimals.insert(*d);
+						}
+						let mut full = Vec::new();
+						v.serialize_revisioned(&mut full).expect("serialize Number into Vec");
+						out.numbers.insert(full);
+					}
 				}
-				Value::Number(n) => {
-					out.number_sub_variants |= 1u8 << (NumberSubVariant::from_number(n) as u8);
-					let mut full = Vec::new();
-					v.serialize_revisioned(&mut full).expect("serialize Number into Vec");
-					out.numbers.insert(full);
-				}
-				Value::Regex(_) => {
-					// Defense-in-depth only: the planner's
-					// `literal_hashset_element_safe` (see
-					// `pre_decode_filter::compile`) excludes `Value::Regex`
-					// from the input to `try_build_inside_literal_hashset`,
-					// so in production a `LeafSetMembership` never reaches
-					// `LiteralSet::from_set` with a Regex element. This arm
-					// (and the `strand_asymmetric` flag it sets) is reachable
-					// today only from direct test construction. Do not
-					// "simplify" it away without first relaxing the planner
-					// filter — otherwise the runtime loses its safety net
-					// against the Strand ↔ Regex asymmetric equality in
-					// `Value::equal`.
-					out.strand_asymmetric = true;
-					out.fallback.insert(v.clone());
-				}
-				_ => {
-					out.fallback.insert(v.clone());
-				}
+			} else if let Value::Regex(_) = v {
+				// Defense-in-depth only: the planner's
+				// `literal_hashset_element_safe` (see
+				// `pre_decode_filter::compile`) excludes `Value::Regex`
+				// from the input to `try_build_inside_literal_hashset`,
+				// so in production a `LeafSetMembership` never reaches
+				// `LiteralSet::from_set` with a Regex element. This arm
+				// (and the `strand_asymmetric` flag it sets) is reachable
+				// today only from direct test construction. Do not
+				// "simplify" it away without first relaxing the planner
+				// filter — otherwise the runtime loses its safety net
+				// against the Strand ↔ Regex asymmetric equality in
+				// `Value::equal`.
+				out.strand_asymmetric = true;
+				out.fallback.insert(v.clone());
+			} else {
+				out.fallback.insert(v.clone());
 			}
 		}
 		out
@@ -331,6 +468,52 @@ impl LiteralSet {
 	#[inline]
 	pub(crate) fn number_sub_variants_mask(&self) -> u8 {
 		self.number_sub_variants
+	}
+
+	/// Whether the Strand partition holds these exact rev-2 `Value` wire bytes.
+	#[inline]
+	pub(crate) fn strands_contain_wire(&self, wire: &[u8]) -> bool {
+		self.strands.contains(wire)
+	}
+
+	/// Whether the Number partition holds these exact rev-2 `Value` wire bytes.
+	#[inline]
+	pub(crate) fn numbers_contain_wire(&self, wire: &[u8]) -> bool {
+		self.numbers.contains(wire)
+	}
+
+	/// Whether the set holds a `Decimal` equal to `d`, whatever scale or sign of
+	/// zero either is stored with.
+	#[inline]
+	pub(crate) fn decimals_contain(&self, d: &Decimal) -> bool {
+		self.decimals.contains(d)
+	}
+
+	/// Whether the set holds no `Number` at all, in which case no stored entry
+	/// can match a Number-tagged value.
+	#[inline]
+	pub(crate) fn has_no_numbers(&self) -> bool {
+		self.number_sub_variants == 0
+	}
+
+	/// Whether the set holds no top-level `String`, in which case no stored
+	/// entry is `Value::equal` to a regex unless it is `==` to it.
+	#[inline]
+	pub(crate) fn has_no_strings(&self) -> bool {
+		self.strands.is_empty()
+	}
+
+	/// True iff a `HashSet<Value>` miss against this set proves that no element
+	/// is `==` to the probed value.
+	///
+	/// False once any element's hash may disagree with its equality — see
+	/// [`Value::hash_agrees_with_eq`]. A caller whose probed value agrees may
+	/// still trust a miss, since `==` requires matching variants on both sides.
+	/// Whether the miss also rules out `Value::equal` is
+	/// [`hash_miss_is_decisive`]'s question.
+	#[inline]
+	pub(crate) fn hash_agrees_with_eq(&self) -> bool {
+		!self.hash_eq_mismatch
 	}
 
 	/// True iff [`Self::numbers`] holds more than one Number sub-variant
@@ -360,10 +543,100 @@ impl LiteralSet {
 mod tests {
 	use std::collections::HashSet;
 
+	use common::decimal::DecimalExt;
 	use rust_decimal::Decimal;
 
 	use super::*;
 	use crate::val::Number;
+
+	#[test]
+	fn literal_set_reports_whether_a_miss_is_decisive() {
+		let clean = LiteralSet::from_set(&HashSet::from([Value::String("x".into())]));
+		assert!(clean.hash_agrees_with_eq());
+		// The empty set has nothing to disagree about.
+		assert!(LiteralSet::from_set(&HashSet::new()).hash_agrees_with_eq());
+		// Numbers of every kind hash as they compare.
+		let numeric = LiteralSet::from_set(&HashSet::from([
+			Value::String("x".into()),
+			Value::Number(Number::Decimal(Decimal::from_str_normalized("0.1").unwrap())),
+			Value::Number(Number::Float(0.1)),
+		]));
+		assert!(numeric.hash_agrees_with_eq());
+		// One element holding a geometry anywhere is enough.
+		let geometric = LiteralSet::from_set(&HashSet::from([
+			Value::String("x".into()),
+			Value::from(vec![Value::Geometry(crate::val::Geometry::Point(geo_types::Point::new(
+				1.0, 2.0,
+			)))]),
+		]));
+		assert!(!geometric.hash_agrees_with_eq());
+	}
+
+	/// A number's miss is decisive against a set of numbers of every kind: equal numbers hash
+	/// alike, so a probe for `3` meets an element `3.0f` or `3dec`, and misses only where no
+	/// element is the same number.
+	#[test]
+	fn a_number_miss_is_decisive_against_numbers_of_every_kind() {
+		let int = |v| Value::Number(Number::Int(v));
+		let float = |v| Value::Number(Number::Float(v));
+		let decimal = |v: i64| Value::Number(Number::Decimal(Decimal::from(v)));
+		for set in [
+			HashSet::from([int(1), int(2), Value::from("a")]),
+			HashSet::from([int(1), float(3.0)]),
+			HashSet::from([decimal(3)]),
+			HashSet::from([int(1), Value::from(vec![float(0.5)])]),
+		] {
+			let literals = LiteralSet::from_set(&set);
+			for probe in [int(3), float(3.0), decimal(3)] {
+				assert!(hash_miss_is_decisive(&probe, &literals), "{probe:?} in {set:?}");
+				let equal = set.iter().any(|v| v.equal(&probe));
+				assert_eq!(set.contains(&probe), equal, "{probe:?} in {set:?}");
+			}
+		}
+	}
+
+	/// A miss [`hash_miss_is_decisive`] trusts proves that no element of the set
+	/// is `Value::equal` to the value. Checked over every pairing of a corpus
+	/// that covers the ways a hash probe parts from `Value::equal`: a regex
+	/// matching a string, with numbers of several kinds, equal and not, among
+	/// the elements.
+	#[test]
+	fn a_decisive_miss_proves_no_equal_element() {
+		use std::str::FromStr;
+
+		use crate::val::Regex;
+		let regex = Value::Regex(Regex::from_str("a.*").unwrap());
+		let corpus = [
+			Value::from("abc"),
+			Value::from("xyz"),
+			regex.clone(),
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
+			Value::Number(Number::Float(0.1)),
+			Value::Number(Number::Float(2.0)),
+			Value::Number(Number::Decimal(Decimal::from_str_normalized("0.1").unwrap())),
+			Value::Number(Number::Decimal(Decimal::from(2))),
+			Value::Bool(true),
+			Value::from(vec![Value::from("abc")]),
+			Value::from(vec![Value::Number(Number::Float(1.0))]),
+			Value::from(vec![regex]),
+		];
+		let mut sets = vec![HashSet::new()];
+		for (i, a) in corpus.iter().enumerate() {
+			sets.push(HashSet::from([a.clone()]));
+			for b in &corpus[i + 1..] {
+				sets.push(HashSet::from([a.clone(), b.clone()]));
+			}
+		}
+		for set in &sets {
+			let literal_set = LiteralSet::from_set(set);
+			for value in &corpus {
+				if hash_miss_is_decisive(value, &literal_set) && !set.contains(value) {
+					assert!(!set.iter().any(|e| e.equal(value)), "{value:?} missed {set:?}");
+				}
+			}
+		}
+	}
 
 	#[test]
 	fn from_value_strand_round_trips_and_extracts_utf8() {
@@ -410,12 +683,14 @@ mod tests {
 			full_wire,
 			sub_variant_id,
 			int_value,
+			decimal_value,
 		} = LiteralWire::from_value(&lit)
 		else {
 			panic!("expected Number variant");
 		};
 		assert_eq!(sub_variant_id, NumberSubVariant::Int);
 		assert_eq!(int_value, Some(42));
+		assert_eq!(decimal_value, None);
 		let mut r: &[u8] = &full_wire;
 		let decoded =
 			<Value as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).unwrap();
@@ -438,12 +713,12 @@ mod tests {
 	}
 
 	#[test]
-	fn from_value_number_decimal_has_no_int_value() {
-		use rust_decimal::Decimal;
+	fn from_value_number_decimal_carries_its_decimal() {
 		let lit = Value::Number(Number::Decimal(Decimal::from(42)));
 		let LiteralWire::Number {
 			sub_variant_id,
 			int_value,
+			decimal_value,
 			..
 		} = LiteralWire::from_value(&lit)
 		else {
@@ -451,6 +726,7 @@ mod tests {
 		};
 		assert_eq!(sub_variant_id, NumberSubVariant::Decimal);
 		assert_eq!(int_value, None, "Decimal literals should not carry an int_value");
+		assert_eq!(decimal_value, Some(Decimal::from(42)));
 	}
 
 	#[test]
@@ -471,19 +747,39 @@ mod tests {
 			Value::Duration(SurrealDuration(StdDuration::from_secs(42))),
 		];
 		for lit in inputs {
-			match LiteralWire::from_value(&lit) {
-				LiteralWire::Canonical {
-					full_wire,
-				} => {
-					let mut r: &[u8] = &full_wire;
-					let decoded =
-						<Value as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r)
-							.unwrap();
-					assert_eq!(decoded, lit, "round-trip mismatch for {lit:?}");
-				}
-				other => panic!("expected Canonical for {lit:?}, got {other:?}"),
-			}
+			let wire = LiteralWire::from_value(&lit);
+			let LiteralWire::Canonical {
+				full_wire,
+			} = wire
+			else {
+				panic!("expected Canonical for {lit:?}, got {wire:?}");
+			};
+			let mut r: &[u8] = &full_wire;
+			let decoded =
+				<Value as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).unwrap();
+			assert_eq!(decoded, lit, "round-trip mismatch for {lit:?}");
 		}
+	}
+
+	#[test]
+	fn from_value_regex_round_trips() {
+		use std::str::FromStr;
+
+		use crate::val::Regex;
+		let lit = Value::Regex(Regex::from_str("^a.c$").unwrap());
+		let LiteralWire::Regex {
+			regex,
+			full_wire,
+		} = LiteralWire::from_value(&lit)
+		else {
+			panic!("expected Regex variant");
+		};
+		assert_eq!(regex.inner().as_str(), "^a.c$");
+		let mut r: &[u8] = &full_wire;
+		let decoded =
+			<Value as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).unwrap();
+		assert_eq!(decoded, lit);
+		assert!(r.is_empty(), "`full_wire` is one whole value");
 	}
 
 	#[test]

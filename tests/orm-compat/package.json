@@ -1,0 +1,30 @@
+{
+  "name": "surrealdb-pgwire-orm-compat",
+  "version": "1.0.0",
+  "description": "Targeted PostgreSQL ORM compatibility checks with a PostgreSQL reference control",
+  "scripts": {
+    "generate": "prisma generate",
+    "test": "tsx suite.ts",
+    "schema-suites": "python3 cli-suites.py",
+    "reference": "node reference.mjs",
+    "format": "prettier --write suite.ts drizzle-schema.ts drizzle.config.ts prisma.config.ts reference.mjs trace-pg.cjs"
+  },
+  "type": "module",
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "drizzle-kit": "0.31.11",
+    "drizzle-orm": "0.45.4",
+    "embedded-postgres": "18.4.0-beta.17",
+    "pg": "8.23.1",
+    "prisma": "7.10.1",
+    "reflect-metadata": "0.2.2",
+    "tsx": "4.23.15",
+    "typeorm": "1.1.2",
+    "typescript": "7.0.2"
+  },
+  "devDependencies": {
+    "prettier": "3.6.2"
+  },
+  "private": true
+}

@@ -1,17 +1,13 @@
 use anyhow::Result;
 use http::header::{ACCEPT, CONTENT_TYPE};
-use reblessive::tree::Stk;
+use surrealdb_rpc::format as api_format;
 use tracing::trace;
 use uuid::Uuid;
 
 use super::args::Optional;
 use crate::api::err::ApiError;
-use crate::api::format as api_format;
-use crate::api::invocation::process_api_request_with_stack;
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
-use crate::catalog::ApiDefinition;
-use crate::catalog::providers::ApiProvider;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -60,16 +56,40 @@ pub mod res;
 /// });
 /// ```
 pub async fn invoke(
-	(stk, ctx, opt): (&mut Stk, &FrozenContext, &Options),
+	(ctx, opt): (&FrozenContext, &Options),
 	(path, Optional(req)): (String, Optional<FromPublic<ApiRequest>>),
 ) -> Result<Value> {
+	let response = match route(ctx, opt, &path, req.map(|x| x.0)).await? {
+		Routed::Found(api, req) => crate::exec::api::process(ctx, opt, &api, req).await?,
+		Routed::NotFound(response) => response,
+	};
+	invoked(response)
+}
+
+/// Where `api::invoke` sends a request to `path`.
+pub(crate) enum Routed {
+	/// The definition that handles it, and the request as it reaches it.
+	Found(Box<crate::catalog::ApiDefinition>, ApiRequest),
+	/// No definition handles it: the response is the not-found one.
+	NotFound(ApiResponse),
+}
+
+/// Route `api::invoke`'s request `req` to `path`: a fresh request id, the
+/// native content type and a preference for it unless the request names its
+/// own, and the definition matching the path and method, with the parameters
+/// the path captures.
+pub(crate) async fn route(
+	ctx: &FrozenContext,
+	opt: &Options,
+	path: &str,
+	req: Option<ApiRequest>,
+) -> Result<Routed> {
 	let request_id = Uuid::new_v4().to_string();
-	let mut req = req.map(|x| x.0).unwrap_or_default();
+	let mut req = req.unwrap_or_default();
 	req.request_id.clone_from(&request_id);
 	trace!(request_id = %request_id, path = %path, "fnc::api::invoke called");
 
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-	let apis = ctx.tx().all_db_apis(ns, db, None).await?;
 
 	if !path.starts_with('/') {
 		// align behaviour with the path provided in DEFINE API statement
@@ -89,20 +109,27 @@ pub async fn invoke(
 		req.headers.insert(ACCEPT, "application/vnd.surrealdb.native;q=0.9, */*;q=0.8".try_into()?);
 	}
 
-	let mut value: Value =
-		if let Some((api, params)) = ApiDefinition::find_definition(&apis, &segments, req.method) {
+	// Routes on the stored definitions and compiles only the handler that
+	// matches; see `Transaction::find_db_api`.
+	Ok(match ctx.tx().find_db_api(ns, db, &segments, req.method).await? {
+		Some((api, params)) => {
 			req.params = params.try_into()?;
-			process_api_request_with_stack(stk, ctx, opt, api, req).await?.into()
-		} else {
+			Routed::Found(Box::new(api), req)
+		}
+		None => {
 			trace!(request_id = %request_id, path = %path, "No API definition found for path");
-			ApiResponse::from_error(ApiError::NotFound, request_id).into()
-		};
+			Routed::NotFound(ApiResponse::from_error(ApiError::NotFound, request_id))
+		}
+	})
+}
 
+/// The value `api::invoke` answers with for `response`: the response, without
+/// the context the chain carried, which is internal state.
+pub(crate) fn invoked(response: ApiResponse) -> Result<Value> {
+	let mut value: Value = response.into();
 	let Value::Object(ref mut obj) = value else {
 		fail!("ApiResponse converts into an object");
 	};
-
-	// Context is internal state
 	obj.remove("context");
 	Ok(value)
 }
@@ -133,12 +160,12 @@ pub async fn invoke(
 ///         };
 /// ```
 pub async fn timeout(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, timeout): (Value, Box<Closure>, Duration),
 ) -> Result<Value> {
 	let mut ctx = Context::new_isolated(ctx);
 	ctx.add_timeout(*timeout)?;
 	let ctx = &ctx.freeze();
 
-	next.invoke(stk, ctx, opt, doc, vec![req]).await
+	crate::exec::closure::invoke_in(&next, ctx, opt, doc, vec![req]).await
 }

@@ -1,0 +1,1060 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
+use std::cmp::Ordering;
+use std::ops::Bound;
+
+use common::fmt::{EscapeIdent, EscapeRidKey};
+use rand::seq::IndexedRandom;
+use revision::revisioned;
+use storekey::{BorrowDecode, Encode};
+use surrealdb_cnf::ID_CHARS;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use ulid::Ulid;
+
+use crate::expr::{self};
+use crate::val::table_name_public::{IntoPublicTable, IntoTableName};
+use crate::val::{
+	Array, IndexFormat, IndexIdFormat, Number, Object, Range, Strand, TableName, Uuid, Value,
+};
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, BorrowDecode)]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
+pub struct RecordIdKeyRange {
+	pub start: Bound<RecordIdKey>,
+	pub end: Bound<RecordIdKey>,
+}
+
+impl PartialOrd for RecordIdKeyRange {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for RecordIdKeyRange {
+	fn cmp(&self, other: &Self) -> Ordering {
+		fn compare_bounds(a: &Bound<RecordIdKey>, b: &Bound<RecordIdKey>) -> Ordering {
+			match a {
+				Bound::Unbounded => match b {
+					Bound::Unbounded => Ordering::Equal,
+					Bound::Included(_) | Bound::Excluded(_) => Ordering::Less,
+				},
+				Bound::Included(a) => match b {
+					Bound::Unbounded => Ordering::Greater,
+					Bound::Included(b) => a.cmp(b),
+					Bound::Excluded(_) => Ordering::Less,
+				},
+				Bound::Excluded(a) => match b {
+					Bound::Excluded(b) => a.cmp(b),
+					Bound::Unbounded | Bound::Included(_) => Ordering::Greater,
+				},
+			}
+		}
+		match compare_bounds(&self.start, &other.start) {
+			Ordering::Equal => compare_bounds(&self.end, &other.end),
+			x @ (Ordering::Less | Ordering::Greater) => x,
+		}
+	}
+}
+
+impl ToSql for RecordIdKeyRange {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match self.start {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => write_sql!(f, sql_fmt, "{x}"),
+			Bound::Excluded(ref x) => write_sql!(f, sql_fmt, "{x}>"),
+		}
+		write_sql!(f, sql_fmt, "..");
+		match self.end {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => write_sql!(f, sql_fmt, "={x}"),
+			Bound::Excluded(ref x) => write_sql!(f, sql_fmt, "{x}"),
+		}
+	}
+}
+
+impl TryFrom<RecordIdKeyRange> for crate::types::PublicRecordIdKeyRange {
+	type Error = anyhow::Error;
+
+	fn try_from(value: RecordIdKeyRange) -> Result<Self, Self::Error> {
+		Ok(crate::types::PublicRecordIdKeyRange {
+			start: match value.start {
+				Bound::Included(x) => Bound::Included(x.try_into()?),
+				Bound::Excluded(x) => Bound::Excluded(x.try_into()?),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match value.end {
+				Bound::Included(x) => Bound::Included(x.try_into()?),
+				Bound::Excluded(x) => Bound::Excluded(x.try_into()?),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+		})
+	}
+}
+
+impl From<crate::types::PublicRecordIdKeyRange> for RecordIdKeyRange {
+	fn from(value: crate::types::PublicRecordIdKeyRange) -> Self {
+		RecordIdKeyRange {
+			start: value.start.map(|x| x.into()),
+			end: value.end.map(|x| x.into()),
+		}
+	}
+}
+
+impl RecordIdKeyRange {
+	pub fn into_literal(self) -> expr::RecordIdKeyRangeLit {
+		let start = self.start.map(|x| x.into_literal());
+		let end = self.end.map(|x| x.into_literal());
+		expr::RecordIdKeyRangeLit {
+			start,
+			end,
+		}
+	}
+
+	/// Convertes a record id key range into the range from a normal value.
+	pub fn into_value_range(self) -> Range {
+		Range {
+			start: self.start.map(|x| x.into_value()),
+			end: self.end.map(|x| x.into_value()),
+		}
+	}
+
+	/// Convertes a record id key range into the range from a normal value.
+	pub fn from_value_range(range: Range) -> Option<Self> {
+		let start = match range.start {
+			Bound::Included(x) => Bound::Included(RecordIdKey::from_value(x)?),
+			Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_value(x)?),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+		let end = match range.end {
+			Bound::Included(x) => Bound::Included(RecordIdKey::from_value(x)?),
+			Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_value(x)?),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		Some(RecordIdKeyRange {
+			start,
+			end,
+		})
+	}
+}
+
+impl PartialEq<Range> for RecordIdKeyRange {
+	fn eq(&self, other: &Range) -> bool {
+		(match self.start {
+			Bound::Included(ref a) => {
+				if let Bound::Included(ref b) = other.start {
+					a == b
+				} else {
+					false
+				}
+			}
+			Bound::Excluded(ref a) => {
+				if let Bound::Excluded(ref b) = other.start {
+					a == b
+				} else {
+					false
+				}
+			}
+			Bound::Unbounded => matches!(other.start, Bound::Unbounded),
+		}) && (match self.end {
+			Bound::Included(ref a) => {
+				if let Bound::Included(ref b) = other.end {
+					a == b
+				} else {
+					false
+				}
+			}
+			Bound::Excluded(ref a) => {
+				if let Bound::Excluded(ref b) = other.end {
+					a == b
+				} else {
+					false
+				}
+			}
+			Bound::Unbounded => matches!(other.end, Bound::Unbounded),
+		})
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
+#[storekey(format = "()")]
+#[storekey(format = "IndexIdFormat")]
+pub enum RecordIdKey {
+	Number(i64),
+	String(Strand),
+	Uuid(Uuid),
+	Array(Array),
+	Object(Object),
+	Range(Box<RecordIdKeyRange>),
+}
+
+/// A record id under [`IndexFormat`] is its [`IndexIdFormat`] encoding, so a
+/// `Datetime` nested in an array or object id is the same text in every index
+/// key, whichever spelling the index gives its indexed values.
+impl Encode<IndexFormat> for RecordIdKey {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> std::result::Result<(), storekey::EncodeError> {
+		Encode::<IndexIdFormat>::encode(self, w)
+	}
+}
+
+impl<'de> BorrowDecode<'de, IndexFormat> for RecordIdKey {
+	fn borrow_decode(
+		r: &mut storekey::BorrowReader<'de>,
+	) -> std::result::Result<Self, storekey::DecodeError> {
+		BorrowDecode::<'de, IndexIdFormat>::borrow_decode(r)
+	}
+}
+
+/// A record id carried inside a key as an *identity*, encoded losslessly
+/// whatever format the enclosing key pins.
+///
+/// [`IndexFormat`] erases a number's kind deliberately: an index key stands for
+/// its whole equality class, so a lookup for `1` has to find a row stored as
+/// `1f`. A record id in a key is not matched that way — it addresses a record —
+/// so erasing its type is precisely what breaks it. Two distinct records
+/// collapse onto one key, and an id decoded back out names a record that was
+/// never stored under it, because the record itself is addressed by the default
+/// codec, which carries the number's kind.
+///
+/// Encoding and decoding therefore go through the default codec under every
+/// format, so an identity cannot pick up the value encoding by sitting in a key
+/// that pins one. Key layouts that carry a record id use this rather than
+/// [`RecordIdKey`] directly; the bare type stays available for the value side,
+/// where the erasure is what is wanted.
+#[derive(Clone, Debug)]
+pub struct RecordIdentity(pub RecordIdKey);
+
+/// The bytes a record is addressed by.
+///
+/// A key that will not encode cannot be stored under one either, but the
+/// comparisons built on this have to stay total, so that case falls back to the
+/// debug spelling — which distinguishes the numeric variants too, so the
+/// fallback upholds the same property.
+fn addressed_by(key: &RecordIdKey) -> Vec<u8> {
+	storekey::encode_vec(key).unwrap_or_else(|_| format!("{key:?}").into_bytes())
+}
+
+impl RecordIdentity {
+	/// The bytes this identity is addressed by.
+	///
+	/// Equality, ordering and hashing all go through the encoding rather than
+	/// through [`RecordIdKey`]'s own comparison, which is cross-variant: `[1]`
+	/// and `[1dec]` compare equal there while addressing two different records,
+	/// and keeping those apart is what this type exists for. Deriving the
+	/// comparisons would reintroduce, between identities, the collapse the type
+	/// is here to prevent.
+	fn addressed_by(&self) -> Vec<u8> {
+		addressed_by(&self.0)
+	}
+}
+
+impl PartialEq for RecordIdentity {
+	fn eq(&self, other: &Self) -> bool {
+		self.addressed_by() == other.addressed_by()
+	}
+}
+
+impl Eq for RecordIdentity {}
+
+impl PartialOrd for RecordIdentity {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for RecordIdentity {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.addressed_by().cmp(&other.addressed_by())
+	}
+}
+
+impl std::hash::Hash for RecordIdentity {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		self.addressed_by().hash(state);
+	}
+}
+
+impl RecordIdentity {
+	pub fn into_inner(self) -> RecordIdKey {
+		self.0
+	}
+}
+
+impl AsRef<RecordIdKey> for RecordIdentity {
+	fn as_ref(&self) -> &RecordIdKey {
+		&self.0
+	}
+}
+
+impl From<RecordIdKey> for RecordIdentity {
+	fn from(id: RecordIdKey) -> Self {
+		Self(id)
+	}
+}
+
+impl From<RecordIdentity> for RecordIdKey {
+	fn from(id: RecordIdentity) -> Self {
+		id.0
+	}
+}
+
+impl<F> Encode<F> for RecordIdentity {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> std::result::Result<(), storekey::EncodeError> {
+		Encode::<()>::encode(&self.0, w)
+	}
+}
+
+impl<'de, F> BorrowDecode<'de, F> for RecordIdentity {
+	fn borrow_decode(
+		r: &mut storekey::BorrowReader<'de>,
+	) -> std::result::Result<Self, storekey::DecodeError> {
+		Ok(Self(BorrowDecode::<'de, ()>::borrow_decode(r)?))
+	}
+}
+
+/// [`RecordIdKey::key_encoding_is_exact`] over a bound: an endpoint decides, an unbounded end
+/// holds nothing.
+fn bound_key_encoding_is_exact(bound: &Bound<RecordIdKey>) -> bool {
+	match bound {
+		Bound::Included(k) | Bound::Excluded(k) => k.key_encoding_is_exact(),
+		Bound::Unbounded => true,
+	}
+}
+
+/// [`RecordIdKey::key_encoding_is_exact`] over a value nested in a key.
+///
+/// Floats, decimals and intervals are normalised by the key encoding (an interval is kept as its
+/// total, so `1 month` and `30 days` are one key); a geometry or closure is not held
+/// losslessly by it; an int is exact. Containers, record ids and ranges are exact when what they
+/// hold is. Every other variant is encoded as it is.
+fn value_key_encoding_is_exact(value: &Value) -> bool {
+	fn range_bound(bound: &Bound<Value>) -> bool {
+		match bound {
+			Bound::Included(v) | Bound::Excluded(v) => value_key_encoding_is_exact(v),
+			Bound::Unbounded => true,
+		}
+	}
+	match value {
+		Value::Number(
+			Number::Int(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_),
+		) => true,
+		Value::Number(
+			Number::Float(_)
+			| Number::Decimal(_)
+			| Number::BigDecimal(_)
+			| Number::F16(_)
+			| Number::F32(_),
+		)
+		| Value::Interval(_)
+		| Value::Geometry(_)
+		| Value::Closure(_) => false,
+		Value::Array(a) => a.iter().all(value_key_encoding_is_exact),
+		Value::Set(s) => s.iter().all(value_key_encoding_is_exact),
+		Value::Object(o) => o.values().all(value_key_encoding_is_exact),
+		Value::RecordId(id) => id.key.key_encoding_is_exact(),
+		Value::Range(r) => range_bound(&r.start) && range_bound(&r.end),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Uuid(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_) => true,
+	}
+}
+
+impl RecordIdKey {
+	/// Whether a record id with this key, written into a storage key and read back from it, is this
+	/// key exactly.
+	///
+	/// The key encoding normalises numbers (`-0.0` and `0.0`, `1.0` and `1`, a decimal's scale),
+	/// and an interval is held as its total, so a key that holds a float, a decimal, an interval, a
+	/// geometry or a closure anywhere inside it is not exact. Ints, strings and uuids are. Arrays,
+	/// objects and ranges are exact when everything they hold is.
+	pub fn key_encoding_is_exact(&self) -> bool {
+		match self {
+			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,
+			RecordIdKey::Array(a) => a.iter().all(value_key_encoding_is_exact),
+			RecordIdKey::Object(o) => o.values().all(value_key_encoding_is_exact),
+			RecordIdKey::Range(r) => {
+				bound_key_encoding_is_exact(&r.start) && bound_key_encoding_is_exact(&r.end)
+			}
+		}
+	}
+
+	/// Whether `self` and `other` address the same record.
+	///
+	/// **Not `==`.** [`Number`]'s equality is cross-variant, so `[1] == [1dec]`
+	/// while the two are stored, fetched and indexed under different keys — an
+	/// equality check therefore accepts exactly the collision a caller asking
+	/// this question is trying to rule out. The comparison is on the encoding,
+	/// which is what addresses the record.
+	///
+	/// This is the comparison behind [`RecordIdentity`]'s own equality; it is
+	/// exposed separately for the callers that hold bare keys, chiefly the
+	/// doc-ID mapping, where a forward hit is adopted only once the reverse
+	/// mapping agrees it names the record asked for.
+	pub fn addresses_same_record(&self, other: &Self) -> bool {
+		// A key holding no number is addressed by its value: `==` compares it
+		// exactly, and spares the encodings.
+		if self.index_format_spells_alike() && other.index_format_spells_alike() {
+			return self == other;
+		}
+		addressed_by(self) == addressed_by(other)
+	}
+
+	/// Orders keys as `RecordIdKey`'s own order does, and two that compare
+	/// equal there but address different records by their lossless encodings:
+	/// `[1]` before `[1f]` before `[1dec]`, the order a table scan lists them in.
+	/// Equal exactly when [`Self::addresses_same_record`] holds.
+	pub fn cmp_by_record_address(&self, other: &Self) -> Ordering {
+		self.cmp(other).then_with(|| {
+			if self.index_format_spells_alike() && other.index_format_spells_alike() {
+				Ordering::Equal
+			} else {
+				addressed_by(self).cmp(&addressed_by(other))
+			}
+		})
+	}
+
+	/// Orders keys as their lossless encodings do: the order a table scan lists
+	/// records in, and the order a B-tree index spelling its entries' ids as
+	/// identities lists the records of one value in. `[1, 'b']` comes before
+	/// `[1dec, 'a']`, since a number's kind follows its value in the encoding,
+	/// and `[d'…:00.1Z']` before `[d'…:00Z']`, since a datetime in a compound
+	/// key encodes as its text. Two integer, string or UUID keys encode in the
+	/// order their values compare, so they compare by value and spare the
+	/// encodings; every other pair compares its encodings. Equal exactly when
+	/// [`Self::addresses_same_record`] holds.
+	pub fn cmp_by_encoding(&self, other: &Self) -> Ordering {
+		match (self, other) {
+			(RecordIdKey::Number(a), RecordIdKey::Number(b)) => a.cmp(b),
+			(RecordIdKey::String(a), RecordIdKey::String(b)) => a.cmp(b),
+			(RecordIdKey::Uuid(a), RecordIdKey::Uuid(b)) => a.cmp(b),
+			_ => addressed_by(self).cmp(&addressed_by(other)),
+		}
+	}
+
+	/// Hashes the key so that keys [`Self::addresses_same_record`] holds for
+	/// hash alike: a key holding no number by its value, any other by its
+	/// lossless encoding.
+	pub fn hash_by_record_address<H: std::hash::Hasher>(&self, state: &mut H) {
+		use std::hash::Hash;
+		if self.index_format_spells_alike() {
+			(0u8, self).hash(state);
+		} else {
+			(1u8, addressed_by(self)).hash(state);
+		}
+	}
+
+	/// [`Value::hash_agrees_with_eq`] for a record id's key.
+	pub fn hash_agrees_with_eq(&self) -> bool {
+		match self {
+			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,
+			RecordIdKey::Array(a) => a.iter().all(Value::hash_agrees_with_eq),
+			RecordIdKey::Object(o) => o.values().all(Value::hash_agrees_with_eq),
+			RecordIdKey::Range(_) => false,
+		}
+	}
+
+	/// [`Value::index_format_spells_alike`] for a record id's key.
+	///
+	/// [`RecordIdKey::Number`] is an `i64`, not a [`crate::val::Number`], so a
+	/// plain record id is spelled alike; only a compound id can hold a number.
+	pub fn index_format_spells_alike(&self) -> bool {
+		match self {
+			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,
+			RecordIdKey::Array(a) => a.iter().all(Value::index_format_spells_alike),
+			RecordIdKey::Object(o) => o.values().all(Value::index_format_spells_alike),
+			RecordIdKey::Range(_) => false,
+		}
+	}
+
+	/// Generate a new random ID: 20 characters of [`ID_CHARS`], one draw each.
+	///
+	/// The text is assembled on the stack, so the id, which fits a [`Strand`]
+	/// inline, allocates nothing.
+	pub fn rand() -> Self {
+		const LEN: usize = 20;
+		// Each character of the alphabet is one byte of the id's text.
+		const _: () = {
+			let mut i = 0;
+			while i < ID_CHARS.len() {
+				assert!(ID_CHARS[i].is_ascii());
+				i += 1;
+			}
+		};
+		let mut buf = [0u8; LEN];
+		crate::rnd::with_rng(|rng| {
+			for byte in buf.iter_mut() {
+				*byte = *ID_CHARS[..].choose(&mut *rng).unwrap_or(&'0') as u8;
+			}
+		});
+		match std::str::from_utf8(&buf) {
+			Ok(id) => Self::String(Strand::from(id)),
+			Err(_) => unreachable!("the id alphabet is ASCII"),
+		}
+	}
+	/// Generate a new random ULID
+	pub fn ulid() -> Self {
+		Self::String(Ulid::new().to_string().into())
+	}
+	/// Generate a new random UUID
+	pub fn uuid() -> Self {
+		Self::Uuid(Uuid::new_v7())
+	}
+
+	/// Returns if this key is a range.
+	pub fn is_range(&self) -> bool {
+		matches!(self, RecordIdKey::Range(_))
+	}
+
+	/// Returns surrealql value of this key.
+	pub fn into_value(self) -> Value {
+		match self {
+			RecordIdKey::Number(n) => Value::Number(Number::Int(n)),
+			RecordIdKey::String(s) => Value::String(s),
+			RecordIdKey::Uuid(u) => Value::Uuid(u),
+			RecordIdKey::Object(object) => Value::Object(object),
+			RecordIdKey::Array(array) => Value::Array(array),
+			RecordIdKey::Range(range) => Value::Range(Box::new(Range {
+				start: range.start.map(RecordIdKey::into_value),
+				end: range.end.map(RecordIdKey::into_value),
+			})),
+		}
+	}
+
+	/// Tries to convert a value into a record id key,
+	///
+	/// Returns None if the value cannot be converted.
+	pub fn from_value(value: Value) -> Option<Self> {
+		// NOTE: This method dictates how coversion between values and record id keys
+		// behave. This method is reimplementing previous (before expr inversion pr)
+		// behavior but I am not sure if it is the right one, float and decimal
+		// generaly implicitly convert to other number types but here they are
+		// rejected.
+		match value {
+			Value::Number(Number::Int(i)) => Some(RecordIdKey::Number(i)),
+			Value::Number(Number::I8(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::U8(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::I16(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::U16(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::I32(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::U32(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::U64(i)) => i64::try_from(i).ok().map(RecordIdKey::Number),
+			Value::String(strand) => Some(RecordIdKey::String(strand)),
+			// NOTE: This was previously (before expr inversion pr) also rejected in this
+			// conversion, a bug I assume.
+			Value::Uuid(uuid) => Some(RecordIdKey::Uuid(uuid)),
+			Value::Array(array) => Some(RecordIdKey::Array(array)),
+			Value::Object(object) => Some(RecordIdKey::Object(object)),
+			Value::Range(range) => {
+				RecordIdKeyRange::from_value_range(*range).map(|x| RecordIdKey::Range(Box::new(x)))
+			}
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(
+				Number::Float(_)
+				| Number::Decimal(_)
+				| Number::BigDecimal(_)
+				| Number::F16(_)
+				| Number::F32(_),
+			)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Set(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Closure(_) => None,
+		}
+	}
+
+	/// Returns the expression which evaluates to the same value
+	pub fn into_literal(self) -> expr::RecordIdKeyLit {
+		match self {
+			RecordIdKey::Number(n) => expr::RecordIdKeyLit::Number(n),
+			RecordIdKey::String(s) => expr::RecordIdKeyLit::String(s),
+			RecordIdKey::Uuid(uuid) => expr::RecordIdKeyLit::Uuid(uuid),
+			RecordIdKey::Object(object) => expr::RecordIdKeyLit::Object(object.into_literal()),
+			RecordIdKey::Array(array) => expr::RecordIdKeyLit::Array(array.into_literal()),
+			RecordIdKey::Range(range) => {
+				expr::RecordIdKeyLit::Range(Box::new(range.into_literal()))
+			}
+		}
+	}
+}
+
+impl From<i64> for RecordIdKey {
+	fn from(value: i64) -> Self {
+		RecordIdKey::Number(value)
+	}
+}
+
+impl From<String> for RecordIdKey {
+	fn from(value: String) -> Self {
+		RecordIdKey::String(value.into())
+	}
+}
+
+impl From<Strand> for RecordIdKey {
+	fn from(value: Strand) -> Self {
+		RecordIdKey::String(value)
+	}
+}
+
+impl From<Uuid> for RecordIdKey {
+	fn from(value: Uuid) -> Self {
+		RecordIdKey::Uuid(value)
+	}
+}
+impl From<Object> for RecordIdKey {
+	fn from(value: Object) -> Self {
+		RecordIdKey::Object(value)
+	}
+}
+impl From<Array> for RecordIdKey {
+	fn from(value: Array) -> Self {
+		RecordIdKey::Array(value)
+	}
+}
+impl From<Box<RecordIdKeyRange>> for RecordIdKey {
+	fn from(value: Box<RecordIdKeyRange>) -> Self {
+		RecordIdKey::Range(value)
+	}
+}
+
+impl From<crate::types::PublicRecordIdKey> for RecordIdKey {
+	fn from(value: crate::types::PublicRecordIdKey) -> Self {
+		match value {
+			crate::types::PublicRecordIdKey::Number(x) => Self::Number(x),
+			crate::types::PublicRecordIdKey::String(x) => Self::String(x.into()),
+			crate::types::PublicRecordIdKey::Uuid(x) => Self::Uuid(x.into()),
+			crate::types::PublicRecordIdKey::Array(x) => Self::Array(x.into()),
+			crate::types::PublicRecordIdKey::Object(x) => Self::Object(x.into()),
+			crate::types::PublicRecordIdKey::Range(x) => Self::Range(Box::new((*x).into())),
+		}
+	}
+}
+
+impl TryFrom<RecordIdKey> for crate::types::PublicRecordIdKey {
+	type Error = anyhow::Error;
+
+	fn try_from(value: RecordIdKey) -> Result<Self, Self::Error> {
+		Ok(match value {
+			RecordIdKey::Number(x) => Self::Number(x),
+			RecordIdKey::String(x) => Self::String(x.into()),
+			RecordIdKey::Uuid(x) => Self::Uuid(x.into()),
+			RecordIdKey::Array(x) => Self::Array(x.try_into()?),
+			RecordIdKey::Object(x) => Self::Object(x.try_into()?),
+			RecordIdKey::Range(x) => Self::Range(Box::new((*x).try_into()?)),
+		})
+	}
+}
+
+impl PartialEq<Value> for RecordIdKey {
+	fn eq(&self, other: &Value) -> bool {
+		match self {
+			RecordIdKey::Number(a) => Value::Number(Number::Int(*a)) == *other,
+			RecordIdKey::String(a) => {
+				if let Value::String(b) = other {
+					a.as_str() == b.as_str()
+				} else {
+					false
+				}
+			}
+			RecordIdKey::Uuid(a) => {
+				if let Value::Uuid(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			RecordIdKey::Object(a) => {
+				if let Value::Object(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			RecordIdKey::Array(a) => {
+				if let Value::Array(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			RecordIdKey::Range(a) => {
+				if let Value::Range(b) = other {
+					**a == **b
+				} else {
+					false
+				}
+			}
+		}
+	}
+}
+
+impl ToSql for RecordIdKey {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match self {
+			RecordIdKey::Number(n) => write_sql!(f, sql_fmt, "{n}"),
+			RecordIdKey::String(v) => write_sql!(f, sql_fmt, "{}", EscapeRidKey(v.as_str())),
+			RecordIdKey::Uuid(uuid) => write_sql!(f, sql_fmt, "{}", uuid),
+			RecordIdKey::Object(object) => write_sql!(f, sql_fmt, "{}", object),
+			RecordIdKey::Array(array) => write_sql!(f, sql_fmt, "{}", array),
+			RecordIdKey::Range(rid) => write_sql!(f, sql_fmt, "{}", rid),
+		}
+	}
+}
+
+/// A record id compared by the record it addresses: two are equal exactly when
+/// they name one record, so `k:[1]` and `k:[1dec]` are two. [`RecordId`]'s own
+/// equality, order and hash compare numbers across kinds, under which those are
+/// one, so a set, a dedupe or a merge that must keep records apart keys by this
+/// instead. It orders by table, then as [`RecordIdKey::cmp_by_record_address`].
+#[derive(Clone, Debug)]
+pub struct RecordAddress(pub RecordId);
+
+impl PartialEq for RecordAddress {
+	fn eq(&self, other: &Self) -> bool {
+		self.0.table == other.0.table && self.0.key.addresses_same_record(&other.0.key)
+	}
+}
+
+impl Eq for RecordAddress {}
+
+impl PartialOrd for RecordAddress {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for RecordAddress {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.0
+			.table
+			.cmp(&other.0.table)
+			.then_with(|| self.0.key.cmp_by_record_address(&other.0.key))
+	}
+}
+
+impl std::hash::Hash for RecordAddress {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		self.0.table.hash(state);
+		self.0.key.hash_by_record_address(state);
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
+pub struct RecordId {
+	pub table: TableName,
+	pub key: RecordIdKey,
+}
+
+impl RecordId {
+	/// Creates a new record id from the given table and key
+	pub fn new<K>(table: TableName, key: K) -> Self
+	where
+		RecordIdKey: From<K>,
+	{
+		RecordId {
+			table,
+			key: key.into(),
+		}
+	}
+
+	/// Turns the record id into a literal which resolves to the same value.
+	pub fn into_literal(self) -> expr::RecordIdLit {
+		expr::RecordIdLit {
+			table: self.table,
+			key: self.key.into_literal(),
+		}
+	}
+
+	pub fn is_table_type(&self, tables: &[TableName]) -> bool {
+		tables.is_empty() || tables.contains(&self.table)
+	}
+}
+
+impl TryFrom<RecordId> for crate::types::PublicRecordId {
+	type Error = anyhow::Error;
+
+	fn try_from(value: RecordId) -> Result<Self, Self::Error> {
+		Ok(crate::types::PublicRecordId {
+			table: value.table.into_public_table(),
+			key: value.key.try_into()?,
+		})
+	}
+}
+
+impl From<crate::types::PublicRecordId> for RecordId {
+	fn from(value: crate::types::PublicRecordId) -> Self {
+		RecordId {
+			table: value.table.into_table_name(),
+			key: RecordIdKey::from(value.key),
+		}
+	}
+}
+
+impl ToSql for RecordId {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		// The table half is an identifier, so it escapes like one: `EscapeRidKey`
+		// is for the key half, where an all-digit name must be quoted to keep it
+		// from reading as an integer, and where a reserved word or a leading
+		// digit is harmless. In table position both of those must be quoted or
+		// the record id cannot be read back.
+		write_sql!(f, sql_fmt, "{}:{}", EscapeIdent(self.table.as_str()), self.key)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A record id must render so that it reads back as the same record id.
+	///
+	/// The table half was rendered with `EscapeRidKey`, which is the escaper
+	/// for the *key* half: it backticks an all-digit key so it cannot be
+	/// mistaken for an integer, but it checks neither reserved words nor a
+	/// leading digit, which is what a table name needs. So `select:1` and
+	/// `1a:1` were emitted, and neither parses back.
+	///
+	/// This is not only a display concern. Export writes `record.data.to_sql()`
+	/// into `INSERT` statements, so a dump of such a table could not be
+	/// re-imported.
+	#[test]
+	fn record_ids_render_so_they_can_be_read_back() {
+		for name in ["select", "1a", "9lives", "table", "person", "_123", "a-b"] {
+			let rid = RecordId {
+				table: TableName::from(name),
+				key: RecordIdKey::Number(1),
+			};
+			let rendered = rid.to_sql();
+			let reparsed = crate::syn::expr(&rendered)
+				.unwrap_or_else(|e| panic!("{rendered} does not parse back: {e}"));
+			let crate::expr::Expr::Literal(crate::expr::Literal::RecordId(lit)) = &reparsed else {
+				panic!("{rendered} parsed as {reparsed:?}, not a record id");
+			};
+			assert_eq!(lit.table.as_str(), name, "{rendered} round-tripped to a different table");
+		}
+	}
+
+	/// `IndexFormat` erases a number's [`NumberKind`], so a compound record id
+	/// does not survive a round trip through it: every nested `Int`/`Float`
+	/// decodes back as a `Decimal`, and two ids differing only in numeric
+	/// variant encode to the same bytes.
+	///
+	/// That is intended for an ordinary index key, which is only ever compared
+	/// and ordered. It is not safe for a key whose id component is decoded back
+	/// into a record identity and used to fetch the record: the fetch re-encodes
+	/// the id in the default format, which *does* carry the kind, so the
+	/// decimalised id addresses a key that no record was stored under.
+	///
+	/// The assertions are on encoded bytes rather than on `==`, because
+	/// [`Number`]'s equality is approximate across variants — `Float(1.5)`
+	/// compares equal to `Decimal(1.5)` while their record keys differ.
+	#[test]
+	fn index_format_does_not_round_trip_a_compound_record_id() {
+		fn arr(n: Number) -> RecordIdKey {
+			RecordIdKey::Array(Array::from(vec![Value::Number(n)]))
+		}
+		/// The bytes a record is actually stored and fetched under.
+		fn record_key(key: &RecordIdKey) -> Vec<u8> {
+			storekey::encode_vec(key).unwrap()
+		}
+		/// The id as it comes back out of an `IndexFormat` key.
+		fn through_index_format(key: &RecordIdKey) -> RecordIdKey {
+			let enc = storekey::encode_vec_format::<IndexFormat, _>(key).unwrap();
+			storekey::decode_borrow_format::<IndexFormat, _>(&enc).unwrap()
+		}
+
+		let int = arr(Number::Int(1));
+		let float = arr(Number::Float(1.5));
+		let dec = arr(Number::Decimal(rust_decimal::Decimal::from(1)));
+
+		// An Int comes back as a Decimal, and so addresses a different record key.
+		assert!(matches!(through_index_format(&int), RecordIdKey::Array(ref a)
+			if matches!(a.first(), Some(Value::Number(Number::Decimal(_))))));
+		assert_ne!(
+			record_key(&through_index_format(&int)),
+			record_key(&int),
+			"`[1]` does not address its own record after an IndexFormat round trip"
+		);
+		assert_ne!(
+			record_key(&through_index_format(&float)),
+			record_key(&float),
+			"`[1.5f]` does not address its own record after an IndexFormat round trip"
+		);
+		// A Decimal is the fixed point, which is why only decimal ids survive today.
+		assert_eq!(record_key(&through_index_format(&dec)), record_key(&dec));
+
+		// The encoding is also not injective: `[1]` and `[1dec]` are distinct
+		// records that collide on one key.
+		assert_ne!(record_key(&int), record_key(&dec), "they are distinct records");
+		assert_eq!(
+			storekey::encode_vec_format::<IndexFormat, _>(&int).unwrap(),
+			storekey::encode_vec_format::<IndexFormat, _>(&dec).unwrap(),
+			"`[1]` and `[1dec]` encode to the same IndexFormat key"
+		);
+
+		// The default format carries the kind, so it does round trip.
+		let back: RecordIdKey = storekey::decode_borrow(&record_key(&int)).unwrap();
+		assert_eq!(record_key(&back), record_key(&int));
+	}
+
+	/// [`RecordIdentity`] is what a key uses instead, and it holds the property
+	/// the bare type does not: it round trips and stays injective even when the
+	/// enclosing key pins [`IndexFormat`].
+	#[test]
+	fn record_identity_round_trips_under_index_format() {
+		fn arr(n: Number) -> RecordIdKey {
+			RecordIdKey::Array(Array::from(vec![Value::Number(n)]))
+		}
+		fn through_index_format(key: &RecordIdKey) -> RecordIdKey {
+			let id = RecordIdentity(key.clone());
+			let enc = storekey::encode_vec_format::<IndexFormat, _>(&id).unwrap();
+			storekey::decode_borrow_format::<IndexFormat, RecordIdentity>(&enc)
+				.unwrap()
+				.into_inner()
+		}
+
+		let int = arr(Number::Int(1));
+		let float = arr(Number::Float(1.5));
+		let dec = arr(Number::Decimal(rust_decimal::Decimal::from(1)));
+		let nested = RecordIdKey::Object(
+			[("k".to_owned(), Value::Number(Number::Int(2)))].into_iter().collect(),
+		);
+
+		for id in [&int, &float, &dec, &nested] {
+			assert_eq!(
+				storekey::encode_vec(&through_index_format(id)).unwrap(),
+				storekey::encode_vec(id).unwrap(),
+				"{id:?} must address its own record after the round trip"
+			);
+		}
+
+		// And distinct records stay on distinct keys.
+		assert_ne!(
+			storekey::encode_vec_format::<IndexFormat, _>(&RecordIdentity(int)).unwrap(),
+			storekey::encode_vec_format::<IndexFormat, _>(&RecordIdentity(dec)).unwrap(),
+			"`[1]` and `[1dec]` must not share a key"
+		);
+	}
+}
+
+surrealdb_kvs::impl_kv_value_revisioned!(RecordId);
+surrealdb_kvs::impl_kv_value_revisioned!(RecordIdKey);
+
+#[cfg(test)]
+mod record_identity_comparison_tests {
+	use std::collections::HashSet;
+
+	use super::*;
+
+	fn identity(n: Number) -> RecordIdentity {
+		RecordIdentity(RecordIdKey::Array(vec![Value::Number(n)].into()))
+	}
+
+	/// The type exists to keep two ids apart that [`RecordIdKey`] itself calls
+	/// equal, so its own comparison must not inherit that. Deriving it does,
+	/// which would put both records in one slot of any set or map keyed by it.
+	#[test]
+	fn identities_differing_only_in_numeric_variant_are_not_equal() {
+		let int = identity(Number::Int(1));
+		let dec = identity(Number::Decimal(1.into()));
+
+		assert_ne!(int, dec, "the identities must not collapse");
+		assert_ne!(
+			storekey::encode_vec(&int.0).unwrap(),
+			storekey::encode_vec(&dec.0).unwrap(),
+			"...because they are stored under different keys"
+		);
+		assert_eq!(
+			HashSet::from([int.clone(), dec.clone()]).len(),
+			2,
+			"and a set keyed by identity must hold both"
+		);
+		assert_ne!(int.cmp(&dec), std::cmp::Ordering::Equal, "ordering must agree");
+		assert_eq!(int, int.clone(), "an identity still equals itself");
+	}
+
+	/// The order an index union merges by id in must be the encoded order a
+	/// B-tree index lists the records of one value in, for every key: the merge
+	/// relies on both branches agreeing with it, and on it being a total order.
+	/// A datetime in a compound key encodes as its text, which does not order
+	/// as the datetime does.
+	#[test]
+	fn cmp_by_encoding_is_the_encoded_order() {
+		use std::str::FromStr;
+
+		use crate::val::{Datetime, Duration};
+
+		let dt = |s: &str| Value::Datetime(Datetime::from_str(s).unwrap());
+		let arr = |v: Vec<Value>| RecordIdKey::Array(v.into());
+		let keys = [
+			RecordIdKey::Number(-5),
+			RecordIdKey::Number(0),
+			RecordIdKey::Number(3),
+			RecordIdKey::String("a".into()),
+			RecordIdKey::String("a\0b".into()),
+			RecordIdKey::String("b".into()),
+			RecordIdKey::Uuid(Uuid(uuid::Uuid::from_u128(1))),
+			RecordIdKey::Uuid(Uuid(uuid::Uuid::from_u128(u128::MAX))),
+			arr(vec![dt("2026-08-28T09:00:00Z")]),
+			arr(vec![dt("2026-08-28T09:00:00.1Z")]),
+			arr(vec![dt("2026-08-28T09:00:00.2Z"), Value::Number(Number::Int(1))]),
+			arr(vec![Value::Duration(Duration::from_secs(1))]),
+			arr(vec![Value::Duration(Duration::from_millis(500))]),
+			arr(vec![Value::Number(Number::Int(1)), Value::from("b")]),
+			arr(vec![Value::Number(Number::Decimal(1.into())), Value::from("a")]),
+			arr(vec![Value::None]),
+			arr(vec![Value::from("x")]),
+		];
+		for a in &keys {
+			for b in &keys {
+				assert_eq!(
+					a.cmp_by_encoding(b),
+					addressed_by(a).cmp(&addressed_by(b)),
+					"{a:?} against {b:?}"
+				);
+			}
+		}
+	}
+}

@@ -1,0 +1,2080 @@
+use std::fmt;
+use std::fmt::Debug;
+use std::future::Future;
+use std::sync::{Arc, Mutex};
+
+use surrealdb_kvs::api::{
+	Batch, GetMultiResult, KeysResult, RangeKeyVisitor, ScanChunkStats, ScanCursorKeys,
+	ScanCursorVals, ScanResult, Transactable,
+};
+use surrealdb_kvs::snapshot::ViewCapabilities;
+use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
+use surrealdb_kvs::{Direction, Estimate, Key, KeyRange, Snapshot, SplitTarget};
+
+use crate::out_of_line::OutOfLine;
+use crate::record_writes::{Reached, RecordWrites, among, record_prefix};
+use crate::speculation::{Held, HeldCursor, Overlay};
+use crate::{IntoBytes, Result, Val};
+
+/// A set of undoable updates and requests against a dataset.
+pub struct Transactor {
+	/// The underlying transaction.
+	///
+	/// Crate-private, because reaching it is reaching past what
+	/// [`crate::Transaction`] wraps around it: the write-cardinality guard, the
+	/// poison checks, the buffered index deltas and the save-point frames that
+	/// mirror this transaction's own save-point stack. `Transaction` derefs to
+	/// `Transactor`, so a public field here is a public bypass of all of them.
+	pub(crate) inner: Box<dyn Transactable>,
+	/// Whether this is a speculation's view of a transaction
+	/// ([`crate::speculation`]): its writes land in [`Self::overlay`] and its
+	/// reads of the current state see them. Fixed when the transactor is made,
+	/// so no other transactor's reads ever pass through an overlay.
+	pub(crate) speculating: bool,
+	/// A speculation's writes; `None` once the speculation has ended, when
+	/// the view refuses every write.
+	pub(crate) overlay: Arc<Mutex<Option<Overlay>>>,
+	/// How many writes the speculation has taken.
+	pub(crate) writes: Arc<std::sync::atomic::AtomicU64>,
+	/// The tables this transaction has written keys of, which a fence of the write transactions a
+	/// build stopped waiting for refuses at commit
+	/// ([`crate::triggers::LiveWrites::fence_tables_through`]). A speculation's writes reach no
+	/// storage, so it records none.
+	pub(crate) written: parking_lot::Mutex<crate::triggers::WrittenTables>,
+	/// The creates held for one check of their keys ([`crate::absence`]), and the cursors open.
+	pub(crate) absence: crate::absence::Absence,
+	/// Which tables' records the writes that reached the storage have written
+	/// ([`crate::Transaction::wrote_records_of`]). Its save points are opened
+	/// and closed with the storage's, by [`crate::Transaction`].
+	///
+	/// `None` for a transactor no write reaches the storage through: a read-only
+	/// transaction, and a speculation's view, whose writes land in its overlay.
+	/// Out of line, so a transactor, which every transaction holds, stays small
+	/// in the futures that hold one.
+	record_writes: Option<Box<parking_lot::Mutex<RecordWrites>>>,
+}
+
+/// How a clear of a range stands to the records of tables whose writes a
+/// transactor has not noted yet ([`Transactor::clears`]).
+#[derive(Clone, Copy)]
+enum Clears {
+	/// It reaches no such record.
+	Nothing,
+	/// It reaches the records of the one table it lies within, if the range
+	/// holds one.
+	Table,
+	/// It reaches the records of every table it overlaps.
+	Tables,
+}
+
+impl fmt::Display for Transactor {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.kind())
+	}
+}
+
+impl Drop for Transactor {
+	fn drop(&mut self) {
+		// A speculation's view commits nothing, and holds nothing to cancel.
+		if !self.speculating && !self.closed() && self.writeable() {
+			// A test may drop a transaction deliberately, so this is only a
+			// warning there; anywhere else it is a leak.
+			#[cfg(any(test, feature = "test-hooks"))]
+			warn!("A transaction was dropped without being committed or cancelled");
+			#[cfg(not(any(test, feature = "test-hooks")))]
+			error!("A transaction was dropped without being committed or cancelled");
+		}
+	}
+}
+
+impl Transactor {
+	/// A transactor over `inner`, speculating nothing.
+	pub(crate) fn new(inner: Box<dyn Transactable>) -> Self {
+		let record_writes = inner.writeable().then(Box::default);
+		Self {
+			inner,
+			speculating: false,
+			overlay: Arc::new(Mutex::new(None)),
+			writes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+			written: Default::default(),
+			absence: Default::default(),
+			record_writes,
+		}
+	}
+
+	/// A speculation's view over `inner`, which reads the transaction it
+	/// speculates on, holding the writes in `overlay`.
+	pub(crate) fn speculative(
+		inner: Box<dyn Transactable>,
+		overlay: Arc<Mutex<Option<Overlay>>>,
+	) -> Self {
+		Self {
+			inner,
+			speculating: true,
+			overlay,
+			writes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+			written: Default::default(),
+			absence: Default::default(),
+			record_writes: None,
+		}
+	}
+
+	/// Whether this is a speculation's view: reads and writes of the current
+	/// state go through the speculation's overlay.
+	#[inline]
+	pub fn speculating(&self) -> bool {
+		self.speculating
+	}
+
+	/// Whether this transaction may have written a durable index build state key, or deleted a
+	/// range that holds one ([`crate::triggers::WrittenTables::wrote_build_state`]). Every write
+	/// reaches the storage through this transactor, so no path writes one unseen; a speculation's
+	/// writes reach no storage and are not counted.
+	pub(crate) fn wrote_build_state(&self) -> bool {
+		self.written.lock().wrote_build_state()
+	}
+
+	/// The count of this transaction's writes that may have reached a doc-ID forward mapping, or
+	/// `None` where no count stands for them
+	/// ([`crate::triggers::WrittenTables::doc_lookup_writes`]). Every write reaches the storage
+	/// through this transactor, so no path writes one unseen; a speculation's writes reach no
+	/// storage and are not counted.
+	pub(crate) fn doc_lookup_writes(&self) -> Option<u64> {
+		self.written.lock().doc_lookup_writes()
+	}
+
+	/// End a write of the storage that [`WrittenTables`](crate::triggers::WrittenTables) recorded
+	/// before it was made, `doc` being what recording it answered. The count of forward-mapping
+	/// writes stands still only from the end of one to the beginning of the next, so a read of a
+	/// mapping that ran alongside the write is not taken for one that did not.
+	fn end_write(&self, doc: bool) {
+		if doc {
+			self.written.lock().end_doc_lookup_write();
+		}
+	}
+
+	/// [`Self::end_write`] for a batch, `docs` being how many of its keys recording them
+	/// answered `true` for.
+	fn end_writes(&self, docs: usize) {
+		if docs > 0 {
+			let mut written = self.written.lock();
+			for _ in 0..docs {
+				written.end_doc_lookup_write();
+			}
+		}
+	}
+
+	/// End the speculation, answering the writes it holds. The view refuses
+	/// every write after, so a task still holding it once the speculation has
+	/// ended reaches neither the overlay nor the storage.
+	pub(crate) fn end_speculation(&self) -> Overlay {
+		self.overlay
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.take()
+			.unwrap_or_default()
+	}
+
+	/// What the speculation in progress answers for `key`.
+	fn held(&self, key: &[u8]) -> Held {
+		match self.overlay.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref() {
+			Some(overlay) => overlay.get(key),
+			None => Held::Storage,
+		}
+	}
+
+	/// Whether the speculation in progress holds anything inside `rng`.
+	fn touches(&self, rng: &KeyRange<'_>) -> bool {
+		self.overlay
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.as_ref()
+			.is_some_and(|overlay| overlay.touches(rng))
+	}
+
+	/// Take a write into the speculation's overlay, refused once the
+	/// speculation has ended.
+	fn overlay_mut(&self, f: impl FnOnce(&mut Overlay)) -> Result<()> {
+		self.overlay_mut_n(1, f)
+	}
+
+	/// Take `writes` writes into the speculation's overlay at once, refused
+	/// once the speculation has ended.
+	fn overlay_mut_n(&self, writes: u64, f: impl FnOnce(&mut Overlay)) -> Result<()> {
+		match self.overlay.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_mut() {
+			Some(overlay) => {
+				f(overlay);
+				self.writes.fetch_add(writes, std::sync::atomic::Ordering::Release);
+				Ok(())
+			}
+			None => Err(crate::Error::TransactionFinished),
+		}
+	}
+
+	/// Run `f` over the tables whose records this transactor has noted writes
+	/// of; `None` when it notes none ([`Self::record_writes`]).
+	pub(crate) fn with_record_writes<R>(
+		&self,
+		f: impl FnOnce(&mut RecordWrites) -> R,
+	) -> Option<R> {
+		self.record_writes.as_ref().map(|writes| f(&mut writes.lock()))
+	}
+
+	/// Whether a write of `key` has no table left to note: `key` is no record's,
+	/// the table it names is noted already, or this transactor notes none.
+	///
+	/// A write that finds a table to note hands the storage a borrow of its key
+	/// and keeps the key, for [`Self::note`] to name the table once the write has
+	/// succeeded. The future then holds nothing across the write beyond the key it
+	/// already holds, and every other write moves its key in, copy-free.
+	fn noted(&self, key: &[u8]) -> bool {
+		let Some(records) = record_prefix(key) else {
+			return true;
+		};
+		self.with_record_writes(|writes| writes.noted(records)).unwrap_or(true)
+	}
+
+	/// Note the table whose record `key` is, once a write of it has succeeded.
+	fn note(&self, key: &[u8]) {
+		if let Some(records) = record_prefix(key) {
+			self.with_record_writes(|writes| writes.note(Reached::Table(records.to_vec())));
+		}
+	}
+
+	/// How a clear of `rng` stands to the records of tables not noted yet.
+	fn clears(&self, rng: &KeyRange<'_>) -> Clears {
+		if self.record_writes.is_none() || rng.is_empty() {
+			return Clears::Nothing;
+		}
+		match Reached::by_range(&rng.start, &rng.end) {
+			None => Clears::Nothing,
+			Some(Reached::Range(..)) => Clears::Tables,
+			Some(Reached::Table(records)) => {
+				match self.with_record_writes(|writes| writes.noted(&records)) {
+					Some(false) => Clears::Table,
+					Some(true) | None => Clears::Nothing,
+				}
+			}
+		}
+	}
+
+	/// Whether a clear of `rng` is to be noted once it has succeeded.
+	///
+	/// A clear within one table reaches it only if the range holds a record this
+	/// transaction can see, which one read of the range's first key settles; a
+	/// clear that spans tables reaches each one it overlaps.
+	async fn notes_clear(&self, rng: &KeyRange<'_>) -> Result<bool> {
+		Ok(match self.clears(rng) {
+			Clears::Nothing => false,
+			Clears::Table => self.holds_record(rng).await?,
+			Clears::Tables => true,
+		})
+	}
+
+	/// Whether the table that `rng` lies within holds a record in `rng`, as this
+	/// transaction sees it.
+	async fn holds_record(&self, rng: &KeyRange<'_>) -> Result<bool> {
+		let Some(Reached::Table(records)) = Reached::by_range(&rng.start, &rng.end) else {
+			return Ok(false);
+		};
+		let (start, end) = among(&rng.start, &rng.end, &records);
+		let range = KeyRange {
+			start: Key::from(start),
+			end: Key::from(end),
+		};
+		Ok(!self.inner.keys(range, 1, 0, None).await?.keys.is_empty())
+	}
+
+	/// Note what a clear of `rng` that has succeeded reached.
+	fn note_clear(&self, rng: &KeyRange<'_>) {
+		if let Some(reached) = Reached::by_range(&rng.start, &rng.end) {
+			self.with_record_writes(|writes| writes.note(reached));
+		}
+	}
+
+	/// Whether a read of the current state within `rng` must merge the
+	/// speculation's writes.
+	fn speculated(&self, rng: &KeyRange<'_>, version: Option<u64>) -> bool {
+		version.is_none() && self.speculating() && self.touches(rng)
+	}
+
+	/// The current value of `key` as the speculation leaves it.
+	async fn speculative_value(&self, key: &Key<'_>) -> Result<Option<Val>> {
+		match self.held(key.as_slice()) {
+			Held::Value(value) => Ok(Some(value)),
+			Held::Deleted => Ok(None),
+			Held::Storage => self.inner.get(key.as_borrowed(), None).await,
+		}
+	}
+
+	/// The pairs inside `rng`, in key order, as the speculation leaves them.
+	async fn speculative_pairs(
+		&self,
+		rng: &KeyRange<'_>,
+		values: bool,
+	) -> Result<Vec<(Vec<u8>, Val)>> {
+		let stored = if values {
+			self.inner.scan(rng.as_borrowed(), u32::MAX, 0, None).await?.values
+		} else {
+			self.inner
+				.keys(rng.as_borrowed(), u32::MAX, 0, None)
+				.await?
+				.keys
+				.into_iter()
+				.map(|key| (key, Vec::new()))
+				.collect()
+		};
+		let overlay = self.overlay.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+		Ok(match overlay.as_ref() {
+			Some(overlay) => overlay.merge(rng, stored),
+			None => stored,
+		})
+	}
+
+	/// Get the underlying datastore kind.
+	pub fn kind(&self) -> &'static str {
+		self.inner.kind()
+	}
+
+	/// Whether [`Self::count`] reads off the calling thread, in parallel where
+	/// the transaction allows. A speculating transaction counts what it
+	/// speculated on the calling thread, so it answers `false`.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::parallel_count`].
+	pub fn parallel_count(&self) -> bool {
+		!self.speculating() && self.inner.parallel_count()
+	}
+
+	/// Whether the next chunk of a scan is worth reading on another task while the caller works
+	/// on the current one. A speculating transaction reads through its overlay, which no other
+	/// task should read ahead through, so it answers `false`.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::scan_read_ahead`].
+	pub fn scan_read_ahead(&self) -> bool {
+		!self.speculating() && self.inner.scan_read_ahead()
+	}
+
+	/// Whether reading many keys or ranges at once costs less than reading them one by one. A
+	/// speculating transaction reads through its overlay, one range at a time, so it answers
+	/// `false`.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::multi_read`].
+	pub fn multi_read(&self) -> bool {
+		!self.speculating() && self.inner.multi_read()
+	}
+
+	/// Whether the backend bounds the memory its write buffer takes. A
+	/// speculating transaction holds its writes in memory itself, so it
+	/// answers `false`.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::bounds_write_buffer`].
+	pub fn bounds_write_buffer(&self) -> bool {
+		!self.speculating() && self.inner.bounds_write_buffer()
+	}
+
+	/// Check if transaction is finished.
+	///
+	/// If the transaction has been cancelled or committed,
+	/// then this function will return [`true`], and any further
+	/// calls to functions on this transaction will result
+	/// in a [`surrealdb_kvs::Error::TransactionFinished`] error.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub fn closed(&self) -> bool {
+		self.inner.closed()
+	}
+
+	/// Check if transaction is writeable.
+	///
+	/// If the transaction has been marked as a writeable
+	/// transaction, then this function will return [`true`].
+	/// This function can be used to check whether a transaction
+	/// allows data to be modified, and if not then the function
+	/// will return a [`surrealdb_kvs::Error::TransactionReadonly`] error when
+	/// attempting to modify any data within the transaction.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub fn writeable(&self) -> bool {
+		self.inner.writeable()
+	}
+
+	/// Whether every transaction committed to the store is committed through
+	/// the datastore this transaction belongs to, and this transaction reads
+	/// the snapshot the store held when it opened.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::sole_writer`].
+	pub fn sole_writer(&self) -> bool {
+		self.inner.sole_writer()
+	}
+
+	/// The longest a write commit may run before its outcome is reported unknown.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::write_commit_bound`].
+	pub fn write_commit_bound(&self) -> std::time::Duration {
+		self.inner.write_commit_bound()
+	}
+
+	/// Whether a write transaction's commit fails if any key it read was
+	/// written since it opened.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::validates_reads`].
+	pub fn validates_reads(&self) -> bool {
+		self.inner.validates_reads()
+	}
+
+	/// Whether a locked read ([`Self::getu`]) conflicts only with writes,
+	/// never with another transaction's locked read of the same key.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::shared_locked_reads`].
+	pub fn shared_locked_reads(&self) -> bool {
+		self.inner.shared_locked_reads()
+	}
+
+	/// Cancel a transaction.
+	///
+	/// This reverses all changes made within the transaction.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn cancel(&self) -> Result<()> {
+		self.absence.discard().await;
+		self.inner.cancel().await
+	}
+
+	/// Commit a transaction.
+	///
+	/// This attempts to commit all changes made within the transaction.
+	///
+	/// Crate-private: [`crate::Transaction::commit`] is the commit a caller wants.
+	/// It refuses a poisoned transaction and flushes the buffered index deltas into
+	/// the same transaction as the writes they describe, and reaching this one past
+	/// it — which `Transaction`'s `Deref` would otherwise allow — skips both.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub(crate) async fn commit(&self) -> Result<()> {
+		self.absence.flush_all(self.inner.as_ref(), self.record_writes.as_deref()).await?;
+		self.inner.commit().await
+	}
+
+	/// Commit the transaction without waiting for the store's own sync.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::commit_unsynced`]. Crate-private:
+	/// only for a commit a later synced commit through the same store makes
+	/// durable.
+	///
+	/// It is not counted among the build-state commits
+	/// ([`crate::triggers::BuildEpoch`]), so a transaction committed through it writes no
+	/// durable index build state.
+	pub(crate) async fn commit_unsynced(&self) -> Result<()> {
+		debug_assert!(!self.wrote_build_state(), "an unsynced commit is not a counted commit");
+		self.commit_deferred().await
+	}
+
+	/// Commit the transaction without waiting for the store's own sync, for
+	/// [`crate::Transaction::commit`] of a transaction that deferred its sync
+	/// ([`crate::Transaction::defer_sync`]), which counts it among the
+	/// build-state commits itself.
+	pub(crate) async fn commit_deferred(&self) -> Result<()> {
+		self.absence.flush_all(self.inner.as_ref(), self.record_writes.as_deref()).await?;
+		self.inner.commit_unsynced().await
+	}
+
+	/// Check if a key exists in the datastore.
+	#[inline(never)]
+	pub fn exists(
+		&self,
+		key: Key<'_>,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<bool>>> {
+		OutOfLine::new(self.exists_body(key, version))
+	}
+
+	/// [`Self::exists`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn exists_body(&self, key: Key<'_>, version: Option<u64>) -> Result<bool> {
+		if self.absence.holds() {
+			self.absence
+				.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+				.await?;
+		}
+		if version.is_none() && self.speculating() {
+			match self.held(key.as_slice()) {
+				Held::Value(_) => return Ok(true),
+				Held::Deleted => return Ok(false),
+				Held::Storage => {}
+			}
+		}
+		self.inner.exists(key, version).await
+	}
+
+	/// Fetch a key from the datastore.
+	#[inline(never)]
+	pub fn get(
+		&self,
+		key: Key<'_>,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<Option<Val>>>> {
+		OutOfLine::new(self.get_body(key, version))
+	}
+
+	/// [`Self::get`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn get_body(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Val>> {
+		if self.absence.holds() {
+			self.absence
+				.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+				.await?;
+		}
+		if version.is_none() && self.speculating() {
+			match self.held(key.as_slice()) {
+				Held::Value(value) => return Ok(Some(value)),
+				Held::Deleted => return Ok(None),
+				Held::Storage => {}
+			}
+		}
+		self.inner.get(key, version).await
+	}
+
+	/// Fetch a key from the datastore, registering the key for
+	/// commit-time conflict detection.
+	#[inline(never)]
+	pub fn getu(&self, key: Key<'_>) -> OutOfLine<impl Future<Output = Result<Option<Val>>>> {
+		OutOfLine::new(self.getu_body(key))
+	}
+
+	/// [`Self::getu`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn getu_body(&self, key: Key<'_>) -> Result<Option<Val>> {
+		if self.absence.holds() {
+			self.absence
+				.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+				.await?;
+		}
+		if self.speculating() {
+			match self.held(key.as_slice()) {
+				Held::Value(value) => return Ok(Some(value)),
+				Held::Deleted => return Ok(None),
+				Held::Storage => {}
+			}
+		}
+		self.inner.getu(key).await
+	}
+
+	/// Fetch many keys from the datastore.
+	#[inline(never)]
+	pub fn getm(
+		&self,
+		keys: &[Key<'_>],
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<GetMultiResult>>> {
+		OutOfLine::new(self.getm_body(keys, version))
+	}
+
+	/// [`Self::getm`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn getm_body(&self, keys: &[Key<'_>], version: Option<u64>) -> Result<GetMultiResult> {
+		if self.absence.holds() {
+			self.absence
+				.guard_keys(self.inner.as_ref(), self.record_writes.as_deref(), keys)
+				.await?;
+		}
+		if version.is_none() && self.speculating() {
+			let mut result = GetMultiResult::default();
+			for key in keys {
+				let value = self.speculative_value(key).await?;
+				if let Some(value) = &value {
+					result.records += 1;
+					result.value_bytes += value.len() as u64;
+				}
+				result.values.push(value);
+			}
+			return Ok(result);
+		}
+		self.inner.getm(keys, version).await
+	}
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
+	/// This function fetches all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
+	#[inline(never)]
+	pub fn getr(
+		&self,
+		rng: KeyRange<'_>,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<ScanResult>>> {
+		OutOfLine::new(self.getr_body(rng, version))
+	}
+
+	/// [`Self::getr`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn getr_body(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<ScanResult> {
+		if self.absence.holds() {
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
+		}
+		if self.speculated(&rng, version) {
+			return Ok(scan_result(self.speculative_pairs(&rng, true).await?));
+		}
+		self.inner.getr(rng, version).await
+	}
+
+	/// Insert or update a key in the datastore.
+	#[inline(never)]
+	pub fn set<V>(&self, key: Key<'_>, val: V) -> OutOfLine<impl Future<Output = Result<()>>>
+	where
+		V: IntoBytes + Debug,
+	{
+		OutOfLine::new(self.set_body(key, val.into_vec()))
+	}
+
+	/// [`Self::set`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn set_body(&self, key: Key<'_>, val: Val) -> Result<()> {
+		let val = val.into_vec();
+		if self.speculating() {
+			return self.overlay_mut(|overlay| overlay.set(&key, val));
+		}
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = async {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.noted(&key) {
+				self.inner.set(key, val).await
+			} else {
+				let written = self.inner.set(key.as_borrowed(), val).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
+		}
+		.await;
+		self.end_write(doc);
+		written
+	}
+
+	/// Insert or update many keys in the datastore, in order.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn setm(&self, entries: Vec<(Key<'_>, Val)>) -> Result<()> {
+		if self.speculating() {
+			return self.overlay_mut_n(entries.len() as u64, |overlay| {
+				for (key, val) in entries {
+					overlay.set(&key, val);
+				}
+			});
+		}
+		let docs = {
+			let mut written = self.written.lock();
+			entries.iter().filter(|(key, _)| written.note_key(key.as_slice())).count()
+		};
+		let tables = match &self.record_writes {
+			Some(writes) => {
+				let writes = writes.lock();
+				entries
+					.iter()
+					.filter_map(|(key, _)| record_prefix(key.as_slice()))
+					.filter(|records| !writes.noted(records))
+					.map(<[u8]>::to_vec)
+					.collect()
+			}
+			None => Vec::new(),
+		};
+		let written = self.inner.setm(entries).await;
+		if written.is_ok() && !tables.is_empty() {
+			self.with_record_writes(|writes| {
+				for records in tables {
+					writes.note(Reached::Table(records));
+				}
+			});
+		}
+		self.end_writes(docs);
+		written
+	}
+
+	/// Delete many keys from the datastore, in order.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn delm(&self, keys: Vec<Key<'_>>) -> Result<()> {
+		if self.speculating() {
+			return self.overlay_mut_n(keys.len() as u64, |overlay| {
+				for key in &keys {
+					overlay.delete(key);
+				}
+			});
+		}
+		let docs = {
+			let mut written = self.written.lock();
+			keys.iter().filter(|key| written.note_key(key.as_slice())).count()
+		};
+		let tables = match &self.record_writes {
+			Some(writes) => {
+				let writes = writes.lock();
+				keys.iter()
+					.filter_map(|key| record_prefix(key.as_slice()))
+					.filter(|records| !writes.noted(records))
+					.map(<[u8]>::to_vec)
+					.collect()
+			}
+			None => Vec::new(),
+		};
+		let written = self.inner.delm(keys).await;
+		if written.is_ok() && !tables.is_empty() {
+			self.with_record_writes(|writes| {
+				for records in tables {
+					writes.note(Reached::Table(records));
+				}
+			});
+		}
+		self.end_writes(docs);
+		written
+	}
+
+	/// Insert or replace a key in the datastore.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn replace<V>(&self, key: Key<'_>, val: V) -> Result<()>
+	where
+		V: IntoBytes + Debug,
+	{
+		let val = val.into_vec();
+		if self.speculating() {
+			return self.overlay_mut(|overlay| overlay.set(&key, val));
+		}
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = async {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.noted(&key) {
+				self.inner.replace(key, val).await
+			} else {
+				let written = self.inner.replace(key.as_borrowed(), val).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
+		}
+		.await;
+		self.end_write(doc);
+		written
+	}
+
+	/// Insert a key if it doesn't exist in the datastore.
+	#[inline(never)]
+	pub fn put<V>(&self, key: Key<'_>, val: V) -> OutOfLine<impl Future<Output = Result<()>>>
+	where
+		V: IntoBytes + Debug,
+	{
+		OutOfLine::new(self.put_body(key, val.into_vec()))
+	}
+
+	/// [`Self::put`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn put_body(&self, key: Key<'_>, val: Val) -> Result<()> {
+		let val = val.into_vec();
+		if self.speculating() {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.speculative_value(&key).await?.is_some() {
+				return Err(crate::Error::TransactionKeyAlreadyExists);
+			}
+			return self.overlay_mut(|overlay| overlay.set(&key, val));
+		}
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = async {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.noted(&key) {
+				self.inner.put(key, val).await
+			} else {
+				let written = self.inner.put(key.as_borrowed(), val).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
+		}
+		.await;
+		self.end_write(doc);
+		written
+	}
+
+	/// Insert a key that must not exist, holding the check that it is absent for one check of
+	/// many keys ([`crate::absence`]).
+	///
+	/// The create fails as [`Self::put`] fails when the key is one the transaction may already
+	/// hold, or while a cursor is open, since it is then made immediately. A held create's failure
+	/// is [`crate::Error::DeferredKeyExists`], raised by whichever operation of the transaction
+	/// flushes it. A speculation's view makes every create immediately.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub(crate) async fn put_held(&self, key: Key<'_>, val: Val) -> Result<()> {
+		if self.speculating() || !crate::absence::enabled() {
+			return self.put(key, val).await;
+		}
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = match self
+			.absence
+			.hold(
+				self.inner.as_ref(),
+				self.record_writes.as_deref(),
+				key.into_inner().into_owned(),
+				val,
+			)
+			.await
+		{
+			Ok(None) => Ok(()),
+			Ok(Some((key, val))) => {
+				let key = Key::from(key);
+				if self.noted(&key) {
+					self.inner.put(key, val).await
+				} else {
+					let written = self.inner.put(key.as_borrowed(), val).await;
+					if written.is_ok() {
+						self.note(&key);
+					}
+					written
+				}
+			}
+			Err(e) => Err(e),
+		};
+		self.end_write(doc);
+		written
+	}
+
+	/// Flush the held creates and take the earliest one that found its key present
+	/// ([`crate::absence`]): its key, or `None` when every held key was absent and is written.
+	pub async fn take_absence_violation(&self) -> Result<Option<Vec<u8>>> {
+		if !self.absence.holds() {
+			return Ok(None);
+		}
+		self.absence.take_violation(self.inner.as_ref(), self.record_writes.as_deref()).await
+	}
+
+	/// Flush the held creates, failing with the earliest one that found its key present.
+	pub async fn flush_held(&self) -> Result<()> {
+		if !self.absence.holds() {
+			return Ok(());
+		}
+		self.absence.flush_all(self.inner.as_ref(), self.record_writes.as_deref()).await
+	}
+
+	/// Whether this transaction holds deferred create checks ([`crate::absence`]).
+	pub fn holds_creates(&self) -> bool {
+		self.absence.holds()
+	}
+
+	/// Update a key in the datastore if the current value matches a condition.
+	#[inline(never)]
+	pub fn putc<V>(
+		&self,
+		key: Key<'_>,
+		val: V,
+		chk: Option<V>,
+	) -> OutOfLine<impl Future<Output = Result<()>>>
+	where
+		V: IntoBytes + Debug,
+	{
+		OutOfLine::new(self.putc_body(key, val.into_vec(), chk.map(|v| v.into_vec())))
+	}
+
+	/// [`Self::putc`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn putc_body(&self, key: Key<'_>, val: Val, chk: Option<Val>) -> Result<()> {
+		let val = val.into_vec();
+		let chk = chk.map(|v| v.into_vec());
+		if self.speculating() {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.speculative_value(&key).await? != chk {
+				return Err(crate::Error::TransactionConditionNotMet);
+			}
+			return self.overlay_mut(|overlay| overlay.set(&key, val));
+		}
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = async {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.noted(&key) {
+				self.inner.putc(key, val, chk).await
+			} else {
+				let written = self.inner.putc(key.as_borrowed(), val, chk).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
+		}
+		.await;
+		self.end_write(doc);
+		written
+	}
+
+	/// Delete a key from the datastore.
+	#[inline(never)]
+	pub fn del(&self, key: Key<'_>) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.del_body(key))
+	}
+
+	/// [`Self::del`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn del_body(&self, key: Key<'_>) -> Result<()> {
+		if self.speculating() {
+			return self.overlay_mut(|overlay| overlay.delete(&key));
+		}
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = async {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.noted(&key) {
+				self.inner.del(key).await
+			} else {
+				let written = self.inner.del(key.as_borrowed()).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
+		}
+		.await;
+		self.end_write(doc);
+		written
+	}
+
+	/// Delete a key from the datastore if the current value matches a
+	/// condition.
+	#[inline(never)]
+	pub fn delc(
+		&self,
+		key: Key<'_>,
+		chk: Option<&[u8]>,
+	) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.delc_body(key, chk))
+	}
+
+	/// [`Self::delc`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn delc_body(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
+		if self.speculating() {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.speculative_value(&key).await?.as_deref() != chk {
+				return Err(crate::Error::TransactionConditionNotMet);
+			}
+			return self.overlay_mut(|overlay| overlay.delete(&key));
+		}
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = async {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.noted(&key) {
+				self.inner.delc(key, chk).await
+			} else {
+				let written = self.inner.delc(key.as_borrowed(), chk).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
+		}
+		.await;
+		self.end_write(doc);
+		written
+	}
+
+	/// Delete a range of keys from the datastore.
+	///
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
+	#[inline(never)]
+	pub fn delr(&self, rng: KeyRange<'_>) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.delr_body(rng))
+	}
+
+	/// [`Self::delr`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn delr_body(&self, rng: KeyRange<'_>) -> Result<()> {
+		if self.speculating() {
+			return self.overlay_mut(|overlay| overlay.clear(&rng));
+		}
+		let doc = self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
+		let written = async {
+			if self.absence.holds() {
+				self.absence
+					.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+					.await?;
+			}
+			match self.notes_clear(&rng).await {
+				Ok(false) => self.inner.delr(rng).await,
+				Ok(true) => {
+					let written = self.inner.delr(rng.as_borrowed()).await;
+					if written.is_ok() {
+						self.note_clear(&rng);
+					}
+					written
+				}
+				Err(err) => Err(err),
+			}
+		}
+		.await;
+		self.end_write(doc);
+		written
+	}
+
+	/// Delete all versions of a key from the datastore.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn clr(&self, key: Key<'_>) -> Result<()> {
+		if self.speculating() {
+			return self.overlay_mut(|overlay| overlay.delete(&key));
+		}
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = async {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.noted(&key) {
+				self.inner.clr(key).await
+			} else {
+				let written = self.inner.clr(key.as_borrowed()).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
+		}
+		.await;
+		self.end_write(doc);
+		written
+	}
+
+	/// Delete all versions of a key from the datastore if the current value
+	/// matches a condition.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn clrc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
+		if self.speculating() {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.speculative_value(&key).await?.as_deref() != chk {
+				return Err(crate::Error::TransactionConditionNotMet);
+			}
+			return self.overlay_mut(|overlay| overlay.delete(&key));
+		}
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = async {
+			if self.absence.holds() {
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
+			}
+			if self.noted(&key) {
+				self.inner.clrc(key, chk).await
+			} else {
+				let written = self.inner.clrc(key.as_borrowed(), chk).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
+		}
+		.await;
+		self.end_write(doc);
+		written
+	}
+
+	/// Delete all versions of a range of keys from the datastore.
+	///
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn clrr(&self, rng: KeyRange<'_>) -> Result<()> {
+		if self.speculating() {
+			return self.overlay_mut(|overlay| overlay.clear(&rng));
+		}
+		let doc = self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
+		let written = async {
+			if self.absence.holds() {
+				self.absence
+					.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+					.await?;
+			}
+			match self.notes_clear(&rng).await {
+				Ok(false) => self.inner.clrr(rng).await,
+				Ok(true) => {
+					let written = self.inner.clrr(rng.as_borrowed()).await;
+					if written.is_ok() {
+						self.note_clear(&rng);
+					}
+					written
+				}
+				Err(err) => Err(err),
+			}
+		}
+		.await;
+		self.end_write(doc);
+		written
+	}
+
+	// --------------------------------------------------
+	// Range functions
+	// --------------------------------------------------
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
+	/// This function fetches the full range of keys without values, in a single
+	/// request to the underlying datastore. The returned [`KeysResult`] also
+	/// reports the total key bytes scanned, accumulated by the backend during
+	/// the same iteration that produced the keys.
+	#[inline(never)]
+	pub fn keys(
+		&self,
+		rng: KeyRange<'_>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<KeysResult>>> {
+		OutOfLine::new(self.keys_body(rng, limit, skip, version))
+	}
+
+	/// [`Self::keys`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn keys_body(
+		&self,
+		rng: KeyRange<'_>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<KeysResult> {
+		if self.absence.holds() {
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
+		}
+		if rng.is_empty() {
+			return Ok(KeysResult::default());
+		}
+		if self.speculated(&rng, version) {
+			let pairs = self.speculative_pairs(&rng, false).await?;
+			return Ok(keys_result(pairs.into_iter().skip(skip as usize).take(limit as usize)));
+		}
+		self.inner.keys(rng, limit, skip, version).await
+	}
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
+	/// This function fetches the full range of keys without values, in a single
+	/// request to the underlying datastore. The returned [`KeysResult`] also
+	/// reports the total key bytes scanned, accumulated by the backend during
+	/// the same iteration that produced the keys.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn keysr(
+		&self,
+		rng: KeyRange<'_>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<KeysResult> {
+		if self.absence.holds() {
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
+		}
+		if rng.is_empty() {
+			return Ok(KeysResult::default());
+		}
+		if self.speculated(&rng, version) {
+			let pairs = self.speculative_pairs(&rng, false).await?;
+			return Ok(keys_result(
+				pairs.into_iter().rev().skip(skip as usize).take(limit as usize),
+			));
+		}
+		self.inner.keysr(rng, limit, skip, version).await
+	}
+
+	/// Retrieve a specific range of key-value pairs from the datastore.
+	///
+	/// This function fetches the full range of key-value pairs, in a single
+	/// request to the underlying datastore. The returned [`ScanResult`] also
+	/// reports the total value bytes scanned, accumulated by the backend
+	/// during the same iteration that produced the values.
+	#[inline(never)]
+	pub fn scan(
+		&self,
+		rng: KeyRange<'_>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<ScanResult>>> {
+		OutOfLine::new(self.scan_body(rng, limit, skip, version))
+	}
+
+	/// [`Self::scan`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn scan_body(
+		&self,
+		rng: KeyRange<'_>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<ScanResult> {
+		if self.absence.holds() {
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
+		}
+		if rng.is_empty() {
+			return Ok(ScanResult::default());
+		}
+		if self.speculated(&rng, version) {
+			let pairs = self.speculative_pairs(&rng, true).await?;
+			return Ok(scan_result(pairs.into_iter().skip(skip as usize).take(limit as usize)));
+		}
+		self.inner.scan(rng, limit, skip, version).await
+	}
+
+	/// Retrieve a specific range of key-value pairs from the datastore.
+	///
+	/// This function fetches the full range of key-value pairs, in a single
+	/// request to the underlying datastore. The returned [`ScanResult`] also
+	/// reports the total value bytes scanned, accumulated by the backend
+	/// during the same iteration that produced the values.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn scanr(
+		&self,
+		rng: KeyRange<'_>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<ScanResult> {
+		if self.absence.holds() {
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
+		}
+		if rng.is_empty() {
+			return Ok(ScanResult::default());
+		}
+		if self.speculated(&rng, version) {
+			let pairs = self.speculative_pairs(&rng, true).await?;
+			return Ok(scan_result(
+				pairs.into_iter().rev().skip(skip as usize).take(limit as usize),
+			));
+		}
+		self.inner.scanr(rng, limit, skip, version).await
+	}
+
+	/// Count the total number of keys within a range in the datastore.
+	///
+	/// This function fetches the total count, in batches, with multiple
+	/// requests to the underlying datastore.
+	#[inline(never)]
+	pub fn count(
+		&self,
+		rng: KeyRange<'_>,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<usize>>> {
+		OutOfLine::new(self.count_body(rng, version))
+	}
+
+	/// [`Self::count`]'s body, polled out of line.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	async fn count_body(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<usize> {
+		if self.absence.holds() {
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
+		}
+		if self.speculated(&rng, version) {
+			return Ok(self.speculative_pairs(&rng, false).await?.len());
+		}
+		self.inner.count(rng, version).await
+	}
+
+	/// Count the keys within a range, examining at most `budget` of them, and
+	/// answer the key to resume at when the range holds more.
+	///
+	/// A range the speculation touches is counted whole, from what the
+	/// speculation holds over what the storage does.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::count_bounded`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn count_bounded(
+		&self,
+		rng: KeyRange<'_>,
+		version: Option<u64>,
+		budget: u32,
+	) -> Result<(usize, Option<Key<'static>>)> {
+		if self.absence.holds() {
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
+		}
+		if self.speculated(&rng, version) {
+			return Ok((self.speculative_pairs(&rng, false).await?.len(), None));
+		}
+		self.inner.count_bounded(rng, version, budget).await
+	}
+
+	/// This transaction's owned read view, or `None` when it cannot give one.
+	///
+	/// A speculation's view answers `None`: its reads pass through an overlay of writes that
+	/// the storage's view does not hold.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::snapshot`].
+	pub fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+		// A view is taken of the store, which holds none of the held creates.
+		if self.speculating() || self.absence.holds() {
+			return None;
+		}
+		self.inner.snapshot()
+	}
+
+	/// What read views the storage can hand out: a fact of the datastore, the same for every
+	/// transaction opened on it, and an upper bound on what [`Self::snapshot`] returns.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::view_capabilities`].
+	pub fn view_capabilities(&self) -> ViewCapabilities {
+		self.inner.view_capabilities()
+	}
+
+	/// What a range holds, exactly when it holds fewer keys than the estimate budget and
+	/// extrapolated otherwise.
+	///
+	/// A speculating transaction estimates what the storage holds: the writes the speculation
+	/// has taken are not counted.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::estimate`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn estimate(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<Estimate> {
+		self.inner.estimate(rng, version).await
+	}
+
+	/// What each of several ranges holds, in their order, as [`Self::estimate`] answers one.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::estimate_many`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn estimate_many(
+		&self,
+		ranges: Vec<KeyRange<'_>>,
+		version: Option<u64>,
+	) -> Result<Vec<Estimate>> {
+		self.inner.estimate_many(ranges, version).await
+	}
+
+	/// What the storage's metadata says a range holds, read without visiting its entries; `None`
+	/// where the storage keeps no such metadata. A speculating transaction answers for the storage,
+	/// as [`Self::estimate`] does.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::approximate`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn approximate(
+		&self,
+		rng: KeyRange<'_>,
+		version: Option<u64>,
+	) -> Result<Option<Estimate>> {
+		self.inner.approximate(rng, version).await
+	}
+
+	/// Boundary keys that divide a range into parts, strictly inside it and ascending.
+	///
+	/// A range the speculation touches is not divided: the storage cannot see the keys the
+	/// speculation holds, so the answer is no boundaries.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::split`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn split(
+		&self,
+		rng: KeyRange<'_>,
+		target: SplitTarget,
+		version: Option<u64>,
+	) -> Result<Vec<Key<'static>>> {
+		if self.speculated(&rng, version) {
+			return Ok(Vec::new());
+		}
+		self.inner.split(rng, target, version).await
+	}
+
+	/// How the work of a count grows with the keys a range holds.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::count_cost`].
+	pub fn count_cost(&self) -> surrealdb_kvs::CountCost {
+		self.inner.count_cost()
+	}
+
+	// --------------------------------------------------
+	// Cursor functions
+	// --------------------------------------------------
+
+	/// Open a stateful keys-only scan cursor over a range.
+	///
+	/// The cursor lives for the duration of one logical scan (e.g. an
+	/// outer table walk or one prefix of a graph-edge traversal). Each
+	/// `next_batch` call advances the same underlying iterator instead of
+	/// re-seeking from scratch, which is the primary cost on
+	/// paged scans. `skip` is applied once on the first batch. See
+	/// [`ScanCursorKeys`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn open_keys_cursor<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		dir: Direction,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Box<dyn ScanCursorKeys + 'a>> {
+		if self.absence.holds() {
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
+		}
+		if self.speculated(&rng, version) {
+			let pairs = self.speculative_pairs(&rng, false).await?;
+			return Ok(Box::new(HeldCursor::new(ordered(pairs, dir, skip))));
+		}
+		self.absence.cursor_opened(rng.start.as_slice(), rng.end.as_slice());
+		let cursor = match self.inner.open_keys_cursor(rng, dir, skip, version).await {
+			Ok(cursor) => cursor,
+			Err(e) => {
+				self.absence.cursor_closed();
+				return Err(e);
+			}
+		};
+		Ok(Box::new(Counted::new(cursor, &self.absence)))
+	}
+
+	/// Visit the keys of several ranges, in range order, at most `limit` keys from each. See
+	/// [`surrealdb_kvs::api::Transactable::visit_key_ranges`]. A speculating transaction reads
+	/// each range through its overlay's cursor.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn visit_key_ranges<'a>(
+		&'a self,
+		ranges: &'a [KeyRange<'a>],
+		limit: u32,
+		version: Option<u64>,
+		f: &'a mut dyn RangeKeyVisitor,
+	) -> Result<ScanChunkStats> {
+		if self.absence.holds() {
+			for rng in ranges {
+				self.absence
+					.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), rng)
+					.await?;
+			}
+		}
+		if !self.speculating() {
+			return self.inner.visit_key_ranges(ranges, limit, version, f).await;
+		}
+		let mut total = ScanChunkStats::default();
+		if limit == 0 {
+			return Ok(total);
+		}
+		for (at, rng) in ranges.iter().enumerate() {
+			let mut cursor =
+				self.open_keys_cursor(rng.clone(), Direction::Forward, 0, version).await?;
+			let mut stopped = false;
+			let chunk = cursor
+				.for_each(limit, &mut |key: &[u8]| {
+					let flow = f(at, key)?;
+					stopped = flow.is_break();
+					Ok(flow)
+				})
+				.await?;
+			total.rows += chunk.rows;
+			total.key_bytes += chunk.key_bytes;
+			if stopped {
+				break;
+			}
+		}
+		Ok(total)
+	}
+
+	/// Open a stateful key+value scan cursor over a range. See
+	/// [`Self::open_keys_cursor`] for the rationale.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn open_vals_cursor<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		dir: Direction,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Box<dyn ScanCursorVals + 'a>> {
+		if self.absence.holds() {
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
+		}
+		if self.speculated(&rng, version) {
+			let pairs = self.speculative_pairs(&rng, true).await?;
+			return Ok(Box::new(HeldCursor::new(ordered(pairs, dir, skip))));
+		}
+		self.absence.cursor_opened(rng.start.as_slice(), rng.end.as_slice());
+		let cursor = match self.inner.open_vals_cursor(rng, dir, skip, version).await {
+			Ok(cursor) => cursor,
+			Err(e) => {
+				self.absence.cursor_closed();
+				return Err(e);
+			}
+		};
+		Ok(Box::new(Counted::new(cursor, &self.absence)))
+	}
+
+	// --------------------------------------------------
+	// Batch functions
+	// --------------------------------------------------
+
+	/// Retrieve a batched scan over a specific range of keys in the datastore.
+	///
+	/// This function fetches keys, in batches, with multiple requests to the
+	/// underlying datastore.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn batch_keys(
+		&self,
+		rng: KeyRange<'_>,
+		batch: u32,
+		version: Option<u64>,
+	) -> Result<Batch<Vec<u8>>> {
+		if self.absence.holds() {
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
+		}
+		if self.speculated(&rng, version) {
+			let pairs = self.speculative_pairs(&rng, false).await?;
+			return Ok(Batch::new(None, pairs.into_iter().map(|(key, _)| key).collect()));
+		}
+		self.inner.batch_keys(rng, batch, version).await
+	}
+
+	/// Retrieve a batched scan over a specific range of keys in the datastore.
+	///
+	/// This function fetches key-value pairs, in batches, with multiple
+	/// requests to the underlying datastore.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn batch_keys_vals(
+		&self,
+		rng: KeyRange<'_>,
+		batch: u32,
+		version: Option<u64>,
+	) -> Result<Batch<(Vec<u8>, Val)>> {
+		if self.absence.holds() {
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
+		}
+		if self.speculated(&rng, version) {
+			return Ok(Batch::new(None, self.speculative_pairs(&rng, true).await?));
+		}
+		self.inner.batch_keys_vals(rng, batch, version).await
+	}
+
+	// --------------------------------------------------
+	// Savepoint functions
+	// --------------------------------------------------
+	//
+	// A save point covers the storage write set, the buffered index deltas and
+	// the record writes noted here, so all three are framed at once. Only
+	// [`crate::Transaction`] frames them, so it owns the save-point API and
+	// calls the engine through `inner` directly.
+	//
+	// There is no save-point wrapper here. `Transaction` derefs to `Transactor`,
+	// so a wrapper would be reachable from any `Transaction` and could roll back
+	// storage without the index and record-write frames. `inner` stays reachable
+	// because `Transaction` needs it, so callers must not use it to skip those
+	// frames.
+
+	// --------------------------------------------------
+	// Timestamp functions
+	// --------------------------------------------------
+
+	/// Get the current monotonic timestamp
+	pub async fn timestamp(&self) -> Result<BoxTimeStamp> {
+		self.inner.timestamp().await
+	}
+
+	/// Get the current safe (closed) watermark timestamp — the versionstamp at or
+	/// below which every committed transaction is final and visible. Defaults to
+	/// the monotonic timestamp; distributed backends override it.
+	pub async fn safe_timestamp(&self) -> Result<BoxTimeStamp> {
+		self.inner.safe_timestamp().await
+	}
+
+	/// Returns the timestamp implementation of the stamps [`Self::timestamp`]
+	/// mints, which key the change feed and the live-query events.
+	pub fn timestamp_impl(&self) -> BoxTimeStampImpl {
+		self.inner.timestamp_impl()
+	}
+
+	/// Returns the timestamp implementation of the version a versioned read
+	/// takes, through which a `VERSION <datetime>` clause is converted.
+	pub fn version_impl(&self) -> BoxTimeStampImpl {
+		self.inner.version_impl()
+	}
+}
+
+/// A [`KeysResult`] of `pairs`' keys.
+fn keys_result(pairs: impl Iterator<Item = (Vec<u8>, Val)>) -> KeysResult {
+	let mut result = KeysResult::default();
+	for (key, _) in pairs {
+		result.key_bytes += key.len() as u64;
+		result.keys.push(key);
+	}
+	result
+}
+
+/// A [`ScanResult`] of `pairs`.
+fn scan_result(pairs: impl IntoIterator<Item = (Vec<u8>, Val)>) -> ScanResult {
+	let mut result = ScanResult::default();
+	for (key, value) in pairs {
+		result.key_bytes += key.len() as u64;
+		result.value_bytes += value.len() as u64;
+		result.values.push((key, value));
+	}
+	result
+}
+
+/// `pairs`, in key order, in the order a scan in direction `dir` yields them,
+/// the first `skip` left out.
+fn ordered(mut pairs: Vec<(Vec<u8>, Val)>, dir: Direction, skip: u32) -> Vec<(Vec<u8>, Val)> {
+	if matches!(dir, Direction::Backward) {
+		pairs.reverse();
+	}
+	pairs.drain(..(skip as usize).min(pairs.len()));
+	pairs
+}
+
+/// A cursor counted open on the transaction for as long as it lives ([`crate::absence`]).
+struct Counted<'a, C: ?Sized> {
+	inner: Box<C>,
+	absence: &'a crate::absence::Absence,
+}
+
+impl<'a, C: ?Sized> Counted<'a, C> {
+	/// Wraps `inner`, a cursor [`crate::absence::Absence::cursor_opened`] has counted open.
+	fn new(inner: Box<C>, absence: &'a crate::absence::Absence) -> Self {
+		Self {
+			inner,
+			absence,
+		}
+	}
+}
+
+impl<C: ?Sized> Drop for Counted<'_, C> {
+	fn drop(&mut self) {
+		self.absence.cursor_closed();
+	}
+}
+
+impl<'a> ScanCursorKeys for Counted<'a, dyn ScanCursorKeys + 'a> {
+	fn next_batch<'s>(
+		&'s mut self,
+		limit: u32,
+	) -> common::future::BoxFut<'s, Result<surrealdb_kvs::api::KeysBatch<'s>>> {
+		self.inner.next_batch(limit)
+	}
+
+	fn for_each<'s>(
+		&'s mut self,
+		limit: u32,
+		f: &'s mut dyn surrealdb_kvs::api::KeyVisitor,
+	) -> common::future::BoxFut<'s, Result<ScanChunkStats>> {
+		self.inner.for_each(limit, f)
+	}
+}
+
+impl<'a> ScanCursorVals for Counted<'a, dyn ScanCursorVals + 'a> {
+	fn next_batch<'s>(
+		&'s mut self,
+		limit: u32,
+	) -> common::future::BoxFut<'s, Result<surrealdb_kvs::api::ValsBatch<'s>>> {
+		self.inner.next_batch(limit)
+	}
+
+	fn for_each<'s>(
+		&'s mut self,
+		limit: u32,
+		f: &'s mut dyn surrealdb_kvs::api::ValVisitor,
+	) -> common::future::BoxFut<'s, Result<ScanChunkStats>> {
+		self.inner.for_each(limit, f)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::api::BoxFut;
+	use surrealdb_kvs::{RangeCursor, Result as KvsResult, TransactionType};
+
+	use super::*;
+
+	/// A view that opens nothing: only its presence is observed.
+	struct StubView;
+
+	impl Snapshot for StubView {
+		fn open<'a>(
+			&'a self,
+			_: KeyRange<'a>,
+			_: Direction,
+			_: Option<u64>,
+		) -> BoxFut<'a, KvsResult<Box<dyn RangeCursor + 'a>>> {
+			unreachable!("the view is only asked for, never read")
+		}
+	}
+
+	/// A transaction on the in-memory backend that, unlike the backend, can give a view.
+	struct Viewing(Box<dyn Transactable>);
+
+	impl Transactable for Viewing {
+		fn kind(&self) -> &'static str {
+			self.0.kind()
+		}
+		fn closed(&self) -> bool {
+			self.0.closed()
+		}
+		fn writeable(&self) -> bool {
+			self.0.writeable()
+		}
+		fn cancel(&self) -> BoxFut<'_, KvsResult<()>> {
+			self.0.cancel()
+		}
+		fn commit(&self) -> BoxFut<'_, KvsResult<()>> {
+			self.0.commit()
+		}
+		fn exists<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, KvsResult<bool>> {
+			self.0.exists(key, version)
+		}
+		fn get<'a>(
+			&'a self,
+			key: Key<'a>,
+			version: Option<u64>,
+		) -> BoxFut<'a, KvsResult<Option<Val>>> {
+			self.0.get(key, version)
+		}
+		fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, KvsResult<()>> {
+			self.0.set(key, val)
+		}
+		fn put<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, KvsResult<()>> {
+			self.0.put(key, val)
+		}
+		fn putc<'a>(
+			&'a self,
+			key: Key<'a>,
+			val: Val,
+			chk: Option<Val>,
+		) -> BoxFut<'a, KvsResult<()>> {
+			self.0.putc(key, val, chk)
+		}
+		fn del<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, KvsResult<()>> {
+			self.0.del(key)
+		}
+		fn delc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, KvsResult<()>> {
+			self.0.delc(key, chk)
+		}
+		fn keys<'a>(
+			&'a self,
+			rng: KeyRange<'a>,
+			limit: u32,
+			skip: u32,
+			version: Option<u64>,
+		) -> BoxFut<'a, KvsResult<KeysResult>> {
+			self.0.keys(rng, limit, skip, version)
+		}
+		fn keysr<'a>(
+			&'a self,
+			rng: KeyRange<'a>,
+			limit: u32,
+			skip: u32,
+			version: Option<u64>,
+		) -> BoxFut<'a, KvsResult<KeysResult>> {
+			self.0.keysr(rng, limit, skip, version)
+		}
+		fn scan<'a>(
+			&'a self,
+			rng: KeyRange<'a>,
+			limit: u32,
+			skip: u32,
+			version: Option<u64>,
+		) -> BoxFut<'a, KvsResult<ScanResult>> {
+			self.0.scan(rng, limit, skip, version)
+		}
+		fn scanr<'a>(
+			&'a self,
+			rng: KeyRange<'a>,
+			limit: u32,
+			skip: u32,
+			version: Option<u64>,
+		) -> BoxFut<'a, KvsResult<ScanResult>> {
+			self.0.scanr(rng, limit, skip, version)
+		}
+		fn new_save_point(&self) -> BoxFut<'_, KvsResult<()>> {
+			self.0.new_save_point()
+		}
+		fn release_last_save_point(&self) -> BoxFut<'_, KvsResult<()>> {
+			self.0.release_last_save_point()
+		}
+		fn rollback_to_save_point(&self) -> BoxFut<'_, KvsResult<()>> {
+			self.0.rollback_to_save_point()
+		}
+		fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+			Some(Arc::new(StubView))
+		}
+	}
+
+	async fn viewing_storage() -> Box<dyn Transactable> {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let (tx, _) = builder.new_transaction(TransactionType::Read).await.unwrap();
+		Box::new(Viewing(tx))
+	}
+
+	async fn writing_storage() -> Box<dyn Transactable> {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let (tx, _) = builder.new_transaction(TransactionType::Write).await.unwrap();
+		tx
+	}
+
+	/// The key of record `id` of table `tb` in namespace 1, database 2.
+	fn record_key(tb: &str, id: i64) -> Key<'static> {
+		use surrealdb_kvs::key::KVKey;
+		crate::key::schema::RecordKey {
+			ns: crate::catalog::NamespaceId(1),
+			db: crate::catalog::DatabaseId(2),
+			tb: std::borrow::Cow::Owned(tb.into()),
+			id: std::borrow::Cow::Owned(surrealdb_expr::val::RecordIdKey::Number(id)),
+		}
+		.encode_key()
+		.unwrap()
+	}
+
+	fn fenced(tb: &str) -> crate::triggers::FencedTable {
+		(crate::catalog::NamespaceId(1), crate::catalog::DatabaseId(2), tb.into())
+	}
+
+	/// A batched write and a batched delete record every table they write a key of, as single
+	/// writes do, so that a fence on one of those tables sees the transaction.
+	#[tokio::test]
+	async fn a_batched_write_notes_every_table_it_writes() {
+		let tr = Transactor::new(writing_storage().await);
+		tr.setm(vec![(record_key("a", 1), b"1".to_vec()), (record_key("b", 1), b"1".to_vec())])
+			.await
+			.unwrap();
+		tr.delm(vec![record_key("c", 1)]).await.unwrap();
+		let written = tr.written.lock();
+		for table in ["a", "b", "c"] {
+			assert!(written.writes_table(&fenced(table)), "table {table} is noted");
+		}
+		assert!(!written.writes_table(&fenced("d")));
+	}
+
+	/// A batch that writes or deletes a record id's doc-ID forward mapping ends each such write
+	/// once the batch returns, as a single write does, so no forward-mapping write is left open.
+	#[tokio::test]
+	async fn a_batched_write_ends_every_forward_mapping_write() {
+		use surrealdb_kvs::key::KVSubspace;
+		let root = crate::key::schema::TblRoot {
+			ns: crate::catalog::NamespaceId(1),
+			db: crate::catalog::DatabaseId(2),
+			tb: std::borrow::Cow::Owned("a".into()),
+		}
+		.encode_bound()
+		.unwrap();
+		let mapping = |id: u8| {
+			let mut key = root.as_slice().to_vec();
+			key.extend_from_slice(crate::triggers::DOC_LOOKUP_TAG);
+			key.push(id);
+			Key::from(key)
+		};
+		let tr = Transactor::new(writing_storage().await);
+		let before = tr.doc_lookup_writes().expect("no write is open");
+		tr.setm(vec![(mapping(1), b"1".to_vec()), (record_key("a", 1), b"1".to_vec())])
+			.await
+			.unwrap();
+		tr.delm(vec![mapping(2)]).await.unwrap();
+		let after = tr.doc_lookup_writes().expect("every forward-mapping write has ended");
+		assert!(after > before, "the batches wrote forward mappings: {before} -> {after}");
+	}
+
+	/// A speculation counts every key a batch writes or deletes, as it counts single writes.
+	#[tokio::test]
+	async fn a_speculated_batch_counts_each_key() {
+		let tr = Transactor::speculative(
+			writing_storage().await,
+			Arc::new(Mutex::new(Some(Overlay::default()))),
+		);
+		tr.setm(vec![(record_key("a", 1), b"1".to_vec()), (record_key("a", 2), b"2".to_vec())])
+			.await
+			.unwrap();
+		tr.delm(vec![record_key("a", 3)]).await.unwrap();
+		assert_eq!(tr.writes.load(std::sync::atomic::Ordering::Acquire), 3);
+	}
+
+	/// A speculation's reads pass through an overlay the storage's view does not hold, so its
+	/// transactor offers no view even over a backend that gives one.
+	#[tokio::test]
+	async fn a_speculating_transaction_gives_no_view() {
+		let plain = Transactor::new(viewing_storage().await);
+		assert!(plain.snapshot().is_some(), "the storage's own view is offered");
+		let speculating =
+			Transactor::speculative(viewing_storage().await, Arc::new(Mutex::new(None)));
+		assert!(speculating.speculating());
+		assert!(speculating.snapshot().is_none());
+	}
+
+	/// A write that flushes a held create records its key in `written` before guarding `absence`
+	/// and closes its write tracking even when the held create fails with `DeferredKeyExists`.
+	#[tokio::test]
+	async fn a_write_notes_its_key_before_guarding_held_creates() {
+		let tr = Transactor::new(writing_storage().await);
+		let existing = record_key("a", 1);
+		tr.set(existing.clone(), b"old".to_vec()).await.unwrap();
+
+		let tr2 = Transactor::new(writing_storage().await);
+		// Seed `existing` in the underlying storage without noting it in `tr2.written`,
+		// then hold a duplicate create on `existing` and trigger a flush via `set` on table `b`.
+		tr2.inner.set(existing.clone(), b"stored".to_vec()).await.unwrap();
+		tr2.put_held(existing.clone(), b"dup".to_vec()).await.unwrap();
+		assert!(tr2.absence.holds(), "create is held in absence");
+
+		let err = tr2.set(existing, b"overwrite".to_vec()).await.unwrap_err();
+		assert!(matches!(err, crate::Error::DeferredKeyExists { .. }), "unexpected: {err:?}");
+		assert!(tr2.doc_lookup_writes().is_some(), "write tracking closed cleanly on error");
+	}
+}

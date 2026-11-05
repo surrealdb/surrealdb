@@ -11,23 +11,114 @@ BENCH_DURATION = { value = "30", condition = { env_not_set = [
 BENCH_SAMPLE_SIZE = { value = "10", condition = { env_not_set = [
     "BENCH_SAMPLE_SIZE",
 ] } }
-BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", condition = { env_not_set = [
+BENCH_FEATURES = { value = "allocator,protocol-ws,kv-mem,kv-surrealkv", condition = { env_not_set = [
     "BENCH_FEATURES",
 ] } }
 # Configure LLVM profiling output to go to target directory instead of repo root
 LLVM_PROFILE_FILE = { value = "target/llvm-cov-target/%p-%m.profraw", condition = { env_not_set = [
     "LLVM_PROFILE_FILE",
 ] } }
-# Adjacent-pair upgrade chain for language upgrade tests. Each consecutive
-# pair (3.0.0 -> 3.0.1, 3.0.1 -> 3.0.2, ...) is exercised as a separate hop.
+# Versions the language upgrade tests hop through.
+#
+# Three axes run over the same test tree, each proving something the others
+# cannot:
+#
+#   LANG_UPGRADE_VERSIONS  adjacent pairs (3.0.0 -> 3.0.1, 3.0.1 -> 3.0.2, ...).
+#                          Proves each release can read the one before it. Also
+#                          the version list the cumulative walk uses.
+#   LANG_UPGRADE_SEEDS     every seed straight to the current checkout. Proves
+#                          today's build reads bytes an *old* release wrote,
+#                          with no intermediate binary in between to migrate or
+#                          rebuild them. Adjacent pairs cannot show this: the
+#                          oldest writer HEAD ever sees is the release directly
+#                          before it.
+#   LANG_UPGRADE_CHAIN     one datastore carried through every listed version in
+#                          order, for the tests that declare `[test.chain]`.
+#                          Proves a structure created once stays correct while
+#                          every release in turn maintains it.
+#
 # The trailing `..` token resolves to a path-based version, which the runner
 # cargo-builds against the current checkout — this is the "main" target.
+#
+# The chain lists every *stable* release on the 3.x line in order. Betas are
+# omitted: once a minor goes stable nobody upgrades from its betas, and a beta
+# left in the chain only displaces the stable that shipped after it. A beta
+# belongs here only while its minor is unreleased. Each new release must be
+# appended before `..`, or the last hop silently widens into a multi-release
+# jump and the versions users actually upgrade from stop being covered.
+#
+# `;` separates independent chains; hops are only made within a chain. A hop that
+# cannot work — one spanning a defect in a released binary that no
+# `version`/`importing-version` gate can express — is excluded by breaking the
+# chain there, leaving every other pair covered.
+#
+# Release order is not version order: a patch on an older line can ship after a
+# newer line and carry a catalog revision the newer line's early releases
+# predate. 3.1.6 is such a release. It writes `TableDefinition` at revision 3,
+# which 3.2.0 and 3.2.1 cannot decode, so upgrading onto either fails outright;
+# its first valid target is 3.2.2. It therefore forms its own chain rather than
+# sitting between 3.1.5 and 3.2.0, where it would both break the 3.1.5 -> 3.2.0
+# hop and assert an upgrade path that does not exist. That chain starts at 3.1.5
+# so the in-line patch upgrade onto it stays covered as well.
+#
+# 3.2.5 and 3.2.6 also shipped after the 3.3 line began, 3.2.6 after 3.3.4, but
+# every 3.3 release reads what they write, so they keep their version-order
+# place before 3.3.0.
 #
 # Every numeric entry must have a published binary at
 #   https://download.surrealdb.com/v{ver}/surreal-v{ver}.{platform}.{tgz|exe}
 # Override `LANG_UPGRADE_VERSIONS` to test alternative chains locally.
-LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0-beta.1,3.1.0-beta.2,..", condition = { env_not_set = [
+LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,3.2.5,3.2.6,3.3.0,3.3.1,3.3.2,3.3.3,3.3.4,..;3.1.5,3.1.6,3.2.2", condition = { env_not_set = [
     "LANG_UPGRADE_VERSIONS",
+] } }
+
+# Versions the cumulative walk carries one datastore through.
+#
+# Deliberately not the same list as the adjacent-pair chain. A walk must not pass
+# through a release that demands a manual repair. The property the walk measures
+# is that a structure created once survives being maintained by every release in
+# turn; a release that forces a `REBUILD INDEX` replaces that structure, so
+# everything after it reads what the rebuild wrote rather than what the original
+# writer left.
+#
+# Repairs are a pairwise concern, and the pairwise axis covers them properly; the
+# chain runner refuses to schedule a test whose repair would fire mid-walk.
+#
+# This is one ordered list, not several: the runner flattens `;` to `,` because a
+# walk cannot skip a version. A release that can only be upgraded onto a target
+# further down the list therefore cannot take part at all — 3.1.6 is omitted for
+# that reason, and the pair and seed axes carry it instead.
+LANG_UPGRADE_CHAIN = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,3.2.5,3.2.6,3.3.0,3.3.1,3.3.2,3.3.3,3.3.4,..", condition = { env_not_set = [
+    "LANG_UPGRADE_CHAIN",
+] } }
+
+# Seeds for the every-release-to-HEAD axis. One release per minor plus the ends
+# of each line: enough to cover every stored format the 3.x series produced
+# without paying for all twenty-five. Add the newest release here as well as to
+# the chain above. 3.1.6 rather than 3.1.5 stands for the end of the 3.1 line, and
+# this axis is the only one that carries it all the way to HEAD. 3.2.4 stays
+# beside 3.2.6, the end of the 3.2 line: it is the last 3.2 release to write the
+# first revision of the ANN pending entries and the reclaim state, which 3.2.5
+# moved to their second.
+#
+# 3.3.0-beta.3 earns its place on a different ground from the rest. The 3.3
+# pre-releases are the only published binaries with a table-level shared doc-ID
+# space but no injective forward mapping (`!dj`): every stable release to 3.2.4
+# is per-index, and 3.3.0 writes `!dj` alongside `!di`. So it is the only seed
+# that gives migration 3 (the injective forward doc-ID rebuild) a mapping to
+# rebuild, and dropping it would leave that rebuild with no released source at
+# all. Its presence is a statement about the code paths this axis reaches, not
+# about which releases are supported upgrade sources — `doc/UPGRADING.md`
+# answers that, and answers it with stable releases only.
+LANG_UPGRADE_SEEDS = { value = "3.0.0,3.0.5,3.1.0,3.1.6,3.2.0,3.2.4,3.2.6,3.3.0-beta.3,3.3.0,3.3.4", condition = { env_not_set = [
+    "LANG_UPGRADE_SEEDS",
+] } }
+
+# Releases whose RocksDB store the current checkout must open as SurrealKV: the
+# latest stable release of each line that still ships `rocksdb://`. Each must
+# also be listed in LANG_UPGRADE_SEEDS, so the binaries are already cached.
+LANG_UPGRADE_MIGRATION_SOURCES = { value = "3.2.4,3.3.0", condition = { env_not_set = [
+    "LANG_UPGRADE_MIGRATION_SOURCES",
 ] } }
 
 # --------------------------------------------------
@@ -40,11 +131,33 @@ description = "Check documentation generation"
 command = "cargo"
 args = [
     "doc",
+    "--locked",
     "--no-deps",
     "--package",
     "surrealdb",
     "--features",
-    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-surrealkv,http,scripting,jwks",
+]
+
+# Doctests need their own task: every other test task here runs under
+# `cargo nextest`, which does not execute doctests at all.
+#
+# The feature list is `ci-docs` plus `kv-surrealkv`. A doc example behind a
+# `#[cfg(feature = ...)]` item is invisible to rustdoc unless that feature is
+# on, so every engine carrying examples has to be enabled here or its examples
+# go unchecked.
+[tasks.ci-doctests]
+category = "CI - CHECK"
+description = "Compile and run the SDK's documentation examples"
+command = "cargo"
+args = [
+    "test",
+    "--locked",
+    "--package",
+    "surrealdb",
+    "--doc",
+    "--features",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-surrealkv,http,scripting,jwks",
 ]
 
 [tasks.ci-fmt]
@@ -93,6 +206,7 @@ description = "Run clippy linting"
 command = "cargo"
 args = [
     "clippy",
+    "--locked",
     "--workspace",
     "--all-targets",
     "--features",
@@ -100,6 +214,37 @@ args = [
     "--tests",
     "--benches",
     "--bins",
+    "--",
+    "-D",
+    "warnings",
+]
+
+# `ci-clippy` lints with `${ALL_FEATURES}`, which enables `surrealism`. Every
+# `cfg(not(feature = "surrealism"))` item is therefore compiled out and never
+# linted by it. This task lints those items by checking the library targets
+# (`--lib`) of `surrealdb-core` and `surrealdb-expr` with default features off.
+#
+# `--no-default-features` is required, not merely dropping `surrealism` from the
+# feature list: `surrealdb-server`'s default set includes `surrealism`, and the
+# root package's default is `surrealdb-server/default`, so defaults would pull it
+# back in. Clippy only lints the packages named with `--package`, and
+# `--no-default-features` only applies to the selected root packages, so both
+# `surrealdb-core` and `surrealdb-expr` are listed explicitly.
+[tasks.ci-clippy-no-surrealism]
+category = "CI - CHECK"
+description = "Run clippy linting with surrealism disabled"
+command = "cargo"
+args = [
+    "clippy",
+    "--locked",
+    "--package",
+    "surrealdb-core",
+    "--package",
+    "surrealdb-expr",
+    "--no-default-features",
+    "--features",
+    "surrealdb-core/kv-mem",
+    "--lib",
     "--",
     "-D",
     "warnings",
@@ -128,6 +273,7 @@ description = "Run code quality linting (release)"
 command = "cargo"
 args = [
     "clippy",
+    "--locked",
     "--workspace",
     "--all-targets",
     "--profile",
@@ -143,61 +289,190 @@ args = [
 ]
 
 [tasks.ci-feature-check]
+# One target directory means one Cargo build lock. Keep package checks ordered
+# locally; CI runs the same leaf tasks in isolated matrix jobs with kache.
 category = "CI - CHECK"
 description = "Verify each feature compiles individually"
 run_task = { name = [
     "ci-feature-check-sdk",
+    "ci-feature-check-engine-local",
     "ci-feature-check-core",
     "ci-feature-check-server",
-], fork = true, parallel = true }
+    "ci-feature-check-kvs",
+    "ci-feature-check-kvs-any",
+    "ci-feature-check-datastore",
+    "ci-feature-check-runtime",
+    "ci-feature-check-idx",
+    "ci-feature-check-types",
+    "ci-feature-check-expr",
+], fork = true, parallel = false }
 
 [tasks.ci-feature-check-sdk]
 category = "CI - CHECK"
 description = "Verify each SDK feature compiles individually"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb",
     "--each-feature",
-    "--exclude-features",
-    "kv-indxdb",
     "--exclude-no-default-features",
+]
+
+[tasks.ci-feature-check-engine-local]
+category = "CI - CHECK"
+description = "Verify each embedded engine feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--locked",
+    "--package",
+    "surrealdb-engine-local",
+    "--each-feature",
 ]
 
 [tasks.ci-feature-check-core]
 category = "CI - CHECK"
 description = "Verify each core feature compiles individually"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb-core",
     "--each-feature",
-    "--exclude-features",
-    "kv-indxdb",
+]
+
+[tasks.ci-feature-check-kvs]
+category = "CI - CHECK"
+description = "Verify each surrealdb-kvs feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--locked",
+    "--package",
+    "surrealdb-kvs",
+    "--each-feature",
+]
+
+[tasks.ci-feature-check-kvs-any]
+category = "CI - CHECK"
+description = "Verify each surrealdb-kvs-any feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--locked",
+    "--package",
+    "surrealdb-kvs-any",
+    "--each-feature",
+]
+
+[tasks.ci-feature-check-datastore]
+category = "CI - CHECK"
+description = "Verify each surrealdb-datastore feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--locked",
+    "--package",
+    "surrealdb-datastore",
+    "--each-feature",
+]
+
+[tasks.ci-feature-check-runtime]
+category = "CI - CHECK"
+description = "Verify each surrealdb-runtime feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--locked",
+    "--package",
+    "surrealdb-runtime",
+    "--each-feature",
+]
+
+[tasks.ci-feature-check-idx]
+category = "CI - CHECK"
+description = "Verify each surrealdb-idx feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--locked",
+    "--package",
+    "surrealdb-idx",
+    "--each-feature",
+]
+
+[tasks.ci-feature-check-types]
+category = "CI - CHECK"
+description = "Verify each surrealdb-types feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--locked",
+    "--package",
+    "surrealdb-types",
+    "--each-feature",
+]
+
+[tasks.ci-feature-check-expr]
+category = "CI - CHECK"
+description = "Verify each surrealdb-expr feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--locked",
+    "--package",
+    "surrealdb-expr",
+    "--each-feature",
 ]
 
 [tasks.ci-feature-check-server]
 category = "CI - CHECK"
 description = "Verify each server feature compiles individually (with storage-mem base)"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb-server",
     "--each-feature",
     "--exclude-features",
-    "storage-indxdb,tokio-console",
+    "tokio-console",
     "--include-features",
     "storage-mem",
     "--exclude-no-default-features",
@@ -210,6 +485,19 @@ install_crate = "cargo-machete"
 command = "cargo"
 args = ["machete"]
 
+[tasks.ci-catalog-schema]
+category = "CI - CHECK"
+description = "Check the catalog's stored-grammar numbering against its schema lock, and against the base branch's lock when CATALOG_SCHEMA_BASE names one"
+command = "cargo"
+args = [
+    "test",
+    "--locked",
+    "-p",
+    "surrealdb-catalog",
+    "--test",
+    "catalog_schema_lock",
+]
+
 [tasks.ci-check-imports]
 category = "CI - CHECK"
 description = "Check for disallowed std::time imports (use web_time instead)"
@@ -217,10 +505,19 @@ script = '''
     #!/bin/bash
     set -euo pipefail
 
+    # Each scan below records its own verdict and the script exits once at the
+    # end, so one scan's findings never hide the other's.
+    FAILED=0
+
     # Scan for direct use of std::time::Instant or std::time::SystemTime in Rust source files.
     # These should be imported from web_time instead for WASM compatibility.
     # std::time::Duration is fine and not flagged.
     # language-tests/ and fuzz/ are excluded (separate workspaces).
+    #
+    # Note: this does not match the brace form (`std::time::{Duration, Instant}`),
+    # which reaches the same clock. Widening it surfaces hits in crates that never
+    # build for wasm, so making it accurate means scoping it the way the
+    # tokio::time scan below is scoped.
 
     MATCHES=$(grep -rn --include='*.rs' \
         -E 'std::time::(Instant|SystemTime)' \
@@ -237,10 +534,59 @@ script = '''
         done
         COUNT=$(echo "$MATCHES" | wc -l | tr -d ' ')
         echo "Found $COUNT disallowed std::time import(s). Use web_time instead."
-        exit 1
+        FAILED=1
+    else
+        echo "No disallowed std::time imports found."
     fi
 
-    echo "No disallowed std::time imports found."
+    # The crates below all compile for wasm32-unknown-unknown, where tokio's
+    # timers compile but trap: they read the clock through std::time, and while
+    # nothing requests tokio's `time` feature for wasm, feature unification
+    # supplies it anyway. `common::time` is the same API over the right clock
+    # for each target, so any `tokio::time` here is a latent wasm panic.
+    #
+    # Tests are exempt — they only ever run natively.
+    #
+    # `tokio::spawn` has the same shape of problem (no runtime on wasm) but is
+    # not checked here: a `#[cfg(not(target_family = "wasm"))]` block around it
+    # is perfectly correct, and grep cannot see cfg, so every hit would be a
+    # false positive.
+
+    TIMERS=$(grep -rn --include='*.rs' \
+        -E 'tokio::time::(Instant|Interval|MissedTickBehavior|interval|sleep|timeout|timeout_at)\b' \
+        --exclude-dir=target \
+        --exclude-dir=tests \
+        --exclude='*test*.rs' \
+        surrealdb/core/src surrealdb/common/src surrealdb/datastore/src surrealdb/kvs/src \
+        surrealdb/expr/src surrealdb/idx/src surrealdb/embedded/src \
+        | grep -v '^surrealdb/common/src/time.rs:' || true)
+
+    # Everything that survives the path filters still has to clear the
+    # per-file test module, which no path convention marks.
+    TIMERS=$(echo "$TIMERS" | while IFS= read -r match; do
+        [ -z "$match" ] && continue
+        file=${match%%:*}
+        rest=${match#*:}
+        line=${rest%%:*}
+        # The nearest preceding `mod test`/`mod tests` opener, if any.
+        start=$(grep -n -E '^(\t| )*mod tests?( |\{)' "$file" | cut -d: -f1 | awk -v L="$line" '$1 < L' | tail -1)
+        [ -n "$start" ] || echo "$match"
+    done)
+
+    if [ -n "$TIMERS" ]; then
+        echo "$TIMERS" | while IFS= read -r match; do
+            echo "error: $match"
+            echo "  --> Use common::time instead of tokio::time so the timer works on WASM."
+            echo ""
+        done
+        COUNT=$(echo "$TIMERS" | wc -l | tr -d ' ')
+        echo "Found $COUNT disallowed tokio::time use(s). Use common::time instead."
+        FAILED=1
+    else
+        echo "No disallowed tokio::time uses found."
+    fi
+
+    exit $FAILED
 '''
 
 [tasks.ci-check-wasm]
@@ -250,19 +596,257 @@ script = '''
 # 1. Install LLVM from Homebrew: `brew install llvm`
 # 2. Add the LLVM bin directory to your PATH: `echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.zshrc`
 category = "CI - CHECK"
-description = "Run code quality checks (WASM)"
-command = "cargo"
-env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js"' }
-args = [
-    "check",
-    "--locked",
-    "--package",
-    "surrealdb",
-    "--features",
-    "protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks",
-    "--target",
-    "wasm32-unknown-unknown",
-]
+description = "Run clippy linting (WASM)"
+# `RUSTFLAGS` replaces `.cargo/config.toml`'s target rustflags, so the
+# getrandom backend and the 4 MiB stack set there are repeated here.
+env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js" -C link-arg=-zstack-size=4194304 ${SURREAL_NIGHTLY_RUSTFLAGS}' }
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    # Clippy rather than `cargo check`: the host-target `ci-clippy` never
+    # compiles `cfg(target_family = "wasm")` items, so this is the only pass
+    # that lints them.
+    #
+    # All browser-targeted crates (`surrealdb`, `surrealdb-core`,
+    # `surrealdb-embedded`, `surrealdb-wasm`, and `surrealism-verify`) are
+    # linted in a unified feature graph with `--no-default-features` and
+    # `surrealdb/default` explicitly enabled so `surrealdb-core`'s default
+    # features (`shaped`, `graphql`, `gql`) remain disabled, matching the
+    # embedded browser engine's feature set while compiling `surrealdb-core`
+    # and its dependency tree once.
+    wasm_features="surrealdb/default,surrealdb/protocol-ws,surrealdb/protocol-http,surrealdb/kv-mem,surrealdb/kv-surrealkv,surrealdb/http,surrealdb/jwks,surrealdb-wasm/kv-mem,surrealdb-wasm/kv-surrealkv"
+
+    cargo clippy --locked \
+        --package surrealdb \
+        --package surrealdb-core \
+        --package surrealdb-embedded \
+        --package surrealdb-wasm \
+        --package surrealism-verify \
+        --no-default-features \
+        --features "$wasm_features" \
+        --target wasm32-unknown-unknown \
+        -- -D warnings
+
+    # Re-lint `surrealdb-wasm` with the `debug` console panic hook enabled.
+    # Retaining the same selected package set keeps Cargo's resolved feature
+    # graph identical across shared dependencies so all other workspace crates
+    # remain fresh and only `surrealdb-wasm` is re-checked.
+    cargo clippy --locked \
+        --package surrealdb \
+        --package surrealdb-core \
+        --package surrealdb-embedded \
+        --package surrealdb-wasm \
+        --package surrealism-verify \
+        --no-default-features \
+        --features "$wasm_features,surrealdb-wasm/debug" \
+        --target wasm32-unknown-unknown \
+        -- -D warnings
+
+    # The core engine on its own, as a downstream edge wasm build takes it: no
+    # default features and none of the SDK or embedded engine feature sets.
+    cargo clippy --locked --package surrealdb-core \
+        --no-default-features --features gql,http \
+        --target wasm32-unknown-unknown \
+        -- -D warnings
+
+    # The SDK for a WASI host, as a client: the WebSocket engine and TLS, without
+    # the SurrealQL parser (its JWT dependency brings in `js-sys` on every wasm
+    # target). The SDK's remote engines are the browser's, which import
+    # JavaScript a WASI runtime does not provide, so a WASI build must not
+    # depend on `wasm-bindgen` through the SDK: a module that does links and
+    # then fails to instantiate. The tree is captured before it is searched, so
+    # a failing `cargo tree` stops the task and `grep -q` closing the pipe early
+    # cannot mask a match.
+    wasi_tree=$(cargo tree --locked --package surrealdb \
+        --no-default-features --features protocol-ws,rustls \
+        --target wasm32-wasip2 --edges normal --prefix none)
+    if grep -q '^wasm-bindgen ' <<<"$wasi_tree"; then
+        echo "error: the SDK pulls wasm-bindgen into a wasm32-wasip2 build"
+        exit 1
+    fi
+'''
+
+[tasks.ci-wasm-size-budget]
+# Builds the edge worker bundles (`surrealdb-edge-size-probe`: lean, full and
+# the edge entry) for wasm32 with the `edge` profile, runs `wasm-opt -Oz`, and
+# fails when a bundle is over its budget. A bundle whose budget is 0 is
+# reported and not checked. Needs binaryen's `wasm-opt` and a clang that
+# targets wasm32 (see `ci-check-wasm`). `cargo make ci-wasm-size-budget --
+# --toolchain nightly` checks the Cloudflare build with the pinned nightly, and
+# `--names` writes each function's size alongside. The budgets and flags are
+# documented in the script.
+category = "CI - CHECK"
+description = "Check the edge wasm bundles against their size budgets"
+command = "scripts/wasm-size-budget.sh"
+args = ["${@}"]
+
+[tasks.ci-sql-frontend]
+private = true
+category = "CI - CHECK"
+description = "Run comprehensive checks for the SQL front ends named in _SQL_FE"
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    for fe in ${_SQL_FE}; do
+        pkg="surrealdb-$fe"
+        dir="surrealdb/$fe"
+        echo "Running clippy on $pkg..."
+        cargo clippy --locked -p "$pkg" --all-features --all-targets -- -D warnings
+
+        echo "Running tests on $pkg..."
+        cargo test --locked -p "$pkg" --features fuzzing
+
+        echo "Checking wasm32 compilation for $pkg..."
+        cargo check --locked -p "$pkg" --target wasm32-unknown-unknown
+
+        echo "Verifying weight fence and dependency allowlist for $pkg..."
+        allowlist="$dir/deps-allowlist.txt"
+        actual_deps=$(cargo tree --locked -e normal -p "$pkg" --prefix none --format '{p}' | sed -E 's/ v[0-9].*//' | sort -u)
+        while IFS= read -r dep; do
+            if [[ -n "$dep" ]] && ! grep -q -F -x "$dep" "$allowlist"; then
+                echo "::error::Normal dependency '$dep' is not in $allowlist"
+                exit 1
+            fi
+        done <<< "$actual_deps"
+
+        echo "Checking oracle denylist on all edge kinds for $pkg..."
+        all_edges=$(cargo tree --locked -e normal,dev,build -p "$pkg" --prefix none --format '{p}')
+        for banned in pg_query prost bindgen clang-sys; do
+            if echo "$all_edges" | grep -q "$banned"; then
+                echo "::error::Banned dependency '$banned' found in $pkg dependency tree"
+                exit 1
+            fi
+        done
+
+        echo "Checking import fence for common..."
+        if [[ -d "$dir/src/common" ]]; then
+            if grep -rn "use crate::" "$dir/src/common/" 2>/dev/null | grep -v "use crate::common::"; then
+                echo "::error::Common import fence violated: src/common/ must only import from crate::common::"
+                exit 1
+            fi
+        fi
+
+        echo "Running grep bans on $dir/src..."
+        if grep -rn -E "\b(tracing|log)::(info|warn|debug|trace|error)\b|\b(info|warn|debug|trace|error)!\(" "$dir/src/" 2>/dev/null; then
+            echo "::error::Logging or tracing macros found in $dir/src/"
+            exit 1
+        fi
+
+        if grep -rn -E "\bassert(!|_eq!|_ne!)\(" "$dir/src/" 2>/dev/null; then
+            echo "::error::assert! macros found in non-test src"
+            exit 1
+        fi
+
+        if [[ -d "$dir/src/print" ]] && grep -rn "format!.*'{.*}'" "$dir/src/print/" 2>/dev/null; then
+            echo "::error::Raw '{ interpolation found in print code"
+            exit 1
+        fi
+
+        if grep -rn -E "(/private/tmp/|/Users/|claude-)" "$dir/src/" "$dir/tests/" 2>/dev/null; then
+            echo "::error::Local or session paths found in $dir"
+            exit 1
+        fi
+
+        if grep -rn -E "::=" "$dir/src/" "$dir/docs/" 2>/dev/null; then
+            echo "::error::Prohibited ISO BNF reference found in $dir"
+            exit 1
+        fi
+
+        if [[ -f "$dir/fuzz/Cargo.toml" ]]; then
+            echo "Checking fuzz satellite workspace for $dir..."
+            cargo check --locked --manifest-path "$dir/fuzz/Cargo.toml"
+        fi
+    done
+
+    echo "✅ SQL front-end checks passed successfully!"
+'''
+
+[tasks.ci-pgsql]
+category = "CI - CHECK"
+description = "Run comprehensive checks for surrealdb-pgsql"
+env = { _SQL_FE = "pgsql" }
+run_task = "ci-sql-frontend"
+
+[tasks.ci-mysql]
+category = "CI - CHECK"
+description = "Run comprehensive checks for surrealdb-mysql"
+env = { _SQL_FE = "mysql" }
+run_task = "ci-sql-frontend"
+
+[tasks.ci-pgsql-wire]
+category = "CI - INTEGRATION TESTS"
+description = "Run the PostgreSQL wire protocol end-to-end integration tests"
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "Running PostgreSQL wire protocol e2e tests..."
+    cargo test --locked -p surrealdb-pgwire --test e2e
+
+    echo "✅ PostgreSQL wire protocol integration tests passed successfully!"
+'''
+
+# The cross-dialect suite drives both listeners through the MySQL crate, so it
+# runs with the MySQL lane.
+[tasks.ci-mysql-wire]
+category = "CI - INTEGRATION TESTS"
+description = "Run the MySQL wire protocol end-to-end and cross-dialect integration tests"
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "Running MySQL wire protocol e2e tests..."
+    cargo test --locked -p surrealdb-mywire --test e2e
+
+    echo "Running cross-dialect wire protocol integration tests..."
+    cargo test --locked -p surrealdb-mywire --test cross_dialect
+
+    echo "✅ MySQL wire protocol integration tests passed successfully!"
+'''
+
+[tasks.ci-wire]
+category = "CI - INTEGRATION TESTS"
+description = "Run the wire protocol end-to-end integration tests for PostgreSQL and MySQL"
+run_task = { name = ["ci-pgsql-wire", "ci-mysql-wire"] }
+
+[tasks.ci-sql-clients]
+category = "CI - INTEGRATION TESTS"
+description = "Drive the real psql, pg_isready, pg_dump, pgbench, mysql, mysqladmin, mysqldump and mysqlslap clients against the PostgreSQL and MySQL wire listeners"
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    # CI hands in the shared `devopt` binary through SURREAL_BIN; locally the binary is built here.
+    if [ -z "${SURREAL_BIN:-}" ]; then
+        cargo build --locked --no-default-features --features storage-mem,http,postgres,mysql
+    fi
+
+    # Version-log the clients so a client upgrade shows up next to any failure.
+    psql --version
+    mysql --version
+
+    CI=true tests/sql-clients/run.sh all
+
+    echo "✅ SQL client tests passed successfully!"
+'''
+
+[tasks.ci-orm-compat]
+category = "CI - INTEGRATION TESTS"
+description = "Run the targeted Prisma, Drizzle and TypeORM harness against the PostgreSQL wire listener, gated by expected-failures.json"
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    node --version
+
+    # CI hands in the shared `devopt` server through ORM_COMPAT_SERVER; locally the example listener is
+    # built here, in the dev profile.
+    ORM_COMPAT_PROFILE="${ORM_COMPAT_PROFILE:-dev}" tests/orm-compat/run.sh pr
+
+    echo "✅ ORM compatibility subset passed successfully!"
+'''
 
 # --------------------------------------------------
 # Integration Tests
@@ -280,7 +864,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,storage-surrealkv,http,scripting,jwks,cli",
+    "storage-mem,storage-surrealkv,http,scripting,jwks,cli,mcp",
     "--workspace",
     "--test",
     "cli_integration",
@@ -328,25 +912,6 @@ args = [
     "ws_integration",
 ]
 
-[tasks.ci-ml-integration]
-category = "CI - INTEGRATION TESTS"
-description = "Run ML integration tests"
-command = "cargo"
-env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = [
-    "RUST_LOG",
-] } } }
-args = [
-    "test",
-    "--locked",
-    "--features",
-    "storage-mem,ml",
-    "--workspace",
-    "--test",
-    "ml_integration",
-    "--",
-    "ml_integration",
-]
-
 [tasks.ci-graphql-integration]
 category = "CI - INTEGRATION TESTS"
 description = "Run GraphQL integration tests"
@@ -385,9 +950,31 @@ args = [
     "gql_integration",
 ]
 
+[tasks.ci-pg-integration]
+category = "CI - INTEGRATION TESTS"
+description = "Run Postgres wire protocol integration tests"
+command = "cargo"
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = [
+    "RUST_LOG",
+] } } }
+# `postgres` must stay in this feature list: the suite sits behind
+# `#[cfg(feature = "postgres")]` on this package's own feature, which the
+# default feature set does not enable. Without it the suite compiles away and
+# reports "running 0 tests" while still exiting 0.
+args = [
+    "test",
+    "--locked",
+    "--features",
+    "storage-mem,postgres",
+    "--test",
+    "pg_integration",
+    "--",
+    "pg_integration",
+]
+
 [tasks.ci-integration-all]
 category = "CI - INTEGRATION TESTS"
-description = "Single compile: CLI, HTTP, WS, ML, GraphQL, and GQL integration suites"
+description = "Single compile: CLI, HTTP, WS, ML, GraphQL, GQL, and Postgres integration suites"
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
@@ -397,7 +984,7 @@ args = [
     "--workspace",
     "--no-default-features",
     "--features",
-    "storage-mem,storage-surrealkv,http,scripting,jwks,cli,ml,graphql,gql",
+    "storage-mem,storage-surrealkv,http,scripting,jwks,cli,graphql,gql,postgres",
     "--test",
     "cli_integration",
     "--test",
@@ -405,11 +992,11 @@ args = [
     "--test",
     "ws_integration",
     "--test",
-    "ml_integration",
-    "--test",
     "graphql_integration",
     "--test",
     "gql_integration",
+    "--test",
+    "pg_integration",
 ]
 
 # --------------------------------------------------
@@ -448,9 +1035,7 @@ category = "CI - INTEGRATION TESTS"
 description = "Run all integration tests"
 dependencies = [
     "ci-api-integration-mem",
-    "ci-api-integration-rocksdb",
     "ci-api-integration-surrealkv",
-    "ci-api-integration-tikv",
     "ci-api-integration-http",
     "ci-api-integration-ws",
     "ci-api-integration-any",
@@ -490,14 +1075,6 @@ run_task = { name = [
     "test-api-integration",
 ], fork = true, parallel = true }
 
-[tasks.ci-api-integration-rocksdb]
-category = "CI - INTEGRATION TESTS"
-description = "Run API integration tests with the RocksDB engine"
-env = { _TEST_API_ENGINE = "rocksdb", _TEST_FEATURES = "kv-rocksdb" }
-run_task = { name = [
-    "test-api-integration",
-], fork = true, parallel = true }
-
 [tasks.ci-api-integration-surrealkv]
 category = "CI - INTEGRATION TESTS"
 description = "Run API integration tests with the SurrealKV engine"
@@ -506,20 +1083,13 @@ run_task = { name = [
     "test-api-integration",
 ], fork = true, parallel = false }
 
-[tasks.ci-api-integration-tikv]
-category = "CI - INTEGRATION TESTS"
-description = "Run API integration tests with the TiKV engine"
-env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
-run_task = { name = [
-    "start-tikv",
-    "test-api-integration",
-    "stop-tikv",
-], fork = true, parallel = false }
-
 # --------------------------------------------------
 # KVS tests
 # --------------------------------------------------
 
+# The engine features are listed because these tests drive whole statements
+# through a datastore (analyzers, users, API handlers, a default-built
+# datastore's maintenance tasks); the backend is the only part that varies.
 [tasks.test-kvs]
 private = true
 command = "cargo"
@@ -532,44 +1102,96 @@ args = [
     "surrealdb-core",
     "--no-default-features",
     "--features",
-    "${_TEST_FEATURES}",
+    "${_TEST_FEATURES},crypto-digest,crypto-password,html-sanitize,cjk-tokenizer,observability,vector-index,fulltext,regex-unicode,collate,geo,scram,text-diff,url,maintenance-tasks,api,files,search,encoding",
     "--lib",
     "--",
     "kvs::tests",
 ]
 
+[tasks.test-kvs-any]
+private = true
+command = "cargo"
+env = { RUST_BACKTRACE = 1 }
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-kvs-any",
+    "--features",
+    "${_TEST_FEATURES}",
+]
+
+# The datastore's lease-contention test runs once per on-disk backend. Its
+# in-memory run needs no feature and comes with the ordinary workspace suite.
+[tasks.test-datastore]
+private = true
+command = "cargo"
+env = { RUST_BACKTRACE = 1 }
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-datastore",
+    "--features",
+    "${_TEST_FEATURES}",
+]
+
+[tasks.test-kvs-crate]
+private = true
+command = "cargo"
+env = { RUST_BACKTRACE = 1 }
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "${_TEST_CRATE}",
+]
+
+# The whole `surrealdb-idx` suite, built with the lane's backend feature. The
+# crate selects no backend of its own and its tests run on the in-memory store;
+# its `kv-*` features add the tests that race against an on-disk or distributed
+# store, which only a lane supplying that backend can run. Only usable from a
+# lane whose `_TEST_FEATURES` names a backend `surrealdb-idx` declares: cargo
+# rejects any other feature name.
+[tasks.test-idx]
+private = true
+command = "cargo"
+env = { RUST_BACKTRACE = 1 }
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-idx",
+    "--features",
+    "${_TEST_FEATURES}",
+]
+
 [tasks.ci-kvs-mem]
+# Each leaf runs Cargo/nextest against the same target directory. Order the
+# builds; nextest parallelizes the tests within each suite.
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the in-memory engine"
-env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
+env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem", _TEST_CRATE = "surrealdb-kvs-mem" }
 run_task = { name = [
     "test-kvs",
-], fork = true, parallel = true }
-
-[tasks.ci-kvs-rocksdb]
-category = "CI - INTEGRATION TESTS"
-description = "Run KVS integration tests with the RocksDB engine"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
-run_task = { name = [
-    "test-kvs",
-], fork = true, parallel = true }
+    "test-kvs-any",
+    "test-kvs-crate",
+], fork = true, parallel = false }
 
 [tasks.ci-kvs-surrealkv]
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the SurrealKV engine"
-env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv", _TEST_CRATE = "surrealdb-kvs-surrealkv" }
 run_task = { name = [
     "test-kvs",
-], fork = true, parallel = false }
-
-[tasks.ci-kvs-tikv]
-category = "CI - INTEGRATION TESTS"
-description = "Run KVS integration tests with the TiKV engine"
-env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
-run_task = { name = [
-    "start-tikv",
-    "test-kvs",
-    "stop-tikv",
+    "test-kvs-any",
+    "test-kvs-crate",
+    "test-datastore",
+    "test-idx",
 ], fork = true, parallel = false }
 
 # --------------------------------------------------
@@ -583,16 +1205,14 @@ description = "Run SurrealQL language tests with specified engine"
 script = """
     #!/bin/bash -ex
     cd language-tests
+    # The runner embeds the engine, so the `devopt` profile (see its comment in
+    # language-tests/Cargo.toml) sets how fast every query in the suite runs.
     if [ "${_TEST_LANG_FEATURES}" != "" ]; then
-        cargo build --features ${_TEST_LANG_FEATURES}
+        cargo build --locked --profile devopt --features ${_TEST_LANG_FEATURES}
     else
-        cargo build
+        cargo build --locked --profile devopt
     fi
-    if [ "${_TEST_API_ENGINE}" = "tikv" ]; then
-        ./target/debug/surrealql-test --color always run --no-wip --jobs 1 --backend ${_TEST_API_ENGINE}
-    else
-        ./target/debug/surrealql-test --color always run --no-wip --jobs 12 --backend ${_TEST_API_ENGINE}
-    fi
+    ./target/devopt/surrealql-test --color always run --no-wip --jobs 12 --backend ${_TEST_API_ENGINE}
 """
 
 [tasks.ci-lang-test-all]
@@ -600,23 +1220,13 @@ category = "CI - LANGUAGE TESTS"
 description = "Run all language tests"
 dependencies = [
     "ci-lang-test-mem",
-    "ci-lang-test-rocksdb",
     "ci-lang-test-surrealkv",
-    "ci-lang-test-tikv",
 ]
 
 [tasks.ci-lang-test-mem]
 category = "CI - LANGUAGE TESTS"
 description = "Run SurrealQL language tests with the in-memory engine"
 env = { _TEST_API_ENGINE = "memory", _TEST_LANG_FEATURES = "" }
-run_task = { name = [
-    "test-lang",
-], fork = true, parallel = true }
-
-[tasks.ci-lang-test-rocksdb]
-category = "CI - LANGUAGE TESTS"
-description = "Run SurrealQL language tests with the RocksDB engine"
-env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "backend-rocksdb" }
 run_task = { name = [
     "test-lang",
 ], fork = true, parallel = true }
@@ -629,15 +1239,175 @@ run_task = { name = [
     "test-lang",
 ], fork = true, parallel = false }
 
-[tasks.ci-lang-test-tikv]
+# The never-declined lane. It runs the whole `tests/` tree, `wip` files
+# included, and reports every statement the engine declined to run as JSON
+# lines in `language-tests/target/declines-<backend>.jsonl`. Grading is
+# unchanged, so the runner exits non-zero when tests fail; the task fails only
+# when the run did not reach its `declines: N` line, i.e. the runner crashed.
+[tasks.test-lang-decline-report]
+private = true
 category = "CI - LANGUAGE TESTS"
-description = "Run SurrealQL language tests with the TiKV engine"
-env = { _TEST_API_ENGINE = "tikv", _TEST_LANG_FEATURES = "backend-tikv" }
+description = "Report the statements the engine declines to run, without failing on their count"
+script = """
+    #!/bin/bash -ex
+    cd language-tests
+    if [ "${_TEST_LANG_FEATURES}" != "" ]; then
+        cargo build --locked --features ${_TEST_LANG_FEATURES}
+    else
+        cargo build --locked
+    fi
+    log="target/declines-${_TEST_API_ENGINE}.log"
+    set +e
+    ./target/debug/surrealql-test --color never run --jobs 12 --backend ${_TEST_API_ENGINE} \
+        --report-declines "target/declines-${_TEST_API_ENGINE}.jsonl" 2>&1 | tee "$log"
+    set -e
+    grep -q '^declines: [0-9]' "$log"
+"""
+
+[tasks.ci-lang-decline-report-mem]
+category = "CI - LANGUAGE TESTS"
+description = "Report declined statements with the in-memory engine"
+env = { _TEST_API_ENGINE = "memory", _TEST_LANG_FEATURES = "" }
 run_task = { name = [
-    "start-tikv",
-    "test-lang",
-    "stop-tikv",
-], fork = true, parallel = false }
+    "test-lang-decline-report",
+], fork = true, parallel = true }
+
+[tasks.ci-lang-decline-report-surrealkv]
+category = "CI - LANGUAGE TESTS"
+description = "Report declined statements with the SurrealKV engine"
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "backend-surrealkv" }
+run_task = { name = [
+    "test-lang-decline-report",
+], fork = true, parallel = true }
+
+[tasks.ci-lang-decline-report]
+category = "CI - LANGUAGE TESTS"
+description = "Report the statements the engine declines to run on mem and surrealkv"
+dependencies = [
+    "ci-lang-decline-report-mem",
+    "ci-lang-decline-report-surrealkv",
+]
+
+[tasks.ci-parser]
+category = "CI - CHECK"
+description = "Run the SurrealQL parser's golden corpus check and its invariant harnesses"
+run_task = { name = ["ci-parser-golden", "ci-parser-invariants"] }
+
+[tasks.ci-parser-golden]
+category = "CI - CHECK"
+description = "Run the SurrealQL parser's golden corpus check"
+# Pins every entry point's tree, plain and pretty-printed, or its rendered
+# error on the corpus. The `golden` profile drops the release profile's LTO,
+# which the check does not need and which dominates its build time.
+script = """
+#!/bin/bash -ex
+cargo run --locked --profile golden -p surrealdb-expr --example golden
+"""
+
+[tasks.ci-parser-invariants]
+category = "CI - CHECK"
+description = "Run the SurrealQL parser's unit tests and invariant harnesses"
+# The invariant harnesses check streaming, round-tripping, the depth ceilings
+# and the tree invariants under mutation.
+script = """
+#!/bin/bash -ex
+cargo test --locked -p surrealdb-parser-next -p surrealdb-expr
+for mode in --fuzz --stream --round-trip --depth-probe --logical; do
+    cargo run --locked --release -p surrealdb-expr --example invariants -- "$mode"
+done
+"""
+
+# --------------------------------------------------
+# Language tests over a remote --endpoint
+# --------------------------------------------------
+#
+# These exercise the test harness's `remote` path: instead of an embedded
+# in-process datastore, the suite runs against a *running* `surreal` server over
+# the API (ws://), so the network + serialization path and the remote executor
+# are covered in CI. The server is started to match the embedded harness's
+# datastore exactly (see language-tests/README.md) — otherwise scripting / file
+# functions / OpenGQL / TEMPFILES / `INFO FOR ROOT` diverge. `_TEST_API_ENGINE`
+# selects the *server's* backend (memory or surrealkv); the harness itself is
+# backend-agnostic over the API.
+#
+# Tests run concurrently, each in a namespace of its own, so the one server is
+# shared. A test that reaches outside its namespace declares
+# `[env] remote-exclusive` and is given the server to itself for its duration;
+# one that needs to and does not fails rather than races.
+
+[tasks.test-lang-remote]
+private = true
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests against a running server over --endpoint"
+script = """
+#!/bin/bash -ex
+# The server's default features cover every backend plus scripting / graphql /
+# opengql / surrealism, so one build serves any `_TEST_API_ENGINE`.
+cargo build --locked -p surreal-db
+SERVER="$(pwd)/target/debug/surreal"
+
+# Run from `language-tests` so the harness resolves its `tests/` directory the
+# same way the embedded path does (relative to CWD).
+cd language-tests
+cargo build --locked --features remote
+# The remote executor's own unit tests (endpoint-URL mapping, EXPLAIN metric
+# redaction) live behind the `remote` feature, and no other CI job builds it —
+# the embedded language-test jobs only `cargo build` and run the binary. Without
+# this they never execute.
+cargo test --locked --features remote
+HARNESS="$(pwd)/target/debug/surrealql-test"
+TESTS_DIR="$(pwd)/tests"
+WORK="$(mktemp -d)"
+mkdir -p "${WORK}/sort"
+
+# A dedicated, uncommon port so the suite doesn't collide with whatever else
+# might hold 8000 (Docker, a dev server) on a CI runner or a developer's box.
+HOST="127.0.0.1:18283"
+
+case "${_TEST_API_ENGINE}" in
+    memory|mem) DATA="memory" ;;
+    surrealkv)  DATA="surrealkv:${WORK}/data" ;;
+    *) echo "test-lang-remote: unsupported _TEST_API_ENGINE='${_TEST_API_ENGINE}'"; exit 1 ;;
+esac
+
+# Start the server with the same datastore configuration the embedded harness
+# builds: all capabilities + all experimental targets, a temp dir for TEMPFILES
+# sorting, the tests tree on the file allowlist, and no bootstrap `main` ns.
+SURREAL_FILE_ALLOWLIST="${TESTS_DIR}" "${SERVER}" start \
+    --bind "${HOST}" \
+    --user root --pass root \
+    --allow-all --allow-experimental '*' \
+    --temporary-directory "${WORK}/sort" --no-defaults \
+    --log warn "${DATA}" &
+SERVER_PID=$!
+trap 'kill "${SERVER_PID}" 2>/dev/null || true' EXIT
+
+# Wait for the server to accept connections before running the suite.
+for _ in $(seq 1 60); do
+    if curl -sf "http://${HOST}/health" >/dev/null 2>&1; then READY=1; break; fi
+    sleep 1
+done
+if [ "${READY:-0}" != "1" ]; then echo "test-lang-remote: server did not become healthy"; exit 1; fi
+
+# `--backend` is what filters the corpus by `[env] backend`, so it has to name
+# the *server's* engine even though the harness opens no store of its own. Left
+# at its `memory` default the surrealkv leg would skip the tests only a
+# file-backed engine answers, and run the ones only the in-memory engine
+# answers, against a server that is not one.
+"${HARNESS}" --color always run --no-wip --backend "${_TEST_API_ENGINE}" --endpoint "ws://${HOST}"
+"""
+
+[tasks.ci-lang-test-remote-mem]
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests over --endpoint against an in-memory server"
+env = { _TEST_API_ENGINE = "memory" }
+run_task = "test-lang-remote"
+
+[tasks.ci-lang-test-remote-surrealkv]
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests over --endpoint against a SurrealKV server"
+env = { _TEST_API_ENGINE = "surrealkv" }
+run_task = "test-lang-remote"
 
 # --------------------------------------------------
 # Language upgrade tests
@@ -652,45 +1422,165 @@ run_task = { name = [
 # Binaries for tagged versions are downloaded from download.surrealdb.com
 # into language-tests/.binary_cache/ (cached across CI runs). The trailing
 # `..` token in the version list cargo-builds the current checkout.
+#
+# The work is two phases so CI can overlap them. The harness phase compiles the
+# `surrealql-test` binary and runs its own unit tests; it needs nothing from the
+# checkout's `surreal` binary, so CI runs it while that binary is still being
+# built and hands `language-tests/target/debug/surrealql-test` to the axes phase.
+# The axes phase needs both binaries. The `ci-lang-upgrade-test-*` tasks run the
+# two phases back to back for a single machine.
+
+[tasks.lang-upgrade-harness]
+private = true
+category = "CI - LANGUAGE TESTS"
+description = "Build the language upgrade harness and run its own unit tests"
+script = """
+#!/bin/bash -ex
+cd language-tests
+cargo build --locked --features "${_TEST_LANG_FEATURES}"
+# The harness's own unit tests live behind the `upgrade` feature and nothing
+# else in CI runs them: the language-test jobs only `cargo build` and then
+# execute the binary. Without this the version-gate regression tests — the guard
+# against a test silently dropping out of the run set — never execute.
+cargo test --locked --features "${_TEST_LANG_FEATURES}"
+"""
 
 [tasks.test-lang-upgrade]
 private = true
 category = "CI - LANGUAGE TESTS"
-description = "Run SurrealQL language upgrade tests, hopping through adjacent version pairs"
+description = "Run the language upgrade axes (adjacent-pair, seed and cumulative) with a built harness"
 script = """
 #!/bin/bash -ex
+# Needs language-tests/target/debug/surrealql-test, built with the lane's
+# `_TEST_LANG_FEATURES` by `lang-upgrade-harness`.
 # Override _TEST_LANG_UPGRADE_JOBS to tune per-runner concurrency (default 12).
 cd language-tests
-cargo build --features "${_TEST_LANG_FEATURES}"
-IFS=',' read -ra V <<< "${LANG_UPGRADE_VERSIONS}"
-for ((i=0; i<${#V[@]}-1; i++)); do
-    echo "=== Upgrade hop: ${V[$i]} -> ${V[$((i+1))]} (backend=${_TEST_API_ENGINE}) ==="
-    ./target/debug/surrealql-test --color always upgrade \\
-        --from "${V[$i]}" --to "${V[$((i+1))]}" \\
-        --backend "${_TEST_API_ENGINE}" \\
-        --allow-download --no-wip \\
-        --jobs "${_TEST_LANG_UPGRADE_JOBS:-12}"
+JOBS="${_TEST_LANG_UPGRADE_JOBS:-12}"
+# Only `--color` is a global flag; everything else belongs to the `upgrade`
+# subcommand and has to follow it.
+OPTS=(--backend "${_TEST_API_ENGINE}" --allow-download --no-wip --jobs "${JOBS}")
+# A machine without a wasm-capable C toolchain skips the Surrealism module tests
+# with a warning so the rest of the suite stays usable. CI has the toolchain, so
+# here a fixture that will not build is a failure rather than lost coverage.
+export LANG_UPGRADE_REQUIRE_MODULES=1
+
+# Axis 1 — adjacent pairs. `;` separates independent chains, `,` separates
+# versions within one. Adjacent pairs are hopped within a chain; no hop is made
+# across a chain boundary.
+IFS=';' read -ra CHAINS <<< "${LANG_UPGRADE_VERSIONS}"
+for chain in "${CHAINS[@]}"; do
+    IFS=',' read -ra V <<< "${chain}"
+    for ((i=0; i<${#V[@]}-1; i++)); do
+        echo "=== Upgrade hop: ${V[$i]} -> ${V[$((i+1))]} (backend=${_TEST_API_ENGINE}) ==="
+        ./target/debug/surrealql-test --color always upgrade "${OPTS[@]}" \
+            --from "${V[$i]}" --to "${V[$((i+1))]}"
+    done
 done
+
+# Axis 2 — every seed straight to the current checkout, in one invocation so the
+# runs fan out across all workers rather than serialising per version.
+echo "=== Upgrade seeds: ${LANG_UPGRADE_SEEDS} -> .. (backend=${_TEST_API_ENGINE}) ==="
+./target/debug/surrealql-test --color always upgrade "${OPTS[@]}" \
+    --from "${LANG_UPGRADE_SEEDS}" --to ..
+
+# Axis 3 — cumulative walk. One datastore per test, carried through every
+# version in order. Only tests declaring `[test.chain]` are selected, and the
+# chain separator is dropped because a walk cannot skip a version.
+echo "=== Upgrade chain walk: ${LANG_UPGRADE_CHAIN} (backend=${_TEST_API_ENGINE}) ==="
+./target/debug/surrealql-test --color always upgrade "${OPTS[@]}" \
+    --chain "${LANG_UPGRADE_CHAIN//;/,}"
 """
+
+[tasks.test-lang-upgrade-rocksdb-migration]
+private = true
+category = "CI - LANGUAGE TESTS"
+description = "Run the RocksDB-to-SurrealKV migration axis with a built harness"
+script = """
+#!/bin/bash -ex
+# Needs language-tests/target/debug/surrealql-test, built with the `upgrade`
+# feature by `lang-upgrade-harness`. The released binary writes `rocksdb://DIR`
+# and the current checkout then opens the same DIR as `surrealkv://DIR`, once
+# unversioned and once with `?versioned=true`.
+cd language-tests
+JOBS="${_TEST_LANG_UPGRADE_JOBS:-12}"
+OPTS=(--backend rocksdb-migration --allow-download --no-wip --jobs "${JOBS}")
+export LANG_UPGRADE_REQUIRE_MODULES=1
+
+echo "=== RocksDB migration: ${LANG_UPGRADE_MIGRATION_SOURCES} -> .. (unversioned) ==="
+./target/debug/surrealql-test --color always upgrade "${OPTS[@]}" \
+    --from "${LANG_UPGRADE_MIGRATION_SOURCES}" --to ..
+
+echo "=== RocksDB migration: ${LANG_UPGRADE_MIGRATION_SOURCES} -> .. (versioned) ==="
+./target/debug/surrealql-test --color always upgrade "${OPTS[@]}" --versioned \
+    --from "${LANG_UPGRADE_MIGRATION_SOURCES}" --to ..
+"""
+
+[tasks.ci-lang-upgrade-run-rocksdb-migration]
+category = "CI - LANGUAGE TESTS"
+description = "Run the RocksDB-to-SurrealKV migration axis, using a built harness"
+run_task = "test-lang-upgrade-rocksdb-migration"
+
+[tasks.ci-lang-upgrade-test-rocksdb-migration]
+category = "CI - LANGUAGE TESTS"
+description = "Run the RocksDB-to-SurrealKV migration axis"
+env = { _TEST_LANG_FEATURES = "upgrade" }
+run_task = { name = [
+    "lang-upgrade-harness",
+    "test-lang-upgrade-rocksdb-migration",
+], fork = true, parallel = false }
+
+[tasks.ci-lang-upgrade-harness-surrealkv]
+category = "CI - LANGUAGE TESTS"
+description = "Build the language upgrade harness for the SurrealKV backend"
+env = { _TEST_LANG_FEATURES = "upgrade" }
+run_task = "lang-upgrade-harness"
+
+[tasks.ci-lang-upgrade-run-surrealkv]
+category = "CI - LANGUAGE TESTS"
+description = "Run the language upgrade axes with the SurrealKV backend, using a built harness"
+env = { _TEST_API_ENGINE = "surrealkv" }
+run_task = "test-lang-upgrade"
 
 [tasks.ci-lang-upgrade-test-surrealkv]
 category = "CI - LANGUAGE TESTS"
 description = "Run language upgrade tests with the SurrealKV backend"
 env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "upgrade" }
-run_task = "test-lang-upgrade"
-
-[tasks.ci-lang-upgrade-test-rocksdb]
-category = "CI - LANGUAGE TESTS"
-description = "Run language upgrade tests with the RocksDB backend"
-env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "upgrade,backend-rocksdb" }
-run_task = "test-lang-upgrade"
+run_task = { name = [
+    "lang-upgrade-harness",
+    "test-lang-upgrade",
+], fork = true, parallel = false }
 
 [tasks.ci-lang-upgrade-test-all]
 category = "CI - LANGUAGE TESTS"
 description = "Run language upgrade tests on all supported backends"
 dependencies = [
     "ci-lang-upgrade-test-surrealkv",
-    "ci-lang-upgrade-test-rocksdb",
+    "ci-lang-upgrade-test-rocksdb-migration",
+]
+
+# --------------------------------------------------
+# MCP tests
+# --------------------------------------------------
+
+# The MCP suite needs its own task because the workspace test tasks run with
+# `--no-default-features`, which suppresses `surrealdb-mcp/server-http` and so
+# compiles the `#![cfg(feature = "server-http")]` HTTP and audit test files
+# down to empty binaries. Naming the package and its transports explicitly is
+# what makes the transport-level and audit-pipeline coverage actually execute.
+[tasks.ci-mcp-test]
+category = "CI - MCP TESTS"
+description = "Run the MCP server test suite across every transport"
+command = "cargo"
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-mcp",
+    "--no-default-features",
+    "--features",
+    "server-http,transport-io",
+    "--all-targets",
 ]
 
 # --------------------------------------------------
@@ -707,19 +1597,161 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism,gql",
+    # `surrealdb-embedded/kv-mem` has to be named explicitly: it is that crate's
+    # own feature, and `storage-mem` on the SDK enables `surrealdb-core/kv-mem`
+    # without touching it. Everything in the embedded engine that needs a
+    # datastore is gated on it, tests included. `surreal-ext/sign` likewise:
+    # `--no-default-features` drops it, and without it `surreal-ext` has no
+    # `sign` command for the module trust tests to sign with.
+    "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem,surreal-ext/sign",
     "--workspace",
+    "--lib",
+    "--bins",
+    "--tests",
     "--exclude", "demo",
     "--exclude", "surrealdb-profiling",
+    "--exclude", "surrealdb-wasm",
+    "--exclude", "surrealdb-node",
+    "--exclude", "surrealdb-edge-size-probe",
+    "--exclude", "surrealdb-parser-size-probe",
+    "--exclude", "surrealism-demo",
     "--",
     "--skip", "api_integration",
     "--skip", "cli_integration",
     "--skip", "http_integration",
     "--skip", "ws_integration",
-    "--skip", "ml_integration",
     "--skip", "graphql_integration",
     "--skip", "gql_integration",
-    "--skip", "database_upgrade",
+]
+
+[tasks.ci-workspace-test-archive]
+category = "CI - WORKSPACE TESTS"
+description = "Build the workspace test binaries once and pack them for ci-workspace-test-run"
+command = "cargo"
+args = [
+    "nextest",
+    "archive",
+    "--locked",
+    "--no-default-features",
+    "--features",
+    "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem,surreal-ext/sign",
+    "--workspace",
+    "--lib",
+    "--bins",
+    "--tests",
+    "--exclude", "demo",
+    "--exclude", "surrealdb-profiling",
+    "--exclude", "surrealdb-wasm",
+    "--exclude", "surrealdb-node",
+    "--exclude", "surrealdb-edge-size-probe",
+    "--exclude", "surrealdb-parser-size-probe",
+    "--exclude", "surrealism-demo",
+    # Omit DWARF sections on the heavy leaf workspace crates in both `profile.dev`
+    # (`.rlib`/`--bins`) and `profile.test` (`--lib`/`--tests` test binaries)
+    # while keeping package settings untouched for dependencies so third-party
+    # and upstream workspace crates share their `kache` entries. Symbol tables
+    # (`.symtab`/`.strtab`) and unwind tables remain intact for panic backtraces.
+    "--config", "profile.dev.package.surrealdb-core.debug=\"none\"",
+    "--config", "profile.test.package.surrealdb-core.debug=\"none\"",
+    "--config", "profile.dev.package.surrealdb-server.debug=\"none\"",
+    "--config", "profile.test.package.surrealdb-server.debug=\"none\"",
+    "--config", "profile.dev.package.surrealdb.debug=\"none\"",
+    "--config", "profile.test.package.surrealdb.debug=\"none\"",
+    "--config", "profile.dev.package.surreal-db.debug=\"none\"",
+    "--config", "profile.test.package.surreal-db.debug=\"none\"",
+    "--config", "profile.dev.package.surreal-ext.debug=\"none\"",
+    "--config", "profile.test.package.surreal-ext.debug=\"none\"",
+    "--config", "profile.dev.package.surrealdb-mcp.debug=\"none\"",
+    "--config", "profile.test.package.surrealdb-mcp.debug=\"none\"",
+    "--config", "profile.dev.package.surrealdb-engine-local.debug=\"none\"",
+    "--config", "profile.test.package.surrealdb-engine-local.debug=\"none\"",
+    "--config", "profile.dev.package.surrealdb-embedded.debug=\"none\"",
+    "--config", "profile.test.package.surrealdb-embedded.debug=\"none\"",
+    "--config", "profile.dev.package.surrealdb-pgwire.debug=\"none\"",
+    "--config", "profile.test.package.surrealdb-pgwire.debug=\"none\"",
+    "--config", "profile.dev.package.surrealdb-mywire.debug=\"none\"",
+    "--config", "profile.test.package.surrealdb-mywire.debug=\"none\"",
+    # Exclude the integration test binaries that `ci-workspace-test-run` skips,
+    # so the archive neither compiles nor links those targets.
+    "-E", "not binary(/^(api|cli_integration|http_integration|ws_integration|graphql_integration|gql_integration)$/)",
+    "--archive-file", "target/workspace-tests.tar.zst",
+]
+
+# Runs one shard (CI_SHARD of CI_SHARDS) of the archive built by
+# `ci-workspace-test-archive`, with the same skips as `ci-workspace-test`.
+[tasks.ci-workspace-test-run]
+category = "CI - WORKSPACE TESTS"
+description = "Run one shard of the packed workspace tests"
+command = "cargo"
+args = [
+    "nextest",
+    "run",
+    "--archive-file", "target/workspace-tests.tar.zst",
+    "--workspace-remap", ".",
+    "--partition", "count:${CI_SHARD}/${CI_SHARDS}",
+    "--",
+    "--skip", "api_integration",
+    "--skip", "cli_integration",
+    "--skip", "http_integration",
+    "--skip", "ws_integration",
+    "--skip", "graphql_integration",
+    "--skip", "gql_integration",
+]
+
+# Defaults apply only when the caller has not set the shard variables, so a
+# matrix leg's exported CI_SHARD / CI_SHARDS reach the `--partition` expansion.
+[tasks.ci-workspace-test-run.env]
+CI_SHARD = { value = "1", condition = { env_not_set = ["CI_SHARD"] } }
+CI_SHARDS = { value = "1", condition = { env_not_set = ["CI_SHARDS"] } }
+
+[tasks.ci-cjk-test]
+category = "CI - WORKSPACE TESTS"
+description = "Run the surrealdb-idx tests with the embedded dictionaries enabled"
+# The `cjk-embed-*` features are off everywhere else, so every test behind them
+# is invisible to the other lanes: `ci-feature-check-idx` only runs `cargo
+# check`, which does not build test code at all. Without this lane the tests
+# that need an embedded dictionary would compile nowhere and run nowhere.
+#
+# This runs the crate's whole library suite rather than filtering to the
+# segmentation modules. A dictionary is needed wherever it is used, not only
+# where it is parsed — the cache that loads one is tested beside the cache, not
+# beside the tokenizer — so a filter naming modules quietly stops covering a
+# gated test added outside them, which is the very gap this lane exists to
+# close. Re-running the rest of the crate's tests costs seconds against the
+# dictionary download that dominates this lane.
+#
+# Enabling the features makes each dictionary crate's build script download its
+# dictionary, which is why this is its own lane rather than a flag added to the
+# workspace run: the cost lands only here.
+command = "cargo"
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-idx",
+    "--features",
+    "cjk-embed-all",
+    "--lib",
+]
+
+# The compile-phase timers' event tests are built only with `compile-timers`, which no other
+# lane enables, so they compile and run nowhere else.
+[tasks.ci-compile-timers-test]
+category = "CI - WORKSPACE TESTS"
+description = "Run the compile-phase timers' tests in surrealdb-core"
+command = "cargo"
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-core",
+    "--features",
+    "compile-timers,kv-mem",
+    "--lib",
+    "--",
+    "timers::",
 ]
 
 # --------------------------------------------------
@@ -767,8 +1799,13 @@ args = [
     "lcov.info",
     "--locked",
     "--no-default-features",
+    # Mirror the `ci-integration-all` feature set so the integration suites
+    # (cli/http/ws/graphql/gql/pg) run under coverage, plus the coverage-only
+    # allocator features. `cli` is required for the `sql` subcommand, and
+    # `postgres` for the `pg_integration` suite, which is compiled away without
+    # it.
     "--features",
-    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,cli,graphql,gql,postgres",
     "--workspace",
     # Exclude surrealism packages due to wasmtime complexity and stdin loops
     "--exclude", "surrealism-runtime",
@@ -798,11 +1835,39 @@ script = """
     # Set up LLVM coverage instrumentation environment
     eval "$(cargo llvm-cov show-env --export-prefix)"
 
+    # `language-tests` declares its own workspace, so every crate under test is
+    # an out-of-workspace path dependency and cargo-llvm-cov instruments none
+    # of them by default. Only the crates named here are compiled with
+    # `-C instrument-coverage`, and a crate left out is absent from the report
+    # entirely rather than showing up as uncovered — so this list is what
+    # defines the measured surface, and a crate added to the harness's
+    # dependency graph must be added here too.
+    #
+    # These are every first-party library crate the harness pulls in. The
+    # first-party proc-macro crates (surrealdb-keyspace-macro,
+    # surrealdb-stored-derive, surrealdb-types-derive) are deliberately
+    # absent: they execute while the compiler runs, so instrumenting them
+    # measures the build, not the tests.
+    COVERAGE_PACKAGES="surrealdb-catalog surrealdb-cnf surrealdb-collections \
+        surrealdb-common surrealdb-core surrealdb-datastore surrealdb-expr \
+        surrealdb-gql surrealdb-iam surrealdb-idx surrealdb-kvs \
+        surrealdb-kvs-any surrealdb-kvs-mem surrealdb-observe \
+        surrealdb-parse-common surrealdb-rpc surrealdb-runtime \
+        surrealdb-strand surrealdb-parser-next surrealdb-types"
+    export __CARGO_LLVM_COV_RUSTC_WRAPPER_CRATE_NAMES="surrealql_test,surrealql_test_tests,$(echo $COVERAGE_PACKAGES | tr ' -' ',_')"
+
     # Clean previous coverage artifacts
     cargo llvm-cov clean --workspace
+    # `clean --workspace` evicts only this workspace's own artifacts. The crates
+    # under test sit outside it, and the variable above is not part of cargo's
+    # fingerprint, so their existing artifacts would otherwise be reused as-is
+    # and the instrumentation request silently ignored. `cargo clean` rejects a
+    # package that is not in the graph, so a crate dropped from the workspace
+    # fails here rather than lingering in the list.
+    cargo clean --locked $(for p in $COVERAGE_PACKAGES; do echo -p $p; done)
 
     # Build language-tests with instrumentation
-    cargo build
+    cargo build --locked
 
     # Run the language tests (this exercises surrealdb-core)
     ./target/debug/surrealql-test --color always run --no-wip --jobs 3 --backend memory
@@ -812,15 +1877,47 @@ script = """
         --lcov \
         --output-path ../language-tests-lcov.info \
         --ignore-filename-regex 'language-tests/src/'
+
+    # An instrumentation gap produces a well-formed but empty lcov file, which
+    # the upload accepts without complaint. Assert that the crates under test
+    # reached the report so the failure surfaces here instead of as a coverage
+    # figure that quietly measures nothing. The parser is checked alongside the
+    # two largest crates because it sits outside the pair the report is most
+    # often read for, so it also catches the crate list narrowing back to those
+    # two.
+    for coverage_anchor in core/src/exec expr/src parser-next/src; do
+        if ! grep -q "surrealdb/$coverage_anchor" ../language-tests-lcov.info; then
+            echo "ERROR: no coverage recorded for surrealdb/$coverage_anchor; the crates under test were not instrumented" >&2
+            exit 1
+        fi
+    done
 """
 
 # --------------------------------------------------
 # Services
 # --------------------------------------------------
 
+# The server the remote-engine tests (`ci-api-integration-{http,ws,any}`) and
+# `ci-workspace-*-with-server` run against. By default it is built from this
+# checkout and listens on 127.0.0.1:8000. Three variables point the tests at
+# any other `surreal`, such as a released binary or a docker image, without
+# building one:
+#
+# - `SURREAL_BIN`: a `surreal` binary to start instead of `target/debug/surreal`.
+# - `SURREAL_DOCKER_IMAGE`: an image to run instead, e.g.
+#   `surrealdb/surrealdb:v3.0.0`. Takes precedence over `SURREAL_BIN`.
+# - `SURREAL_TEST_ADDRESS`: the `host:port` the server listens on and the tests
+#   connect to (default `127.0.0.1:8000`).
+#
+# For example:
+#   SURREAL_DOCKER_IMAGE=surrealdb/surrealdb:latest SURREAL_TEST_ADDRESS=127.0.0.1:18000 \
+#     cargo make ci-api-integration-ws
 [tasks.build-surrealdb]
 category = "CI - BUILD"
 private = true
+# `_PREBUILT_SURREAL` set means `target/debug/surreal` was supplied by the
+# caller; `SURREAL_BIN` or `SURREAL_DOCKER_IMAGE` set means no server is built.
+condition = { env_not_set = ["_PREBUILT_SURREAL", "SURREAL_BIN", "SURREAL_DOCKER_IMAGE"] }
 command = "cargo"
 args = [
     "build",
@@ -837,16 +1934,28 @@ dependencies = ["build-surrealdb"]
 script = """
     #!/bin/bash -ex
 
-    target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all --deny-guests &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
+    addr="${SURREAL_TEST_ADDRESS:-127.0.0.1:8000}"
+    name="surreal-test-${_TEST_API_ENGINE}"
+    rm -f /tmp/${name}.pid /tmp/${name}.container
 
-    echo $! > /tmp/surreal-${_TEST_API_ENGINE}.pid
+    if [[ -n "${SURREAL_DOCKER_IMAGE:-}" ]]; then
+        # A local binary inherits the root credentials (`SURREAL_USER`,
+        # `SURREAL_PASS`) from the environment; a container has to be handed them.
+        docker run --detach --rm --name "$name" --publish "${addr}:8000" \
+            --env SURREAL_USER --env SURREAL_PASS --env SURREAL_LOG "$SURREAL_DOCKER_IMAGE" \
+            start ${_START_SURREALDB_PATH} --allow-all --deny-guests --bind 0.0.0.0:8000 \
+            > /tmp/${name}.container
+    else
+        "${SURREAL_BIN:-target/debug/surreal}" start ${_START_SURREALDB_PATH} --allow-all --deny-guests \
+            --bind "$addr" &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
+        echo $! > /tmp/${name}.pid
+    fi
 
     set +e
-    echo "Waiting for surreal to be ready..."
-    tries=0
-    while [[ $tries < 5 ]]; do
-            target/debug/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
-            tries=$((tries + 1))
+    echo "Waiting for surreal to be ready on ${addr}..."
+    for _ in $(seq 1 30); do
+        curl --silent --fail "http://${addr}/health" >/dev/null && echo "Ready!" && exit 0
+        sleep 1
     done
 
     echo "ERROR: Surreal is unhealthy!"
@@ -858,75 +1967,14 @@ category = "CI - SERVICES"
 description = "Stop the local SurrealDB server"
 script = """
     #!/bin/bash -ex
-    kill $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
-    sleep 5
-    kill -9 $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
-"""
-
-[tasks.start-tikv]
-category = "CI - SERVICES"
-description = "Start a local TiKV playground"
-script = """
-    #!/bin/bash -ex
-
-	echo "Installing TiKV playground..."
-    ${HOME}/.tiup/bin/tiup install pd tikv playground
-
-    echo "Cleaning TiKV playground..."
-    ${HOME}/.tiup/bin/tiup clean --all
-    killall -q tiup-playground || true
-    rm -rf ${HOME}/.tiup/data/testing
-
-	echo "Starting TiKV playground..."
-	nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 1 --pd 1 --db 0 --ticdc 0 --tiflash 0 --without-monitor --tag "testing" > /tmp/tiup.log &
-
-    set +e
-	tries=0
-	echo "Waiting for TiKV playground to start..."
-	while [[ $tries -lt 5 ]]; do
-		sleep 5
-		echo "Displaying playground status..."
-		if ! ${HOME}/.tiup/bin/tiup playground display >/dev/null; then
-			tries=$((tries + 1));
-			continue
-		fi
-		exit 0;
-	done
-
-	echo "PANIC: Couldn't start TiKV playground! Here are the logs for the last attempt:"
-    cat /tmp/tiup.log
-
-    exit 1
-"""
-
-[tasks.stop-tikv]
-category = "CI - SERVICES"
-description = "Stop the local TiKV playground"
-script = """
-    #!/bin/bash -ex
-
-    echo "Cleaning TiKV playground..."
-    ${HOME}/.tiup/bin/tiup clean --all
-    killall -q tiup-playground || true
-    rm -rf ${HOME}/.tiup/data/testing
-
-    set +e
-	tries=0
-	echo "Waiting for TiKV playground to stop..."
-	while [[ $tries -lt 5 ]]; do
-		sleep 5
-		echo "Displaying playground status..."
-		if ${HOME}/.tiup/bin/tiup playground display >/dev/null; then
-			tries=$((tries + 1));
-			continue
-		fi
-		exit 0;
-	done
-
-	echo "PANIC: Couldn't stop TiKV playground! Here are the logs for the last attempt:"
-    cat /tmp/tiup.log
-
-    exit 1
+    name="surreal-test-${_TEST_API_ENGINE}"
+    if [[ -f /tmp/${name}.container ]]; then
+        docker stop "$(cat /tmp/${name}.container)" || true
+    else
+        kill $(cat /tmp/${name}.pid) || true
+        sleep 5
+        kill -9 $(cat /tmp/${name}.pid) || true
+    fi
 """
 
 # --------------------------------------------------
@@ -939,6 +1987,7 @@ description = "Run SurrealDB benchmarks"
 command = "cargo"
 args = [
     "bench",
+    "--locked",
     "--quiet",
     "--package",
     "surrealdb",
@@ -948,12 +1997,36 @@ args = [
     "${@}",
 ]
 
-[tasks.bench-target]
+# The `lib-*` targets drive the datastore directly and live with the embedded
+# engine; the `sdk-*` targets drive the SDK's public API. Each half is a
+# separate benchmark binary, so the two dispatch tasks below differ only in the
+# package, the bench name, and where the feature set comes from: the engine
+# crate takes one storage backend per target, the SDK takes `BENCH_FEATURES`
+# because `sdk-ws` needs a protocol feature rather than a backend.
+[tasks.bench-lib-target]
 private = true
 category = "CI - BENCHMARK"
 command = "cargo"
 args = [
     "bench",
+    "--locked",
+    "--package",
+    "surrealdb-engine-local",
+    "--bench",
+    "datastore",
+    "--no-default-features",
+    "--features",
+    "${BENCH_LIB_FEATURES}",
+    "${@}",
+]
+
+[tasks.bench-sdk-target]
+private = true
+category = "CI - BENCHMARK"
+command = "cargo"
+args = [
+    "bench",
+    "--locked",
     "--package",
     "surrealdb",
     "--bench",
@@ -967,44 +2040,32 @@ args = [
 [tasks.bench-lib-mem]
 category = "CI - BENCHMARK"
 description = "Run library benchmarks with the in-memory engine"
-env = { BENCH_DATASTORE_TARGET = "lib-mem" }
-run_task = { name = ["bench-target"] }
-
-[tasks.bench-lib-rocksdb]
-category = "CI - BENCHMARK"
-description = "Run library benchmarks with the RocksDB engine"
-env = { BENCH_DATASTORE_TARGET = "lib-rocksdb" }
-run_task = { name = ["bench-target"] }
+env = { BENCH_DATASTORE_TARGET = "lib-mem", BENCH_LIB_FEATURES = "allocator,kv-mem" }
+run_task = { name = ["bench-lib-target"] }
 
 [tasks.bench-lib-surrealkv]
 category = "CI - BENCHMARK"
 description = "Run library benchmarks with the SurrealKV engine"
-env = { BENCH_DATASTORE_TARGET = "lib-surrealkv" }
-run_task = { name = ["bench-target"] }
+env = { BENCH_DATASTORE_TARGET = "lib-surrealkv", BENCH_LIB_FEATURES = "allocator,kv-surrealkv" }
+run_task = { name = ["bench-lib-target"] }
 
 [tasks.bench-sdk-mem]
 category = "CI - BENCHMARK"
 description = "Run SDK benchmarks with the in-memory engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-mem" }
-run_task = { name = ["bench-target"] }
-
-[tasks.bench-sdk-rocksdb]
-category = "CI - BENCHMARK"
-description = "Run SDK benchmarks with the RocksDB engine"
-env = { BENCH_DATASTORE_TARGET = "sdk-rocksdb" }
-run_task = { name = ["bench-target"] }
+run_task = { name = ["bench-sdk-target"] }
 
 [tasks.bench-sdk-surrealkv]
 category = "CI - BENCHMARK"
 description = "Run SDK benchmarks with the SurrealKV engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-surrealkv" }
-run_task = { name = ["bench-target"] }
+run_task = { name = ["bench-sdk-target"] }
 
 [tasks.bench-sdk-ws]
 category = "CI - BENCHMARK"
 description = "Run SDK benchmarks with the WebSocket engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-ws" }
-run_task = { name = ["bench-target"] }
+run_task = { name = ["bench-sdk-target"] }
 
 # --------------------------------------------------
 # Run all required checks for PR merge
@@ -1017,11 +2078,11 @@ script = """
     #!/bin/bash -e
     echo "Building SDK local tests..."
     cd tests/sdk/local
-    cargo build
+    cargo build --locked
 
     echo "Building SDK remote tests..."
     cd ../remote
-    cargo build
+    cargo build --locked
 """
 
 [tasks.ci-all-required]
@@ -1034,31 +2095,30 @@ dependencies = [
     "ci-check",
     "ci-check-wasm",
     "ci-check-imports",
+    "ci-catalog-schema",
     "ci-feature-check",
     "ci-unused-deps",
     "ci-docs",
+    "ci-doctests",
     # Workspace tests
     "ci-workspace-test",
+    "ci-compile-timers-test",
     # Integration tests
     "ci-cli-integration",
     "ci-http-integration",
     "ci-ws-integration",
-    "ci-ml-integration",
     # KVS tests
     "ci-kvs-mem",
-    "ci-kvs-rocksdb",
     "ci-kvs-surrealkv",
     # SDK build tests
     "ci-sdk-build",
     # SDK tests
     "ci-api-integration-mem",
-    "ci-api-integration-rocksdb",
     "ci-api-integration-surrealkv",
     "ci-api-integration-http",
     "ci-api-integration-ws",
     "ci-api-integration-any",
     # Language tests
     "ci-lang-test-mem",
-    "ci-lang-test-rocksdb",
     "ci-lang-test-surrealkv",
 ]

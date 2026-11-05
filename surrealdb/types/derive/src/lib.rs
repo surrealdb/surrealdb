@@ -190,6 +190,15 @@ pub fn kind(input: TokenStream) -> TokenStream {
 	kind::kind(input)
 }
 
+/// Expansion target of `surrealdb_types::kind!`: `kind!` with the path of the
+/// crate defining `Kind` written first and closed by a `;`. Not meant to be
+/// called directly.
+#[doc(hidden)]
+#[proc_macro]
+pub fn kind_in(input: TokenStream) -> TokenStream {
+	kind::kind_in(input)
+}
+
 /// A procedural macro for writing SQL strings with automatic `ToSql` formatting.
 ///
 /// This macro parses format strings at compile time and generates code that calls

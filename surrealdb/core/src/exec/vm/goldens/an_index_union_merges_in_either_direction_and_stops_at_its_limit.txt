@@ -1,0 +1,74 @@
+### SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age
+{ age: 0, id: pairs:33 }
+{ age: 0, id: pairs:22 }
+{ age: 1, id: pairs:30 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 4, id: pairs:21 }
+{ age: 4, id: pairs:10 }
+{ age: 5, id: pairs:29 }
+{ age: 5, id: pairs:18 }
+{ age: 6, id: pairs:37 }
+{ age: 6, id: pairs:26 }
+{ age: 7, id: pairs:1 }
+{ age: 7, id: pairs:34 }
+{ age: 8, id: pairs:9 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+### SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 8, id: pairs:9 }
+{ age: 7, id: pairs:1 }
+{ age: 7, id: pairs:34 }
+{ age: 6, id: pairs:37 }
+{ age: 6, id: pairs:26 }
+{ age: 5, id: pairs:29 }
+{ age: 5, id: pairs:18 }
+{ age: 4, id: pairs:21 }
+{ age: 4, id: pairs:10 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 1, id: pairs:30 }
+{ age: 0, id: pairs:33 }
+{ age: 0, id: pairs:22 }
+### SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age LIMIT 3 START 2
+{ age: 1, id: pairs:30 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+### SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC LIMIT 3
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 9, id: pairs:17 }
+### SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC LIMIT 1
+{ age: 10, id: pairs:25 }
+### SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age LIMIT 0
+(no rows)
+### SELECT id, age FROM pairs WHERE kind IN [1, 2, 3] ORDER BY age DESC LIMIT 7
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 10, id: pairs:3 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 9, id: pairs:39 }
+{ age: 8, id: pairs:9 }
+### SELECT id, age FROM pairs WHERE kind IN [1, 2, 3] ORDER BY age LIMIT 7 START 4
+{ age: 1, id: pairs:19 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 2, id: pairs:27 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 3, id: pairs:35 }
+### SELECT id FROM pairs WHERE kind = 1 OR kind = 2 LIMIT 3
+{ id: pairs:33 }
+{ id: pairs:5 }
+{ id: pairs:13 }

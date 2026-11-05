@@ -1,12 +1,11 @@
-//! The `ShortestPathExpand` operator — shortest-path search for GQL v2
-//! `MATCH` (the `ALL SHORTEST` / `ANY SHORTEST` / `SHORTEST k` / `SHORTEST k
-//! GROUP(S)` path-search prefixes).
+//! Shortest-path search for GQL v2 `MATCH` (the `ALL SHORTEST` / `ANY SHORTEST`
+//! / `SHORTEST k` / `SHORTEST k GROUP(S)` path-search prefixes).
 //!
-//! Like [`PathExpand`](super::path_expand::PathExpand) it expands a single
+//! Like [`expand_paths`](super::path_expand::expand_paths) it expands a single
 //! quantified segment from a bound *source* node, per input binding row, and
-//! emits one row per selected path with the terminal node, the edge group (R4)
-//! and the alternating path array (R5). It differs in *which* paths it keeps:
-//! the planner routes a pattern carrying a `SHORTEST` (or `ANY`) selector here.
+//! emits one row per selected path with the terminal node, the edge group
+//! and the alternating path array. It differs in *which* paths it keeps:
+//! a pattern carrying a `SHORTEST` (or `ANY`) selector is routed here.
 //! Grouping is per-source-row by terminal node id, which equals the GQL endpoint
 //! partition `(start, end)`. A pattern bound on its far node expands backwards
 //! (`source` is the pattern's end); grouping and path length are symmetric so
@@ -15,13 +14,13 @@
 //!
 //! ## Algorithm: BFS over partial paths
 //!
-//! Per source row the operator runs a breadth-first traversal whose frontier is
+//! Per source row the search runs a breadth-first traversal whose frontier is
 //! a FIFO queue of partial paths `{ tip, edges, nodes }` (the same struct
-//! `PathExpand` uses). Because successors are enqueued at the back, paths are
+//! path expansion uses). Because successors are enqueued at the back, paths are
 //! processed in non-decreasing depth (hop count), so a terminal is *reached* in
 //! non-decreasing length order — the property every selector relies on.
-//! Edge-uniqueness within a path (DIFFERENT EDGES, R2) is enforced by the
-//! adjacency scan exactly as in `PathExpand`, which also bounds the queue on
+//! Edge-uniqueness within a path (DIFFERENT EDGES) is enforced by the
+//! adjacency scan exactly as in path expansion, which also bounds the queue on
 //! cyclic graphs; the optional path mode adds node-uniqueness
 //! ([`step_kind`]). Shortest is by **hop count** (unweighted).
 //!
@@ -57,33 +56,25 @@
 #![cfg_attr(not(feature = "gql"), allow(dead_code))]
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
 
-use futures::StreamExt;
 use tracing::debug;
 
-use super::expand::ExpandDir;
 use super::path_expand::{
-	PartialPath, PathMode, StepKind, assemble_row, build_group_and_path, edge_target, node_id,
-	node_passes_label, path_rows_exceeded, scan_dir, source_record_id, step_kind, target_field,
+	PartialPath, PathCaches, PathFlush, PathParams, StepKind, assemble_row, build_group_and_path,
+	edge_target, node_id, node_passes_label, path_rows_exceeded, push_row, scan_dir,
+	source_record_id, step_kind, target_field,
 };
-use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{
-	EdgeTableSpec, compute_graph_ranges, decode_graph_edge,
-};
-use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
-};
-use crate::idx::planner::ScanDirection;
-use crate::val::{RecordId, TableName, Value};
+use crate::exec::operators::scan::fetch::resolve_with_field_state;
+use crate::exec::operators::scan::graph_keys::collect_adjacency;
+use crate::exec::{ExecutionContext, FlowResult};
+use crate::val::{RecordId, Value};
 
 /// Which of the paths to each endpoint a path search keeps. Named for the
 /// shortest family (its main job), it also serves the non-shortest `ANY [k]`
 /// selector ([`ShortestSelector::Any`]) — a shortest representative is a valid
 /// arbitrary path, so `ANY` reuses the same cheap visit-once / `k`-bounded
-/// traversal rather than the full `PathExpand` DFS.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// traversal rather than the full path-expansion DFS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShortestSelector {
 	/// `k` arbitrary paths per endpoint (`ANY [k]`); implemented as the `k`
 	/// shortest (a valid arbitrary choice) for O(k·E) cost.
@@ -103,7 +94,7 @@ pub enum ShortestSelector {
 
 impl ShortestSelector {
 	/// The EXPLAIN label for this selector.
-	fn attr(self) -> String {
+	pub(crate) fn attr(self) -> String {
 		match self {
 			ShortestSelector::Any {
 				count: 1,
@@ -278,415 +269,217 @@ impl TerminalSelector {
 	}
 }
 
-/// Shortest-path variable-length expansion from a bound source node.
+/// The paths from the node bound at `params.source` in `row` that `selector`
+/// keeps, as the rows of `out`: breadth-first, so a terminal is reached in
+/// non-decreasing length, with a full batch handed to `flush` as it forms.
+/// Selection and the per-source budget (frontier pushes and emits) are per
+/// source row.
 ///
-/// See the module documentation for the full semantics. Constructed by the GQL
-/// streaming planner from a quantified `EdgeStep` whose pattern carries a
-/// `SHORTEST` path-search selector.
-#[derive(Debug, Clone)]
-pub struct ShortestPathExpand {
-	/// Child operator providing the input binding rows.
-	pub(crate) input: Arc<dyn ExecOperator>,
-	/// Name of the bound source-node binding in each input row.
-	pub(crate) source: String,
-	/// Direction of every hop in the quantified step.
-	pub(crate) direction: ExpandDir,
-	/// Edge table(s) the step may traverse; empty ⇒ all edge tables in `direction`.
-	pub(crate) edge_tables: Vec<TableName>,
-	/// Minimum path length (number of edges). `0` enables the zero-length path.
-	pub(crate) min: u32,
-	/// Maximum path length, or `None` for unbounded (`*`, `+`, `{n,}`).
-	pub(crate) max: Option<u32>,
-	/// Binding name the terminal node is written under.
-	pub(crate) target_binding: String,
-	/// Optional table the terminal node must belong to (label filter).
-	pub(crate) target_label: Option<TableName>,
-	/// Binding name for the edge-group list (kind `EdgeGroup`), when present.
-	pub(crate) group_binding: Option<String>,
-	/// Binding name for the whole-path array (kind `Path`), when present.
-	pub(crate) path_binding: Option<String>,
-	/// The path mode (node/edge repetition discipline).
-	pub(crate) mode: PathMode,
-	/// Which paths to each endpoint survive.
-	pub(crate) selector: ShortestSelector,
-	/// `true` when the pattern was anchored on its far node, so the traversal
-	/// runs the segment backwards (`source` is the pattern's *end*); the emitted
-	/// group and path arrays are reversed to read in the pattern's written order.
-	/// Path length is symmetric, so the shortest selection is unaffected.
-	pub(crate) reversed: bool,
-	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
-	pub(crate) metrics: Arc<OperatorMetrics>,
-}
+/// `false` once `flush` refused a batch, which ends the search.
+pub(crate) async fn expand_shortest(
+	ctx: &ExecutionContext,
+	params: &PathParams,
+	selector: ShortestSelector,
+	caches: &mut PathCaches,
+	row: &Value,
+	out: &mut Vec<Value>,
+	flush: &mut dyn PathFlush,
+) -> FlowResult<bool> {
+	let db_ctx = ctx.database()?;
+	let txn = ctx.txn();
+	let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+	let db_id = db_ctx.db.database_id;
+	let version = ctx.version_stamp();
+	let dir = scan_dir(params.direction);
+	let tgt_field = target_field(params.direction);
+	let path_row_limit = params.path_row_limit;
 
-impl ShortestPathExpand {
-	#[allow(clippy::too_many_arguments)]
-	pub(crate) fn new(
-		input: Arc<dyn ExecOperator>,
-		source: String,
-		direction: ExpandDir,
-		edge_tables: Vec<TableName>,
-		min: u32,
-		max: Option<u32>,
-		target_binding: String,
-		target_label: Option<TableName>,
-		group_binding: Option<String>,
-		path_binding: Option<String>,
-		mode: PathMode,
-		selector: ShortestSelector,
-		reversed: bool,
-	) -> Self {
-		Self {
-			input,
-			source,
-			direction,
-			edge_tables,
-			min,
-			max,
-			target_binding,
-			target_label,
-			group_binding,
-			path_binding,
-			mode,
-			selector,
-			reversed,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
-	}
-
-	/// Build the `EdgeTableSpec` list (unbounded ranges) for the configured edge
-	/// tables. Mirrors `PathExpand::edge_specs`.
-	fn edge_specs(&self) -> Vec<EdgeTableSpec> {
-		self.edge_tables
-			.iter()
-			.cloned()
-			.map(|table| EdgeTableSpec {
-				table,
-				range_start: std::ops::Bound::Unbounded,
-				range_end: std::ops::Bound::Unbounded,
-			})
-			.collect()
-	}
-}
-
-impl ExecOperator for ShortestPathExpand {
-	fn name(&self) -> &'static str {
-		"ShortestPathExpand"
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		let dir = match self.direction {
-			ExpandDir::Out => "->",
-			ExpandDir::In => "<-",
-		};
-		let tables = if self.edge_tables.is_empty() {
-			"*".to_string()
-		} else {
-			self.edge_tables.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(", ")
-		};
-		let max = self.max.map(|m| m.to_string()).unwrap_or_else(|| "∞".to_string());
-		let mut attrs = vec![
-			("source".to_string(), self.source.clone()),
-			("direction".to_string(), dir.to_string()),
-			("tables".to_string(), tables),
-			("min".to_string(), self.min.to_string()),
-			("max".to_string(), max),
-			("target_binding".to_string(), self.target_binding.clone()),
-			("search".to_string(), self.selector.attr()),
-		];
-		if let Some(label) = self.target_label.as_ref() {
-			attrs.push(("target_label".to_string(), label.as_str().to_string()));
-		}
-		if let Some(group) = self.group_binding.as_ref() {
-			attrs.push(("group".to_string(), group.clone()));
-		}
-		if let Some(path) = self.path_binding.as_ref() {
-			attrs.push(("path".to_string(), path.clone()));
-		}
-		if let Some(mode) = self.mode.attr() {
-			attrs.push(("mode".to_string(), mode.to_string()));
-		}
-		if self.reversed {
-			attrs.push(("reversed".to_string(), "true".to_string()));
-		}
-		attrs
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		self.input.required_context().max(ContextLevel::Database)
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		self.input.access_mode()
-	}
-
-	fn cardinality_hint(&self) -> CardinalityHint {
-		CardinalityHint::Unbounded
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		vec![&self.input]
-	}
-
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let db_ctx = ctx.database()?.clone();
-		let input_stream = buffer_stream(
-			self.input.execute(ctx)?,
-			self.input.access_mode(),
-			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+	let Some(source_rid) = source_record_id(row, &params.source) else {
+		debug!(
+			target: "surrealdb::exec::shortest_path_expand",
+			"ShortestPathExpand source binding {} is not a bound node; dropping row",
+			params.source,
 		);
+		return Ok(true);
+	};
+	let source_obj = if let Value::Object(obj) = row {
+		obj.get(&params.source).cloned().unwrap_or(Value::Null)
+	} else {
+		Value::Null
+	};
 
-		let source = self.source.clone();
-		let direction = self.direction;
-		let edge_specs = self.edge_specs();
-		let min = self.min;
-		let max = self.max;
-		let target_binding = self.target_binding.clone();
-		let target_label = self.target_label.clone();
-		let group_binding = self.group_binding.clone();
-		let path_binding = self.path_binding.clone();
-		let mode = self.mode;
-		let selector = self.selector;
-		let reversed = self.reversed;
-		let emits_at = move |d: u32| d >= min && max.is_none_or(|m| d <= m);
-		let extends_past = move |d: u32| max.is_none_or(|m| d < m);
-		let scan_batch_size = ctx.root().ctx.config.scan_batch_size;
-		let path_row_limit = ctx.root().ctx.config.gql_max_path_rows;
-		let dir = scan_dir(direction);
-		let tgt_field = target_field(direction);
-		let ctx = ctx.clone();
+	// Per-source budget (frontier pushes + emits) and selector state.
+	let mut path_count: usize = 0;
+	let mut state = TerminalSelector::new(selector, params.min);
+	state.mark_source(&source_rid);
 
-		let stream = async_stream::try_stream! {
-			let txn = ctx.txn();
-			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
-			let db_id = db_ctx.db.database_id;
-			let version = ctx.version_stamp();
+	// --- Zero-length path: the source is its own terminal at depth 0.
+	// Emitted iff min == 0, the source passes the label, and the selector
+	// admits it.
+	if params.min == 0
+		&& node_passes_label(&source_obj, params.target_label.as_ref())
+		&& state.should_emit(&source_rid, 0)
+	{
+		path_count += 1;
+		if path_count > path_row_limit {
+			return Err(path_rows_exceeded(path_row_limit));
+		}
+		let assembled = assemble_row(
+			row,
+			&params.target_binding,
+			source_obj.clone(),
+			params.group_binding.as_deref(),
+			&[],
+			params.path_binding.as_deref(),
+			std::slice::from_ref(&source_obj),
+		);
+		if !push_row(params, out, assembled, flush).await? {
+			return Ok(false);
+		}
+	}
 
-			let mut edge_cache = FetchFieldStateCache::new();
-			let mut node_cache = FetchFieldStateCache::new();
+	// --- BFS frontier (FIFO => non-decreasing depth).
+	let mut queue: VecDeque<PartialPath> = VecDeque::new();
+	if params.extends_past(0) {
+		path_count += 1;
+		if path_count > path_row_limit {
+			return Err(path_rows_exceeded(path_row_limit));
+		}
+		queue.push_back(PartialPath {
+			tip: source_rid.clone(),
+			edges: Vec::new(),
+			nodes: vec![source_obj.clone()],
+		});
+	}
 
-			let mut out: Vec<Value> = Vec::with_capacity(scan_batch_size);
+	while let Some(path) = queue.pop_front() {
+		crate::exec::vm::fuel::tick(ctx, 1).await?;
+		let depth = path.depth();
 
-			futures::pin_mut!(input_stream);
-			while let Some(batch_result) = input_stream.next().await {
-				crate::exec::operators::check_cancelled(&ctx)?;
-				let batch = batch_result?;
-				for row in batch.values {
-					let Some(source_rid) = source_record_id(&row, &source) else {
-						debug!(
-							target: "surrealdb::exec::shortest_path_expand",
-							"ShortestPathExpand source binding {source} is not a bound node; dropping row",
-						);
-						continue;
-					};
-					let source_obj = match &row {
-						Value::Object(obj) => obj.get(&source).cloned().unwrap_or(Value::Null),
-						_ => Value::Null,
-					};
+		// Enumerate the tip's adjacency, retaining only edges not already on
+		// the path (DIFFERENT EDGES), filtered per streamed item. Same scan as
+		// path expansion.
+		let mut edge_ids: Vec<RecordId> = Vec::new();
+		let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
+		collect_adjacency(
+			&txn,
+			ns_id,
+			db_id,
+			&path.tip,
+			dir,
+			&params.edge_specs,
+			ctx,
+			version,
+			&mut caches.adjacency,
+			|item| {
+				if !path.contains_edge(&item.edge) {
+					edge_ids.push(item.edge);
+					decoded_targets.push(item.target);
+				}
+				Ok(())
+			},
+		)
+		.await?;
 
-					// Per-source budget (frontier pushes + emits) and selector state.
-					let mut path_count: usize = 0;
-					let mut state = TerminalSelector::new(selector, min);
-					state.mark_source(&source_rid);
+		if edge_ids.is_empty() {
+			continue;
+		}
 
-					// --- Zero-length path (R6): the source is its own terminal at
-					// depth 0. Emitted iff min == 0, the source passes the label,
-					// and the selector admits it.
-					if min == 0
-						&& node_passes_label(&source_obj, target_label.as_ref())
-						&& state.should_emit(&source_rid, 0)
-					{
-						path_count += 1;
-						if path_count > path_row_limit {
-							Err(path_rows_exceeded(path_row_limit))?;
-						}
-						let assembled = assemble_row(
-							&row,
-							&target_binding,
-							source_obj.clone(),
-							group_binding.as_deref(),
-							&[],
-							path_binding.as_deref(),
-							std::slice::from_ref(&source_obj),
-						);
-						out.push(assembled);
-						if out.len() >= scan_batch_size {
-							yield ValueBatch { values: std::mem::take(&mut out) };
-							out = Vec::with_capacity(scan_batch_size);
-						}
-					}
+		let edge_objs = resolve_with_field_state(ctx, &mut caches.edges, &edge_ids).await?;
 
-					// --- BFS frontier (FIFO ⇒ non-decreasing depth).
-					let mut queue: VecDeque<PartialPath> = VecDeque::new();
-					if extends_past(0) {
-						path_count += 1;
-						if path_count > path_row_limit {
-							Err(path_rows_exceeded(path_row_limit))?;
-						}
-						queue.push_back(PartialPath {
-							tip: source_rid.clone(),
-							edges: Vec::new(),
-							nodes: vec![source_obj.clone()],
-						});
-					}
+		let mut step_edges: Vec<(RecordId, Value)> = Vec::new();
+		let mut node_ids: Vec<RecordId> = Vec::new();
+		for ((edge_id, decoded_target), edge_obj) in
+			edge_ids.into_iter().zip(decoded_targets).zip(edge_objs)
+		{
+			let Some(edge_obj) = edge_obj else {
+				continue;
+			};
+			let next_id = decoded_target.or_else(|| edge_target(&edge_obj, tgt_field));
+			let Some(next_id) = next_id else {
+				continue;
+			};
+			step_edges.push((edge_id, edge_obj));
+			node_ids.push(next_id);
+		}
 
-					while let Some(path) = queue.pop_front() {
-						crate::exec::operators::check_cancelled(&ctx)?;
-						let depth = path.depth();
+		if node_ids.is_empty() {
+			continue;
+		}
 
-						// Enumerate the tip's adjacency, skipping edges already on
-						// the path (DIFFERENT EDGES). Identical to `PathExpand`.
-						let ranges = compute_graph_ranges(
-							ns_id, db_id, &path.tip, dir, &edge_specs, &ctx,
-						).await?;
+		let node_objs = resolve_with_field_state(ctx, &mut caches.nodes, &node_ids).await?;
 
-						let mut edge_ids: Vec<RecordId> = Vec::new();
-						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
-						for (beg, end) in ranges {
-							let mut cursor = txn
-								.open_keys_cursor(beg..end, ScanDirection::Forward, 0, version)
-								.await
-								.context("Failed to open ShortestPathExpand graph cursor")?;
-							loop {
-								crate::exec::operators::check_cancelled(&ctx)?;
-								let keys = cursor
-									.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
-									.await
-									.context("Failed to scan ShortestPathExpand graph edge")?;
-								if keys.is_empty() {
-									break;
-								}
-								for key in &keys {
-									let decoded = decode_graph_edge(key)?;
-									if !path.contains_edge(&decoded.edge) {
-										edge_ids.push(decoded.edge);
-										decoded_targets.push(decoded.target);
-									}
-								}
-							}
-							drop(cursor);
-						}
+		let new_depth = depth + 1;
+		for ((edge_id, edge_obj), node_obj) in step_edges.into_iter().zip(node_objs) {
+			let Some(node_obj) = node_obj else {
+				continue;
+			};
+			let Some(target_id) = node_id(&node_obj) else {
+				// A node without an id cannot be an endpoint or be
+				// deduplicated; skip it.
+				continue;
+			};
 
-						if edge_ids.is_empty() {
-							continue;
-						}
+			let kind = step_kind(params.mode, &path.nodes, &target_id);
+			if matches!(kind, StepKind::Reject) {
+				continue;
+			}
 
-						let edge_objs =
-							resolve_with_field_state(&ctx, &mut edge_cache, &edge_ids).await?;
+			let mut edges = path.edges.clone();
+			edges.push((edge_id, edge_obj));
+			let mut nodes = path.nodes.clone();
+			nodes.push(node_obj.clone());
 
-						let mut step_edges: Vec<(RecordId, Value)> = Vec::new();
-						let mut node_ids: Vec<RecordId> = Vec::new();
-						for ((edge_id, decoded_target), edge_obj) in
-							edge_ids.into_iter().zip(decoded_targets).zip(edge_objs)
-						{
-							let Some(edge_obj) = edge_obj else {
-								continue;
-							};
-							let next_id =
-								decoded_target.or_else(|| edge_target(&edge_obj, tgt_field));
-							let Some(next_id) = next_id else {
-								continue;
-							};
-							step_edges.push((edge_id, edge_obj));
-							node_ids.push(next_id);
-						}
-
-						if node_ids.is_empty() {
-							continue;
-						}
-
-						let node_objs =
-							resolve_with_field_state(&ctx, &mut node_cache, &node_ids).await?;
-
-						let new_depth = depth + 1;
-						for ((edge_id, edge_obj), node_obj) in
-							step_edges.into_iter().zip(node_objs)
-						{
-							let Some(node_obj) = node_obj else {
-								continue;
-							};
-							let Some(target_id) = node_id(&node_obj) else {
-								// A node without an id cannot be an endpoint or be
-								// deduplicated; skip it.
-								continue;
-							};
-
-							let kind = step_kind(mode, &path.nodes, &target_id);
-							if matches!(kind, StepKind::Reject) {
-								continue;
-							}
-
-							let mut edges = path.edges.clone();
-							edges.push((edge_id, edge_obj));
-							let mut nodes = path.nodes.clone();
-							nodes.push(node_obj.clone());
-
-							// Emit when in window, label-passing, and the selector
-							// admits this arrival at `target_id`.
-							if emits_at(new_depth)
-								&& node_passes_label(&node_obj, target_label.as_ref())
-								&& state.should_emit(&target_id, new_depth)
-							{
-								path_count += 1;
-								if path_count > path_row_limit {
-									Err(path_rows_exceeded(path_row_limit))?;
-								}
-								let (group, path_arr) =
-									build_group_and_path(&nodes, &edges, reversed);
-								let assembled = assemble_row(
-									&row,
-									&target_binding,
-									node_obj.clone(),
-									group_binding.as_deref(),
-									&group,
-									path_binding.as_deref(),
-									&path_arr,
-								);
-								out.push(assembled);
-								if out.len() >= scan_batch_size {
-									yield ValueBatch { values: std::mem::take(&mut out) };
-									out = Vec::with_capacity(scan_batch_size);
-								}
-							}
-
-							// Extend when the mode permits (a SIMPLE close does not)
-							// another hop is allowed, and the selector's frontier
-							// pruning admits it.
-							if matches!(kind, StepKind::EmitAndExtend)
-								&& extends_past(new_depth)
-								&& state.should_extend(&target_id, new_depth)
-							{
-								path_count += 1;
-								if path_count > path_row_limit {
-									Err(path_rows_exceeded(path_row_limit))?;
-								}
-								queue.push_back(PartialPath {
-									tip: target_id,
-									edges,
-									nodes,
-								});
-							}
-						}
-					}
+			// Emit when in window, label-passing, and the selector admits this
+			// arrival at `target_id`.
+			if params.emits_at(new_depth)
+				&& node_passes_label(&node_obj, params.target_label.as_ref())
+				&& state.should_emit(&target_id, new_depth)
+			{
+				path_count += 1;
+				if path_count > path_row_limit {
+					return Err(path_rows_exceeded(path_row_limit));
+				}
+				let (group, path_arr) = build_group_and_path(&nodes, &edges, params.reversed);
+				let assembled = assemble_row(
+					row,
+					&params.target_binding,
+					node_obj.clone(),
+					params.group_binding.as_deref(),
+					&group,
+					params.path_binding.as_deref(),
+					&path_arr,
+				);
+				if !push_row(params, out, assembled, flush).await? {
+					return Ok(false);
 				}
 			}
 
-			if !out.is_empty() {
-				yield ValueBatch { values: out };
+			// Extend when the mode permits (a SIMPLE close does not) another
+			// hop is allowed, and the selector's frontier pruning admits it.
+			if matches!(kind, StepKind::EmitAndExtend)
+				&& params.extends_past(new_depth)
+				&& state.should_extend(&target_id, new_depth)
+			{
+				path_count += 1;
+				if path_count > path_row_limit {
+					return Err(path_rows_exceeded(path_row_limit));
+				}
+				queue.push_back(PartialPath {
+					tip: target_id,
+					edges,
+					nodes,
+				});
 			}
-		};
-
-		Ok(monitor_stream(Box::pin(stream), "ShortestPathExpand", &self.metrics))
+		}
 	}
+	Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::val::TableName;
 
 	fn rid(key: &str) -> RecordId {
 		RecordId {

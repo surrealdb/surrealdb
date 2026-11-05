@@ -33,7 +33,7 @@ use axum::extract::MatchedPath;
 use futures::Future;
 use http::{Request, Response, StatusCode, Version};
 use pin_project_lite::pin_project;
-use surrealdb_core::observe::{
+use surrealdb_observe::{
 	ExecutionObserver, HttpMethod, HttpRequestEvent, HttpRequestEventCtx, HttpRequestEventSafe,
 	HttpRequestStartEvent, HttpRequestStartEventSafe, HttpVersion, NetworkBytesEvent,
 	NetworkBytesEventSafe, NetworkDirection, Outcome, SessionProtocol,
@@ -276,10 +276,12 @@ impl HttpCallMetricTracker {
 	fn outcome(&self) -> Outcome {
 		match self.state.replace(ResultState::None) {
 			ResultState::Failed => Outcome::Error,
-			_ => match self.status_code {
-				Some(s) if s.is_server_error() || s.is_client_error() => Outcome::Error,
-				_ => Outcome::Success,
-			},
+			ResultState::None | ResultState::Started | ResultState::Result(..) => {
+				match self.status_code {
+					Some(s) if s.is_server_error() || s.is_client_error() => Outcome::Error,
+					_ => Outcome::Success,
+				}
+			}
 		}
 	}
 }
@@ -380,8 +382,7 @@ pub fn on_request_finish(tracker: &HttpCallMetricTracker) {
 	// so dashboards keying on `surrealdb_http_request_total{error_class=...}`
 	// distinguish 401 / 403 / 408 from generic 4xx/5xx without scraping
 	// the per-status-code label. `None` for 1xx / 2xx / 3xx responses.
-	let error_class =
-		status_code.and_then(surrealdb_core::observe::error_class::classify_http_status);
+	let error_class = status_code.and_then(surrealdb_observe::error_class::classify_http_status);
 	let event = HttpRequestEvent {
 		safe: HttpRequestEventSafe {
 			method: tracker.method,
@@ -435,7 +436,7 @@ mod tests {
 	use axum::response::Response;
 	use axum::routing::get;
 	use http::Request;
-	use surrealdb_core::observe::{
+	use surrealdb_observe::{
 		AuthEvent, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent, QueryEvent,
 		RpcEvent, SessionEvent, StatementEvent, TransactionEvent,
 	};

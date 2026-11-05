@@ -1,0 +1,6 @@
+### FOR $i IN 0..3 { CREATE t SET n = $i, d = (DEFINE FIELD OVERWRITE m ON t VALUE $i) }
+NONE
+[{ d: NONE, m: NONE, n: 0 }, { d: NONE, m: NONE, n: 1 }, { d: NONE, m: NONE, n: 2 }]
+### { CREATE t:1 SET n = 1; UPDATE t:1 SET d = (DEFINE FIELD OVERWRITE m ON t VALUE 2); RETURN 1 }
+1
+[{ d: NONE, m: NONE, n: 1 }]

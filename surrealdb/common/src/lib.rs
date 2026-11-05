@@ -10,12 +10,34 @@
 //! <a href="https://crates.io/crates/surrealdb">the Rust SDK</a>.
 //! </section>
 
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+
 #[macro_use]
+pub mod decimal;
+pub mod duration;
+pub mod fmt;
 pub mod ids;
+pub mod keywords;
+#[macro_use]
+pub mod mac;
+
+#[cfg(feature = "sys")]
+pub mod sys;
 
 mod error;
 
-pub use error::{Error, ErrorCode, ErrorTrait, TypedError, source as source_error};
+pub use error::{
+	EngineError, Error, ErrorCode, ErrorTrait, LeafError, TypedError, internal_todo,
+	source as source_error,
+};
 
+pub mod future;
+pub mod mem_registry;
+pub mod net;
 pub mod non_max;
+pub mod range;
+pub mod rt;
 pub mod span;
+pub mod str;
+pub mod time;

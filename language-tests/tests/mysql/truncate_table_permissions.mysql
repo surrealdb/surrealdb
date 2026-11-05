@@ -1,0 +1,19 @@
+/**
+[env]
+namespace = true
+database = true
+auth = { level = "viewer" }
+imports = ["mysql/_truncate_table.surql"]
+
+[test]
+reason = "A user the table's permissions do not let delete rows removes none by TRUNCATE TABLE, and is handed none"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ n: 2 }]"
+*/
+
+TRUNCATE TABLE truncate_kept;
+SELECT count(*) AS n FROM truncate_kept;

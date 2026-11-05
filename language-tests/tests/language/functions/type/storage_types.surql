@@ -1,7 +1,4 @@
 /**
-[env.capabilities]
-allow-experimental = ["files"]
-
 [test]
 reason = "Test that all Value storage types are preserved correctly when stored and retrieved from the database"
 

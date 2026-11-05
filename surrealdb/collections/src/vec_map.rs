@@ -4,10 +4,10 @@ use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
-use std::io::Write;
-use std::iter::FromIterator;
+use std::iter::{FromIterator, FusedIterator};
 use std::ops::Index;
 
+#[cfg(feature = "storekey")]
 use storekey::{BorrowDecode, BorrowReader, DecodeError, Encode, EncodeError, Writer};
 
 use crate::search::search_sorted_by;
@@ -128,10 +128,18 @@ impl<K, V> VecMap<K, V> {
 		self.get(key).is_some()
 	}
 
+	/// Inserts `value` under `key`, returning the value the key held before.
+	///
+	/// A key greater than every key held, as each is when a map is built in key order, is
+	/// appended without a search.
 	pub fn insert(&mut self, key: K, value: V) -> Option<V>
 	where
 		K: Ord,
 	{
+		if self.entries.last().is_none_or(|(last, _)| *last < key) {
+			self.entries.push((key, value));
+			return None;
+		}
 		match search_sorted_by(&self.entries, |(k, _)| k.cmp(&key)) {
 			Ok(i) => Some(std::mem::replace(&mut self.entries[i].1, value)),
 			Err(i) => {
@@ -141,12 +149,41 @@ impl<K, V> VecMap<K, V> {
 		}
 	}
 
-	pub fn remove<Q: ?Sized + Ord>(&mut self, key: &Q) -> Option<V>
+	/// The entry of `key`.
+	#[must_use]
+	pub fn get_key_value<Q: ?Sized + Ord>(&self, key: &Q) -> Option<(&K, &V)>
 	where
 		K: Borrow<Q>,
 	{
 		let i = search_sorted_by(&self.entries, |(k, _)| k.borrow().cmp(key)).ok()?;
-		Some(self.entries.remove(i).1)
+		let (k, v) = &self.entries[i];
+		Some((k, v))
+	}
+
+	pub fn remove<Q: ?Sized + Ord>(&mut self, key: &Q) -> Option<V>
+	where
+		K: Borrow<Q>,
+	{
+		self.remove_entry(key).map(|(_, v)| v)
+	}
+
+	/// Removes `key`, returning its entry.
+	pub fn remove_entry<Q: ?Sized + Ord>(&mut self, key: &Q) -> Option<(K, V)>
+	where
+		K: Borrow<Q>,
+	{
+		let i = search_sorted_by(&self.entries, |(k, _)| k.borrow().cmp(key)).ok()?;
+		Some(self.entries.remove(i))
+	}
+
+	/// Removes and returns the entry with the least key. Shifts every other entry: **O(n)**.
+	pub fn pop_first(&mut self) -> Option<(K, V)> {
+		(!self.entries.is_empty()).then(|| self.entries.remove(0))
+	}
+
+	/// Removes and returns the entry with the greatest key.
+	pub fn pop_last(&mut self) -> Option<(K, V)> {
+		self.entries.pop()
 	}
 
 	pub fn retain<F>(&mut self, mut f: F)
@@ -263,6 +300,11 @@ impl<K, V> VecMap<K, V> {
 		}
 	}
 
+	/// The entries, in key order.
+	pub fn as_slice(&self) -> &[(K, V)] {
+		&self.entries
+	}
+
 	pub fn iter_mut(&mut self) -> IterMut<'_, K, V> {
 		IterMut {
 			inner: self.entries.iter_mut(),
@@ -326,6 +368,7 @@ impl<'a, K, V> IntoIterator for &'a VecMap<K, V> {
 	}
 }
 
+#[derive(Debug)]
 pub struct Iter<'a, K, V> {
 	inner: std::slice::Iter<'a, (K, V)>,
 }
@@ -342,11 +385,19 @@ impl<'a, K, V> Iterator for Iter<'a, K, V> {
 	}
 }
 
+impl<'a, K, V> DoubleEndedIterator for Iter<'a, K, V> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		self.inner.next_back().map(|(k, v)| (k, v))
+	}
+}
+
 impl<'a, K, V> ExactSizeIterator for Iter<'a, K, V> {
 	fn len(&self) -> usize {
 		self.inner.len()
 	}
 }
+
+impl<'a, K, V> FusedIterator for Iter<'a, K, V> {}
 
 impl<'a, K, V> Clone for Iter<'a, K, V> {
 	fn clone(&self) -> Self {
@@ -356,6 +407,7 @@ impl<'a, K, V> Clone for Iter<'a, K, V> {
 	}
 }
 
+#[derive(Debug)]
 pub struct IterMut<'a, K, V> {
 	inner: std::slice::IterMut<'a, (K, V)>,
 }
@@ -372,6 +424,21 @@ impl<'a, K, V> Iterator for IterMut<'a, K, V> {
 	}
 }
 
+impl<'a, K, V> DoubleEndedIterator for IterMut<'a, K, V> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		self.inner.next_back().map(|(k, v)| (&*k, v))
+	}
+}
+
+impl<'a, K, V> ExactSizeIterator for IterMut<'a, K, V> {
+	fn len(&self) -> usize {
+		self.inner.len()
+	}
+}
+
+impl<'a, K, V> FusedIterator for IterMut<'a, K, V> {}
+
+#[derive(Debug)]
 pub struct IntoIter<K, V> {
 	inner: std::vec::IntoIter<(K, V)>,
 }
@@ -388,16 +455,35 @@ impl<K, V> Iterator for IntoIter<K, V> {
 	}
 }
 
+impl<K, V> DoubleEndedIterator for IntoIter<K, V> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		self.inner.next_back()
+	}
+}
+
 impl<K, V> ExactSizeIterator for IntoIter<K, V> {
 	fn len(&self) -> usize {
 		self.inner.len()
 	}
 }
 
+impl<K, V> FusedIterator for IntoIter<K, V> {}
+
 impl<K, V> VecMap<K, V> {
+	/// Consumes the map and returns an iterator over the keys in order.
+	pub fn into_keys(self) -> impl DoubleEndedIterator<Item = K> + ExactSizeIterator {
+		self.entries.into_iter().map(|(k, _)| k)
+	}
+
 	/// Consumes the map and returns an iterator over the values in key order.
-	pub fn into_values(self) -> impl Iterator<Item = V> {
+	pub fn into_values(self) -> impl DoubleEndedIterator<Item = V> + ExactSizeIterator {
 		self.entries.into_iter().map(|(_, v)| v)
+	}
+
+	/// Consumes the map and returns its entries, in key order.
+	#[must_use]
+	pub fn into_vec(self) -> Vec<(K, V)> {
+		self.entries
 	}
 }
 
@@ -414,9 +500,17 @@ impl<K, V> IntoIterator for VecMap<K, V> {
 
 impl<K: Ord, V> FromIterator<(K, V)> for VecMap<K, V> {
 	fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
-		let mut v: Vec<(K, V)> = iter.into_iter().collect();
-		if v.is_empty() {
-			return Self::default();
+		Self::from(iter.into_iter().collect::<Vec<_>>())
+	}
+}
+
+/// Entries in any order, sorted in place; of entries with the same key, the last is kept, as
+/// inserting them in turn keeps it. Entries already in strictly ascending key order are kept
+/// as they are, without a sort.
+impl<K: Ord, V> From<Vec<(K, V)>> for VecMap<K, V> {
+	fn from(mut v: Vec<(K, V)>) -> Self {
+		if v.windows(2).all(|w| w[0].0 < w[1].0) {
+			return Self::from_sorted_vec_unchecked(v);
 		}
 		v.sort_by(|a, b| a.0.cmp(&b.0));
 		// Stable sort preserves iterator order among equal keys. Reverse so the last
@@ -455,10 +549,40 @@ pub enum Entry<'a, K, V> {
 }
 
 impl<'a, K: Ord, V> Entry<'a, K, V> {
+	/// The entry's value, inserting `default` where the map does not hold the key.
+	pub fn or_insert(self, default: V) -> &'a mut V {
+		self.or_insert_with(|| default)
+	}
+
 	pub fn or_insert_with<F: FnOnce() -> V>(self, default: F) -> &'a mut V {
 		match self {
 			Entry::Occupied(o) => o.into_mut(),
 			Entry::Vacant(v) => v.insert(default()),
+		}
+	}
+
+	/// The entry's value, inserting `V::default()` where the map does not hold the key.
+	pub fn or_default(self) -> &'a mut V
+	where
+		V: Default,
+	{
+		self.or_insert_with(V::default)
+	}
+
+	/// The entry, with `f` run on its value where the map holds the key.
+	#[must_use]
+	pub fn and_modify<F: FnOnce(&mut V)>(mut self, f: F) -> Self {
+		if let Entry::Occupied(o) = &mut self {
+			f(o.get_mut());
+		}
+		self
+	}
+
+	/// The entry's key.
+	pub fn key(&self) -> &K {
+		match self {
+			Entry::Occupied(o) => o.key(),
+			Entry::Vacant(v) => v.key(),
 		}
 	}
 }
@@ -469,8 +593,38 @@ pub struct OccupiedEntry<'a, K, V> {
 }
 
 impl<'a, K, V> OccupiedEntry<'a, K, V> {
+	/// The entry's key.
+	pub fn key(&self) -> &K {
+		&self.entries[self.index].0
+	}
+
+	/// The entry's value.
+	pub fn get(&self) -> &V {
+		&self.entries[self.index].1
+	}
+
+	/// The entry's value, mutably.
+	pub fn get_mut(&mut self) -> &mut V {
+		&mut self.entries[self.index].1
+	}
+
 	pub fn into_mut(self) -> &'a mut V {
 		&mut self.entries[self.index].1
+	}
+
+	/// Replaces the entry's value, returning the one it held.
+	pub fn insert(&mut self, value: V) -> V {
+		std::mem::replace(self.get_mut(), value)
+	}
+
+	/// Removes the entry, returning its value.
+	pub fn remove(self) -> V {
+		self.remove_entry().1
+	}
+
+	/// Removes the entry, returning it.
+	pub fn remove_entry(self) -> (K, V) {
+		self.entries.remove(self.index)
 	}
 }
 
@@ -481,14 +635,25 @@ pub struct VacantEntry<'a, K, V> {
 }
 
 impl<'a, K, V> VacantEntry<'a, K, V> {
+	/// The key the entry would hold.
+	pub fn key(&self) -> &K {
+		&self.key
+	}
+
+	/// The key the entry would hold, taken.
+	pub fn into_key(self) -> K {
+		self.key
+	}
+
 	pub fn insert(self, value: V) -> &'a mut V {
 		self.entries.insert(self.index, (self.key, value));
 		&mut self.entries[self.index].1
 	}
 }
 
+#[cfg(feature = "storekey")]
 impl<F, K: Encode<F>, V: Encode<F>> Encode<F> for VecMap<K, V> {
-	fn encode<W: Write>(&self, w: &mut Writer<W>) -> Result<(), EncodeError> {
+	fn encode<W: std::io::Write>(&self, w: &mut Writer<W>) -> Result<(), EncodeError> {
 		for (k, v) in self.iter() {
 			w.mark_terminator();
 			k.encode(w)?;
@@ -498,6 +663,7 @@ impl<F, K: Encode<F>, V: Encode<F>> Encode<F> for VecMap<K, V> {
 	}
 }
 
+#[cfg(feature = "storekey")]
 impl<'de, F, K: BorrowDecode<'de, F> + Ord, V: BorrowDecode<'de, F>> BorrowDecode<'de, F>
 	for VecMap<K, V>
 {
@@ -520,6 +686,62 @@ impl<'de, F, K: BorrowDecode<'de, F> + Ord, V: BorrowDecode<'de, F>> BorrowDecod
 			map.push(k, v);
 		}
 		Ok(map)
+	}
+}
+
+/// Serialised as a map, in key order.
+#[cfg(feature = "serde")]
+impl<K: serde::Serialize, V: serde::Serialize> serde::Serialize for VecMap<K, V> {
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		serializer.collect_map(self.iter())
+	}
+}
+
+/// Deserialised from a map whose keys may come in any order; of entries with the same key, the
+/// last is kept, as inserting them in turn keeps it.
+#[cfg(feature = "serde")]
+impl<'de, K: serde::Deserialize<'de> + Ord, V: serde::Deserialize<'de>> serde::Deserialize<'de>
+	for VecMap<K, V>
+{
+	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		/// The most entries reserved ahead of reading them, so that a hostile size hint cannot
+		/// make the map over-allocate.
+		const MAX_PREALLOCATED: usize = 4096;
+
+		struct MapVisitor<K, V>(std::marker::PhantomData<(K, V)>);
+
+		impl<'de, K: serde::Deserialize<'de> + Ord, V: serde::Deserialize<'de>>
+			serde::de::Visitor<'de> for MapVisitor<K, V>
+		{
+			type Value = VecMap<K, V>;
+
+			fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+				f.write_str("a map")
+			}
+
+			fn visit_map<A: serde::de::MapAccess<'de>>(
+				self,
+				mut map: A,
+			) -> Result<Self::Value, A::Error> {
+				let mut entries =
+					Vec::with_capacity(map.size_hint().unwrap_or(0).min(MAX_PREALLOCATED));
+				while let Some(entry) = map.next_entry()? {
+					entries.push(entry);
+				}
+				Ok(VecMap::from(entries))
+			}
+		}
+
+		deserializer.deserialize_map(MapVisitor(std::marker::PhantomData))
+	}
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a, K: arbitrary::Arbitrary<'a> + Ord, V: arbitrary::Arbitrary<'a>> arbitrary::Arbitrary<'a>
+	for VecMap<K, V>
+{
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		Ok(BTreeMap::<K, V>::arbitrary(u)?.into())
 	}
 }
 
@@ -1118,5 +1340,77 @@ mod tests {
 		let b: VecMap<i32, i32> = [(3, 3), (1, 1), (2, 2)].into_iter().collect();
 		assert_eq!(a, b);
 		assert_eq!(hash_of(&a), hash_of(&b));
+	}
+
+	#[test]
+	fn insert_appends_past_the_greatest_key_and_searches_otherwise() {
+		let mut m = VecMap::new();
+		assert_eq!(m.insert(1, "a"), None);
+		assert_eq!(m.insert(3, "c"), None);
+		assert_eq!(m.insert(2, "b"), None);
+		assert_eq!(m.insert(3, "C"), Some("c"));
+		assert_eq!(m.as_slice(), &[(1, "a"), (2, "b"), (3, "C")]);
+	}
+
+	#[test]
+	fn entries_are_taken_from_either_end_and_by_key() {
+		let mut m: VecMap<i32, &str> =
+			[(1, "a"), (2, "b"), (3, "c"), (4, "d")].into_iter().collect();
+		assert_eq!(m.get_key_value(&2), Some((&2, &"b")));
+		assert_eq!(m.remove_entry(&2), Some((2, "b")));
+		assert_eq!(m.remove_entry(&2), None);
+		assert_eq!(m.pop_first(), Some((1, "a")));
+		assert_eq!(m.pop_last(), Some((4, "d")));
+		assert_eq!(m.clone().into_keys().collect::<Vec<_>>(), [3]);
+		assert_eq!(m.into_vec(), [(3, "c")]);
+		assert_eq!(VecMap::<i32, i32>::new().pop_first(), None);
+	}
+
+	#[test]
+	fn entry_reads_and_changes_in_place() {
+		let mut m: VecMap<&str, i32> = [("b", 1)].into_iter().collect();
+		assert_eq!(*m.entry("a").or_default(), 0);
+		*m.entry("b").and_modify(|v| *v += 10).or_insert(99) += 1;
+		assert_eq!(m.entry("c").key(), &"c");
+		match m.entry("b") {
+			Entry::Occupied(mut o) => {
+				assert_eq!((o.key(), *o.get()), (&"b", 12));
+				assert_eq!(o.insert(5), 12);
+				assert_eq!(o.remove_entry(), ("b", 5));
+			}
+			Entry::Vacant(_) => panic!("b is held"),
+		}
+		match m.entry("z") {
+			Entry::Vacant(v) => assert_eq!(v.into_key(), "z"),
+			Entry::Occupied(_) => panic!("z is not held"),
+		}
+		assert_eq!(m.as_slice(), &[("a", 0)]);
+	}
+
+	#[test]
+	fn iterators_run_from_both_ends() {
+		let mut m: VecMap<i32, i32> = [(1, 10), (2, 20), (3, 30)].into_iter().collect();
+		for (_, v) in m.iter_mut().rev().take(1) {
+			*v += 1;
+		}
+		assert_eq!(m.iter_mut().len(), 3);
+		assert_eq!(m.clone().into_iter().rev().collect::<Vec<_>>(), [(3, 31), (2, 20), (1, 10)]);
+		assert_eq!(m.into_values().rev().collect::<Vec<_>>(), [31, 20, 10]);
+	}
+
+	#[cfg(feature = "serde")]
+	#[test]
+	fn serde_reads_any_key_order_keeping_the_last_and_writes_key_order() {
+		let m: VecMap<String, i32> = serde_json::from_str(r#"{"b":1,"a":2,"b":3}"#).unwrap();
+		assert_eq!(m.as_slice(), &[("a".to_string(), 2), ("b".to_string(), 3)]);
+		assert_eq!(serde_json::to_string(&m).unwrap(), r#"{"a":2,"b":3}"#);
+	}
+
+	#[test]
+	fn from_vec_sorts_and_keeps_the_last_of_a_repeated_key() {
+		let m = VecMap::from(vec![(2, "x"), (1, "a"), (2, "b")]);
+		assert_eq!(m.as_slice(), &[(1, "a"), (2, "b")]);
+		let sorted = VecMap::from(vec![(1, "a"), (2, "b")]);
+		assert_eq!(sorted.as_slice(), &[(1, "a"), (2, "b")]);
 	}
 }

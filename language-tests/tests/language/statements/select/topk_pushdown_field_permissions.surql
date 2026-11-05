@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "TopK threshold pushdown with field-level SELECT permissions on the ORDER BY field: plan time cannot know the session's permission level, so EXPLAIN shows `deferred (runtime field state)`; the execute-time re-check arms the probe only when permission checks are bypassed (owner), and owner results reflect the raw field values."
+reason = "TopK threshold pushdown with a field-level SELECT permission on the ORDER BY field, read as the owner: the owner is not permission-checked, so the bound plan carries no guard, the scan keeps `topk_pushdown: yes`, and the order reflects the stored values. The record-user side is pinned in topk_pushdown_field_permissions_record_user.surql."
 
 [[test.results]]
 value = "NONE"
@@ -23,7 +22,12 @@ value = "[{ id: p:2, pub: 2, secret: 1 }]"
 value = "[{ id: p:3, pub: 3, secret: 2 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 2]\n        SortTopKByKey [ctx: Db] [sort_keys: secret DESC, limit: 2]\n            TableScan [ctx: Db] [table: p, direction: Forward, topk_pushdown: deferred (runtime field state)]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 2]
+        Sort [ctx: Db] [sort_keys: secret DESC, keep: 2]
+            TableScan [ctx: Db] [table: p, direction: Forward, topk_pushdown: yes]
+''''
 
 [[test.results]]
 value = "[p:1, p:3]"
@@ -32,7 +36,12 @@ value = "[p:1, p:3]"
 value = "[p:2, p:3]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    Limit [ctx: Db] [limit: 2]\n        SortTopKByKey [ctx: Db] [sort_keys: pub DESC, limit: 2]\n            TableScan [ctx: Db] [table: p, direction: Forward, topk_pushdown: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 2]
+        Sort [ctx: Db] [sort_keys: pub DESC, keep: 2]
+            TableScan [ctx: Db] [table: p, direction: Forward, topk_pushdown: yes]
+''''
 */
 
 DEFINE TABLE p SCHEMALESS;
@@ -41,12 +50,11 @@ CREATE p:1 SET secret = 3, pub = 1;
 CREATE p:2 SET secret = 1, pub = 2;
 CREATE p:3 SET secret = 2, pub = 3;
 
--- Non-Allow SELECT permission on the ORDER BY field defers the field check
--- to execute time, where the session's permission level is known.
+-- The owner is not permission-checked, so the guard on `secret` enters no
+-- plan and the ORDER BY field stays eligible for the threshold probe.
 EXPLAIN SELECT * FROM p ORDER BY secret DESC LIMIT 2;
 
--- Owner session bypasses permission checks, so the probe arms and the order
--- reflects the stored values.
+-- The order reflects the stored values.
 SELECT VALUE id FROM p ORDER BY secret DESC LIMIT 2;
 SELECT VALUE id FROM p ORDER BY secret ASC LIMIT 2;
 

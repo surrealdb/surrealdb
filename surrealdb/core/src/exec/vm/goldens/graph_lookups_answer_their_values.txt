@@ -1,0 +1,233 @@
+### owner: SELECT VALUE ->knows FROM person:a
+[knows:k1, knows:k2, knows:k3]
+### owner: SELECT VALUE ->knows->person FROM person:a
+[person:b, person:h, person:c]
+### owner: SELECT VALUE ->likes->person FROM person:a
+[person:c, person:h]
+### owner: SELECT VALUE <-likes<-person FROM person:a
+[person:b]
+### owner: SELECT VALUE <->likes<->person FROM person:a
+[person:b, person:a, person:a, person:a, person:c, person:a, person:h]
+### owner: SELECT VALUE ->(knows, likes)->person FROM person:a
+[person:b, person:h, person:c, person:c, person:h]
+### owner: SELECT VALUE ->likes->person->likes->person FROM person:a
+[person:b]
+### owner: SELECT VALUE ->likes->(person, cached) FROM cached:1
+[cached:2, person:a]
+### owner: SELECT VALUE ->likes->? FROM person:a
+[person:c, person:h]
+### owner: SELECT VALUE ->? FROM person:a
+[knows:k1, knows:k2, knows:k3, likes:l1, likes:l2, pal:[person:a, person:b]]
+### owner: SELECT VALUE ->knows[WHERE since > 2015] FROM person:a
+[knows:k1, knows:k2]
+### owner: SELECT VALUE ->(likes WHERE out = person:c)->person FROM person:a
+[person:c]
+### owner: SELECT VALUE ->knows[WHERE twice > 4030]->person FROM person:a
+[person:b, person:h]
+### owner: SELECT VALUE ->knows[WHERE secret = 's1'] FROM person:a
+[knows:k1]
+### owner: SELECT VALUE ->knows[WHERE out = person:b] FROM person:a
+[knows:k1]
+### owner: SELECT VALUE ->knows[WHERE id = knows:k2 OR in = person:x] FROM person:a
+[knows:k2]
+### owner: SELECT VALUE ->knows[WHERE out.n > $parent.n] FROM person
+[knows:k1, knows:k3]
+[]
+[]
+[]
+### owner: SELECT VALUE ->likes->person[WHERE name != 'c'] FROM person:a
+[person:h]
+### owner: SELECT VALUE ->pal->person FROM person:a
+[person:b]
+### owner: SELECT VALUE <->pal<->person FROM person:a
+[person:c, person:a, person:a, person:b]
+### owner: SELECT VALUE ->pal FROM person
+[pal:[person:a, person:b]]
+[]
+[pal:[person:c, person:a]]
+[]
+### owner: SELECT VALUE pal:[person:a, person:b]->person FROM person:a
+[person:b]
+### owner: SELECT VALUE ->likes->person FROM cached:1
+[person:a]
+### owner: SELECT VALUE ->likes FROM cached:1
+[likes:l5, likes:l6]
+### owner: SELECT VALUE <~post FROM person:a
+[post:1, post:2, post:2, post:3]
+### owner: SELECT VALUE <~(post FIELD editor) FROM person:a
+[post:2, post:3]
+### owner: SELECT VALUE <~(post FIELD author, post FIELD editor) FROM person:a
+[post:1, post:2, post:2, post:3]
+### owner: SELECT VALUE <~post[WHERE editor = NONE] FROM person:a
+[post:1]
+### owner: SELECT VALUE <~? FROM person:a
+[post:1, post:2, post:2, post:3]
+### owner: SELECT VALUE ->likes->person<~post FROM person:b
+[post:1, post:2, post:2, post:3]
+### owner: SELECT VALUE [person:a, 'x', person:b, [person:c]]->likes->person FROM person:a
+[[person:c, person:h], NONE, [person:a], [person:b]]
+### owner: SELECT VALUE { id: person:a }->likes FROM person:b
+[likes:l1, likes:l2]
+### owner: SELECT VALUE (5)->likes FROM person:b
+NONE
+### owner: SELECT id, ->likes->person AS out, <-likes<-person AS in FROM person
+{ id: person:a, in: [person:b], out: [person:c, person:h] }
+{ id: person:b, in: [person:c], out: [person:a] }
+{ id: person:c, in: [person:a], out: [person:b] }
+{ id: person:h, in: [person:a], out: [] }
+### owner: SELECT VALUE ->likes->person.name FROM person:a
+['c', 'h']
+### owner: SELECT VALUE ->knows[WHERE since > 2015].out.name FROM person:a
+['b', 'h']
+### owner: SELECT VALUE ->likes->person[WHERE n > $parent.n] FROM person
+[person:c]
+[]
+[]
+[]
+### owner: SELECT VALUE ->likes->person->likes->person.name FROM person
+['b']
+['c', 'h']
+['a']
+[]
+### owner: SELECT VALUE <-likes<-person.n FROM [person:a, person:b]
+[2]
+[3]
+### owner: SELECT VALUE ->knows.* FROM person:a
+[{ id: knows:k1, in: person:a, out: person:b, secret: 's1', since: 2020, twice: 4040 }, { id: knows:k2, in: person:a, out: person:h, since: 2021, twice: 4042 }, { id: knows:k3, in: person:a, out: person:c, since: 1990, twice: 3980 }]
+### owner: SELECT VALUE ->knows.*.secret FROM person:a
+['s1', NONE, NONE]
+### owner: SELECT VALUE ->knows.twice FROM person:a
+[4040, 4042, 3980]
+### owner: SELECT VALUE (->likes->person)[0] FROM person:a
+person:c
+### owner: SELECT VALUE ->likes->person.{ name, n } FROM person:a
+[{ n: 3, name: 'c' }, { n: NONE, name: 'h' }]
+### owner: SELECT VALUE [1, 2].map(|$t| $t + n) FROM person
+error: Cannot perform addition with 'int' and 'none'
+### owner: SELECT VALUE [1, 2].filter(|$t| $t > n).len() FROM person
+1
+0
+0
+2
+### owner: SELECT VALUE { f: |$x| $x > n } FROM person
+{ f: |$x: any| $x > n }
+{ f: |$x: any| $x > n }
+{ f: |$x: any| $x > n }
+{ f: |$x: any| $x > n }
+### owner: SELECT VALUE (|$x| $x + n)(1) FROM person
+error: Cannot perform addition with 'int' and 'none'
+### record user: SELECT VALUE ->knows FROM person:a
+[knows:k1, knows:k2]
+### record user: SELECT VALUE ->knows->person FROM person:a
+[person:b]
+### record user: SELECT VALUE ->likes->person FROM person:a
+[person:c]
+### record user: SELECT VALUE <-likes<-person FROM person:a
+[person:b]
+### record user: SELECT VALUE <->likes<->person FROM person:a
+[person:b, person:a, person:a, person:a, person:c, person:a]
+### record user: SELECT VALUE ->(knows, likes)->person FROM person:a
+[person:b, person:c]
+### record user: SELECT VALUE ->likes->person->likes->person FROM person:a
+[person:b]
+### record user: SELECT VALUE ->likes->(person, cached) FROM cached:1
+[cached:2, person:a]
+### record user: SELECT VALUE ->likes->? FROM person:a
+[person:c]
+### record user: SELECT VALUE ->? FROM person:a
+[knows:k1, knows:k2, likes:l1, likes:l2]
+### record user: SELECT VALUE ->knows[WHERE since > 2015] FROM person:a
+[knows:k1, knows:k2]
+### record user: SELECT VALUE ->(likes WHERE out = person:c)->person FROM person:a
+[person:c]
+### record user: SELECT VALUE ->knows[WHERE twice > 4030]->person FROM person:a
+[person:b]
+### record user: SELECT VALUE ->knows[WHERE secret = 's1'] FROM person:a
+[]
+### record user: SELECT VALUE ->knows[WHERE out = person:b] FROM person:a
+[knows:k1]
+### record user: SELECT VALUE ->knows[WHERE id = knows:k2 OR in = person:x] FROM person:a
+[knows:k2]
+### record user: SELECT VALUE ->knows[WHERE out.n > $parent.n] FROM person
+[knows:k1]
+[]
+[]
+### record user: SELECT VALUE ->likes->person[WHERE name != 'c'] FROM person:a
+[]
+### record user: SELECT VALUE ->pal->person FROM person:a
+[]
+### record user: SELECT VALUE <->pal<->person FROM person:a
+[]
+### record user: SELECT VALUE ->pal FROM person
+[]
+[]
+[]
+### record user: SELECT VALUE pal:[person:a, person:b]->person FROM person:a
+[person:b]
+### record user: SELECT VALUE ->likes->person FROM cached:1
+[person:a]
+### record user: SELECT VALUE ->likes FROM cached:1
+[likes:l5, likes:l6]
+### record user: SELECT VALUE <~post FROM person:a
+[post:1, post:3]
+### record user: SELECT VALUE <~(post FIELD editor) FROM person:a
+[post:3]
+### record user: SELECT VALUE <~(post FIELD author, post FIELD editor) FROM person:a
+[post:1, post:3]
+### record user: SELECT VALUE <~post[WHERE editor = NONE] FROM person:a
+[post:1]
+### record user: SELECT VALUE <~? FROM person:a
+[post:1, post:3]
+### record user: SELECT VALUE ->likes->person<~post FROM person:b
+[post:1, post:3]
+### record user: SELECT VALUE [person:a, 'x', person:b, [person:c]]->likes->person FROM person:a
+[[person:c], NONE, [person:a], [person:b]]
+### record user: SELECT VALUE { id: person:a }->likes FROM person:b
+[likes:l1, likes:l2]
+### record user: SELECT VALUE (5)->likes FROM person:b
+NONE
+### record user: SELECT id, ->likes->person AS out, <-likes<-person AS in FROM person
+{ id: person:a, in: [person:b], out: [person:c] }
+{ id: person:b, in: [person:c], out: [person:a] }
+{ id: person:c, in: [person:a], out: [person:b] }
+### record user: SELECT VALUE ->likes->person.name FROM person:a
+['c']
+### record user: SELECT VALUE ->knows[WHERE since > 2015].out.name FROM person:a
+['b', NONE]
+### record user: SELECT VALUE ->likes->person[WHERE n > $parent.n] FROM person
+[person:c]
+[]
+[]
+### record user: SELECT VALUE ->likes->person->likes->person.name FROM person
+['b']
+['c']
+['a']
+### record user: SELECT VALUE <-likes<-person.n FROM [person:a, person:b]
+[2]
+[3]
+### record user: SELECT VALUE ->knows.* FROM person:a
+[{ id: knows:k1, in: person:a, out: person:b, since: 2020, twice: 4040 }, { id: knows:k2, in: person:a, out: person:h, since: 2021, twice: 4042 }]
+### record user: SELECT VALUE ->knows.*.secret FROM person:a
+[NONE, NONE]
+### record user: SELECT VALUE ->knows.twice FROM person:a
+[4040, 4042]
+### record user: SELECT VALUE (->likes->person)[0] FROM person:a
+person:c
+### record user: SELECT VALUE ->likes->person.{ name, n } FROM person:a
+[{ n: 3, name: 'c' }]
+### record user: SELECT VALUE [1, 2].map(|$t| $t + n) FROM person
+[2, 3]
+[3, 4]
+[4, 5]
+### record user: SELECT VALUE [1, 2].filter(|$t| $t > n).len() FROM person
+1
+0
+0
+### record user: SELECT VALUE { f: |$x| $x > n } FROM person
+{ f: |$x: any| $x > n }
+{ f: |$x: any| $x > n }
+{ f: |$x: any| $x > n }
+### record user: SELECT VALUE (|$x| $x + n)(1) FROM person
+2
+3
+4

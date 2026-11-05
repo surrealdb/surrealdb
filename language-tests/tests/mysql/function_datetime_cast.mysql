@@ -1,0 +1,28 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A text cast to a datetime or a date is read as MySQL writes it, in a query and in the value of an INSERT, and a date has no time of day"
+
+[[test.results]]
+value = "[{ a: ts'2024-03-15T10:20:30', b: pd'2024-03-15', c: pd'2024-03-15', d: NULL }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ at: ts'2024-03-15T10:20:30', id: 1 }]"
+
+[[test.results]]
+value = "[{ same: true, y: 2024 }]"
+*/
+
+SELECT CAST('2024-03-15 10:20:30' AS DATETIME) AS a, CAST('2024-03-15' AS DATE) AS b, CAST(CAST('2024-03-15 10:20:30' AS DATETIME) AS DATE) AS c, CAST(NULL AS DATETIME) AS d;
+
+CREATE TABLE cast_dt (id INT PRIMARY KEY, at DATETIME);
+
+INSERT INTO cast_dt (id, at) VALUES (1, CAST('2024-03-15 10:20:30' AS DATETIME));
+
+SELECT at = CAST('2024-03-15T10:20:30Z' AS DATETIME) AS same, extract(YEAR FROM at) AS y FROM cast_dt;

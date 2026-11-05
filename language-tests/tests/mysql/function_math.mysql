@@ -1,0 +1,28 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL mod by zero is NULL, log is natural, and truncate cuts toward zero"
+
+[[test.results]]
+value = "[{ a: 1, b: -1, c: 1.5f, zero: NULL }]"
+
+[[test.results]]
+value = "[{ a: -1, deg: 180f, e: 1f, ln0: NULL, lnneg: NULL, pi: true }]"
+
+[[test.results]]
+value = "[{ base1: NULL, base2: true, natural: true, zero: NULL }]"
+
+[[test.results]]
+value = "[{ a: 1.9dec, b: 1200f, c: -1.9dec, d: 2.57dec }]"
+*/
+
+SELECT mod(10, 3) AS a, mod(-7, 3) AS b, mod(7.5, 2) AS c, mod(1, 0) AS zero;
+
+SELECT sign(-5) AS a, pi() > 3.14 AS pi, degrees(3.141592653589793) AS deg, exp(0) AS e, ln(0) AS ln0, ln(-1) AS lnneg;
+
+SELECT abs(log(100) - 4.605170186) < 0.000001 AS natural, abs(log(2, 8) - 3) < 0.000001 AS base2, log(1, 8) AS base1, log(0) AS zero;
+
+SELECT truncate(1.999, 1) AS a, truncate(1234, -2) AS b, truncate(-1.999, 1) AS c, round(2.567, 2) AS d;

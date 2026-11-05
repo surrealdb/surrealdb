@@ -1,0 +1,79 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_native.surql"]
+
+[test]
+reason = "MySQL single-table clauses, aggregates, having, distinct and unions"
+
+[[test.results]]
+value = "[{ name: 'Alice' }, { name: 'Bob' }]"
+
+[[test.results]]
+value = "[{ name: 'Alice' }, { name: 'Bob' }, { name: 'Eve' }]"
+
+[[test.results]]
+value = "[{ name: 'Cara' }, { name: 'Hana' }, { name: 'Alice' }]"
+
+[[test.results]]
+value = "[{ name: 'Cara' }, { name: 'Dan' }, { name: 'Eve' }]"
+
+[[test.results]]
+value = "[{ city: 'Berlin' }, { city: 'London' }, { city: 'Paris' }, { city: 'Rome' }]"
+
+[[test.results]]
+value = "[{ city: 'Berlin', dept: NONE }, { city: 'London', dept: NULL }, { city: 'London', dept: 1 }, { city: 'Paris', dept: 1 }, { city: 'Berlin', dept: 2 }, { city: 'London', dept: 2 }, { city: 'Paris', dept: 3 }, { city: 'Rome', dept: 9 }]"
+
+[[test.results]]
+value = "[{ n: 8 }]"
+
+[[test.results]]
+value = "[{ n: 0 }]"
+
+[[test.results]]
+value = "[{ city: 'Berlin', n: 2, total: 140 }, { city: 'London', n: 3, total: 280.5f }, { city: 'Paris', n: 2, total: 150 }, { city: 'Rome', n: 1, total: 110 }]"
+
+[[test.results]]
+value = "[{ city: 'Berlin', n: 2 }, { city: 'London', n: 3 }, { city: 'Paris', n: 2 }]"
+
+[[test.results]]
+value = "[{ city: 'London', total: 280.5f }]"
+
+[[test.results]]
+value = "[{ city: 'London', n: 3 }]"
+
+[[test.results]]
+value = "[{ city: 'Berlin', n: 2 }, { city: 'London', n: 3 }, { city: 'Paris', n: 2 }]"
+
+[[test.results]]
+error = "The table 'missing' does not exist"
+*/
+
+SELECT e.name FROM emp e WHERE e.dept = 1 ORDER BY e.name;
+
+SELECT e.name FROM emp e WHERE e.dept IN (1, 3) ORDER BY e.name;
+
+SELECT e.name FROM emp e ORDER BY e.salary DESC LIMIT 3;
+
+SELECT e.name FROM emp e ORDER BY e.name LIMIT 2, 3;
+
+SELECT DISTINCT e.city FROM emp e ORDER BY e.city;
+
+SELECT DISTINCT e.dept, e.city FROM emp e ORDER BY e.dept, e.city;
+
+SELECT count(*) AS n FROM emp e;
+
+SELECT count(*) AS n FROM empty x;
+
+SELECT e.city, count(*) AS n, sum(e.salary) AS total FROM emp e GROUP BY e.city ORDER BY e.city;
+
+SELECT e.city, count(*) AS n FROM emp e GROUP BY e.city HAVING count(*) > 1 ORDER BY e.city;
+
+SELECT e.city, sum(e.salary) AS total FROM emp e GROUP BY e.city HAVING sum(e.salary) > 150 ORDER BY total;
+
+SELECT e.city, count(*) AS n FROM emp e GROUP BY e.city HAVING sum(e.salary) > 150 ORDER BY e.city;
+
+SELECT s.city, s.n FROM (SELECT e.city AS city, count(*) AS n FROM emp e GROUP BY e.city) s WHERE s.n > 1 ORDER BY s.city;
+
+SELECT e.name FROM missing e;

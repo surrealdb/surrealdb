@@ -1,0 +1,58 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_schema.surql"]
+
+[test]
+reason = "A grouped select field that is, or is built only from, an expression the group is keyed by returns one value per group"
+
+[[test.results]]
+value = "[{ big: false, n: 1 }, { big: true, n: 2 }]"
+
+[[test.results]]
+value = "[{ k: 2, s: 300 }, { k: 3, s: 150 }]"
+
+[[test.results]]
+value = "[{ k: 2, s: 300 }]"
+
+[[test.results]]
+value = "[{ big: false, n: 1 }, { big: true, n: 2 }]"
+
+[[test.results]]
+value = "[{ big: true, n: 2 }, { big: false, n: 1 }]"
+
+[[test.results]]
+value = "[{ n: 1, negated: true, wrapped: false }, { n: 2, negated: false, wrapped: true }]"
+
+[[test.results]]
+value = "[{ n: 1, t: '100' }, { n: 1, t: '150' }, { n: 1, t: '200' }]"
+
+[[test.results]]
+value = "[{ n: 1, t: '100' }, { n: 1, t: '150' }, { n: 1, t: '200' }]"
+
+[[test.results]]
+value = "[{ c: 'BOOKS', n: 1 }, { c: 'ELECTRONICS', n: 2 }]"
+
+[[test.results]]
+value = "[{ band: 'high', n: 2 }, { band: 'low', n: 1 }]"
+
+[[test.results]]
+value = "[{ k: 100, n: 1 }, { k: 200, n: 1 }, { k: NULL, n: 1 }]"
+
+[[test.results]]
+value = "[{ big: false, n: 1, u: 2 }, { big: true, n: 1, u: 2 }, { big: true, n: 1, u: 3 }]"
+*/
+
+SELECT total > 120 AS big, count(*) AS n FROM orders GROUP BY total > 120 ORDER BY big ASC;
+SELECT user_id + 1 AS k, sum(total) AS s FROM orders GROUP BY user_id + 1 ORDER BY k ASC;
+SELECT user_id + 1 AS k, sum(total) AS s FROM orders GROUP BY user_id + 1 HAVING sum(total) > 200 ORDER BY k ASC;
+SELECT total > 120 AS big, count(*) AS n FROM orders GROUP BY 1 ORDER BY big ASC;
+SELECT total > 120 AS big, count(*) AS n FROM orders GROUP BY total > 120 ORDER BY total > 120 DESC;
+SELECT (total > 120) AND true AS wrapped, NOT (total > 120) AS negated, count(*) AS n FROM orders GROUP BY total > 120 ORDER BY n;
+SELECT CAST(total AS TEXT) AS t, count(*) AS n FROM orders GROUP BY CAST(total AS TEXT) ORDER BY t;
+SELECT total::text AS t, count(*) AS n FROM orders GROUP BY total::text ORDER BY t;
+SELECT upper(category) AS c, count(*) AS n FROM products GROUP BY upper(category) ORDER BY c;
+SELECT CASE WHEN total > 120 THEN 'high' ELSE 'low' END AS band, count(*) AS n FROM orders GROUP BY CASE WHEN total > 120 THEN 'high' ELSE 'low' END ORDER BY band;
+SELECT NULLIF(total, 150) AS k, count(*) AS n FROM orders GROUP BY NULLIF(total, 150) ORDER BY n, k;
+SELECT user_id + 1 AS u, total > 120 AS big, count(*) AS n FROM orders GROUP BY user_id + 1, total > 120 ORDER BY u, big;

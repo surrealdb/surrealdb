@@ -1,7 +1,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use axum::extract::MatchedPath;
+use axum::extract::{MatchedPath, OriginalUri};
 use http::header;
 use hyper::{Request, Response};
 use opentelemetry_http::HeaderExtractor;
@@ -42,8 +42,10 @@ impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 			http.route = field::Empty,
 			http.request.method = req.method().as_str(),
 			http.request.body.size = field::Empty,
-			url.path = req.uri().path(),
-			url.query = field::Empty,
+			// A scoped request is rewritten before it is traced; record the path
+			// the client sent.
+			url.path =
+				req.extensions().get::<OriginalUri>().map_or(req.uri().path(), |uri| uri.path()),
 			url.scheme = field::Empty,
 			http.request.id = field::Empty,
 			user_agent.original = field::Empty,
@@ -62,8 +64,7 @@ impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 			error = field::Empty,
 			error_message = field::Empty,
 		);
-		// Record the basic request query information
-		req.uri().query().map(|v| span.record("url.query", v));
+		// Record the basic request URI information
 		req.uri().scheme().map(|v| span.record("url.scheme", v.as_str()));
 		req.uri().host().map(|v| span.record("server.address", v));
 		req.uri().port_u16().map(|v| span.record("server.port", v));

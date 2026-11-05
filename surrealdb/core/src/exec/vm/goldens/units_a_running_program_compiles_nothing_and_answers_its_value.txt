@@ -1,0 +1,148 @@
+### owner: fn::count_items()
+3
+### owner: SELECT VALUE id FROM doc
+doc:1
+### owner: $shown
+'shown'
+### owner: $gated
+'gated'
+### owner: $barred
+'barred'
+### owner: $counted
+'counted'
+### owner: [$shown, $gated, $counted]
+['shown', 'gated', 'counted']
+### owner: SELECT VALUE [n, $gated] FROM item ORDER BY n
+[1, 'gated']
+[2, 'gated']
+[3, 'gated']
+### owner: fn::sees(2)
+5
+### owner: [fn::sees(1), fn::sees(2), $gated]
+[4, 5, 'gated']
+### owner: fn::v()
+1
+### owner: fn::twice(21)
+42
+### owner: fn::nested(3)
+7
+### owner: fn::count_items() #2
+3
+### owner: fn::fact(5)
+120
+### owner: fn::even(6)
+true
+### owner: SELECT n, fn::twice(n) AS t FROM item ORDER BY n
+{ n: 1, t: 2 }
+{ n: 2, t: 4 }
+{ n: 3, t: 6 }
+### owner: SELECT VALUE doubled FROM calc
+8
+### owner: fn::guarded()
+'ok'
+### owner: fn::refused()
+'no'
+### owner: SELECT VALUE id FROM doc #2
+doc:1
+### owner: array::map([1, 2], |$x| fn::twice($x))
+[2, 4]
+### owner: fn::apply(|$x| $x + 1, 1)
+2
+### owner: { LET $f = |$x| fn::twice($x); RETURN $f(2) }
+4
+### owner: { LET $f = |$x| $x * 2; RETURN $f(21) }
+42
+### owner: (|$x: int| $x + 1)(1)
+2
+### owner: { LET $f = || (SELECT VALUE n FROM item ORDER BY n); RETURN $f() }
+[1, 2, 3]
+### owner: { LET $f = |$id| (SELECT secret FROM ONLY $id); RETURN [$f(item:1), $f(item:3)] }
+[{ secret: 's1' }, { secret: NONE }]
+### owner: array::map([4, 5], |$v| (SELECT VALUE doubled FROM calc WHERE n = $v))
+[[8], []]
+### owner: { LET $y = 10; LET $f = |$x| $x + $y; RETURN array::map([1, 2], $f) }
+[11, 12]
+### owner: SELECT n, (|$m| $m + n)(1) AS k FROM item ORDER BY n
+{ k: 2, n: 1 }
+{ k: 3, n: 2 }
+{ k: 4, n: 3 }
+### owner: { LET $f = |$s, $n| IF $n = 0 { 0 } ELSE { $s($s, $n - 1) }; RETURN $f($f, 3) }
+0
+### owner: { LET $f = || fn::v(); RETURN $f() }
+1
+### owner: { LET $f = || $auth.id; RETURN $f() }
+NONE
+### owner: array::fold([1, 2, 3], 0, |$acc, $v| $acc + (SELECT VALUE n FROM ONLY item:1))
+3
+### record user: fn::count_items()
+2
+### record user: SELECT VALUE id FROM doc
+doc:1
+### record user: $shown
+'shown'
+### record user: $gated
+error: You don't have permission to view the $gated parameter
+### record user: $barred
+error: You don't have permission to view the $barred parameter
+### record user: $counted
+'counted'
+### record user: [$shown, $gated, $counted]
+error: You don't have permission to view the $gated parameter
+### record user: SELECT VALUE [n, $gated] FROM item ORDER BY n
+error: You don't have permission to view the $gated parameter
+### record user: fn::sees(2)
+4
+### record user: [fn::sees(1), fn::sees(2), $gated]
+error: You don't have permission to view the $gated parameter
+### record user: fn::v()
+1
+### record user: fn::twice(21)
+42
+### record user: fn::nested(3)
+7
+### record user: fn::count_items() #2
+2
+### record user: fn::fact(5)
+120
+### record user: fn::even(6)
+true
+### record user: SELECT n, fn::twice(n) AS t FROM item ORDER BY n
+{ n: 1, t: 2 }
+{ n: 2, t: 4 }
+### record user: SELECT VALUE doubled FROM calc
+8
+### record user: fn::guarded()
+error: You don't have permission to run the fn::guarded function
+### record user: fn::refused()
+error: You don't have permission to run the fn::refused function
+### record user: SELECT VALUE id FROM doc #2
+doc:1
+### record user: array::map([1, 2], |$x| fn::twice($x))
+[2, 4]
+### record user: fn::apply(|$x| $x + 1, 1)
+2
+### record user: { LET $f = |$x| fn::twice($x); RETURN $f(2) }
+4
+### record user: { LET $f = |$x| $x * 2; RETURN $f(21) }
+42
+### record user: (|$x: int| $x + 1)(1)
+2
+### record user: { LET $f = || (SELECT VALUE n FROM item ORDER BY n); RETURN $f() }
+[1, 2]
+### record user: { LET $f = |$id| (SELECT secret FROM ONLY $id); RETURN [$f(item:1), $f(item:3)] }
+[{ secret: NONE }, NONE]
+### record user: array::map([4, 5], |$v| (SELECT VALUE doubled FROM calc WHERE n = $v))
+[[8], []]
+### record user: { LET $y = 10; LET $f = |$x| $x + $y; RETURN array::map([1, 2], $f) }
+[11, 12]
+### record user: SELECT n, (|$m| $m + n)(1) AS k FROM item ORDER BY n
+{ k: 2, n: 1 }
+{ k: 3, n: 2 }
+### record user: { LET $f = |$s, $n| IF $n = 0 { 0 } ELSE { $s($s, $n - 1) }; RETURN $f($f, 3) }
+0
+### record user: { LET $f = || fn::v(); RETURN $f() }
+1
+### record user: { LET $f = || $auth.id; RETURN $f() }
+NONE
+### record user: array::fold([1, 2, 3], 0, |$acc, $v| $acc + (SELECT VALUE n FROM ONLY item:1))
+3

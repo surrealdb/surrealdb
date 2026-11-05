@@ -1,0 +1,12 @@
+1bigdec;
+1.50bigdec;
+-1.50bigdec;
+0.000bigdec;
+1.5e40bigdec;
+1e-40bigdec;
+1_2.3_4e1_2bigdec;
+12345678901234567890123456789012345678901234567890.0123456789bigdec;
+- -1bigdec;
+[1bigdec, 2.5bigdec];
+{ 1bigdec: 1 };
+1bigdec + 1dec;

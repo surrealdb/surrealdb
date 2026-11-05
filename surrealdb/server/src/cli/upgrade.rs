@@ -1,222 +1,266 @@
-use std::borrow::Cow;
-use std::fs;
-use std::ops::Deref;
+//! `surreal upgrade`: upgrading is the Surreal CLI's job, so this command only
+//! says how to get there. It downloads nothing and always exits non-zero, so a
+//! script that relied on it to upgrade fails instead of carrying on with the
+//! version it already had.
+
 use std::path::Path;
-use std::process::Command;
+use std::process::ExitCode;
 
-use anyhow::{Context as _, Result, bail, ensure};
 use clap::Args;
-use semver::{Comparator, Op, Version};
 
-use crate::cli::version_client;
-use crate::cli::version_client::VersionClient;
-use crate::cnf::PKG_VERSION;
+use crate::cli::launcher;
 
-pub(crate) const ROOT: &str = "https://download.surrealdb.com";
-const ALPHA: &str = "alpha";
-const BETA: &str = "beta";
-const LATEST: &str = "latest";
-const NIGHTLY: &str = "nightly";
-
+/// The options `upgrade` accepts. They are parsed so that a script passing them
+/// reaches the explanation rather than a usage error, and have no effect.
 #[derive(Args, Debug)]
+#[allow(dead_code, reason = "accepted for compatibility; the values are never used")]
 pub struct UpgradeCommandArguments {
-	/// Install the latest nightly version
-	#[arg(long, conflicts_with = "alpha", conflicts_with = "beta", conflicts_with = "version")]
+	#[arg(long, hide = true)]
 	nightly: bool,
-	/// Install the latest alpha version
-	#[arg(long, conflicts_with = "nightly", conflicts_with = "beta", conflicts_with = "version")]
+	#[arg(long, hide = true)]
 	alpha: bool,
-	/// Install the latest beta version
-	#[arg(long, conflicts_with = "nightly", conflicts_with = "alpha", conflicts_with = "version")]
+	#[arg(long, hide = true)]
 	beta: bool,
-	/// Install a specific version
-	#[arg(long, conflicts_with = "nightly", conflicts_with = "alpha", conflicts_with = "beta")]
+	#[arg(long, hide = true)]
 	version: Option<String>,
-	/// Don't actually replace the executable
-	#[arg(long)]
+	#[arg(long, hide = true)]
 	dry_run: bool,
 }
 
-impl UpgradeCommandArguments {
-	/// Get the version string to download based on the user preference
-	async fn version(&self) -> Result<Cow<'_, str>> {
-		// Convert the version to lowercase, if supplied
-		let version = self.version.as_deref().map(str::to_ascii_lowercase);
-		let client = version_client::new(None)?;
+pub fn init(_: UpgradeCommandArguments) -> ExitCode {
+	let message = match launcher::invoked_as() {
+		Some(_) => launcher_message(),
+		None => {
+			let removal = match std::env::current_exe() {
+				Ok(exe) => remove_command(&exe, cfg!(windows), needs_sudo(&exe)),
+				Err(_) => remove_unknown_command(cfg!(windows)),
+			};
+			standalone_message(&removal, cfg!(windows))
+		}
+	};
+	eprintln!("{message}");
+	ExitCode::FAILURE
+}
 
-		if self.nightly || version.as_deref() == Some(NIGHTLY) {
-			Ok(Cow::Borrowed(NIGHTLY))
-		} else if self.alpha || version.as_deref() == Some(ALPHA) {
-			client.fetch(ALPHA).await
-		} else if self.beta || version.as_deref() == Some(BETA) {
-			client.fetch(BETA).await
-		} else if let Some(version) = version {
-			// Parse the version string to make sure it's valid, return an error if not
-			let version = parse_version(&version)?;
-			// Return the version, ensuring it's prefixed by `v`
-			Ok(Cow::Owned(format!("v{version}")))
+/// The message when the Surreal CLI ran this executable.
+fn launcher_message() -> String {
+	"Upgrading is done by the Surreal CLI; run `surreal upgrade db`.".to_owned()
+}
+
+/// The message for a standalone install, given the command that removes it.
+fn standalone_message(removal: &str, windows: bool) -> String {
+	format!(
+		"Upgrading SurrealDB has moved to the Surreal CLI, which runs the database as `surreal db`.
+
+  1. Remove this executable:    {removal}
+  2. Install the Surreal CLI:   {}
+  3. Run the database:          surreal db start …
+
+After that, `surreal upgrade` upgrades the CLI and the database together.",
+		launcher::install_command(windows)
+	)
+}
+
+/// The command that removes the executable at `exe`.
+///
+/// On Windows the path is a single-quoted PowerShell string, which expands
+/// nothing (a `$` or `()` in a path stays literal), with `-LiteralPath` so
+/// wildcard characters are not patterns either.
+fn remove_command(exe: &Path, windows: bool, sudo: bool) -> String {
+	let exe = exe.to_string_lossy();
+	if windows {
+		format!("Remove-Item -LiteralPath '{}'", exe.replace('\'', "''"))
+	} else {
+		let sudo = if sudo {
+			"sudo "
 		} else {
-			client.fetch(LATEST).await
-		}
+			""
+		};
+		format!("{sudo}rm {}", shell_quote(&exe))
 	}
 }
 
-pub(crate) fn parse_version(input: &str) -> Result<Version> {
-	// Remove the `v` prefix, if supplied
-	let version = input.strip_prefix('v').unwrap_or(input);
-	// Parse the version
-	let comp = Comparator::parse(version)?;
-	// See if a supported operation was requested
-	ensure!(
-		matches!(comp.op, Op::Exact | Op::Caret),
-		"Unsupported version `{version}`. Only exact matches are supported."
-	);
-	// Build and return the version if supported
-	match (comp.minor, comp.patch) {
-		(Some(minor), Some(patch)) => {
-			let mut version = Version::new(comp.major, minor, patch);
-			version.pre = comp.pre;
-			Ok(version)
-		}
-		_ => {
-			bail!("Unsupported version `{version}`. Please specify a full version, like `v1.2.1`.")
-		}
+/// The removal command when the running executable's path cannot be read: it
+/// asks the shell where `surreal` is.
+fn remove_unknown_command(windows: bool) -> String {
+	if windows {
+		"Remove-Item (Get-Command surreal).Source".to_owned()
+	} else {
+		"rm \"$(command -v surreal)\"".to_owned()
 	}
 }
 
-pub fn file_platform_suffix() -> Result<String> {
-	let download_arch = match std::env::consts::ARCH {
-		"aarch64" => "arm64",
-		"x86_64" => "amd64",
-		arch => {
-			bail!("Unsupported architecture '{arch}'")
-		}
+/// Whether removing `exe` needs root: this process is not root, and
+/// [`may_remove`] says it cannot remove the file itself. When the file or its
+/// directory cannot be inspected, the command is printed without `sudo`.
+#[cfg(unix)]
+fn needs_sudo(exe: &Path) -> bool {
+	use std::os::unix::fs::MetadataExt;
+
+	use nix::unistd::{AccessFlags, Uid, access};
+
+	// `S_ISVTX`. Its value is the same on every unix, while the type nix gives
+	// it differs (`u16` on macOS, `u32` on Linux), so a plain constant compares
+	// with `mode()` without a conversion one platform needs and the other's
+	// clippy rejects.
+	const STICKY: u32 = 0o1000;
+
+	let uid = Uid::effective();
+	if uid.is_root() {
+		return false;
+	}
+	let Some(parent) = exe.parent() else {
+		return false;
 	};
-
-	let (download_os, download_ext) = match std::env::consts::OS {
-		"linux" => ("linux", "tgz"),
-		"macos" => ("darwin", "tgz"),
-		"windows" => ("windows", "exe"),
-		os => {
-			bail!("Unsupported operating system '{os}'")
-		}
+	let (Ok(dir), Ok(file)) = (parent.metadata(), exe.metadata()) else {
+		return false;
 	};
-	Ok(format!("{download_os}-{download_arch}.{download_ext}"))
+	let dir_writable = access(parent, AccessFlags::W_OK).is_ok();
+	let dir_sticky = dir.mode() & STICKY != 0;
+	!may_remove(uid.as_raw(), dir_writable, dir_sticky, dir.uid(), file.uid())
 }
 
-pub async fn init(args: UpgradeCommandArguments) -> Result<()> {
-	// Upgrading overwrites the existing executable
-	let exe = std::env::current_exe()?;
+/// Whether the non-root user `uid` may remove a file owned by `file_owner` from
+/// a directory owned by `dir_owner`. It takes write access to the directory and,
+/// when the directory is sticky (as `/tmp` is), owning the file or the
+/// directory as well.
+#[cfg(unix)]
+fn may_remove(
+	uid: u32,
+	dir_writable: bool,
+	dir_sticky: bool,
+	dir_owner: u32,
+	file_owner: u32,
+) -> bool {
+	dir_writable && (!dir_sticky || uid == file_owner || uid == dir_owner)
+}
 
-	// Check if we have write permissions
-	let metadata = fs::metadata(&exe)?;
-	let permissions = metadata.permissions();
-	ensure!(!permissions.readonly(), "executable is read-only");
-	#[cfg(unix)]
-	if std::os::unix::fs::MetadataExt::uid(&metadata) == 0
-		&& !nix::unistd::Uid::effective().is_root()
-	{
-		bail!("executable is owned by root; try again with sudo")
+#[cfg(not(unix))]
+fn needs_sudo(_: &Path) -> bool {
+	false
+}
+
+/// `value` as a single POSIX shell word: unchanged when it holds only
+/// characters the shell leaves alone, otherwise single-quoted.
+fn shell_quote(value: &str) -> String {
+	let plain = !value.is_empty()
+		&& value.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+:@%,=".contains(c));
+	if plain {
+		value.to_owned()
+	} else {
+		format!("'{}'", value.replace('\'', r"'\''"))
 	}
+}
 
-	// Compare old and new versions
-	let old_version = PKG_VERSION.deref().clone();
-	let new_version = args.version().await?;
+#[cfg(test)]
+mod tests {
+	use super::*;
 
-	// Parsed version numbers follow semver format (major.minor.patch)
-	if new_version != NIGHTLY && new_version != ALPHA && new_version != BETA {
-		let old_version_parsed = parse_version(&old_version)?;
-		let new_version_parsed = parse_version(&new_version)?;
-
-		if old_version_parsed == new_version_parsed {
-			println!("{old_version} is already installed");
-			return Ok(());
-		}
-	}
-
-	println!(
-		"current version is {old_version} for {} on {}",
-		std::env::consts::OS,
-		std::env::consts::ARCH,
-	);
-
-	let suffix = file_platform_suffix()?;
-
-	println!(
-		"downloading {new_version} for {} on {}",
-		std::env::consts::OS,
-		std::env::consts::ARCH,
-	);
-
-	let download_filename = format!("surreal-{new_version}.{suffix}");
-	let url = format!("{ROOT}/{new_version}/{download_filename}");
-
-	let response = reqwest::get(&url).await?;
-
-	ensure!(
-		response.status().is_success(),
-		"received status {} when downloading executable from {url}",
-		response.status()
-	);
-
-	let binary = response.bytes().await.context("Failed to download executable")?;
-
-	// Create a temporary file path
-	let tmp_dir = tempfile::tempdir().context("Failed to create temporary directory")?;
-	let mut tmp_path = tmp_dir.path().join(download_filename);
-
-	// Download to a temp file to avoid writing to a running exe file
-	fs::write(&tmp_path, &*binary)?;
-
-	// Preserve permissions
-	fs::set_permissions(&tmp_path, permissions)?;
-
-	// Unarchive
-	if suffix.ends_with("tgz") {
-		let output = Command::new("tar")
-			.arg("-zxf")
-			.arg(&tmp_path)
-			.arg("-C")
-			.arg(tmp_dir.path())
-			.output()
-			.context("Failed to run 'tar' executable")?;
-		ensure!(
-			output.status.success(),
-			"failed to extract exectuable from tar archive: {}",
-			output.status
+	#[test]
+	fn launcher_message_points_at_the_launcher() {
+		assert_eq!(
+			launcher_message(),
+			"Upgrading is done by the Surreal CLI; run `surreal upgrade db`."
 		);
-
-		// focus on the extracted path
-		tmp_path = tmp_dir.path().join("surreal");
 	}
 
-	println!("installing at {}", exe.display());
+	#[test]
+	fn standalone_message_on_unix() {
+		let removal = remove_command(Path::new("/usr/local/bin/surreal"), false, false);
+		assert_eq!(
+			standalone_message(&removal, false),
+			"Upgrading SurrealDB has moved to the Surreal CLI, which runs the database as `surreal db`.
 
-	// Replace the running executable
-	if args.dry_run {
-		println!("Dry run successfully completed")
-	} else {
-		replace_exe(&tmp_path, &exe)?;
-		println!("SurrealDB successfully upgraded");
+  1. Remove this executable:    rm /usr/local/bin/surreal
+  2. Install the Surreal CLI:   curl -sSf https://download.surrealdb.com/cli/launcher/install.sh | sh
+  3. Run the database:          surreal db start …
+
+After that, `surreal upgrade` upgrades the CLI and the database together."
+		);
 	}
 
-	// All ok
-	Ok(())
-}
+	/// On Windows the removal and install steps are PowerShell.
+	#[test]
+	fn standalone_message_on_windows() {
+		let removal =
+			remove_command(Path::new(r"C:\Program Files\SurrealDB\surreal.exe"), true, false);
+		let message = standalone_message(&removal, true);
+		assert!(message.contains(
+			"  1. Remove this executable:    Remove-Item -LiteralPath 'C:\\Program Files\\SurrealDB\\surreal.exe'\n"
+		));
+		assert!(message.contains(
+			"  2. Install the Surreal CLI:   irm https://download.surrealdb.com/cli/launcher/install.ps1 | iex\n"
+		));
+	}
 
-/// Replace exe at `to` with contents of `from`
-fn replace_exe(from: &Path, to: &Path) -> Result<()> {
-	if cfg!(windows) {
-		fs::rename(to, to.with_extension("old.exe"))?;
-	} else {
-		fs::remove_file(to).context("Could not remove old executable file")?;
+	/// A PowerShell path is single-quoted, so nothing in it expands, and a quote
+	/// inside it is doubled.
+	#[test]
+	fn windows_removal_is_literal() {
+		assert_eq!(
+			remove_command(Path::new(r"C:\Users\O'Brien\$env\surreal.exe"), true, false),
+			r"Remove-Item -LiteralPath 'C:\Users\O''Brien\$env\surreal.exe'"
+		);
 	}
-	// Rename works when from and to are on the same file system/device, but
-	// fall back to copy if they're not
-	if fs::rename(from, to).is_err() {
-		// Don't worry about deleting the file as the tmp directory will
-		// be deleted automatically
-		fs::copy(from, to).context("Failed to new executable to location of old executable")?;
+
+	/// An executable of our own, in a directory of our own, is removed without
+	/// `sudo`.
+	#[cfg(unix)]
+	#[test]
+	fn no_sudo_for_an_executable_in_a_directory_of_our_own() {
+		let dir = tempfile::tempdir().unwrap();
+		let exe = dir.path().join("surreal");
+		std::fs::write(&exe, b"").unwrap();
+		assert!(!needs_sudo(&exe));
 	}
-	Ok(())
+
+	/// A sticky directory of our own still lets us remove what is in it.
+	#[cfg(unix)]
+	#[test]
+	fn no_sudo_in_a_sticky_directory_of_our_own() {
+		use std::os::unix::fs::PermissionsExt;
+
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o1777)).unwrap();
+		let exe = dir.path().join("surreal");
+		std::fs::write(&exe, b"").unwrap();
+		assert!(!needs_sudo(&exe));
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn removal_needs_a_writable_directory() {
+		assert!(may_remove(501, true, false, 0, 0));
+		assert!(!may_remove(501, false, false, 501, 501));
+	}
+
+	/// In a sticky directory, such as `/tmp`, a writable directory is not
+	/// enough: the file or the directory must be ours.
+	#[cfg(unix)]
+	#[test]
+	fn removal_from_a_sticky_directory_needs_ownership() {
+		assert!(!may_remove(501, true, true, 0, 0));
+		assert!(may_remove(501, true, true, 0, 501));
+		assert!(may_remove(501, true, true, 501, 0));
+	}
+
+	#[test]
+	fn removal_prefixes_sudo_when_asked() {
+		assert_eq!(
+			remove_command(Path::new("/usr/local/bin/surreal"), false, true),
+			"sudo rm /usr/local/bin/surreal"
+		);
+	}
+
+	#[test]
+	fn removal_quotes_a_path_the_shell_would_split() {
+		assert_eq!(
+			remove_command(Path::new("/Users/me/My Tools/surreal"), false, false),
+			"rm '/Users/me/My Tools/surreal'"
+		);
+		assert_eq!(
+			remove_command(Path::new("/tmp/it's/surreal"), false, false),
+			r"rm '/tmp/it'\''s/surreal'"
+		);
+	}
 }

@@ -43,11 +43,11 @@ impl Uuid {
 
 	/// Generate a new V7 UUID
 	pub fn new_v7_from_datetime(timestamp: Datetime) -> Self {
-		let ts = uuid::Timestamp::from_unix(
-			uuid::NoContext,
-			timestamp.0.timestamp() as u64,
-			timestamp.0.timestamp_subsec_nanos(),
-		);
+		let (secs, nanos) = match u64::try_from(timestamp.0.timestamp()) {
+			Ok(secs) => (secs, timestamp.0.timestamp_subsec_nanos()),
+			Err(_) => (0, 0),
+		};
+		let ts = uuid::Timestamp::from_unix(uuid::NoContext, secs, nanos);
 		Self(uuid::Uuid::new_v7(ts))
 	}
 
@@ -111,5 +111,20 @@ impl DerefMut for Uuid {
 impl Display for Uuid {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		self.0.fmt(f)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use chrono::{TimeZone, Utc};
+
+	use super::*;
+
+	#[test]
+	fn new_v7_from_pre_epoch_datetime_does_not_wrap_to_far_future() {
+		let pre_epoch = Datetime::from(Utc.with_ymd_and_hms(1969, 12, 31, 23, 59, 59).unwrap());
+		let u = Uuid::new_v7_from_datetime(pre_epoch);
+		let (secs, nanos) = u.0.get_timestamp().expect("v7 timestamp").to_unix();
+		assert_eq!((secs, nanos), (0, 0));
 	}
 }

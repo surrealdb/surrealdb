@@ -8,215 +8,18 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
-use tracing::instrument;
 
-use super::common::resolve_version_stamp;
 use super::pipeline::{
-	ScanPipeline, build_field_state, filter_and_process_batch, kv_scan_stream, range_end_key,
-	range_start_key,
+	FieldState, ScalarRows, ScanPipeline, build_field_state, filter_and_process_batch,
+	kv_scan_stream,
 };
-use super::resolved::ResolvedTableContext;
-use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
-	validate_record_user_access,
-};
-use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_for_execute};
-use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, OutputOrdering, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
-};
+use super::resolved::{EnforcementMode, planned_select_permission};
+use crate::err::EngineError;
+use crate::exec::operators::scan::count::record_key_range;
+use crate::exec::permission::PhysicalPermission;
+use crate::exec::{Clause, ExecutionContext};
 use crate::expr::{ControlFlow, ControlFlowExt};
-use crate::iam::Action;
 use crate::val::{RecordId, RecordIdKey, Value};
-
-/// Record lookup and range scan by RecordId.
-///
-/// Handles both single-record point lookups (`person:1`) and RecordId
-/// range scans (`person:1..5`). Unlike [`DynamicScan`](super::DynamicScan),
-/// this operator knows at plan time that its source is a RecordId. It skips:
-/// - Source expression type dispatch (table vs record vs array)
-/// - `IndexAnalyzer` / access path selection
-///
-/// For point lookups, it also skips limit/start tracking and scan pipelines
-/// (always 0 or 1 row).
-///
-/// It reuses `build_field_state` and `filter_and_process_batch` from the
-/// shared pipeline infrastructure for permissions and computed fields.
-#[derive(Debug, Clone)]
-pub struct RecordIdScan {
-	/// Expression that evaluates to a RecordId value.
-	pub(crate) record_id: Arc<dyn PhysicalExpr>,
-	/// Optional VERSION timestamp for time-travel queries.
-	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
-	/// Fields needed by the query (projection + WHERE + ORDER + GROUP).
-	/// `None` means all fields are needed (SELECT *).
-	pub(crate) needed_fields: Option<std::collections::HashSet<String>>,
-	/// Compiled WHERE predicate pushed down from the Filter operator.
-	/// Applied after computed fields, before field-level permissions.
-	pub(crate) predicate: Option<Arc<dyn PhysicalExpr>>,
-	/// Plan-time resolved table context. When present, `execute_record_lookup`
-	/// skips runtime `get_table_def()` and `build_field_state()` entirely.
-	pub(crate) resolved: Option<ResolvedTableContext>,
-	/// Predicate pre-decode filter status (plan-time); see [`PreDecodeFilterStatus`].
-	pub(crate) pre_decode_filter_status: PreDecodeFilterStatus,
-	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
-	pub(crate) metrics: Arc<OperatorMetrics>,
-}
-
-impl RecordIdScan {
-	pub(crate) fn new(
-		record_id: Arc<dyn PhysicalExpr>,
-		version: Option<Arc<dyn PhysicalExpr>>,
-		needed_fields: Option<std::collections::HashSet<String>>,
-		predicate: Option<Arc<dyn PhysicalExpr>>,
-	) -> Self {
-		Self {
-			record_id,
-			version,
-			needed_fields,
-			predicate,
-			resolved: None,
-			pre_decode_filter_status: PreDecodeFilterStatus::NotApplicable,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
-	}
-
-	/// Set the plan-time resolved table context.
-	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
-		self.resolved = Some(resolved);
-		self
-	}
-
-	/// Set plan-time pre-decode filter status for EXPLAIN and execution.
-	pub(crate) fn with_pre_decode_filter(mut self, status: PreDecodeFilterStatus) -> Self {
-		self.pre_decode_filter_status = status;
-		self
-	}
-}
-impl ExecOperator for RecordIdScan {
-	fn name(&self) -> &'static str {
-		"RecordIdScan"
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		let mut attrs = vec![("record_id".to_string(), self.record_id.to_sql())];
-		if let Some(ref version) = self.version {
-			attrs.push(("version".to_string(), version.to_sql()));
-		}
-		if let Some(ref pred) = self.predicate {
-			attrs.push(("predicate".to_string(), pred.to_sql()));
-		}
-		if let Some(s) = self.pre_decode_filter_status.explain_text() {
-			attrs.push(("pre_decode_filter".to_string(), s.to_string()));
-		}
-		attrs
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		let mut mode = self.record_id.access_mode();
-		if let Some(ref version) = self.version {
-			mode = mode.combine(version.access_mode());
-		}
-		if let Some(ref pred) = self.predicate {
-			mode = mode.combine(pred.access_mode());
-		}
-		mode
-	}
-
-	fn cardinality_hint(&self) -> crate::exec::CardinalityHint {
-		// RecordIdScan produces at most one row for point lookups.
-		// Range scans could produce more, but the planner only routes
-		// literal RecordId expressions here (ranges go through DynamicScan).
-		crate::exec::CardinalityHint::AtMostOne
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
-		let mut exprs = vec![("record_id", &self.record_id)];
-		if let Some(ref version) = self.version {
-			exprs.push(("version", version));
-		}
-		if let Some(ref pred) = self.predicate {
-			exprs.push(("predicate", pred));
-		}
-		exprs
-	}
-
-	fn output_ordering(&self) -> OutputOrdering {
-		use crate::exec::operators::SortDirection;
-		use crate::exec::ordering::SortProperty;
-
-		// Both point lookups (0-1 rows) and range scans (KV-ordered by id)
-		// produce output sorted by id ASC.
-		OutputOrdering::Sorted(vec![SortProperty {
-			path: crate::exec::field_path::FieldPath::field("id"),
-			direction: SortDirection::Asc,
-			collate: false,
-			numeric: false,
-		}])
-	}
-
-	#[instrument(name = "RecordLookup::execute", level = "trace", skip_all)]
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let db_ctx = ctx.database()?.clone();
-
-		// Validate record user has access to this namespace/database
-		validate_record_user_access(&db_ctx)?;
-
-		// Check if we need to enforce permissions
-		let check_perms = should_check_perms(&db_ctx, Action::View)?;
-
-		// Clone for the async block
-		let record_id_expr = Arc::clone(&self.record_id);
-		let version_expr = self.version.clone();
-		let needed_fields = self.needed_fields.clone();
-		let predicate = self.predicate.clone();
-		let resolved = self.resolved.clone();
-		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
-		let ctx = ctx.clone();
-
-		let stream = async_stream::try_stream! {
-			// 1. Evaluate the record_id expression to get the RecordId value
-			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let rid_value = record_id_expr.evaluate(eval_ctx).await?;
-
-			let rid = match rid_value {
-				Value::RecordId(rid) => rid,
-				other => {
-					// If the expression didn't produce a RecordId, yield as-is
-					// (defensive fallback — the planner should only route RecordIds here)
-					yield ValueBatch { values: vec![other] };
-					return;
-				}
-			};
-
-			// 2. Resolve VERSION timestamp; see [`resolve_version_stamp`]
-			//    for why we prefer the stamp already set by the enclosing
-			//    `VersionScope` over re-evaluating `version_expr` here.
-			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
-
-			// 3. Delegate to the shared lookup helper
-			let results = execute_record_lookup(
-				&rid, version, check_perms, needed_fields.as_ref(), &ctx,
-				predicate.as_ref(), None, 0, resolved.as_ref(),
-				&pre_decode_filter_status,
-			).await?;
-
-			if !results.is_empty() {
-				yield ValueBatch { values: results };
-			}
-		};
-
-		Ok(monitor_stream(Box::pin(stream), "RecordLookup", &self.metrics))
-	}
-}
 
 // =============================================================================
 // Shared helper — used by both RecordLookup::execute and DynamicScan
@@ -233,63 +36,90 @@ impl ExecOperator for RecordIdScan {
 /// runtime, it forwards its pushed-down values here so that the results are
 /// correctly filtered and bounded.
 ///
+/// `for_update` makes the point lookup a locked read: the record key is
+/// registered on the storage engine for commit-time conflict detection,
+/// including when the record does not exist. It is incompatible with a
+/// `version` and with range keys — both are rejected here so a locked read
+/// is never silently downgraded.
+///
+/// `mode` says who enforces what the table declares — the lookup per record
+/// under [`EnforcementMode::Runtime`], the plan above under
+/// [`EnforcementMode::Planned`].
+///
 /// This is the single implementation of RecordId-based data access, shared
 /// by `RecordIdScan` (plan-time) and `DynamicScan` (runtime-discovered).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_record_lookup(
 	rid: &RecordId,
 	version: Option<u64>,
+	for_update: bool,
 	check_perms: bool,
 	needed_fields: Option<&std::collections::HashSet<String>>,
 	ctx: &ExecutionContext,
-	predicate: Option<&Arc<dyn PhysicalExpr>>,
+	predicate: Option<&Clause>,
 	// FIXME: We should be consistent on which integer type we use for limit.
 	// Our backend only support u32 so we should use u32 everywhere for limits.
 	limit: Option<usize>,
 	start: usize,
-	resolved: Option<&ResolvedTableContext>,
-	pre_decode_filter_status: &PreDecodeFilterStatus,
+	mode: EnforcementMode,
 ) -> Result<Vec<Value>, ControlFlow> {
 	let db_ctx = ctx.database().context("RecordLookup requires database context")?;
 	let txn = ctx.txn();
 	let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 	let db = Arc::clone(&db_ctx.db);
 
-	// 1. Check table existence and resolve SELECT permission.
-	// Use plan-time resolved context if available, otherwise runtime lookups.
-	let (select_permission, field_state) = if let Some(res) = resolved {
-		let perm = res.select_permission(check_perms);
-		let fs = res.field_state_for_projection(needed_fields);
-		(perm, fs)
-	} else {
-		// Runtime fallback
-		let table_def =
-			db_ctx.get_table_def(&rid.table, version).await.context("Failed to get table")?;
-
-		if table_def.is_none() {
-			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
-				name: rid.table.clone(),
+	if for_update {
+		if version.is_some() {
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::Query {
+				message: crate::dbs::FOR_UPDATE_VERSION_ERROR.to_string(),
 			})));
 		}
+		if rid.key.is_range() {
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::Query {
+				message: crate::dbs::FOR_UPDATE_TARGETS_ERROR.to_string(),
+			})));
+		}
+	}
 
-		let perm = if check_perms {
-			let catalog_perm = match &table_def {
-				Some(def) => def.permissions.select.clone(),
-				None => crate::catalog::Permission::None,
+	// 1. Check table existence and resolve SELECT permission.
+	let Some(table_def) =
+		db_ctx.get_table_def(&rid.table, version).await.context("Failed to get table")?
+	else {
+		return Err(ControlFlow::Err(anyhow::Error::new(crate::catalog::Error::TbNotFound {
+			name: rid.table.clone(),
+		})));
+	};
+
+	let (select_permission, field_state) = match mode {
+		// The plan above enforces.
+		EnforcementMode::Planned => (
+			if check_perms {
+				planned_select_permission(&table_def)
+			} else {
+				PhysicalPermission::Allow
+			},
+			FieldState::empty(),
+		),
+		EnforcementMode::Runtime => {
+			let perm = if check_perms {
+				crate::exec::vm::descriptor::select_permission(ctx, &table_def.name).await?
+			} else {
+				PhysicalPermission::Allow
 			};
-			convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
-				.await
-				.context("Failed to convert permission")?
-		} else {
-			PhysicalPermission::Allow
-		};
-
-		let fs = build_field_state(ctx, &rid.table, check_perms, needed_fields).await?;
-		(perm, fs)
+			let fs = build_field_state(ctx, &rid.table, check_perms, needed_fields).await?;
+			(perm, fs)
+		}
 	};
 
 	// Early exit if denied
 	if matches!(select_permission, PhysicalPermission::Deny) {
+		return Ok(vec![]);
+	}
+
+	// A zero limit reads no record, except a
+	// locked read: the lock is a side effect of the read whatever rows it
+	// returns, so the point lookup below still registers it.
+	if limit == Some(0) && !for_update {
 		return Ok(vec![]);
 	}
 
@@ -307,100 +137,115 @@ pub(crate) async fn execute_record_lookup(
 		ScanPipeline::compute_needs_row_filtering(&select_permission, predicate);
 
 	// 3. Dispatch based on key type
-	match &rid.key {
-		RecordIdKey::Range(range) => {
-			// --- Range scan ---
-			let beg = range_start_key(ns.namespace_id, db.database_id, &rid.table, &range.start)?;
-			let end = range_end_key(ns.namespace_id, db.database_id, &rid.table, &range.end)?;
+	if let RecordIdKey::Range(range) = &rid.key {
+		// --- Range scan ---
+		let range = record_key_range(ns.namespace_id, db.database_id, &rid.table, range)?;
 
-			let pre_skip = if !needs_row_filtering {
-				start
-			} else {
-				0
-			};
-			let effective_storage_limit = if !needs_row_filtering {
-				limit
-			} else {
-				None
-			};
-			let limit_hint = limit.map(|l| (l + start).try_into().unwrap_or(u32::MAX));
+		let pre_skip = if !needs_row_filtering {
+			start
+		} else {
+			0
+		};
+		let effective_storage_limit = if !needs_row_filtering {
+			limit
+		} else {
+			None
+		};
+		let limit_hint = limit.map(|l| (l + start).try_into().unwrap_or(u32::MAX));
 
-			let pre_decode_filter = pre_decode_filter_for_execute(
-				pre_decode_filter_status,
+		let epoch = txn.layout_epoch();
+		let layouts = txn
+			.table_layouts(ns.namespace_id, db.database_id, &rid.table, version)
+			.await
+			.map_err(ControlFlow::Err)?;
+		let gate = crate::kvs::RowGate::new(
+			layouts,
+			ns.namespace_id,
+			db.database_id,
+			&rid.table,
+			version,
+			epoch,
+		)
+		.map_err(ControlFlow::Err)?;
+		let replay = crate::exec::migrate::replay_for(ctx, &rid.table, version).await?;
+		let mut source = kv_scan_stream(
+			Arc::clone(&txn),
+			range,
+			gate,
+			version,
+			effective_storage_limit,
+			crate::kvs::Direction::Forward,
+			pre_skip,
+			limit_hint,
+			None,
+			// TopK threshold pushdown targets full table scans only.
+			None,
+			replay.clone(),
+			ScalarRows::Content,
+		);
+
+		let mut pipeline = ScanPipeline::new(
+			select_permission,
+			predicate.cloned(),
+			field_state,
+			check_perms,
+			limit,
+			start.saturating_sub(pre_skip),
+		);
+
+		let mut results = Vec::new();
+		while let Some(batch_result) = source.next().await {
+			if ctx.cancellation().is_cancelled() {
+				return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
+			}
+			let mut batch = batch_result?;
+			if let Some(replay) = &replay {
+				replay.apply_batch(ctx, &mut batch).await?;
+			}
+			let cont = pipeline.process_batch(batch.values_mut(), ctx).await?;
+			results.extend(batch.into_values());
+			if !cont {
+				break;
+			}
+		}
+		Ok(results)
+	} else {
+		// --- Point lookup ---
+		let fetched = if for_update {
+			let fetched =
+				crate::exec::operators::fetch::fetch_raw_record_for_update(ctx, rid).await?;
+			if limit == Some(0) {
+				return Ok(vec![]);
+			}
+			fetched
+		} else {
+			crate::exec::operators::fetch::fetch_raw_record(ctx, rid, version).await?
+		};
+		let Some(value) = fetched else {
+			return Ok(vec![]);
+		};
+
+		let mut batch = vec![value];
+		if needs_processing {
+			filter_and_process_batch(
+				&mut batch,
+				&select_permission,
+				predicate,
+				ctx,
 				&field_state,
 				check_perms,
-				ctx.ctx().config.idiom_recursion_limit,
-			);
-
-			let mut source = kv_scan_stream(
-				Arc::clone(&txn),
-				beg,
-				end,
-				version,
-				effective_storage_limit,
-				crate::idx::planner::ScanDirection::Forward,
-				pre_skip,
-				limit_hint,
-				pre_decode_filter,
-				// TopK threshold pushdown targets full table scans only.
-				None,
-			);
-
-			let mut pipeline = ScanPipeline::new(
-				select_permission,
-				predicate.cloned(),
-				field_state,
-				check_perms,
-				limit,
-				start.saturating_sub(pre_skip),
-			);
-
-			let mut results = Vec::new();
-			while let Some(batch_result) = source.next().await {
-				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
-					)));
-				}
-				let mut batch = batch_result?;
-				let cont = pipeline.process_batch(&mut batch.values, ctx).await?;
-				results.extend(batch.values);
-				if !cont {
-					break;
-				}
-			}
-			Ok(results)
+			)
+			.await?;
 		}
-		_ => {
-			// --- Point lookup ---
-			let Some(value) =
-				crate::exec::operators::fetch::fetch_raw_record(ctx, rid, version).await?
-			else {
-				return Ok(vec![]);
-			};
-
-			let mut batch = vec![value];
-			if needs_processing {
-				filter_and_process_batch(
-					&mut batch,
-					&select_permission,
-					predicate,
-					ctx,
-					&field_state,
-					check_perms,
-				)
-				.await?;
-			}
-			// Apply start/limit for point lookups (0-1 rows after filtering).
-			// Start skips the first N post-filter rows; with at most one row,
-			// any non-zero start discards it.
-			if !batch.is_empty() && start > 0 {
-				batch.clear();
-			}
-			if !batch.is_empty() && limit == Some(0) {
-				batch.clear();
-			}
-			Ok(batch)
+		// Apply start/limit for point lookups (0-1 rows after filtering).
+		// Start skips the first N post-filter rows; with at most one row,
+		// any non-zero start discards it.
+		if !batch.is_empty() && start > 0 {
+			batch.clear();
 		}
+		if !batch.is_empty() && limit == Some(0) {
+			batch.clear();
+		}
+		Ok(batch)
 	}
 }

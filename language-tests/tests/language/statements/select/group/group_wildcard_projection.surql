@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test GROUP BY with wildcard (*) projection to verify which fields appear"

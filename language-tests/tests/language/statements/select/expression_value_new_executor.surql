@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test SELECT VALUE with negation and boolean NOT expressions (new executor)"
+reason = "Test SELECT VALUE with negation and boolean NOT expressions"
 
 [[test.results]]
 value = "[{ boolean: true, id: thing:a, number: 5 }]"
@@ -18,7 +17,8 @@ value = "[-5, 5]"
 value = "[false, true]"
 
 [[test.results]]
-value = ''''ProjectValue [ctx: Db] [expr: ! boolean] {rows: 2}
+value = '''
+'ProjectValue [ctx: Db] [expr: !boolean] {rows: 2}
     TableScan [ctx: Db] [table: thing, direction: Forward] {rows: 2}
 
 Total rows: 2''''

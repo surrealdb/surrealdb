@@ -1,0 +1,4243 @@
+### owner: SELECT id FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE title @@ 'beta' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE title @AND@ 'alpha guide' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE title @OR@ 'alpha notes' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE title @1,AND@ 'beta guide' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE body @1@ 'run' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE body @1@ 'dogs' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE name @1@ 'ell' ORDER BY id
+{ id: open:5 }
+{ id: open:10 }
+{ id: open:15 }
+{ id: open:20 }
+### owner: SELECT id FROM open WHERE title @1@ '' ORDER BY id
+(no rows)
+### owner: SELECT id FROM open WHERE title @1@ '!!' ORDER BY id
+(no rows)
+### owner: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, s: 0.6632941961288452f }
+{ id: open:6, s: 0.6632941961288452f }
+{ id: open:9, s: 0.6632941961288452f }
+{ id: open:12, s: 0.6632941961288452f }
+{ id: open:15, s: 0.6632941961288452f }
+{ id: open:18, s: 0.6632941961288452f }
+{ id: open:21, s: 0.6632941961288452f }
+{ id: open:24, s: 0.6632941961288452f }
+### owner: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'beta' ORDER BY s DESC, id
+{ id: open:1, s: 0f }
+{ id: open:2, s: 0f }
+{ id: open:3, s: 0f }
+{ id: open:4, s: 0f }
+{ id: open:5, s: 0f }
+{ id: open:6, s: 0f }
+{ id: open:7, s: 0f }
+{ id: open:8, s: 0f }
+{ id: open:9, s: 0f }
+{ id: open:10, s: 0f }
+{ id: open:11, s: 0f }
+{ id: open:12, s: 0f }
+{ id: open:13, s: 0f }
+{ id: open:14, s: 0f }
+{ id: open:15, s: 0f }
+{ id: open:16, s: 0f }
+{ id: open:17, s: 0f }
+{ id: open:18, s: 0f }
+{ id: open:19, s: 0f }
+{ id: open:20, s: 0f }
+{ id: open:21, s: 0f }
+{ id: open:22, s: 0f }
+{ id: open:23, s: 0f }
+{ id: open:24, s: 0f }
+### owner: SELECT id, search::highlight('<b>', '</b>', 1) AS h FROM open WHERE title @1@ 'beta' ORDER BY id
+{ h: '<b>Beta</b> gamma notes', id: open:1 }
+{ h: '<b>Beta</b> gamma notes', id: open:2 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:3 }
+{ h: '<b>Beta</b> gamma notes', id: open:4 }
+{ h: '<b>Beta</b> gamma notes', id: open:5 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:6 }
+{ h: '<b>Beta</b> gamma notes', id: open:7 }
+{ h: '<b>Beta</b> gamma notes', id: open:8 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:9 }
+{ h: '<b>Beta</b> gamma notes', id: open:10 }
+{ h: '<b>Beta</b> gamma notes', id: open:11 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:12 }
+{ h: '<b>Beta</b> gamma notes', id: open:13 }
+{ h: '<b>Beta</b> gamma notes', id: open:14 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:15 }
+{ h: '<b>Beta</b> gamma notes', id: open:16 }
+{ h: '<b>Beta</b> gamma notes', id: open:17 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:18 }
+{ h: '<b>Beta</b> gamma notes', id: open:19 }
+{ h: '<b>Beta</b> gamma notes', id: open:20 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:21 }
+{ h: '<b>Beta</b> gamma notes', id: open:22 }
+{ h: '<b>Beta</b> gamma notes', id: open:23 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:24 }
+### owner: SELECT id, search::highlight('<b>', '</b>', 1, true) AS h FROM open WHERE name @1@ 'ell' ORDER BY id
+{ h: 'H<b>ell</b>oworld', id: open:5 }
+{ h: 'H<b>ell</b>oworld', id: open:10 }
+{ h: 'H<b>ell</b>oworld', id: open:15 }
+{ h: 'H<b>ell</b>oworld', id: open:20 }
+### owner: SELECT id, search::offsets(1) AS o FROM open WHERE title @1@ 'beta' ORDER BY id
+{ id: open:1, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:2, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:3, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:4, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:5, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:6, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:7, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:8, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:9, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:10, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:11, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:12, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:13, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:14, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:15, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:16, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:17, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:18, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:19, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:20, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:21, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:22, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:23, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:24, o: { "0": [{ e: 10, s: 6 }] } }
+### owner: SELECT id, search::offsets(1, true) AS o FROM open WHERE name @1@ 'ell' ORDER BY id
+{ id: open:5, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: open:10, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: open:15, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: open:20, o: { "0": [{ e: 4, s: 1 }] } }
+### owner: SELECT id, <string> search::score(1) AS s, search::score(1) * 2 AS twice FROM open WHERE title @1@ 'beta' ORDER BY id
+{ id: open:1, s: '0f', twice: 0f }
+{ id: open:2, s: '0f', twice: 0f }
+{ id: open:3, s: '0f', twice: 0f }
+{ id: open:4, s: '0f', twice: 0f }
+{ id: open:5, s: '0f', twice: 0f }
+{ id: open:6, s: '0f', twice: 0f }
+{ id: open:7, s: '0f', twice: 0f }
+{ id: open:8, s: '0f', twice: 0f }
+{ id: open:9, s: '0f', twice: 0f }
+{ id: open:10, s: '0f', twice: 0f }
+{ id: open:11, s: '0f', twice: 0f }
+{ id: open:12, s: '0f', twice: 0f }
+{ id: open:13, s: '0f', twice: 0f }
+{ id: open:14, s: '0f', twice: 0f }
+{ id: open:15, s: '0f', twice: 0f }
+{ id: open:16, s: '0f', twice: 0f }
+{ id: open:17, s: '0f', twice: 0f }
+{ id: open:18, s: '0f', twice: 0f }
+{ id: open:19, s: '0f', twice: 0f }
+{ id: open:20, s: '0f', twice: 0f }
+{ id: open:21, s: '0f', twice: 0f }
+{ id: open:22, s: '0f', twice: 0f }
+{ id: open:23, s: '0f', twice: 0f }
+{ id: open:24, s: '0f', twice: 0f }
+### owner: SELECT VALUE search::score(1) FROM open WHERE title @1@ 'alpha' ORDER BY id
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+### owner: SELECT id, { score: search::score(1), at: [search::offsets(1)] } AS x FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:6, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:9, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:12, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:15, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:18, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:21, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:24, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+### owner: SELECT id, IF search::score(1) > 0 { 'hit' } ELSE { 'miss' } AS k FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, k: 'hit' }
+{ id: open:6, k: 'hit' }
+{ id: open:9, k: 'hit' }
+{ id: open:12, k: 'hit' }
+{ id: open:15, k: 'hit' }
+{ id: open:18, k: 'hit' }
+{ id: open:21, k: 'hit' }
+{ id: open:24, k: 'hit' }
+### owner: SELECT id FROM open WHERE title @1@ 'alpha' AND search::score(1) > 0 ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### owner: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'beta' ORDER BY s DESC, id LIMIT 3
+{ id: open:1, s: 0f }
+{ id: open:2, s: 0f }
+{ id: open:3, s: 0f }
+### owner: SELECT tag, math::max(search::score(1)) AS best FROM open WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ best: 0f, tag: 'a' }
+{ best: 0f, tag: 'b' }
+### owner: SELECT * FROM (SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'alpha') ORDER BY id
+{ id: open:3, s: 0.6632941961288452f }
+{ id: open:6, s: 0.6632941961288452f }
+{ id: open:9, s: 0.6632941961288452f }
+{ id: open:12, s: 0.6632941961288452f }
+{ id: open:15, s: 0.6632941961288452f }
+{ id: open:18, s: 0.6632941961288452f }
+{ id: open:21, s: 0.6632941961288452f }
+{ id: open:24, s: 0.6632941961288452f }
+### owner: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY d, id LIMIT 2
+{ d: 0.25f, id: open:5 }
+{ d: 0.75f, id: open:4 }
+### owner: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'nothing' ORDER BY id
+(no rows)
+### owner: SELECT id, search::score(1) AS s FROM open WHERE n > 100 AND title @1@ 'alpha' ORDER BY id
+(no rows)
+### owner: SELECT id, search::score(1) AS a, search::score(2) AS b FROM open WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ a: 0f, b: 0f, id: open:1 }
+{ a: 0f, b: 0f, id: open:2 }
+{ a: 0f, b: 0f, id: open:3 }
+{ a: 0f, b: 0f, id: open:4 }
+{ a: 0f, b: 0f, id: open:5 }
+{ a: 0f, b: 0f, id: open:6 }
+{ a: 0f, b: 0f, id: open:7 }
+{ a: 0f, b: 0f, id: open:8 }
+{ a: 0f, b: 0f, id: open:9 }
+{ a: 0f, b: 0f, id: open:10 }
+{ a: 0f, b: 0f, id: open:11 }
+{ a: 0f, b: 0f, id: open:12 }
+{ a: 0f, b: 0f, id: open:13 }
+{ a: 0f, b: 0f, id: open:14 }
+{ a: 0f, b: 0f, id: open:15 }
+{ a: 0f, b: 0f, id: open:16 }
+{ a: 0f, b: 0f, id: open:17 }
+{ a: 0f, b: 0f, id: open:18 }
+{ a: 0f, b: 0f, id: open:19 }
+{ a: 0f, b: 0f, id: open:20 }
+{ a: 0f, b: 0f, id: open:21 }
+{ a: 0f, b: 0f, id: open:22 }
+{ a: 0f, b: 0f, id: open:23 }
+{ a: 0f, b: 0f, id: open:24 }
+### owner: SELECT id, search::highlight('[', ']', 2) AS h FROM open WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ h: 'the [dog] runs home', id: open:1 }
+{ h: 'the [dog] runs home', id: open:2 }
+{ h: 'the [dog] runs home', id: open:3 }
+{ h: 'running [dogs] and cats', id: open:4 }
+{ h: 'the [dog] runs home', id: open:5 }
+{ h: 'the [dog] runs home', id: open:6 }
+{ h: 'the [dog] runs home', id: open:7 }
+{ h: 'running [dogs] and cats', id: open:8 }
+{ h: 'the [dog] runs home', id: open:9 }
+{ h: 'the [dog] runs home', id: open:10 }
+{ h: 'the [dog] runs home', id: open:11 }
+{ h: 'running [dogs] and cats', id: open:12 }
+{ h: 'the [dog] runs home', id: open:13 }
+{ h: 'the [dog] runs home', id: open:14 }
+{ h: 'the [dog] runs home', id: open:15 }
+{ h: 'running [dogs] and cats', id: open:16 }
+{ h: 'the [dog] runs home', id: open:17 }
+{ h: 'the [dog] runs home', id: open:18 }
+{ h: 'the [dog] runs home', id: open:19 }
+{ h: 'running [dogs] and cats', id: open:20 }
+{ h: 'the [dog] runs home', id: open:21 }
+{ h: 'the [dog] runs home', id: open:22 }
+{ h: 'the [dog] runs home', id: open:23 }
+{ h: 'running [dogs] and cats', id: open:24 }
+### owner: SELECT id FROM open WHERE title @1@ 'alpha' AND body @2@ 'dog' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE title @1@ 'alpha' AND body @2@ 'zebra' ORDER BY id
+(no rows)
+### owner: SELECT id FROM open WHERE title @1@ 'alpha' OR n = 2 ORDER BY id
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE title @1@ 'alpha' OR body @2@ 'dog' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE (title @1@ 'alpha') = true ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE !(title @1@ 'alpha') ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:22 }
+{ id: open:23 }
+### owner: SELECT id FROM open WHERE title @1@ 'alpha' AND (n = 3 OR body @2@ 'dog') ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE n > 0 AND title @@ 'beta' AND body @@ 'dogs' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+### owner: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'beta' OR n = 2 ORDER BY id
+{ id: open:1, s: 0f }
+{ id: open:2, s: 0f }
+{ id: open:3, s: 0f }
+{ id: open:4, s: 0f }
+{ id: open:5, s: 0f }
+{ id: open:6, s: 0f }
+{ id: open:7, s: 0f }
+{ id: open:8, s: 0f }
+{ id: open:9, s: 0f }
+{ id: open:10, s: 0f }
+{ id: open:11, s: 0f }
+{ id: open:12, s: 0f }
+{ id: open:13, s: 0f }
+{ id: open:14, s: 0f }
+{ id: open:15, s: 0f }
+{ id: open:16, s: 0f }
+{ id: open:17, s: 0f }
+{ id: open:18, s: 0f }
+{ id: open:19, s: 0f }
+{ id: open:20, s: 0f }
+{ id: open:21, s: 0f }
+{ id: open:22, s: 0f }
+{ id: open:23, s: 0f }
+{ id: open:24, s: 0f }
+### owner: SELECT id FROM open WHERE title @1@ 'beta' AND n > 2 AND tag = 'a' ORDER BY id
+{ id: open:4 }
+{ id: open:10 }
+{ id: open:16 }
+{ id: open:22 }
+### owner: SELECT id FROM open WHERE title @1@ 'beta' ORDER BY id LIMIT 3 START 2
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+### owner: SELECT tag, count() AS c FROM open WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ c: 12, tag: 'a' }
+{ c: 12, tag: 'b' }
+### owner: SELECT count() FROM open WHERE title @1@ 'beta' GROUP ALL
+{ count: 24 }
+### owner: SELECT id, label, secret FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, label: 'row 3', secret: 's' }
+{ id: open:6, label: 'row 0', secret: 's' }
+{ id: open:9, label: 'row 3', secret: 's' }
+{ id: open:12, label: 'row 0', secret: 's' }
+{ id: open:15, label: 'row 3', secret: 's' }
+{ id: open:18, label: 'row 0', secret: 's' }
+{ id: open:21, label: 'row 3', secret: 's' }
+{ id: open:24, label: 'row 0', secret: 's' }
+### owner: SELECT *, search::score(1) AS s FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ body: 'the dog runs home', emb: [3f, 0f, 0f], id: open:3, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [6f, 0f, 0f], id: open:6, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [12f, 0f, 0f], id: open:12, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [15f, 0f, 0f], id: open:15, label: 'row 3', n: 3, name: 'Helloworld', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [18f, 0f, 0f], id: open:18, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [21f, 0f, 0f], id: open:21, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [24f, 0f, 0f], id: open:24, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+### owner: SELECT id, title @@ 'beta' AS m FROM open ORDER BY id
+error: There was no suitable index supporting the expression: title @@ 'beta'
+### owner: SELECT id, title @1@ 'beta' AS m FROM open WHERE title @1@ 'beta' ORDER BY id
+{ id: open:1, m: true }
+{ id: open:2, m: true }
+{ id: open:3, m: true }
+{ id: open:4, m: true }
+{ id: open:5, m: true }
+{ id: open:6, m: true }
+{ id: open:7, m: true }
+{ id: open:8, m: true }
+{ id: open:9, m: true }
+{ id: open:10, m: true }
+{ id: open:11, m: true }
+{ id: open:12, m: true }
+{ id: open:13, m: true }
+{ id: open:14, m: true }
+{ id: open:15, m: true }
+{ id: open:16, m: true }
+{ id: open:17, m: true }
+{ id: open:18, m: true }
+{ id: open:19, m: true }
+{ id: open:20, m: true }
+{ id: open:21, m: true }
+{ id: open:22, m: true }
+{ id: open:23, m: true }
+{ id: open:24, m: true }
+### owner: SELECT id FROM open:1..5 WHERE title @@ 'beta'
+(no rows)
+### owner: SELECT id, search::score(1) AS s FROM open:3 WHERE title @1@ 'alpha'
+(no rows)
+### owner: SELECT id, (SELECT VALUE search::score(1) FROM open WHERE title @1@ 'alpha' ORDER BY id LIMIT 1) AS x FROM open:1
+{ id: open:1, x: [0.6632941961288452f] }
+### owner: SELECT id FROM open WHERE title @1@ 'alpha' AND id IN (SELECT VALUE id FROM open WHERE body @1@ 'dog') ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### owner: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+### owner: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY d, id
+{ d: 0.25f, id: open:5 }
+{ d: 0.75f, id: open:4 }
+{ d: 1.25f, id: open:6 }
+{ d: 1.75f, id: open:3 }
+### owner: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ d: 2.75f, id: open:2 }
+{ d: 1.75f, id: open:3 }
+{ d: 0.75f, id: open:4 }
+{ d: 0.25f, id: open:5 }
+{ d: 1.25f, id: open:6 }
+{ d: 2.25f, id: open:7 }
+### owner: SELECT id, vector::distance::knn() * 2 AS d, label FROM open WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
+{ d: 0f, id: open:1, label: 'row 1' }
+{ d: 2f, id: open:2, label: 'row 2' }
+{ d: 4f, id: open:3, label: 'row 3' }
+### owner: SELECT VALUE vector::distance::knn() FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.25f
+0.75f
+### owner: SELECT *, vector::distance::knn() AS d FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: open:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: open:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+### owner: SELECT count() FROM open WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
+{ count: 5 }
+### owner: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: open:2 }
+{ id: open:4 }
+{ id: open:6 }
+{ id: open:8 }
+### owner: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY id
+{ d: 2.75f, id: open:2 }
+{ d: 1.75f, id: open:3 }
+{ d: 0.75f, id: open:4 }
+{ d: 0.25f, id: open:5 }
+### owner: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' ORDER BY id
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+### owner: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n = 3 ORDER BY id
+{ id: open:3 }
+{ id: open:9 }
+{ id: open:15 }
+{ id: open:21 }
+### owner: SELECT id FROM open WHERE emb <|3, 40|> [4.75, 0.0, 0.0] AND n IN [1, 2] AND tag = 'b' ORDER BY id
+{ id: open:1 }
+{ id: open:7 }
+{ id: open:13 }
+### owner: SELECT id, search::score(1) AS s, vector::distance::knn() AS d FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' AND n > 0 ORDER BY id
+{ d: 1.75f, id: open:3, s: 0f }
+{ d: 0.75f, id: open:4, s: 0f }
+{ d: 0.25f, id: open:5, s: 0f }
+{ d: 2.25f, id: open:7, s: 0f }
+### owner: SELECT id FROM bare WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: bare:3 }
+{ id: bare:4 }
+{ id: bare:5 }
+{ id: bare:6 }
+### owner: SELECT id FROM open WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: open:2 }
+{ id: open:4 }
+{ id: open:6 }
+{ id: open:8 }
+### owner: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|4, MANHATTAN|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY d, id
+{ d: 0.25f, id: open:5 }
+{ d: 0.75f, id: open:4 }
+{ d: 1.75f, id: open:3 }
+{ d: 2.75f, id: open:2 }
+### owner: SELECT id FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:3 }
+{ id: mine:6 }
+{ id: mine:9 }
+{ id: mine:12 }
+{ id: mine:15 }
+{ id: mine:18 }
+{ id: mine:21 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE title @@ 'beta' ORDER BY id
+{ id: mine:1 }
+{ id: mine:2 }
+{ id: mine:3 }
+{ id: mine:4 }
+{ id: mine:5 }
+{ id: mine:6 }
+{ id: mine:7 }
+{ id: mine:8 }
+{ id: mine:9 }
+{ id: mine:10 }
+{ id: mine:11 }
+{ id: mine:12 }
+{ id: mine:13 }
+{ id: mine:14 }
+{ id: mine:15 }
+{ id: mine:16 }
+{ id: mine:17 }
+{ id: mine:18 }
+{ id: mine:19 }
+{ id: mine:20 }
+{ id: mine:21 }
+{ id: mine:22 }
+{ id: mine:23 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE title @AND@ 'alpha guide' ORDER BY id
+{ id: mine:3 }
+{ id: mine:6 }
+{ id: mine:9 }
+{ id: mine:12 }
+{ id: mine:15 }
+{ id: mine:18 }
+{ id: mine:21 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE title @OR@ 'alpha notes' ORDER BY id
+{ id: mine:1 }
+{ id: mine:2 }
+{ id: mine:3 }
+{ id: mine:4 }
+{ id: mine:5 }
+{ id: mine:6 }
+{ id: mine:7 }
+{ id: mine:8 }
+{ id: mine:9 }
+{ id: mine:10 }
+{ id: mine:11 }
+{ id: mine:12 }
+{ id: mine:13 }
+{ id: mine:14 }
+{ id: mine:15 }
+{ id: mine:16 }
+{ id: mine:17 }
+{ id: mine:18 }
+{ id: mine:19 }
+{ id: mine:20 }
+{ id: mine:21 }
+{ id: mine:22 }
+{ id: mine:23 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE title @1,AND@ 'beta guide' ORDER BY id
+{ id: mine:3 }
+{ id: mine:6 }
+{ id: mine:9 }
+{ id: mine:12 }
+{ id: mine:15 }
+{ id: mine:18 }
+{ id: mine:21 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE body @1@ 'run' ORDER BY id
+{ id: mine:1 }
+{ id: mine:2 }
+{ id: mine:3 }
+{ id: mine:4 }
+{ id: mine:5 }
+{ id: mine:6 }
+{ id: mine:7 }
+{ id: mine:8 }
+{ id: mine:9 }
+{ id: mine:10 }
+{ id: mine:11 }
+{ id: mine:12 }
+{ id: mine:13 }
+{ id: mine:14 }
+{ id: mine:15 }
+{ id: mine:16 }
+{ id: mine:17 }
+{ id: mine:18 }
+{ id: mine:19 }
+{ id: mine:20 }
+{ id: mine:21 }
+{ id: mine:22 }
+{ id: mine:23 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE body @1@ 'dogs' ORDER BY id
+{ id: mine:1 }
+{ id: mine:2 }
+{ id: mine:3 }
+{ id: mine:4 }
+{ id: mine:5 }
+{ id: mine:6 }
+{ id: mine:7 }
+{ id: mine:8 }
+{ id: mine:9 }
+{ id: mine:10 }
+{ id: mine:11 }
+{ id: mine:12 }
+{ id: mine:13 }
+{ id: mine:14 }
+{ id: mine:15 }
+{ id: mine:16 }
+{ id: mine:17 }
+{ id: mine:18 }
+{ id: mine:19 }
+{ id: mine:20 }
+{ id: mine:21 }
+{ id: mine:22 }
+{ id: mine:23 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE name @1@ 'ell' ORDER BY id
+{ id: mine:5 }
+{ id: mine:10 }
+{ id: mine:15 }
+{ id: mine:20 }
+### owner: SELECT id FROM mine WHERE title @1@ '' ORDER BY id
+(no rows)
+### owner: SELECT id FROM mine WHERE title @1@ '!!' ORDER BY id
+(no rows)
+### owner: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:3, s: 0.6632941961288452f }
+{ id: mine:6, s: 0.6632941961288452f }
+{ id: mine:9, s: 0.6632941961288452f }
+{ id: mine:12, s: 0.6632941961288452f }
+{ id: mine:15, s: 0.6632941961288452f }
+{ id: mine:18, s: 0.6632941961288452f }
+{ id: mine:21, s: 0.6632941961288452f }
+{ id: mine:24, s: 0.6632941961288452f }
+### owner: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'beta' ORDER BY s DESC, id
+{ id: mine:1, s: 0f }
+{ id: mine:2, s: 0f }
+{ id: mine:3, s: 0f }
+{ id: mine:4, s: 0f }
+{ id: mine:5, s: 0f }
+{ id: mine:6, s: 0f }
+{ id: mine:7, s: 0f }
+{ id: mine:8, s: 0f }
+{ id: mine:9, s: 0f }
+{ id: mine:10, s: 0f }
+{ id: mine:11, s: 0f }
+{ id: mine:12, s: 0f }
+{ id: mine:13, s: 0f }
+{ id: mine:14, s: 0f }
+{ id: mine:15, s: 0f }
+{ id: mine:16, s: 0f }
+{ id: mine:17, s: 0f }
+{ id: mine:18, s: 0f }
+{ id: mine:19, s: 0f }
+{ id: mine:20, s: 0f }
+{ id: mine:21, s: 0f }
+{ id: mine:22, s: 0f }
+{ id: mine:23, s: 0f }
+{ id: mine:24, s: 0f }
+### owner: SELECT id, search::highlight('<b>', '</b>', 1) AS h FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ h: '<b>Beta</b> gamma notes', id: mine:1 }
+{ h: '<b>Beta</b> gamma notes', id: mine:2 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:3 }
+{ h: '<b>Beta</b> gamma notes', id: mine:4 }
+{ h: '<b>Beta</b> gamma notes', id: mine:5 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:6 }
+{ h: '<b>Beta</b> gamma notes', id: mine:7 }
+{ h: '<b>Beta</b> gamma notes', id: mine:8 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:9 }
+{ h: '<b>Beta</b> gamma notes', id: mine:10 }
+{ h: '<b>Beta</b> gamma notes', id: mine:11 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:12 }
+{ h: '<b>Beta</b> gamma notes', id: mine:13 }
+{ h: '<b>Beta</b> gamma notes', id: mine:14 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:15 }
+{ h: '<b>Beta</b> gamma notes', id: mine:16 }
+{ h: '<b>Beta</b> gamma notes', id: mine:17 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:18 }
+{ h: '<b>Beta</b> gamma notes', id: mine:19 }
+{ h: '<b>Beta</b> gamma notes', id: mine:20 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:21 }
+{ h: '<b>Beta</b> gamma notes', id: mine:22 }
+{ h: '<b>Beta</b> gamma notes', id: mine:23 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:24 }
+### owner: SELECT id, search::highlight('<b>', '</b>', 1, true) AS h FROM mine WHERE name @1@ 'ell' ORDER BY id
+{ h: 'H<b>ell</b>oworld', id: mine:5 }
+{ h: 'H<b>ell</b>oworld', id: mine:10 }
+{ h: 'H<b>ell</b>oworld', id: mine:15 }
+{ h: 'H<b>ell</b>oworld', id: mine:20 }
+### owner: SELECT id, search::offsets(1) AS o FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ id: mine:1, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:2, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:3, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:4, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:5, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:6, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:7, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:8, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:9, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:10, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:11, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:12, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:13, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:14, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:15, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:16, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:17, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:18, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:19, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:20, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:21, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:22, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:23, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:24, o: { "0": [{ e: 10, s: 6 }] } }
+### owner: SELECT id, search::offsets(1, true) AS o FROM mine WHERE name @1@ 'ell' ORDER BY id
+{ id: mine:5, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: mine:10, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: mine:15, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: mine:20, o: { "0": [{ e: 4, s: 1 }] } }
+### owner: SELECT id, <string> search::score(1) AS s, search::score(1) * 2 AS twice FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ id: mine:1, s: '0f', twice: 0f }
+{ id: mine:2, s: '0f', twice: 0f }
+{ id: mine:3, s: '0f', twice: 0f }
+{ id: mine:4, s: '0f', twice: 0f }
+{ id: mine:5, s: '0f', twice: 0f }
+{ id: mine:6, s: '0f', twice: 0f }
+{ id: mine:7, s: '0f', twice: 0f }
+{ id: mine:8, s: '0f', twice: 0f }
+{ id: mine:9, s: '0f', twice: 0f }
+{ id: mine:10, s: '0f', twice: 0f }
+{ id: mine:11, s: '0f', twice: 0f }
+{ id: mine:12, s: '0f', twice: 0f }
+{ id: mine:13, s: '0f', twice: 0f }
+{ id: mine:14, s: '0f', twice: 0f }
+{ id: mine:15, s: '0f', twice: 0f }
+{ id: mine:16, s: '0f', twice: 0f }
+{ id: mine:17, s: '0f', twice: 0f }
+{ id: mine:18, s: '0f', twice: 0f }
+{ id: mine:19, s: '0f', twice: 0f }
+{ id: mine:20, s: '0f', twice: 0f }
+{ id: mine:21, s: '0f', twice: 0f }
+{ id: mine:22, s: '0f', twice: 0f }
+{ id: mine:23, s: '0f', twice: 0f }
+{ id: mine:24, s: '0f', twice: 0f }
+### owner: SELECT VALUE search::score(1) FROM mine WHERE title @1@ 'alpha' ORDER BY id
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+### owner: SELECT id, { score: search::score(1), at: [search::offsets(1)] } AS x FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:3, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:6, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:9, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:12, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:15, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:18, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:21, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:24, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+### owner: SELECT id, IF search::score(1) > 0 { 'hit' } ELSE { 'miss' } AS k FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:3, k: 'hit' }
+{ id: mine:6, k: 'hit' }
+{ id: mine:9, k: 'hit' }
+{ id: mine:12, k: 'hit' }
+{ id: mine:15, k: 'hit' }
+{ id: mine:18, k: 'hit' }
+{ id: mine:21, k: 'hit' }
+{ id: mine:24, k: 'hit' }
+### owner: SELECT id FROM mine WHERE title @1@ 'alpha' AND search::score(1) > 0 ORDER BY id
+{ id: mine:3 }
+{ id: mine:6 }
+{ id: mine:9 }
+{ id: mine:12 }
+{ id: mine:15 }
+{ id: mine:18 }
+{ id: mine:21 }
+{ id: mine:24 }
+### owner: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'beta' ORDER BY s DESC, id LIMIT 3
+{ id: mine:1, s: 0f }
+{ id: mine:2, s: 0f }
+{ id: mine:3, s: 0f }
+### owner: SELECT tag, math::max(search::score(1)) AS best FROM mine WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ best: 0f, tag: 'a' }
+{ best: 0f, tag: 'b' }
+### owner: SELECT * FROM (SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'alpha') ORDER BY id
+{ id: mine:3, s: 0.6632941961288452f }
+{ id: mine:6, s: 0.6632941961288452f }
+{ id: mine:9, s: 0.6632941961288452f }
+{ id: mine:12, s: 0.6632941961288452f }
+{ id: mine:15, s: 0.6632941961288452f }
+{ id: mine:18, s: 0.6632941961288452f }
+{ id: mine:21, s: 0.6632941961288452f }
+{ id: mine:24, s: 0.6632941961288452f }
+### owner: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY d, id LIMIT 2
+{ d: 0.25f, id: mine:5 }
+{ d: 0.75f, id: mine:4 }
+### owner: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'nothing' ORDER BY id
+(no rows)
+### owner: SELECT id, search::score(1) AS s FROM mine WHERE n > 100 AND title @1@ 'alpha' ORDER BY id
+(no rows)
+### owner: SELECT id, search::score(1) AS a, search::score(2) AS b FROM mine WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ a: 0f, b: 0f, id: mine:1 }
+{ a: 0f, b: 0f, id: mine:2 }
+{ a: 0f, b: 0f, id: mine:3 }
+{ a: 0f, b: 0f, id: mine:4 }
+{ a: 0f, b: 0f, id: mine:5 }
+{ a: 0f, b: 0f, id: mine:6 }
+{ a: 0f, b: 0f, id: mine:7 }
+{ a: 0f, b: 0f, id: mine:8 }
+{ a: 0f, b: 0f, id: mine:9 }
+{ a: 0f, b: 0f, id: mine:10 }
+{ a: 0f, b: 0f, id: mine:11 }
+{ a: 0f, b: 0f, id: mine:12 }
+{ a: 0f, b: 0f, id: mine:13 }
+{ a: 0f, b: 0f, id: mine:14 }
+{ a: 0f, b: 0f, id: mine:15 }
+{ a: 0f, b: 0f, id: mine:16 }
+{ a: 0f, b: 0f, id: mine:17 }
+{ a: 0f, b: 0f, id: mine:18 }
+{ a: 0f, b: 0f, id: mine:19 }
+{ a: 0f, b: 0f, id: mine:20 }
+{ a: 0f, b: 0f, id: mine:21 }
+{ a: 0f, b: 0f, id: mine:22 }
+{ a: 0f, b: 0f, id: mine:23 }
+{ a: 0f, b: 0f, id: mine:24 }
+### owner: SELECT id, search::highlight('[', ']', 2) AS h FROM mine WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ h: 'the [dog] runs home', id: mine:1 }
+{ h: 'the [dog] runs home', id: mine:2 }
+{ h: 'the [dog] runs home', id: mine:3 }
+{ h: 'running [dogs] and cats', id: mine:4 }
+{ h: 'the [dog] runs home', id: mine:5 }
+{ h: 'the [dog] runs home', id: mine:6 }
+{ h: 'the [dog] runs home', id: mine:7 }
+{ h: 'running [dogs] and cats', id: mine:8 }
+{ h: 'the [dog] runs home', id: mine:9 }
+{ h: 'the [dog] runs home', id: mine:10 }
+{ h: 'the [dog] runs home', id: mine:11 }
+{ h: 'running [dogs] and cats', id: mine:12 }
+{ h: 'the [dog] runs home', id: mine:13 }
+{ h: 'the [dog] runs home', id: mine:14 }
+{ h: 'the [dog] runs home', id: mine:15 }
+{ h: 'running [dogs] and cats', id: mine:16 }
+{ h: 'the [dog] runs home', id: mine:17 }
+{ h: 'the [dog] runs home', id: mine:18 }
+{ h: 'the [dog] runs home', id: mine:19 }
+{ h: 'running [dogs] and cats', id: mine:20 }
+{ h: 'the [dog] runs home', id: mine:21 }
+{ h: 'the [dog] runs home', id: mine:22 }
+{ h: 'the [dog] runs home', id: mine:23 }
+{ h: 'running [dogs] and cats', id: mine:24 }
+### owner: SELECT id FROM mine WHERE title @1@ 'alpha' AND body @2@ 'dog' ORDER BY id
+{ id: mine:3 }
+{ id: mine:6 }
+{ id: mine:9 }
+{ id: mine:12 }
+{ id: mine:15 }
+{ id: mine:18 }
+{ id: mine:21 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE title @1@ 'alpha' AND body @2@ 'zebra' ORDER BY id
+(no rows)
+### owner: SELECT id FROM mine WHERE title @1@ 'alpha' OR n = 2 ORDER BY id
+{ id: mine:2 }
+{ id: mine:3 }
+{ id: mine:6 }
+{ id: mine:8 }
+{ id: mine:9 }
+{ id: mine:12 }
+{ id: mine:14 }
+{ id: mine:15 }
+{ id: mine:18 }
+{ id: mine:20 }
+{ id: mine:21 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE title @1@ 'alpha' OR body @2@ 'dog' ORDER BY id
+{ id: mine:1 }
+{ id: mine:2 }
+{ id: mine:3 }
+{ id: mine:4 }
+{ id: mine:5 }
+{ id: mine:6 }
+{ id: mine:7 }
+{ id: mine:8 }
+{ id: mine:9 }
+{ id: mine:10 }
+{ id: mine:11 }
+{ id: mine:12 }
+{ id: mine:13 }
+{ id: mine:14 }
+{ id: mine:15 }
+{ id: mine:16 }
+{ id: mine:17 }
+{ id: mine:18 }
+{ id: mine:19 }
+{ id: mine:20 }
+{ id: mine:21 }
+{ id: mine:22 }
+{ id: mine:23 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE (title @1@ 'alpha') = true ORDER BY id
+{ id: mine:3 }
+{ id: mine:6 }
+{ id: mine:9 }
+{ id: mine:12 }
+{ id: mine:15 }
+{ id: mine:18 }
+{ id: mine:21 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE !(title @1@ 'alpha') ORDER BY id
+{ id: mine:1 }
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:8 }
+{ id: mine:10 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:14 }
+{ id: mine:16 }
+{ id: mine:17 }
+{ id: mine:19 }
+{ id: mine:20 }
+{ id: mine:22 }
+{ id: mine:23 }
+### owner: SELECT id FROM mine WHERE title @1@ 'alpha' AND (n = 3 OR body @2@ 'dog') ORDER BY id
+{ id: mine:3 }
+{ id: mine:6 }
+{ id: mine:9 }
+{ id: mine:12 }
+{ id: mine:15 }
+{ id: mine:18 }
+{ id: mine:21 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE n > 0 AND title @@ 'beta' AND body @@ 'dogs' ORDER BY id
+{ id: mine:1 }
+{ id: mine:2 }
+{ id: mine:3 }
+{ id: mine:4 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:8 }
+{ id: mine:9 }
+{ id: mine:10 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:14 }
+{ id: mine:15 }
+{ id: mine:16 }
+{ id: mine:17 }
+{ id: mine:19 }
+{ id: mine:20 }
+{ id: mine:21 }
+{ id: mine:22 }
+{ id: mine:23 }
+### owner: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'beta' OR n = 2 ORDER BY id
+{ id: mine:1, s: 0f }
+{ id: mine:2, s: 0f }
+{ id: mine:3, s: 0f }
+{ id: mine:4, s: 0f }
+{ id: mine:5, s: 0f }
+{ id: mine:6, s: 0f }
+{ id: mine:7, s: 0f }
+{ id: mine:8, s: 0f }
+{ id: mine:9, s: 0f }
+{ id: mine:10, s: 0f }
+{ id: mine:11, s: 0f }
+{ id: mine:12, s: 0f }
+{ id: mine:13, s: 0f }
+{ id: mine:14, s: 0f }
+{ id: mine:15, s: 0f }
+{ id: mine:16, s: 0f }
+{ id: mine:17, s: 0f }
+{ id: mine:18, s: 0f }
+{ id: mine:19, s: 0f }
+{ id: mine:20, s: 0f }
+{ id: mine:21, s: 0f }
+{ id: mine:22, s: 0f }
+{ id: mine:23, s: 0f }
+{ id: mine:24, s: 0f }
+### owner: SELECT id FROM mine WHERE title @1@ 'beta' AND n > 2 AND tag = 'a' ORDER BY id
+{ id: mine:4 }
+{ id: mine:10 }
+{ id: mine:16 }
+{ id: mine:22 }
+### owner: SELECT id FROM mine WHERE title @1@ 'beta' ORDER BY id LIMIT 3 START 2
+{ id: mine:3 }
+{ id: mine:4 }
+{ id: mine:5 }
+### owner: SELECT tag, count() AS c FROM mine WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ c: 12, tag: 'a' }
+{ c: 12, tag: 'b' }
+### owner: SELECT count() FROM mine WHERE title @1@ 'beta' GROUP ALL
+{ count: 24 }
+### owner: SELECT id, label, secret FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:3, label: 'row 3', secret: 's' }
+{ id: mine:6, label: 'row 0', secret: 's' }
+{ id: mine:9, label: 'row 3', secret: 's' }
+{ id: mine:12, label: 'row 0', secret: 's' }
+{ id: mine:15, label: 'row 3', secret: 's' }
+{ id: mine:18, label: 'row 0', secret: 's' }
+{ id: mine:21, label: 'row 3', secret: 's' }
+{ id: mine:24, label: 'row 0', secret: 's' }
+### owner: SELECT *, search::score(1) AS s FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ body: 'the dog runs home', emb: [3f, 0f, 0f], id: mine:3, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [6f, 0f, 0f], id: mine:6, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [9f, 0f, 0f], id: mine:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [12f, 0f, 0f], id: mine:12, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [15f, 0f, 0f], id: mine:15, label: 'row 3', n: 3, name: 'Helloworld', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [18f, 0f, 0f], id: mine:18, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [21f, 0f, 0f], id: mine:21, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [24f, 0f, 0f], id: mine:24, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+### owner: SELECT id, title @@ 'beta' AS m FROM mine ORDER BY id
+error: There was no suitable index supporting the expression: title @@ 'beta'
+### owner: SELECT id, title @1@ 'beta' AS m FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ id: mine:1, m: true }
+{ id: mine:2, m: true }
+{ id: mine:3, m: true }
+{ id: mine:4, m: true }
+{ id: mine:5, m: true }
+{ id: mine:6, m: true }
+{ id: mine:7, m: true }
+{ id: mine:8, m: true }
+{ id: mine:9, m: true }
+{ id: mine:10, m: true }
+{ id: mine:11, m: true }
+{ id: mine:12, m: true }
+{ id: mine:13, m: true }
+{ id: mine:14, m: true }
+{ id: mine:15, m: true }
+{ id: mine:16, m: true }
+{ id: mine:17, m: true }
+{ id: mine:18, m: true }
+{ id: mine:19, m: true }
+{ id: mine:20, m: true }
+{ id: mine:21, m: true }
+{ id: mine:22, m: true }
+{ id: mine:23, m: true }
+{ id: mine:24, m: true }
+### owner: SELECT id FROM mine:1..5 WHERE title @@ 'beta'
+(no rows)
+### owner: SELECT id, search::score(1) AS s FROM mine:3 WHERE title @1@ 'alpha'
+(no rows)
+### owner: SELECT id, (SELECT VALUE search::score(1) FROM mine WHERE title @1@ 'alpha' ORDER BY id LIMIT 1) AS x FROM mine:1
+{ id: mine:1, x: [0.6632941961288452f] }
+### owner: SELECT id FROM mine WHERE title @1@ 'alpha' AND id IN (SELECT VALUE id FROM mine WHERE body @1@ 'dog') ORDER BY id
+{ id: mine:3 }
+{ id: mine:6 }
+{ id: mine:9 }
+{ id: mine:12 }
+{ id: mine:15 }
+{ id: mine:18 }
+{ id: mine:21 }
+{ id: mine:24 }
+### owner: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: mine:3 }
+{ id: mine:4 }
+{ id: mine:5 }
+{ id: mine:6 }
+### owner: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY d, id
+{ d: 0.25f, id: mine:5 }
+{ d: 0.75f, id: mine:4 }
+{ d: 1.25f, id: mine:6 }
+{ d: 1.75f, id: mine:3 }
+### owner: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ d: 2.75f, id: mine:2 }
+{ d: 1.75f, id: mine:3 }
+{ d: 0.75f, id: mine:4 }
+{ d: 0.25f, id: mine:5 }
+{ d: 1.25f, id: mine:6 }
+{ d: 2.25f, id: mine:7 }
+### owner: SELECT id, vector::distance::knn() * 2 AS d, label FROM mine WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
+{ d: 0f, id: mine:1, label: 'row 1' }
+{ d: 2f, id: mine:2, label: 'row 2' }
+{ d: 4f, id: mine:3, label: 'row 3' }
+### owner: SELECT VALUE vector::distance::knn() FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.25f
+0.75f
+### owner: SELECT *, vector::distance::knn() AS d FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: mine:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: mine:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: mine:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+### owner: SELECT count() FROM mine WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
+{ count: 5 }
+### owner: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+### owner: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY id
+{ d: 2.75f, id: mine:2 }
+{ d: 1.75f, id: mine:3 }
+{ d: 0.75f, id: mine:4 }
+{ d: 0.25f, id: mine:5 }
+### owner: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' ORDER BY id
+{ id: mine:3 }
+{ id: mine:4 }
+{ id: mine:5 }
+{ id: mine:6 }
+### owner: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n = 3 ORDER BY id
+{ id: mine:3 }
+{ id: mine:9 }
+{ id: mine:15 }
+{ id: mine:21 }
+### owner: SELECT id FROM mine WHERE emb <|3, 40|> [4.75, 0.0, 0.0] AND n IN [1, 2] AND tag = 'b' ORDER BY id
+{ id: mine:1 }
+{ id: mine:7 }
+{ id: mine:13 }
+### owner: SELECT id, search::score(1) AS s, vector::distance::knn() AS d FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' AND n > 0 ORDER BY id
+{ d: 1.75f, id: mine:3, s: 0f }
+{ d: 0.75f, id: mine:4, s: 0f }
+{ d: 0.25f, id: mine:5, s: 0f }
+{ d: 2.25f, id: mine:7, s: 0f }
+### owner: SELECT id FROM bare WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] ORDER BY id #2
+{ id: bare:3 }
+{ id: bare:4 }
+{ id: bare:5 }
+{ id: bare:6 }
+### owner: SELECT id FROM mine WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+### owner: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|4, MANHATTAN|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY d, id
+{ d: 0.25f, id: mine:5 }
+{ d: 0.75f, id: mine:4 }
+{ d: 1.75f, id: mine:3 }
+{ d: 2.75f, id: mine:2 }
+### owner: SELECT id FROM locked WHERE title @1@ 'alpha' ORDER BY id
+{ id: locked:3 }
+{ id: locked:6 }
+{ id: locked:9 }
+{ id: locked:12 }
+{ id: locked:15 }
+{ id: locked:18 }
+{ id: locked:21 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE title @@ 'beta' ORDER BY id
+{ id: locked:1 }
+{ id: locked:2 }
+{ id: locked:3 }
+{ id: locked:4 }
+{ id: locked:5 }
+{ id: locked:6 }
+{ id: locked:7 }
+{ id: locked:8 }
+{ id: locked:9 }
+{ id: locked:10 }
+{ id: locked:11 }
+{ id: locked:12 }
+{ id: locked:13 }
+{ id: locked:14 }
+{ id: locked:15 }
+{ id: locked:16 }
+{ id: locked:17 }
+{ id: locked:18 }
+{ id: locked:19 }
+{ id: locked:20 }
+{ id: locked:21 }
+{ id: locked:22 }
+{ id: locked:23 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE title @AND@ 'alpha guide' ORDER BY id
+{ id: locked:3 }
+{ id: locked:6 }
+{ id: locked:9 }
+{ id: locked:12 }
+{ id: locked:15 }
+{ id: locked:18 }
+{ id: locked:21 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE title @OR@ 'alpha notes' ORDER BY id
+{ id: locked:1 }
+{ id: locked:2 }
+{ id: locked:3 }
+{ id: locked:4 }
+{ id: locked:5 }
+{ id: locked:6 }
+{ id: locked:7 }
+{ id: locked:8 }
+{ id: locked:9 }
+{ id: locked:10 }
+{ id: locked:11 }
+{ id: locked:12 }
+{ id: locked:13 }
+{ id: locked:14 }
+{ id: locked:15 }
+{ id: locked:16 }
+{ id: locked:17 }
+{ id: locked:18 }
+{ id: locked:19 }
+{ id: locked:20 }
+{ id: locked:21 }
+{ id: locked:22 }
+{ id: locked:23 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE title @1,AND@ 'beta guide' ORDER BY id
+{ id: locked:3 }
+{ id: locked:6 }
+{ id: locked:9 }
+{ id: locked:12 }
+{ id: locked:15 }
+{ id: locked:18 }
+{ id: locked:21 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE body @1@ 'run' ORDER BY id
+{ id: locked:1 }
+{ id: locked:2 }
+{ id: locked:3 }
+{ id: locked:4 }
+{ id: locked:5 }
+{ id: locked:6 }
+{ id: locked:7 }
+{ id: locked:8 }
+{ id: locked:9 }
+{ id: locked:10 }
+{ id: locked:11 }
+{ id: locked:12 }
+{ id: locked:13 }
+{ id: locked:14 }
+{ id: locked:15 }
+{ id: locked:16 }
+{ id: locked:17 }
+{ id: locked:18 }
+{ id: locked:19 }
+{ id: locked:20 }
+{ id: locked:21 }
+{ id: locked:22 }
+{ id: locked:23 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE body @1@ 'dogs' ORDER BY id
+{ id: locked:1 }
+{ id: locked:2 }
+{ id: locked:3 }
+{ id: locked:4 }
+{ id: locked:5 }
+{ id: locked:6 }
+{ id: locked:7 }
+{ id: locked:8 }
+{ id: locked:9 }
+{ id: locked:10 }
+{ id: locked:11 }
+{ id: locked:12 }
+{ id: locked:13 }
+{ id: locked:14 }
+{ id: locked:15 }
+{ id: locked:16 }
+{ id: locked:17 }
+{ id: locked:18 }
+{ id: locked:19 }
+{ id: locked:20 }
+{ id: locked:21 }
+{ id: locked:22 }
+{ id: locked:23 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE name @1@ 'ell' ORDER BY id
+{ id: locked:5 }
+{ id: locked:10 }
+{ id: locked:15 }
+{ id: locked:20 }
+### owner: SELECT id FROM locked WHERE title @1@ '' ORDER BY id
+(no rows)
+### owner: SELECT id FROM locked WHERE title @1@ '!!' ORDER BY id
+(no rows)
+### owner: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'alpha' ORDER BY id
+{ id: locked:3, s: 0.6632941961288452f }
+{ id: locked:6, s: 0.6632941961288452f }
+{ id: locked:9, s: 0.6632941961288452f }
+{ id: locked:12, s: 0.6632941961288452f }
+{ id: locked:15, s: 0.6632941961288452f }
+{ id: locked:18, s: 0.6632941961288452f }
+{ id: locked:21, s: 0.6632941961288452f }
+{ id: locked:24, s: 0.6632941961288452f }
+### owner: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'beta' ORDER BY s DESC, id
+{ id: locked:1, s: 0f }
+{ id: locked:2, s: 0f }
+{ id: locked:3, s: 0f }
+{ id: locked:4, s: 0f }
+{ id: locked:5, s: 0f }
+{ id: locked:6, s: 0f }
+{ id: locked:7, s: 0f }
+{ id: locked:8, s: 0f }
+{ id: locked:9, s: 0f }
+{ id: locked:10, s: 0f }
+{ id: locked:11, s: 0f }
+{ id: locked:12, s: 0f }
+{ id: locked:13, s: 0f }
+{ id: locked:14, s: 0f }
+{ id: locked:15, s: 0f }
+{ id: locked:16, s: 0f }
+{ id: locked:17, s: 0f }
+{ id: locked:18, s: 0f }
+{ id: locked:19, s: 0f }
+{ id: locked:20, s: 0f }
+{ id: locked:21, s: 0f }
+{ id: locked:22, s: 0f }
+{ id: locked:23, s: 0f }
+{ id: locked:24, s: 0f }
+### owner: SELECT id, search::highlight('<b>', '</b>', 1) AS h FROM locked WHERE title @1@ 'beta' ORDER BY id
+{ h: '<b>Beta</b> gamma notes', id: locked:1 }
+{ h: '<b>Beta</b> gamma notes', id: locked:2 }
+{ h: 'Alpha <b>Beta</b> guide', id: locked:3 }
+{ h: '<b>Beta</b> gamma notes', id: locked:4 }
+{ h: '<b>Beta</b> gamma notes', id: locked:5 }
+{ h: 'Alpha <b>Beta</b> guide', id: locked:6 }
+{ h: '<b>Beta</b> gamma notes', id: locked:7 }
+{ h: '<b>Beta</b> gamma notes', id: locked:8 }
+{ h: 'Alpha <b>Beta</b> guide', id: locked:9 }
+{ h: '<b>Beta</b> gamma notes', id: locked:10 }
+{ h: '<b>Beta</b> gamma notes', id: locked:11 }
+{ h: 'Alpha <b>Beta</b> guide', id: locked:12 }
+{ h: '<b>Beta</b> gamma notes', id: locked:13 }
+{ h: '<b>Beta</b> gamma notes', id: locked:14 }
+{ h: 'Alpha <b>Beta</b> guide', id: locked:15 }
+{ h: '<b>Beta</b> gamma notes', id: locked:16 }
+{ h: '<b>Beta</b> gamma notes', id: locked:17 }
+{ h: 'Alpha <b>Beta</b> guide', id: locked:18 }
+{ h: '<b>Beta</b> gamma notes', id: locked:19 }
+{ h: '<b>Beta</b> gamma notes', id: locked:20 }
+{ h: 'Alpha <b>Beta</b> guide', id: locked:21 }
+{ h: '<b>Beta</b> gamma notes', id: locked:22 }
+{ h: '<b>Beta</b> gamma notes', id: locked:23 }
+{ h: 'Alpha <b>Beta</b> guide', id: locked:24 }
+### owner: SELECT id, search::highlight('<b>', '</b>', 1, true) AS h FROM locked WHERE name @1@ 'ell' ORDER BY id
+{ h: 'H<b>ell</b>oworld', id: locked:5 }
+{ h: 'H<b>ell</b>oworld', id: locked:10 }
+{ h: 'H<b>ell</b>oworld', id: locked:15 }
+{ h: 'H<b>ell</b>oworld', id: locked:20 }
+### owner: SELECT id, search::offsets(1) AS o FROM locked WHERE title @1@ 'beta' ORDER BY id
+{ id: locked:1, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:2, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:3, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: locked:4, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:5, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:6, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: locked:7, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:8, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:9, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: locked:10, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:11, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:12, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: locked:13, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:14, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:15, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: locked:16, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:17, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:18, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: locked:19, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:20, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:21, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: locked:22, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:23, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: locked:24, o: { "0": [{ e: 10, s: 6 }] } }
+### owner: SELECT id, search::offsets(1, true) AS o FROM locked WHERE name @1@ 'ell' ORDER BY id
+{ id: locked:5, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: locked:10, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: locked:15, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: locked:20, o: { "0": [{ e: 4, s: 1 }] } }
+### owner: SELECT id, <string> search::score(1) AS s, search::score(1) * 2 AS twice FROM locked WHERE title @1@ 'beta' ORDER BY id
+{ id: locked:1, s: '0f', twice: 0f }
+{ id: locked:2, s: '0f', twice: 0f }
+{ id: locked:3, s: '0f', twice: 0f }
+{ id: locked:4, s: '0f', twice: 0f }
+{ id: locked:5, s: '0f', twice: 0f }
+{ id: locked:6, s: '0f', twice: 0f }
+{ id: locked:7, s: '0f', twice: 0f }
+{ id: locked:8, s: '0f', twice: 0f }
+{ id: locked:9, s: '0f', twice: 0f }
+{ id: locked:10, s: '0f', twice: 0f }
+{ id: locked:11, s: '0f', twice: 0f }
+{ id: locked:12, s: '0f', twice: 0f }
+{ id: locked:13, s: '0f', twice: 0f }
+{ id: locked:14, s: '0f', twice: 0f }
+{ id: locked:15, s: '0f', twice: 0f }
+{ id: locked:16, s: '0f', twice: 0f }
+{ id: locked:17, s: '0f', twice: 0f }
+{ id: locked:18, s: '0f', twice: 0f }
+{ id: locked:19, s: '0f', twice: 0f }
+{ id: locked:20, s: '0f', twice: 0f }
+{ id: locked:21, s: '0f', twice: 0f }
+{ id: locked:22, s: '0f', twice: 0f }
+{ id: locked:23, s: '0f', twice: 0f }
+{ id: locked:24, s: '0f', twice: 0f }
+### owner: SELECT VALUE search::score(1) FROM locked WHERE title @1@ 'alpha' ORDER BY id
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+### owner: SELECT id, { score: search::score(1), at: [search::offsets(1)] } AS x FROM locked WHERE title @1@ 'alpha' ORDER BY id
+{ id: locked:3, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: locked:6, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: locked:9, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: locked:12, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: locked:15, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: locked:18, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: locked:21, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: locked:24, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+### owner: SELECT id, IF search::score(1) > 0 { 'hit' } ELSE { 'miss' } AS k FROM locked WHERE title @1@ 'alpha' ORDER BY id
+{ id: locked:3, k: 'hit' }
+{ id: locked:6, k: 'hit' }
+{ id: locked:9, k: 'hit' }
+{ id: locked:12, k: 'hit' }
+{ id: locked:15, k: 'hit' }
+{ id: locked:18, k: 'hit' }
+{ id: locked:21, k: 'hit' }
+{ id: locked:24, k: 'hit' }
+### owner: SELECT id FROM locked WHERE title @1@ 'alpha' AND search::score(1) > 0 ORDER BY id
+{ id: locked:3 }
+{ id: locked:6 }
+{ id: locked:9 }
+{ id: locked:12 }
+{ id: locked:15 }
+{ id: locked:18 }
+{ id: locked:21 }
+{ id: locked:24 }
+### owner: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'beta' ORDER BY s DESC, id LIMIT 3
+{ id: locked:1, s: 0f }
+{ id: locked:2, s: 0f }
+{ id: locked:3, s: 0f }
+### owner: SELECT tag, math::max(search::score(1)) AS best FROM locked WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ best: 0f, tag: 'a' }
+{ best: 0f, tag: 'b' }
+### owner: SELECT * FROM (SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'alpha') ORDER BY id
+{ id: locked:3, s: 0.6632941961288452f }
+{ id: locked:6, s: 0.6632941961288452f }
+{ id: locked:9, s: 0.6632941961288452f }
+{ id: locked:12, s: 0.6632941961288452f }
+{ id: locked:15, s: 0.6632941961288452f }
+{ id: locked:18, s: 0.6632941961288452f }
+{ id: locked:21, s: 0.6632941961288452f }
+{ id: locked:24, s: 0.6632941961288452f }
+### owner: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY d, id LIMIT 2
+{ d: 0.25f, id: locked:5 }
+{ d: 0.75f, id: locked:4 }
+### owner: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'nothing' ORDER BY id
+(no rows)
+### owner: SELECT id, search::score(1) AS s FROM locked WHERE n > 100 AND title @1@ 'alpha' ORDER BY id
+(no rows)
+### owner: SELECT id, search::score(1) AS a, search::score(2) AS b FROM locked WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ a: 0f, b: 0f, id: locked:1 }
+{ a: 0f, b: 0f, id: locked:2 }
+{ a: 0f, b: 0f, id: locked:3 }
+{ a: 0f, b: 0f, id: locked:4 }
+{ a: 0f, b: 0f, id: locked:5 }
+{ a: 0f, b: 0f, id: locked:6 }
+{ a: 0f, b: 0f, id: locked:7 }
+{ a: 0f, b: 0f, id: locked:8 }
+{ a: 0f, b: 0f, id: locked:9 }
+{ a: 0f, b: 0f, id: locked:10 }
+{ a: 0f, b: 0f, id: locked:11 }
+{ a: 0f, b: 0f, id: locked:12 }
+{ a: 0f, b: 0f, id: locked:13 }
+{ a: 0f, b: 0f, id: locked:14 }
+{ a: 0f, b: 0f, id: locked:15 }
+{ a: 0f, b: 0f, id: locked:16 }
+{ a: 0f, b: 0f, id: locked:17 }
+{ a: 0f, b: 0f, id: locked:18 }
+{ a: 0f, b: 0f, id: locked:19 }
+{ a: 0f, b: 0f, id: locked:20 }
+{ a: 0f, b: 0f, id: locked:21 }
+{ a: 0f, b: 0f, id: locked:22 }
+{ a: 0f, b: 0f, id: locked:23 }
+{ a: 0f, b: 0f, id: locked:24 }
+### owner: SELECT id, search::highlight('[', ']', 2) AS h FROM locked WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ h: 'the [dog] runs home', id: locked:1 }
+{ h: 'the [dog] runs home', id: locked:2 }
+{ h: 'the [dog] runs home', id: locked:3 }
+{ h: 'running [dogs] and cats', id: locked:4 }
+{ h: 'the [dog] runs home', id: locked:5 }
+{ h: 'the [dog] runs home', id: locked:6 }
+{ h: 'the [dog] runs home', id: locked:7 }
+{ h: 'running [dogs] and cats', id: locked:8 }
+{ h: 'the [dog] runs home', id: locked:9 }
+{ h: 'the [dog] runs home', id: locked:10 }
+{ h: 'the [dog] runs home', id: locked:11 }
+{ h: 'running [dogs] and cats', id: locked:12 }
+{ h: 'the [dog] runs home', id: locked:13 }
+{ h: 'the [dog] runs home', id: locked:14 }
+{ h: 'the [dog] runs home', id: locked:15 }
+{ h: 'running [dogs] and cats', id: locked:16 }
+{ h: 'the [dog] runs home', id: locked:17 }
+{ h: 'the [dog] runs home', id: locked:18 }
+{ h: 'the [dog] runs home', id: locked:19 }
+{ h: 'running [dogs] and cats', id: locked:20 }
+{ h: 'the [dog] runs home', id: locked:21 }
+{ h: 'the [dog] runs home', id: locked:22 }
+{ h: 'the [dog] runs home', id: locked:23 }
+{ h: 'running [dogs] and cats', id: locked:24 }
+### owner: SELECT id FROM locked WHERE title @1@ 'alpha' AND body @2@ 'dog' ORDER BY id
+{ id: locked:3 }
+{ id: locked:6 }
+{ id: locked:9 }
+{ id: locked:12 }
+{ id: locked:15 }
+{ id: locked:18 }
+{ id: locked:21 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE title @1@ 'alpha' AND body @2@ 'zebra' ORDER BY id
+(no rows)
+### owner: SELECT id FROM locked WHERE title @1@ 'alpha' OR n = 2 ORDER BY id
+{ id: locked:2 }
+{ id: locked:3 }
+{ id: locked:6 }
+{ id: locked:8 }
+{ id: locked:9 }
+{ id: locked:12 }
+{ id: locked:14 }
+{ id: locked:15 }
+{ id: locked:18 }
+{ id: locked:20 }
+{ id: locked:21 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE title @1@ 'alpha' OR body @2@ 'dog' ORDER BY id
+{ id: locked:1 }
+{ id: locked:2 }
+{ id: locked:3 }
+{ id: locked:4 }
+{ id: locked:5 }
+{ id: locked:6 }
+{ id: locked:7 }
+{ id: locked:8 }
+{ id: locked:9 }
+{ id: locked:10 }
+{ id: locked:11 }
+{ id: locked:12 }
+{ id: locked:13 }
+{ id: locked:14 }
+{ id: locked:15 }
+{ id: locked:16 }
+{ id: locked:17 }
+{ id: locked:18 }
+{ id: locked:19 }
+{ id: locked:20 }
+{ id: locked:21 }
+{ id: locked:22 }
+{ id: locked:23 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE (title @1@ 'alpha') = true ORDER BY id
+{ id: locked:3 }
+{ id: locked:6 }
+{ id: locked:9 }
+{ id: locked:12 }
+{ id: locked:15 }
+{ id: locked:18 }
+{ id: locked:21 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE !(title @1@ 'alpha') ORDER BY id
+{ id: locked:1 }
+{ id: locked:2 }
+{ id: locked:4 }
+{ id: locked:5 }
+{ id: locked:7 }
+{ id: locked:8 }
+{ id: locked:10 }
+{ id: locked:11 }
+{ id: locked:13 }
+{ id: locked:14 }
+{ id: locked:16 }
+{ id: locked:17 }
+{ id: locked:19 }
+{ id: locked:20 }
+{ id: locked:22 }
+{ id: locked:23 }
+### owner: SELECT id FROM locked WHERE title @1@ 'alpha' AND (n = 3 OR body @2@ 'dog') ORDER BY id
+{ id: locked:3 }
+{ id: locked:6 }
+{ id: locked:9 }
+{ id: locked:12 }
+{ id: locked:15 }
+{ id: locked:18 }
+{ id: locked:21 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE n > 0 AND title @@ 'beta' AND body @@ 'dogs' ORDER BY id
+{ id: locked:1 }
+{ id: locked:2 }
+{ id: locked:3 }
+{ id: locked:4 }
+{ id: locked:5 }
+{ id: locked:7 }
+{ id: locked:8 }
+{ id: locked:9 }
+{ id: locked:10 }
+{ id: locked:11 }
+{ id: locked:13 }
+{ id: locked:14 }
+{ id: locked:15 }
+{ id: locked:16 }
+{ id: locked:17 }
+{ id: locked:19 }
+{ id: locked:20 }
+{ id: locked:21 }
+{ id: locked:22 }
+{ id: locked:23 }
+### owner: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'beta' OR n = 2 ORDER BY id
+{ id: locked:1, s: 0f }
+{ id: locked:2, s: 0f }
+{ id: locked:3, s: 0f }
+{ id: locked:4, s: 0f }
+{ id: locked:5, s: 0f }
+{ id: locked:6, s: 0f }
+{ id: locked:7, s: 0f }
+{ id: locked:8, s: 0f }
+{ id: locked:9, s: 0f }
+{ id: locked:10, s: 0f }
+{ id: locked:11, s: 0f }
+{ id: locked:12, s: 0f }
+{ id: locked:13, s: 0f }
+{ id: locked:14, s: 0f }
+{ id: locked:15, s: 0f }
+{ id: locked:16, s: 0f }
+{ id: locked:17, s: 0f }
+{ id: locked:18, s: 0f }
+{ id: locked:19, s: 0f }
+{ id: locked:20, s: 0f }
+{ id: locked:21, s: 0f }
+{ id: locked:22, s: 0f }
+{ id: locked:23, s: 0f }
+{ id: locked:24, s: 0f }
+### owner: SELECT id FROM locked WHERE title @1@ 'beta' AND n > 2 AND tag = 'a' ORDER BY id
+{ id: locked:4 }
+{ id: locked:10 }
+{ id: locked:16 }
+{ id: locked:22 }
+### owner: SELECT id FROM locked WHERE title @1@ 'beta' ORDER BY id LIMIT 3 START 2
+{ id: locked:3 }
+{ id: locked:4 }
+{ id: locked:5 }
+### owner: SELECT tag, count() AS c FROM locked WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ c: 12, tag: 'a' }
+{ c: 12, tag: 'b' }
+### owner: SELECT count() FROM locked WHERE title @1@ 'beta' GROUP ALL
+{ count: 24 }
+### owner: SELECT id, label, secret FROM locked WHERE title @1@ 'alpha' ORDER BY id
+{ id: locked:3, label: 'row 3', secret: 's' }
+{ id: locked:6, label: 'row 0', secret: 's' }
+{ id: locked:9, label: 'row 3', secret: 's' }
+{ id: locked:12, label: 'row 0', secret: 's' }
+{ id: locked:15, label: 'row 3', secret: 's' }
+{ id: locked:18, label: 'row 0', secret: 's' }
+{ id: locked:21, label: 'row 3', secret: 's' }
+{ id: locked:24, label: 'row 0', secret: 's' }
+### owner: SELECT *, search::score(1) AS s FROM locked WHERE title @1@ 'alpha' ORDER BY id
+{ body: 'the dog runs home', emb: [3f, 0f, 0f], id: locked:3, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [6f, 0f, 0f], id: locked:6, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [9f, 0f, 0f], id: locked:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [12f, 0f, 0f], id: locked:12, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [15f, 0f, 0f], id: locked:15, label: 'row 3', n: 3, name: 'Helloworld', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [18f, 0f, 0f], id: locked:18, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [21f, 0f, 0f], id: locked:21, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [24f, 0f, 0f], id: locked:24, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, secret: 's', tag: 'a', title: 'Alpha Beta guide' }
+### owner: SELECT id, title @@ 'beta' AS m FROM locked ORDER BY id
+error: There was no suitable index supporting the expression: title @@ 'beta'
+### owner: SELECT id, title @1@ 'beta' AS m FROM locked WHERE title @1@ 'beta' ORDER BY id
+{ id: locked:1, m: true }
+{ id: locked:2, m: true }
+{ id: locked:3, m: true }
+{ id: locked:4, m: true }
+{ id: locked:5, m: true }
+{ id: locked:6, m: true }
+{ id: locked:7, m: true }
+{ id: locked:8, m: true }
+{ id: locked:9, m: true }
+{ id: locked:10, m: true }
+{ id: locked:11, m: true }
+{ id: locked:12, m: true }
+{ id: locked:13, m: true }
+{ id: locked:14, m: true }
+{ id: locked:15, m: true }
+{ id: locked:16, m: true }
+{ id: locked:17, m: true }
+{ id: locked:18, m: true }
+{ id: locked:19, m: true }
+{ id: locked:20, m: true }
+{ id: locked:21, m: true }
+{ id: locked:22, m: true }
+{ id: locked:23, m: true }
+{ id: locked:24, m: true }
+### owner: SELECT id FROM locked:1..5 WHERE title @@ 'beta'
+(no rows)
+### owner: SELECT id, search::score(1) AS s FROM locked:3 WHERE title @1@ 'alpha'
+(no rows)
+### owner: SELECT id, (SELECT VALUE search::score(1) FROM locked WHERE title @1@ 'alpha' ORDER BY id LIMIT 1) AS x FROM locked:1
+{ id: locked:1, x: [0.6632941961288452f] }
+### owner: SELECT id FROM locked WHERE title @1@ 'alpha' AND id IN (SELECT VALUE id FROM locked WHERE body @1@ 'dog') ORDER BY id
+{ id: locked:3 }
+{ id: locked:6 }
+{ id: locked:9 }
+{ id: locked:12 }
+{ id: locked:15 }
+{ id: locked:18 }
+{ id: locked:21 }
+{ id: locked:24 }
+### owner: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: locked:3 }
+{ id: locked:4 }
+{ id: locked:5 }
+{ id: locked:6 }
+### owner: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY d, id
+{ d: 0.25f, id: locked:5 }
+{ d: 0.75f, id: locked:4 }
+{ d: 1.25f, id: locked:6 }
+{ d: 1.75f, id: locked:3 }
+### owner: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ d: 2.75f, id: locked:2 }
+{ d: 1.75f, id: locked:3 }
+{ d: 0.75f, id: locked:4 }
+{ d: 0.25f, id: locked:5 }
+{ d: 1.25f, id: locked:6 }
+{ d: 2.25f, id: locked:7 }
+### owner: SELECT id, vector::distance::knn() * 2 AS d, label FROM locked WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
+{ d: 0f, id: locked:1, label: 'row 1' }
+{ d: 2f, id: locked:2, label: 'row 2' }
+{ d: 4f, id: locked:3, label: 'row 3' }
+### owner: SELECT VALUE vector::distance::knn() FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.25f
+0.75f
+### owner: SELECT *, vector::distance::knn() AS d FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: locked:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: locked:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: locked:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+### owner: SELECT count() FROM locked WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
+{ count: 5 }
+### owner: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: locked:2 }
+{ id: locked:4 }
+{ id: locked:6 }
+{ id: locked:8 }
+### owner: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY id
+{ d: 2.75f, id: locked:2 }
+{ d: 1.75f, id: locked:3 }
+{ d: 0.75f, id: locked:4 }
+{ d: 0.25f, id: locked:5 }
+### owner: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' ORDER BY id
+{ id: locked:3 }
+{ id: locked:4 }
+{ id: locked:5 }
+{ id: locked:6 }
+### owner: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n = 3 ORDER BY id
+{ id: locked:3 }
+{ id: locked:9 }
+{ id: locked:15 }
+{ id: locked:21 }
+### owner: SELECT id FROM locked WHERE emb <|3, 40|> [4.75, 0.0, 0.0] AND n IN [1, 2] AND tag = 'b' ORDER BY id
+{ id: locked:1 }
+{ id: locked:7 }
+{ id: locked:13 }
+### owner: SELECT id, search::score(1) AS s, vector::distance::knn() AS d FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' AND n > 0 ORDER BY id
+{ d: 1.75f, id: locked:3, s: 0f }
+{ d: 0.75f, id: locked:4, s: 0f }
+{ d: 0.25f, id: locked:5, s: 0f }
+{ d: 2.25f, id: locked:7, s: 0f }
+### owner: SELECT id FROM bare WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] ORDER BY id #3
+{ id: bare:3 }
+{ id: bare:4 }
+{ id: bare:5 }
+{ id: bare:6 }
+### owner: SELECT id FROM locked WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: locked:2 }
+{ id: locked:4 }
+{ id: locked:6 }
+{ id: locked:8 }
+### owner: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|4, MANHATTAN|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY d, id
+{ d: 0.25f, id: locked:5 }
+{ d: 0.75f, id: locked:4 }
+{ d: 1.75f, id: locked:3 }
+{ d: 2.75f, id: locked:2 }
+### alice: SELECT id FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE title @@ 'beta' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE title @AND@ 'alpha guide' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE title @OR@ 'alpha notes' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE title @1,AND@ 'beta guide' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE body @1@ 'run' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE body @1@ 'dogs' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE name @1@ 'ell' ORDER BY id
+{ id: open:5 }
+{ id: open:10 }
+{ id: open:15 }
+{ id: open:20 }
+### alice: SELECT id FROM open WHERE title @1@ '' ORDER BY id
+(no rows)
+### alice: SELECT id FROM open WHERE title @1@ '!!' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, s: 0.6632941961288452f }
+{ id: open:6, s: 0.6632941961288452f }
+{ id: open:9, s: 0.6632941961288452f }
+{ id: open:12, s: 0.6632941961288452f }
+{ id: open:15, s: 0.6632941961288452f }
+{ id: open:18, s: 0.6632941961288452f }
+{ id: open:21, s: 0.6632941961288452f }
+{ id: open:24, s: 0.6632941961288452f }
+### alice: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'beta' ORDER BY s DESC, id
+{ id: open:1, s: 0f }
+{ id: open:2, s: 0f }
+{ id: open:3, s: 0f }
+{ id: open:4, s: 0f }
+{ id: open:5, s: 0f }
+{ id: open:6, s: 0f }
+{ id: open:7, s: 0f }
+{ id: open:8, s: 0f }
+{ id: open:9, s: 0f }
+{ id: open:10, s: 0f }
+{ id: open:11, s: 0f }
+{ id: open:12, s: 0f }
+{ id: open:13, s: 0f }
+{ id: open:14, s: 0f }
+{ id: open:15, s: 0f }
+{ id: open:16, s: 0f }
+{ id: open:17, s: 0f }
+{ id: open:18, s: 0f }
+{ id: open:19, s: 0f }
+{ id: open:20, s: 0f }
+{ id: open:21, s: 0f }
+{ id: open:22, s: 0f }
+{ id: open:23, s: 0f }
+{ id: open:24, s: 0f }
+### alice: SELECT id, search::highlight('<b>', '</b>', 1) AS h FROM open WHERE title @1@ 'beta' ORDER BY id
+{ h: '<b>Beta</b> gamma notes', id: open:1 }
+{ h: '<b>Beta</b> gamma notes', id: open:2 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:3 }
+{ h: '<b>Beta</b> gamma notes', id: open:4 }
+{ h: '<b>Beta</b> gamma notes', id: open:5 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:6 }
+{ h: '<b>Beta</b> gamma notes', id: open:7 }
+{ h: '<b>Beta</b> gamma notes', id: open:8 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:9 }
+{ h: '<b>Beta</b> gamma notes', id: open:10 }
+{ h: '<b>Beta</b> gamma notes', id: open:11 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:12 }
+{ h: '<b>Beta</b> gamma notes', id: open:13 }
+{ h: '<b>Beta</b> gamma notes', id: open:14 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:15 }
+{ h: '<b>Beta</b> gamma notes', id: open:16 }
+{ h: '<b>Beta</b> gamma notes', id: open:17 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:18 }
+{ h: '<b>Beta</b> gamma notes', id: open:19 }
+{ h: '<b>Beta</b> gamma notes', id: open:20 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:21 }
+{ h: '<b>Beta</b> gamma notes', id: open:22 }
+{ h: '<b>Beta</b> gamma notes', id: open:23 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:24 }
+### alice: SELECT id, search::highlight('<b>', '</b>', 1, true) AS h FROM open WHERE name @1@ 'ell' ORDER BY id
+{ h: 'H<b>ell</b>oworld', id: open:5 }
+{ h: 'H<b>ell</b>oworld', id: open:10 }
+{ h: 'H<b>ell</b>oworld', id: open:15 }
+{ h: 'H<b>ell</b>oworld', id: open:20 }
+### alice: SELECT id, search::offsets(1) AS o FROM open WHERE title @1@ 'beta' ORDER BY id
+{ id: open:1, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:2, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:3, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:4, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:5, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:6, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:7, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:8, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:9, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:10, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:11, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:12, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:13, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:14, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:15, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:16, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:17, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:18, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:19, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:20, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:21, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:22, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:23, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:24, o: { "0": [{ e: 10, s: 6 }] } }
+### alice: SELECT id, search::offsets(1, true) AS o FROM open WHERE name @1@ 'ell' ORDER BY id
+{ id: open:5, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: open:10, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: open:15, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: open:20, o: { "0": [{ e: 4, s: 1 }] } }
+### alice: SELECT id, <string> search::score(1) AS s, search::score(1) * 2 AS twice FROM open WHERE title @1@ 'beta' ORDER BY id
+{ id: open:1, s: '0f', twice: 0f }
+{ id: open:2, s: '0f', twice: 0f }
+{ id: open:3, s: '0f', twice: 0f }
+{ id: open:4, s: '0f', twice: 0f }
+{ id: open:5, s: '0f', twice: 0f }
+{ id: open:6, s: '0f', twice: 0f }
+{ id: open:7, s: '0f', twice: 0f }
+{ id: open:8, s: '0f', twice: 0f }
+{ id: open:9, s: '0f', twice: 0f }
+{ id: open:10, s: '0f', twice: 0f }
+{ id: open:11, s: '0f', twice: 0f }
+{ id: open:12, s: '0f', twice: 0f }
+{ id: open:13, s: '0f', twice: 0f }
+{ id: open:14, s: '0f', twice: 0f }
+{ id: open:15, s: '0f', twice: 0f }
+{ id: open:16, s: '0f', twice: 0f }
+{ id: open:17, s: '0f', twice: 0f }
+{ id: open:18, s: '0f', twice: 0f }
+{ id: open:19, s: '0f', twice: 0f }
+{ id: open:20, s: '0f', twice: 0f }
+{ id: open:21, s: '0f', twice: 0f }
+{ id: open:22, s: '0f', twice: 0f }
+{ id: open:23, s: '0f', twice: 0f }
+{ id: open:24, s: '0f', twice: 0f }
+### alice: SELECT VALUE search::score(1) FROM open WHERE title @1@ 'alpha' ORDER BY id
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+### alice: SELECT id, { score: search::score(1), at: [search::offsets(1)] } AS x FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:6, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:9, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:12, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:15, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:18, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:21, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:24, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+### alice: SELECT id, IF search::score(1) > 0 { 'hit' } ELSE { 'miss' } AS k FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, k: 'hit' }
+{ id: open:6, k: 'hit' }
+{ id: open:9, k: 'hit' }
+{ id: open:12, k: 'hit' }
+{ id: open:15, k: 'hit' }
+{ id: open:18, k: 'hit' }
+{ id: open:21, k: 'hit' }
+{ id: open:24, k: 'hit' }
+### alice: SELECT id FROM open WHERE title @1@ 'alpha' AND search::score(1) > 0 ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### alice: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'beta' ORDER BY s DESC, id LIMIT 3
+{ id: open:1, s: 0f }
+{ id: open:2, s: 0f }
+{ id: open:3, s: 0f }
+### alice: SELECT tag, math::max(search::score(1)) AS best FROM open WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ best: 0f, tag: 'a' }
+{ best: 0f, tag: 'b' }
+### alice: SELECT * FROM (SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'alpha') ORDER BY id
+{ id: open:3, s: 0.6632941961288452f }
+{ id: open:6, s: 0.6632941961288452f }
+{ id: open:9, s: 0.6632941961288452f }
+{ id: open:12, s: 0.6632941961288452f }
+{ id: open:15, s: 0.6632941961288452f }
+{ id: open:18, s: 0.6632941961288452f }
+{ id: open:21, s: 0.6632941961288452f }
+{ id: open:24, s: 0.6632941961288452f }
+### alice: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY d, id LIMIT 2
+{ d: 0.25f, id: open:5 }
+{ d: 0.75f, id: open:4 }
+### alice: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'nothing' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM open WHERE n > 100 AND title @1@ 'alpha' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS a, search::score(2) AS b FROM open WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ a: 0f, b: 0f, id: open:1 }
+{ a: 0f, b: 0f, id: open:2 }
+{ a: 0f, b: 0f, id: open:3 }
+{ a: 0f, b: 0f, id: open:4 }
+{ a: 0f, b: 0f, id: open:5 }
+{ a: 0f, b: 0f, id: open:6 }
+{ a: 0f, b: 0f, id: open:7 }
+{ a: 0f, b: 0f, id: open:8 }
+{ a: 0f, b: 0f, id: open:9 }
+{ a: 0f, b: 0f, id: open:10 }
+{ a: 0f, b: 0f, id: open:11 }
+{ a: 0f, b: 0f, id: open:12 }
+{ a: 0f, b: 0f, id: open:13 }
+{ a: 0f, b: 0f, id: open:14 }
+{ a: 0f, b: 0f, id: open:15 }
+{ a: 0f, b: 0f, id: open:16 }
+{ a: 0f, b: 0f, id: open:17 }
+{ a: 0f, b: 0f, id: open:18 }
+{ a: 0f, b: 0f, id: open:19 }
+{ a: 0f, b: 0f, id: open:20 }
+{ a: 0f, b: 0f, id: open:21 }
+{ a: 0f, b: 0f, id: open:22 }
+{ a: 0f, b: 0f, id: open:23 }
+{ a: 0f, b: 0f, id: open:24 }
+### alice: SELECT id, search::highlight('[', ']', 2) AS h FROM open WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ h: 'the [dog] runs home', id: open:1 }
+{ h: 'the [dog] runs home', id: open:2 }
+{ h: 'the [dog] runs home', id: open:3 }
+{ h: 'running [dogs] and cats', id: open:4 }
+{ h: 'the [dog] runs home', id: open:5 }
+{ h: 'the [dog] runs home', id: open:6 }
+{ h: 'the [dog] runs home', id: open:7 }
+{ h: 'running [dogs] and cats', id: open:8 }
+{ h: 'the [dog] runs home', id: open:9 }
+{ h: 'the [dog] runs home', id: open:10 }
+{ h: 'the [dog] runs home', id: open:11 }
+{ h: 'running [dogs] and cats', id: open:12 }
+{ h: 'the [dog] runs home', id: open:13 }
+{ h: 'the [dog] runs home', id: open:14 }
+{ h: 'the [dog] runs home', id: open:15 }
+{ h: 'running [dogs] and cats', id: open:16 }
+{ h: 'the [dog] runs home', id: open:17 }
+{ h: 'the [dog] runs home', id: open:18 }
+{ h: 'the [dog] runs home', id: open:19 }
+{ h: 'running [dogs] and cats', id: open:20 }
+{ h: 'the [dog] runs home', id: open:21 }
+{ h: 'the [dog] runs home', id: open:22 }
+{ h: 'the [dog] runs home', id: open:23 }
+{ h: 'running [dogs] and cats', id: open:24 }
+### alice: SELECT id FROM open WHERE title @1@ 'alpha' AND body @2@ 'dog' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE title @1@ 'alpha' AND body @2@ 'zebra' ORDER BY id
+(no rows)
+### alice: SELECT id FROM open WHERE title @1@ 'alpha' OR n = 2 ORDER BY id
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE title @1@ 'alpha' OR body @2@ 'dog' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE (title @1@ 'alpha') = true ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE !(title @1@ 'alpha') ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:22 }
+{ id: open:23 }
+### alice: SELECT id FROM open WHERE title @1@ 'alpha' AND (n = 3 OR body @2@ 'dog') ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE n > 0 AND title @@ 'beta' AND body @@ 'dogs' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+### alice: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'beta' OR n = 2 ORDER BY id
+{ id: open:1, s: 0f }
+{ id: open:2, s: 0f }
+{ id: open:3, s: 0f }
+{ id: open:4, s: 0f }
+{ id: open:5, s: 0f }
+{ id: open:6, s: 0f }
+{ id: open:7, s: 0f }
+{ id: open:8, s: 0f }
+{ id: open:9, s: 0f }
+{ id: open:10, s: 0f }
+{ id: open:11, s: 0f }
+{ id: open:12, s: 0f }
+{ id: open:13, s: 0f }
+{ id: open:14, s: 0f }
+{ id: open:15, s: 0f }
+{ id: open:16, s: 0f }
+{ id: open:17, s: 0f }
+{ id: open:18, s: 0f }
+{ id: open:19, s: 0f }
+{ id: open:20, s: 0f }
+{ id: open:21, s: 0f }
+{ id: open:22, s: 0f }
+{ id: open:23, s: 0f }
+{ id: open:24, s: 0f }
+### alice: SELECT id FROM open WHERE title @1@ 'beta' AND n > 2 AND tag = 'a' ORDER BY id
+{ id: open:4 }
+{ id: open:10 }
+{ id: open:16 }
+{ id: open:22 }
+### alice: SELECT id FROM open WHERE title @1@ 'beta' ORDER BY id LIMIT 3 START 2
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+### alice: SELECT tag, count() AS c FROM open WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ c: 12, tag: 'a' }
+{ c: 12, tag: 'b' }
+### alice: SELECT count() FROM open WHERE title @1@ 'beta' GROUP ALL
+{ count: 24 }
+### alice: SELECT id, label, secret FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, label: 'row 3', secret: NONE }
+{ id: open:6, label: 'row 0', secret: NONE }
+{ id: open:9, label: 'row 3', secret: NONE }
+{ id: open:12, label: 'row 0', secret: NONE }
+{ id: open:15, label: 'row 3', secret: NONE }
+{ id: open:18, label: 'row 0', secret: NONE }
+{ id: open:21, label: 'row 3', secret: NONE }
+{ id: open:24, label: 'row 0', secret: NONE }
+### alice: SELECT *, search::score(1) AS s FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ body: 'the dog runs home', emb: [3f, 0f, 0f], id: open:3, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [6f, 0f, 0f], id: open:6, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [12f, 0f, 0f], id: open:12, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [15f, 0f, 0f], id: open:15, label: 'row 3', n: 3, name: 'Helloworld', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [18f, 0f, 0f], id: open:18, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [21f, 0f, 0f], id: open:21, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [24f, 0f, 0f], id: open:24, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+### alice: SELECT id, title @@ 'beta' AS m FROM open ORDER BY id
+error: There was no suitable index supporting the expression: title @@ 'beta'
+### alice: SELECT id, title @1@ 'beta' AS m FROM open WHERE title @1@ 'beta' ORDER BY id
+{ id: open:1, m: true }
+{ id: open:2, m: true }
+{ id: open:3, m: true }
+{ id: open:4, m: true }
+{ id: open:5, m: true }
+{ id: open:6, m: true }
+{ id: open:7, m: true }
+{ id: open:8, m: true }
+{ id: open:9, m: true }
+{ id: open:10, m: true }
+{ id: open:11, m: true }
+{ id: open:12, m: true }
+{ id: open:13, m: true }
+{ id: open:14, m: true }
+{ id: open:15, m: true }
+{ id: open:16, m: true }
+{ id: open:17, m: true }
+{ id: open:18, m: true }
+{ id: open:19, m: true }
+{ id: open:20, m: true }
+{ id: open:21, m: true }
+{ id: open:22, m: true }
+{ id: open:23, m: true }
+{ id: open:24, m: true }
+### alice: SELECT id FROM open:1..5 WHERE title @@ 'beta'
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM open:3 WHERE title @1@ 'alpha'
+(no rows)
+### alice: SELECT id, (SELECT VALUE search::score(1) FROM open WHERE title @1@ 'alpha' ORDER BY id LIMIT 1) AS x FROM open:1
+{ id: open:1, x: [0.6632941961288452f] }
+### alice: SELECT id FROM open WHERE title @1@ 'alpha' AND id IN (SELECT VALUE id FROM open WHERE body @1@ 'dog') ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### alice: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+### alice: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY d, id
+{ d: 0.25f, id: open:5 }
+{ d: 0.75f, id: open:4 }
+{ d: 1.25f, id: open:6 }
+{ d: 1.75f, id: open:3 }
+### alice: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ d: 2.75f, id: open:2 }
+{ d: 1.75f, id: open:3 }
+{ d: 0.75f, id: open:4 }
+{ d: 0.25f, id: open:5 }
+{ d: 1.25f, id: open:6 }
+{ d: 2.25f, id: open:7 }
+### alice: SELECT id, vector::distance::knn() * 2 AS d, label FROM open WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
+{ d: 0f, id: open:1, label: 'row 1' }
+{ d: 2f, id: open:2, label: 'row 2' }
+{ d: 4f, id: open:3, label: 'row 3' }
+### alice: SELECT VALUE vector::distance::knn() FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.25f
+0.75f
+### alice: SELECT *, vector::distance::knn() AS d FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: open:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: open:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+### alice: SELECT count() FROM open WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
+{ count: 5 }
+### alice: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: open:2 }
+{ id: open:4 }
+{ id: open:6 }
+{ id: open:8 }
+### alice: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY id
+{ d: 2.75f, id: open:2 }
+{ d: 1.75f, id: open:3 }
+{ d: 0.75f, id: open:4 }
+{ d: 0.25f, id: open:5 }
+### alice: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' ORDER BY id
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+### alice: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n = 3 ORDER BY id
+{ id: open:3 }
+{ id: open:9 }
+{ id: open:15 }
+{ id: open:21 }
+### alice: SELECT id FROM open WHERE emb <|3, 40|> [4.75, 0.0, 0.0] AND n IN [1, 2] AND tag = 'b' ORDER BY id
+{ id: open:1 }
+{ id: open:7 }
+{ id: open:13 }
+### alice: SELECT id, search::score(1) AS s, vector::distance::knn() AS d FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' AND n > 0 ORDER BY id
+{ d: 1.75f, id: open:3, s: 0f }
+{ d: 0.75f, id: open:4, s: 0f }
+{ d: 0.25f, id: open:5, s: 0f }
+{ d: 2.25f, id: open:7, s: 0f }
+### alice: SELECT id FROM bare WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] ORDER BY id
+(no rows)
+### alice: SELECT id FROM open WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: open:2 }
+{ id: open:4 }
+{ id: open:6 }
+{ id: open:8 }
+### alice: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|4, MANHATTAN|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY d, id
+{ d: 0.25f, id: open:5 }
+{ d: 0.75f, id: open:4 }
+{ d: 1.75f, id: open:3 }
+{ d: 2.75f, id: open:2 }
+### alice: SELECT id FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:6 }
+{ id: mine:12 }
+{ id: mine:18 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE title @@ 'beta' ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+{ id: mine:10 }
+{ id: mine:12 }
+{ id: mine:14 }
+{ id: mine:16 }
+{ id: mine:18 }
+{ id: mine:20 }
+{ id: mine:22 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE title @AND@ 'alpha guide' ORDER BY id
+{ id: mine:6 }
+{ id: mine:12 }
+{ id: mine:18 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE title @OR@ 'alpha notes' ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+{ id: mine:10 }
+{ id: mine:12 }
+{ id: mine:14 }
+{ id: mine:16 }
+{ id: mine:18 }
+{ id: mine:20 }
+{ id: mine:22 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE title @1,AND@ 'beta guide' ORDER BY id
+{ id: mine:6 }
+{ id: mine:12 }
+{ id: mine:18 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE body @1@ 'run' ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+{ id: mine:10 }
+{ id: mine:12 }
+{ id: mine:14 }
+{ id: mine:16 }
+{ id: mine:18 }
+{ id: mine:20 }
+{ id: mine:22 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE body @1@ 'dogs' ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+{ id: mine:10 }
+{ id: mine:12 }
+{ id: mine:14 }
+{ id: mine:16 }
+{ id: mine:18 }
+{ id: mine:20 }
+{ id: mine:22 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE name @1@ 'ell' ORDER BY id
+{ id: mine:10 }
+{ id: mine:20 }
+### alice: SELECT id FROM mine WHERE title @1@ '' ORDER BY id
+(no rows)
+### alice: SELECT id FROM mine WHERE title @1@ '!!' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:6, s: 0.6632941961288452f }
+{ id: mine:12, s: 0.6632941961288452f }
+{ id: mine:18, s: 0.6632941961288452f }
+{ id: mine:24, s: 0.6632941961288452f }
+### alice: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'beta' ORDER BY s DESC, id
+{ id: mine:2, s: 0f }
+{ id: mine:4, s: 0f }
+{ id: mine:6, s: 0f }
+{ id: mine:8, s: 0f }
+{ id: mine:10, s: 0f }
+{ id: mine:12, s: 0f }
+{ id: mine:14, s: 0f }
+{ id: mine:16, s: 0f }
+{ id: mine:18, s: 0f }
+{ id: mine:20, s: 0f }
+{ id: mine:22, s: 0f }
+{ id: mine:24, s: 0f }
+### alice: SELECT id, search::highlight('<b>', '</b>', 1) AS h FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ h: '<b>Beta</b> gamma notes', id: mine:2 }
+{ h: '<b>Beta</b> gamma notes', id: mine:4 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:6 }
+{ h: '<b>Beta</b> gamma notes', id: mine:8 }
+{ h: '<b>Beta</b> gamma notes', id: mine:10 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:12 }
+{ h: '<b>Beta</b> gamma notes', id: mine:14 }
+{ h: '<b>Beta</b> gamma notes', id: mine:16 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:18 }
+{ h: '<b>Beta</b> gamma notes', id: mine:20 }
+{ h: '<b>Beta</b> gamma notes', id: mine:22 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:24 }
+### alice: SELECT id, search::highlight('<b>', '</b>', 1, true) AS h FROM mine WHERE name @1@ 'ell' ORDER BY id
+{ h: 'H<b>ell</b>oworld', id: mine:10 }
+{ h: 'H<b>ell</b>oworld', id: mine:20 }
+### alice: SELECT id, search::offsets(1) AS o FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ id: mine:2, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:4, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:6, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:8, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:10, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:12, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:14, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:16, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:18, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:20, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:22, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:24, o: { "0": [{ e: 10, s: 6 }] } }
+### alice: SELECT id, search::offsets(1, true) AS o FROM mine WHERE name @1@ 'ell' ORDER BY id
+{ id: mine:10, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: mine:20, o: { "0": [{ e: 4, s: 1 }] } }
+### alice: SELECT id, <string> search::score(1) AS s, search::score(1) * 2 AS twice FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ id: mine:2, s: '0f', twice: 0f }
+{ id: mine:4, s: '0f', twice: 0f }
+{ id: mine:6, s: '0f', twice: 0f }
+{ id: mine:8, s: '0f', twice: 0f }
+{ id: mine:10, s: '0f', twice: 0f }
+{ id: mine:12, s: '0f', twice: 0f }
+{ id: mine:14, s: '0f', twice: 0f }
+{ id: mine:16, s: '0f', twice: 0f }
+{ id: mine:18, s: '0f', twice: 0f }
+{ id: mine:20, s: '0f', twice: 0f }
+{ id: mine:22, s: '0f', twice: 0f }
+{ id: mine:24, s: '0f', twice: 0f }
+### alice: SELECT VALUE search::score(1) FROM mine WHERE title @1@ 'alpha' ORDER BY id
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+### alice: SELECT id, { score: search::score(1), at: [search::offsets(1)] } AS x FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:6, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:12, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:18, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:24, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+### alice: SELECT id, IF search::score(1) > 0 { 'hit' } ELSE { 'miss' } AS k FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:6, k: 'hit' }
+{ id: mine:12, k: 'hit' }
+{ id: mine:18, k: 'hit' }
+{ id: mine:24, k: 'hit' }
+### alice: SELECT id FROM mine WHERE title @1@ 'alpha' AND search::score(1) > 0 ORDER BY id
+{ id: mine:6 }
+{ id: mine:12 }
+{ id: mine:18 }
+{ id: mine:24 }
+### alice: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'beta' ORDER BY s DESC, id LIMIT 3
+{ id: mine:2, s: 0f }
+{ id: mine:4, s: 0f }
+{ id: mine:6, s: 0f }
+### alice: SELECT tag, math::max(search::score(1)) AS best FROM mine WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ best: 0f, tag: 'a' }
+### alice: SELECT * FROM (SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'alpha') ORDER BY id
+{ id: mine:6, s: 0.6632941961288452f }
+{ id: mine:12, s: 0.6632941961288452f }
+{ id: mine:18, s: 0.6632941961288452f }
+{ id: mine:24, s: 0.6632941961288452f }
+### alice: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY d, id LIMIT 2
+{ d: 0.75f, id: mine:4 }
+{ d: 1.25f, id: mine:6 }
+### alice: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'nothing' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM mine WHERE n > 100 AND title @1@ 'alpha' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS a, search::score(2) AS b FROM mine WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ a: 0f, b: 0f, id: mine:2 }
+{ a: 0f, b: 0f, id: mine:4 }
+{ a: 0f, b: 0f, id: mine:6 }
+{ a: 0f, b: 0f, id: mine:8 }
+{ a: 0f, b: 0f, id: mine:10 }
+{ a: 0f, b: 0f, id: mine:12 }
+{ a: 0f, b: 0f, id: mine:14 }
+{ a: 0f, b: 0f, id: mine:16 }
+{ a: 0f, b: 0f, id: mine:18 }
+{ a: 0f, b: 0f, id: mine:20 }
+{ a: 0f, b: 0f, id: mine:22 }
+{ a: 0f, b: 0f, id: mine:24 }
+### alice: SELECT id, search::highlight('[', ']', 2) AS h FROM mine WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ h: 'the [dog] runs home', id: mine:2 }
+{ h: 'running [dogs] and cats', id: mine:4 }
+{ h: 'the [dog] runs home', id: mine:6 }
+{ h: 'running [dogs] and cats', id: mine:8 }
+{ h: 'the [dog] runs home', id: mine:10 }
+{ h: 'running [dogs] and cats', id: mine:12 }
+{ h: 'the [dog] runs home', id: mine:14 }
+{ h: 'running [dogs] and cats', id: mine:16 }
+{ h: 'the [dog] runs home', id: mine:18 }
+{ h: 'running [dogs] and cats', id: mine:20 }
+{ h: 'the [dog] runs home', id: mine:22 }
+{ h: 'running [dogs] and cats', id: mine:24 }
+### alice: SELECT id FROM mine WHERE title @1@ 'alpha' AND body @2@ 'dog' ORDER BY id
+{ id: mine:6 }
+{ id: mine:12 }
+{ id: mine:18 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE title @1@ 'alpha' AND body @2@ 'zebra' ORDER BY id
+(no rows)
+### alice: SELECT id FROM mine WHERE title @1@ 'alpha' OR n = 2 ORDER BY id
+{ id: mine:2 }
+{ id: mine:6 }
+{ id: mine:8 }
+{ id: mine:12 }
+{ id: mine:14 }
+{ id: mine:18 }
+{ id: mine:20 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE title @1@ 'alpha' OR body @2@ 'dog' ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+{ id: mine:10 }
+{ id: mine:12 }
+{ id: mine:14 }
+{ id: mine:16 }
+{ id: mine:18 }
+{ id: mine:20 }
+{ id: mine:22 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE (title @1@ 'alpha') = true ORDER BY id
+{ id: mine:6 }
+{ id: mine:12 }
+{ id: mine:18 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE !(title @1@ 'alpha') ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:8 }
+{ id: mine:10 }
+{ id: mine:14 }
+{ id: mine:16 }
+{ id: mine:20 }
+{ id: mine:22 }
+### alice: SELECT id FROM mine WHERE title @1@ 'alpha' AND (n = 3 OR body @2@ 'dog') ORDER BY id
+{ id: mine:6 }
+{ id: mine:12 }
+{ id: mine:18 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE n > 0 AND title @@ 'beta' AND body @@ 'dogs' ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:8 }
+{ id: mine:10 }
+{ id: mine:14 }
+{ id: mine:16 }
+{ id: mine:20 }
+{ id: mine:22 }
+### alice: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'beta' OR n = 2 ORDER BY id
+{ id: mine:2, s: 0f }
+{ id: mine:4, s: 0f }
+{ id: mine:6, s: 0f }
+{ id: mine:8, s: 0f }
+{ id: mine:10, s: 0f }
+{ id: mine:12, s: 0f }
+{ id: mine:14, s: 0f }
+{ id: mine:16, s: 0f }
+{ id: mine:18, s: 0f }
+{ id: mine:20, s: 0f }
+{ id: mine:22, s: 0f }
+{ id: mine:24, s: 0f }
+### alice: SELECT id FROM mine WHERE title @1@ 'beta' AND n > 2 AND tag = 'a' ORDER BY id
+{ id: mine:4 }
+{ id: mine:10 }
+{ id: mine:16 }
+{ id: mine:22 }
+### alice: SELECT id FROM mine WHERE title @1@ 'beta' ORDER BY id LIMIT 3 START 2
+{ id: mine:6 }
+{ id: mine:8 }
+{ id: mine:10 }
+### alice: SELECT tag, count() AS c FROM mine WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ c: 12, tag: 'a' }
+### alice: SELECT count() FROM mine WHERE title @1@ 'beta' GROUP ALL
+{ count: 12 }
+### alice: SELECT id, label, secret FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:6, label: 'row 0', secret: NONE }
+{ id: mine:12, label: 'row 0', secret: NONE }
+{ id: mine:18, label: 'row 0', secret: NONE }
+{ id: mine:24, label: 'row 0', secret: NONE }
+### alice: SELECT *, search::score(1) AS s FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ body: 'the dog runs home', emb: [6f, 0f, 0f], id: mine:6, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [12f, 0f, 0f], id: mine:12, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [18f, 0f, 0f], id: mine:18, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [24f, 0f, 0f], id: mine:24, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+### alice: SELECT id, title @@ 'beta' AS m FROM mine ORDER BY id
+error: There was no suitable index supporting the expression: title @@ 'beta'
+### alice: SELECT id, title @1@ 'beta' AS m FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ id: mine:2, m: true }
+{ id: mine:4, m: true }
+{ id: mine:6, m: true }
+{ id: mine:8, m: true }
+{ id: mine:10, m: true }
+{ id: mine:12, m: true }
+{ id: mine:14, m: true }
+{ id: mine:16, m: true }
+{ id: mine:18, m: true }
+{ id: mine:20, m: true }
+{ id: mine:22, m: true }
+{ id: mine:24, m: true }
+### alice: SELECT id FROM mine:1..5 WHERE title @@ 'beta'
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM mine:3 WHERE title @1@ 'alpha'
+(no rows)
+### alice: SELECT id, (SELECT VALUE search::score(1) FROM mine WHERE title @1@ 'alpha' ORDER BY id LIMIT 1) AS x FROM mine:1
+(no rows)
+### alice: SELECT id FROM mine WHERE title @1@ 'alpha' AND id IN (SELECT VALUE id FROM mine WHERE body @1@ 'dog') ORDER BY id
+{ id: mine:6 }
+{ id: mine:12 }
+{ id: mine:18 }
+{ id: mine:24 }
+### alice: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+### alice: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY d, id
+{ d: 0.75f, id: mine:4 }
+{ d: 1.25f, id: mine:6 }
+{ d: 2.75f, id: mine:2 }
+{ d: 3.25f, id: mine:8 }
+### alice: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ d: 2.75f, id: mine:2 }
+{ d: 0.75f, id: mine:4 }
+{ d: 1.25f, id: mine:6 }
+{ d: 3.25f, id: mine:8 }
+{ d: 5.25f, id: mine:10 }
+{ d: 7.25f, id: mine:12 }
+### alice: SELECT id, vector::distance::knn() * 2 AS d, label FROM mine WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
+{ d: 2f, id: mine:2, label: 'row 2' }
+{ d: 6f, id: mine:4, label: 'row 4' }
+{ d: 10f, id: mine:6, label: 'row 0' }
+### alice: SELECT VALUE vector::distance::knn() FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.75f
+2.75f
+### alice: SELECT *, vector::distance::knn() AS d FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: mine:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: mine:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+{ body: 'running dogs and cats', d: 2.75f, emb: [12f, 0f, 0f], id: mine:12, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Alpha Beta guide' }
+### alice: SELECT count() FROM mine WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
+{ count: 5 }
+### alice: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+### alice: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY id
+{ d: 2.75f, id: mine:2 }
+{ d: 0.75f, id: mine:4 }
+{ d: 3.25f, id: mine:8 }
+{ d: 5.25f, id: mine:10 }
+### alice: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+### alice: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n = 3 ORDER BY id
+(no rows)
+### alice: SELECT id FROM mine WHERE emb <|3, 40|> [4.75, 0.0, 0.0] AND n IN [1, 2] AND tag = 'b' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS s, vector::distance::knn() AS d FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' AND n > 0 ORDER BY id
+{ d: 2.75f, id: mine:2, s: 0f }
+{ d: 0.75f, id: mine:4, s: 0f }
+{ d: 3.25f, id: mine:8, s: 0f }
+{ d: 5.25f, id: mine:10, s: 0f }
+### alice: SELECT id FROM bare WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] ORDER BY id #2
+(no rows)
+### alice: SELECT id FROM mine WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+### alice: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|4, MANHATTAN|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY d, id
+{ d: 0.75f, id: mine:4 }
+{ d: 2.75f, id: mine:2 }
+{ d: 3.25f, id: mine:8 }
+{ d: 5.25f, id: mine:10 }
+### alice: SELECT id FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @@ 'beta' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @AND@ 'alpha guide' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @OR@ 'alpha notes' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1,AND@ 'beta guide' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE body @1@ 'run' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE body @1@ 'dogs' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE name @1@ 'ell' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1@ '' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1@ '!!' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'beta' ORDER BY s DESC, id
+(no rows)
+### alice: SELECT id, search::highlight('<b>', '</b>', 1) AS h FROM locked WHERE title @1@ 'beta' ORDER BY id
+(no rows)
+### alice: SELECT id, search::highlight('<b>', '</b>', 1, true) AS h FROM locked WHERE name @1@ 'ell' ORDER BY id
+(no rows)
+### alice: SELECT id, search::offsets(1) AS o FROM locked WHERE title @1@ 'beta' ORDER BY id
+(no rows)
+### alice: SELECT id, search::offsets(1, true) AS o FROM locked WHERE name @1@ 'ell' ORDER BY id
+(no rows)
+### alice: SELECT id, <string> search::score(1) AS s, search::score(1) * 2 AS twice FROM locked WHERE title @1@ 'beta' ORDER BY id
+(no rows)
+### alice: SELECT VALUE search::score(1) FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### alice: SELECT id, { score: search::score(1), at: [search::offsets(1)] } AS x FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### alice: SELECT id, IF search::score(1) > 0 { 'hit' } ELSE { 'miss' } AS k FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1@ 'alpha' AND search::score(1) > 0 ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'beta' ORDER BY s DESC, id LIMIT 3
+(no rows)
+### alice: SELECT tag, math::max(search::score(1)) AS best FROM locked WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+(no rows)
+### alice: SELECT * FROM (SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'alpha') ORDER BY id
+(no rows)
+### alice: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY d, id LIMIT 2
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'nothing' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM locked WHERE n > 100 AND title @1@ 'alpha' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS a, search::score(2) AS b FROM locked WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+(no rows)
+### alice: SELECT id, search::highlight('[', ']', 2) AS h FROM locked WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1@ 'alpha' AND body @2@ 'dog' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1@ 'alpha' AND body @2@ 'zebra' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1@ 'alpha' OR n = 2 ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1@ 'alpha' OR body @2@ 'dog' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE (title @1@ 'alpha') = true ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE !(title @1@ 'alpha') ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1@ 'alpha' AND (n = 3 OR body @2@ 'dog') ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE n > 0 AND title @@ 'beta' AND body @@ 'dogs' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'beta' OR n = 2 ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1@ 'beta' AND n > 2 AND tag = 'a' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1@ 'beta' ORDER BY id LIMIT 3 START 2
+(no rows)
+### alice: SELECT tag, count() AS c FROM locked WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+(no rows)
+### alice: SELECT count() FROM locked WHERE title @1@ 'beta' GROUP ALL
+{ count: 0 }
+### alice: SELECT id, label, secret FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### alice: SELECT *, search::score(1) AS s FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### alice: SELECT id, title @@ 'beta' AS m FROM locked ORDER BY id
+(no rows)
+### alice: SELECT id, title @1@ 'beta' AS m FROM locked WHERE title @1@ 'beta' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked:1..5 WHERE title @@ 'beta'
+(no rows)
+### alice: SELECT id, search::score(1) AS s FROM locked:3 WHERE title @1@ 'alpha'
+(no rows)
+### alice: SELECT id, (SELECT VALUE search::score(1) FROM locked WHERE title @1@ 'alpha' ORDER BY id LIMIT 1) AS x FROM locked:1
+(no rows)
+### alice: SELECT id FROM locked WHERE title @1@ 'alpha' AND id IN (SELECT VALUE id FROM locked WHERE body @1@ 'dog') ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+(no rows)
+### alice: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY d, id
+(no rows)
+### alice: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY id
+(no rows)
+### alice: SELECT id, vector::distance::knn() * 2 AS d, label FROM locked WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
+(no rows)
+### alice: SELECT VALUE vector::distance::knn() FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+(no rows)
+### alice: SELECT *, vector::distance::knn() AS d FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+(no rows)
+### alice: SELECT count() FROM locked WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
+{ count: 0 }
+### alice: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+(no rows)
+### alice: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n = 3 ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE emb <|3, 40|> [4.75, 0.0, 0.0] AND n IN [1, 2] AND tag = 'b' ORDER BY id
+(no rows)
+### alice: SELECT id, search::score(1) AS s, vector::distance::knn() AS d FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' AND n > 0 ORDER BY id
+(no rows)
+### alice: SELECT id FROM bare WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] ORDER BY id #3
+(no rows)
+### alice: SELECT id FROM locked WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+(no rows)
+### alice: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|4, MANHATTAN|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY d, id
+(no rows)
+### bob: SELECT id FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE title @@ 'beta' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE title @AND@ 'alpha guide' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE title @OR@ 'alpha notes' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE title @1,AND@ 'beta guide' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE body @1@ 'run' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE body @1@ 'dogs' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE name @1@ 'ell' ORDER BY id
+{ id: open:5 }
+{ id: open:10 }
+{ id: open:15 }
+{ id: open:20 }
+### bob: SELECT id FROM open WHERE title @1@ '' ORDER BY id
+(no rows)
+### bob: SELECT id FROM open WHERE title @1@ '!!' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, s: 0.6632941961288452f }
+{ id: open:6, s: 0.6632941961288452f }
+{ id: open:9, s: 0.6632941961288452f }
+{ id: open:12, s: 0.6632941961288452f }
+{ id: open:15, s: 0.6632941961288452f }
+{ id: open:18, s: 0.6632941961288452f }
+{ id: open:21, s: 0.6632941961288452f }
+{ id: open:24, s: 0.6632941961288452f }
+### bob: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'beta' ORDER BY s DESC, id
+{ id: open:1, s: 0f }
+{ id: open:2, s: 0f }
+{ id: open:3, s: 0f }
+{ id: open:4, s: 0f }
+{ id: open:5, s: 0f }
+{ id: open:6, s: 0f }
+{ id: open:7, s: 0f }
+{ id: open:8, s: 0f }
+{ id: open:9, s: 0f }
+{ id: open:10, s: 0f }
+{ id: open:11, s: 0f }
+{ id: open:12, s: 0f }
+{ id: open:13, s: 0f }
+{ id: open:14, s: 0f }
+{ id: open:15, s: 0f }
+{ id: open:16, s: 0f }
+{ id: open:17, s: 0f }
+{ id: open:18, s: 0f }
+{ id: open:19, s: 0f }
+{ id: open:20, s: 0f }
+{ id: open:21, s: 0f }
+{ id: open:22, s: 0f }
+{ id: open:23, s: 0f }
+{ id: open:24, s: 0f }
+### bob: SELECT id, search::highlight('<b>', '</b>', 1) AS h FROM open WHERE title @1@ 'beta' ORDER BY id
+{ h: '<b>Beta</b> gamma notes', id: open:1 }
+{ h: '<b>Beta</b> gamma notes', id: open:2 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:3 }
+{ h: '<b>Beta</b> gamma notes', id: open:4 }
+{ h: '<b>Beta</b> gamma notes', id: open:5 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:6 }
+{ h: '<b>Beta</b> gamma notes', id: open:7 }
+{ h: '<b>Beta</b> gamma notes', id: open:8 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:9 }
+{ h: '<b>Beta</b> gamma notes', id: open:10 }
+{ h: '<b>Beta</b> gamma notes', id: open:11 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:12 }
+{ h: '<b>Beta</b> gamma notes', id: open:13 }
+{ h: '<b>Beta</b> gamma notes', id: open:14 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:15 }
+{ h: '<b>Beta</b> gamma notes', id: open:16 }
+{ h: '<b>Beta</b> gamma notes', id: open:17 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:18 }
+{ h: '<b>Beta</b> gamma notes', id: open:19 }
+{ h: '<b>Beta</b> gamma notes', id: open:20 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:21 }
+{ h: '<b>Beta</b> gamma notes', id: open:22 }
+{ h: '<b>Beta</b> gamma notes', id: open:23 }
+{ h: 'Alpha <b>Beta</b> guide', id: open:24 }
+### bob: SELECT id, search::highlight('<b>', '</b>', 1, true) AS h FROM open WHERE name @1@ 'ell' ORDER BY id
+{ h: 'H<b>ell</b>oworld', id: open:5 }
+{ h: 'H<b>ell</b>oworld', id: open:10 }
+{ h: 'H<b>ell</b>oworld', id: open:15 }
+{ h: 'H<b>ell</b>oworld', id: open:20 }
+### bob: SELECT id, search::offsets(1) AS o FROM open WHERE title @1@ 'beta' ORDER BY id
+{ id: open:1, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:2, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:3, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:4, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:5, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:6, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:7, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:8, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:9, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:10, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:11, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:12, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:13, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:14, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:15, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:16, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:17, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:18, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:19, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:20, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:21, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: open:22, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:23, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: open:24, o: { "0": [{ e: 10, s: 6 }] } }
+### bob: SELECT id, search::offsets(1, true) AS o FROM open WHERE name @1@ 'ell' ORDER BY id
+{ id: open:5, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: open:10, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: open:15, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: open:20, o: { "0": [{ e: 4, s: 1 }] } }
+### bob: SELECT id, <string> search::score(1) AS s, search::score(1) * 2 AS twice FROM open WHERE title @1@ 'beta' ORDER BY id
+{ id: open:1, s: '0f', twice: 0f }
+{ id: open:2, s: '0f', twice: 0f }
+{ id: open:3, s: '0f', twice: 0f }
+{ id: open:4, s: '0f', twice: 0f }
+{ id: open:5, s: '0f', twice: 0f }
+{ id: open:6, s: '0f', twice: 0f }
+{ id: open:7, s: '0f', twice: 0f }
+{ id: open:8, s: '0f', twice: 0f }
+{ id: open:9, s: '0f', twice: 0f }
+{ id: open:10, s: '0f', twice: 0f }
+{ id: open:11, s: '0f', twice: 0f }
+{ id: open:12, s: '0f', twice: 0f }
+{ id: open:13, s: '0f', twice: 0f }
+{ id: open:14, s: '0f', twice: 0f }
+{ id: open:15, s: '0f', twice: 0f }
+{ id: open:16, s: '0f', twice: 0f }
+{ id: open:17, s: '0f', twice: 0f }
+{ id: open:18, s: '0f', twice: 0f }
+{ id: open:19, s: '0f', twice: 0f }
+{ id: open:20, s: '0f', twice: 0f }
+{ id: open:21, s: '0f', twice: 0f }
+{ id: open:22, s: '0f', twice: 0f }
+{ id: open:23, s: '0f', twice: 0f }
+{ id: open:24, s: '0f', twice: 0f }
+### bob: SELECT VALUE search::score(1) FROM open WHERE title @1@ 'alpha' ORDER BY id
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+### bob: SELECT id, { score: search::score(1), at: [search::offsets(1)] } AS x FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:6, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:9, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:12, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:15, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:18, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:21, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: open:24, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+### bob: SELECT id, IF search::score(1) > 0 { 'hit' } ELSE { 'miss' } AS k FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, k: 'hit' }
+{ id: open:6, k: 'hit' }
+{ id: open:9, k: 'hit' }
+{ id: open:12, k: 'hit' }
+{ id: open:15, k: 'hit' }
+{ id: open:18, k: 'hit' }
+{ id: open:21, k: 'hit' }
+{ id: open:24, k: 'hit' }
+### bob: SELECT id FROM open WHERE title @1@ 'alpha' AND search::score(1) > 0 ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### bob: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'beta' ORDER BY s DESC, id LIMIT 3
+{ id: open:1, s: 0f }
+{ id: open:2, s: 0f }
+{ id: open:3, s: 0f }
+### bob: SELECT tag, math::max(search::score(1)) AS best FROM open WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ best: 0f, tag: 'a' }
+{ best: 0f, tag: 'b' }
+### bob: SELECT * FROM (SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'alpha') ORDER BY id
+{ id: open:3, s: 0.6632941961288452f }
+{ id: open:6, s: 0.6632941961288452f }
+{ id: open:9, s: 0.6632941961288452f }
+{ id: open:12, s: 0.6632941961288452f }
+{ id: open:15, s: 0.6632941961288452f }
+{ id: open:18, s: 0.6632941961288452f }
+{ id: open:21, s: 0.6632941961288452f }
+{ id: open:24, s: 0.6632941961288452f }
+### bob: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY d, id LIMIT 2
+{ d: 0.25f, id: open:5 }
+{ d: 0.75f, id: open:4 }
+### bob: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'nothing' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM open WHERE n > 100 AND title @1@ 'alpha' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS a, search::score(2) AS b FROM open WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ a: 0f, b: 0f, id: open:1 }
+{ a: 0f, b: 0f, id: open:2 }
+{ a: 0f, b: 0f, id: open:3 }
+{ a: 0f, b: 0f, id: open:4 }
+{ a: 0f, b: 0f, id: open:5 }
+{ a: 0f, b: 0f, id: open:6 }
+{ a: 0f, b: 0f, id: open:7 }
+{ a: 0f, b: 0f, id: open:8 }
+{ a: 0f, b: 0f, id: open:9 }
+{ a: 0f, b: 0f, id: open:10 }
+{ a: 0f, b: 0f, id: open:11 }
+{ a: 0f, b: 0f, id: open:12 }
+{ a: 0f, b: 0f, id: open:13 }
+{ a: 0f, b: 0f, id: open:14 }
+{ a: 0f, b: 0f, id: open:15 }
+{ a: 0f, b: 0f, id: open:16 }
+{ a: 0f, b: 0f, id: open:17 }
+{ a: 0f, b: 0f, id: open:18 }
+{ a: 0f, b: 0f, id: open:19 }
+{ a: 0f, b: 0f, id: open:20 }
+{ a: 0f, b: 0f, id: open:21 }
+{ a: 0f, b: 0f, id: open:22 }
+{ a: 0f, b: 0f, id: open:23 }
+{ a: 0f, b: 0f, id: open:24 }
+### bob: SELECT id, search::highlight('[', ']', 2) AS h FROM open WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ h: 'the [dog] runs home', id: open:1 }
+{ h: 'the [dog] runs home', id: open:2 }
+{ h: 'the [dog] runs home', id: open:3 }
+{ h: 'running [dogs] and cats', id: open:4 }
+{ h: 'the [dog] runs home', id: open:5 }
+{ h: 'the [dog] runs home', id: open:6 }
+{ h: 'the [dog] runs home', id: open:7 }
+{ h: 'running [dogs] and cats', id: open:8 }
+{ h: 'the [dog] runs home', id: open:9 }
+{ h: 'the [dog] runs home', id: open:10 }
+{ h: 'the [dog] runs home', id: open:11 }
+{ h: 'running [dogs] and cats', id: open:12 }
+{ h: 'the [dog] runs home', id: open:13 }
+{ h: 'the [dog] runs home', id: open:14 }
+{ h: 'the [dog] runs home', id: open:15 }
+{ h: 'running [dogs] and cats', id: open:16 }
+{ h: 'the [dog] runs home', id: open:17 }
+{ h: 'the [dog] runs home', id: open:18 }
+{ h: 'the [dog] runs home', id: open:19 }
+{ h: 'running [dogs] and cats', id: open:20 }
+{ h: 'the [dog] runs home', id: open:21 }
+{ h: 'the [dog] runs home', id: open:22 }
+{ h: 'the [dog] runs home', id: open:23 }
+{ h: 'running [dogs] and cats', id: open:24 }
+### bob: SELECT id FROM open WHERE title @1@ 'alpha' AND body @2@ 'dog' ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE title @1@ 'alpha' AND body @2@ 'zebra' ORDER BY id
+(no rows)
+### bob: SELECT id FROM open WHERE title @1@ 'alpha' OR n = 2 ORDER BY id
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE title @1@ 'alpha' OR body @2@ 'dog' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:12 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:18 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE (title @1@ 'alpha') = true ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE !(title @1@ 'alpha') ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:22 }
+{ id: open:23 }
+### bob: SELECT id FROM open WHERE title @1@ 'alpha' AND (n = 3 OR body @2@ 'dog') ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE n > 0 AND title @@ 'beta' AND body @@ 'dogs' ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+{ id: open:11 }
+{ id: open:13 }
+{ id: open:14 }
+{ id: open:15 }
+{ id: open:16 }
+{ id: open:17 }
+{ id: open:19 }
+{ id: open:20 }
+{ id: open:21 }
+{ id: open:22 }
+{ id: open:23 }
+### bob: SELECT id, search::score(1) AS s FROM open WHERE title @1@ 'beta' OR n = 2 ORDER BY id
+{ id: open:1, s: 0f }
+{ id: open:2, s: 0f }
+{ id: open:3, s: 0f }
+{ id: open:4, s: 0f }
+{ id: open:5, s: 0f }
+{ id: open:6, s: 0f }
+{ id: open:7, s: 0f }
+{ id: open:8, s: 0f }
+{ id: open:9, s: 0f }
+{ id: open:10, s: 0f }
+{ id: open:11, s: 0f }
+{ id: open:12, s: 0f }
+{ id: open:13, s: 0f }
+{ id: open:14, s: 0f }
+{ id: open:15, s: 0f }
+{ id: open:16, s: 0f }
+{ id: open:17, s: 0f }
+{ id: open:18, s: 0f }
+{ id: open:19, s: 0f }
+{ id: open:20, s: 0f }
+{ id: open:21, s: 0f }
+{ id: open:22, s: 0f }
+{ id: open:23, s: 0f }
+{ id: open:24, s: 0f }
+### bob: SELECT id FROM open WHERE title @1@ 'beta' AND n > 2 AND tag = 'a' ORDER BY id
+{ id: open:4 }
+{ id: open:10 }
+{ id: open:16 }
+{ id: open:22 }
+### bob: SELECT id FROM open WHERE title @1@ 'beta' ORDER BY id LIMIT 3 START 2
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+### bob: SELECT tag, count() AS c FROM open WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ c: 12, tag: 'a' }
+{ c: 12, tag: 'b' }
+### bob: SELECT count() FROM open WHERE title @1@ 'beta' GROUP ALL
+{ count: 24 }
+### bob: SELECT id, label, secret FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, label: 'row 3', secret: NONE }
+{ id: open:6, label: 'row 0', secret: NONE }
+{ id: open:9, label: 'row 3', secret: NONE }
+{ id: open:12, label: 'row 0', secret: NONE }
+{ id: open:15, label: 'row 3', secret: NONE }
+{ id: open:18, label: 'row 0', secret: NONE }
+{ id: open:21, label: 'row 3', secret: NONE }
+{ id: open:24, label: 'row 0', secret: NONE }
+### bob: SELECT *, search::score(1) AS s FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ body: 'the dog runs home', emb: [3f, 0f, 0f], id: open:3, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [6f, 0f, 0f], id: open:6, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [12f, 0f, 0f], id: open:12, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [15f, 0f, 0f], id: open:15, label: 'row 3', n: 3, name: 'Helloworld', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [18f, 0f, 0f], id: open:18, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [21f, 0f, 0f], id: open:21, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'running dogs and cats', emb: [24f, 0f, 0f], id: open:24, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, s: 0.6632941961288452f, tag: 'a', title: 'Alpha Beta guide' }
+### bob: SELECT id, title @@ 'beta' AS m FROM open ORDER BY id
+error: There was no suitable index supporting the expression: title @@ 'beta'
+### bob: SELECT id, title @1@ 'beta' AS m FROM open WHERE title @1@ 'beta' ORDER BY id
+{ id: open:1, m: true }
+{ id: open:2, m: true }
+{ id: open:3, m: true }
+{ id: open:4, m: true }
+{ id: open:5, m: true }
+{ id: open:6, m: true }
+{ id: open:7, m: true }
+{ id: open:8, m: true }
+{ id: open:9, m: true }
+{ id: open:10, m: true }
+{ id: open:11, m: true }
+{ id: open:12, m: true }
+{ id: open:13, m: true }
+{ id: open:14, m: true }
+{ id: open:15, m: true }
+{ id: open:16, m: true }
+{ id: open:17, m: true }
+{ id: open:18, m: true }
+{ id: open:19, m: true }
+{ id: open:20, m: true }
+{ id: open:21, m: true }
+{ id: open:22, m: true }
+{ id: open:23, m: true }
+{ id: open:24, m: true }
+### bob: SELECT id FROM open:1..5 WHERE title @@ 'beta'
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM open:3 WHERE title @1@ 'alpha'
+(no rows)
+### bob: SELECT id, (SELECT VALUE search::score(1) FROM open WHERE title @1@ 'alpha' ORDER BY id LIMIT 1) AS x FROM open:1
+{ id: open:1, x: [0.6632941961288452f] }
+### bob: SELECT id FROM open WHERE title @1@ 'alpha' AND id IN (SELECT VALUE id FROM open WHERE body @1@ 'dog') ORDER BY id
+{ id: open:3 }
+{ id: open:6 }
+{ id: open:9 }
+{ id: open:12 }
+{ id: open:15 }
+{ id: open:18 }
+{ id: open:21 }
+{ id: open:24 }
+### bob: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+### bob: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY d, id
+{ d: 0.25f, id: open:5 }
+{ d: 0.75f, id: open:4 }
+{ d: 1.25f, id: open:6 }
+{ d: 1.75f, id: open:3 }
+### bob: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ d: 2.75f, id: open:2 }
+{ d: 1.75f, id: open:3 }
+{ d: 0.75f, id: open:4 }
+{ d: 0.25f, id: open:5 }
+{ d: 1.25f, id: open:6 }
+{ d: 2.25f, id: open:7 }
+### bob: SELECT id, vector::distance::knn() * 2 AS d, label FROM open WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
+{ d: 0f, id: open:1, label: 'row 1' }
+{ d: 2f, id: open:2, label: 'row 2' }
+{ d: 4f, id: open:3, label: 'row 3' }
+### bob: SELECT VALUE vector::distance::knn() FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.25f
+0.75f
+### bob: SELECT *, vector::distance::knn() AS d FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: open:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: open:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+### bob: SELECT count() FROM open WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
+{ count: 5 }
+### bob: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: open:2 }
+{ id: open:4 }
+{ id: open:6 }
+{ id: open:8 }
+### bob: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY id
+{ d: 2.75f, id: open:2 }
+{ d: 1.75f, id: open:3 }
+{ d: 0.75f, id: open:4 }
+{ d: 0.25f, id: open:5 }
+### bob: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' ORDER BY id
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+### bob: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n = 3 ORDER BY id
+{ id: open:3 }
+{ id: open:9 }
+{ id: open:15 }
+{ id: open:21 }
+### bob: SELECT id FROM open WHERE emb <|3, 40|> [4.75, 0.0, 0.0] AND n IN [1, 2] AND tag = 'b' ORDER BY id
+{ id: open:1 }
+{ id: open:7 }
+{ id: open:13 }
+### bob: SELECT id, search::score(1) AS s, vector::distance::knn() AS d FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' AND n > 0 ORDER BY id
+{ d: 1.75f, id: open:3, s: 0f }
+{ d: 0.75f, id: open:4, s: 0f }
+{ d: 0.25f, id: open:5, s: 0f }
+{ d: 2.25f, id: open:7, s: 0f }
+### bob: SELECT id FROM bare WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] ORDER BY id
+(no rows)
+### bob: SELECT id FROM open WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+{ id: open:2 }
+{ id: open:4 }
+{ id: open:6 }
+{ id: open:8 }
+### bob: SELECT id, vector::distance::knn() AS d FROM open WHERE emb <|4, MANHATTAN|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY d, id
+{ d: 0.25f, id: open:5 }
+{ d: 0.75f, id: open:4 }
+{ d: 1.75f, id: open:3 }
+{ d: 2.75f, id: open:2 }
+### bob: SELECT id FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:3 }
+{ id: mine:9 }
+{ id: mine:15 }
+{ id: mine:21 }
+### bob: SELECT id FROM mine WHERE title @@ 'beta' ORDER BY id
+{ id: mine:1 }
+{ id: mine:3 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:9 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:15 }
+{ id: mine:17 }
+{ id: mine:19 }
+{ id: mine:21 }
+{ id: mine:23 }
+### bob: SELECT id FROM mine WHERE title @AND@ 'alpha guide' ORDER BY id
+{ id: mine:3 }
+{ id: mine:9 }
+{ id: mine:15 }
+{ id: mine:21 }
+### bob: SELECT id FROM mine WHERE title @OR@ 'alpha notes' ORDER BY id
+{ id: mine:1 }
+{ id: mine:3 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:9 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:15 }
+{ id: mine:17 }
+{ id: mine:19 }
+{ id: mine:21 }
+{ id: mine:23 }
+### bob: SELECT id FROM mine WHERE title @1,AND@ 'beta guide' ORDER BY id
+{ id: mine:3 }
+{ id: mine:9 }
+{ id: mine:15 }
+{ id: mine:21 }
+### bob: SELECT id FROM mine WHERE body @1@ 'run' ORDER BY id
+{ id: mine:1 }
+{ id: mine:3 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:9 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:15 }
+{ id: mine:17 }
+{ id: mine:19 }
+{ id: mine:21 }
+{ id: mine:23 }
+### bob: SELECT id FROM mine WHERE body @1@ 'dogs' ORDER BY id
+{ id: mine:1 }
+{ id: mine:3 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:9 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:15 }
+{ id: mine:17 }
+{ id: mine:19 }
+{ id: mine:21 }
+{ id: mine:23 }
+### bob: SELECT id FROM mine WHERE name @1@ 'ell' ORDER BY id
+{ id: mine:5 }
+{ id: mine:15 }
+### bob: SELECT id FROM mine WHERE title @1@ '' ORDER BY id
+(no rows)
+### bob: SELECT id FROM mine WHERE title @1@ '!!' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:3, s: 0.6632941961288452f }
+{ id: mine:9, s: 0.6632941961288452f }
+{ id: mine:15, s: 0.6632941961288452f }
+{ id: mine:21, s: 0.6632941961288452f }
+### bob: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'beta' ORDER BY s DESC, id
+{ id: mine:1, s: 0f }
+{ id: mine:3, s: 0f }
+{ id: mine:5, s: 0f }
+{ id: mine:7, s: 0f }
+{ id: mine:9, s: 0f }
+{ id: mine:11, s: 0f }
+{ id: mine:13, s: 0f }
+{ id: mine:15, s: 0f }
+{ id: mine:17, s: 0f }
+{ id: mine:19, s: 0f }
+{ id: mine:21, s: 0f }
+{ id: mine:23, s: 0f }
+### bob: SELECT id, search::highlight('<b>', '</b>', 1) AS h FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ h: '<b>Beta</b> gamma notes', id: mine:1 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:3 }
+{ h: '<b>Beta</b> gamma notes', id: mine:5 }
+{ h: '<b>Beta</b> gamma notes', id: mine:7 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:9 }
+{ h: '<b>Beta</b> gamma notes', id: mine:11 }
+{ h: '<b>Beta</b> gamma notes', id: mine:13 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:15 }
+{ h: '<b>Beta</b> gamma notes', id: mine:17 }
+{ h: '<b>Beta</b> gamma notes', id: mine:19 }
+{ h: 'Alpha <b>Beta</b> guide', id: mine:21 }
+{ h: '<b>Beta</b> gamma notes', id: mine:23 }
+### bob: SELECT id, search::highlight('<b>', '</b>', 1, true) AS h FROM mine WHERE name @1@ 'ell' ORDER BY id
+{ h: 'H<b>ell</b>oworld', id: mine:5 }
+{ h: 'H<b>ell</b>oworld', id: mine:15 }
+### bob: SELECT id, search::offsets(1) AS o FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ id: mine:1, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:3, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:5, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:7, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:9, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:11, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:13, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:15, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:17, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:19, o: { "0": [{ e: 4, s: 0 }] } }
+{ id: mine:21, o: { "0": [{ e: 10, s: 6 }] } }
+{ id: mine:23, o: { "0": [{ e: 4, s: 0 }] } }
+### bob: SELECT id, search::offsets(1, true) AS o FROM mine WHERE name @1@ 'ell' ORDER BY id
+{ id: mine:5, o: { "0": [{ e: 4, s: 1 }] } }
+{ id: mine:15, o: { "0": [{ e: 4, s: 1 }] } }
+### bob: SELECT id, <string> search::score(1) AS s, search::score(1) * 2 AS twice FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ id: mine:1, s: '0f', twice: 0f }
+{ id: mine:3, s: '0f', twice: 0f }
+{ id: mine:5, s: '0f', twice: 0f }
+{ id: mine:7, s: '0f', twice: 0f }
+{ id: mine:9, s: '0f', twice: 0f }
+{ id: mine:11, s: '0f', twice: 0f }
+{ id: mine:13, s: '0f', twice: 0f }
+{ id: mine:15, s: '0f', twice: 0f }
+{ id: mine:17, s: '0f', twice: 0f }
+{ id: mine:19, s: '0f', twice: 0f }
+{ id: mine:21, s: '0f', twice: 0f }
+{ id: mine:23, s: '0f', twice: 0f }
+### bob: SELECT VALUE search::score(1) FROM mine WHERE title @1@ 'alpha' ORDER BY id
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+0.6632941961288452f
+### bob: SELECT id, { score: search::score(1), at: [search::offsets(1)] } AS x FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:3, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:9, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:15, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+{ id: mine:21, x: { at: [{ "0": [{ e: 5, s: 0 }] }], score: 0.6632941961288452f } }
+### bob: SELECT id, IF search::score(1) > 0 { 'hit' } ELSE { 'miss' } AS k FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:3, k: 'hit' }
+{ id: mine:9, k: 'hit' }
+{ id: mine:15, k: 'hit' }
+{ id: mine:21, k: 'hit' }
+### bob: SELECT id FROM mine WHERE title @1@ 'alpha' AND search::score(1) > 0 ORDER BY id
+{ id: mine:3 }
+{ id: mine:9 }
+{ id: mine:15 }
+{ id: mine:21 }
+### bob: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'beta' ORDER BY s DESC, id LIMIT 3
+{ id: mine:1, s: 0f }
+{ id: mine:3, s: 0f }
+{ id: mine:5, s: 0f }
+### bob: SELECT tag, math::max(search::score(1)) AS best FROM mine WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ best: 0f, tag: 'b' }
+### bob: SELECT * FROM (SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'alpha') ORDER BY id
+{ id: mine:3, s: 0.6632941961288452f }
+{ id: mine:9, s: 0.6632941961288452f }
+{ id: mine:15, s: 0.6632941961288452f }
+{ id: mine:21, s: 0.6632941961288452f }
+### bob: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY d, id LIMIT 2
+{ d: 0.25f, id: mine:5 }
+{ d: 1.75f, id: mine:3 }
+### bob: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'nothing' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM mine WHERE n > 100 AND title @1@ 'alpha' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS a, search::score(2) AS b FROM mine WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ a: 0f, b: 0f, id: mine:1 }
+{ a: 0f, b: 0f, id: mine:3 }
+{ a: 0f, b: 0f, id: mine:5 }
+{ a: 0f, b: 0f, id: mine:7 }
+{ a: 0f, b: 0f, id: mine:9 }
+{ a: 0f, b: 0f, id: mine:11 }
+{ a: 0f, b: 0f, id: mine:13 }
+{ a: 0f, b: 0f, id: mine:15 }
+{ a: 0f, b: 0f, id: mine:17 }
+{ a: 0f, b: 0f, id: mine:19 }
+{ a: 0f, b: 0f, id: mine:21 }
+{ a: 0f, b: 0f, id: mine:23 }
+### bob: SELECT id, search::highlight('[', ']', 2) AS h FROM mine WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+{ h: 'the [dog] runs home', id: mine:1 }
+{ h: 'the [dog] runs home', id: mine:3 }
+{ h: 'the [dog] runs home', id: mine:5 }
+{ h: 'the [dog] runs home', id: mine:7 }
+{ h: 'the [dog] runs home', id: mine:9 }
+{ h: 'the [dog] runs home', id: mine:11 }
+{ h: 'the [dog] runs home', id: mine:13 }
+{ h: 'the [dog] runs home', id: mine:15 }
+{ h: 'the [dog] runs home', id: mine:17 }
+{ h: 'the [dog] runs home', id: mine:19 }
+{ h: 'the [dog] runs home', id: mine:21 }
+{ h: 'the [dog] runs home', id: mine:23 }
+### bob: SELECT id FROM mine WHERE title @1@ 'alpha' AND body @2@ 'dog' ORDER BY id
+{ id: mine:3 }
+{ id: mine:9 }
+{ id: mine:15 }
+{ id: mine:21 }
+### bob: SELECT id FROM mine WHERE title @1@ 'alpha' AND body @2@ 'zebra' ORDER BY id
+(no rows)
+### bob: SELECT id FROM mine WHERE title @1@ 'alpha' OR n = 2 ORDER BY id
+{ id: mine:3 }
+{ id: mine:9 }
+{ id: mine:15 }
+{ id: mine:21 }
+### bob: SELECT id FROM mine WHERE title @1@ 'alpha' OR body @2@ 'dog' ORDER BY id
+{ id: mine:1 }
+{ id: mine:3 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:9 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:15 }
+{ id: mine:17 }
+{ id: mine:19 }
+{ id: mine:21 }
+{ id: mine:23 }
+### bob: SELECT id FROM mine WHERE (title @1@ 'alpha') = true ORDER BY id
+{ id: mine:3 }
+{ id: mine:9 }
+{ id: mine:15 }
+{ id: mine:21 }
+### bob: SELECT id FROM mine WHERE !(title @1@ 'alpha') ORDER BY id
+{ id: mine:1 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:17 }
+{ id: mine:19 }
+{ id: mine:23 }
+### bob: SELECT id FROM mine WHERE title @1@ 'alpha' AND (n = 3 OR body @2@ 'dog') ORDER BY id
+{ id: mine:3 }
+{ id: mine:9 }
+{ id: mine:15 }
+{ id: mine:21 }
+### bob: SELECT id FROM mine WHERE n > 0 AND title @@ 'beta' AND body @@ 'dogs' ORDER BY id
+{ id: mine:1 }
+{ id: mine:3 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:9 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:15 }
+{ id: mine:17 }
+{ id: mine:19 }
+{ id: mine:21 }
+{ id: mine:23 }
+### bob: SELECT id, search::score(1) AS s FROM mine WHERE title @1@ 'beta' OR n = 2 ORDER BY id
+{ id: mine:1, s: 0f }
+{ id: mine:3, s: 0f }
+{ id: mine:5, s: 0f }
+{ id: mine:7, s: 0f }
+{ id: mine:9, s: 0f }
+{ id: mine:11, s: 0f }
+{ id: mine:13, s: 0f }
+{ id: mine:15, s: 0f }
+{ id: mine:17, s: 0f }
+{ id: mine:19, s: 0f }
+{ id: mine:21, s: 0f }
+{ id: mine:23, s: 0f }
+### bob: SELECT id FROM mine WHERE title @1@ 'beta' AND n > 2 AND tag = 'a' ORDER BY id
+(no rows)
+### bob: SELECT id FROM mine WHERE title @1@ 'beta' ORDER BY id LIMIT 3 START 2
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:9 }
+### bob: SELECT tag, count() AS c FROM mine WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+{ c: 12, tag: 'b' }
+### bob: SELECT count() FROM mine WHERE title @1@ 'beta' GROUP ALL
+{ count: 12 }
+### bob: SELECT id, label, secret FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ id: mine:3, label: 'row 3', secret: NONE }
+{ id: mine:9, label: 'row 3', secret: NONE }
+{ id: mine:15, label: 'row 3', secret: NONE }
+{ id: mine:21, label: 'row 3', secret: NONE }
+### bob: SELECT *, search::score(1) AS s FROM mine WHERE title @1@ 'alpha' ORDER BY id
+{ body: 'the dog runs home', emb: [3f, 0f, 0f], id: mine:3, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [9f, 0f, 0f], id: mine:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [15f, 0f, 0f], id: mine:15, label: 'row 3', n: 3, name: 'Helloworld', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', emb: [21f, 0f, 0f], id: mine:21, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, s: 0.6632941961288452f, tag: 'b', title: 'Alpha Beta guide' }
+### bob: SELECT id, title @@ 'beta' AS m FROM mine ORDER BY id
+error: There was no suitable index supporting the expression: title @@ 'beta'
+### bob: SELECT id, title @1@ 'beta' AS m FROM mine WHERE title @1@ 'beta' ORDER BY id
+{ id: mine:1, m: true }
+{ id: mine:3, m: true }
+{ id: mine:5, m: true }
+{ id: mine:7, m: true }
+{ id: mine:9, m: true }
+{ id: mine:11, m: true }
+{ id: mine:13, m: true }
+{ id: mine:15, m: true }
+{ id: mine:17, m: true }
+{ id: mine:19, m: true }
+{ id: mine:21, m: true }
+{ id: mine:23, m: true }
+### bob: SELECT id FROM mine:1..5 WHERE title @@ 'beta'
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM mine:3 WHERE title @1@ 'alpha'
+(no rows)
+### bob: SELECT id, (SELECT VALUE search::score(1) FROM mine WHERE title @1@ 'alpha' ORDER BY id LIMIT 1) AS x FROM mine:1
+{ id: mine:1, x: [0.6632941961288452f] }
+### bob: SELECT id FROM mine WHERE title @1@ 'alpha' AND id IN (SELECT VALUE id FROM mine WHERE body @1@ 'dog') ORDER BY id
+{ id: mine:3 }
+{ id: mine:9 }
+{ id: mine:15 }
+{ id: mine:21 }
+### bob: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: mine:1 }
+{ id: mine:3 }
+{ id: mine:5 }
+{ id: mine:7 }
+### bob: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY d, id
+{ d: 0.25f, id: mine:5 }
+{ d: 1.75f, id: mine:3 }
+{ d: 2.25f, id: mine:7 }
+{ d: 3.75f, id: mine:1 }
+### bob: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ d: 3.75f, id: mine:1 }
+{ d: 1.75f, id: mine:3 }
+{ d: 0.25f, id: mine:5 }
+{ d: 2.25f, id: mine:7 }
+{ d: 4.25f, id: mine:9 }
+{ d: 6.25f, id: mine:11 }
+### bob: SELECT id, vector::distance::knn() * 2 AS d, label FROM mine WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
+{ d: 0f, id: mine:1, label: 'row 1' }
+{ d: 4f, id: mine:3, label: 'row 3' }
+{ d: 8f, id: mine:5, label: 'row 5' }
+### bob: SELECT VALUE vector::distance::knn() FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+2.25f
+0.25f
+1.75f
+### bob: SELECT *, vector::distance::knn() AS d FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'the dog runs home', d: 2.25f, emb: [7f, 0f, 0f], id: mine:7, label: 'row 1', n: 1, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: mine:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 1.75f, emb: [11f, 0f, 0f], id: mine:11, label: 'row 5', n: 5, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Beta gamma notes' }
+### bob: SELECT count() FROM mine WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
+{ count: 5 }
+### bob: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+(no rows)
+### bob: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY id
+{ d: 1.75f, id: mine:3 }
+{ d: 0.25f, id: mine:5 }
+{ d: 4.25f, id: mine:9 }
+{ d: 6.25f, id: mine:11 }
+### bob: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' ORDER BY id
+{ id: mine:1 }
+{ id: mine:3 }
+{ id: mine:5 }
+{ id: mine:7 }
+### bob: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n = 3 ORDER BY id
+{ id: mine:3 }
+{ id: mine:9 }
+{ id: mine:15 }
+{ id: mine:21 }
+### bob: SELECT id FROM mine WHERE emb <|3, 40|> [4.75, 0.0, 0.0] AND n IN [1, 2] AND tag = 'b' ORDER BY id
+{ id: mine:1 }
+{ id: mine:7 }
+{ id: mine:13 }
+### bob: SELECT id, search::score(1) AS s, vector::distance::knn() AS d FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' AND n > 0 ORDER BY id
+{ d: 3.75f, id: mine:1, s: 0f }
+{ d: 1.75f, id: mine:3, s: 0f }
+{ d: 0.25f, id: mine:5, s: 0f }
+{ d: 2.25f, id: mine:7, s: 0f }
+### bob: SELECT id FROM bare WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] ORDER BY id #2
+(no rows)
+### bob: SELECT id FROM mine WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+(no rows)
+### bob: SELECT id, vector::distance::knn() AS d FROM mine WHERE emb <|4, MANHATTAN|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY d, id
+{ d: 0.25f, id: mine:5 }
+{ d: 1.75f, id: mine:3 }
+{ d: 4.25f, id: mine:9 }
+{ d: 6.25f, id: mine:11 }
+### bob: SELECT id FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @@ 'beta' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @AND@ 'alpha guide' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @OR@ 'alpha notes' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1,AND@ 'beta guide' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE body @1@ 'run' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE body @1@ 'dogs' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE name @1@ 'ell' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1@ '' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1@ '!!' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'beta' ORDER BY s DESC, id
+(no rows)
+### bob: SELECT id, search::highlight('<b>', '</b>', 1) AS h FROM locked WHERE title @1@ 'beta' ORDER BY id
+(no rows)
+### bob: SELECT id, search::highlight('<b>', '</b>', 1, true) AS h FROM locked WHERE name @1@ 'ell' ORDER BY id
+(no rows)
+### bob: SELECT id, search::offsets(1) AS o FROM locked WHERE title @1@ 'beta' ORDER BY id
+(no rows)
+### bob: SELECT id, search::offsets(1, true) AS o FROM locked WHERE name @1@ 'ell' ORDER BY id
+(no rows)
+### bob: SELECT id, <string> search::score(1) AS s, search::score(1) * 2 AS twice FROM locked WHERE title @1@ 'beta' ORDER BY id
+(no rows)
+### bob: SELECT VALUE search::score(1) FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### bob: SELECT id, { score: search::score(1), at: [search::offsets(1)] } AS x FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### bob: SELECT id, IF search::score(1) > 0 { 'hit' } ELSE { 'miss' } AS k FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1@ 'alpha' AND search::score(1) > 0 ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'beta' ORDER BY s DESC, id LIMIT 3
+(no rows)
+### bob: SELECT tag, math::max(search::score(1)) AS best FROM locked WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+(no rows)
+### bob: SELECT * FROM (SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'alpha') ORDER BY id
+(no rows)
+### bob: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY d, id LIMIT 2
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'nothing' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM locked WHERE n > 100 AND title @1@ 'alpha' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS a, search::score(2) AS b FROM locked WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+(no rows)
+### bob: SELECT id, search::highlight('[', ']', 2) AS h FROM locked WHERE title @1@ 'beta' AND body @2@ 'dog' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1@ 'alpha' AND body @2@ 'dog' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1@ 'alpha' AND body @2@ 'zebra' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1@ 'alpha' OR n = 2 ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1@ 'alpha' OR body @2@ 'dog' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE (title @1@ 'alpha') = true ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE !(title @1@ 'alpha') ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1@ 'alpha' AND (n = 3 OR body @2@ 'dog') ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE n > 0 AND title @@ 'beta' AND body @@ 'dogs' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM locked WHERE title @1@ 'beta' OR n = 2 ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1@ 'beta' AND n > 2 AND tag = 'a' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1@ 'beta' ORDER BY id LIMIT 3 START 2
+(no rows)
+### bob: SELECT tag, count() AS c FROM locked WHERE title @1@ 'beta' GROUP BY tag ORDER BY tag
+(no rows)
+### bob: SELECT count() FROM locked WHERE title @1@ 'beta' GROUP ALL
+{ count: 0 }
+### bob: SELECT id, label, secret FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### bob: SELECT *, search::score(1) AS s FROM locked WHERE title @1@ 'alpha' ORDER BY id
+(no rows)
+### bob: SELECT id, title @@ 'beta' AS m FROM locked ORDER BY id
+(no rows)
+### bob: SELECT id, title @1@ 'beta' AS m FROM locked WHERE title @1@ 'beta' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked:1..5 WHERE title @@ 'beta'
+(no rows)
+### bob: SELECT id, search::score(1) AS s FROM locked:3 WHERE title @1@ 'alpha'
+(no rows)
+### bob: SELECT id, (SELECT VALUE search::score(1) FROM locked WHERE title @1@ 'alpha' ORDER BY id LIMIT 1) AS x FROM locked:1
+(no rows)
+### bob: SELECT id FROM locked WHERE title @1@ 'alpha' AND id IN (SELECT VALUE id FROM locked WHERE body @1@ 'dog') ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+(no rows)
+### bob: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY d, id
+(no rows)
+### bob: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|6, 40|> [4.75, 0.0, 0.0] ORDER BY id
+(no rows)
+### bob: SELECT id, vector::distance::knn() * 2 AS d, label FROM locked WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
+(no rows)
+### bob: SELECT VALUE vector::distance::knn() FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+(no rows)
+### bob: SELECT *, vector::distance::knn() AS d FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+(no rows)
+### bob: SELECT count() FROM locked WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
+{ count: 0 }
+### bob: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+(no rows)
+### bob: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND n = 3 ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE emb <|3, 40|> [4.75, 0.0, 0.0] AND n IN [1, 2] AND tag = 'b' ORDER BY id
+(no rows)
+### bob: SELECT id, search::score(1) AS s, vector::distance::knn() AS d FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND title @1@ 'beta' AND n > 0 ORDER BY id
+(no rows)
+### bob: SELECT id FROM bare WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] ORDER BY id #3
+(no rows)
+### bob: SELECT id FROM locked WHERE emb <|4, EUCLIDEAN|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
+(no rows)
+### bob: SELECT id, vector::distance::knn() AS d FROM locked WHERE emb <|4, MANHATTAN|> [4.75, 0.0, 0.0] AND n > 1 ORDER BY d, id
+(no rows)

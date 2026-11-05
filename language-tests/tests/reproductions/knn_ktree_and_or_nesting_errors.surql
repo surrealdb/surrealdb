@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "KNN diagnostics: the legacy `<|k|>` (KTree) operator now emits a distinct, actionable error pointing at the supported variants, and KNN nested under OR/NOT emits a separate error explaining the placement rule. Top-level-AND queries that combine an HNSW or brute-force KNN with an OR sub-clause keep working."
+reason = "KNN diagnostics: the `<|k|>` (KTree) operator emits a distinct, actionable error pointing at the supported variants, and KNN nested under OR/NOT emits a separate error explaining the placement rule. Top-level-AND queries that combine an HNSW or brute-force KNN with an OR sub-clause keep working."
 
 # DEFINE INDEX
 [[test.results]]

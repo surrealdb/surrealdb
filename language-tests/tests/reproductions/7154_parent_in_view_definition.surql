@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = "$parent in nested SELECT inside DEFINE TABLE AS view should resolve like a direct SELECT (#7154)"

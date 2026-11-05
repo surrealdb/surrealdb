@@ -1,0 +1,17 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["gql/_schema.surql", "gql/_mutate_write_paths_import.surql"]
+
+[test]
+reason = "The writes of a SET and of an INSERT fire the table's events as the hand-written UPDATE and CREATE do: each event writes a row of `audit`, which a later MATCH of the same statement reads."
+
+[[test.results]]
+value = "[{ what: 'create', who: 'N' }, { what: 'update', who: 'A' }]"
+*/
+
+MATCH (n:person WHERE n.name = 'A') SET n.age = 31
+INSERT (p:person {name: 'N'})
+MATCH (l:audit)
+RETURN l.what AS what, l.who AS who ORDER BY what, who

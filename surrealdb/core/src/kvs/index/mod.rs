@@ -9,7 +9,9 @@
 //! The durable protocol uses four key families:
 //!
 //! - `!bs`: one build-state record per index, including phase, owner, generation, report counters,
-//!   and error reason.
+//!   the initial-scan continuation checkpoint, and error reason.
+//! - `!bt`: the generation-scoped writer-admission ticket counter, kept off `!bs` so an admitted
+//!   write never invalidates the builder's in-flight batch.
 //! - `!bg`: generation-scoped queued mutations that the builder replays.
 //! - `!bp`: per-record pointers to the first queued mutation seen during the initial scan, so the
 //!   scan indexes the writer-observed old state.
@@ -20,48 +22,55 @@
 //! Generation numbers fence stale queued work. Builder owner heartbeats fence
 //! stale builders. Query planning only sees durable-`Online` indexes, while
 //! document writes still see building indexes so they can enqueue mutations.
+//! A build in durable `Error` keeps admitting writes the same way, and its
+//! queue is never replayed: `REBUILD INDEX` wipes it and rescans the table.
+//! The exception is a UNIQUE index in `Error`. Its queue cannot enforce
+//! uniqueness, so a write that adds a key to it is refused with
+//! `IndexBuildFailed` until the index is rebuilt or removed. Writes that add no
+//! key are still admitted.
 //! Legacy `!ig`/`!ip` appendings are still drained for committed work from older
 //! code paths, but new writes use the durable queue.
 
 mod admission;
+mod after_commit;
 mod builder;
+mod count;
+mod doc_ids;
+mod kind;
+pub(crate) mod materialise;
 mod replay;
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+mod scan;
 mod state;
+mod unseen;
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests;
 
 use std::time::Duration;
 
-pub(crate) use builder::{IndexBuilder, IndexMutation};
-pub(crate) use replay::{Appending, PrimaryAppending, PrimaryAppendingTicket};
-pub(crate) use state::{
-	IndexBuildPhase, IndexBuildReportStatus, IndexBuildReservation, IndexBuildState,
-	filter_online_indexes, index_building_info, retire_durable_index,
+#[cfg(all(test, feature = "kv-mem"))]
+pub(crate) use after_commit::unstarted;
+pub(crate) use after_commit::{RemoveFailedDefinition, StagedRebuild};
+pub(crate) use builder::{
+	AbortLocalBuild, BuildCompletion, BuildPass, BuildTasks, CleanUncommittedBuild, IndexBuilder,
+	IndexMutation, RebuildStaging, ResumeScope,
 };
+pub(crate) use state::filter_online_indexes;
+// Only the frozen-fixture corpus names this directly; the builder reaches a
+// primary appending through its ticket.
+#[cfg(test)]
+pub(crate) use surrealdb_datastore::values::index_build::PrimaryAppending;
+// What a build persists is part of the keyspace, so it is declared below this
+// layer; the coordination protocol above reads it from there.
+pub(crate) use surrealdb_datastore::values::index_build::{
+	Appending, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildBasis,
+	IndexBuildPhase, IndexBuildReportStatus, IndexBuildReservation, IndexBuildState,
+	PrimaryAppendingTicket,
+};
+use web_time::Instant;
 
 use crate::kvs::tx::IndexBuildReservationRelease;
-
-/// Monotonically increasing build epoch for a table index.
-///
-/// Durable appendings, primary appending sentinels, and reservations all carry
-/// this value so a replacement build never consumes work left behind by an
-/// older build attempt.
-pub(crate) type BuildGeneration = u64;
-/// Per-generation ordering token assigned to a writer admitted during a build.
-///
-/// A single user transaction reserves one `BuildTicket` per index it writes to;
-/// every indexed mutation in that transaction shares the ticket and is
-/// disambiguated by `BuildTicketMutationSeq`.
-pub(crate) type BuildTicket = u64;
-/// Per-ticket index of an admitted mutation, distinguishing the different
-/// `!bg` entries that share the same `(generation, ticket)` reservation.
-///
-/// The first mutation in a user transaction's batch uses `0`; subsequent
-/// mutations use `1`, `2`, ... A `u32` gives a per-user-transaction cap of
-/// ~4.3B mutations per index, which is well above any realistic single-txn
-/// indexed write count.
-pub(crate) type BuildTicketMutationSeq = u32;
 
 /// How long a writer admission reservation is considered owned by the writer.
 const BUILD_RESERVATION_TTL_SECS: i64 = 30;
@@ -71,13 +80,49 @@ const BUILD_RESERVATION_TTL_SECS: i64 = 30;
 /// CAS on `(generation, owner)`, so a stale owner cannot publish progress after
 /// takeover.
 const BUILD_OWNER_LEASE_SECS: i64 = 60;
+/// How often a `CONCURRENTLY` build that is waiting for the transaction of the
+/// statement that started it renews its owner lease. That transaction can stay
+/// open for longer than [`BUILD_OWNER_LEASE_SECS`], and a lapsed lease would
+/// let another builder take the generation over and build it from the
+/// definition committed before the statement, which a `REBUILD` replaces.
+#[cfg(not(test))]
+const BUILD_WAITING_HEARTBEAT: Duration = Duration::from_secs(BUILD_OWNER_LEASE_SECS as u64 / 4);
+/// Short enough for a test to watch a waiting build renew its lease.
+#[cfg(test)]
+const BUILD_WAITING_HEARTBEAT: Duration = Duration::from_millis(100);
 /// Poll cadence while writer admission waits for `Closing` to become `Online`
 /// or `Error`. The caller's context deadline is the only timeout budget.
 const BUILD_CLOSING_SLEEP: Duration = Duration::from_millis(100);
-
+/// Total time one closing transaction may spend waiting for the local builders
+/// it aborted to stop, before deleting their durable state anyway.
+///
+/// A builder polls its abort flag per record during the initial scan and once
+/// per iteration in every replay, sweep and retry loop, so the wait normally
+/// ends in microseconds. The budget only binds where a single uninterruptible
+/// stretch runs long: one initial-scan or replay batch's index writes and
+/// commit, or one chunk of the doc-ID reclaim sweep, each bounded by
+/// [`INDEXING_SCAN_BATCH_SIZE`](crate::kvs::INDEXING_SCAN_BATCH_SIZE) records
+/// and carrying no internal checkpoint. A build folds no compaction plan, so
+/// no vector graph apply runs inside it. Overrunning the budget falls back to
+/// the compare-and-swap on `!bs` as the only ordering against the builder,
+/// which is exactly what the wait exists to replace, so the budget is
+/// deliberately generous: a cancelled statement stalls for at most this long,
+/// whereas falling short strands durable state that nothing collects.
+const BUILD_ABORT_STOP_BUDGET: Duration = Duration::from_secs(15);
 type IndexBuilding = std::sync::Arc<builder::Building>;
 
-#[derive(Clone, Copy)]
+/// Deadline for an abort-wait in a close drain that began at `drain_started_at`.
+///
+/// The budget is per drain, not per build: a schema transaction that defined
+/// several indexes and then rolled back queues one cleanup per index, they run
+/// one at a time, and their waits must not multiply into a close the client
+/// reads as a hang. Measuring every one of them from the same origin caps the
+/// whole drain at a single budget.
+pub(crate) fn build_abort_deadline(drain_started_at: Instant) -> Instant {
+	drain_started_at + BUILD_ABORT_STOP_BUDGET
+}
+
+#[derive(Clone)]
 struct AcquiredBuild {
 	generation: BuildGeneration,
 	phase: IndexBuildPhase,
@@ -86,6 +131,13 @@ struct AcquiredBuild {
 	initial_count: usize,
 	/// Persisted `INFO FOR INDEX` replayed-update count at the moment ownership was acquired.
 	updates_count: usize,
+	/// Persisted initial-scan continuation cursor at the moment ownership was
+	/// acquired. A same-generation takeover resumes the scan after this record
+	/// instead of wiping the partial index data and rescanning.
+	initial_cursor: Option<crate::val::RecordIdKey>,
+	/// Whether this acquisition staged the generation, rather than taking over one an earlier
+	/// build staged.
+	staged: bool,
 }
 
 struct DurableAdmission {
@@ -102,12 +154,16 @@ struct DurableAdmission {
 }
 
 enum DurableAdmissionDecision {
-	/// The write must be queued for the active durable generation.
-	Admit(DurableAdmission),
+	/// The write must be queued for the active durable generation. Boxed: the
+	/// admission carries its release, which holds a transaction factory, and
+	/// the decision is made once per user transaction and index, after a
+	/// commit of its own.
+	Admit(Box<DurableAdmission>),
 	/// Durable state exists and is already online, so index normally.
 	IndexNormally,
-	/// Durable state is absent; the caller must disambiguate legacy from retired catalog state.
-	MissingState,
+	/// Durable state is absent and the catalog no longer names this index, so
+	/// there is nothing to maintain and nothing that will replay a queued write.
+	Retired,
 }
 
 enum DurableAdmissionFence {
@@ -126,8 +182,6 @@ pub(crate) enum ConsumeResult {
 	Retired,
 }
 
-pub(crate) type BatchId = u32;
-pub(crate) type AppendingId = u32;
 const LEGACY_BATCH_ID: BatchId = 0;
 
 enum ExistingPrimaryAppending {

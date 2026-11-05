@@ -1,10 +1,9 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 # Extra timeout because this test has a sleep.
-timeout = 5000
-context-timeout = 5000
+timeout = 15000
+context-timeout = 15000
 
 [test]
 
@@ -27,17 +26,47 @@ error = "The index 'test' already exists"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "{ events: {  }, fields: {  }, indexes: { test: 'DEFINE INDEX test ON `user.csv` FIELDS email' }, lives: {  }, tables: {  } }"
 
+# `building.queued` and `building.active` follow the background compaction drain,
+# which a server runs and the in-process harness does not, so they are not pinned.
 [[test.results]]
-value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
-value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: test, access: = 'testA@surrealdb.com', direction: Forward]
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [table: user.csv, index: test, access: = 'testA@surrealdb.com', direction: Forward]
 "'''
 
 [[test.results]]
@@ -53,7 +82,16 @@ CREATE `user.csv`:2 SET email = 'testA@surrealdb.com';
 CREATE `user.csv`:3 SET email = 'testB@surrealdb.com';
 DEFINE INDEX test ON `user.csv` FIELDS email CONCURRENTLY;
 DEFINE INDEX `test` ON `user.csv` FIELDS email CONCURRENTLY;
-SLEEP 1s;
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
 INFO FOR TABLE `user.csv`;
 INFO FOR INDEX test ON `user.csv`;
 INFO FOR INDEX `test` ON `user.csv`;

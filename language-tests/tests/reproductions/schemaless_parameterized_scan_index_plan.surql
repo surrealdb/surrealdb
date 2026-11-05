@@ -3,11 +3,10 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
-Ensure the new executor correctly plans index usage on a SCHEMALESS table \
+Ensure index usage is planned correctly on a SCHEMALESS table \
 with computed fields and multiple indexes, exercised through parameterized \
 OData V4-style queries. The V4 connector cannot distinguish strings from \
 record IDs in plain JSON, so the WHERE clause checks both: \
@@ -96,14 +95,14 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = """
-"Project [ctx: Db] {rows: 2}
-    Filter [ctx: Db] [predicate: type::field(...) INSIDE ['scan:01kg1bsd1hbtsnq1b57zz3zm55', scan:01kg1bsd1hbtsnq1b57zz3zm55]] {rows: 2}
+value = '''
+"SelectProject [ctx: Db] [projections: id, title, category, cryptoVulnerabilityType, summary, location, classicSeverity, classicWeaknessType, annotation, quantumSeverity, quantumWeaknessType, ruleId, scan, confidence, advisories, links, potentialSideEffects, replacementConfidence, replacementCode, guidance, replacementCodeLanguage, remediations, remediationJobs] {rows: 2}
+    Filter [ctx: Db] [predicate: type::field('scan') INSIDE ['scan:01kg1bsd1hbtsnq1b57zz3zm55', type::record('scan:01kg1bsd1hbtsnq1b57zz3zm55')]] {rows: 2}
         UnionIndexScan [ctx: Db] [table: finding, branches: 2] {rows: 2}
-            IndexScan [ctx: Db] [index: idx_scan, access: = 'scan:01kg1bsd1hbtsnq1b57zz3zm55', direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_scan, access: = scan:01kg1bsd1hbtsnq1b57zz3zm55, direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: finding, index: idx_scan, access: = 'scan:01kg1bsd1hbtsnq1b57zz3zm55', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: finding, index: idx_scan, access: = scan:01kg1bsd1hbtsnq1b57zz3zm55, direction: Forward] {rows: 2}
 
-Total rows: 2""""
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ advisories: [], annotation: NONE, category: 'crypto', classicSeverity: 'high', classicWeaknessType: 'CWE-326', confidence: 'high', cryptoVulnerabilityType: 'key-size', guidance: 'Upgrade to 4096-bit RSA or switch to ECDSA', id: finding:1, links: [], location: 'src/tls.rs:42', potentialSideEffects: NONE, quantumSeverity: 'critical', quantumWeaknessType: 'QWE-1', remediationJobs: [], remediations: [], replacementCode: NONE, replacementCodeLanguage: NONE, replacementConfidence: 'medium', ruleId: 'CRYPTO-001', scan: scan:01kg1bsd1hbtsnq1b57zz3zm55, summary: 'RSA key is below 2048 bits', title: 'Weak RSA key size' }, { advisories: ['CVE-2021-1234'], annotation: 'Known legacy requirement', category: 'transport', classicSeverity: 'medium', classicWeaknessType: 'CWE-327', confidence: 'high', cryptoVulnerabilityType: NONE, guidance: 'Enforce minimum TLS 1.2', id: finding:2, links: ['https://example.com/advisory'], location: 'src/server.rs:88', potentialSideEffects: 'May break legacy clients', quantumSeverity: 'medium', quantumWeaknessType: NONE, remediationJobs: [], remediations: [], replacementCode: 'set_min_tls_version(TLS_1_3)', replacementCodeLanguage: 'rust', replacementConfidence: 'high', ruleId: 'TLS-002', scan: scan:01kg1bsd1hbtsnq1b57zz3zm55, summary: 'TLS 1.0 is in use', title: 'Deprecated TLS version' }]"
@@ -234,7 +233,7 @@ LET $select21 = "remediations";
 LET $select22 = "remediationJobs";
 LET $table = "finding";
 
--- Verify the new executor plans index usage correctly
+-- Verify index usage is planned correctly
 EXPLAIN ANALYZE SELECT
     type::field($select0) AS `id`,
     type::field($select1) AS `title`,

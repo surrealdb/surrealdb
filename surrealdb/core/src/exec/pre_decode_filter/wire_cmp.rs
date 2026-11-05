@@ -8,10 +8,11 @@
 //! [`crate::fnc::operate`] path.
 //!
 //! Strand wire form is canonical (`u16 rev=1 || varint len || pre-validated
-//! UTF-8`), so byte-equality is value-equality. Number wire form is canonical
-//! per variant — `Int(1)` and `Float(1.0)` have distinct wires despite being
-//! `Value::equal`-equal, so cross-variant Number eq is left to the fallback
-//! path.
+//! UTF-8`), so byte-equality is value-equality. Among numbers only an `Int`'s
+//! wire is canonical. A `Decimal`'s carries its scale and the sign of a zero,
+//! so a decimal is compared by its decoded body. A `Float`, and every
+//! cross-variant pair (`Int(1)` and `Float(1.0)` have distinct wires despite
+//! being `Value::equal`-equal), is left to the fallback path.
 //!
 //! **Operator commutativity:** `Equal` / `NotEqual` / `ExactEqual` all
 //! commute, so the planner's `reversed` flag never changes their truth value
@@ -21,6 +22,7 @@
 //! decoding the literal anew, so the wire path bails on that case.
 
 use revision::optimised::tag::{SizeClass, Tag};
+use rust_decimal::Decimal;
 
 use super::Evidence;
 use super::wire_literal::{LiteralSet, LiteralWire, NumberSubVariant};
@@ -31,11 +33,12 @@ use crate::expr::operator::BinaryOperator;
 pub(super) mod variant_id {
 	pub(crate) const NUMBER: u8 = 3;
 	pub(crate) const STRING: u8 = 4;
-	/// [`Value::Regex`] — a `Value::String(s)` can compare equal to a
-	/// `Value::Regex(r)` (and vice versa) when the regex matches the string,
-	/// see `Value::equal`. The wire-fast eq / set paths must therefore bail
-	/// to the full-decode fallback whenever a Strand-tagged comparand meets
-	/// a Regex peer, since byte-eq cannot decide that case.
+	/// [`Value::Regex`]. Under `Value::equal` (`=`, `!=`) a `Value::String(s)`
+	/// and a `Value::Regex(r)` compare equal when `r` matches `s`, which
+	/// byte-eq cannot decide, so a wire path judging `Value::equal` either
+	/// bails to the full-decode fallback where a Strand meets a Regex or runs
+	/// the regex over the Strand. Under `Value`'s derived `PartialEq` (`==`)
+	/// the two never compare equal.
 	pub(crate) const REGEX: u8 = 16;
 }
 
@@ -88,21 +91,21 @@ fn peek_value(bytes: &[u8]) -> Option<ValuePeek<'_>> {
 /// [`Value::Number(_)`]'s already-located payload.
 ///
 /// `peek.payload` for a `Varlen` `Value::Number(_)` is positioned at the
-/// `u32_le payload_length` prefix; the inner `Number` rev-1 wire follows.
+/// `u32_le payload_length` prefix; the inner `Number` wire follows.
 /// Under the default (non-`fixed-width-encoding`) varint codec the next
-/// two values are both 1-byte varints (`u16` Number rev = `0x01`,
-/// `u32` discriminant ∈ `{0, 1, 2}`), so `peek.payload[5]` is the
-/// sub-variant id.
+/// two values are both 1-byte varints (`u16` Number rev ∈ `{0x01, 0x02}`,
+/// `u32` discriminant ∈ `0..=2` for rev 1 or `3..=11` for rev 2), so
+/// `peek.payload[5]` is the sub-variant id.
 ///
 /// Returns [`None`] for truncated payloads or a non-canonical
 /// sub-variant byte (so the caller bails to fallback rather than
 /// claiming a same-sub-variant match against garbage).
 ///
 /// **Wire-layout invariant.** The fixed offset assumes
-/// `<u16 as DeserializeRevisioned>` emits a single byte for `rev = 1`
+/// `<u16 as DeserializeRevisioned>` emits a single byte for `rev ∈ {1, 2}`
 /// and `<u32 as DeserializeRevisioned>` emits a single byte for
 /// discriminants `< 251`. Both hold under the default codec and the
-/// three Number variants present today. A `debug_assert!` cross-checks
+/// twelve Number variants present today. A `debug_assert!` cross-checks
 /// the offset against a proper deserialise in dev builds; if the
 /// underlying varint shape ever changes the test suite will surface it
 /// loudly.
@@ -112,24 +115,46 @@ fn peek_number_sub_variant(payload: &[u8]) -> Option<NumberSubVariant> {
 	if payload.len() < 6 {
 		return None;
 	}
-	let sv = NumberSubVariant::from_wire_byte(payload[5])?;
+	let sv = match (payload[4], payload[5]) {
+		(1, 0..=2) | (2, 3..=11) => NumberSubVariant::from_wire_byte(payload[5])?,
+		_ => return None,
+	};
 	#[cfg(debug_assertions)]
 	{
 		// Cross-check against a proper varint deserialise of the inner
 		// Number wire — catches any future varint-encoding drift.
-		let proper = (|| -> Option<u32> {
+		let proper = (|| -> Option<(u16, u32)> {
 			let mut r: &[u8] = &payload[4..];
-			let _rev =
+			let rev =
 				<u16 as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).ok()?;
-			<u32 as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).ok()
+			let disc =
+				<u32 as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).ok()?;
+			Some((rev, disc))
 		})();
 		debug_assert_eq!(
-			proper,
-			Some(sv as u32),
+			proper.and_then(|(rev, d)| match (rev, u8::try_from(d).ok()?) {
+				(1, b @ 0..=2) | (2, b @ 3..=11) => NumberSubVariant::from_wire_byte(b),
+				_ => None,
+			}),
+			Some(sv),
 			"peek_number_sub_variant: fast-path byte at offset 5 disagrees with varint decode",
 		);
 	}
 	Some(sv)
+}
+
+/// The decimal held by a rev-2 `Value::Number(_)`'s payload whose sub-variant
+/// [`peek_number_sub_variant`] read as `Decimal`. Returns [`None`] for a
+/// truncated payload.
+///
+/// The body starts after the six bytes [`peek_number_sub_variant`] reads (the
+/// `u32_le` payload length, then the Number rev and the discriminant at one
+/// varint byte each) and is decoded by the `Decimal` implementation a full
+/// `Value` decode uses, so it is the decimal the authoritative predicate sees.
+#[inline]
+fn decimal_in_number_payload(payload: &[u8]) -> Option<Decimal> {
+	let mut body: &[u8] = payload.get(6..)?;
+	<Decimal as revision::DeserializeRevisioned>::deserialize_revisioned(&mut body).ok()
 }
 
 /// Compare a navigated [`Value`] wire against a pre-encoded [`LiteralWire`]
@@ -144,8 +169,12 @@ pub(crate) fn evaluate_leaf_on_wire(
 	match op {
 		// Commutative — `reversed` is irrelevant. See the operator note in
 		// the module docstring.
-		BinaryOperator::Equal | BinaryOperator::ExactEqual => {
+		BinaryOperator::Equal => {
 			let truth = wire_eq(value_bytes, lit)?;
+			Some(evidence_bool(truth))
+		}
+		BinaryOperator::ExactEqual => {
+			let truth = wire_exact_eq(value_bytes, lit)?;
 			Some(evidence_bool(truth))
 		}
 		BinaryOperator::NotEqual => {
@@ -185,10 +214,10 @@ pub(crate) fn evaluate_leaf_on_wire(
 			}
 			let haystack = &r[..len];
 			let hit = memchr::memmem::find(haystack, utf8).is_some();
-			let truth = match op {
-				BinaryOperator::Contain => hit,
-				BinaryOperator::NotContain => !hit,
-				_ => unreachable!(),
+			let truth = if matches!(op, BinaryOperator::Contain) {
+				hit
+			} else {
+				!hit
 			};
 			Some(evidence_bool(truth))
 		}
@@ -218,16 +247,45 @@ pub(crate) fn evaluate_leaf_on_wire(
 			} else {
 				order
 			};
-			let truth = match op {
-				BinaryOperator::LessThan => order == std::cmp::Ordering::Less,
-				BinaryOperator::LessThanEqual => order != std::cmp::Ordering::Greater,
-				BinaryOperator::MoreThan => order == std::cmp::Ordering::Greater,
-				BinaryOperator::MoreThanEqual => order != std::cmp::Ordering::Less,
-				_ => unreachable!(),
+			let truth = if matches!(op, BinaryOperator::LessThan) {
+				order == std::cmp::Ordering::Less
+			} else if matches!(op, BinaryOperator::LessThanEqual) {
+				order != std::cmp::Ordering::Greater
+			} else if matches!(op, BinaryOperator::MoreThan) {
+				order == std::cmp::Ordering::Greater
+			} else {
+				order != std::cmp::Ordering::Less
 			};
 			Some(evidence_bool(truth))
 		}
-		_ => None,
+		BinaryOperator::Subtract
+		| BinaryOperator::Add
+		| BinaryOperator::Multiply
+		| BinaryOperator::Divide
+		| BinaryOperator::Remainder
+		| BinaryOperator::Power
+		| BinaryOperator::AllEqual
+		| BinaryOperator::AnyEqual
+		| BinaryOperator::Or
+		| BinaryOperator::And
+		| BinaryOperator::NullCoalescing
+		| BinaryOperator::TenaryCondition
+		| BinaryOperator::ContainAll
+		| BinaryOperator::ContainAny
+		| BinaryOperator::ContainNone
+		| BinaryOperator::Inside
+		| BinaryOperator::NotInside
+		| BinaryOperator::AllInside
+		| BinaryOperator::AnyInside
+		| BinaryOperator::NoneInside
+		| BinaryOperator::Outside
+		| BinaryOperator::Intersects
+		| BinaryOperator::Range
+		| BinaryOperator::RangeInclusive
+		| BinaryOperator::RangeSkip
+		| BinaryOperator::RangeSkipInclusive
+		| BinaryOperator::Matches(_)
+		| BinaryOperator::NearestNeighbor(_) => None,
 	}
 }
 
@@ -258,6 +316,12 @@ fn wire_cmp_int_number(value_bytes: &[u8], lit: &LiteralWire) -> Option<std::cmp
 		return None;
 	}
 	let lit_i64 = (*int_value)?;
+	Some(int_on_wire(value_bytes)?.cmp(&lit_i64))
+}
+
+/// The integer a rev-2 `Value::Number(Number::Int(_))` wire holds, or [`None`]
+/// for a value of any other kind or sub-variant, or a truncated wire.
+pub(crate) fn int_on_wire(value_bytes: &[u8]) -> Option<i64> {
 	let peek = peek_value(value_bytes)?;
 	if peek.tag.variant_id() != variant_id::NUMBER {
 		return None;
@@ -276,14 +340,13 @@ fn wire_cmp_int_number(value_bytes: &[u8], lit: &LiteralWire) -> Option<std::cmp
 		return None;
 	}
 	let mut body: &[u8] = &peek.payload[6..];
-	let field_i64 =
-		<i64 as revision::DeserializeRevisioned>::deserialize_revisioned(&mut body).ok()?;
-	Some(field_i64.cmp(&lit_i64))
+	<i64 as revision::DeserializeRevisioned>::deserialize_revisioned(&mut body).ok()
 }
 
 /// Probe `value_bytes` against a [`LiteralSet`]. Returns `Some(true)` /
 /// `Some(false)` only when the value's wire tag dispatches to a wire-fast
-/// partition (Strand → `set.strands`, Number → `set.numbers`); otherwise
+/// partition (Strand via `strands_contain_wire`, Number via
+/// `numbers_contain_wire`); otherwise
 /// returns [`None`] so the caller falls back to full decode + `set.contains`.
 ///
 /// **Strand asymmetric-equality safety:** when the set has any element that
@@ -293,22 +356,22 @@ fn wire_cmp_int_number(value_bytes: &[u8], lit: &LiteralWire) -> Option<std::cmp
 /// their chance. See [`LiteralSet::has_strand_asymmetric_match`].
 ///
 /// **Number cross-variant safety:** `Number::PartialEq` treats
-/// `Int(1) == Float(1.0) == Decimal(1)` and `Number::Hash` agrees, so a
-/// `HashSet<Value>` containing those entries collapses to a single stored
-/// sub-variant per equivalence class. The wire-fast path inspects the
-/// runtime value's Number sub-variant against the set's stored
-/// sub-variants (via [`LiteralSet::number_sub_variants_mask`]):
+/// `Int(1) == Float(1.0) == Decimal(1)`, so one equivalence class can be spelled
+/// three ways and the partition holds whichever spellings the set listed. The
+/// wire-fast path inspects the runtime value's Number sub-variant against the
+/// set's stored sub-variants (via [`LiteralSet::number_sub_variants_mask`]):
 ///
-/// - Runtime sub-variant is the **only** one stored AND is byte-canonical (`Int` / `Decimal`) →
-///   byte miss is definitive value miss.
-/// - Runtime sub-variant is `Float` → defer to fallback (`+0.0` ↔ `-0.0` and NaN edge cases).
-/// - Runtime sub-variant is **not** in the set's mask but the mask is non-empty → cross-variant
-///   equality may still hold under `Number::PartialEq`, defer to fallback.
+/// - Runtime sub-variant is the **only** one stored → an `Int` byte miss is a definitive value
+///   miss; a `Decimal` is probed by value among the set's decimals, since its bytes carry its scale
+///   and the sign of a zero; a `Float` defers to fallback (`+0.0` ↔ `-0.0` and NaN edge cases).
+/// - Runtime sub-variant is **not** in the set's mask but the mask is non-empty, or the set mixes
+///   sub-variants → cross-variant equality may still hold under `Number::PartialEq`, defer to
+///   fallback.
 pub(crate) fn wire_value_in_set(value_bytes: &[u8], set: &LiteralSet) -> Option<bool> {
 	let peek = peek_value(value_bytes)?;
 	match peek.tag.variant_id() {
 		variant_id::STRING => {
-			if set.strands.contains(value_bytes) {
+			if set.strands_contain_wire(value_bytes) {
 				return Some(true);
 			}
 			// On a miss, hand off to the decode path if the set has any
@@ -324,10 +387,10 @@ pub(crate) fn wire_value_in_set(value_bytes: &[u8], set: &LiteralSet) -> Option<
 			// short-circuit in the Strand arm (where `strand_asymmetric =
 			// false` collapses to `Some(false)` after a hash miss on an
 			// empty `strands`).
-			if set.numbers.is_empty() {
+			if set.has_no_numbers() {
 				return Some(false);
 			}
-			if set.numbers.contains(value_bytes) {
+			if set.numbers_contain_wire(value_bytes) {
 				return Some(true);
 			}
 			// Byte miss on the numbers partition. Decide between
@@ -342,27 +405,32 @@ pub(crate) fn wire_value_in_set(value_bytes: &[u8], set: &LiteralSet) -> Option<
 			if (mask & field_bit) == 0 {
 				return None;
 			}
-			// Field sub-variant matches a stored sub-variant. Float byte
-			// miss is still inconclusive (NaN / ±0); Int / Decimal are
-			// canonical-per-value so a hash miss is a value miss.
-			if !field_sv.byte_eq_decides_value_eq() {
-				return None;
-			}
-			// Also defer if the set mixes sub-variants — even if the
-			// field's sub-variant is byte-canonical, a stored
+			// Also defer if the set mixes sub-variants: a stored
 			// *other*-sub-variant entry could still be cross-variant
 			// `==` to the field.
 			if mask & !field_bit != 0 {
 				return None;
 			}
-			Some(false)
+			match field_sv {
+				// One encoding per integer: a byte miss is a value miss.
+				NumberSubVariant::Int => Some(false),
+				// Equal decimals can differ in scale and in the sign of a
+				// zero, which the bytes carry: probe by value.
+				NumberSubVariant::Decimal => {
+					Some(set.decimals_contain(&decimal_in_number_payload(peek.payload)?))
+				}
+				// A Float byte miss is inconclusive (NaN / ±0).
+				NumberSubVariant::Float => None,
+				NumberSubVariant::Sized => None,
+			}
 		}
 		_ => None,
 	}
 }
 
-/// Byte-equality between a navigated [`Value`] wire and an array element
-/// candidate (for `ArrayElementContains`).
+/// Whether an array element's wire equals the needle `lit` under
+/// `Value::equal`, which `CONTAINS` tests an array's elements with, as
+/// [`wire_eq`] decides it (for `ArrayElementContains`).
 ///
 /// Returns [`None`] when the wire path doesn't cover the pair shape (caller
 /// falls back to full element decode + `Value::eq`).
@@ -370,6 +438,14 @@ pub(crate) fn eq_wire(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 	wire_eq(value_bytes, lit)
 }
 
+/// Whether the navigated value equals `lit` under `Value::equal`, which `=`
+/// and `!=` evaluate, or [`None`] when the wire cannot decide it.
+///
+/// `Value::equal` is `Value`'s derived `PartialEq` but for one pair of kinds:
+/// it matches a string against a regex by running the regex. So a Strand
+/// literal bails on a Regex-tagged field, and a Regex literal runs its regex
+/// over a Strand-tagged field. `==` has no such arm; [`wire_exact_eq`]
+/// answers it.
 fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 	match lit {
 		LiteralWire::Strand {
@@ -381,10 +457,9 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 			if vid == variant_id::STRING {
 				return Some(value_bytes == full_wire.as_slice());
 			}
-			// `Value::equal` treats `String <-> Regex` asymmetrically: a
-			// `Value::Regex(r)` compares equal to a `Value::String(s)` iff
-			// `r.is_match(s)`. Byte-eq cannot decide that, so fall back to
-			// the decode path for Regex peers.
+			// A `Value::Regex(r)` field compares equal to a `Value::String(s)`
+			// literal iff `r.is_match(s)`. Byte-eq cannot decide that, so fall
+			// back to the decode path for Regex peers.
 			if vid == variant_id::REGEX {
 				return None;
 			}
@@ -396,6 +471,7 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 			full_wire,
 			sub_variant_id,
 			int_value: _,
+			decimal_value,
 		} => {
 			let peek = peek_value(value_bytes)?;
 			if peek.tag.variant_id() != variant_id::NUMBER {
@@ -412,16 +488,21 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 			if field_sv != *sub_variant_id {
 				return None;
 			}
-			// Same sub-variant. `Float` byte equality is unreliable
-			// (NaN bit-equal but ≠ under `f64::PartialEq`; `+0.0` ↔ `-0.0`
-			// byte-differ but `==` under `f64::PartialEq`). Cheap to defer
-			// the few Float-eq predicates to the full decode and keep the
-			// wire-fast path correct.
-			if !field_sv.byte_eq_decides_value_eq() {
-				return None;
+			match field_sv {
+				// One encoding per integer.
+				NumberSubVariant::Int => Some(value_bytes == full_wire.as_slice()),
+				// Equal decimals can differ in scale (`2.0` / `2`) and in the
+				// sign of a zero, which the bytes carry: compare the values,
+				// as `Number`'s equality does.
+				NumberSubVariant::Decimal => {
+					Some(decimal_in_number_payload(peek.payload)? == (*decimal_value)?)
+				}
+				// A float compares by its bits and every NaN is one value, so
+				// a byte match is equal; a mismatch is left to the full
+				// decode (`+0.0` ↔ `-0.0`, NaN payloads).
+				NumberSubVariant::Float => (value_bytes == full_wire.as_slice()).then_some(true),
+				NumberSubVariant::Sized => None,
 			}
-			// Int / Decimal: byte form is canonical per value.
-			Some(value_bytes == full_wire.as_slice())
 		}
 		LiteralWire::Canonical {
 			full_wire,
@@ -434,12 +515,12 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 		}
 		LiteralWire::Regex {
 			regex,
+			full_wire: _,
 		} => {
-			// `Value::equal(Strand(s), Regex(r))` is asymmetric — true iff
+			// `Value::equal(Strand(s), Regex(r))` is true iff
 			// `r.is_match(s)`. Peek the field's wire: if it's a Strand,
-			// borrow its UTF-8 payload as `&str` (via the unchecked-utf8
-			// invariant — see [`strand_payload_str_unchecked`]) and run
-			// the pre-compiled regex against it.
+			// borrow its UTF-8 payload as `&str` (see [`strand_payload_str`])
+			// and run the pre-compiled regex against it.
 			//
 			// Other variant tags fall back to the decode path: Regex-vs-
 			// Regex equality compares the underlying pattern strings,
@@ -449,10 +530,39 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 			if peek.tag.variant_id() != variant_id::STRING {
 				return None;
 			}
-			let s = strand_payload_str_unchecked(value_bytes)?;
+			let s = strand_payload_str(value_bytes)?;
 			Some(regex.inner().is_match(s))
 		}
 		LiteralWire::Other => None,
+	}
+}
+
+/// Whether the navigated value equals `lit` under `Value`'s derived
+/// `PartialEq`, which `==` (`operate::exact`) evaluates, or [`None`] when the
+/// wire cannot decide it.
+///
+/// It answers as [`wire_eq`] does except against a regex literal. Derived
+/// equality has no arm across kinds, so a regex equals only a regex with the
+/// same pattern, and never a string, whatever the regex matches. Every other
+/// answer [`wire_eq`] gives holds for `==` as well: the one other pair the two
+/// equalities disagree on, a Strand literal and a Regex-tagged field, is one
+/// it bails on.
+fn wire_exact_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
+	if let LiteralWire::Regex {
+		full_wire,
+		..
+	} = lit
+	{
+		let peek = peek_value(value_bytes)?;
+		if peek.tag.variant_id() != variant_id::REGEX {
+			return Some(false);
+		}
+		// A regex's wire holds its pattern, which is all `Regex`'s
+		// `PartialEq` compares, and the serialiser writes one wire per
+		// pattern, so byte-eq decides it.
+		Some(value_bytes == full_wire.as_slice())
+	} else {
+		wire_eq(value_bytes, lit)
 	}
 }
 
@@ -476,31 +586,15 @@ fn varlen_payload_after_u32_len(payload: &[u8]) -> Option<&[u8]> {
 	Some(&rest[..len])
 }
 
-/// Borrow the UTF-8 bytes inside a rev-2 `Value::String(Strand)` wire as
-/// `&str` without re-validating UTF-8.
+/// Borrow the UTF-8 bytes inside a rev-2 `Value::String(Strand)` wire as `&str`.
 ///
-/// `value_bytes` must point at the start of a `Value::String(Strand)` wire
-/// (rev prefix + variant tag + `u32_le` envelope length + Strand body where
-/// the Strand body is `<varint len> || utf8`). On success returns the
-/// borrowed `&str` view of the inner UTF-8 bytes (no length prefix);
-/// returns `None` on wire-shape mismatch (wrong tag, truncated lengths).
-///
-/// # Safety invariant
-///
-/// The Strand wire's UTF-8 payload is **pre-validated at serialise time**:
-/// every path that produces a `Strand` (parser, decoder, `Strand::from`)
-/// goes through `str::from_utf8` or similar before writing the wire bytes,
-/// and the wire layout has no normalisation pass at decode time. So the
-/// bytes returned by [`varlen_payload_after_u32_len`] for a `String`
-/// variant are guaranteed to be valid UTF-8 by the surrealdb invariant.
-///
-/// `from_utf8_unchecked` skips the per-byte validation that
-/// `from_utf8(...).unwrap()` would perform — a non-trivial saving for
-/// long Strand values in the scan hot path.
-///
-/// In debug builds the `debug_assert!` surfaces any wire-validation
-/// regression immediately; in release builds the check is elided.
-pub(crate) fn strand_payload_str_unchecked(value_bytes: &[u8]) -> Option<&str> {
+/// `value_bytes` must point at the start of a `Value::String(Strand)` wire (rev prefix + variant
+/// tag + `u32_le` envelope length + Strand body, which is `<varint len> || utf8`). On success
+/// returns the borrowed `&str` view of the inner UTF-8 bytes (no length prefix). Returns `None`
+/// on a wire-shape mismatch (wrong tag, truncated lengths) and when the bytes are not valid
+/// UTF-8, so a caller declines to the full decode, which refuses such a string with its own
+/// error. The bytes are validated here, never assumed valid: stored bytes are untrusted.
+pub(crate) fn strand_payload_str(value_bytes: &[u8]) -> Option<&str> {
 	let peek = peek_value(value_bytes)?;
 	if peek.tag.variant_id() != variant_id::STRING || !matches!(peek.size_class, SizeClass::Varlen)
 	{
@@ -509,21 +603,7 @@ pub(crate) fn strand_payload_str_unchecked(value_bytes: &[u8]) -> Option<&str> {
 	let strand_wire = varlen_payload_after_u32_len(peek.payload)?;
 	let mut r: &[u8] = strand_wire;
 	let len = <usize as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).ok()?;
-	if r.len() < len {
-		return None;
-	}
-	let utf8 = &r[..len];
-	debug_assert!(
-		std::str::from_utf8(utf8).is_ok(),
-		"strand_payload_str_unchecked: rev-2 invariant violated — \
-		 Strand wire bytes are not valid UTF-8",
-	);
-	// SAFETY: see the "Safety invariant" section in the docstring.
-	// Strand wire bytes are pre-validated UTF-8 by every writer; the
-	// rev-2 envelope has no decode-time normalisation. The debug assert
-	// catches any regression in writer-side validation. Lifetime of the
-	// returned `&str` is tied to `value_bytes`, which the caller owns.
-	Some(unsafe { std::str::from_utf8_unchecked(utf8) })
+	std::str::from_utf8(r.get(..len)?).ok()
 }
 
 #[inline]
@@ -1045,20 +1125,20 @@ mod tests {
 	}
 
 	// ------------------------------------------------------------------
-	// strand_payload_str_unchecked + LiteralWire::Regex
+	// strand_payload_str + LiteralWire::Regex
 	// ------------------------------------------------------------------
 
 	#[test]
-	fn strand_payload_str_unchecked_borrows_inner_utf8() {
+	fn strand_payload_str_borrows_inner_utf8() {
 		let v = encoded(&Value::String(Strand::from("hello 世界")));
-		let s = strand_payload_str_unchecked(&v).expect("string payload");
+		let s = strand_payload_str(&v).expect("string payload");
 		assert_eq!(s, "hello 世界");
 	}
 
 	#[test]
-	fn strand_payload_str_unchecked_returns_none_on_non_string() {
+	fn strand_payload_str_returns_none_on_non_string() {
 		let v = encoded(&Value::Number(Number::Int(1)));
-		assert_eq!(strand_payload_str_unchecked(&v), None);
+		assert_eq!(strand_payload_str(&v), None);
 	}
 
 	#[test]
@@ -1093,6 +1173,66 @@ mod tests {
 		assert_eq!(wire_eq(&v, &lit), None);
 	}
 
+	/// `==` has no string arm: a regex literal is unequal to every string,
+	/// the strings it matches included.
+	#[test]
+	fn evaluate_leaf_on_wire_exact_eq_regex_provably_false_on_strand() {
+		use std::str::FromStr;
+
+		use crate::val::Regex;
+		let lit = LiteralWire::from_value(&Value::Regex(Regex::from_str("^abc").unwrap()));
+		for s in ["abcdef", "xyz"] {
+			let v = encoded(&Value::String(Strand::from(s)));
+			for reversed in [false, true] {
+				assert_eq!(
+					evaluate_leaf_on_wire(&v, &BinaryOperator::ExactEqual, &lit, reversed),
+					Some(Evidence::ProvablyFalse),
+					"{s:?} reversed {reversed}"
+				);
+			}
+		}
+	}
+
+	/// Under `==` a regex literal equals a regex with the same pattern and no
+	/// other value, which the wire decides without decoding: a regex's wire is
+	/// the one its decoded value re-encodes to, and it holds the pattern that
+	/// `Regex`'s `PartialEq` compares.
+	#[test]
+	fn evaluate_leaf_on_wire_exact_eq_regex_agrees_with_derived_eq() {
+		use std::str::FromStr;
+
+		use crate::val::Regex;
+		// `a\/b` and `a/b` parse to one pattern.
+		let patterns = ["^abc", "abc", "a.*", "", "a\\/b", "a/b", "é+"];
+		let regex = |p: &str| Value::Regex(Regex::from_str(p).unwrap());
+		let mut fields: Vec<Value> = patterns.iter().map(|p| regex(p)).collect();
+		fields.extend([
+			Value::String(Strand::from("abc")),
+			Value::Number(Number::Int(1)),
+			Value::Bool(true),
+			Value::None,
+			Value::Null,
+		]);
+		for field in &fields {
+			let wire = encoded(field);
+			let mut r: &[u8] = &wire;
+			let decoded =
+				<Value as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).unwrap();
+			assert_eq!(encoded(&decoded), wire, "{field:?} re-encodes to its own wire");
+			for p in patterns {
+				let literal = regex(p);
+				let lit = LiteralWire::from_value(&literal);
+				for reversed in [false, true] {
+					assert_eq!(
+						evaluate_leaf_on_wire(&wire, &BinaryOperator::ExactEqual, &lit, reversed),
+						Some(evidence_bool(*field == literal)),
+						"{field:?} == {literal:?} reversed {reversed}"
+					);
+				}
+			}
+		}
+	}
+
 	#[test]
 	fn evaluate_leaf_on_wire_eq_regex_provably_true_on_match() {
 		use std::str::FromStr;
@@ -1120,28 +1260,56 @@ mod tests {
 	}
 
 	// ---------------------------------------------------------------------
-	// Number sub-variant fast path — eliminates the previous
-	// `Value::__deserialize_after_header` fallback for same-sub-variant
-	// `Int`/`Decimal` mismatches in the scan/predicate hot loop.
+	// Number sub-variant fast path: a same-sub-variant `Int` or `Decimal`
+	// comparison is decided without decoding the `Value`.
 	// ---------------------------------------------------------------------
 
 	#[test]
 	fn wire_eq_number_int_byte_mismatch_is_provably_false() {
-		// Previously: same outer Number variant + byte mismatch returned
-		// `None` (defer to decode). Now: same Int sub-variant + byte
-		// mismatch is decisively `Some(false)` — Int's wire form is
-		// canonical-per-value.
+		// Same Int sub-variant + byte mismatch is decisively `Some(false)` —
+		// Int's wire form is canonical-per-value.
 		let lit = LiteralWire::from_value(&Value::Number(Number::Int(5)));
 		let v = encoded(&Value::Number(Number::Int(7)));
 		assert_eq!(wire_eq(&v, &lit), Some(false));
 	}
 
 	#[test]
-	fn wire_eq_number_decimal_byte_mismatch_is_provably_false() {
+	fn wire_eq_number_decimal_value_mismatch_is_provably_false() {
 		use rust_decimal::Decimal;
 		let lit = LiteralWire::from_value(&Value::Number(Number::Decimal(Decimal::from(5))));
 		let v = encoded(&Value::Number(Number::Decimal(Decimal::from(7))));
 		assert_eq!(wire_eq(&v, &lit), Some(false));
+	}
+
+	/// A decimal's bytes carry its scale and the sign of a zero; equality
+	/// ignores both.
+	#[test]
+	fn wire_eq_number_decimal_compares_values_not_encodings() {
+		use rust_decimal::Decimal;
+		let d = |s: &str| -> Decimal { s.parse().unwrap() };
+		let dec = |d: Decimal| Value::Number(Number::Decimal(d));
+		for (field, literal) in
+			[(d("2.0"), d("2")), (d("2"), d("2.00")), (-d("0"), d("0")), (d("0.0"), -d("0"))]
+		{
+			let lit = LiteralWire::from_value(&dec(literal));
+			assert_eq!(wire_eq(&encoded(&dec(field)), &lit), Some(true), "{field:?} = {literal:?}");
+		}
+		let lit = LiteralWire::from_value(&dec(d("2")));
+		assert_eq!(wire_eq(&encoded(&dec(d("2.01"))), &lit), Some(false));
+	}
+
+	#[test]
+	fn wire_value_in_set_decimal_probes_by_value() {
+		use std::collections::HashSet;
+
+		use rust_decimal::Decimal;
+		let d = |s: &str| -> Decimal { s.parse().unwrap() };
+		let dec = |d: Decimal| Value::Number(Number::Decimal(d));
+		let ls = LiteralSet::from_set(&HashSet::from([dec(d("2")), dec(d("0"))]));
+		for field in [d("2.0"), d("2.000"), -d("0"), d("0.00")] {
+			assert_eq!(wire_value_in_set(&encoded(&dec(field)), &ls), Some(true), "{field:?}");
+		}
+		assert_eq!(wire_value_in_set(&encoded(&dec(d("2.5"))), &ls), Some(false));
 	}
 
 	#[test]
@@ -1154,16 +1322,18 @@ mod tests {
 		assert_eq!(wire_eq(&v, &lit), None);
 	}
 
+	/// A float compares by its bits, every NaN as one value, so a byte-exact
+	/// Float match is equal; `+0.0` against `-0.0` byte-differs though equal,
+	/// so a mismatch is left to the decode.
 	#[test]
-	fn wire_eq_number_float_byte_match_bails_to_none() {
-		// Even a byte-exact Float match bails: NaN bit patterns can
-		// byte-equal yet compare unequal (`f64::PartialEq` says NaN !=
-		// NaN). Conservatively deferring all Float comparisons to the
-		// fallback keeps the wire-fast path correct for both NaN and the
-		// `±0.0` case. The cost is the rare Float-eq predicate paying a
-		// decode; the per-row Int/Decimal hot loop is unaffected.
-		let lit = LiteralWire::from_value(&Value::Number(Number::Float(1.5)));
-		let v = encoded(&Value::Number(Number::Float(1.5)));
+	fn wire_eq_number_float_byte_match_is_equal() {
+		for f in [1.5, f64::NAN, -0.0] {
+			let lit = LiteralWire::from_value(&Value::Number(Number::Float(f)));
+			let v = encoded(&Value::Number(Number::Float(f)));
+			assert_eq!(wire_eq(&v, &lit), Some(true), "{f}");
+		}
+		let lit = LiteralWire::from_value(&Value::Number(Number::Float(0.0)));
+		let v = encoded(&Value::Number(Number::Float(-0.0)));
 		assert_eq!(wire_eq(&v, &lit), None);
 	}
 

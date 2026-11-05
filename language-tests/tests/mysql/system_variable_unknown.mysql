@@ -1,0 +1,13 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A variable MySQL does not have is refused, whatever the scope it is read with, instead of reading as NULL"
+
+[test.results]
+request-error = "MySQL SELECT lowering error: lowering error: Unknown system variable 'no_such_variable'"
+*/
+
+SELECT @@global.no_such_variable AS v;

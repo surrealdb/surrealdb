@@ -26,23 +26,12 @@
 //! the entire FieldState machinery (computed fields + field-level permissions),
 //! which would leak restricted fields into binding rows.
 
-// This FieldState-aware fetch helper is used only by the GQL v2 MATCH
-// operators, which are constructed only by the gql-gated planner
-// (`Expr::Match` is `#[cfg(feature = "gql")]`), so it is dead code when the
-// feature is off — suppress the lint there only, keeping dead-code detection
-// active in the default (gql-on) build.
-#![cfg_attr(not(feature = "gql"), allow(dead_code))]
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::pipeline::{
-	FieldState, build_field_state, compute_fields_for_value, filter_fields_by_permission,
-};
-use crate::catalog::providers::TableProvider;
+use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
-	resolve_select_permission, should_check_perms,
+	PhysicalPermission, check_permission_for_value, should_check_perms, validate_record_user_access,
 };
 use crate::exec::{ControlFlowExt, ExecutionContext};
 use crate::expr::ControlFlow;
@@ -122,17 +111,7 @@ impl FetchFieldStateCache {
 	) -> Result<&'a TableFetchState, ControlFlow> {
 		if !self.tables.contains_key(table) {
 			let permission = if check_perms {
-				let db_ctx =
-					ctx.database().context("MATCH binding fetch requires database context")?;
-				let version = ctx.version_stamp();
-				let table_def = db_ctx
-					.get_table_def(table, version)
-					.await
-					.context("Failed to get table definition")?;
-				let catalog_perm = resolve_select_permission(table_def.as_deref());
-				convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
-					.await
-					.context("Failed to convert permission")?
+				crate::exec::vm::descriptor::select_permission(ctx, table).await?
 			} else {
 				// Permission enforcement is bypassed for this session; treat
 				// the table as unconditionally allowed and skip field-level
@@ -190,6 +169,11 @@ pub(crate) async fn resolve_with_field_state(
 		return Ok(Vec::new());
 	}
 
+	// SECURITY (GHSA-2v9j): confine record resolution to the caller's tenant. The
+	// MATCH operators materialize records through this shared path without a
+	// preceding validated scan, so enforce the namespace/database boundary here.
+	validate_record_user_access(ctx.database()?)?;
+
 	let check_perms = cache.resolve_check_perms(ctx)?;
 	let version = ctx.version_stamp();
 
@@ -209,11 +193,18 @@ pub(crate) async fn resolve_with_field_state(
 	let db_id = db_ctx.db.database_id;
 
 	// One batched multi-get for the whole batch; `get_records` returns records
-	// positionally aligned with `rids` and splices the canonical id in.
-	let records = txn
-		.get_records(ns_id, db_id, rids, version, crate::kvs::CachePolicy::ReadWrite)
-		.await
-		.context("Failed to fetch records")?;
+	// positionally aligned with `rids` and splices the canonical id in, each
+	// brought through the migration steps of its table it has not passed.
+	let records = crate::exec::migrate::get_records(
+		ctx,
+		&txn,
+		ns_id,
+		db_id,
+		rids,
+		version,
+		crate::kvs::CachePolicy::ReadWrite,
+	)
+	.await?;
 
 	let mut out: Vec<Option<Value>> = Vec::with_capacity(rids.len());
 	for (rid, record) in rids.iter().zip(records) {
@@ -248,14 +239,16 @@ pub(crate) async fn resolve_with_field_state(
 			Err(arc) => arc.data.clone(),
 		};
 
-		// 2. Computed fields: evaluated and injected before field permissions, exactly as
-		//    filter_and_process_batch orders it.
-		compute_fields_for_value(ctx, &table_state.field_state, &mut value, false).await?;
-
-		// 3. Field-level SELECT permissions: cut fields the caller cannot read.
-		if check_perms {
-			filter_fields_by_permission(ctx, &table_state.field_state, &mut value).await?;
-		}
+		// 2. Computed fields and field-level SELECT permissions, ordered exactly as
+		//    `filter_and_process_batch` orders them.
+		materialise_fields_with_permissions(
+			ctx,
+			&table_state.field_state,
+			&mut value,
+			false,
+			check_perms,
+		)
+		.await?;
 
 		out.push(Some(value));
 	}
@@ -270,7 +263,7 @@ mod tests {
 	// The cache is a plain owned struct; verify it constructs and resolves
 	// `check_perms` lazily without a datastore for the trivial paths. The
 	// full permission/computed-field behavior is exercised by the language
-	// tests over the streaming engine (graph/lookup + gql corpora).
+	// tests over the engine (graph/lookup + gql corpora).
 
 	#[test]
 	fn empty_cache_starts_uninitialised() {

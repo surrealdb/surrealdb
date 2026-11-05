@@ -1,0 +1,74 @@
+# Local feature provenance for the PostgreSQL FROM-function surface.
+version = 1
+
+[[sources]]
+id = "postgresql-15-grammar"
+kind = "postgresql_grammar"
+url = "https://github.com/postgres/postgres/blob/REL_15_STABLE/src/backend/parser/gram.y"
+
+[[features]]
+key = "from.single_function"
+source = "postgresql-15-grammar"
+productions = ["table_ref", "func_table", "func_alias_clause", "opt_ordinality"]
+lines = [12413, 12826, 12860]
+supported = ["single function call", "table alias", "column aliases", "WITH ORDINALITY"]
+execution = "registered uncorrelated scalar functions"
+unsupported = ["ROWS FROM", "LATERAL correlation", "record column definitions", "set-returning functions"]
+
+[[features]]
+key = "expr.keyword_function_forms"
+source = "postgresql-15-grammar"
+productions = ["func_expr_common_subexpr", "extract_list", "extract_arg", "overlay_list", "position_list", "substr_list"]
+lines = [15207, 15984, 15994, 16013, 16027, 16048]
+supported = ["EXTRACT(field FROM source)", "POSITION(needle IN haystack)", "SUBSTRING(s FROM start FOR count)", "SUBSTRING(s FOR count)", "OVERLAY(s PLACING replacement FROM start FOR count)"]
+execution = "the calls extract, position, substring and overlay of the registered functions"
+unsupported = ["SUBSTRING(s FROM pattern) regular expression", "the SIMILAR escape form of SUBSTRING"]
+
+[[features]]
+key = "expr.type_func_name_keyword_calls"
+source = "postgresql-15-grammar"
+productions = ["func_application", "func_name", "type_function_name"]
+lines = [15064, 16319, 16616]
+supported = ["left(s, n)", "right(s, n)"]
+execution = "the calls left and right of the registered functions"
+unsupported = []
+
+[[features]]
+key = "ddl.create_extension"
+source = "postgresql-15-grammar"
+productions = ["CreateExtensionStmt", "create_extension_opt_list", "create_extension_opt_item"]
+supported = ["IF NOT EXISTS", "WITH", "SCHEMA", "VERSION", "CASCADE"]
+execution = "only the vector extension is available; naming it changes nothing"
+unsupported = ["FROM old_version"]
+
+[[features]]
+key = "ddl.enum_types"
+source = "postgresql-15-grammar"
+productions = ["DefineStmt", "AlterEnumStmt", "opt_enum_val_list", "enum_val_list"]
+supported = ["CREATE TYPE name AS ENUM (labels)", "ALTER TYPE name ADD VALUE [IF NOT EXISTS] label [BEFORE | AFTER label]", "ALTER TYPE name RENAME VALUE label TO label", "DROP TYPE [IF EXISTS] name"]
+execution = "lowered to DEFINE TYPE over a union of the labels, ALTER TYPE and REMOVE TYPE; the type's labels order by declaration"
+unsupported = ["CREATE TYPE of a composite, range or base type", "ALTER TYPE owner, schema and attribute actions", "DROP TYPE CASCADE, which does not drop the columns that use the type"]
+
+[[features]]
+key = "ddl.index_opclass_and_reloptions"
+source = "postgresql-15-grammar"
+productions = ["index_elem", "opt_qualified_name", "opt_reloptions", "reloption_list"]
+supported = ["operator class after an index column", "WITH (name = value) storage parameters"]
+execution = "hnsw indexes over a vector column read the operator class and the m and ef_construction parameters"
+unsupported = ["COLLATE", "operator class parameters", "INCLUDE", "TABLESPACE", "reloption namespaces"]
+
+[[features]]
+key = "ddl.domains_and_composite_types"
+source = "postgresql-15-grammar"
+productions = ["DefineStmt", "CreateDomainStmt", "AlterDomainStmt", "ColQualList", "ColConstraint", "ColConstraintElem", "OptTableFuncElementList", "DropStmt"]
+supported = ["CREATE DOMAIN name [AS] type with DEFAULT, NULL, NOT NULL and CHECK elements, each optionally named", "ALTER DOMAIN SET DEFAULT, DROP DEFAULT, SET NOT NULL, DROP NOT NULL, ADD [CONSTRAINT name] CHECK, DROP CONSTRAINT [IF EXISTS] name, and VALIDATE CONSTRAINT", "CREATE TYPE name AS (attribute type, ...), including the empty list", "DROP DOMAIN [IF EXISTS] name [, ...] [CASCADE | RESTRICT]"]
+execution = "parsed only; lowering refuses these statements with the 0A000 feature error until the domain and composite catalog entities exist"
+unsupported = ["COLLATE on a domain or an attribute", "DEFAULT under a constraint name", "a second DEFAULT", "NOT VALID and NO INHERIT", "the OWNER, RENAME and SET SCHEMA actions", "column and wire effects of a domain or a composite type"]
+
+[[features]]
+key = "types.interval_field_qualifiers"
+source = "postgresql-15-grammar"
+productions = ["SimpleTypename", "ConstInterval", "opt_interval", "interval_second"]
+supported = ["INTERVAL YEAR, MONTH, DAY, HOUR, MINUTE and SECOND", "INTERVAL YEAR TO MONTH, DAY TO HOUR, DAY TO MINUTE, DAY TO SECOND, HOUR TO MINUTE, HOUR TO SECOND and MINUTE TO SECOND", "SECOND(p) as the last field"]
+execution = "a column of the type keeps it as its declared SQL type, which truncates a written interval below its finest field and rounds its seconds to p digits; a cast to the type is a cast to interval"
+unsupported = ["the field qualifier of an INTERVAL 'text' literal", "reading an unlabelled number of the text by the finest field"]

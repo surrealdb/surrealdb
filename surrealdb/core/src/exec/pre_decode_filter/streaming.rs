@@ -10,16 +10,17 @@
 //! per-element decode (rare in scan benchmarks).
 
 use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use memchr::memmem;
 use revision::optimised::IndexedSeqWalker;
 use revision::{DeserializeRevisioned, Error as RevisionError, WalkRevisioned};
 
-use super::wire_literal::{LiteralSet, LiteralWire};
+use super::wire_literal::{LiteralSet, LiteralWire, hash_miss_is_decisive};
 use super::{Evidence, wire_cmp};
+use crate::exec::object_extract::wire_skip::{rev2_optimised_payload_unchecked, skip_value_wire};
 use crate::val::Value;
-use crate::val::object_extract::wire_skip::{rev2_optimised_payload_unchecked, skip_value_wire};
 
 /// Construct an [`IndexedSeqWalker`] directly from an [`Array`]'s rev-2
 /// wire bytes, **bypassing** the macro-generated
@@ -28,7 +29,7 @@ use crate::val::object_extract::wire_skip::{rev2_optimised_payload_unchecked, sk
 /// `Array` is `#[revisioned(revision(1), revision(2, optimised))]` with a
 /// single `#[revision(indexed_seq)]` field, so the rev-2 envelope payload
 /// IS the indexed-seq body — see
-/// [`rev2_optimised_payload`](crate::val::object_extract::wire_skip::rev2_optimised_payload)
+/// [`rev2_optimised_payload`](crate::exec::object_extract::wire_skip::rev2_optimised_payload)
 /// for the layout and rationale (same trick as
 /// `indexed_map_walker_from_object_bytes` in [`object_extract`]).
 ///
@@ -39,7 +40,7 @@ use crate::val::object_extract::wire_skip::{rev2_optimised_payload_unchecked, sk
 /// `OptimisedOffsetsNonMonotonic` error + graceful fall-through to full
 /// decode that the validating walker contract guarantees.
 ///
-/// [`object_extract`]: crate::val::object_extract
+/// [`object_extract`]: crate::exec::object_extract
 #[inline]
 fn indexed_seq_walker_from_array_bytes(
 	array_wire: &[u8],
@@ -125,6 +126,18 @@ pub(crate) trait StreamingLeafEvaluator: std::fmt::Debug + Send + Sync {
 			fallback.reversed,
 			&Value::None,
 		)
+	}
+
+	/// Evidence for the leaf decoded to `leaf`: for a record in the
+	/// stored-value encoding, which [`Self::evaluate`] cannot walk, and for a
+	/// `revision` leaf the walk could not open.
+	///
+	/// Default: the caller's [`LeafFallback`](super::LeafFallback) applied to
+	/// `leaf`. Correct for evaluators whose predicate is that comparison of the
+	/// leaf itself; an evaluator judging a function of the leaf must override
+	/// it, since the fallback compares the leaf.
+	fn evaluate_decoded(&self, leaf: &Value, fallback: &super::LeafFallback) -> Evidence {
+		super::evidence_from_binary_cmp(&fallback.op, &fallback.literal, fallback.reversed, leaf)
 	}
 }
 
@@ -264,10 +277,12 @@ const STACK_MASK_WORDS: usize = 8;
 /// per evaluation.
 #[derive(Debug)]
 pub(crate) struct ArrayOverlapsLiteralSet {
-	/// Literal value → stable bit index. Source of truth for the `All`
-	/// bitmask; also the lookup table for the compound-element fallback.
+	/// Literal value → its equivalence class's bit index. Also the lookup table
+	/// for the compound-element fallback. Several entries share an index when
+	/// the set spells one value more than one way — see
+	/// [`overlap_streaming_from_set`].
 	pub(crate) literal_to_idx: Arc<HashMap<Value, usize>>,
-	/// Wire bytes (full rev-2 [`Value`] wire) → stable bit index. Indices
+	/// Wire bytes (full rev-2 [`Value`] wire) → bit index. Indices
 	/// match `literal_to_idx`. Covers Strand and Number literals so the
 	/// `All` mode hot path can resolve a bit without decoding the element.
 	pub(crate) wire_to_idx: Arc<HashMap<Vec<u8>, usize>>,
@@ -275,6 +290,10 @@ pub(crate) struct ArrayOverlapsLiteralSet {
 	/// contains check; identical content to `literal_to_idx` but indexed by
 	/// wire bytes for byte-eq probes.
 	pub(crate) literal_set: Arc<LiteralSet>,
+	/// Number of distinct bit indices, i.e. of literal *values* — not of
+	/// `literal_to_idx` entries, which count spellings. This is the bit count
+	/// `All` requires, so a set spelling one value twice still needs one match.
+	pub(crate) literal_count: usize,
 	pub(crate) mode: OverlapMode,
 }
 
@@ -297,7 +316,7 @@ impl ArrayOverlapsLiteralSet {
 
 impl StreamingLeafEvaluator for ArrayOverlapsLiteralSet {
 	fn evaluate(&self, leaf: ValueWalker<'_>) -> Evidence {
-		let n_lit = self.literal_to_idx.len();
+		let n_lit = self.literal_count;
 		if n_lit == 0 {
 			return match self.mode {
 				OverlapMode::Any => Evidence::ProvablyFalse,
@@ -359,9 +378,12 @@ impl StreamingLeafEvaluator for ArrayOverlapsLiteralSet {
 					heap_mask.as_mut_slice()
 				};
 				let result = for_each_array_element_bytes(&seq_walker, |elem_bytes| {
-					if let Some(idx) =
-						Self::element_set_index(elem_bytes, wire_to_idx, literal_to_idx)?
-					{
+					if let Some(idx) = Self::element_set_index(
+						elem_bytes,
+						wire_to_idx,
+						literal_to_idx,
+						literal_set,
+					)? {
 						mask[idx / 64] |= 1u64 << (idx % 64);
 						if Self::all_bits_set(mask, n_lit) {
 							return Ok(std::ops::ControlFlow::Break(()));
@@ -389,6 +411,15 @@ impl ArrayOverlapsLiteralSet {
 	/// Decide whether an array element's wire bytes match any literal in
 	/// `set`. Wire-fast path probes the Strand / Number partitions; on a
 	/// compound element tag, decodes the element and probes `literal_to_idx`.
+	///
+	/// `Err(())` means undecidable, which the caller turns into
+	/// [`Evidence::Unknown`]. A decoded element is undecidable wherever
+	/// [`hash_miss_is_decisive`] does not trust a miss on it, and the probe is
+	/// then not made at all: a string or a regex meeting a set that holds the
+	/// other kind, or a value whose hash may disagree with its equality. A miss
+	/// would prove nothing, and whether the probe meets an equal entry that
+	/// hashes apart depends on the hasher's seed, so no verdict built on it
+	/// would be reproducible.
 	#[inline]
 	fn element_in_set(
 		elem_bytes: &[u8],
@@ -401,6 +432,9 @@ impl ArrayOverlapsLiteralSet {
 				let mut r: &[u8] = elem_bytes;
 				let v = <Value as DeserializeRevisioned>::deserialize_revisioned(&mut r)
 					.map_err(|_| ())?;
+				if !hash_miss_is_decisive(&v, set) {
+					return Err(());
+				}
 				Ok(literal_to_idx.contains_key(&v))
 			}
 		}
@@ -409,11 +443,19 @@ impl ArrayOverlapsLiteralSet {
 	/// Look up an array element's bit index in the literal set (for `All`
 	/// mode). Wire-fast path uses the precomputed `wire_to_idx` table; on a
 	/// compound tag, decodes the element and probes `literal_to_idx`.
+	///
+	/// `Err(())` covers the same undecidable elements as [`Self::element_in_set`].
+	/// `All` can count such an element neither as setting no bit, since it may
+	/// equal a literal, nor as setting the bit of the entry a probe meets: the
+	/// element may equal literals of two classes while the probe resolves it to
+	/// one: a string can be `==` to one literal while a regex literal matches
+	/// it.
 	#[inline]
 	fn element_set_index(
 		elem_bytes: &[u8],
 		wire_to_idx: &HashMap<Vec<u8>, usize>,
 		literal_to_idx: &HashMap<Value, usize>,
+		set: &LiteralSet,
 	) -> Result<Option<usize>, ()> {
 		// Peek the tag to decide whether the wire-byte lookup applies. For
 		// Strand and Number elements the full Value wire bytes (input
@@ -424,71 +466,10 @@ impl ArrayOverlapsLiteralSet {
 		}
 		let mut r: &[u8] = elem_bytes;
 		let v = <Value as DeserializeRevisioned>::deserialize_revisioned(&mut r).map_err(|_| ())?;
+		if !hash_miss_is_decisive(&v, set) {
+			return Err(());
+		}
 		Ok(literal_to_idx.get(&v).copied())
-	}
-}
-
-/// `WHERE array::len(field) <op> N` against an array leaf.
-///
-/// The rev-2 `Array` wire prologue carries the element count as a varint
-/// right after the `flags` byte (see `IndexedSeqWalker`); we read just that
-/// prefix and compare against `expected_len`. No element decode, no array
-/// iteration, no Strand / Value materialisation.
-#[derive(Debug)]
-pub(crate) struct ArrayLenCompare {
-	/// Right-hand side of the predicate: the numeric literal `array::len`
-	/// is being compared against.
-	pub(crate) expected_len: i64,
-	/// The binary operator. Restricted at compile time to the comparison
-	/// ops below; anything else returns `Evidence::Unknown`.
-	pub(crate) op: crate::expr::operator::BinaryOperator,
-}
-
-impl StreamingLeafEvaluator for ArrayLenCompare {
-	fn evaluate(&self, leaf: ValueWalker<'_>) -> Evidence {
-		use crate::expr::operator::BinaryOperator;
-
-		if !leaf.is_array() {
-			// `array::len` on a non-array is a runtime error at
-			// post-decode time ("Argument 1 was the wrong type. Expected
-			// `array` but found `<T>`"); bailing to Unknown lets the
-			// authoritative evaluator surface that error instead of
-			// silently rejecting the row.
-			return Evidence::Unknown;
-		}
-		let Ok(array_view) = leaf.array_view() else {
-			return Evidence::Unknown;
-		};
-		// Bypass the macro-emitted walker chain — see
-		// `indexed_seq_walker_from_array_bytes` for rationale.
-		let Ok(seq_walker) = indexed_seq_walker_from_array_bytes(array_view.as_bytes()) else {
-			return Evidence::Unknown;
-		};
-		let actual: i64 = seq_walker.len() as i64;
-		let truth = match self.op {
-			BinaryOperator::Equal | BinaryOperator::ExactEqual => actual == self.expected_len,
-			BinaryOperator::NotEqual => actual != self.expected_len,
-			BinaryOperator::LessThan => actual < self.expected_len,
-			BinaryOperator::LessThanEqual => actual <= self.expected_len,
-			BinaryOperator::MoreThan => actual > self.expected_len,
-			BinaryOperator::MoreThanEqual => actual >= self.expected_len,
-			_ => return Evidence::Unknown,
-		};
-		if truth {
-			Evidence::ProvablyTrue
-		} else {
-			Evidence::ProvablyFalse
-		}
-	}
-
-	/// Field absent → `array::len(NONE)` errors at post-decode time
-	/// (`Incorrect arguments for function array::len(). Argument 1 was the
-	/// wrong type. Expected array but found NONE`). Bail to `Unknown` so
-	/// the authoritative evaluator surfaces the error rather than the
-	/// pre-decode filter silently rejecting the row via
-	/// `evidence_from_binary_cmp` against `Value::None`.
-	fn evaluate_missing(&self, _fallback: &super::LeafFallback) -> Evidence {
-		Evidence::Unknown
 	}
 }
 
@@ -497,26 +478,6 @@ mod array_len_missing_tests {
 	use super::*;
 	use crate::exec::pre_decode_filter::LeafFallback;
 	use crate::expr::operator::BinaryOperator;
-	use crate::val::Number;
-
-	/// Regression for `reproductions/3545_where_clause_relations.surql`:
-	/// `array::len(absent_field) >= 1` must NOT be wire-rejected by the
-	/// pre-decode filter — the post-decode evaluator needs to error with
-	/// "Expected array but found NONE". Confirms `evaluate_missing`
-	/// returns `Unknown` regardless of the fallback's literal/op.
-	#[test]
-	fn array_len_compare_evaluate_missing_returns_unknown() {
-		let evaluator = ArrayLenCompare {
-			expected_len: 1,
-			op: BinaryOperator::MoreThanEqual,
-		};
-		let fallback = LeafFallback {
-			op: BinaryOperator::MoreThanEqual,
-			literal: Value::Number(Number::Int(1)),
-			reversed: false,
-		};
-		assert_eq!(evaluator.evaluate_missing(&fallback), Evidence::Unknown);
-	}
 
 	/// SubstringMatch's default `evaluate_missing` should still fall
 	/// through the LeafFallback path — `Value::None CONTAINS 'x'` is a
@@ -541,11 +502,11 @@ mod array_len_missing_tests {
 
 /// Plan-time lookup tables for [`ArrayOverlapsLiteralSet`].
 ///
-/// All three tables share the same bit indices: a literal at position `i`
-/// in iteration order keys to `i` in both [`literal_to_idx`] (decoded form,
-/// used for compound-element fallback) and [`wire_to_idx`] (wire-byte form,
-/// used for the Strand / Number fast path). [`literal_set`] carries the
-/// same elements partitioned for membership probes by `Any` / `None` modes.
+/// All three tables share one bit index per literal *value*: every spelling of
+/// that value keys to it in both [`literal_to_idx`] (decoded form, used for
+/// compound-element fallback) and [`wire_to_idx`] (wire-byte form, used for the
+/// Strand / Number fast path). [`literal_set`] carries the same elements
+/// partitioned for membership probes by `Any` / `None` modes.
 ///
 /// Field names mirror [`ArrayOverlapsLiteralSet`]'s fields so plan-time
 /// construction is a flat move from this struct into the evaluator.
@@ -555,37 +516,70 @@ mod array_len_missing_tests {
 /// [`literal_set`]: Self::literal_set
 #[derive(Debug, Clone)]
 pub(crate) struct OverlapLookupTables {
-	/// Decoded literal → stable bit index. Source of truth for the `All`
-	/// bitmask; also the lookup table for compound-element decode fallback.
+	/// Decoded literal → its equivalence class's bit index; also the lookup
+	/// table for compound-element decode fallback.
 	pub(crate) literal_to_idx: Arc<HashMap<Value, usize>>,
-	/// Full rev-2 [`Value`] wire bytes → stable bit index (Strand / Number
+	/// Full rev-2 [`Value`] wire bytes → bit index (Strand / Number
 	/// literals only). Indices match [`Self::literal_to_idx`].
 	pub(crate) wire_to_idx: Arc<HashMap<Vec<u8>, usize>>,
 	/// Partitioned literal set used by `Any` / `None` modes' fast paths.
 	pub(crate) literal_set: Arc<LiteralSet>,
+	/// Number of distinct bit indices — see
+	/// [`ArrayOverlapsLiteralSet::literal_count`].
+	pub(crate) literal_count: usize,
 }
 
 /// Plan-time build for [`ArrayOverlapsLiteralSet`]: produce the decoded
 /// `value → bit_index` map, the wire-bytes `→ bit_index` map (covers Strand
 /// and Number literals), and the [`LiteralSet`] partitions used by the
 /// `Any` / `None` modes' fast paths. Indices are shared across all three.
-pub(crate) fn overlap_streaming_from_set(set: &HashSet<Value>) -> OverlapLookupTables {
+///
+/// A bit index identifies a literal **value**, not a spelling of one, and
+/// `All` mode demands every bit be set, so a bit per spelling would ask a
+/// single array element to match two spellings of one value at once and
+/// reject the row. Indices are therefore assigned through an ordered map,
+/// which collapses each equivalence class to one bit even where an element's
+/// hash disagrees with its equality ([`Value::hash_agrees_with_eq`]), as the
+/// incoming `HashSet<Value>` may then hold two equal elements. `Ord`-equality is the same relation
+/// as `PartialEq` for every element type a literal set may hold: the variants whose
+/// `partial_cmp` can return `None` (`Regex`, `Range`, `Closure`), and `Geometry`, which is
+/// totally ordered but whose order equates NaN coordinates that `PartialEq` does not, are
+/// excluded by `literal_hashset_element_safe`.
+///
+/// The classes are equivalence classes because equality among the literals is
+/// transitive: `Number` compares exact values across every kind, so the ordered
+/// map files every spelling of one value under one class, whatever order the
+/// set yields them in. `All` relies on the classes in two places. A wire hit
+/// reads the class of the top-level literal an element matches byte for byte. A
+/// decoded element is looked up only where [`hash_miss_is_decisive`] trusts a
+/// miss on it; the element is then `==` to the literals of one class at most,
+/// and `==` decides [`Value::equal`] for it.
+pub(crate) fn overlap_streaming_from_set<S: BuildHasher>(
+	set: &HashSet<Value, S>,
+) -> OverlapLookupTables {
+	use std::collections::BTreeMap;
+
 	use revision::SerializeRevisioned;
 
+	let mut classes: BTreeMap<&Value, usize> = BTreeMap::new();
 	let mut value_map = HashMap::with_capacity(set.len());
 	let mut wire_map: HashMap<Vec<u8>, usize> = HashMap::new();
-	for (i, v) in set.iter().enumerate() {
+	for v in set.iter() {
+		let next = classes.len();
+		let idx = *classes.entry(v).or_insert(next);
 		if matches!(v, Value::String(_) | Value::Number(_)) {
 			let mut full = Vec::new();
 			v.serialize_revisioned(&mut full).expect("serialize into Vec");
-			wire_map.insert(full, i);
+			wire_map.insert(full, idx);
 		}
-		value_map.insert(v.clone(), i);
+		value_map.insert(v.clone(), idx);
 	}
+	let literal_count = classes.len();
 	let set = LiteralSet::from_set(set);
 	OverlapLookupTables {
 		literal_to_idx: Arc::new(value_map),
 		wire_to_idx: Arc::new(wire_map),
 		literal_set: Arc::new(set),
+		literal_count,
 	}
 }

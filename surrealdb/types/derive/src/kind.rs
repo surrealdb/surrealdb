@@ -60,7 +60,16 @@ impl Parse for KindExpr {
 					variants.push(right);
 					KindExpr::Union(variants)
 				}
-				_ => KindExpr::Union(vec![expr, right]),
+				KindExpr::Ident(_)
+				| KindExpr::Parameterized {
+					..
+				}
+				| KindExpr::Literal(_)
+				| KindExpr::KindPrefix(_)
+				| KindExpr::LiteralPrefix(_)
+				| KindExpr::Parenthesized(_)
+				| KindExpr::Object(_)
+				| KindExpr::Array(_) => KindExpr::Union(vec![expr, right]),
 			};
 		}
 
@@ -308,6 +317,55 @@ pub fn kind(input: TokenStream) -> TokenStream {
 	TokenStream::from(tokens)
 }
 
+/// Entry point for `kind_in!`: the same DSL as [`kind`], with the path of the
+/// crate that defines `Kind` written ahead of it and closed by a `;`.
+///
+/// The generated code names that path wherever it would otherwise name
+/// `surrealdb_types`, so the expansion resolves for a caller that reaches the
+/// types through a re-export and has no `surrealdb_types` dependency of its own.
+pub fn kind_in(input: TokenStream) -> TokenStream {
+	let mut base = TokenStream2::new();
+	let mut rest = TokenStream2::new();
+	let mut closed = false;
+	for tree in TokenStream2::from(input) {
+		match &tree {
+			proc_macro2::TokenTree::Punct(p) if !closed && p.as_char() == ';' => closed = true,
+			_ if closed => rest.extend([tree]),
+			proc_macro2::TokenTree::Group(_)
+			| proc_macro2::TokenTree::Ident(_)
+			| proc_macro2::TokenTree::Punct(_)
+			| proc_macro2::TokenTree::Literal(_) => base.extend([tree]),
+		}
+	}
+	if !closed || base.is_empty() {
+		return quote! { compile_error!("kind_in! expects `<crate path>; <kind>`") }.into();
+	}
+	let expr = match syn::parse2::<KindExpr>(rest) {
+		Ok(expr) => expr,
+		Err(err) => return err.to_compile_error().into(),
+	};
+	TokenStream::from(rebase(generate_kind_code(&expr), &base))
+}
+
+/// Replace every `surrealdb_types` identifier in `tokens` with `base`.
+fn rebase(tokens: TokenStream2, base: &TokenStream2) -> TokenStream2 {
+	use proc_macro2::{Group, TokenTree};
+	tokens
+		.into_iter()
+		.flat_map(|tree| match tree {
+			TokenTree::Ident(ident) if ident == "surrealdb_types" => base.clone(),
+			TokenTree::Group(group) => {
+				let mut rebuilt = Group::new(group.delimiter(), rebase(group.stream(), base));
+				rebuilt.set_span(group.span());
+				TokenStream2::from(TokenTree::Group(rebuilt))
+			}
+			other @ TokenTree::Ident(_)
+			| other @ TokenTree::Punct(_)
+			| other @ TokenTree::Literal(_) => TokenStream2::from(other),
+		})
+		.collect()
+}
+
 /// Generate Rust code for a parsed `KindExpr`.
 ///
 /// Converts the parsed kind expression into tokens that construct the appropriate
@@ -402,7 +460,12 @@ fn generate_literal_kind(lit: &syn::Lit) -> TokenStream2 {
 				surrealdb_types::Kind::Literal(surrealdb_types::KindLiteral::String(#value.to_string()))
 			}
 		}
-		_ => quote! { compile_error!("Unsupported literal type") },
+		syn::Lit::ByteStr(_)
+		| syn::Lit::CStr(_)
+		| syn::Lit::Byte(_)
+		| syn::Lit::Char(_)
+		| syn::Lit::Verbatim(_)
+		| _ => quote! { compile_error!("Unsupported literal type") },
 	}
 }
 
@@ -419,10 +482,24 @@ fn generate_simple_kind(ident: &Ident) -> TokenStream2 {
 		"bool" => quote! { surrealdb_types::Kind::Bool },
 		"bytes" => quote! { surrealdb_types::Kind::Bytes },
 		"datetime" => quote! { surrealdb_types::Kind::Datetime },
+		"date" => quote! { surrealdb_types::Kind::Date },
+		"time" => quote! { surrealdb_types::Kind::Time },
+		"timestamp" => quote! { surrealdb_types::Kind::Timestamp },
+		"interval" => quote! { surrealdb_types::Kind::Interval },
 		"decimal" => quote! { surrealdb_types::Kind::Decimal },
+		"bigdecimal" => quote! { surrealdb_types::Kind::BigDecimal },
 		"duration" => quote! { surrealdb_types::Kind::Duration },
-		"float" => quote! { surrealdb_types::Kind::Float },
-		"int" => quote! { surrealdb_types::Kind::Int },
+		"f16" => quote! { surrealdb_types::Kind::F16 },
+		"f32" => quote! { surrealdb_types::Kind::F32 },
+		"f64" | "float" => quote! { surrealdb_types::Kind::Float },
+		"i8" => quote! { surrealdb_types::Kind::I8 },
+		"i16" => quote! { surrealdb_types::Kind::I16 },
+		"i32" => quote! { surrealdb_types::Kind::I32 },
+		"i64" | "int" => quote! { surrealdb_types::Kind::Int },
+		"u8" => quote! { surrealdb_types::Kind::U8 },
+		"u16" => quote! { surrealdb_types::Kind::U16 },
+		"u32" => quote! { surrealdb_types::Kind::U32 },
+		"u64" => quote! { surrealdb_types::Kind::U64 },
 		"number" => quote! { surrealdb_types::Kind::Number },
 		"object" => quote! { surrealdb_types::Kind::Object },
 		"string" => quote! { surrealdb_types::Kind::String },
@@ -469,7 +546,7 @@ fn generate_parameterized_kind(name: &Ident, params: &[KindParam]) -> TokenStrea
 							}
 						}
 					}
-					_ => {} // Ignore other parameter types
+					KindParam::Literal(_) | KindParam::Kind(_) => {} // Ignore other parameter types
 				}
 			}
 
@@ -492,7 +569,7 @@ fn generate_parameterized_kind(name: &Ident, params: &[KindParam]) -> TokenStrea
 							}
 						}
 					}
-					_ => {} // Ignore other parameter types
+					KindParam::Literal(_) | KindParam::Kind(_) => {} // Ignore other parameter types
 				}
 			}
 
@@ -596,7 +673,7 @@ fn generate_parameterized_kind(name: &Ident, params: &[KindParam]) -> TokenStrea
 							}
 						}
 					}
-					_ => {} // Ignore other parameter types
+					KindParam::Literal(_) | KindParam::Kind(_) => {} // Ignore other parameter types
 				}
 			}
 
@@ -619,7 +696,7 @@ fn generate_parameterized_kind(name: &Ident, params: &[KindParam]) -> TokenStrea
 							}
 						}
 					}
-					_ => {} // Ignore other parameter types
+					KindParam::Literal(_) | KindParam::Kind(_) => {} // Ignore other parameter types
 				}
 			}
 

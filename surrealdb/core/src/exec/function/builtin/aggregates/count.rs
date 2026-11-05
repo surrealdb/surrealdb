@@ -1,11 +1,14 @@
 //! Count aggregate functions.
 //!
-//! Provides `COUNT()` for counting all rows and `COUNT(field)` for counting
-//! truthy values.
+//! Provides `COUNT()` for counting all rows, `COUNT(field)` for counting
+//! truthy values, and `count::present` for counting the values that are
+//! neither `NULL` nor `NONE`.
 
 use anyhow::Result;
 
+use super::saved::{Loading, Saving};
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::val::{Number, Value};
 
@@ -22,27 +25,53 @@ impl AggregateFunction for Count {
 		"count"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "count", Fallibility::INFALLIBLE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(CountAccumulator::default())
 	}
 
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::Count(CountAccumulator::default())
+	}
+
 	fn signature(&self) -> Signature {
-		// count() takes no arguments - we pass a dummy value during evaluation
+		// count() takes no arguments. Evaluation passes a placeholder value that update() ignores.
 		Signature::new().returns(Kind::Int)
 	}
 }
 
 #[derive(Debug, Clone, Default)]
-struct CountAccumulator {
+pub(crate) struct CountAccumulator {
 	count: i64,
 }
 
+impl CountAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) {
+		self.count += other.count;
+	}
+}
+
 impl Accumulator for CountAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().int(self.count).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.count = state.int()?;
+		Ok(())
+	}
+
 	fn update(&mut self, _value: Value) -> Result<()> {
 		self.count += 1;
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		self.count += values.len() as i64;
 		Ok(())
@@ -53,7 +82,7 @@ impl Accumulator for CountAccumulator {
 			.as_any()
 			.downcast_ref::<CountAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.count += other.count;
+		self.absorb(other);
 		Ok(())
 	}
 
@@ -87,8 +116,16 @@ impl AggregateFunction for CountField {
 		"count"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "count", Fallibility::INFALLIBLE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(CountFieldAccumulator::default())
+	}
+
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::CountField(CountFieldAccumulator::default())
 	}
 
 	fn signature(&self) -> Signature {
@@ -97,19 +134,37 @@ impl AggregateFunction for CountField {
 }
 
 #[derive(Debug, Clone, Default)]
-struct CountFieldAccumulator {
+pub(crate) struct CountFieldAccumulator {
 	count: i64,
 }
 
+impl CountFieldAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) {
+		self.count += other.count;
+	}
+}
+
 impl Accumulator for CountFieldAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().int(self.count).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.count = state.int()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
-		// Count truthy values (matches old behavior)
+		// Only truthy values are counted. None and false are skipped.
 		if value.is_truthy() {
 			self.count += 1;
 		}
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		self.count += values.iter().filter(|v| v.is_truthy()).count() as i64;
 		Ok(())
@@ -120,7 +175,102 @@ impl Accumulator for CountFieldAccumulator {
 			.as_any()
 			.downcast_ref::<CountFieldAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		self.absorb(other);
+		Ok(())
+	}
+
+	fn finalize(&self) -> Result<Value> {
+		Ok(Value::Number(Number::Int(self.count)))
+	}
+
+	fn reset(&mut self) {
+		self.count = 0;
+	}
+
+	fn clone_box(&self) -> Box<dyn Accumulator> {
+		Box::new(self.clone())
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
+	}
+}
+
+// ============================================================================
+// CountPresent (SQL `COUNT(column)`)
+// ============================================================================
+
+/// `count::present`: the number of values of the group that are neither `NULL`
+/// nor `NONE`, which is SQL's `COUNT(column)`. Not callable from SurrealQL; the
+/// SQL front ends name it so that the folded argument is the column as
+/// written, with no per-row test around it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CountPresent;
+
+impl AggregateFunction for CountPresent {
+	fn name(&self) -> &'static str {
+		"count::present"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "count::present", Fallibility::INFALLIBLE)
+	}
+
+	fn create_accumulator(&self) -> Box<dyn Accumulator> {
+		Box::new(CountPresentAccumulator::default())
+	}
+
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::CountPresent(CountPresentAccumulator::default())
+	}
+
+	fn signature(&self) -> Signature {
+		Signature::new().arg("value", Kind::Any).returns(Kind::Int)
+	}
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CountPresentAccumulator {
+	count: i64,
+}
+
+impl CountPresentAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) {
 		self.count += other.count;
+	}
+}
+
+impl Accumulator for CountPresentAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().int(self.count).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.count = state.int()?;
+		Ok(())
+	}
+
+	fn update(&mut self, value: Value) -> Result<()> {
+		if !value.is_nullish() {
+			self.count += 1;
+		}
+		Ok(())
+	}
+
+	#[cfg(test)]
+	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
+		self.count += values.iter().filter(|v| !v.is_nullish()).count() as i64;
+		Ok(())
+	}
+
+	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
+		let other = other
+			.as_any()
+			.downcast_ref::<CountPresentAccumulator>()
+			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		self.absorb(other);
 		Ok(())
 	}
 
@@ -153,10 +303,10 @@ mod tests {
 
 	// Helper to extract i64 from Value
 	fn as_int(v: &Value) -> i64 {
-		match v {
-			Value::Number(Number::Int(i)) => *i,
-			_ => panic!("Expected Int, got {:?}", v),
-		}
+		let Value::Number(Number::Int(i)) = v else {
+			panic!("Expected Int, got {:?}", v);
+		};
+		*i
 	}
 
 	// -------------------------------------------------------------------------
@@ -354,5 +504,36 @@ mod tests {
 		acc.update(Value::Bool(true)).unwrap();
 		let result = acc.finalize().unwrap();
 		assert_eq!(as_int(&result), 2);
+	}
+
+	// -------------------------------------------------------------------------
+	// CountPresent tests
+	// -------------------------------------------------------------------------
+
+	#[test]
+	fn count_present_skips_null_and_none_only() {
+		let mut acc = CountPresent.create_accumulator();
+		for value in [
+			Value::Null,
+			Value::None,
+			Value::Bool(false),
+			Value::Number(Number::Int(0)),
+			Value::String(Strand::new_static("")),
+			Value::Bool(true),
+		] {
+			acc.update(value).unwrap();
+		}
+		assert_eq!(as_int(&acc.finalize().unwrap()), 4);
+	}
+
+	#[test]
+	fn count_present_merge() {
+		let mut acc1 = CountPresent.create_accumulator();
+		acc1.update(Value::Number(Number::Int(0))).unwrap();
+		acc1.update(Value::Null).unwrap();
+		let mut acc2 = CountPresent.create_accumulator();
+		acc2.update(Value::Bool(false)).unwrap();
+		acc1.merge(acc2).unwrap();
+		assert_eq!(as_int(&acc1.finalize().unwrap()), 2);
 	}
 }

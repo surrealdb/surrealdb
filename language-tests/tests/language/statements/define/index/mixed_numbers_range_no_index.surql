@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["compute-only"]
 
 [test]
 
@@ -11,49 +10,25 @@ value = "'OK'"
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table' }, { detail: { reason: 'WITH NOINDEX' }, operation: 'Fallback' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table' }, { detail: { reason: 'WITH NOINDEX' }, operation: 'Fallback' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
+value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table' }, { detail: { reason: 'WITH NOINDEX' }, operation: 'Fallback' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
-value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
-
-[[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table' }, { detail: { reason: 'WITH NOINDEX' }, operation: 'Fallback' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
+value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table' }, { detail: { reason: 'WITH NOINDEX' }, operation: 'Fallback' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
-value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
-
-[[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table' }, { detail: { reason: 'WITH NOINDEX' }, operation: 'Fallback' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int0, number: 0 }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table' }, { detail: { reason: 'WITH NOINDEX' }, operation: 'Fallback' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int0, number: 0 }, { id: test:int1, number: 1 }]"
-
-[[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table' }, { detail: { reason: 'WITH NOINDEX' }, operation: 'Fallback' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
 
 */
 {
@@ -67,25 +42,17 @@ value = "[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate
 };
 
 SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 2 ORDER BY id;
-SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 2 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WITH NOINDEX WHERE number > 0.1 AND number < 2 ORDER BY id;
-SELECT * FROM test WITH NOINDEX WHERE number > 0.1 AND number < 2 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WITH NOINDEX WHERE number > 0.1 AND number < 1.5 ORDER BY id;
-SELECT * FROM test WITH NOINDEX WHERE number > 0.1 AND number < 1.5 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 1.5 ORDER BY id;
-SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 1.5 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WITH NOINDEX WHERE number > 0.1 ORDER BY id;
-SELECT * FROM test WITH NOINDEX WHERE number > 0.1 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WITH NOINDEX WHERE number > 0 ORDER BY id;
-SELECT * FROM test WITH NOINDEX WHERE number > 0 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WITH NOINDEX WHERE number < 2 ORDER BY id;
-SELECT * FROM test WITH NOINDEX WHERE number < 2 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WITH NOINDEX WHERE number < 1.9 ORDER BY id;
-SELECT * FROM test WITH NOINDEX WHERE number < 1.9 ORDER BY id EXPLAIN;

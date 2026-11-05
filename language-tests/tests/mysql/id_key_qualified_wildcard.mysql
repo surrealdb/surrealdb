@@ -1,0 +1,24 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_id_key.surql"]
+
+[test]
+reason = "A t.* over a base table yields the key of the record id as its id, as * does, so a derived table over it holds keys"
+
+[[test.results]]
+value = "[{ age: 42, id: 1, name: 'Tobie' }]"
+
+[[test.results]]
+value = "[{ id: 2, name: 'Jaime' }]"
+
+[[test.results]]
+value = "[{ name: 'Tobie' }, { name: 'Zed' }]"
+*/
+
+SELECT p.* FROM person p WHERE p.id = 1;
+
+SELECT d.id, d.name FROM (SELECT p.* FROM person p) d WHERE d.id = 2;
+
+SELECT d.name FROM (SELECT p.* FROM person p) d JOIN profile f ON d.id = f.id ORDER BY d.name;

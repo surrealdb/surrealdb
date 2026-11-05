@@ -6,24 +6,33 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use rand::Rng;
-use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
-use surrealdb_core::buc::BucketStoreProvider;
+use surrealdb_catalog::providers::RootProvider;
+use surrealdb_cnf::ConfigMap;
 use surrealdb_core::channel::Receiver;
-use surrealdb_core::cnf::ConfigMap;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
-use surrealdb_core::observe::ExecutionObserver;
+use surrealdb_core::options::EngineOptions;
+use surrealdb_datastore::TransactionType;
+use surrealdb_observe::ExecutionObserver;
+use surrealdb_rpc::capabilities::{
+	ArbitraryQueryTarget, Capabilities, EvalQueryTarget, ExperimentalTarget, FuncTarget,
+	McpToolTarget, MethodTarget, NetTarget, RouteTarget, Targets,
+};
 use surrealdb_types::Notification;
 use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 
 use crate::cli::Config;
-use crate::core::dbs::capabilities::{
-	ArbitraryQueryTarget, Capabilities, EvalQueryTarget, ExperimentalTarget, FuncTarget,
-	MethodTarget, NetTarget, RouteTarget, Targets,
-};
-use crate::core::dbs::{NewPlannerStrategy, Session};
+use crate::core::dbs::Session;
 
 const TARGET: &str = "surreal::dbs";
+
+/// How often a startup operation that is still retrying reports that it is
+/// still going.
+///
+/// The cadence is on the log, not on the retries: attempts keep to their own
+/// back-off, and one failure in every interval is reported at `info` so the
+/// wait is visible without `debug` logging turned on.
+const STARTUP_RETRY_LOG_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
@@ -64,17 +73,21 @@ pub struct StartCommandDbsOptions {
 	// normalized, single-line SQL rendering. You can control which `$param`
 	// values appear in the log with the following lists:
 	// - `slow_log_param_deny` takes precedence and excludes matches.
-	// - If `slow_log_param_allow` is non-empty, only listed parameter names are included;
-	//   otherwise all parameters are allowed by default (subject to deny).
+	// - Only parameter names listed in `slow_log_param_allow` are included; when it is empty, no
+	//   parameter value is logged.
 	#[arg(help = "The minimum execution time in milliseconds to trigger slow query logging")]
 	#[arg(env = "SURREAL_SLOW_QUERY_LOG_THRESHOLD", long = "slow-log-threshold")]
 	#[arg(value_parser = super::cli::validator::duration)]
 	slow_log_threshold: Option<Duration>,
-	#[arg(help = "A comma-separated list of parameter names to include in slow query logs")]
+	#[arg(
+		help = "A comma-separated list of parameter names to include in the params of slow query logs. No parameter value is logged unless its name is listed here"
+	)]
 	#[arg(env = "SURREAL_SLOW_QUERY_LOG_PARAM_ALLOW", long = "slow-log-param-allow")]
 	#[arg(value_delimiter = ',', num_args = 1..)]
 	slow_log_param_allow: Vec<String>,
-	#[arg(help = "A comma-separated list of parameter names to omit from slow query logs")]
+	#[arg(
+		help = "A comma-separated list of parameter names to leave out of the params of slow query logs, even if they are also allowed"
+	)]
 	#[arg(env = "SURREAL_SLOW_QUERY_LOG_PARAM_DENY", long = "slow-log-param-deny")]
 	#[arg(value_delimiter = ',', num_args = 1..)]
 	slow_log_param_deny: Vec<String>,
@@ -88,7 +101,7 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_NO_DEFAULTS", long = "no-defaults", conflicts_with_all = ["default_namespace", "default_database"])]
 	#[arg(default_value_t = false)]
 	no_defaults: bool,
-	#[arg(help = "Load Surrealism modules lazily on first use instead of eagerly at startup")]
+	#[arg(help = "Load Surrealism extensions lazily on first use instead of eagerly at startup")]
 	#[arg(env = "SURREAL_LAZY_SURREALISM", long = "lazy-surrealism")]
 	#[arg(default_value_t = false)]
 	lazy_surrealism: bool,
@@ -168,10 +181,13 @@ Denied for everyone by default (even under --allow-all); must be explicitly enab
 		help = "Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow",
 		long_help = r#"Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow
 Specifically denied network targets prevail over any other allowed outbound network connections.
-Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
+Targets must be in the form of <host>[:<port>], *.<domain>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
  - 'surrealdb.com:80', '127.0.0.1:80' or 'fd00::1:80' -> Match outbound connections to these hosts on port 80
+ - '*.surrealdb.com' -> Match outbound connections to any subdomain of surrealdb.com (such as 'api.surrealdb.com' or 'a.b.surrealdb.com', but not 'surrealdb.com' itself) on any port
+ - '*.surrealdb.com:443' -> Match outbound connections to any subdomain of surrealdb.com on port 443
  - '10.0.0.0/8' or 'fd00::/8' -> Match outbound connections to any host in these networks
+A wildcard is only allowed as the whole leftmost label and must be followed by a domain of at least two labels; it never matches an IP address.
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_NET", long)]
@@ -202,6 +218,17 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(default_value_os = "")] // Allow all HTTP routes by default
 	#[arg(value_parser = super::cli::validator::route_targets)]
 	allow_http: Option<Targets<RouteTarget>>,
+
+	#[arg(
+		help = "Allow all MCP tools to be called except for tools that are specifically denied. Alternatively, you can provide a comma-separated list of MCP tool names to allow."
+	)]
+	#[arg(env = "SURREAL_CAPS_ALLOW_MCP", long)]
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(default_value_os = "")] // Allow all MCP tools by default
+	#[arg(value_parser = super::cli::validator::mcp_tool_targets)]
+	allow_mcp: Option<Targets<McpToolTarget>>,
 
 	//
 	// Deny
@@ -274,10 +301,13 @@ User groups must be one of "guest", "record" or "system".
 		help = "Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny",
 		long_help = r#"Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny.
 Specifically allowed network targets prevail over a general denial of outbound network connections.
-Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
+Targets must be in the form of <host>[:<port>], *.<domain>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
  - 'surrealdb.com:80', '127.0.0.1:80' or 'fd00::1:80' -> Match outbound connections to these hosts on port 80
+ - '*.surrealdb.com' -> Match outbound connections to any subdomain of surrealdb.com (such as 'api.surrealdb.com' or 'a.b.surrealdb.com', but not 'surrealdb.com' itself) on any port
+ - '*.surrealdb.com:443' -> Match outbound connections to any subdomain of surrealdb.com on port 443
  - '10.0.0.0/8' or 'fd00::/8' -> Match outbound connections to any host in these networks
+A wildcard is only allowed as the whole leftmost label and must be followed by a domain of at least two labels; it never matches an IP address.
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_DENY_NET", long)]
@@ -308,11 +338,21 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	deny_http: Option<Targets<RouteTarget>>,
 
 	#[arg(
-		help = "Strategy for the streaming query planner: 'best-effort' (default), 'compute-only', or 'all-read-only'"
+		help = "Deny all MCP tools from being called except for tools that are specifically allowed. Alternatively, you can provide a comma-separated list of MCP tool names to deny."
 	)]
-	#[arg(env = "SURREAL_PLANNER_STRATEGY", long = "planner-strategy")]
-	#[arg(default_value = "best-effort")]
-	planner_strategy: NewPlannerStrategy,
+	#[arg(env = "SURREAL_CAPS_DENY_MCP", long)]
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::mcp_tool_targets)]
+	deny_mcp: Option<Targets<McpToolTarget>>,
+
+	// Accepted so that an existing deployment keeps starting, and ignored: the
+	// engine has a single execution path. Hidden from `--help`; `init` logs a
+	// deprecation warning when it is set.
+	#[arg(env = "SURREAL_PLANNER_STRATEGY", long = "planner-strategy", hide = true)]
+	#[arg(value_parser = super::cli::validator::retired_planner_strategy)]
+	planner_strategy: Option<String>,
 }
 
 impl DbsCapabilities {
@@ -582,10 +622,60 @@ impl DbsCapabilities {
 		self.deny_all
 	}
 
+	fn get_allow_all(&self) -> bool {
+		self.allow_all && !self.deny_all
+	}
+
 	fn get_deny_rpc(&self) -> Targets<MethodTarget> {
 		// Allowed RPC methods already consider a global deny and a general deny for RPC
 		// On top of what is explicitly allowed, we deny what is specifically denied
 		if let Some(targets) = &self.deny_rpc
+			&& let Targets::Some(_) = targets
+		{
+			return targets.clone();
+		}
+		Targets::None
+	}
+
+	fn get_allow_mcp(&self) -> Targets<McpToolTarget> {
+		// If there was a global deny, we allow if there is a general allow or some
+		// specific allows for MCP
+		if self.deny_all {
+			if let Some(targets) = &self.allow_mcp {
+				match targets {
+					Targets::None => {}
+					Targets::Some(_) => return targets.clone(),
+					Targets::All => return Targets::All,
+				}
+			}
+			return Targets::None;
+		}
+
+		// If there was a general deny for MCP, we allow if there are specific allows
+		// for MCP tools
+		if let Some(Targets::All) = self.deny_mcp {
+			if let Some(targets) = self.allow_mcp.as_ref()
+				&& let Targets::Some(_) = targets
+			{
+				return targets.clone();
+			}
+			return Targets::None;
+		}
+
+		// If there are no high level denies but there is a global allow, we allow MCP
+		if self.allow_all {
+			return Targets::All;
+		}
+
+		// If there are no high level denies, we allow the provided MCP tools
+		// If nothing was provided, we allow MCP by default (Targets::All)
+		self.allow_mcp.clone().unwrap_or(Targets::All)
+	}
+
+	fn get_deny_mcp(&self) -> Targets<McpToolTarget> {
+		// Allowed MCP tools already consider a global deny and a general deny for MCP
+		// On top of what is explicitly allowed, we deny what is specifically denied
+		if let Some(targets) = &self.deny_mcp
 			&& let Targets::Some(_) = targets
 		{
 			return targets.clone();
@@ -637,7 +727,7 @@ impl DbsCapabilities {
 	}
 
 	pub fn into_cli_capabilities(self) -> Capabilities {
-		merge_capabilities(SdkCapabilities::all().into(), &self)
+		merge_capabilities(Capabilities::all(), &self)
 	}
 }
 
@@ -651,6 +741,8 @@ fn merge_capabilities(initial: Capabilities, caps: &DbsCapabilities) -> Capabili
 		.without_network_targets(caps.get_deny_net())
 		.with_rpc_methods(caps.get_allow_rpc())
 		.without_rpc_methods(caps.get_deny_rpc())
+		.with_mcp_tools(caps.get_allow_mcp())
+		.without_mcp_tools(caps.get_deny_mcp())
 		.with_http_routes(caps.get_allow_http())
 		.without_http_routes(caps.get_deny_http())
 		.with_experimental(caps.get_allow_experimental())
@@ -659,13 +751,34 @@ fn merge_capabilities(initial: Capabilities, caps: &DbsCapabilities) -> Capabili
 		.without_arbitrary_query(caps.get_deny_arbitrary_query())
 		.with_eval_query(caps.get_allow_eval_query())
 		.without_eval_query(caps.get_deny_eval_query())
-		.with_planner_strategy(caps.planner_strategy)
 }
 
 impl From<DbsCapabilities> for Capabilities {
 	fn from(caps: DbsCapabilities) -> Self {
 		merge_capabilities(Default::default(), &caps)
 	}
+}
+
+/// Returns startup warning messages for individual capabilities that
+/// materially widen the server's attack surface.
+fn permissive_capability_warnings(capabilities: &Capabilities) -> Vec<&'static str> {
+	let mut warnings = Vec::new();
+	if capabilities.allows_guest_access() {
+		warnings.push(
+			"⚠️ Guest (anonymous) access is enabled: unauthenticated callers may reach any resource whose permissions allow guests. This is not recommended for production.",
+		);
+	}
+	if capabilities.allows_scripting() {
+		warnings.push(
+			"⚠️ Scripting is enabled: any principal permitted to run queries (including record users, and guests if guest access is enabled) can execute embedded JavaScript. Only enable this if you trust every such principal.",
+		);
+	}
+	if capabilities.allows_all_network_targets() {
+		warnings.push(
+			"⚠️ Outbound network access is unrestricted (--allow-net): queries can make requests to any network target, including internal and cloud-metadata addresses. Consider restricting to an explicit allowlist or configuring --deny-net.",
+		);
+	}
+	warnings
 }
 
 /// Retry an async operation until it succeeds or the configured timeout is reached.
@@ -710,6 +823,7 @@ where
 {
 	let start = Instant::now();
 	let mut attempt = 0;
+	let mut last_reported = start;
 
 	loop {
 		attempt += 1;
@@ -746,13 +860,29 @@ where
 					));
 				}
 
-				debug!(
-					target: TARGET,
-					operation = operation_name,
-					attempt = attempt,
-					error = %e,
-					"Operation failed, retrying..."
-				);
+				// The first failure always reports, and one more per interval
+				// after that, so an operator watching a start that is waiting on
+				// storage sees it without the log scaling with the retry rate.
+				if attempt == 1 || last_reported.elapsed() >= STARTUP_RETRY_LOG_INTERVAL {
+					last_reported = Instant::now();
+					info!(
+						target: TARGET,
+						operation = operation_name,
+						attempt = attempt,
+						elapsed = ?elapsed,
+						budget = ?timeout_duration,
+						error = %e,
+						"Operation failed, still retrying within the startup budget"
+					);
+				} else {
+					debug!(
+						target: TARGET,
+						operation = operation_name,
+						attempt = attempt,
+						error = %e,
+						"Operation failed, retrying..."
+					);
+				}
 
 				// Exponential backoff with jitter: 100ms, 200ms, 400ms, 800ms, 1600ms, capped at 5s
 				// Jitter adds randomness (0.5 to 1.5x) to prevent thundering herd
@@ -774,9 +904,41 @@ where
 	}
 }
 
+/// Whether a startup failure is a permanent property of the data on disk.
+///
+/// Each of these tells an operator to run a different build or restore an
+/// export; none can be retried into success, and retrying only delays the
+/// message reaching them. Matched on the rendered text because the errors cross
+/// the core boundary as `anyhow::Error`.
+///
+/// `MigrationTimedOut` is deliberately absent: it means another live node is
+/// still applying migrations, which is the one startup condition that a retry
+/// can resolve on its own.
+fn is_permanent_storage_error(e: &anyhow::Error) -> bool {
+	let message = e.to_string();
+	// `OutdatedStorageVersion`, `MigratedBeyondStorageVersion`,
+	// `UpgradeFrom3xNotEnabled` and `InvalidStorageVersion` respectively. The
+	// last reaches startup because the version bootstrap declines to retry a
+	// marker it cannot decode; retrying it here would spend the budget and then
+	// report a timeout, which names none of what an operator has to act on.
+	message.contains("out-of-date")
+		|| message.contains("cannot be read by this one")
+		|| message.contains("is refused by default")
+		|| message.contains("invalid storage version")
+}
+
+/// Whether a startup import failed because the file itself is unusable.
+///
+/// A file that does not parse reads the same on every attempt, so retrying it
+/// would hold the start for the whole retry budget and then report a timeout
+/// rather than the parse error the operator has to act on.
+fn is_permanent_import_error(e: &anyhow::Error) -> bool {
+	e.downcast_ref::<surrealdb_types::Error>().is_some_and(surrealdb_types::Error::is_validation)
+}
+
 #[instrument(level = "trace", target = "surreal::dbs", skip_all)]
 // The return tuple is the established shape of this internal startup
-// entrypoint; the pending import is just one more element on it.
+// entrypoint; the deferred startup work is just one more element on it.
 #[allow(clippy::type_complexity)]
 /// Initialise the database server
 ///
@@ -789,8 +951,8 @@ where
 ///
 /// # Generic parameters
 /// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
-	composer: C,
+pub async fn init<C: TransactionBuilderFactory>(
+	composer: &C,
 	opt: &Config,
 	canceller: CancellationToken,
 	observer: Arc<dyn ExecutionObserver>,
@@ -812,11 +974,17 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		#[cfg_attr(not(feature = "surrealism"), allow(unused_variables))]
 		lazy_surrealism,
 	}: StartCommandDbsOptions,
-) -> Result<(Datastore, Receiver<Notification>, C::RouterState, PendingStartup)> {
+) -> Result<(Arc<Datastore>, Receiver<Notification>, C::RouterState, PendingStartup)> {
 	// Warn about the strict mode flag being unused.
 	if let Some(true) = strict_mode {
 		warn!(
 			"Strict mode is no longer defined on the server level. Use `DEFINE DATABASE <db> STRICT` instead. Ignoring strict mode flag."
+		);
+	}
+	// Warn about the retired planner strategy option being unused.
+	if capabilities.planner_strategy.is_some() {
+		warn!(
+			"The planner strategy option (`--planner-strategy` / `SURREAL_PLANNER_STRATEGY`) is deprecated and has no effect. Remove it from your configuration."
 		);
 	}
 	// Log specified query timeout
@@ -840,6 +1008,12 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 			"You are denying all capabilities by default. Although this is recommended, beware that any new capabilities will also be denied."
 		);
 	}
+	// Warn about the impact of allowing all capabilities
+	if capabilities.get_allow_all() {
+		warn!(
+			"⚠️ You are allowing all capabilities by default (--allow-all). This is not recommended for production use."
+		);
+	}
 	if let Some(v) = slow_log_threshold {
 		debug!("Slow log threshold is {v:?}");
 	}
@@ -850,28 +1024,55 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		debug!("Slow log param deny is {:?}", slow_log_param_deny);
 	}
 	// Convert the capabilities
-	let capabilities = capabilities.into();
-	// Log the specified server capabilities
-	debug!("Server capabilities: {capabilities}");
+	let capabilities: Capabilities = capabilities.into();
+	// Log the effective server capability posture at INFO so it is visible in the
+	// default log output, giving operators a durable record of the posture the
+	// server actually booted with.
+	info!("Server capabilities: {capabilities}");
+	// Explicitly warn about individually enabled capabilities that materially widen
+	// the attack surface, so a permissive posture is never silent at boot.
+	for warning in permissive_capability_warnings(&capabilities) {
+		warn!("{warning}");
+	}
 
-	let (send, recv) =
-		surrealdb_core::channel::bounded(surrealdb_core::cnf::NOTIFICATIONS_CHANNEL_SIZE);
+	let (send, recv) = surrealdb_core::channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
 
 	let config = ConfigMap::from_env();
+	// The binary runs Surrealism extensions on wasmtime, whichever composer
+	// builds the datastore.
+	#[cfg(feature = "surrealism")]
+	let extension_runner =
+		std::sync::Arc::new(surrealdb_core::extension::SurrealismRunner::from_config_map(&config));
 	// Parse and setup the desired kv datastore
 	let builder = Datastore::builder()
+		// The cadences the maintenance tasks run at, once this function starts
+		// them below.
+		.with_engine_options(opt.engine)
+		// Started by hand from `initialise_datastore`, after `check_version`,
+		// rather than at construction. Every one of these tasks writes, and a
+		// write that lands before the version key does makes a datastore this
+		// process just created look like one written before that key existed —
+		// which `check_version` is obliged to refuse, permanently, on this and
+		// every later start.
+		.without_maintenance_tasks()
+		// Nothing here may open a transaction (see below): the feature level and
+		// the ledger are read by `check_version` in `initialise_datastore`.
+		.without_startup_transactions()
 		.with_config(config)
 		// Mirror the tokio runtime worker count the server built itself
 		// with (see `cnf::RUNTIME_WORKER_THREADS`) into the datastore
-		// config so the RocksDB engine sizes its inline-blocking permit
-		// cap from the actual executor width.
+		// config so storage engines see the actual executor width.
 		.with_runtime_worker_threads(*crate::cnf::RUNTIME_WORKER_THREADS)
+		// Likewise its blocking-thread cap (see
+		// `cnf::RUNTIME_MAX_BLOCKING_THREADS`), which bounds the commits the
+		// engine runs on the runtime's blocking pool.
+		.with_runtime_max_blocking_threads(*crate::cnf::RUNTIME_MAX_BLOCKING_THREADS)
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth(!unauthenticated)
 		.with_capabilities(capabilities)
 		.with_notify(send)
-		.with_shutdown_cancel(canceller)
+		.with_shutdown_cancel(canceller.clone())
 		.with_observer(observer);
 
 	#[cfg(storage)]
@@ -884,114 +1085,312 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	};
 
 	#[cfg(feature = "surrealism")]
-	let builder = builder.with_lazy_surrealism(lazy_surrealism);
+	let builder =
+		builder.with_lazy_extensions(lazy_surrealism).with_extension_runner(extension_runner);
 
 	let (dbs, router_state) =
 		builder.build_with_factory_path_and_router_state::<C>(&opt.path, composer).await?;
-	// Ensure the storage version is up to date to prevent corruption.
-	// OutdatedStorageVersion is a permanent condition (the data on disk is from
-	// an older version), so retrying it would waste time and delay pod restarts
-	// in Kubernetes environments where operators need fast failure feedback.
-	let (_, is_new) = retry_with_timeout_check(
-		"check_version",
-		startup_operation_timeout,
-		|| async { dbs.check_version().await },
-		|e| e.to_string().contains("out-of-date"),
-	)
-	.await?;
-	// Create default namespace and database if not disabled
-	if is_new && !no_defaults {
-		let default_namespace = default_namespace.unwrap_or_else(|| "main".to_string());
-		let default_database = default_database.unwrap_or_else(|| "main".to_string());
-		// Initialise defaults
-		retry_with_timeout("initialise_defaults", startup_operation_timeout, || async {
-			dbs.initialise_defaults(&default_namespace, &default_database).await
-		})
-		.await?;
-	}
-	// Defer the startup import so the caller can bind the HTTP listener first and
-	// run it concurrently (see [`finish_startup`]). A large or slow import no
-	// longer blocks the listener, so a pathological import cannot starve the
-	// liveness probe at startup.
+	// Building the datastore is all this function does: every startup step that
+	// opens a transaction is handed back for the caller to run through
+	// [`initialise_datastore`] and [`finish_startup`] once the HTTP listener is
+	// bound.
 	//
-	// Credentials are created synchronously here when there is *no* import, so a
-	// plain server is fully ready the instant it starts serving (no readiness
-	// window for clients that don't poll `/ready`). When an import *is* present,
-	// credential creation is deferred to run after it, preserving the historical
-	// ordering: an import that supplies root users still suppresses creation of
-	// the CLI bootstrap user.
-	let credentials = opt.user.clone().zip(opt.pass.clone());
-	let deferred_credentials = match &import_file {
-		Some(_) => credentials,
-		None => {
-			if let Some((user, pass)) = &credentials {
-				info!(target: TARGET, user = %user, "Initialising credentials");
-				retry_with_timeout("initialise_credentials", startup_operation_timeout, || async {
-					dbs.initialise_credentials(user, pass).await
-				})
-				.await?;
-			}
-			None
-		}
-	};
+	// This is what lets a composer hand back a datastore that cannot serve a
+	// transaction yet. Nothing here opens one, so a composer whose engine has to
+	// join a cluster no longer has to finish joining before it returns: it can
+	// hand back the builder and let the join finish behind the readiness gate,
+	// which is the only way `/status` and `/ready` can answer during a join.
+	// Until such a composer does so, the wait simply moves — this function still
+	// cannot return before the builder it is given exists.
+	//
+	// It also keeps the steps off the bind on every other engine, where they are
+	// fast but not free, and where storage that is slow to answer would
+	// otherwise hold the listener for the whole retry budget.
 	let pending_startup = PendingStartup {
 		import_file,
-		credentials: deferred_credentials,
+		credentials: opt.user.clone().zip(opt.pass.clone()),
+		default_namespace,
+		default_database,
+		no_defaults,
+		engine: opt.engine,
+		canceller,
 		timeout: startup_operation_timeout,
 	};
-	// Bootstrap the datastore
-	retry_with_timeout("Insert node", startup_operation_timeout, || async {
-		dbs.insert_node().await
-	})
-	.await?;
-	retry_with_timeout("Expire nodes", startup_operation_timeout, || async {
-		dbs.expire_nodes().await
-	})
-	.await?;
-	retry_with_timeout("Remove nodes", startup_operation_timeout, || async {
-		dbs.remove_nodes().await
-	})
-	.await?;
 	// All ok
 	Ok((dbs, recv, router_state, pending_startup))
 }
 
+/// Starts the first peer-expiry and archived-node cleanup pass in the
+/// background.
+///
+/// Ordering is the whole point of running this from here rather than leaving it
+/// to the maintenance scheduler's own cadence:
+///
+/// - It runs after `check_version`, so a pass can never commit catalog mutations to a datastore
+///   whose version validation goes on to refuse startup. The scheduler is held back for the same
+///   reason (see the `without_maintenance_tasks` builder call in `init`), but this pass has to be
+///   ordered explicitly because it does not wait for the first tick.
+/// - It runs after this node's own `insert_node`, so the id this process is about to serve under is
+///   already active when the pass takes its snapshot. A node id that is stable across restarts
+///   would otherwise be visible to an earlier pass as its previous incarnation's stale or archived
+///   row, and both jobs decide from a snapshot taken before their write transaction.
+///
+/// It is spawned rather than awaited because it must not gate readiness:
+/// `remove_nodes` opens one write transaction per archived node, so its cost
+/// scales with however much dead-member residue a restarting cluster left
+/// behind, with no bound.
+///
+/// Expiry runs before cleanup, so a peer that has just timed out is archived in
+/// time for the same pass to reap it. Either step is skipped when its interval
+/// is zero, which is how both are disabled — the same contract the scheduler's
+/// own registration applies. Failures are logged and do not stop the other
+/// step: the periodic `NodeExpire` / `NodeCleanup` jobs run on their normal
+/// cadence from here on and pick up whatever this pass left.
+fn spawn_first_node_maintenance_pass(
+	dbs: &Arc<Datastore>,
+	engine: &EngineOptions,
+	canceller: CancellationToken,
+) {
+	let expire = !engine.node_membership_check_interval.is_zero();
+	let cleanup = !engine.node_membership_cleanup_interval.is_zero();
+	if !expire && !cleanup {
+		return;
+	}
+	/// Reports a failed step, unless the server is shutting down: the storage
+	/// engine refuses commits from that point on, so a failure there describes
+	/// the shutdown rather than a fault.
+	fn report(canceller: &CancellationToken, step: &str, res: Result<()>) {
+		if let Err(err) = res
+			&& !canceller.is_cancelled()
+		{
+			warn!(target: TARGET, "Error {step}: {err}");
+		}
+	}
+
+	let dbs = Arc::clone(dbs);
+	tokio::spawn(async move {
+		if expire && !canceller.is_cancelled() {
+			report(&canceller, "expiring inactive nodes", dbs.expire_nodes().await);
+		}
+		if cleanup && !canceller.is_cancelled() {
+			report(&canceller, "removing archived nodes", dbs.remove_nodes().await);
+		}
+	});
+}
+
 /// Startup work deferred out of [`init`] so the caller can bind the HTTP
-/// listener first and run it concurrently (via [`finish_startup`]). While this
-/// is running the instance is not yet ready to serve queries (see the readiness
-/// gate in `ntw`).
+/// listener first and run it concurrently (via [`initialise_datastore`], then
+/// [`finish_startup`]). Until both have completed the instance is not ready to
+/// serve queries (see the readiness gate in `ntw`).
 pub(crate) struct PendingStartup {
 	/// SurrealQL file to import on startup, if one was provided.
 	import_file: Option<PathBuf>,
 	/// Root credentials (user, pass) to create if no root user already exists.
 	credentials: Option<(String, String)>,
+	/// Namespace to create on a datastore that turns out to be new; `main` when
+	/// unset.
+	default_namespace: Option<String>,
+	/// Database to create on a datastore that turns out to be new; `main` when
+	/// unset.
+	default_database: Option<String>,
+	/// Whether to skip creating the default namespace and database entirely.
+	no_defaults: bool,
+	/// Cadences the maintenance schedule and its first node pass run at.
+	engine: EngineOptions,
+	/// Cancelled when the server shuts down, so the first node-maintenance pass
+	/// stops rather than writing into a closing storage engine.
+	canceller: CancellationToken,
 	/// Per-operation retry budget (from `SURREAL_STARTUP_OPERATION_TIMEOUT`).
 	timeout: Duration,
 }
 
 impl PendingStartup {
-	/// Whether there is any deferred work to run. When `false`, the caller can
-	/// mark the instance ready before binding (no startup window).
-	pub(crate) fn has_work(&self) -> bool {
-		self.import_file.is_some() || self.credentials.is_some()
+	/// The session the startup import runs under.
+	///
+	/// It is the owner, positioned in the datastore's default namespace and
+	/// database unless those are disabled, so that a file's statements apply to
+	/// the database the server serves by default without every file having to
+	/// open with `USE`. The default is the one the datastore records
+	/// (`DEFINE CONFIG DEFAULT`), which is what an empty `USE` resolves to
+	/// everywhere else; the configured names are only the fallback for a
+	/// datastore that records none. A `USE` in the file moves the session as it
+	/// would anywhere else. Without a default there is no database to name, and
+	/// a statement that needs one is refused until the file selects it.
+	async fn import_session(&self, ds: &Datastore) -> Result<Session> {
+		let session = Session::owner();
+		if self.no_defaults {
+			return Ok(session);
+		}
+		let txn = ds.transaction(TransactionType::Read).await?;
+		let recorded = txn.get_default_config().await;
+		let _ = txn.cancel().await;
+		let recorded = recorded?;
+		let namespace = recorded
+			.as_ref()
+			.and_then(|c| c.namespace.as_deref())
+			.or(self.default_namespace.as_deref())
+			.unwrap_or("main");
+		let database = recorded
+			.as_ref()
+			.and_then(|c| c.database.as_deref())
+			.or(self.default_database.as_deref())
+			.unwrap_or("main");
+		Ok(session.with_ns(namespace).with_db(database))
+	}
+
+	/// Whether a startup import is part of the deferred work.
+	///
+	/// The caller uses this to decide whether the HTTP bind waits for that work:
+	/// an import is unbounded, so waiting for one would starve the probes for as
+	/// long as it runs, which is what deferring it avoids.
+	pub(crate) fn has_import(&self) -> bool {
+		self.import_file.is_some()
 	}
 }
 
-/// Run the deferred startup work: execute the import file (if any), then
-/// initialise the root credentials (if provided).
+/// Bring the datastore built by [`init`] into the state a server can serve
+/// from: stamp the storage version, create the configured defaults if the
+/// datastore is new, register this node's cluster membership row, and start the
+/// maintenance schedule.
+///
+/// None of it can be skipped, so a failure here is fatal to the instance rather
+/// than something it can serve without — the caller is expected to end the
+/// process rather than leave a server that can never become ready.
+///
+/// The order is load-bearing:
+///
+/// - The wait for the backend to become serve-ready comes before all of it, and is not part of the
+///   retry budget the steps share.
+/// - `before_check_version` next, outside the retry budget the steps below share. Community's
+///   implementation is empty. A composer that fills this datastore from another keyspace does so
+///   here, so `check_version` finds the copied keys and the 3.x data migrations run on them. The
+///   fill writes the version key last, so a fill cut short is refused by `check_version` rather
+///   than started from (see `surrealdb_core::kvs::copy`). The hook must not call `get_version` or
+///   `check_version`.
+/// - `check_version` next, and the maintenance schedule only after it. Every maintenance task
+///   writes, and a write that lands before the version key does makes a datastore this process just
+///   created look like one written before that key existed — which `check_version` is obliged to
+///   refuse, permanently, on this and every later start.
+/// - The storage-state conditions `check_version` reports are permanent — the data on disk is from
+///   another version — so they are not retried: retrying them would waste the budget and delay the
+///   pod restart that operators need the failure to trigger.
+/// - `insert_node` before the first node-maintenance pass, so the id this process is about to serve
+///   under is already active when that pass takes its snapshot (see
+///   [`spawn_first_node_maintenance_pass`]).
+pub(crate) async fn initialise_datastore<C: TransactionBuilderFactory>(
+	composer: &C,
+	dbs: &Arc<Datastore>,
+	pending: &PendingStartup,
+) -> Result<()> {
+	// A backend that has to join a cluster before it can answer reports that
+	// wait here. It is unbounded on purpose: every step below opens a
+	// transaction under the shared `pending.timeout` budget, and a join that
+	// legitimately takes longer than that budget would otherwise exhaust it and
+	// fail a start that was only ever going to be slow. The readiness gate
+	// covers the window, and the caller cancels this task at shutdown.
+	dbs.wait_until_serve_ready().await?;
+	composer.before_check_version(dbs).await?;
+	// Ensure the storage version is up to date to prevent corruption.
+	let (_, is_new) = retry_with_timeout_check(
+		"check_version",
+		pending.timeout,
+		|| async { dbs.check_version().await },
+		is_permanent_storage_error,
+	)
+	.await?;
+	// Create default namespace and database if not disabled
+	if is_new && !pending.no_defaults {
+		let ns = pending.default_namespace.as_deref().unwrap_or("main");
+		let db = pending.default_database.as_deref().unwrap_or("main");
+		// Initialise defaults
+		retry_with_timeout("initialise_defaults", pending.timeout, || async {
+			dbs.initialise_defaults(ns, db).await
+		})
+		.await?;
+	}
+	// Register this node's cluster membership row. Until it exists this node has
+	// no heartbeat, which `/ready` reports as still starting.
+	retry_with_timeout("Insert node", pending.timeout, || async { dbs.insert_node().await })
+		.await?;
+	// The version is stamped and this node is registered, so the maintenance
+	// tasks may start writing. A read-only datastore starts only the membership
+	// refresh and the session purge, and its first pass would only be refused:
+	// expiry and cleanup write state it does not accept.
+	dbs.start_maintenance_tasks_checked().await?;
+	if !dbs.is_read_only() {
+		spawn_first_node_maintenance_pass(dbs, &pending.engine, pending.canceller.clone());
+	}
+	Ok(())
+}
+
+/// Run the deferred startup content: execute the import file (if any), then
+/// initialise the root credentials (if provided). Runs after
+/// [`initialise_datastore`], which is what makes the datastore writable.
 ///
 /// The import runs *before* credential initialisation so that an import which
 /// supplies root users suppresses creation of the CLI bootstrap user, matching
 /// the historical (pre-early-bind) ordering.
+///
+/// A datastore that is open read-only refuses both writes, and `retry_with_timeout`
+/// would retry that permanent refusal until its budget ran out and fail the start.
+/// So each step is skipped, with a warning naming it, and the server serves what
+/// the store already holds.
 pub(crate) async fn finish_startup(ds: &Datastore, pending: &PendingStartup) -> Result<()> {
-	// Import the startup file, discarding the per-statement results.
+	if ds.is_read_only() {
+		if let Some(file) = &pending.import_file {
+			warn!(
+				target: TARGET,
+				file = ?file,
+				"The datastore is open read-only, so the startup import was skipped"
+			);
+		}
+		if pending.credentials.is_some() {
+			warn!(
+				target: TARGET,
+				"The datastore is open read-only, so the root credentials were not initialised"
+			);
+		}
+		return Ok(());
+	}
+	// Import the startup file.
+	//
+	// An import is not transactional: each statement commits on its own and
+	// execution carries on past a failure, so the result of the call says only
+	// that the dump parsed. Every statement that did not apply is logged here,
+	// because startup proceeds either way and this is the operator's only
+	// account of what the file actually restored.
+	//
+	// The failures are not returned: `retry_with_timeout` retries on `Err`, and
+	// re-running a dump that has already applied part of itself is worse than
+	// booting with the loss reported.
 	if let Some(file) = &pending.import_file {
 		info!(target: TARGET, file = ?file, "Importing data from file");
 		let sql = fs::read_to_string(file)?;
-		retry_with_timeout("startup", pending.timeout, || async {
-			ds.startup(&sql, &Session::owner()).await
-		})
+		let results = retry_with_timeout_check(
+			"startup",
+			pending.timeout,
+			|| async {
+				let session = pending.import_session(ds).await?;
+				ds.startup(&sql, &session).await
+			},
+			is_permanent_import_error,
+		)
 		.await?;
+		let failed = results.iter().filter(|r| r.result.is_err()).count();
+		if failed > 0 {
+			error!(
+				target: TARGET,
+				file = ?file,
+				failed,
+				total = results.len(),
+				"Startup import did not apply in full; the database is partially restored"
+			);
+			for result in results.iter() {
+				if let Err(err) = &result.result {
+					error!(target: TARGET, error = %err, "Startup import statement failed");
+				}
+			}
+		}
 	}
 	// Create the CLI-provided root user if no root user exists yet.
 	if let Some((user, pass)) = &pending.credentials {
@@ -1013,6 +1412,10 @@ mod tests {
 
 	use clap::Parser;
 	use serial_test::serial;
+	// Named here rather than inside each test because the shared helpers below
+	// carry them in their signatures.
+	#[cfg(feature = "storage-surrealkv")]
+	use surrealdb_datastore::key::schema::{NodeKey, NodeLiveQueryKey};
 	use surrealdb_types::ToSql;
 	use test_log::test;
 	use wiremock::matchers::{method, path};
@@ -1096,7 +1499,7 @@ mod tests {
 		assert_eq!(cli.dbs.startup_operation_timeout, Duration::from_secs(75));
 	}
 
-	#[test(tokio::test(flavor = "multi_thread"))]
+	#[test(tokio::test(start_paused = true))]
 	async fn startup_retry_times_out_attempt_without_retrying() {
 		let attempts = Arc::new(AtomicUsize::new(0));
 
@@ -1115,7 +1518,7 @@ mod tests {
 		assert_eq!(attempts.load(Ordering::SeqCst), 1);
 	}
 
-	#[test(tokio::test(flavor = "multi_thread"))]
+	#[test(tokio::test(start_paused = true))]
 	async fn startup_retry_returns_permanent_errors_immediately() {
 		let attempts = Arc::new(AtomicUsize::new(0));
 
@@ -1136,6 +1539,55 @@ mod tests {
 
 		assert_eq!(err.to_string(), "permanent");
 		assert_eq!(attempts.load(Ordering::SeqCst), 1);
+	}
+
+	/// Every storage-state error the version bootstrap can raise is recognised
+	/// as permanent by the server's own classifier.
+	///
+	/// The classifier matches rendered text, because these cross the core
+	/// boundary as `anyhow::Error` and the type is not nameable here. That makes
+	/// it drift silently when a variant is reworded or a new one starts reaching
+	/// startup, so the fixtures are the real errors rather than copies of their
+	/// wording: a reword that breaks the match breaks this too.
+	#[test]
+	fn every_storage_state_error_is_classified_permanent() {
+		use surrealdb_datastore::DatastoreError;
+
+		for error in [
+			DatastoreError::InvalidStorageVersion,
+			DatastoreError::OutdatedStorageVersion {
+				expected: 3,
+				actual: 1,
+			},
+			DatastoreError::MigratedBeyondStorageVersion {
+				stored: "3.4.0".to_string(),
+				running: "3.3.0".to_string(),
+				migrations: "2".to_string(),
+			},
+			DatastoreError::UpgradeFrom3xNotEnabled {
+				stored: "3.3.0".to_string(),
+				running: "4.0.0".to_string(),
+			},
+		] {
+			let rendered = error.to_string();
+			assert!(
+				is_permanent_storage_error(&anyhow::Error::new(error)),
+				"a permanent storage-state error would be retried: {rendered}"
+			);
+		}
+	}
+
+	/// A migration another node is still applying is the one startup condition a
+	/// retry resolves on its own, so it must stay retryable.
+	#[test]
+	fn a_pending_migration_is_not_classified_permanent() {
+		use surrealdb_datastore::DatastoreError;
+
+		assert!(!is_permanent_storage_error(&anyhow::Error::new(
+			DatastoreError::MigrationTimedOut {
+				migrations: "2".to_string(),
+			}
+		)));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -1287,12 +1739,10 @@ mod tests {
 				true,
 				"1".to_string(),
 			),
-			// 7 - Specific experimental feature enabled
+			// 7 - Buckets need no experimental feature
 			(
 				Datastore::builder()
-					.with_capabilities(
-						Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
-					)
+					.with_capabilities(Capabilities::default())
 					.build_with_path("memory")
 					.await
 					.unwrap(),
@@ -1306,15 +1756,15 @@ mod tests {
 				Datastore::builder()
 					.with_capabilities(
 						Capabilities::default()
-							.without_experimental(ExperimentalTarget::Files.into()),
+							.without_experimental(ExperimentalTarget::Surrealism.into()),
 					)
 					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner().with_ns("test").with_db("test"),
-				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
+				"RETURN ext::nonexistent();".to_string(),
 				false,
-				"expected the experimental files feature to be enabled".to_string(),
+				"Surrealism extensions are not enabled".to_string(),
 			),
 			//
 			// 9 - Some functions are not allowed
@@ -1569,8 +2019,7 @@ mod tests {
 			info!("Test case {idx}: query={query}, succeeds={succeeds}");
 			let res = ds.execute(&query, &sess, None).await;
 
-			if !succeeds && res.is_err() {
-				let res = res.unwrap_err();
+			if !succeeds && let Err(res) = &res {
 				assert!(
 					res.to_string().contains(&contains),
 					"Unexpected error for test case {}: {:?}",
@@ -1614,6 +2063,7 @@ mod tests {
 			allow_net: None,
 			allow_rpc: None,
 			allow_http: None,
+			allow_mcp: None,
 			deny_all: false,
 			#[cfg(feature = "scripting")]
 			deny_scripting: false,
@@ -1625,10 +2075,101 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
-			planner_strategy: NewPlannerStrategy::default(),
+			deny_mcp: None,
+			planner_strategy: None,
 		};
 		assert_eq!(caps.get_allow_experimental(), Targets::All);
 		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
+	}
+
+	#[test]
+	fn test_dbs_capabilities_mcp() {
+		// A baseline with nothing set. Each case overrides only the MCP fields it
+		// exercises, so the resolution precedence is what is under test.
+		let base = || DbsCapabilities {
+			allow_all: false,
+			#[cfg(feature = "scripting")]
+			allow_scripting: false,
+			allow_guests: false,
+			allow_funcs: None,
+			allow_experimental: None,
+			allow_arbitrary_query: None,
+			allow_eval_query: None,
+			allow_net: None,
+			allow_rpc: None,
+			allow_http: None,
+			allow_mcp: None,
+			deny_all: false,
+			#[cfg(feature = "scripting")]
+			deny_scripting: false,
+			deny_guests: false,
+			deny_funcs: None,
+			deny_experimental: None,
+			deny_arbitrary_query: None,
+			deny_eval_query: None,
+			deny_net: None,
+			deny_rpc: None,
+			deny_http: None,
+			deny_mcp: None,
+			planner_strategy: None,
+		};
+		let one = |name: &str| -> Targets<McpToolTarget> {
+			Targets::Some([McpToolTarget::from_str(name).unwrap()].into_iter().collect())
+		};
+
+		// Default: MCP enabled (All), nothing denied.
+		let caps = base();
+		assert_eq!(caps.get_allow_mcp(), Targets::All);
+		assert_eq!(caps.get_deny_mcp(), Targets::None);
+
+		// A specific `--deny-mcp graphql`: allow stays All, deny carries the tool.
+		let caps = DbsCapabilities {
+			deny_mcp: Some(one("graphql")),
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), Targets::All);
+		assert_eq!(caps.get_deny_mcp(), one("graphql"));
+
+		// A general `--deny-mcp` with no value (`Targets::All`): nothing is
+		// allowed, and `get_deny_mcp` reports None because the shut-off is
+		// expressed through the allow side.
+		let caps = DbsCapabilities {
+			deny_mcp: Some(Targets::All),
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), Targets::None);
+		assert_eq!(caps.get_deny_mcp(), Targets::None);
+
+		// A general deny plus a specific allow re-enables only that tool.
+		let caps = DbsCapabilities {
+			deny_mcp: Some(Targets::All),
+			allow_mcp: Some(one("query")),
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), one("query"));
+
+		// A global `--deny-all`: MCP follows, but a specific allow re-enables it.
+		let caps = DbsCapabilities {
+			deny_all: true,
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), Targets::None);
+		let caps = DbsCapabilities {
+			deny_all: true,
+			allow_mcp: Some(one("query")),
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), one("query"));
+
+		// A global `--allow-all`: everything is allowed; a specific `--deny-mcp`
+		// still layers on top via `get_deny_mcp`.
+		let caps = DbsCapabilities {
+			allow_all: true,
+			deny_mcp: Some(one("graphql")),
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), Targets::All);
+		assert_eq!(caps.get_deny_mcp(), one("graphql"));
 	}
 
 	#[test]
@@ -1647,6 +2188,7 @@ mod tests {
 			allow_net: None,
 			allow_rpc: None,
 			allow_http: None,
+			allow_mcp: None,
 			deny_all: false,
 			#[cfg(feature = "scripting")]
 			deny_scripting: false,
@@ -1658,7 +2200,8 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
-			planner_strategy: NewPlannerStrategy::default(),
+			deny_mcp: None,
+			planner_strategy: None,
 		};
 		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
 		assert_eq!(caps.get_allow_eval_query(), Targets::None, "eval is not enabled by allow_all");
@@ -1684,6 +2227,7 @@ mod tests {
 			allow_net: None,
 			allow_rpc: None,
 			allow_http: None,
+			allow_mcp: None,
 			deny_all: false,
 			#[cfg(feature = "scripting")]
 			deny_scripting: false,
@@ -1695,7 +2239,8 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
-			planner_strategy: NewPlannerStrategy::default(),
+			deny_mcp: None,
+			planner_strategy: None,
 		};
 		assert_eq!(
 			caps.get_allow_funcs(),
@@ -1717,6 +2262,7 @@ mod tests {
 			allow_net: None,
 			allow_rpc: None,
 			allow_http: Some(Targets::All),
+			allow_mcp: None,
 			deny_all: false,
 			#[cfg(feature = "scripting")]
 			deny_scripting: false,
@@ -1728,7 +2274,8 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: Some(Targets::All),
-			planner_strategy: NewPlannerStrategy::default(),
+			deny_mcp: None,
+			planner_strategy: None,
 		};
 		assert_eq!(
 			caps.get_allow_http(),
@@ -1750,6 +2297,7 @@ mod tests {
 			allow_net: None,
 			allow_rpc: None,
 			allow_http: None,
+			allow_mcp: None,
 			deny_all: false,
 			#[cfg(feature = "scripting")]
 			deny_scripting: false,
@@ -1761,12 +2309,806 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
-			planner_strategy: NewPlannerStrategy::default(),
+			deny_mcp: None,
+			planner_strategy: None,
 		};
 		assert_eq!(
 			caps.get_allow_funcs(),
 			Targets::None,
 			"When deny_funcs=All and allow_funcs=None, should deny (return None)"
 		);
+	}
+
+	/// Seeds a fresh datastore at `path` with an archived peer node and one of
+	/// the live-query records it owns, then closes it so the caller can open the
+	/// same path through [`init`]. Returns the keys of the two seeded rows.
+	///
+	/// The heartbeat sits at the epoch, so no reading of the clock makes the row
+	/// look live, and the seeding datastore runs no maintenance tasks, so nothing
+	/// reaps the rows before the caller reopens the path.
+	#[cfg(feature = "storage-surrealkv")]
+	async fn seed_archived_peer(path: &str) -> Result<(NodeKey, NodeLiveQueryKey)> {
+		use surrealdb_core::dbs::node::{Node, Timestamp};
+		use surrealdb_datastore::TransactionType;
+		use surrealdb_datastore::catalog::{DatabaseId, NamespaceId, NodeLiveQuery};
+		use uuid::Uuid;
+
+		let peer = Uuid::new_v4();
+		let node_key = NodeKey {
+			nd: peer,
+		};
+		let nlq_key = NodeLiveQueryKey {
+			nd: peer,
+			lq: Uuid::new_v4(),
+		};
+		let seed = Datastore::builder().without_maintenance_tasks().build_with_path(path).await?;
+		// Stamp the storage version first: data written to an unstamped datastore
+		// reads back as a pre-versioning upgrade, which `init` refuses to start
+		// against.
+		seed.check_version().await?;
+		let txn = seed.transaction(TransactionType::Write).await?;
+		txn.set_key(&node_key, &Node::new(peer, Timestamp::default(), true)).await?;
+		txn.set_key(
+			&nlq_key,
+			&NodeLiveQuery {
+				ns: NamespaceId(1),
+				db: DatabaseId(1),
+				tb: "test".to_string().into(),
+			},
+		)
+		.await?;
+		txn.commit().await?;
+		// Release the storage engine's lock before the caller reopens the path.
+		seed.shutdown().await?;
+		Ok((node_key, nlq_key))
+	}
+
+	/// Leaves a datastore at `path` in the state a version bootstrap that was
+	/// interrupted before it stamped `!v` leaves behind: the bootstrap sentinel,
+	/// and a node row standing in for the maintenance write that used to reach
+	/// storage first.
+	///
+	/// Written by hand rather than by interrupting a real bootstrap because the
+	/// injection registry the core tests use is a test-only build of the
+	/// datastore crate; what matters here is that `init` recovers the state, and
+	/// the core tests are what pin that the state is the one the bootstrap
+	/// actually produces.
+	#[cfg(feature = "storage-surrealkv")]
+	async fn seed_interrupted_bootstrap(path: &str) -> Result<()> {
+		use surrealdb_core::dbs::node::{Node, Timestamp};
+		use surrealdb_datastore::TransactionType;
+		use surrealdb_datastore::key::schema::BootstrapKey;
+		use surrealdb_datastore::version::MajorVersion;
+		use uuid::Uuid;
+
+		let seed = Datastore::builder().without_maintenance_tasks().build_with_path(path).await?;
+		let txn = seed.transaction(TransactionType::Write).await?;
+		txn.set_key(&BootstrapKey {}, &MajorVersion::latest()).await?;
+		let peer = Uuid::new_v4();
+		txn.set_key(
+			&NodeKey {
+				nd: peer,
+			},
+			&Node::new(peer, Timestamp::default(), false),
+		)
+		.await?;
+		txn.commit().await?;
+		// Release the storage engine's lock before the caller reopens the path.
+		seed.shutdown().await?;
+		Ok(())
+	}
+
+	/// A server config for `path` with both node-maintenance intervals set to
+	/// `interval`, which is what decides whether the node jobs run at all.
+	#[cfg(any(feature = "storage-surrealkv", feature = "storage-mem"))]
+	fn node_maintenance_config(path: String, interval: Duration) -> Result<Config> {
+		use surrealdb_core::options::EngineOptions;
+
+		use crate::ntw::client_ip::ClientIp;
+
+		Ok(Config {
+			bind: "127.0.0.1:0".parse()?,
+			postgres_bind: None,
+			mysql_bind: None,
+			path,
+			client_ip: ClientIp::None,
+			user: None,
+			pass: None,
+			crt: None,
+			key: None,
+			engine: EngineOptions::default()
+				.with_node_membership_check_interval(interval)
+				.with_node_membership_cleanup_interval(interval),
+			no_identification_headers: false,
+			allow_origin: Vec::new(),
+			durable_session_ttl: crate::cnf::DEFAULT_DURABLE_SESSION_TTL,
+			cookie_auth: false,
+		})
+	}
+
+	/// Whether the seeded node row and its live-query row are still present,
+	/// read in one transaction so the pair is observed at a single snapshot.
+	#[cfg(feature = "storage-surrealkv")]
+	async fn seeded_rows_present(
+		dbs: &Datastore,
+		node_key: &NodeKey,
+		nlq_key: &NodeLiveQueryKey,
+	) -> Result<(bool, bool)> {
+		use surrealdb_datastore::TransactionType;
+
+		let txn = dbs.transaction(TransactionType::Read).await?;
+		let node = txn.get_key(node_key, None).await?;
+		let nlq = txn.get_key(nlq_key, None).await?;
+		txn.cancel().await?;
+		Ok((node.is_some(), nlq.is_some()))
+	}
+
+	/// Startup must never reap archived cluster members on its own thread:
+	/// `remove_nodes` opens one write transaction per archived node, so inlining
+	/// it would hold readiness for as long as a restarting cluster's residue
+	/// takes to clear.
+	///
+	/// Both intervals are zero, the documented setting that disables the node
+	/// jobs. That leaves the schedule without them *and* skips the first pass
+	/// `initialise_datastore` spawns, so nothing but the startup steps themselves
+	/// could have touched the seeded rows by the time they return.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[serial]
+	async fn init_leaves_archived_nodes_for_the_maintenance_scheduler() -> Result<()> {
+		use surrealdb_core::CommunityComposer;
+		use surrealdb_observe::NoopObserver;
+
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().join("store").display());
+		let (node_key, nlq_key) = seed_archived_peer(&path).await?;
+
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config(path, Duration::ZERO)?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, pending) = init(
+			&CommunityComposer(),
+			&config,
+			canceller.clone(),
+			Arc::new(NoopObserver),
+			dbs_opts,
+		)
+		.await?;
+		// `init` only builds the datastore; the steps under test are the deferred
+		// ones the server runs once its listener is bound.
+		initialise_datastore(&CommunityComposer(), &dbs, &pending).await?;
+
+		let (node, nlq) = seeded_rows_present(&dbs, &node_key, &nlq_key).await?;
+		assert!(node, "startup removed the archived node");
+		assert!(nlq, "startup removed the archived node's live query");
+
+		// The cleanup path itself is intact — it is only deferred, not dropped.
+		dbs.remove_nodes().await?;
+		let (node, nlq) = seeded_rows_present(&dbs, &node_key, &nlq_key).await?;
+		assert!(!node, "remove_nodes left the archived node behind");
+		assert!(!nlq, "remove_nodes left the archived node's live query behind");
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		Ok(())
+	}
+
+	/// The first expiry and cleanup pass runs off `initialise_datastore`, after
+	/// this node has registered, so a restarting cluster clears dead-member
+	/// residue without waiting out an interval and without the reap gating
+	/// readiness.
+	///
+	/// Both intervals are an hour, so the periodic jobs cannot reach their first
+	/// deadline inside the test: the only thing that can reap the seeded rows is
+	/// the pass `initialise_datastore` spawns.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[serial]
+	async fn init_spawns_the_first_cleanup_pass_after_registration() -> Result<()> {
+		use surrealdb_core::CommunityComposer;
+		use surrealdb_observe::NoopObserver;
+
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().join("store").display());
+		let (node_key, nlq_key) = seed_archived_peer(&path).await?;
+
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config(path, Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, pending) = init(
+			&CommunityComposer(),
+			&config,
+			canceller.clone(),
+			Arc::new(NoopObserver),
+			dbs_opts,
+		)
+		.await?;
+		// `init` only builds the datastore; the steps under test are the deferred
+		// ones the server runs once its listener is bound.
+		initialise_datastore(&CommunityComposer(), &dbs, &pending).await?;
+
+		// The pass is spawned, so poll for its effect rather than assuming it has
+		// already landed when the initialisation returns.
+		let deadline = Instant::now() + Duration::from_secs(15);
+		let (node, nlq) = loop {
+			let present = seeded_rows_present(&dbs, &node_key, &nlq_key).await?;
+			if present == (false, false) || Instant::now() >= deadline {
+				break present;
+			}
+			sleep(Duration::from_millis(100)).await;
+		};
+		assert!(!node, "the first cleanup pass left the archived node behind");
+		assert!(!nlq, "the first cleanup pass left the archived node's live query behind");
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		Ok(())
+	}
+
+	/// `init` builds the datastore and nothing else: every startup step that
+	/// opens a transaction waits for `initialise_datastore`, which the server
+	/// runs after its listener is bound.
+	///
+	/// That is what makes a datastore which cannot yet serve a transaction safe
+	/// to hand back. An engine that has to join a cluster before it will accept
+	/// one can then return its builder immediately and finish joining behind the
+	/// readiness gate, rather than holding the bind — and with it `/status` and
+	/// `/ready` — until it is a member, which leaves an operator's probes on a
+	/// refused connection with no way to tell a starting instance from a dead
+	/// one.
+	#[cfg(feature = "storage-mem")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn init_defers_every_step_that_opens_a_transaction() -> Result<()> {
+		use surrealdb_core::CommunityComposer;
+		use surrealdb_observe::NoopObserver;
+
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config("memory".to_string(), Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, pending) = init(
+			&CommunityComposer(),
+			&config,
+			canceller.clone(),
+			Arc::new(NoopObserver),
+			dbs_opts,
+		)
+		.await?;
+
+		assert!(
+			!dbs.maintenance_tasks_running(),
+			"init started the maintenance schedule, whose tasks all write"
+		);
+		assert!(
+			dbs.node_heartbeat_age().await?.is_none(),
+			"init registered this node's cluster membership row"
+		);
+
+		// The deferred phase is what performs them, so nothing is dropped by
+		// being held back.
+		initialise_datastore(&CommunityComposer(), &dbs, &pending).await?;
+		assert!(
+			dbs.maintenance_tasks_running(),
+			"the deferred initialisation started no maintenance schedule"
+		);
+		assert!(
+			dbs.node_heartbeat_age().await?.is_some(),
+			"the deferred initialisation did not register this node"
+		);
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		Ok(())
+	}
+
+	/// The deferred initialisation waits for the backend to report that it can
+	/// serve before it opens its first transaction, and that wait is outside the
+	/// retry budget the steps share.
+	///
+	/// A backend that has to join a cluster before it can answer would otherwise
+	/// spend that budget on transactions which cannot succeed yet, so a join
+	/// slower than `SURREAL_STARTUP_OPERATION_TIMEOUT` would fail a start that
+	/// was only ever going to be slow. The budget here is one second and the
+	/// backend takes longer than that to report ready, so a wait charged against
+	/// it would leave nothing for the steps that follow.
+	#[cfg(feature = "storage-mem")]
+	#[serial]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn initialisation_waits_for_the_backend_to_become_serve_ready() -> Result<()> {
+		use std::sync::atomic::AtomicBool;
+
+		use common::future::BoxFut;
+		use surrealdb_core::CommunityComposer;
+		use surrealdb_core::kvs::TransactionBuilderParts;
+		use surrealdb_kvs::api::Transactable;
+		use surrealdb_kvs::err::Result as KvsResult;
+		use surrealdb_kvs::{Metrics, TransactionBuilder, TransactionType};
+		use surrealdb_observe::NoopObserver;
+
+		/// The retry budget the startup steps share, set low enough that the
+		/// wait under test outlasts it.
+		const SHORT_BUDGET: Duration = Duration::from_secs(1);
+
+		/// The community backend behind a gate that holds serve-readiness
+		/// closed, recording any transaction opened before it opens.
+		struct GatedBuilder {
+			inner: Box<dyn TransactionBuilder>,
+			gate: CancellationToken,
+			ready: Arc<AtomicBool>,
+			opened_early: Arc<AtomicBool>,
+		}
+
+		impl TransactionBuilder for GatedBuilder {
+			fn name(&self) -> &'static str {
+				self.inner.name()
+			}
+
+			fn new_transaction(
+				&self,
+				write: TransactionType,
+			) -> BoxFut<'_, KvsResult<(Box<dyn Transactable>, bool)>> {
+				if !self.ready.load(Ordering::SeqCst) {
+					self.opened_early.store(true, Ordering::SeqCst);
+				}
+				self.inner.new_transaction(write)
+			}
+
+			fn shutdown(&self) -> BoxFut<'_, KvsResult<()>> {
+				self.inner.shutdown()
+			}
+
+			fn register_metrics(&self) -> Option<Metrics> {
+				self.inner.register_metrics()
+			}
+
+			fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
+				self.inner.collect_u64_metric(metric)
+			}
+
+			fn wait_until_serve_ready(&self) -> BoxFut<'_, KvsResult<()>> {
+				Box::pin(async move {
+					self.gate.cancelled().await;
+					self.ready.store(true, Ordering::SeqCst);
+					Ok(())
+				})
+			}
+		}
+
+		struct GatedComposer {
+			gate: CancellationToken,
+			ready: Arc<AtomicBool>,
+			opened_early: Arc<AtomicBool>,
+			hook_calls: Arc<AtomicUsize>,
+		}
+
+		impl TransactionBuilderFactory for GatedComposer {
+			type RouterState = ();
+
+			async fn new_transaction_builder(
+				&self,
+				path: &str,
+				canceller: CancellationToken,
+				config: ConfigMap,
+			) -> Result<TransactionBuilderParts<Self::RouterState>> {
+				let parts =
+					CommunityComposer().new_transaction_builder(path, canceller, config).await?;
+				Ok(TransactionBuilderParts::without_router_state(Box::new(GatedBuilder {
+					inner: parts.builder,
+					gate: self.gate.clone(),
+					ready: Arc::clone(&self.ready),
+					opened_early: Arc::clone(&self.opened_early),
+				})))
+			}
+
+			fn path_valid(&self, v: &str) -> Result<String> {
+				CommunityComposer().path_valid(v)
+			}
+
+			/// Opens a transaction, which the gate records as early if the hook
+			/// ran before serve-readiness.
+			async fn before_check_version(&self, datastore: &Arc<Datastore>) -> Result<()> {
+				self.hook_calls.fetch_add(1, Ordering::SeqCst);
+				datastore.transaction(TransactionType::Read).await?.cancel().await?;
+				Ok(())
+			}
+		}
+
+		let gate = CancellationToken::new();
+		let ready = Arc::new(AtomicBool::new(false));
+		let opened_early = Arc::new(AtomicBool::new(false));
+		let hook_calls = Arc::new(AtomicUsize::new(0));
+		let composer = GatedComposer {
+			gate: gate.clone(),
+			ready: Arc::clone(&ready),
+			opened_early: Arc::clone(&opened_early),
+			hook_calls: Arc::clone(&hook_calls),
+		};
+
+		let _budget = EnvGuard::set(STARTUP_OPERATION_TIMEOUT_ENV, "1s");
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config("memory".to_string(), Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, pending) =
+			init(&composer, &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts).await?;
+		assert!(!ready.load(Ordering::SeqCst), "init waited for the backend to become serve-ready");
+		assert_eq!(
+			pending.timeout, SHORT_BUDGET,
+			"the retry budget this test outlasts was not the one applied"
+		);
+
+		let mut deferred = tokio::spawn({
+			let dbs = Arc::clone(&dbs);
+			async move { initialise_datastore(&composer, &dbs, &pending).await }
+		});
+
+		// The gate is closed, so the wait cannot complete however long this waits.
+		// Outlasting the whole retry budget is what makes the release below prove
+		// the wait was not charged against it.
+		assert!(
+			tokio::time::timeout(SHORT_BUDGET + SHORT_BUDGET / 2, &mut deferred).await.is_err(),
+			"the deferred initialisation ran without waiting for serve-readiness"
+		);
+		assert_eq!(
+			hook_calls.load(Ordering::SeqCst),
+			0,
+			"before_check_version ran before the backend reported serve-readiness"
+		);
+		assert!(
+			!opened_early.load(Ordering::SeqCst),
+			"a transaction was opened before the backend reported serve-readiness"
+		);
+
+		// More wall-clock has now passed than the whole budget, so a start that
+		// completes from here is one whose steps still had theirs.
+		gate.cancel();
+		deferred.await??;
+		assert!(
+			!opened_early.load(Ordering::SeqCst),
+			"a transaction was opened before the backend reported serve-readiness"
+		);
+		assert_eq!(
+			hook_calls.load(Ordering::SeqCst),
+			1,
+			"before_check_version did not run exactly once after serve-readiness"
+		);
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		Ok(())
+	}
+
+	/// Startup starts the maintenance schedule itself, because `init` builds the
+	/// datastore without one.
+	///
+	/// Every maintenance task writes — the node-membership refresh blindly
+	/// upserts this node's row, every leased job writes its lease — and a write
+	/// that reaches storage before `check_version` stamps the version key makes
+	/// a datastore this process just created indistinguishable from one written
+	/// before that key existed, which `check_version` then refuses as out of
+	/// date on this and every later start. Deferring the schedule is what keeps
+	/// that ordering structural; starting it here is the other half, and
+	/// dropping it would leave a server with no compaction, no reclaim and no
+	/// heartbeat while everything else about startup looked healthy.
+	#[cfg(feature = "storage-mem")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn init_starts_the_maintenance_schedule_after_the_version_gate() -> Result<()> {
+		use surrealdb_core::CommunityComposer;
+		use surrealdb_datastore::version::MajorVersion;
+		use surrealdb_observe::NoopObserver;
+
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config("memory".to_string(), Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, pending) = init(
+			&CommunityComposer(),
+			&config,
+			canceller.clone(),
+			Arc::new(NoopObserver),
+			dbs_opts,
+		)
+		.await?;
+		// `init` only builds the datastore; the steps under test are the deferred
+		// ones the server runs once its listener is bound.
+		initialise_datastore(&CommunityComposer(), &dbs, &pending).await?;
+
+		assert!(
+			dbs.maintenance_tasks_running(),
+			"startup left the datastore with no maintenance tasks"
+		);
+		// And the gate they were held for did its job: a datastore this start
+		// created is stamped at this build, not read as pre-versioning storage.
+		assert_eq!(dbs.get_version().await?, (MajorVersion::latest(), false));
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		Ok(())
+	}
+	/// A composer that fills the datastore from a `/kvexport` stream of `source`,
+	/// as the migration target does, in batches of two keys.
+	#[cfg(feature = "storage-mem")]
+	struct CopyingComposer {
+		source: Arc<Datastore>,
+		copied: Arc<AtomicUsize>,
+		/// Stops the fill before the version key, as a fill cut short does.
+		stop_before_version: bool,
+	}
+
+	#[cfg(feature = "storage-mem")]
+	impl TransactionBuilderFactory for CopyingComposer {
+		type RouterState = ();
+
+		async fn new_transaction_builder(
+			&self,
+			path: &str,
+			canceller: CancellationToken,
+			config: ConfigMap,
+		) -> Result<surrealdb_core::kvs::TransactionBuilderParts<Self::RouterState>> {
+			surrealdb_core::CommunityComposer()
+				.new_transaction_builder(path, canceller, config)
+				.await
+		}
+
+		fn path_valid(&self, v: &str) -> Result<String> {
+			surrealdb_core::CommunityComposer().path_valid(v)
+		}
+
+		async fn before_check_version(&self, datastore: &Arc<Datastore>) -> Result<()> {
+			use futures::StreamExt;
+			use surrealdb_core::kvs::copy::{self, KeyRole};
+			use surrealdb_kvs::{Key, TransactionType};
+
+			use crate::ntw::kvexport::{Opened, open, wire};
+
+			let tx = datastore.transaction(TransactionType::Read).await?;
+			let keys = tx.scan_raw(copy::keyspace(), 1, 0, None).await;
+			tx.cancel().await?;
+			// Nothing, the feature level included, may precede the fill: the target
+			// settles its feature level from what the copy leaves.
+			anyhow::ensure!(keys?.is_empty(), "the datastore was written to before the hook ran");
+
+			let Opened::Stream(body) = open(&self.source, None, false).await? else {
+				anyhow::bail!("a memory source keeps no history");
+			};
+			let mut stream = body.into_data_stream();
+			let mut bytes = Vec::new();
+			while let Some(chunk) = stream.next().await {
+				bytes.extend_from_slice(&chunk.map_err(|err| anyhow::anyhow!("{err}"))?);
+			}
+			let response = wire::decode(&bytes)?;
+			response.version.check()?;
+			for batch in response.frames.chunks(2) {
+				let write = datastore.transaction(TransactionType::Write).await?;
+				for (key, value) in batch {
+					if self.stop_before_version && copy::key_role(key) == KeyRole::Version {
+						write.cancel().await?;
+						return Ok(());
+					}
+					write.set(Key::from(key.clone()), value.clone()).await?;
+					self.copied.fetch_add(1, Ordering::SeqCst);
+				}
+				write.commit().await?;
+			}
+			Ok(())
+		}
+	}
+
+	/// A source with a catalog of its own, a namespace the target's defaults would
+	/// never create, owing the data migration it returns: its ledger entry is
+	/// removed, as on a store written before that migration existed. It also
+	/// carries a bootstrap sentinel as residue, which a copy must not move.
+	#[cfg(feature = "storage-mem")]
+	async fn copy_source() -> Result<(Arc<Datastore>, u32)> {
+		use surrealdb_datastore::key::schema::{BootstrapKey, MigrationKey};
+		use surrealdb_datastore::version::MajorVersion;
+		use surrealdb_kvs::TransactionType;
+
+		let source =
+			Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
+		source.check_version().await?;
+		source.initialise_defaults("copied", "copied").await?;
+		let owed = source
+			.applied_migration_ids()
+			.await?
+			.first()
+			.map(|(id, _)| *id)
+			.ok_or_else(|| anyhow::anyhow!("this build ships no data migration to owe"))?;
+		let tx = source.transaction(TransactionType::Write).await?;
+		tx.del_key(&MigrationKey::new(owed)).await?;
+		tx.set_key(&BootstrapKey {}, &MajorVersion::latest()).await?;
+		tx.commit().await?;
+		Ok((source, owed))
+	}
+
+	/// A keyspace the hook copies in is an existing store, not a creation.
+	///
+	/// The hook runs while the datastore is still empty — `init` built it without
+	/// stamping `!v` — and everything it writes is there for `check_version` to
+	/// find. The version key arrives last, with the copy whole, so the gate
+	/// reports an existing store: the default namespace is not created over the
+	/// copied catalog, and the migration the source owes runs against the copied
+	/// keys instead of being recorded as already applied.
+	#[cfg(feature = "storage-mem")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn a_keyspace_copied_by_the_hook_is_an_existing_store() -> Result<()> {
+		use surrealdb_catalog::providers::NamespaceProvider;
+		use surrealdb_core::kvs::copy;
+		use surrealdb_kvs::{Key, TransactionType};
+		use surrealdb_observe::NoopObserver;
+
+		let (source, owed) = copy_source().await?;
+		let copied = Arc::new(AtomicUsize::new(0));
+		let composer = CopyingComposer {
+			source: Arc::clone(&source),
+			copied: Arc::clone(&copied),
+			stop_before_version: false,
+		};
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config("memory".to_string(), Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, pending) =
+			init(&composer, &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts).await?;
+		assert!(!pending.no_defaults, "this test needs the default namespace to be eligible");
+		initialise_datastore(&composer, &dbs, &pending).await?;
+
+		assert!(
+			copied.load(Ordering::SeqCst) > 2,
+			"the copy spanned fewer keys than one batch, so the batching went untested"
+		);
+		let (_, is_new) = dbs.check_version().await?;
+		assert!(!is_new, "the version gate treated the copied store as one it created");
+		let tx = dbs.transaction(TransactionType::Read).await?;
+		let names: Vec<String> =
+			tx.all_ns(None).await?.iter().map(|ns| ns.name.to_string()).collect();
+		let sentinel = tx.get(Key::from(copy::BOOTSTRAP_KEY), None).await?;
+		tx.cancel().await?;
+		assert_eq!(
+			names,
+			["copied"],
+			"the target must hold the copied catalog and not a default namespace created over it"
+		);
+		assert_eq!(sentinel, None, "the copy moved the bootstrap sentinel");
+		let applied = |ids: Vec<(u32, Option<_>)>| ids.iter().any(|(id, _)| *id == owed);
+		assert!(!applied(source.applied_migration_ids().await?), "the source no longer owes it");
+		assert!(
+			applied(dbs.applied_migration_ids().await?),
+			"the migration the source owed did not run against the copied keys"
+		);
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		source.shutdown().await?;
+		Ok(())
+	}
+
+	/// A copy that stops before the version key is refused, not served: the copied
+	/// keys without `!v` read as a store from before versioning, and the gate
+	/// refuses that permanently rather than start with keys missing.
+	#[cfg(feature = "storage-mem")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn a_copy_cut_short_before_the_version_key_is_refused() -> Result<()> {
+		use surrealdb_observe::NoopObserver;
+
+		let (source, _) = copy_source().await?;
+		let copied = Arc::new(AtomicUsize::new(0));
+		let composer = CopyingComposer {
+			source: Arc::clone(&source),
+			copied: Arc::clone(&copied),
+			stop_before_version: true,
+		};
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config("memory".to_string(), Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, pending) =
+			init(&composer, &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts).await?;
+		let err = initialise_datastore(&composer, &dbs, &pending).await.unwrap_err();
+
+		assert!(copied.load(Ordering::SeqCst) > 2, "the copy wrote too little to test anything");
+		assert!(
+			is_permanent_storage_error(&err) && err.to_string().contains("out-of-date"),
+			"a partial copy was not refused as a store from before versioning: {err}"
+		);
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		source.shutdown().await?;
+		Ok(())
+	}
+
+	/// A volume whose first boot was interrupted between claiming the datastore
+	/// and stamping it starts, rather than being refused for the life of the
+	/// volume.
+	///
+	/// Run against a persistent backend and through a genuine reopen, because
+	/// that is the shape of the failure: the first process wrote and died, and
+	/// every later process has only the bytes to go on. Without the sentinel
+	/// those bytes read as storage from before `!v` existed, and the version
+	/// gate commits `!v = 1` and refuses — permanently, since the refusal is a
+	/// permanent error and the stamp it read is now on disk.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[serial]
+	async fn init_completes_a_bootstrap_a_previous_boot_left_unfinished() -> Result<()> {
+		use surrealdb_core::CommunityComposer;
+		use surrealdb_datastore::version::MajorVersion;
+		use surrealdb_observe::NoopObserver;
+
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().join("store").display());
+		seed_interrupted_bootstrap(&path).await?;
+
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config(path, Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, pending) = init(
+			&CommunityComposer(),
+			&config,
+			canceller.clone(),
+			Arc::new(NoopObserver),
+			dbs_opts,
+		)
+		.await?;
+		// `init` only builds the datastore; the steps under test are the deferred
+		// ones the server runs once its listener is bound.
+		initialise_datastore(&CommunityComposer(), &dbs, &pending).await?;
+
+		assert_eq!(
+			dbs.get_version().await?,
+			(MajorVersion::latest(), false),
+			"the interrupted bootstrap was not completed at this build's version"
+		);
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		Ok(())
+	}
+
+	#[test]
+	fn permissive_capability_warnings_match_posture() {
+		use std::collections::HashSet;
+		use std::str::FromStr;
+
+		assert!(
+			permissive_capability_warnings(&Capabilities::default()).is_empty(),
+			"default capabilities must not trigger permissive posture warnings"
+		);
+
+		let guest = Capabilities::default().with_guest_access(true);
+		let warnings = permissive_capability_warnings(&guest);
+		assert_eq!(warnings.len(), 1);
+		assert!(warnings[0].contains("Guest (anonymous) access is enabled"));
+
+		let scripting = Capabilities::default().with_scripting(true);
+		let warnings = permissive_capability_warnings(&scripting);
+		assert_eq!(warnings.len(), 1);
+		assert!(warnings[0].contains("Scripting is enabled"));
+
+		let wildcard_net = Capabilities::default().with_network_targets(Targets::All);
+		let warnings = permissive_capability_warnings(&wildcard_net);
+		assert_eq!(warnings.len(), 1);
+		assert!(warnings[0].contains("Outbound network access is unrestricted"));
+
+		let scoped_net =
+			Capabilities::default().with_network_targets(Targets::Some(HashSet::from([
+				NetTarget::from_str("api.example.com:443").unwrap(),
+			])));
+		assert!(
+			permissive_capability_warnings(&scoped_net).is_empty(),
+			"explicit network allowlist must not warn as unrestricted"
+		);
+
+		let net_with_deny =
+			Capabilities::default().with_network_targets(Targets::All).without_network_targets(
+				Targets::Some(HashSet::from([NetTarget::from_str("169.254.169.254").unwrap()])),
+			);
+		assert!(
+			permissive_capability_warnings(&net_with_deny).is_empty(),
+			"allow-net combined with a deny-net restriction must not report unrestricted network access"
+		);
+
+		let all = Capabilities::all();
+		let warnings = permissive_capability_warnings(&all);
+		assert_eq!(warnings.len(), 3);
+		assert!(warnings[0].contains("Guest (anonymous) access is enabled"));
+		assert!(warnings[1].contains("Scripting is enabled"));
+		assert!(warnings[2].contains("Outbound network access is unrestricted"));
 	}
 }

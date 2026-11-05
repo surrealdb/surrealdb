@@ -1,0 +1,440 @@
+### owner: CREATE type::record('t', 5) SET a = 5 RETURN AFTER
+[{ a: 5, id: t:5 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }, { a: 5, id: t:5 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: CREATE type::record('absent', 1) SET a = 1 RETURN AFTER
+[{ a: 1, id: absent:1 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+[{ a: 1, id: absent:1 }]
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: CREATE type::record('absent', 1), type::record('absent', 2) SET a = 1 RETURN AFTER
+[{ a: 1, id: absent:1 }, { a: 1, id: absent:2 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+[{ a: 1, id: absent:1 }, { a: 1, id: absent:2 }]
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: CREATE t:7, item:9 SET n = 9 RETURN AFTER
+[{ id: t:7, n: 9 }, { id: item:9, n: 9 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }, { id: item:9, n: 9 }]
+[{ a: 1, id: t:1 }, { id: t:7, n: 9 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: UPSERT type::record('t', 1) SET a = 2 RETURN AFTER
+[{ a: 2, id: t:1 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 2, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: UPDATE type::table('item') SET n += 1 RETURN AFTER
+[{ id: item:1, n: 2, secret: 's1', tags: [1, 2] }, { id: item:2, n: 3, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 4 }]
+state:
+[{ id: item:1, n: 2, secret: 's1', tags: [1, 2] }, { id: item:2, n: 3, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 4 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: UPDATE (SELECT VALUE id FROM item) SET touched = true RETURN AFTER
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2], touched: true }, { id: item:2, n: 2, secret: 's2', tags: [3], touched: true }, { hidden: true, id: item:3, n: 3, touched: true }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2], touched: true }, { id: item:2, n: 2, secret: 's2', tags: [3], touched: true }, { hidden: true, id: item:3, n: 3, touched: true }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: DELETE type::table('t') RETURN BEFORE
+[{ a: 1, id: t:1 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: { LET $tb = 't'; INSERT INTO $tb { id: 4, a: 4 } }
+[{ a: 4, id: t:4 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }, { a: 4, id: t:4 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: CREATE |t:1..3| SET a = 3 RETURN AFTER
+error: Database record `t:1` already exists
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: { LET $x = t:9; CREATE $x SET a = 1 RETURN AFTER }
+[{ a: 1, id: t:9 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }, { a: 1, id: t:9 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: { DEFINE TABLE made PERMISSIONS FULL; CREATE type::record('made', 1) SET a = 1; RETURN (SELECT * FROM made) }
+[{ a: 1, id: made:1 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+[{ a: 1, id: made:1 }]
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: { DEFINE TABLE sch SCHEMAFULL PERMISSIONS FULL; DEFINE FIELD a ON sch TYPE int; CREATE type::record('sch', 1) SET a = 1 RETURN AFTER }
+[{ a: 1, id: sch:1 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+[{ a: 1, id: sch:1 }]
+error: The table 'tmp' does not exist
+### owner: { DEFINE TABLE sch SCHEMAFULL PERMISSIONS FULL; DEFINE FIELD a ON sch TYPE int; CREATE type::record('sch', 1) SET b = 1 }
+error: Couldn't coerce value for field `a` of `sch:1`: Expected `int` but found `NONE`
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: FOR $i IN 0..3 { CREATE type::record('t', $i) SET a = $i; }
+error: Database record `t:1` already exists
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: UPDATE type::record('calc', 1) SET n = 5 RETURN doubled
+[{ doubled: 10 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 10, id: calc:1, n: 5 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: { CREATE type::record('fresh', 1); CREATE type::record('fresh', 2); RETURN (SELECT * FROM fresh ORDER BY id) }
+[{ id: fresh:1 }, { id: fresh:2 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+[{ id: fresh:1 }, { id: fresh:2 }]
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: FOR $i IN 0..3 { CREATE type::record('absent', $i) SET a = $i; }
+NONE
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+[{ a: 0, id: absent:0 }, { a: 1, id: absent:1 }, { a: 2, id: absent:2 }]
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: FOR $i IN 0..2 { DEFINE TABLE tmp PERMISSIONS FULL; CREATE type::record('tmp', $i); REMOVE TABLE tmp; }
+NONE
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### owner: FOR $i IN 0..2 { CREATE type::record('t', $i) SET a = $i; DEFINE FIELD b ON t COMPUTED a + $i; }
+error: Database record `t:1` already exists
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: CREATE type::record('t', 5) SET a = 5 RETURN AFTER
+[{ a: 5, id: t:5 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }, { a: 5, id: t:5 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: CREATE type::record('absent', 1) SET a = 1 RETURN AFTER
+[]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+[]
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: CREATE type::record('absent', 1), type::record('absent', 2) SET a = 1 RETURN AFTER
+[]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+[]
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: CREATE t:7, item:9 SET n = 9 RETURN AFTER
+[{ id: t:7, n: 9 }, { id: item:9, n: 9 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }, { id: item:9, n: 9 }]
+[{ a: 1, id: t:1 }, { id: t:7, n: 9 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: UPSERT type::record('t', 1) SET a = 2 RETURN AFTER
+[{ a: 2, id: t:1 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 2, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: UPDATE type::table('item') SET n += 1 RETURN AFTER
+[{ id: item:1, n: 2, tags: [1, 2] }, { id: item:2, n: 3, tags: [3] }]
+state:
+[{ id: item:1, n: 2, secret: 's1', tags: [1, 2] }, { id: item:2, n: 3, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 4 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: UPDATE (SELECT VALUE id FROM item) SET touched = true RETURN AFTER
+[{ id: item:1, n: 1, tags: [1, 2], touched: true }, { id: item:2, n: 2, tags: [3], touched: true }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2], touched: true }, { id: item:2, n: 2, secret: 's2', tags: [3], touched: true }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: DELETE type::table('t') RETURN BEFORE
+[{ a: 1, id: t:1 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: { LET $tb = 't'; INSERT INTO $tb { id: 4, a: 4 } }
+[{ a: 4, id: t:4 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }, { a: 4, id: t:4 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: CREATE |t:1..3| SET a = 3 RETURN AFTER
+error: Database record `t:1` already exists
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: { LET $x = t:9; CREATE $x SET a = 1 RETURN AFTER }
+[{ a: 1, id: t:9 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }, { a: 1, id: t:9 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: { DEFINE TABLE made PERMISSIONS FULL; CREATE type::record('made', 1) SET a = 1; RETURN (SELECT * FROM made) }
+error: IAM error: Not enough permissions to perform this action
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: { DEFINE TABLE sch SCHEMAFULL PERMISSIONS FULL; DEFINE FIELD a ON sch TYPE int; CREATE type::record('sch', 1) SET a = 1 RETURN AFTER }
+error: IAM error: Not enough permissions to perform this action
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: { DEFINE TABLE sch SCHEMAFULL PERMISSIONS FULL; DEFINE FIELD a ON sch TYPE int; CREATE type::record('sch', 1) SET b = 1 }
+error: IAM error: Not enough permissions to perform this action
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: FOR $i IN 0..3 { CREATE type::record('t', $i) SET a = $i; }
+error: Database record `t:1` already exists
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: UPDATE type::record('calc', 1) SET n = 5 RETURN doubled
+[{ doubled: 10 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 10, id: calc:1, n: 5 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: { CREATE type::record('fresh', 1); CREATE type::record('fresh', 2); RETURN (SELECT * FROM fresh ORDER BY id) }
+[]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+[]
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: FOR $i IN 0..3 { CREATE type::record('absent', $i) SET a = $i; }
+NONE
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+[]
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: FOR $i IN 0..2 { DEFINE TABLE tmp PERMISSIONS FULL; CREATE type::record('tmp', $i); REMOVE TABLE tmp; }
+error: IAM error: Not enough permissions to perform this action
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist
+### record user: FOR $i IN 0..2 { CREATE type::record('t', $i) SET a = $i; DEFINE FIELD b ON t COMPUTED a + $i; }
+error: IAM error: Not enough permissions to perform this action
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+[{ doubled: 8, id: calc:1, n: 4 }]
+error: The table 'absent' does not exist
+error: The table 'fresh' does not exist
+error: The table 'made' does not exist
+error: The table 'sch' does not exist
+error: The table 'tmp' does not exist

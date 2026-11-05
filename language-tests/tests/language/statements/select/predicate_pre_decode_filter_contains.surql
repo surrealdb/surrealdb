@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Pre-decode filter for CONTAINS / CONTAINSNOT on strings and arrays, including nested paths. EXPLAIN asserts pre_decode_filter: yes."
+reason = "Pre-decode filter for CONTAINS / CONTAINSNOT on strings and arrays, including nested paths. EXPLAIN shows the predicate as a filter over the table scan."
 
 [[test.results]]
 value = "{ id: pcf:1, outer: { list: [1, 2, 3] }, s: 'foo_omicron_bar' }"
@@ -23,13 +22,22 @@ value = "[{ id: pcf:2, outer: { list: [9] }, s: 'no_match' }]"
 value = "[{ id: pcf:1, outer: { list: [1, 2, 3] }, s: 'foo_omicron_bar' }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: pcf, direction: Forward, predicate: s CONTAINS 'omicron', pre_decode_filter: yes]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: pcf, direction: Forward, predicate: s CONTAINS 'omicron', pre_decode_filter: yes]
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: pcf, direction: Forward, predicate: s CONTAINSNOT 'omicron', pre_decode_filter: yes]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: pcf, direction: Forward, predicate: s CONTAINSNOT 'omicron', pre_decode_filter: yes]
+"'''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: pcf, direction: Forward, predicate: outer.list CONTAINS 2, pre_decode_filter: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: pcf, direction: Forward, predicate: outer.list CONTAINS 2, pre_decode_filter: yes]
+''''
 
 */
 

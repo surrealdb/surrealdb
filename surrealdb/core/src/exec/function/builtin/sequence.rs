@@ -2,10 +2,13 @@
 
 use anyhow::Result;
 
-use crate::err::Error;
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
-use crate::exec::physical_expr::EvalContext;
+use crate::err::EngineError;
+use crate::exec::EvalContext;
+use crate::exec::function::{ScalarFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
+use crate::expr::logical::EffectSet;
+use crate::fnc::args::FromArgs;
 use crate::val::Value;
 
 // =========================================================================
@@ -18,6 +21,14 @@ pub struct SequenceNextval;
 impl ScalarFunction for SequenceNextval {
 	fn name(&self) -> &'static str {
 		"sequence::nextval"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "sequence::nextval", Fallibility::DATA)
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::ADVANCES_STATE
 	}
 
 	fn signature(&self) -> Signature {
@@ -44,19 +55,22 @@ impl ScalarFunction for SequenceNextval {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options().ok_or_else(|| {
-				anyhow::anyhow!(Error::Internal(
+				anyhow::anyhow!(EngineError::Internal(
 					"No options available for sequence operation".to_string()
 				))
 			})?;
 
 			// Get the sequence name from args
-			let seq = args.into_iter().next().unwrap_or(Value::None);
+			let args = FromArgs::from_args("sequence::nextval", args)?;
 
-			crate::fnc::sequence::nextval((frozen, opt), (seq,)).await
+			crate::fnc::sequence::nextval((frozen, opt), args).await
 		})
 	}
 }
 
-pub fn register(registry: &mut FunctionRegistry) {
-	registry.register(SequenceNextval);
-}
+// Each call advances the sequence once and returns the value it moved past,
+// as `EffectSet::ADVANCES_STATE` declares. Callers must not duplicate or drop
+// a call: a duplicate consumes an extra value, and a dropped call leaves the
+// sequence where it stood.
+/// The `sequence::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[&SequenceNextval];

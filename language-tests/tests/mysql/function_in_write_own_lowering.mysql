@@ -1,0 +1,58 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A function that has a lowering of its own answers as it does in a read in the values, conditions and ON DUPLICATE KEY UPDATE of a write"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, n: 1i32, s: '7', ts: ts'2019-05-01T00:00:00' }, { id: 2, n: 2i32, s: '42', ts: ts'2021-05-01T00:00:00' }, { id: 3, n: 3i32, s: 'abc', ts: ts'2018-01-01T00:00:00' }]"
+
+[[test.results]]
+value = "[{ id: 1, n: 1i32, s: '00007', ts: ts'2019-05-01T00:00:00' }, { id: 2, n: 2i32, s: '00042', ts: ts'2021-05-01T00:00:00' }]"
+
+[[test.results]]
+value = "[{ id: 1, n: 1i32, s: '00007', ts: ts'2019-05-01T00:00:00' }, { id: 3, n: 3i32, s: 'abc', ts: ts'2018-01-01T00:00:00' }]"
+
+[[test.results]]
+value = "[{ id: 2, s: '00042' }]"
+
+[[test.results]]
+value = "[{ id: 2, n: 1i32, s: '00042', ts: ts'2021-05-02T00:00:00' }]"
+
+[[test.results]]
+value = "[{ id: 2, n: 1i32, s: '00042', ts: ts'2021-06-02T00:00:00' }]"
+
+[[test.results]]
+value = "[{ id: 9, n: 1i32, s: 'bcd' }]"
+
+[[test.results]]
+value = "[{ id: 9, n: 1i32, s: '**x' }]"
+
+[[test.results]]
+value = "[{ id: 2, n: 1i32, s: '00042', ts: ts'2021-06-02T00:00:00' }, { id: 9, n: 1i32, s: '**x', ts: NONE }]"
+*/
+
+CREATE TABLE wr (id INT PRIMARY KEY, s VARCHAR(20), ts DATETIME, n INT);
+
+INSERT INTO wr (id, s, ts, n) VALUES (1, '7', CAST('2019-05-01 00:00:00' AS DATETIME), 1), (2, '42', CAST('2021-05-01 00:00:00' AS DATETIME), 2), (3, 'abc', CAST('2018-01-01 00:00:00' AS DATETIME), 3);
+
+UPDATE wr SET s = lpad(s, 5, '0') WHERE id < 3;
+
+DELETE FROM wr WHERE year(ts) < 2020;
+
+SELECT id, s FROM wr ORDER BY id;
+
+UPDATE wr SET ts = date_add(ts, INTERVAL 1 DAY), n = mod(n + 7, 4) WHERE id = 2;
+
+UPDATE wr SET ts = ts + INTERVAL 1 MONTH WHERE id = 2;
+
+INSERT INTO wr (id, s, n) VALUES (9, substring('abcdef', 2, 3), 1);
+
+INSERT INTO wr (id, s, n) VALUES (9, 'x', 1) ON DUPLICATE KEY UPDATE s = lpad(VALUES(s), 3, '*'), n = instr(VALUES(s), 'x');
+
+SELECT id, s, n, ts FROM wr ORDER BY id;

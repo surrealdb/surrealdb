@@ -21,9 +21,9 @@ value = "'OK'"
 {
 	DEFINE TABLE person SCHEMALESS;
 
-	CREATE |person:1..5000| SET name = 'p' RETURN NONE;
+	CREATE |person:1..=5000| SET name = 'p' RETURN NONE;
 
-	FOR $n IN array::range(1, 5000) {
+	FOR $n IN array::range(1, 5001) {
 		LET $s = type::record('person', $n);
 		FOR $d IN [1, 2, 3, 4] {
 			-- wrap into 1..=5000: ((n - 1 + d) mod 5000) + 1

@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_schema.surql"]
+
+[test]
+reason = "PostgreSQL CASE WHEN expression"
+
+[[test.results]]
+value = "[{ age_group: 'junior', name: 'Bob' }, { age_group: 'senior', name: 'Alice' }, { age_group: 'senior', name: 'Charlie' }]"
+*/
+
+SELECT u.name, CASE WHEN u.age >= 30 THEN 'senior' ELSE 'junior' END AS age_group FROM users u ORDER BY u.age ASC;

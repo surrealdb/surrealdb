@@ -1,0 +1,14 @@
+### CREATE t:start SET n = 0
+{ id: t:start, n: 0 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => f6fd8e4fbfd0ad9c (9 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("t"), key: Number(3) }), "n": Number(Int(3))}))
+Delete Object(Object({"id": RecordId(RecordId { table: Table("t"), key: Number(2) }), "n": Number(Int(3))}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("t"), key: Number(2) }), "n": Number(Int(3))}))
+Create Object(Object({"id": RecordId(RecordId { table: Table("t"), key: Number(2) }), "n": Number(Int(2))}))
+Delete Object(Object({"id": RecordId(RecordId { table: Table("t"), key: Number(1) }), "n": Number(Int(2))}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("t"), key: Number(1) }), "n": Number(Int(2))}))
+Create Object(Object({"id": RecordId(RecordId { table: Table("t"), key: Number(1) }), "n": Number(Int(1))}))
+Delete Object(Object({"id": RecordId(RecordId { table: Table("t"), key: String("start") }), "n": Number(Int(1))}))
+Update Object(Object({"id": RecordId(RecordId { table: Table("t"), key: String("start") }), "n": Number(Int(1))}))
+Create Object(Object({"id": RecordId(RecordId { table: Table("t"), key: String("start") }), "n": Number(Int(0))}))

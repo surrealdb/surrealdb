@@ -1,0 +1,30 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_union_tables.surql"]
+
+[test]
+reason = "A UNION answers rows under the names its first branch gives its columns, so a query over the union reads a later branch's rows under those names"
+
+[[test.results]]
+value = "[{ name: 'ada' }, { name: 'bob' }, { name: 'bob' }, { name: 'cy' }]"
+
+[[test.results]]
+value = "[{ name: 'ada' }, { name: 'bob' }, { name: 'cy' }]"
+
+[[test.results]]
+value = "[{ k: 1, name: 'ada' }, { k: 2, name: 'bob' }, { k: 2, name: 'bob' }, { k: 3, name: 'cy' }]"
+
+[[test.results]]
+value = "[{ n: 1 }, { n: 2 }, { n: 3 }]"
+
+[[test.results]]
+value = "[{ name: 'ada' }, { name: 'bob' }, { name: 'bob' }, { name: 'cy' }]"
+*/
+
+SELECT name FROM (SELECT name FROM un_a UNION ALL SELECT label FROM un_b) u ORDER BY name;
+SELECT name FROM (SELECT name FROM un_a UNION SELECT label FROM un_b) u ORDER BY name;
+SELECT k, name FROM (SELECT k, name FROM un_a UNION ALL SELECT k2, label FROM un_b) u ORDER BY k, name;
+SELECT n FROM (SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3) u ORDER BY n;
+SELECT name FROM un_a UNION ALL SELECT label FROM un_b ORDER BY name;

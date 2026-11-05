@@ -3,8 +3,8 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
-use crate::conn::Command;
-use crate::method::{BoxFuture, Model, OnceLockExt};
+use crate::conn::ctx;
+use crate::method::{BoxFuture, OnceLockExt};
 use crate::{Connection, Error, ExtraFeatures, Result, Surreal};
 
 /// Returned by [`Surreal::import`](crate::Surreal::import) to restore from a `.surql` backup file.
@@ -13,23 +13,7 @@ use crate::{Connection, Error, ExtraFeatures, Result, Surreal};
 pub struct Import<'r, C: Connection, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) file: PathBuf,
-	pub(super) is_ml: bool,
 	pub(super) import_type: PhantomData<T>,
-}
-
-impl<'r, C> Import<'r, C>
-where
-	C: Connection,
-{
-	/// Import machine learning model
-	pub fn ml(self) -> Import<'r, C, Model> {
-		Import {
-			client: self.client,
-			file: self.file,
-			is_ml: true,
-			import_type: PhantomData,
-		}
-	}
 }
 
 impl<C, T> Import<'_, C, T>
@@ -63,25 +47,7 @@ where
 				));
 			}
 
-			if self.is_ml {
-				return router
-					.execute_unit(
-						self.client.session_id,
-						Command::ImportMl {
-							path: self.file,
-						},
-					)
-					.await;
-			}
-
-			router
-				.execute_unit(
-					self.client.session_id,
-					Command::ImportFile {
-						path: self.file,
-					},
-				)
-				.await
+			router.engine.import_file(ctx(self.client.session_id), self.file).await
 		})
 	}
 }

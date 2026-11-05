@@ -17,9 +17,17 @@ server-http = [
 ]
 transport-io = ["rmcp/transport-io"]
 
+[package.metadata.docs.rs]
+# docs.rs builds with the latest nightly, whose trait solver rejects the `diskann`
+# crate (`Arc<B>: Batch` not satisfied); `-Znext-solver=no` keeps it compiling there.
+rustc-args = ["-Znext-solver=no"]
+
 [dependencies]
 rmcp = { workspace = true, features = ["server", "macros"] }
 surrealdb-core = { workspace = true, features = ["graphql", "gql"] }
+surrealdb-cnf = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-rpc = { workspace = true }
 surrealdb-types = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
@@ -32,7 +40,8 @@ tracing = { workspace = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
-surrealdb-core = { workspace = true, features = ["kv-mem", "graphql", "gql"] }
+# `fulltext`: the schema tests define and list analyzers.
+surrealdb-core = { workspace = true, features = ["kv-mem", "graphql", "gql", "fulltext"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }
 # Enable `client` so integration tests can drive the MCP server over an
 # in-process duplex transport (same code path as `serve_stdio`).

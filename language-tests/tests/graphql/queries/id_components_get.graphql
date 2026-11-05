@@ -1,0 +1,17 @@
+/**
+[env]
+imports = ["../id_components_import.surql"]
+
+[test]
+reason = "GraphQL single-record queries return the components of the record named by an array id"
+
+[[test.results]]
+value = "{ reading: { city: 'London', temp: 5, time: '2024-01-02T00:00:00+00:00' } }"
+*/
+query {
+	reading(id: "['London', d'2024-01-02T00:00:00Z']") {
+		city
+		time
+		temp
+	}
+}

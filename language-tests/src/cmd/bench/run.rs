@@ -9,21 +9,28 @@ use clap::ArgMatches;
 use semver::Version;
 use sha2::{Digest, Sha256};
 use surrealdb_core::channel;
-use surrealdb_core::dbs::capabilities::Targets;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::env::VERSION;
-use surrealdb_core::kvs::{Builder, Datastore};
+use surrealdb_core::kvs::{Builder, Datastore, QueryRequest, QuerySource};
+use surrealdb_rpc::capabilities::{Capabilities, Targets};
+use surrealdb_types::Datetime;
 
 use crate::cli::{Backend, ColorMode};
+use crate::cmd::bench::meta::current_commit;
 use crate::cmd::bench::stats::{ComparisonData, MeasurementData};
-use crate::cmd::bench::store::{BenchMarkRun, StoreConfig, get_store};
+use crate::cmd::bench::store::{Baseline, BenchMarkRun, StoreConfig, get_store};
 use crate::cmd::bench::{DEFAULT_NOISE_THRESHOLD, DEFAULT_SIGNIFICANCE_THRESHOLD};
 use crate::cmd::util::ImportFailure;
 use crate::cmd::{graphql, util};
 use crate::tests::case::Dialect;
 use crate::tests::run::{CaseImports, RunConfig, TestRunId};
-use crate::tests::schema::{BoolOr, NewPlannerStrategyConfig, TestConfig};
+use crate::tests::schema::{BoolOr, TestConfig};
 use crate::tests::{CaseSet, RunSetBuilder, TestRun};
+
+/// The measurement cap `--quick` imposes on every bench. A bench whose single
+/// iteration, re-import included, outlasts it can collect only one sample, so
+/// it sets `[bench] quick = false`; revisit those benches if this changes.
+const QUICK_MAX_TIME: Duration = Duration::from_secs(10);
 
 struct BenchRunConfig {
 	/// Key grouping runs whose populated datastore is byte-for-byte
@@ -67,14 +74,18 @@ fn resolve_capabilities(config: &TestConfig) -> Capabilities {
 /// target namespace + database all match — everything that determines the
 /// populated keyspace and the engine config.
 ///
-/// Deliberately excluded: auth, planner strategy, dialect, and the bench's own
-/// query. These only parameterize the per-bench execute session and statement
-/// (built fresh per bench against the shared store), never where imported data
-/// lands — imports always run as `Session::owner()` retargeted to `(ns, db)`.
+/// Deliberately excluded for ordinary benches: auth, dialect,
+/// and the bench's own query. These only parameterize the per-bench execute
+/// session and statement (built fresh per bench against the shared store), never
+/// where imported data lands — imports always run as `Session::owner()`
+/// retargeted to `(ns, db)`. Graph-fold benches are the exception: their store
+/// layout depends on the statement (see below), so `source` joins the key there.
 fn calc_group_key(
 	chain: &[Arc<crate::tests::case::TestCase>],
 	parsed: &TestConfig,
 	backend: Backend,
+	source: &str,
+	config: &[(String, String)],
 ) -> String {
 	let mut hasher = Sha256::new();
 	// Effective import chain: each import's path + mtime, in order.
@@ -91,15 +102,32 @@ fn calc_group_key(
 	// Backend engine/layout — never share a populated store across backends.
 	let backend_tag = match backend {
 		Backend::Memory => "mem",
-		Backend::RocksDb => "rocksdb",
 		Backend::SurrealKv => "surrealkv",
 		Backend::TikV => "tikv",
+		Backend::Other => "other",
 	};
 	hasher.update(backend_tag.as_bytes());
+	// The datastore configuration the run was given: a store built under one is not
+	// interchangeable with one built under another.
+	for (key, value) in config {
+		hasher.update(key.as_bytes());
+		hasher.update(b"=");
+		hasher.update(value.as_bytes());
+		hasher.update(b"\x00");
+	}
 	// Target namespace + database: imports physically land under exactly (ns, db).
 	hasher.update(parsed.env.namespace().unwrap_or("").as_bytes());
 	hasher.update(b"\x00");
 	hasher.update(parsed.env.database().unwrap_or("").as_bytes());
+	// Graph adjacency layout: a folded store is not interchangeable with an
+	// unfolded one, nor numeric block entries with plain ones. The fold pass
+	// primes with the bench's own statement, so which scopes end up folded is
+	// statement-dependent: folded benches never share a store unless they run
+	// the same statement.
+	hasher.update([parsed.bench.graph_fold as u8, parsed.bench.graph_numeric_ids as u8]);
+	if parsed.bench.graph_fold || parsed.bench.graph_numeric_ids {
+		hasher.update(source.as_bytes());
+	}
 
 	let bytes = hasher.finalize();
 	let mut res = String::new();
@@ -112,10 +140,11 @@ fn calc_group_key(
 
 struct BenchConfig {
 	backend: Backend,
-	/// Temp directory under which file-backed datastores (rocksdb/surrealkv) are
+	/// The datastore configuration keys given with `--config`.
+	config: Vec<(String, String)>,
+	/// Temp directory under which file-backed datastores (surrealkv) are
 	/// built; `None` for the in-memory backend. Removed when `run()` returns.
 	bench_root: Option<PathBuf>,
-	new_planner: NewPlannerStrategyConfig,
 }
 
 /// Counter for unique per-datastore subdirectories under `bench_root`.
@@ -126,9 +155,9 @@ static DS_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn datastore_conn(config: &BenchConfig) -> String {
 	let scheme = match config.backend {
 		Backend::Memory => return "mem://".to_string(),
-		Backend::RocksDb => "rocksdb",
 		Backend::SurrealKv => "surrealkv",
 		Backend::TikV => unreachable!("TiKV is rejected before prepare()"),
+		Backend::Other => unreachable!("`other` is rejected before prepare()"),
 	};
 	let root = config.bench_root.as_ref().expect("file backend requires a bench root");
 	let id = DS_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -142,6 +171,33 @@ impl Drop for CleanupDir {
 	fn drop(&mut self) {
 		let _ = std::fs::remove_dir_all(&self.0);
 	}
+}
+
+/// Closes a datastore the run has finished with and reclaims the directory it
+/// was built in.
+///
+/// Dropping the last `Arc<Datastore>` does not close a file-backed engine: its
+/// own background threads hold a
+/// handle to the store until `shutdown` stops them. A store that is only
+/// dropped stays open for the rest of the process, its memory resident, its
+/// background work still running and its files still held, and removing its
+/// directory then unlinks files it has open without freeing their space. So a
+/// file-backed store is shut down first, closes when `dbs` — which must be its
+/// last handle — drops, and only then is the temp root emptied. Only one
+/// datastore is live at a time, so emptying the whole root is safe.
+///
+/// On the in-memory backend dropping `dbs` frees the store and there is no
+/// directory, so nothing else is done.
+async fn retire_datastore(dbs: Arc<Datastore>, config: &BenchConfig) {
+	let Some(root) = config.bench_root.as_deref() else {
+		return;
+	};
+	if let Err(e) = dbs.shutdown().await {
+		println!("Warning: could not shut down a bench datastore: {e}");
+	}
+	drop(dbs);
+	let _ = std::fs::remove_dir_all(root);
+	let _ = std::fs::create_dir_all(root);
 }
 
 /// Creates (clean) the temp root for this run's file-backed datastores.
@@ -160,6 +216,9 @@ struct CmdConfig<'a> {
 	save: bool,
 	quick: bool,
 	json: Option<&'a String>,
+	/// The datastore configuration keys given with `--config`, for every datastore the run
+	/// builds.
+	config: Vec<(String, String)>,
 	store: StoreConfig<'a>,
 }
 
@@ -173,6 +232,10 @@ impl<'a> CmdConfig<'a> {
 		let save = current.get_flag("save");
 		let quick = current.get_flag("quick");
 		let json = current.get_one::<String>("json");
+		let config = current
+			.get_many::<(String, String)>("config")
+			.map(|pairs| pairs.cloned().collect())
+			.unwrap_or_default();
 
 		Self {
 			path,
@@ -182,6 +245,7 @@ impl<'a> CmdConfig<'a> {
 			save,
 			quick,
 			json,
+			config,
 			store: StoreConfig::from_matches(parent),
 		}
 	}
@@ -191,7 +255,17 @@ impl<'a> CmdConfig<'a> {
 /// verdict. Kept in sync with the human-readable summary printed in `run()`:
 /// a difference that isn't statistically significant, or is significant but
 /// inside the noise threshold, is reported as `within-noise`.
-fn comparison_verdict(compare: &ComparisonData) -> &'static str {
+fn comparison_verdict(compare: &Comparison) -> &'static str {
+	// A bench that returns a different number of rows than its baseline did is
+	// not a faster or slower version of the same work — it is different work,
+	// and reporting a percentage against it invites the reader to blame the
+	// code. This is not hypothetical: #635 changed mock expansion, which changed
+	// the seeded `rand::*` draw order, which changed how many rows the scan
+	// benches match; the timings moved up to 2.4x with the engine untouched.
+	if compare.workload_changed() {
+		return "workload-changed";
+	}
+	let compare = &compare.data;
 	if compare.p_value >= DEFAULT_SIGNIFICANCE_THRESHOLD {
 		return "within-noise";
 	}
@@ -205,6 +279,45 @@ fn comparison_verdict(compare: &ComparisonData) -> &'static str {
 	}
 }
 
+/// A baseline comparison, with enough of the baseline's provenance to say
+/// whether the comparison is meaningful.
+struct Comparison {
+	data: ComparisonData,
+	/// Commit the baseline was measured at, when it was recorded.
+	baseline_commit: Option<String>,
+	/// When the baseline was measured. A baseline that predates the benches it
+	/// is compared against reports a difference that no code caused.
+	baseline_datetime: Option<Datetime>,
+	baseline_rows: Option<i64>,
+	rows: Option<i64>,
+}
+
+impl Comparison {
+	/// Whether this bench returned a different number of rows than the baseline
+	/// did. Unknown on either side (a GQL bench, or a baseline written before
+	/// `rows` was recorded) counts as unchanged, so an unknown never
+	/// manufactures a warning.
+	fn workload_changed(&self) -> bool {
+		match (self.baseline_rows, self.rows) {
+			(Some(base), Some(now)) => base != now,
+			_ => false,
+		}
+	}
+
+	/// Whole days between the baseline measurement and now.
+	fn baseline_age_days(&self) -> Option<i64> {
+		let taken = self.baseline_datetime.as_ref()?;
+		let now = Datetime::now();
+		Some((*now - **taken).num_days())
+	}
+}
+
+/// A baseline older than this is reported alongside every comparison drawn
+/// against it. The nightly is meant to refresh these every 24 hours, so
+/// anything past a couple of days means the nightly has been failing and the
+/// board is measuring against whatever it last managed to store.
+const BASELINE_STALE_DAYS: i64 = 2;
+
 /// Per-bench comparison against the fetched baseline. Percentages are relative to
 /// the baseline (positive = slower than baseline = regression).
 #[derive(serde::Serialize)]
@@ -216,6 +329,17 @@ struct JsonComparison {
 	change_hi_pct: f64,
 	p_value: f64,
 	verdict: &'static str,
+	/// Commit the baseline was measured at, so a comparison can be traced to the
+	/// code that produced the number it is drawn against. `None` for rows stored
+	/// before the commit was recorded.
+	base_commit: Option<String>,
+	/// Age of the baseline in whole days. The nightly refreshes these every 24
+	/// hours, so anything larger means it has been failing and this comparison
+	/// spans every merge since.
+	base_age_days: Option<i64>,
+	/// Rows the baseline's statement returned, against `JsonBench::rows`. A
+	/// difference means the two runs measured different work.
+	base_rows: Option<i64>,
 }
 
 /// One bench's result in the `--json` report. Times are in seconds.
@@ -226,6 +350,10 @@ struct JsonBench {
 	median_lo_secs: f64,
 	median_hi_secs: f64,
 	mean_secs: f64,
+	/// Rows this bench's statement returned, or `None` for a dialect whose
+	/// result is not a row list. Recorded so a change in the *workload* is
+	/// distinguishable from a change in its speed.
+	rows: Option<i64>,
 	comparison: Option<JsonComparison>,
 }
 
@@ -246,26 +374,32 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 		)
 	}
 
+	// Before any datastore is built, so every HNSW index in the run is built from
+	// the same graph seed.
+	pin_hnsw_build_seed();
+
 	let mut load_errors = Vec::new();
 
 	let cfg = CmdConfig::from_matches(parent, current);
-	let set = CaseSet::load_surrealql_files(cfg.path, &mut load_errors).await?;
+	if cfg.save && !cfg.config.is_empty() {
+		bail!(
+			"--config cannot be combined with --save: a run under a datastore configuration of its own would replace the stored baseline. Use --json to compare runs"
+		);
+	}
+	let set = CaseSet::load_test_files(cfg.path, &mut load_errors).await?;
 
 	// Resolve the backend. The in-memory engine needs no storage; file-backed
-	// engines (rocksdb/surrealkv) build into a temporary directory (a fresh
+	// engines (surrealkv) build into a temporary directory (a fresh
 	// subdir per datastore). TiKV needs an external cluster, so it's unsupported.
 	let bench_root = match cfg.backend {
 		Backend::Memory => None,
-		#[cfg(feature = "backend-rocksdb")]
-		Backend::RocksDb => Some(make_bench_root()?),
-		#[cfg(not(feature = "backend-rocksdb"))]
-		Backend::RocksDb => {
-			bail!("RocksDb benchmarking requires building with `--features backend-rocksdb`")
-		}
 		// surrealkv is always available under the `bench` feature (kv-surrealkv).
 		Backend::SurrealKv => Some(make_bench_root()?),
 		Backend::TikV => {
 			bail!("TiKV is not supported for benchmarking (it needs an external cluster)")
+		}
+		Backend::Other => {
+			bail!("the `other` backend names a server's engine; benchmarks open their own")
 		}
 	};
 	// Removes the whole temp tree when `run()` returns; declared here so it drops
@@ -274,11 +408,16 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 
 	let config = BenchConfig {
 		backend: cfg.backend,
+		config: cfg.config.clone(),
 		bench_root,
-		new_planner: NewPlannerStrategyConfig::BestEffortRo,
 	};
 
 	let mut store = get_store(&cfg.store).await?;
+
+	// Metadata embedded into every stored measurement (and used to key the
+	// baseline by transport). Benches currently run embedded; the remote
+	// transports populate this differently.
+	let meta = crate::cmd::bench::meta::RunMetadata::gather("embedded", None);
 
 	let core_version = Version::parse(VERSION).unwrap();
 	let set_builder = RunSetBuilder::new(&set, &mut load_errors)
@@ -381,12 +520,36 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	// matrix variants with different chains land in distinct groups.
 	for run in runs.iter_mut() {
 		let chain = run.config.imports.as_deref().unwrap_or(&run.case.imports);
-		run.config.group_key = calc_group_key(chain, &run.case.test.config.parsed, cfg.backend);
+		run.config.group_key = calc_group_key(
+			chain,
+			&run.case.test.config.parsed,
+			cfg.backend,
+			&run.case.test.source,
+			&cfg.config,
+		);
 	}
 
 	if runs.is_empty() {
 		println!("No benchmarks found, exiting");
 		return Ok(());
+	}
+
+	// `--quick` leaves out the benches that opt out of it (`[bench] quick =
+	// false`), naming each so an explicit quick run of one does not read as a
+	// filter that matched nothing. A set they empty still reaches the common
+	// finalization, so a requested `--json` report is written (empty) and load
+	// errors are reported.
+	if cfg.quick {
+		runs.retain(|run| {
+			let keep = run.case.test.config.parsed.bench.quick;
+			if !keep {
+				println!(
+					"Skipping {} (`quick = false`: one iteration outlasts quick mode's {QUICK_MAX_TIME:?} cap)",
+					run.name()
+				);
+			}
+			keep
+		});
 	}
 
 	// Split runs into read-only (groupable) and mutating (`rebuild = true`). Only
@@ -413,7 +576,8 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	}
 	readonly.sort_by_key(|run| first_seen[&run.config.group_key]);
 
-	let mut measurements: Vec<(String, MeasurementData, Option<ComparisonData>)> = Vec::new();
+	let mut measurements: Vec<(String, MeasurementData, Option<i64>, Option<Comparison>)> =
+		Vec::new();
 
 	// Read-only benches: build + populate + compact one datastore per group, then
 	// run every member against it. The whole group runs on a single runtime so the
@@ -435,7 +599,7 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 		for run in group {
 			baselines.push(
 				store
-					.fetch_latest(&run.name(), cfg.backend)
+					.fetch_latest(&run.name(), cfg.backend, &meta.transport)
 					.await
 					.context("Could not fetch latest measurement data")?,
 			);
@@ -494,13 +658,16 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 								run.name()
 							);
 						}
-						BenchRunResult::Ok(measurement, compare) => {
+						BenchRunResult::Ok(measurement, rows, compare) => {
 							if cfg.save
 								&& let Err(e) = store
 									.add(BenchMarkRun {
 										measurement: measurement.clone(),
 										path: run.name(),
 										backend: cfg.backend,
+										meta: meta.clone(),
+										commit: current_commit(),
+										rows,
 									})
 									.await
 							{
@@ -509,38 +676,35 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 									run.name()
 								);
 							}
-							measurements.push((run.name(), measurement, compare));
+							measurements.push((run.name(), measurement, rows, compare));
 						}
 					}
 				}
 			}
 		}
 
-		// The group's datastore has dropped (run_group returned), so reclaim the
-		// file-backed store dir(s) before the next group. Only one group is live at
-		// a time, so wiping the whole root here is safe.
-		if let Some(root) = config.bench_root.as_deref() {
-			let _ = std::fs::remove_dir_all(root);
-			let _ = std::fs::create_dir_all(root);
-		}
+		release_freed_heap();
 
 		idx = end;
 	}
 
 	// Mutating benches: rebuild a fresh datastore each iteration (never grouped).
 	// On a file backend that re-imports the dataset to disk every iteration, which
-	// is impractically slow, so they are restricted to the in-memory backend.
+	// is impractically slow for most of them, so they run on the in-memory backend
+	// unless the bench sets `rebuild-file-backend` — the opt-in for a bench whose
+	// subject is the storage layer, where `mem` measures the wrong thing.
 	for run in rebuild.into_iter() {
-		if cfg.backend != Backend::Memory {
+		if cfg.backend != Backend::Memory && !run.case.test.config.parsed.bench.rebuild_file_backend
+		{
 			println!(
-				"Skipping {} (`rebuild = true` benches only run on the `mem` backend)",
+				"Skipping {} (`rebuild = true` benches run on the `mem` backend unless they set `rebuild-file-backend`)",
 				run.name()
 			);
 			continue;
 		}
 
 		let baseline = store
-			.fetch_latest(&run.name(), cfg.backend)
+			.fetch_latest(&run.name(), cfg.backend, &meta.transport)
 			.await
 			.context("Could not fetch latest measurement data")?;
 
@@ -576,32 +740,62 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 					run.name()
 				);
 			}
-			BenchRunResult::Ok(measurement, compare) => {
+			BenchRunResult::Ok(measurement, rows, compare) => {
+				// Persist each result the moment its bench finishes, not in a trailing
+				// pass over the whole suite, so a run killed partway (job timeout,
+				// runner eviction, panic) keeps every completed bench instead of
+				// discarding the lot. The store is a per-bench time series, so a
+				// partial run is well-formed. Non-fatal: a transient store error must
+				// not sink an otherwise-good run.
 				if cfg.save
 					&& let Err(e) = store
 						.add(BenchMarkRun {
 							measurement: measurement.clone(),
 							path: run.name(),
 							backend: cfg.backend,
+							meta: meta.clone(),
+							commit: current_commit(),
+							rows,
 						})
 						.await
 				{
 					eprintln!("Warning: could not store measurement for {}: {e:#}", run.name());
 				}
-				measurements.push((run.name(), measurement, compare));
+				measurements.push((run.name(), measurement, rows, compare));
 			}
 		}
 
-		if let Some(root) = config.bench_root.as_deref() {
-			let _ = std::fs::remove_dir_all(root);
-			let _ = std::fs::create_dir_all(root);
-		}
+		release_freed_heap();
 	}
 
-	for (name, m, compare) in &measurements {
+	for (name, m, _rows, compare) in &measurements {
 		println!(" - {}", name);
 
 		if let Some(compare) = compare {
+			// Said before the percentage, because the percentage is not worth
+			// reading once either of these holds.
+			if compare.workload_changed() {
+				println!(
+					"       WORKLOAD CHANGED: returns {} rows, baseline returned {} — \
+					 this is different work, not a speed difference",
+					compare.rows.unwrap_or_default(),
+					compare.baseline_rows.unwrap_or_default(),
+				);
+			}
+			if let Some(age) = compare.baseline_age_days()
+				&& age > BASELINE_STALE_DAYS
+			{
+				println!(
+					"       STALE BASELINE: measured {age} days ago{} — the comparison \
+					 below spans every merge since",
+					match &compare.baseline_commit {
+						Some(c) => format!(" at {}", c.chars().take(9).collect::<String>()),
+						None => String::new(),
+					}
+				);
+			}
+
+			let compare = &compare.data;
 			let signficant = compare.p_value < DEFAULT_SIGNIFICANCE_THRESHOLD;
 			if !signficant {
 				println!("       No change in performance detected")
@@ -712,19 +906,23 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	if let Some(json_path) = cfg.json {
 		let benches = measurements
 			.iter()
-			.map(|(name, m, compare)| JsonBench {
+			.map(|(name, m, rows, compare)| JsonBench {
 				name: name.clone(),
 				median_secs: m.median.point,
 				median_lo_secs: m.median.lower_bound,
 				median_hi_secs: m.median.upper_bound,
 				mean_secs: m.mean.point,
+				rows: *rows,
 				comparison: compare.as_ref().map(|c| JsonComparison {
-					base_median_secs: c.base_median,
-					change_pct: c.dist_mean.point * 100.0,
-					change_lo_pct: c.dist_mean.lower_bound * 100.0,
-					change_hi_pct: c.dist_mean.upper_bound * 100.0,
-					p_value: c.p_value,
+					base_median_secs: c.data.base_median,
+					change_pct: c.data.dist_mean.point * 100.0,
+					change_lo_pct: c.data.dist_mean.lower_bound * 100.0,
+					change_hi_pct: c.data.dist_mean.upper_bound * 100.0,
+					p_value: c.data.p_value,
 					verdict: comparison_verdict(c),
+					base_commit: c.baseline_commit.clone(),
+					base_age_days: c.baseline_age_days(),
+					base_rows: c.baseline_rows,
 				}),
 			})
 			.collect();
@@ -753,23 +951,57 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	Ok(())
 }
 
-pub fn builder_from_config(config: &TestConfig) -> Builder {
+pub fn builder_from_config(config: &TestConfig, run: &[(String, String)]) -> Result<Builder> {
 	let capabilities = resolve_capabilities(config);
 
-	let builder = Datastore::builder();
+	// Quiescent, because a benchmark has to measure the statement rather than
+	// whatever the background tasks happen to be doing beside it: compaction,
+	// changefeed GC, tombstone reclaim and the cluster heartbeat all run on the
+	// same cores as the timed section. The indexes the benches read are still
+	// compacted — `build_and_populate` drains the compaction queue itself once
+	// the dataset is loaded, so that cost lands before the measurement instead
+	// of during it, and the explicit drain no longer contends with the
+	// background task for the `IndexCompaction` lease.
+	let builder = Datastore::builder().without_maintenance_tasks();
+	// Graph-fold benches drop the fold threshold to one so the single priming
+	// execution observes every scope it traverses, however small — the
+	// post-import fold pass in `build_and_populate` then packs exactly those
+	// scopes. The threshold is a builder-level override, not a config key.
+	let builder = if config.bench.graph_fold || config.bench.graph_numeric_ids {
+		builder.with_graph_fold_threshold(1)
+	} else {
+		builder
+	};
+	// The keys of the datastore are one map: the bench's own, then those of the run, which never
+	// override the bench's.
+	let mut keys = surrealdb_cnf::ConfigMap::empty();
+	if config.bench.graph_numeric_ids {
+		if run.iter().any(|(key, _)| key == "graph_numeric_ids") {
+			bail!("--config graph_numeric_ids collides with the key the bench sets itself");
+		}
+		keys = keys.with_key_value("graph_numeric_ids", "true");
+	}
+	for (key, value) in run {
+		keys = keys.with_key_value(key.as_str(), value.as_str());
+	}
+	let builder = if config.bench.graph_numeric_ids || !run.is_empty() {
+		builder.with_config(keys)
+	} else {
+		builder
+	};
 	let builder = if capabilities.allows_live_query_notifications() {
 		let (send, _) = channel::bounded(15_000);
 		builder.with_notify(send)
 	} else {
 		builder
 	};
-	builder.with_capabilities(capabilities)
+	Ok(builder.with_capabilities(capabilities))
 }
 
 #[allow(clippy::large_enum_variant)]
 enum BenchRunResult {
 	Import(ImportFailure),
-	Ok(MeasurementData, Option<ComparisonData>),
+	Ok(MeasurementData, Option<i64>, Option<Comparison>),
 	/// Too few samples were collected to compute statistics — a bench whose single
 	/// iteration exceeds `max_time` collects only one sample, and the stats need at
 	/// least two. Reported and skipped instead of panicking.
@@ -781,12 +1013,14 @@ enum BenchRunResult {
 /// prepared datastore.
 enum BenchStatement {
 	SurrealQl,
+	PgSql,
+	MySql,
 	/// A parsed-and-lowered GQL plan. Parse + lowering happen once in
 	/// `prepare`, so the timed iterations measure plan execution only (mirroring
 	/// the GraphQL arm, which generates its schema up front). The plan is cloned
-	/// per iteration because `process_gql` consumes it by value.
+	/// per iteration because submitting it consumes it by value.
 	Gql {
-		plan: surrealdb_core::gql::PreparedGqlQuery,
+		plan: surrealdb_gql::PreparedGqlQuery,
 	},
 	GraphQl {
 		schema: async_graphql::dynamic::Schema,
@@ -810,22 +1044,22 @@ impl BenchStatement {
 	) -> Result<Self> {
 		match run.case.test.dialect {
 			Dialect::SurrealQl => Ok(Self::SurrealQl),
+			Dialect::PgSql => Ok(Self::PgSql),
+			Dialect::MySql => Ok(Self::MySql),
 			Dialect::Gql => {
 				// Parse + lower the `.gql` source once, exactly as the run path
 				// does (see `cmd::run::run_test_with_dbs`), so the timed loop
-				// measures only `process_gql`.
-				let settings = surrealdb_core::gql::GqlParserSettings::default();
+				// measures only execution.
+				let settings = surrealdb_gql::GqlParserSettings::default();
 				let source = run.case.test.source.as_bytes();
-				let plan = surrealdb_core::gql::parse_to_plan_with_settings(
-					&run.case.test.source,
-					settings,
-				)
-				.map_err(|e| {
-					anyhow!(
-						"Failed to parse/lower GQL bench statement: {}",
-						e.render_on_bytes(source)
-					)
-				})?;
+				let plan =
+					surrealdb_gql::parse_to_plan_with_settings(&run.case.test.source, settings)
+						.map_err(|e| {
+							anyhow!(
+								"Failed to parse/lower GQL bench statement: {}",
+								e.render_on_bytes(source)
+							)
+						})?;
 				Ok(Self::Gql {
 					plan,
 				})
@@ -845,25 +1079,77 @@ impl BenchStatement {
 		}
 	}
 
-	/// Executes the bench statement once. GraphQL responses carry their
-	/// errors in-band, so they are checked here — a bench that errors every
-	/// iteration would otherwise silently measure nothing.
+	/// Executes the bench statement once.
+	///
+	/// Both SurrealQL and GraphQL carry statement errors in-band rather than
+	/// as a failed call, so both are checked here: a bench whose statement
+	/// errors every iteration measures the error path, and the cost of
+	/// failing is unrelated to — and usually far cheaper than — the work the
+	/// bench claims to time.
+	/// Returns the number of rows the statement produced, which the caller
+	/// records alongside the timing. Two runs of a bench that return different
+	/// row counts are not measuring the same work, however comparable their
+	/// timings look — see [`JsonBench::rows`].
 	async fn execute(
 		&self,
 		run: &TestRun<BenchRunConfig>,
 		dbs: &Arc<Datastore>,
 		session: &Session,
-	) -> Result<()> {
+	) -> Result<Option<i64>> {
 		match self {
 			Self::SurrealQl => {
-				let _ = dbs.execute(&run.case.test.source, session, None).await?;
+				let results = dbs.execute(&run.case.test.source, session, None).await?;
+				let mut rows = 0i64;
+				for (idx, result) in results.iter().enumerate() {
+					match &result.result {
+						Err(error) => bail!("bench statement {idx} returned an error: {error}"),
+						// One row for a non-array result, so a bench selecting a
+						// single record still counts as work rather than as zero.
+						Ok(value) => {
+							rows += value.as_array().map_or(1, |a| a.len() as i64);
+						}
+					}
+				}
+				return Ok(Some(rows));
+			}
+			Self::PgSql => {
+				let results = dbs
+					.run(QueryRequest::new(QuerySource::pgsql(&run.case.test.source), session))
+					.await?;
+				let mut rows = 0i64;
+				for (idx, result) in results.iter().enumerate() {
+					match &result.result {
+						Err(error) => bail!("bench statement {idx} returned an error: {error}"),
+						Ok(value) => {
+							rows += value.as_array().map_or(1, |a| a.len() as i64);
+						}
+					}
+				}
+				return Ok(Some(rows));
+			}
+			Self::MySql => {
+				let results = dbs
+					.run(QueryRequest::new(QuerySource::mysql(&run.case.test.source), session))
+					.await?;
+				let mut rows = 0i64;
+				for (idx, result) in results.iter().enumerate() {
+					match &result.result {
+						Err(error) => bail!("bench statement {idx} returned an error: {error}"),
+						Ok(value) => {
+							rows += value.as_array().map_or(1, |a| a.len() as i64);
+						}
+					}
+				}
+				return Ok(Some(rows));
 			}
 			Self::Gql {
 				plan,
 			} => {
-				// `process_gql` takes the plan by value, so each iteration
+				// Submitting the plan takes it by value, so each iteration
 				// executes a fresh clone of the once-lowered plan.
-				let _ = dbs.process_gql(plan.clone(), session, None).await?;
+				let _ = dbs
+					.run(QueryRequest::new(QuerySource::Plan(vec![plan.clone().0]), session))
+					.await?;
 			}
 			Self::GraphQl {
 				schema,
@@ -885,19 +1171,42 @@ impl BenchStatement {
 				}
 			}
 		}
-		Ok(())
+		// GQL and GraphQL results are not shaped as a row list, so they carry no
+		// row count and are compared on timing alone.
+		Ok(None)
 	}
 }
 
 /// Seed used to make benchmark datasets deterministic. Each dataset build
-/// reseeds the engine RNG (see `surrealdb_core::rnd`) so `rand::*` values and
+/// reseeds the engine RNG (see `surrealdb_expr::val::rnd`) so `rand::*` values and
 /// `|record:N|` ids are identical across runs and independent of benchmark
 /// order. Override with `SURREAL_RAND_SEED` to sanity-check results against a
 /// different, but still fixed, dataset draw; the variable is parsed once by
-/// `surrealdb_core::cnf::RAND_SEED` (which warns on a malformed value).
+/// `surrealdb_cnf::RAND_SEED` (which warns on a malformed value).
 fn dataset_seed() -> u64 {
 	const DEFAULT_DATASET_SEED: u64 = 0x5EED_B0A7;
-	surrealdb_core::cnf::RAND_SEED.unwrap_or(DEFAULT_DATASET_SEED)
+	surrealdb_cnf::RAND_SEED.unwrap_or(DEFAULT_DATASET_SEED)
+}
+
+/// Pin HNSW graph construction to a fixed seed for the whole run.
+///
+/// HNSW assigns each element a random layer at insert time, so an unseeded build
+/// produces a different graph on every run and the same kNN query then traverses
+/// a different number of nodes. That variance dwarfs any regression the suite is
+/// meant to catch, which makes an unseeded ANN bench useless as a guardrail.
+///
+/// The harness owns this default rather than the CI workflows so a local
+/// `cargo make bench` and a nightly run build the same graph without anyone
+/// having to remember an environment variable. `SURREAL_HNSW_BUILD_SEED` still
+/// takes precedence (see [`surrealdb_cnf::hnsw_build_seed`]), so a single run can
+/// be re-seeded to check that a result is not an artefact of this one graph.
+///
+/// Changing the constant re-shapes every HNSW graph in the suite, so ANN
+/// measurements taken before the change are no longer comparable with ones taken
+/// after it.
+fn pin_hnsw_build_seed() {
+	const DEFAULT_HNSW_BUILD_SEED: u64 = 0x5EED_11A5;
+	surrealdb_cnf::set_default_hnsw_build_seed(DEFAULT_HNSW_BUILD_SEED);
 }
 
 /// Builds a fresh datastore, reseeds the engine RNG, runs the (effective) import
@@ -905,7 +1214,9 @@ fn dataset_seed() -> u64 {
 /// execute timed read-only statements.
 ///
 /// Returns `Ok(Err(..))` when an import fails so the caller can surface it as an
-/// [`BenchRunResult::Import`] / [`GroupOutcome::ImportFailed`].
+/// [`BenchRunResult::Import`] / [`GroupOutcome::ImportFailed`]. A datastore that
+/// fails to populate, through an import failure or an error, is retired here, so
+/// neither path leaves it open.
 ///
 /// Shared by the grouped read-only path (built once per dataset group, then reused
 /// across the group's benches) and, via [`prepare`], the per-iteration rebuild
@@ -917,30 +1228,115 @@ async fn build_and_populate(
 	config: &BenchConfig,
 	token: &tokio_util::sync::CancellationToken,
 ) -> Result<std::result::Result<Arc<Datastore>, ImportFailure>> {
-	let dbs = Arc::new(
-		builder_from_config(&run.case.test.config.parsed)
-			.build_with_path(&datastore_conn(config))
-			.await?,
-	);
+	let dbs = builder_from_config(&run.case.test.config.parsed, &config.config)?
+		.build_with_path(&datastore_conn(config))
+		.await?;
+	match populate(run, token, &dbs).await {
+		Ok(None) => Ok(Ok(dbs)),
+		Ok(Some(e)) => {
+			retire_datastore(dbs, config).await;
+			Ok(Err(e))
+		}
+		Err(e) => {
+			retire_datastore(dbs, config).await;
+			Err(e)
+		}
+	}
+}
 
+/// Everything [`build_and_populate`] does once the datastore exists: reseed,
+/// import, compact and, for a graph-fold bench, fold. Returns the failure when
+/// an import fails.
+async fn populate(
+	run: &TestRun<BenchRunConfig>,
+	token: &tokio_util::sync::CancellationToken,
+	dbs: &Arc<Datastore>,
+) -> Result<Option<ImportFailure>> {
 	// The import session only targets the namespace/database — data lands as owner
 	// (see `run_imports_list`), so it is independent of the bench's own auth. The
 	// timed statement gets its own session per bench.
-	let session =
-		util::session_from_test_config(&run.case.test.config.parsed, config.new_planner.into());
+	let session = util::session_from_test_config(&run.case.test.config.parsed);
 
-	surrealdb_core::rnd::reseed(dataset_seed());
+	surrealdb_expr::val::rnd::reseed(dataset_seed());
 
 	// Use the per-variant dataset import chain (from `[bench].datasets`) when one
 	// was selected, otherwise fall back to the bench's own resolved imports.
 	let imports = run.config.imports.as_deref().unwrap_or(&run.case.imports);
-	if let Some(e) = util::run_imports_list(imports, session, &dbs).await? {
-		return Ok(Err(e));
+	let compatibility = run.case.test.config.parsed.env.compatibility;
+	if let Some(e) = util::run_imports_list(imports, session, compatibility, dbs).await? {
+		return Ok(Some(e));
 	}
 
 	Datastore::index_compaction(dbs.clone(), Duration::from_secs(1), token.clone()).await?;
 
-	Ok(Ok(dbs))
+	// Graph-fold benches: execute the statement once as the priming pass — the
+	// fold queue is observation-driven, so exactly the scopes the timed
+	// statement traverses get folded — then drain the queue with the same
+	// routine the background task runs. Both land here, before the warmup, so
+	// the measured iterations read the folded layout without paying for it.
+	let bench = &run.case.test.config.parsed.bench;
+	if bench.graph_fold || bench.graph_numeric_ids {
+		if bench.rebuild {
+			bail!(
+				"`graph-fold` / `graph-numeric-ids` require `rebuild = false`: the fold \
+				 priming pass would execute a mutating statement an extra, unmeasured time"
+			);
+		}
+		if !matches!(run.case.test.dialect, Dialect::SurrealQl) {
+			bail!("`graph-fold` / `graph-numeric-ids` require a SurrealQL bench statement");
+		}
+		let session = util::session_from_test_config(&run.case.test.config.parsed);
+		let results = dbs.execute(&run.case.test.source, &session, None).await?;
+		for (idx, result) in results.iter().enumerate() {
+			if let Err(error) = &result.result {
+				bail!("graph-fold priming statement {idx} returned an error: {error}");
+			}
+		}
+		// A single pass drains the queue as it stood when the pass began; a
+		// very large scope can leave residual entries behind, so run passes
+		// until one reports no work. The pass count is bounded so a scope
+		// that keeps re-enqueuing itself fails with a diagnostic instead of
+		// spinning until the job timeout.
+		const MAX_FOLD_DRAIN_PASSES: usize = 100;
+		let mut residual = usize::MAX;
+		for _ in 0..MAX_FOLD_DRAIN_PASSES {
+			let (iterations, errors) =
+				Datastore::graph_fold(dbs.clone(), Duration::from_secs(1), token.clone()).await?;
+			if errors > 0 {
+				bail!("the graph-fold pass reported {errors} scope errors");
+			}
+			residual = iterations;
+			if iterations == 0 {
+				break;
+			}
+		}
+		if residual != 0 {
+			bail!(
+				"the graph-fold drain did not quiesce after {MAX_FOLD_DRAIN_PASSES} passes \
+				 ({residual} scopes still queued on the last pass)"
+			);
+		}
+	}
+
+	Ok(None)
+}
+
+/// Prepares the bench statement against a datastore [`prepare`] just built and
+/// runs it once, returning the rows it produced and how long the statement took
+/// — the preparation is not timed.
+///
+/// The statement is dropped before this returns, whatever the outcome: a GraphQL
+/// statement's schema holds handles to the datastore, and the caller retires
+/// `dbs` next, which needs the last one.
+async fn execute_on_fresh(
+	run: &TestRun<BenchRunConfig>,
+	dbs: &Arc<Datastore>,
+	session: &Session,
+) -> Result<(Option<i64>, Duration)> {
+	let statement = BenchStatement::prepare(run, dbs, session).await?;
+	let start = Instant::now();
+	let produced = statement.execute(run, dbs, session).await?;
+	Ok((produced, start.elapsed()))
 }
 
 /// Builds a populated datastore plus the per-bench execute session. Used by the
@@ -953,10 +1349,7 @@ async fn prepare(
 	match build_and_populate(run, config, token).await? {
 		Err(e) => Ok(Err(e)),
 		Ok(dbs) => {
-			let session = util::session_from_test_config(
-				&run.case.test.config.parsed,
-				config.new_planner.into(),
-			);
+			let session = util::session_from_test_config(&run.case.test.config.parsed);
 			Ok(Ok((dbs, session)))
 		}
 	}
@@ -984,7 +1377,7 @@ async fn run_group(
 	group: &[TestRun<BenchRunConfig>],
 	config: &BenchConfig,
 	quick: bool,
-	baselines: Vec<Option<MeasurementData>>,
+	baselines: Vec<Option<Baseline>>,
 ) -> Result<GroupOutcome> {
 	let token = tokio_util::sync::CancellationToken::new();
 
@@ -996,12 +1389,20 @@ async fn run_group(
 
 	// Each member runs against the shared `dbs`; its per-bench result (`Ok` or
 	// `InsufficientSamples`) is returned to `run()` for storing/printing.
-	let mut results = Vec::with_capacity(group.len());
-	for (run, baseline) in group.iter().zip(baselines) {
-		results.push(run_bench(run, config, baseline, quick, Some(dbs.clone())).await?);
+	let ran = async {
+		let mut results = Vec::with_capacity(group.len());
+		for (run, baseline) in group.iter().zip(baselines) {
+			results.push(run_bench(run, config, baseline, quick, Some(dbs.clone())).await?);
+		}
+		anyhow::Ok(results)
 	}
+	.await;
+	// Every member's handle dropped with its `run_bench`, so this is the last.
+	// Retired before any member's error propagates, so a failed run leaves no
+	// store open.
+	retire_datastore(dbs, config).await;
 
-	Ok(GroupOutcome::Ran(results))
+	Ok(GroupOutcome::Ran(ran?))
 }
 
 /// Emits a sentinel line on stderr delimiting the measured region of a bench,
@@ -1017,7 +1418,7 @@ fn bench_marker(name: &str) {
 async fn run_bench(
 	run: &TestRun<BenchRunConfig>,
 	config: &BenchConfig,
-	baseline: Option<MeasurementData>,
+	baseline: Option<Baseline>,
 	quick: bool,
 	shared_dbs: Option<Arc<Datastore>>,
 ) -> Result<BenchRunResult> {
@@ -1053,7 +1454,7 @@ async fn run_bench(
 		bench_config.measurement_time.0
 	};
 	let max_time = if quick {
-		Duration::from_secs(10)
+		QUICK_MAX_TIME
 	} else {
 		bench_config.max_time.0
 	};
@@ -1071,10 +1472,7 @@ async fn run_bench(
 	// data MUST set `rebuild = true`.
 	let shared = match shared_dbs {
 		Some(dbs) => {
-			let session = util::session_from_test_config(
-				&run.case.test.config.parsed,
-				config.new_planner.into(),
-			);
+			let session = util::session_from_test_config(&run.case.test.config.parsed);
 			let statement = BenchStatement::prepare(run, &dbs, &session).await?;
 			Some((dbs, session, statement))
 		}
@@ -1085,7 +1483,7 @@ async fn run_bench(
 	// vector-KNN query vector) is deterministic and independent of how many benches
 	// shared this datastore before it. (The rebuild path reseeds again inside each
 	// per-iteration `prepare`; harmless.)
-	surrealdb_core::rnd::reseed(dataset_seed());
+	surrealdb_expr::val::rnd::reseed(dataset_seed());
 
 	let before_warmup = Instant::now();
 	let mut count = 0usize;
@@ -1097,8 +1495,9 @@ async fn run_bench(
 				Ok(prepared) => prepared,
 				Err(e) => return Ok(BenchRunResult::Import(e)),
 			};
-			let statement = BenchStatement::prepare(run, &dbs, &session).await?;
-			statement.execute(run, &dbs, &session).await?;
+			let executed = execute_on_fresh(run, &dbs, &session).await;
+			retire_datastore(dbs, config).await;
+			executed?;
 		}
 
 		count += 1;
@@ -1131,29 +1530,40 @@ async fn run_bench(
 	);
 
 	// Mark the measured region so a profiler attaching mid-run (after the dataset
-	// import + warmup) samples only the timed statements.
+	// import + warmup) samples only the timed statements. The in-process
+	// profiler (`bench-pprof` feature + `BENCH_PPROF`) covers the same region.
 	bench_marker("__BENCH_MEASURE_START__");
+	let profiler = super::pprof::RegionProfiler::start();
 
 	let measure_start = Instant::now();
 	let mut iterations = Vec::new();
 	let mut samples = Vec::new();
+	// Row count of the last measured iteration. Every iteration runs the same
+	// statement against the same data, so any one of them describes the
+	// workload; taking the last avoids an extra untimed execution.
+	let mut rows: Option<i64> = None;
 	for _ in 0..sample_size {
 		let mut sample_duration = 0.0;
 		for _ in 0..iterations_per_samples {
 			if let Some((dbs, session, statement)) = shared.as_ref() {
 				let start = Instant::now();
-				statement.execute(run, dbs, session).await?;
+				let produced = statement.execute(run, dbs, session).await?;
 				sample_duration += start.elapsed().as_secs_f64();
+				rows = produced;
 			} else {
 				let (dbs, session) = match prepare(run, config, &token).await? {
 					Ok(prepared) => prepared,
 					Err(e) => return Ok(BenchRunResult::Import(e)),
 				};
-				let statement = BenchStatement::prepare(run, &dbs, &session).await?;
-
-				let start = Instant::now();
-				statement.execute(run, &dbs, &session).await?;
-				sample_duration += start.elapsed().as_secs_f64();
+				let executed = execute_on_fresh(run, &dbs, &session).await;
+				// Outside the timed region, as the import is: closing a file-backed
+				// store flushes it and drains its background work, so none of that
+				// work runs into the next iteration's measurement. Retired before an
+				// error propagates, so a failed run leaves no store open.
+				retire_datastore(dbs, config).await;
+				let (produced, elapsed) = executed?;
+				sample_duration += elapsed.as_secs_f64();
+				rows = produced;
 			}
 		}
 		iterations.push(iterations_per_samples as f64);
@@ -1173,6 +1583,7 @@ async fn run_bench(
 		}
 	}
 
+	profiler.finish();
 	bench_marker("__BENCH_MEASURE_END__");
 
 	// A bench whose single iteration exceeds `max_time` collects only one sample,
@@ -1182,7 +1593,104 @@ async fn run_bench(
 	let Some(measurement) = MeasurementData::from_iteration_times(iterations, samples) else {
 		return Ok(BenchRunResult::InsufficientSamples(collected));
 	};
-	let comp = baseline.map(|baseline| ComparisonData::compare(&baseline, &measurement));
+	let comp = baseline.map(|baseline| Comparison {
+		data: ComparisonData::compare(&baseline.measurement, &measurement),
+		baseline_commit: baseline.commit,
+		baseline_datetime: baseline.datetime,
+		baseline_rows: baseline.rows,
+		rows,
+	});
 
-	Ok(BenchRunResult::Ok(measurement, comp))
+	Ok(BenchRunResult::Ok(measurement, rows, comp))
+}
+
+/// Returns pages freed by a bench's datastore to the OS.
+///
+/// Called only where a datastore has just been dropped — a read-only dataset
+/// group finishing, or a mutating bench finishing — so its allocations are
+/// already free as far as the process is concerned, but glibc keeps them
+/// resident until something trims. Trimming holds the resident floor a later
+/// bench measures under at a repeatable level rather than at whatever the
+/// heaviest preceding dataset happened to leave behind.
+///
+/// This does not lower the process's peak, which is reached inside a group
+/// while its dataset is being imported and nothing has yet been freed. It is
+/// never called from inside a measured region, so its `madvise` cost cannot
+/// land in a reported median.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn release_freed_heap() {
+	unsafe extern "C" {
+		fn malloc_trim(pad: usize) -> i32;
+	}
+	// SAFETY: takes no pointers, borrows nothing, and is callable at any point
+	// in the life of a process.
+	unsafe { malloc_trim(0) };
+}
+
+/// No-op on targets whose allocator exposes no equivalent: musl has no
+/// `malloc_trim`, and macOS would need `malloc_zone_pressure_relief`.
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn release_freed_heap() {}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn pairs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+		pairs.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())).collect()
+	}
+
+	/// A key given with `--config` reaches the datastore a bench builds.
+	#[tokio::test]
+	async fn a_morsel_key_reaches_the_datastore() {
+		let run = pairs(&[
+			("morsel_split_rows", "1"),
+			("morsel_target_bytes", "1"),
+			("morsel_places", "0"),
+			("morsel_steal_always", "true"),
+		]);
+		let ds = builder_from_config(&TestConfig::default(), &run)
+			.expect("a builder")
+			.build_with_path("mem://")
+			.await
+			.expect("a datastore");
+		let held = ds.morsel_knobs();
+		assert!(held.contains(&("morsel_split_rows", "1".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_target_bytes", "1".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_places", "0".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_steal_always", "true".to_owned())), "{held:?}");
+	}
+
+	/// A run that gives no key builds the datastore the bench alone configures.
+	#[tokio::test]
+	async fn no_key_leaves_the_defaults() {
+		let ds = builder_from_config(&TestConfig::default(), &[])
+			.expect("a builder")
+			.build_with_path("mem://")
+			.await
+			.expect("a datastore");
+		let held = ds.morsel_knobs();
+		assert!(!held.contains(&("morsel_split_rows", "1".to_owned())), "{held:?}");
+	}
+
+	/// The keys of a run fold beside the keys a bench sets itself, and a key the bench sets is
+	/// never overridden by the run: a run that gives it is refused.
+	#[test]
+	fn a_key_the_bench_sets_is_not_overridden() {
+		let mut config = TestConfig::default();
+		config.bench.graph_numeric_ids = true;
+		assert!(builder_from_config(&config, &pairs(&[("morsel_places", "0")])).is_ok());
+		assert!(builder_from_config(&config, &pairs(&[("graph_numeric_ids", "false")])).is_err());
+	}
+
+	/// Stores built under different keys are never shared.
+	#[test]
+	fn the_group_key_holds_the_keys_of_the_run() {
+		let config = TestConfig::default();
+		let key =
+			|run: &[(&str, &str)]| calc_group_key(&[], &config, Backend::Memory, "", &pairs(run));
+		assert_eq!(key(&[]), key(&[]));
+		assert_ne!(key(&[]), key(&[("morsel_split_rows", "1")]));
+		assert_ne!(key(&[("morsel_split_rows", "1")]), key(&[("morsel_split_rows", "2")]));
+	}
 }

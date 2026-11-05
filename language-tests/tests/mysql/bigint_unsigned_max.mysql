@@ -1,0 +1,25 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "BIGINT UNSIGNED holds every value up to 18446744073709551615: the maximum is inserted as a literal, compared and read back exactly, and the value below the signed boundary is kept"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, v: 18446744073709551615u64 }, { id: 2, v: 9223372036854775808u64 }, { id: 3, v: 0u64 }]"
+
+[[test.results]]
+value = "[{ id: 1, v: 18446744073709551615u64 }, { id: 2, v: 9223372036854775808u64 }, { id: 3, v: 0u64 }]"
+
+[[test.results]]
+value = "[{ id: 1 }]"
+*/
+
+CREATE TABLE u64_max (id INT PRIMARY KEY, v BIGINT UNSIGNED);
+INSERT INTO u64_max (id, v) VALUES (1, 18446744073709551615), (2, 9223372036854775808), (3, 0);
+SELECT id, v FROM u64_max ORDER BY id;
+SELECT id FROM u64_max WHERE v = 18446744073709551615;

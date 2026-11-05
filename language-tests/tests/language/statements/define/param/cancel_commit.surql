@@ -1,5 +1,9 @@
 /**
 [test]
+reason = """
+A cancelled transaction undoes both its DEFINE PARAM and its LET: `$b` holds
+nothing again, and `$a` names no parameter.
+"""
 
 [[test.results]]
 value = "NONE"
@@ -14,7 +18,7 @@ error = "The query was not executed due to a cancelled transaction"
 value = "NONE"
 
 [[test.results]]
-value = "1"
+value = "NONE"
 
 [[test.results]]
 value = "NONE"

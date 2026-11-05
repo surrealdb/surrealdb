@@ -1,0 +1,39 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "The MySQL aliases of the integer, float, and string types map to the kind of the type they abbreviate, and the multi-word names read as one type"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+match = "array::len($result) == 1 AND type::is_string($result[0].id) AND object::remove($result[0], 'id') == { a: 1i8, b: 2i16, c: 3i32, d: 4i32, e: 5, f: 6i32, g: 1.5f32, h: 2.5f, i: 'x', j: 'y', k: 'z', l: 'w', m: 'v', n: 'u', o: 't' }"
+error = false
+
+[[test.results]]
+value = "[{ a: 1i8, b: 2i16, c: 3i32, d: 4i32, e: 5, f: 6i32, g: 1.5f32, h: 2.5f, i: 'x', j: 'y', k: 'z', l: 'w', m: 'v', n: 'u', o: 't' }]"
+*/
+
+CREATE TABLE aliases_t (
+	a INT1,
+	b INT2,
+	c INT3,
+	d INT4,
+	e INT8,
+	f MIDDLEINT,
+	g FLOAT4,
+	h FLOAT8,
+	i NCHAR(5),
+	j NVARCHAR(5),
+	k NATIONAL CHAR(5),
+	l NATIONAL VARCHAR(5),
+	m CHARACTER VARYING(5),
+	n LONG,
+	o LONG VARCHAR
+);
+INSERT INTO aliases_t (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o)
+	VALUES (1, 2, 3, 4, 5, 6, 1.5, 2.5, 'x', 'y', 'z', 'w', 'v', 'u', 't');
+SELECT a, b, c, d, e, f, g, h, i, j, k, l, m, n, o FROM aliases_t;

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -23,18 +22,19 @@ value = "NONE"
 value = "{ events: {  }, fields: {  }, indexes: { i: 'DEFINE INDEX i ON b FIELDS t FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]
-    FullTextScan [ctx: Db] [index: i, query: Hello]
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    FullTextScan [ctx: Db] [table: b, index: i, query: Hello]
 ''''
 
 [[test.results]]
-value = "[{ score: 0.5108256340026855f, title: '{Hello} World!' }]"
+value = "[{ score: 0.9808292388916016f, title: '{Hello} World!' }]"
 
 [[test.results]]
 value = "[{ id: b:4, t: 'Foo Bar' }]"
 
 [[test.results]]
-value = '[{ score: 0.9537026882171631f, title: { "0": [{ e: 7, s: 4 }] } }]'
+value = '[{ score: 1.355169415473938f, title: { "0": [{ e: 7, s: 4 }] } }]'
 
 [[test.results]]
 value = "[]"

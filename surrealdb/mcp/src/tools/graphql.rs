@@ -19,6 +19,11 @@ pub struct GraphqlParams {
 	/// Optional operation name, used to select an operation when the document
 	/// defines more than one named operation.
 	pub operation: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn execute(

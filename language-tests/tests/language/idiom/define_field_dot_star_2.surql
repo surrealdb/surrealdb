@@ -1,6 +1,6 @@
-
 /**
 [test]
+reason = "`*` in a field path stands for every value of an object and every element of an array, and a field defined in it needs `*` defined first"
 
 [[test.results]]
 value = "NONE"
@@ -12,50 +12,39 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Couldn't coerce value for field `emails.address` of `user:1`: Expected `string` but found `9`"
+value = "NONE"
 
 [[test.results]]
-value = """
-[
-	{
-		emails: {
-			address: 'me@me.com'
-		},
-		id: user:2
-	}
-]
-"""
-
+value = "NONE"
 
 [[test.results]]
-value = """
-[
-	{
-		emails: {
-			address: 'me@me.com'
-		},
-		id: user:3,
-		tags: [
-			{
-				value: 'bla'
-			}
-		]
-	}
-]
-"""
+value = "NONE"
 
+[[test.results]]
+error = "Cannot define field `emails.*.address`: the field `emails.*` it is nested in is not defined. Define `emails.*` first"
+
+[[test.results]]
+error = "Couldn't coerce value for field `book.*.title` of `user:1`: Expected `none | string` but found `9`"
+
+[[test.results]]
+value = "[{ book: { dune: { title: 'Dune' } }, id: user:2 }]"
+
+[[test.results]]
+value = "[{ id: user:3, tags: [{ value: 'bla' }] }]"
+
+[[test.results]]
+error = "Couldn't coerce value for field `tags.*.value` of `user:4`: Expected `none | string` but found `9`"
 */
 
-
-DEFINE FIELD emails.address ON TABLE user TYPE string;
--- Previously `emails.*` would be considered the same as `emails`
--- Resulting in two conflicting types for the same field. But now
--- `emails.*`, for objects, targets all values when `emails` is an object
--- and all entries when `emails` is an array.
-DEFINE FIELD emails.*.address ON TABLE user TYPE option<number>;
+DEFINE FIELD book ON TABLE user TYPE option<object>;
+DEFINE FIELD book.* ON TABLE user TYPE object;
+DEFINE FIELD book.*.title ON TABLE user TYPE option<string>;
+DEFINE FIELD tags ON TABLE user TYPE option<array<object>>;
 DEFINE FIELD tags.*.value ON TABLE user TYPE option<string>;
+DEFINE FIELD emails ON TABLE user TYPE option<object>;
+DEFINE FIELD emails.*.address ON TABLE user TYPE string;
 
-CREATE user:1 SET emails.address = 9;
-CREATE user:2 SET emails.address = "me@me.com";
-create user:3 set tags = [{ value: 'bla' }], emails.address = "me@me.com";
-
+CREATE user:1 SET book = { dune: { title: 9 } };
+CREATE user:2 SET book = { dune: { title: 'Dune' } };
+CREATE user:3 SET tags = [{ value: 'bla' }];
+CREATE user:4 SET tags = [{ value: 9 }];

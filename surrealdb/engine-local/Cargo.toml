@@ -1,0 +1,134 @@
+[package]
+name = "surrealdb-engine-local"
+publish = true
+documentation = "https://docs.rs/surrealdb-engine-local/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# Storage backends. At least one is required for the engine to be able to open
+# a datastore; which one is selected at runtime from the endpoint scheme.
+kv-mem = ["surrealdb-core/kv-mem"]
+kv-surrealkv = ["surrealdb-core/kv-surrealkv"]
+# Optional engine capabilities, forwarded to the database core.
+allocator = ["surrealdb-core/allocator"]
+allocation-tracking = ["surrealdb-core/allocation-tracking"]
+arbitrary = ["surrealdb-core/arbitrary"]
+http = ["surrealdb-core/http"]
+# Embedded CJK segmentation dictionaries, so an embedded engine can run
+# `TOKENIZERS SEGMENT(...)` the way the shipped server does. Off by default:
+# see `surrealdb-idx` for what enabling one costs.
+cjk = ["surrealdb-core/cjk"]
+jwks = ["surrealdb-core/jwks"]
+scripting = ["surrealdb-core/scripting"]
+
+[package.metadata.docs.rs]
+# docs.rs builds with the latest nightly, whose trait solver rejects the `diskann`
+# crate (`Arc<B>: Batch` not satisfied); `-Znext-solver=no` keeps it compiling there.
+rustc-args = ["-Znext-solver=no"]
+
+[dependencies]
+# workspace internal dependencies
+# The optional function families stay on: an embedded engine runs the same
+# functions as the server. Leaving one out takes a direct `surrealdb-core`
+# dependency.
+surrealdb-core = { workspace = true, default-features = false, features = [
+    "crypto-digest",
+    "crypto-password",
+    "html-sanitize",
+    "cjk-tokenizer",
+    "observability",
+    "vector-index",
+    "fulltext",
+    "regex-unicode",
+    "collate",
+    "geo",
+    "scram",
+    "text-diff",
+    "url",
+    "maintenance-tasks",
+    "api",
+    "files",
+    "search",
+    "encoding",
+    "egraph",
+] }
+surrealdb-engine-api = { workspace = true }
+surrealdb-cnf = { workspace = true }
+surrealdb-datastore = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-rpc = { workspace = true }
+surrealdb-types = { workspace = true }
+
+# Other crates (anyhow used for import stream compat with core's execute_import)
+anyhow.workspace = true
+async-channel.workspace = true
+futures.workspace = true
+tokio-util = { workspace = true, features = ["compat"] }
+tracing.workspace = true
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+tokio = { workspace = true, default-features = false, features = [
+    "rt",
+    "sync",
+] }
+
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+wasm-bindgen-futures.workspace = true
+wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, default-features = false, features = [
+    "fs",
+    "io-util",
+    "macros",
+    "rt",
+    "sync",
+    "time",
+] }
+
+[dev-dependencies]
+surrealdb-cnf = { workspace = true }
+criterion.workspace = true
+rand.workspace = true
+test-log = { workspace = true, features = ["trace"] }
+tokio = { workspace = true, features = [
+    "macros",
+    "rt-multi-thread",
+    "test-util",
+    "time",
+] }
+web-time.workspace = true
+
+# Checks that the engine configuration this crate builds reaches SurrealKV.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+surrealdb-kvs-surrealkv = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "datastore"
+harness = false
+
+[[bench]]
+name = "point_read"
+harness = false
+
+[[bench]]
+name = "scan"
+harness = false
+# It opens a SurrealKV store on disk.
+required-features = ["kv-surrealkv"]
+
+[[bench]]
+name = "stmt_fixed_cost"
+harness = false

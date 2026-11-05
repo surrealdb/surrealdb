@@ -1,0 +1,122 @@
+# Cancels every in-flight `pull_request` workflow run for a pull request when that
+# pull request is closed, whether it was merged (including force merges that bypass
+# branch protection) or closed without merging.
+#
+# GitHub does not cancel existing runs when a PR merges, so without this workflow
+# queued and running PR jobs keep consuming runner capacity after their results
+# have stopped gating anything. Runs for earlier commits of the same PR are included.
+# Only runs created at or before the moment the PR closed are cancelled, so runs that
+# a reopen starts while this job is still queued are left alone.
+#
+# A run is matched to the PR when the runs API lists the PR number in its
+# `pull_requests`, or when its head repository and head branch equal the PR's. The
+# second rule is required because the API leaves `pull_requests` empty for many runs
+# (queued ones in particular) and always for fork PRs. The head match is skipped when
+# another open PR has the same head repository and branch, since those runs cannot be
+# told apart and the other PR is still live.
+#
+# This uses `pull_request_target` so the close event fires even when the PR has a merge
+# conflict; `pull_request` workflows do not run in that state. It also gives the token
+# write access for fork PRs, whose runs live in this repository. The job never checks
+# out or executes code from the PR. It only reads run metadata and cancels runs. The
+# PR-controlled head branch name is passed through `env` and `jq --arg` and is never
+# interpolated into the script, so it cannot inject commands. Keep it that way: do not
+# add a checkout of the PR head here.
+#
+# The job's `permissions` replace the workflow's, so every scope it needs is listed on the
+# job: `actions: write` to list and cancel runs, and `pull-requests: read` to list the open
+# PRs that share the head. Without the second, the pulls listing answers 403 on a private or
+# internal repository and the job fails before it cancels anything.
+
+name: Cancel PR runs on close
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Cancel in-flight runs for this pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          CLOSED_AT: ${{ github.event.pull_request.closed_at }}
+          SELF_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Runs from this head count only if no other open PR shares it. `head` takes
+          # `owner:branch`, where owner is the head repository's owner. A deleted fork
+          # leaves HEAD_REPOSITORY empty, in which case only the PR number can match.
+          match_head=false
+          if [ -n "$HEAD_REPOSITORY" ]; then
+            others=$(gh api --paginate -X GET "repos/$REPOSITORY/pulls" \
+              -f state=open -f per_page=100 -f head="${HEAD_REPOSITORY%%/*}:$HEAD_BRANCH" \
+              | jq -rs --arg pr "$PR_NUMBER" --arg repo "$HEAD_REPOSITORY" \
+                  'first(.[][] | select(.number != ($pr | tonumber)) | select(.head.repo.full_name == $repo) | .number) // empty')
+            if [ -z "$others" ]; then
+              match_head=true
+            else
+              echo "Open PR #$others has the same head; matching by PR number only"
+            fi
+          fi
+
+          # Every status that means "not finished yet". Each is a separate query because
+          # the runs API accepts a single status value per request.
+          : > "$RUNNER_TEMP/run-ids"
+          for status in queued in_progress waiting requested pending; do
+            gh api --paginate -X GET "repos/$REPOSITORY/actions/runs" \
+              -f event=pull_request -f status="$status" -f per_page=100 \
+              | jq -r --arg self "$SELF_RUN_ID" --arg pr "$PR_NUMBER" \
+                  --arg match_head "$match_head" --arg repo "$HEAD_REPOSITORY" --arg branch "$HEAD_BRANCH" \
+                  --arg closed_at "$CLOSED_AT" \
+                  '.workflow_runs[]
+                    | select(.id != ($self | tonumber))
+                    | select(.created_at <= $closed_at)
+                    | select(
+                        any(.pull_requests[]?; .number == ($pr | tonumber))
+                        or ($match_head == "true"
+                            and .head_branch == $branch
+                            and (.head_repository.full_name // "") == $repo))
+                    | .id' \
+              >> "$RUNNER_TEMP/run-ids"
+          done
+
+          ids=$(sort -u "$RUNNER_TEMP/run-ids")
+          if [ -z "$ids" ]; then
+            echo "No in-flight pull_request runs for #$PR_NUMBER"
+            exit 0
+          fi
+
+          # A run can finish between listing and cancelling; that cancel returns 409 and is
+          # tolerated. Any other failure (token policy, rate limit, server error) leaves the
+          # run active, so it is recorded and fails the job after the remaining runs have
+          # been attempted.
+          failed=0
+          for id in $ids; do
+            if out=$(gh api -X POST "repos/$REPOSITORY/actions/runs/$id/cancel" 2>&1); then
+              echo "Cancelled run $id"
+            elif grep -q 'HTTP 409' <<< "$out"; then
+              echo "Run $id had already completed"
+            else
+              echo "::error::Could not cancel run $id: $out"
+              failed=1
+            fi
+          done
+          exit "$failed"

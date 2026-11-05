@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "TopK threshold pushdown result correctness on unindexed scans: ORDER BY + LIMIT results must equal the prefix of the full ordered result (LIMIT above the priority-queue cap forces SortByKey, the pushdown-free reference), including missing sort fields (None sorts below everything), mixed-type sort keys, multi-key ORDER BY with heavy first-key ties (equal first keys must fall through to the later keys), and WHERE + ORDER BY + LIMIT with the pre-decode WHERE probe active in the same scan visitor."
+reason = "TopK threshold pushdown result correctness on unindexed scans: ORDER BY + LIMIT results must equal the prefix of the full ordered result (LIMIT above the priority-queue cap forces a full Sort, the pushdown-free reference), including missing sort fields (None sorts below everything), mixed-type sort keys, multi-key ORDER BY with heavy first-key ties (equal first keys must fall through to the later keys), and WHERE + ORDER BY + LIMIT with the pre-decode WHERE probe active in the same scan visitor."
 
 [[test.results]]
 value = "NONE"
@@ -83,7 +82,7 @@ FOR $i IN 0..40 {
 };
 
 -- Heap path (LIMIT <= 1000, probe armed) vs full-sort reference (LIMIT 1001
--- forces SortByKey — no heap, no pushdown): prefixes must agree.
+-- forces a full Sort — no heap, no pushdown): prefixes must agree.
 SELECT VALUE id FROM t WITH NOINDEX ORDER BY dt DESC LIMIT 5;
 SELECT VALUE id FROM (SELECT id, dt FROM t WITH NOINDEX ORDER BY dt DESC LIMIT 1001) LIMIT 5;
 SELECT VALUE id FROM t WITH NOINDEX ORDER BY dt ASC LIMIT 5;

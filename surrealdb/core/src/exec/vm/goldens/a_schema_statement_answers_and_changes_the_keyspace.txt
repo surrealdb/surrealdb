@@ -1,0 +1,2563 @@
+### DEFINE NAMESPACE other
+NONE
+keyspace:
+/!nsother\x00 => a0c00da0480ccd33 (18 bytes)
+### DEFINE NAMESPACE other COMMENT 'a namespace'
+NONE
+keyspace:
+/!nsother\x00 => d9afbbd6483179c8 (32 bytes)
+### DEFINE NAMESPACE test
+error: The namespace 'test' already exists
+keyspace:
+### DEFINE NAMESPACE IF NOT EXISTS test
+NONE
+keyspace:
+### DEFINE NAMESPACE OVERWRITE test COMMENT 'redefined'
+NONE
+keyspace:
+/!nstest\x00 => 12b892c7e6811967 (29 bytes)
+### DEFINE NAMESPACE OVERWRITE fresh
+NONE
+keyspace:
+/!nsfresh\x00 => 8993ac306a953bd1 (18 bytes)
+### DEFINE NAMESPACE ('fr' + 'esh')
+NONE
+keyspace:
+/!nsfresh\x00 => 8993ac306a953bd1 (18 bytes)
+### DEFINE NAMESPACE ('te' + 'st')
+error: The namespace 'test' already exists
+keyspace:
+### DEFINE NAMESPACE (1)
+error: Expected `namespace name` but found `1`
+keyspace:
+### DEFINE DATABASE other
+NONE
+keyspace:
+/*\x00\x00\x00\x00!dbother\x00 => 3811a5d9394f0c3d (27 bytes)
+### DEFINE DATABASE test
+error: The database 'test' already exists
+keyspace:
+### DEFINE DATABASE IF NOT EXISTS test
+NONE
+keyspace:
+### DEFINE DATABASE OVERWRITE test COMMENT 'again' STRICT
+NONE
+keyspace:
+/*\x00\x00\x00\x00!dbtest\x00 => 56af854e4e3ce296 (34 bytes)
+### DEFINE DATABASE feed CHANGEFEED 1h INCLUDE ORIGINAL
+NONE
+keyspace:
+/*\x00\x00\x00\x00!dbfeed\x00 => 53a5502ddfd0bbf8 (44 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x02!cf => <nonce> (8 bytes)
+### DEFINE DATABASE ('fr' + 'esh')
+NONE
+keyspace:
+/*\x00\x00\x00\x00!dbfresh\x00 => f9d7ad35d879fe77 (27 bytes)
+### DEFINE DATABASE ('te' + 'st')
+error: The database 'test' already exists
+keyspace:
+### DEFINE DATABASE (1)
+error: Expected `database name` but found `1`
+keyspace:
+### DEFINE TABLE thing
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvthing\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnthing\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbthing\x00 => d98c880ced975954 (173 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*thing\x00!lg\x00\x01 => 2b8413f0c94d056b (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*thing\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE person
+error: The table 'person' already exists
+keyspace:
+### DEFINE TABLE IF NOT EXISTS person
+NONE
+keyspace:
+### DEFINE TABLE OVERWRITE person SCHEMAFULL COMMENT 'people'
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 92d8aceefd4b274c (20 bytes)
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => c3df185cf56f41e3 (23 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnperson\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 9077dcda3e467b56 (183 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!lg\x00\x02 => 524d28f2f265e839 (127 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!mi => d7876602b7aabefe (16 bytes)
+### DEFINE TABLE thing TYPE NORMAL DROP PERMISSIONS FOR select WHERE $auth.id = id, FOR create NONE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvthing\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnthing\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbthing\x00 => e8a1ac07836d948c (186 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*thing\x00!lg\x00\x01 => 2b8413f0c94d056b (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*thing\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE knows TYPE RELATION IN person OUT person ENFORCED
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvknows\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnknows\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbknows\x00 => 55da9190bcbcccc2 (204 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*knows\x00!fdin\x00 => fd471902c5b717d3 (85 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*knows\x00!fdout\x00 => 8a39d520220e2eea (86 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*knows\x00!lg\x00\x01 => 6a3bc4d9213b8a03 (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*knows\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE feed CHANGEFEED 3d
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => <nonce> (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfeed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnfeed\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfeed\x00 => 726ddd204b5ddc6f (190 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*feed\x00 => bfae1124fbe75b44 (129 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*feed\x00!lg\x00\x01 => 1ebc1ef879ce3166 (21 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*feed\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE capped INLINE EDGES 8
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcapped\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gncapped\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcapped\x00 => 8a0df44a73ed4115 (177 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*capped\x00!lg\x00\x01 => 96fd456dc0515e69 (23 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*capped\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE FIELD name ON person TYPE string
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 8596b3158989c12d (19 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdname\x00 => 74fc473d9da84132 (88 bytes)
+### DEFINE FIELD age ON person TYPE int VALUE $value + 0 ASSERT $value >= 0 DEFAULT 1
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 23b317c0c98969c6 (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdage\x00 => 1a44e73367b25de7 (112 bytes)
+### DEFINE FIELD tags ON person TYPE array<string>
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 7c5f1f4998b5cb2a (19 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags\x00 => bcb2063ab4fe9507 (95 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags.*\x00 => 844f047b39bd6e78 (82 bytes)
+### DEFINE FIELD nested ON person TYPE array<array<int>>
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => a45764a8b1954996 (21 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdnested\x00 => 70810c9e2b8a7acc (101 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdnested.*\x00 => 5c69c48937d1a501 (88 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdnested.*.*\x00 => 569fc996db19f03c (83 bytes)
+### DEFINE FIELD made ON person READONLY DEFAULT ALWAYS time::now() COMMENT 'made'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdmade\x00 => 039234abb7371db3 (97 bytes)
+### DEFINE FIELD auto ON newtable TYPE string
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvnewtable\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnnewtable\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbnewtable\x00 => 6bb5b0bc67a26938 (176 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*newtable\x00!fc => 95415c8f42665a2d (39 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*newtable\x00!fdauto\x00 => 6daab98145930d73 (90 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*newtable\x00!lg\x00\x01 => b2c0c9c508c968c4 (25 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*newtable\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE FIELD in ON knows TYPE record<person>
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvknows\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnknows\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbknows\x00 => 07dc222d71ec76c8 (173 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*knows\x00!fdin\x00 => ff1242aa0c5b6ad3 (93 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*knows\x00!lg\x00\x01 => 6a3bc4d9213b8a03 (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*knows\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE FIELD out ON knows TYPE record<person>
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvknows\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnknows\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbknows\x00 => 07dc222d71ec76c8 (173 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*knows\x00!fdout\x00 => 93fbe07bc01d87ea (94 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*knows\x00!lg\x00\x01 => 6a3bc4d9213b8a03 (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*knows\x00!mi => d7876502b7aabd4b (16 bytes)
+### { DEFINE FIELD tags ON person TYPE array; DEFINE FIELD tags[0] ON person TYPE string }
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => f81184c7a5ab0163 (19 bytes)
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082f2407b4e8902a (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags\x00 => 7b7a9f423891860a (87 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags[0]\x00 => 10154605ff894be8 (91 bytes)
+### { DEFINE FIELD tags ON person TYPE array; DEFINE FIELD tags[*] ON person TYPE string }
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => f81184c7a5ab0163 (19 bytes)
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082f2407b4e8902a (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags\x00 => 7b7a9f423891860a (87 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags.*\x00 => dc8773f4bfa80400 (90 bytes)
+### DEFINE FIELD seen ON person PERMISSIONS FOR select WHERE $auth.id = id
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdseen\x00 => 5f6ca6209df42e2e (92 bytes)
+### DEFINE FIELD friend ON person TYPE option<record<person>>
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 1372b4d88bd88776 (21 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdfriend\x00 => 3abc5ea4e8f361b6 (105 bytes)
+### DEFINE FIELD existing ON person
+error: The field 'existing' already exists
+keyspace:
+### DEFINE FIELD IF NOT EXISTS existing ON person
+NONE
+keyspace:
+### DEFINE FIELD OVERWRITE existing ON person TYPE bool
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 0de818710a0d0579 (23 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => 2ede553306ff1685 (90 bytes)
+### DEFINE FIELD total ON person COMPUTED 1 + 1
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtotal\x00 => 965141f0b838b0f7 (88 bytes)
+### DEFINE PARAM $fresh VALUE 1 + 2
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x01fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!pafresh\x00 => 59ca38f28968c515 (25 bytes)
+### DEFINE PARAM $computed VALUE (SELECT VALUE existing FROM person)
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x01computed\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!pacomputed\x00 => 98172eb7cf6e3f46 (32 bytes)
+### DEFINE PARAM $limit VALUE 20
+error: The param '$limit' already exists
+keyspace:
+### DEFINE PARAM IF NOT EXISTS $limit VALUE 20
+NONE
+keyspace:
+### DEFINE PARAM OVERWRITE $limit VALUE 20 COMMENT 'again' PERMISSIONS NONE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x01limit\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!palimit\x00 => 4bf4fd98a9140a3e (33 bytes)
+### DEFINE PARAM $fails VALUE <int> 'x'
+error: Could not cast into `int` using input `'x'`
+keyspace:
+### DEFINE EVENT fresh ON person WHEN $event = 'CREATE' THEN (CREATE log SET at = time::now())
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!evfresh\x00 => 750526dd09894440 (109 bytes)
+### DEFINE EVENT audit ON person THEN (CREATE log)
+error: The event 'audit' already exists
+keyspace:
+### DEFINE EVENT IF NOT EXISTS audit ON person THEN (CREATE log)
+NONE
+keyspace:
+### DEFINE EVENT OVERWRITE audit ON person THEN { CREATE log; CREATE log } COMMENT 'twice'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!evaudit\x00 => f8a32adecaa44795 (98 bytes)
+### DEFINE EVENT ('fr' + 'esh') ON person THEN (CREATE log)
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!evfresh\x00 => bb0dbce734336b5c (75 bytes)
+### DEFINE EVENT ('au' + 'dit') ON person THEN (CREATE log)
+error: The event 'audit' already exists
+keyspace:
+### DEFINE EVENT (1) ON person THEN (CREATE log)
+error: Expected `event name` but found `1`
+keyspace:
+### DEFINE FUNCTION fn::two() { 2 }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fntwo\x00 => b1e912757f5d2007 (51 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00two\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE FUNCTION fn::add($a: int, $b: int) -> int { $a + $b } PERMISSIONS FULL
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnadd\x00 => ad64ec8b9a6d2b88 (89 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00add\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE FUNCTION fn::one() { 1 }
+error: The function 'fn::one' already exists
+keyspace:
+### DEFINE FUNCTION IF NOT EXISTS fn::one() { 1 }
+NONE
+keyspace:
+### DEFINE FUNCTION OVERWRITE fn::one() { 11 } COMMENT 'eleven'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnone\x00 => 252cfba971c6ea57 (61 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00one\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE USER fresh ON ROOT PASSHASH 'hash' ROLES OWNER
+NONE
+keyspace:
+/!usfresh\x00 => 05fa5cc3fdb75528 (30 bytes)
+### DEFINE USER fresh ON NAMESPACE PASSHASH 'hash' ROLES EDITOR DURATION FOR TOKEN 1h, FOR SESSION 2d
+NONE
+keyspace:
+/*\x00\x00\x00\x00!usfresh\x00 => 8bee4cc22bc708a8 (37 bytes)
+### DEFINE USER fresh ON DATABASE PASSHASH 'hash' ROLES VIEWER COMMENT 'new'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!usfresh\x00 => f86e38c7226d6468 (35 bytes)
+### DEFINE USER root_user ON ROOT PASSHASH 'hash'
+error: The root user 'root_user' already exists
+keyspace:
+### DEFINE USER ns_user ON NAMESPACE PASSHASH 'hash'
+error: The user 'ns_user' already exists in the namespace 'test'
+keyspace:
+### DEFINE USER db_user ON DATABASE PASSHASH 'hash'
+error: The user 'db_user' already exists in the database 'test'
+keyspace:
+### DEFINE USER IF NOT EXISTS db_user ON DATABASE PASSHASH 'hash'
+NONE
+keyspace:
+### DEFINE USER OVERWRITE db_user ON DATABASE PASSHASH 'other' ROLES EDITOR
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!usdb_user\x00 => a41107ea681ceaf6 (34 bytes)
+### DEFINE USER ('fr' + 'esh') ON DATABASE PASSHASH 'hash' ROLES VIEWER
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!usfresh\x00 => 8d0da9bcc42e81ea (31 bytes)
+### DEFINE USER ('db_' + 'user') ON DATABASE PASSHASH 'hash'
+error: The user 'db_user' already exists in the database 'test'
+keyspace:
+### DEFINE USER (1) ON ROOT PASSHASH 'hash'
+error: Expected `user name` but found `1`
+keyspace:
+### DEFINE ANALYZER fresh TOKENIZERS blank, class FILTERS lowercase, ascii, snowball(english)
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!azfresh\x00 => 9540e3c46a0986c8 (57 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x05fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ANALYZER words TOKENIZERS blank
+error: The analyzer 'words' already exists
+keyspace:
+### DEFINE ANALYZER IF NOT EXISTS words TOKENIZERS blank
+NONE
+keyspace:
+### DEFINE ANALYZER OVERWRITE unused TOKENIZERS camel COMMENT 'camel'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!azunused\x00 => a88ecbe3092239d5 (34 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x05unused\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ACCESS fresh ON DATABASE TYPE JWT ALGORITHM HS256 KEY 'se' + 'cret'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!acfresh\x00 => a70018905a129db7 (96 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ACCESS fresh ON DATABASE TYPE JWT ALGORITHM HS256 KEY 1 + 1
+error: Expected `string` but found `2`
+keyspace:
+### DEFINE ACCESS fresh ON DATABASE TYPE JWT ALGORITHM HS256 KEY 'a' + 'b' WITH ISSUER KEY 'a' + 'b'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!acfresh\x00 => 92c0c65ee4c6373d (88 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ACCESS fresh ON DATABASE TYPE JWT ALGORITHM HS256 KEY 'a' + 'b' WITH ISSUER KEY 'a' + 'c'
+error: Invalid query: Symmetric algorithm HS256 requires the same key for signing and verification. Use the same key value for both KEY and WITH ISSUER KEY clauses, or omit WITH ISSUER KEY.
+keyspace:
+### DEFINE ACCESS fresh ON DATABASE TYPE JWT ALGORITHM HS256 KEY 'ab' WITH ISSUER KEY 'a' + 'c'
+error: Invalid query: Symmetric algorithm HS256 requires the same key for signing and verification. Use the same key value for both KEY and WITH ISSUER KEY clauses, or omit WITH ISSUER KEY.
+keyspace:
+### DEFINE ACCESS fresh ON DATABASE TYPE JWT ALGORITHM HS256 KEY '[RED' + 'ACTED]'
+error: The access method 'fresh' names the redaction placeholder as its key, which is published wherever an access is rendered; restore it from a definition carrying the real key, or define it again
+keyspace:
+### DEFINE ACCESS fresh ON NAMESPACE TYPE JWT URL 'https://' + 'example.com/jwks'
+NONE
+keyspace:
+/*\x00\x00\x00\x00!acfresh\x00 => 9c7097f95c7a316a (87 bytes)
+### DEFINE ACCESS fresh ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'k' AUDIENCE 'aud' + '1', 'aud2'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!acfresh\x00 => c91e949c9eea6741 (102 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ACCESS fresh ON DATABASE TYPE RECORD SIGNIN (SELECT * FROM person) DURATION FOR TOKEN 1h + 1h, FOR SESSION 2h + 2h
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!acfresh\x00 => 605ee1235606a1c0 (395 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ACCESS fresh ON DATABASE TYPE RECORD SIGNIN (SELECT * FROM person) DURATION FOR TOKEN [NONE][0]
+error: Tokens issued by record access methods can be consumed by third parties and must have an expiration; DURATION FOR TOKEN cannot be NONE on TYPE RECORD access
+keyspace:
+### DEFINE ACCESS fresh ON DATABASE TYPE RECORD SIGNIN (SELECT * FROM person) DURATION FOR TOKEN 'x' + 'y'
+error: Could not cast into `duration` using input `'xy'`
+keyspace:
+### DEFINE ACCESS fresh ON DATABASE TYPE RECORD SIGNIN (SELECT * FROM person) WITH JWT ALGORITHM HS256 KEY 'k' + 'ey' DURATION FOR TOKEN 1h
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!acfresh\x00 => ad7235a87b5225d3 (119 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ACCESS keyed ON DATABASE TYPE BEARER FOR USER DURATION FOR GRANT 15d + 15d COMMENT 'bear' + 'er'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ackeyed\x00 => d195655df487f8e6 (383 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02keyed\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ACCESS ('db_' + 'jwt') ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'se' + 'cret'
+error: The access method 'db_jwt' already exists in the database 'test'
+keyspace:
+### DEFINE USER fresh ON DATABASE PASSHASH 'hash' DURATION FOR TOKEN 1h + 1h, FOR SESSION 1d + 1d
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!usfresh\x00 => 5faceddf846026ca (37 bytes)
+### DEFINE USER fresh ON DATABASE PASSHASH 'hash' DURATION FOR TOKEN 'x' + 'y'
+error: Could not cast into `duration` using input `'xy'`
+keyspace:
+### DEFINE SEQUENCE fresh BATCH 5 * 2 START 3 * 3 TIMEOUT 1s + 1s
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x06fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sdfresh\x00 => fd64e9988f7243bc (32 bytes)
+### DEFINE SEQUENCE fresh BATCH 0 - 1
+error: Invalid query: `-1` is not valid batch size for a sequence definition. A batch size must be within 0..=4294967295
+keyspace:
+### DEFINE SEQUENCE fresh BATCH -1
+error: Invalid query: `-1` is not valid batch size for a sequence definition. A batch size must be within 0..=4294967295
+keyspace:
+### DEFINE SEQUENCE fresh START 'x' + 'y'
+error: Could not cast into `int` using input `'xy'`
+keyspace:
+### DEFINE SEQUENCE IF NOT EXISTS seq BATCH 0 - 1
+NONE
+keyspace:
+### DEFINE CONFIG DEFAULT NAMESPACE 'ot' + 'her' DATABASE 'te' + 'st'
+NONE
+keyspace:
+/!cgdefault\x00 => 90103c75646122f8 (26 bytes)
+### DEFINE CONFIG DEFAULT NAMESPACE [NONE][0]
+NONE
+keyspace:
+/!cgdefault\x00 => 8d739cd6e753e181 (11 bytes)
+### DEFINE CONFIG DEFAULT NAMESPACE 1 + 1
+error: Expected `namespace` but found `2`
+keyspace:
+### DEFINE API '/fr' + 'esh' FOR get THEN { { status: 200 } }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/fresh\x00 => 4655d2a1004e72a6 (104 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE API '/pi' + 'ng' FOR get THEN { { status: 200 } }
+error: The api '/ping' already exists
+keyspace:
+### DEFINE API 'no' + 'slash' FOR get THEN { { status: 200 } }
+error: The string could not be parsed into a path: Segment should start with /
+keyspace:
+### DEFINE API '/fresh/' + ':id' FOR get THEN { { status: 200 } } COMMENT 'with ' + 'a param'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/fresh/:id\x00 => c6f516c4ea2e8199 (123 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/fresh/:id\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER API '/pi' + 'ng' COMMENT 'altered'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/ping\x00 => 7c8d83fb410dc251 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/ping\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER API ('/mis' + 'sing') COMMENT 'x'
+error: The api '/missing' does not exist
+keyspace:
+### REMOVE API '/pi' + 'ng'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/ping\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/ping\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### REMOVE API '/ping'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/ping\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/ping\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### REMOVE API IF EXISTS '/mis' + 'sing'
+NONE
+keyspace:
+### REMOVE API (1)
+error: Expected `api name` but found `1`
+keyspace:
+### DEFINE NAMESPACE fresh COMMENT 'a ' + 'namespace'
+NONE
+keyspace:
+/!nsfresh\x00 => aa89183b364230ee (32 bytes)
+### DEFINE NAMESPACE test COMMENT (1 / 0)
+error: The namespace 'test' already exists
+keyspace:
+### DEFINE NAMESPACE IF NOT EXISTS test COMMENT <string> 1
+NONE
+keyspace:
+### DEFINE DATABASE fresh COMMENT <string> 1 + 2
+error: Cannot perform addition with 'string' and 'int'
+keyspace:
+### DEFINE TABLE fresh COMMENT 'a ' + 'table'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnfresh\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 32d0e380f67e1e80 (183 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!lg\x00\x01 => 5e45e05a330cfe1f (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE fresh COMMENT 3
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnfresh\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 571a23c998d253ea (177 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!lg\x00\x01 => 5e45e05a330cfe1f (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE ('fr' + 'esh') COMMENT 'evaluated'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnfresh\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 27c32aef70d35a8a (185 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!lg\x00\x01 => 5e45e05a330cfe1f (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE (1) COMMENT 'number'
+error: Expected `table name` but found `1`
+keyspace:
+### DEFINE PARAM $fresh VALUE 1 COMMENT 'a ' + 'param'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x01fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!pafresh\x00 => 560527ad56208675 (35 bytes)
+### DEFINE EVENT fresh ON person THEN (CREATE log) COMMENT 'an ' + 'event'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!evfresh\x00 => 8b7ecc68a1a06fe0 (86 bytes)
+### DEFINE FUNCTION fn::fresh() { 1 } COMMENT 'a ' + 'function'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnfresh\x00 => 6400aff44f1362d0 (66 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE FUNCTION fn::one() { 1 } COMMENT 'never ' + 'evaluated'
+error: The function 'fn::one' already exists
+keyspace:
+### DEFINE USER fresh ON DATABASE PASSHASH 'hash' COMMENT 'a ' + 'user'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!usfresh\x00 => 46e392debba166bf (38 bytes)
+### DEFINE ANALYZER fresh TOKENIZERS blank COMMENT 'an ' + 'analyzer'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!azfresh\x00 => 7a6b2a0fc99eec3a (39 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x05fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ANALYZER fresh TOKENIZERS blank COMMENT [1, 2]
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!azfresh\x00 => 4b5c4fde1f140aa6 (34 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x05fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE API '/fresh' FOR get THEN { { status: 200 } } COMMENT 'an ' + 'api'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/fresh\x00 => 550336c1d3df4eaa (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE TABLE light TYPE RELATION LIGHTWEIGHT IN person OUT person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvlight\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnlight\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tblight\x00 => ff47a6f985f35dd1 (204 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*light\x00!fdin\x00 => f70181f45b476dbf (85 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*light\x00!fdout\x00 => bfc309a4709d2af6 (86 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*light\x00!lg\x00\x01 => 58292a00b536f737 (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*light\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE OVERWRITE light TYPE RELATION LIGHTWEIGHT IN person OUT person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvlight\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnlight\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tblight\x00 => ff47a6f985f35dd1 (204 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*light\x00!fdin\x00 => f70181f45b476dbf (85 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*light\x00!fdout\x00 => bfc309a4709d2af6 (86 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*light\x00!lg\x00\x01 => 58292a00b536f737 (22 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*light\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE rel_change TYPE NORMAL
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvrel_change\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnrel_change\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbrel_change\x00 => 06aba19d4a0ab9e5 (178 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*rel_change\x00!lg\x00\x01 => 116e4ef3d99cd1e8 (27 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*rel_change\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE OVERWRITE rel_change TYPE RELATION IN person OUT person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvrel_change\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnrel_change\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbrel_change\x00 => d621c1903f177743 (209 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*rel_change\x00!fdin\x00 => 9f1266666479a3a2 (90 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*rel_change\x00!fdout\x00 => eddfd35989a5d7d5 (91 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*rel_change\x00!lg\x00\x01 => 116e4ef3d99cd1e8 (27 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*rel_change\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE OVERWRITE rel_change TYPE NORMAL
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvrel_change\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnrel_change\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbrel_change\x00 => 06aba19d4a0ab9e5 (178 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*rel_change\x00!lg\x00\x01 => 116e4ef3d99cd1e8 (27 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*rel_change\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE TABLE carried TYPE RELATION IN person OUT person
+error: The table 'carried' already exists
+keyspace:
+### DEFINE FIELD weight ON carried TYPE int INLINE
+error: The field 'weight' already exists
+keyspace:
+### DEFINE FIELD OVERWRITE weight ON carried TYPE int INLINE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcarried\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcarried\x00 => 930460cca6b101a1 (206 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*carried\x00!fdweight\x00 => fa387dcf5bf9b0a4 (88 bytes)
+### REMOVE FIELD weight ON carried
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcarried\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcarried\x00 => 93045fcca6b0ffee (206 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*carried\x00!fdweight\x00 => removed
+### { DEFINE TABLE light TYPE RELATION LIGHTWEIGHT IN person OUT person; DEFINE INDEX fresh ON light FIELDS a }
+error: An error occurred: a LIGHTWEIGHT relation cannot carry an index: its edges store no records
+keyspace:
+### DEFINE INDEX fresh ON ('per' + 'son') FIELDS existing
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x01 => fcd500563d7a36cf (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ixfresh\x00 => c9b3dfed2639d4b7 (54 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!ir => af63bf4c8601bb45 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01*\x06a\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 83cbc14aee1f29f0 (19 bytes)
+### DEFINE INDEX fresh ON ('brand' + '_new') FIELDS existing
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvbrand_new\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnbrand_new\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbbrand_new\x00 => 30370a128da0bc68 (177 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!bs\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!il\x00\x00\x00\x00 => fcd500563d7a36cf (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!ixfresh\x00 => 803617e9a71fe67d (57 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!lg\x00\x01 => 09ba5cfaf875c33b (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00+\x00\x00\x00\x00!ir => af63bf4c8601bb45 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00+\x00\x00\x00\x00!it => cbf29ce484222325 (0 bytes)
+### DEFINE EVENT fresh ON ('per' + 'son') THEN (CREATE log)
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!evfresh\x00 => bb0dbce734336b5c (75 bytes)
+### DEFINE EVENT fresh ON (1) THEN (CREATE log)
+error: Expected `target table` but found `1`
+keyspace:
+### DEFINE TABLE fresh_view AS SELECT * FROM person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh_view\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnfresh_view\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh_view\x00 => ac440684b6b66afe (202 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh_view\x00!lg\x00\x02 => c5debefff9ac3760 (27 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh_view\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh_view\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => bbca238d0afbe150 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ftfresh_view\x00 => ac440684b6b66afe (202 bytes)
+### DEFINE TABLE fresh_view AS SELECT * FROM person WHERE existing = 'a'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh_view\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnfresh_view\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh_view\x00 => 227bafbae7ca7fff (219 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh_view\x00!lg\x00\x02 => c5debefff9ac3760 (27 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh_view\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh_view\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => bbca238d0afbe150 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ftfresh_view\x00 => 227bafbae7ca7fff (219 bytes)
+### DEFINE TABLE counts AS SELECT count() AS n, existing FROM person GROUP BY existing
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounts\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gncounts\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounts\x00 => 2cce16ee0c8cc0c3 (233 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counts\x00!lg\x00\x02 => 43082eb01c2f31e4 (23 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counts\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counts\x00*\x05\x06a\x00\x00 => 4fa3989fdbc7c9ff (62 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ftcounts\x00 => 2cce16ee0c8cc0c3 (233 bytes)
+### DEFINE TABLE OVERWRITE by_person AS SELECT existing FROM person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvby_person\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnby_person\x00 => a30e0f7dd8876983 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbby_person\x00 => 70c87fc2dca4ccc8 (208 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!lg\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!lg\x00\x03 => a10fc455be289c1c (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!mi => 74440e1fd41ef4ec (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 6c7096c0243c84cb (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ftby_person\x00 => 70c87fc2dca4ccc8 (208 bytes)
+### DEFINE TABLE by_person AS SELECT existing FROM person
+error: The table 'by_person' already exists
+keyspace:
+### DEFINE TABLE fresh_view AS SELECT * FROM missing
+error: The table 'missing' does not exist
+keyspace:
+### DEFINE TABLE sale_copy AS SELECT * FROM sale
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_copy\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_copy\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_copy\x00 => 0f98d397375f177a (199 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_copy\x00 => 0f98d397375f177a (199 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_copy\x00!lg\x00\x02 => 6db36fee9e3600a6 (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_copy\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_copy\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 711257d1f50e05ec (38 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_copy\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => bd9e4a6947ee16ae (38 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_copy\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => 2a029a12759ee85a (38 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_copy\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x04 => 0b11d5de87b35c00 (25 bytes)
+### DEFINE TABLE sale_big AS SELECT region, amount FROM sale WHERE amount > 5
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_big\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_big\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_big\x00 => 0157f84aa743754f (224 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_big\x00 => 0157f84aa743754f (224 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_big\x00!lg\x00\x02 => a004a687b58a8bac (25 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_big\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_big\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 12bcf973ae4b657d (25 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_big\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 38e2ff9187b87de7 (25 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_big\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x04 => 0b11d5de87b35c00 (25 bytes)
+### DEFINE TABLE sale_doubled AS SELECT region, amount * 2 AS doubled FROM sale
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_doubled\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_doubled\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_doubled\x00 => b76e02dad998b1bc (230 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_doubled\x00 => b76e02dad998b1bc (230 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_doubled\x00!lg\x00\x02 => 87c6a4c354aaf0d1 (29 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_doubled\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_doubled\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => c9c5232ca5cf9488 (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_doubled\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => c380e4c816b64b64 (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_doubled\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => 5df4e17c1cbbe3e4 (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_doubled\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x04 => 0850c4b20e7e7b38 (26 bytes)
+### DEFINE TABLE sale_unions AS SELECT region FROM sale, person
+error: The key being inserted already exists
+keyspace:
+### DEFINE TABLE by_region AS SELECT region, count() AS n, math::sum(amount) AS total FROM sale GROUP BY region
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvby_region\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnby_region\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbby_region\x00 => 063e8c7116e95808 (258 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_region\x00!lg\x00\x02 => 5c4e804e2948c3ad (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_region\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_region\x00*\x05\x06eu\x00\x00 => bed052182dc1388a (96 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_region\x00*\x05\x06us\x00\x00 => baad04ed5a8730e8 (96 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftby_region\x00 => 063e8c7116e95808 (258 bytes)
+### DEFINE TABLE all_sales AS SELECT count() AS n, math::sum(amount) AS total FROM sale GROUP ALL
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvall_sales\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnall_sales\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tball_sales\x00 => 2a13af07d8c06294 (242 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*all_sales\x00!lg\x00\x02 => 3f74345b638f03cf (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*all_sales\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*all_sales\x00*\x05\x00 => 17cd7b85708e59fa (80 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftall_sales\x00 => 2a13af07d8c06294 (242 bytes)
+### DEFINE TABLE sale_mean AS SELECT region, math::mean(amount) AS mean FROM sale GROUP BY region
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_mean\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_mean\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_mean\x00 => 8606d1cacde4ed00 (244 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_mean\x00 => 8606d1cacde4ed00 (244 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_mean\x00!lg\x00\x02 => 1c0bf991052df106 (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_mean\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_mean\x00*\x05\x06eu\x00\x00 => c95c414d3283381f (82 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_mean\x00*\x05\x06us\x00\x00 => 8eb6bc158cdc82f9 (82 bytes)
+### DEFINE TABLE sale_spread AS SELECT region, math::variance(amount) AS var, math::stddev(amount) AS dev FROM sale GROUP BY region
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_spread\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_spread\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_spread\x00 => a489f646d9ff3060 (278 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_spread\x00 => a489f646d9ff3060 (278 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_spread\x00!lg\x00\x02 => a217d5e5333e69f6 (28 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_spread\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_spread\x00*\x05\x06eu\x00\x00 => e725209c142fbdf4 (155 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_spread\x00*\x05\x06us\x00\x00 => b997edd68a99cda4 (155 bytes)
+### DEFINE TABLE sale_extremes AS SELECT region, math::max(amount) AS hi, math::min(amount) AS lo, time::max(at) AS last, time::min(at) AS first FROM sale GROUP BY region
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_extremes\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_extremes\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_extremes\x00 => 9044e296614cf97e (335 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_extremes\x00 => 9044e296614cf97e (335 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_extremes\x00!lg\x00\x02 => 616b0273cd77ea52 (30 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_extremes\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_extremes\x00*\x05\x06eu\x00\x00 => 521b4abd8a5e1100 (143 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_extremes\x00*\x05\x06us\x00\x00 => 260b5e561a24228e (143 bytes)
+### DEFINE TABLE sale_counted AS SELECT region, count(amount) AS n, count() AS rows FROM sale GROUP BY region
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_counted\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_counted\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_counted\x00 => 6c2248d4c7f21978 (256 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_counted\x00 => 6c2248d4c7f21978 (256 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_counted\x00!lg\x00\x02 => ed7ff835879d8eb8 (29 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_counted\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_counted\x00*\x05\x06eu\x00\x00 => 25960c985879f437 (79 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_counted\x00*\x05\x06us\x00\x00 => 25cc0a9858a78041 (79 bytes)
+### DEFINE TABLE sale_filtered AS SELECT region, count() AS n FROM sale WHERE amount > 5 GROUP BY region
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_filtered\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_filtered\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_filtered\x00 => dacda5c00f327453 (247 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_filtered\x00 => dacda5c00f327453 (247 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_filtered\x00!lg\x00\x02 => da70b1ca12396f08 (30 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_filtered\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_filtered\x00*\x05\x06eu\x00\x00 => e46d56ba900074d0 (61 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_filtered\x00*\x05\x06us\x00\x00 => 0c4139143d83ae2e (61 bytes)
+### DEFINE TABLE sale_computed AS SELECT region, math::sum(amount * 2) + 1 AS scaled FROM sale GROUP BY region
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_computed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_computed\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_computed\x00 => acbd804cb71e819f (257 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_computed\x00 => acbd804cb71e819f (257 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_computed\x00!lg\x00\x02 => 372b20e1d791faec (30 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_computed\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_computed\x00*\x05\x06eu\x00\x00 => d04bb60459c2312a (86 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_computed\x00*\x05\x06us\x00\x00 => dc2b6046b914c425 (86 bytes)
+### DEFINE TABLE sale_grouped AS SELECT region, amount > 5 AS big, count() AS n FROM sale GROUP BY region, big
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_grouped\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_grouped\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_grouped\x00 => d0a1d92c912bde51 (257 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_grouped\x00 => d0a1d92c912bde51 (257 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_grouped\x00!lg\x00\x02 => b54a631f5efc8a7c (29 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_grouped\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_grouped\x00*\x05\x06eu\x00\x04\x03\x00 => 483c054b242f80c4 (68 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_grouped\x00*\x05\x06us\x00\x04\x02\x00 => 655d6c9852d28e39 (68 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_grouped\x00*\x05\x06us\x00\x04\x03\x00 => 1fa0cd263f262462 (68 bytes)
+### DEFINE TABLE sale_none AS SELECT region, count() AS n FROM sale WHERE amount > 1000 GROUP BY region
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_none\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_none\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_none\x00 => 67734b7e9929b761 (246 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_none\x00 => 67734b7e9929b761 (246 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_none\x00!lg\x00\x02 => e719a9fe16c3a98d (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_none\x00!mi => 6ba82c1fcf428498 (16 bytes)
+### DEFINE TABLE sale_none_all AS SELECT count() AS n FROM sale WHERE amount > 1000 GROUP ALL
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_none_all\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_none_all\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_none_all\x00 => 5f235d50d1df5fcb (234 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_none_all\x00 => 5f235d50d1df5fcb (234 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_none_all\x00!lg\x00\x02 => 76525e657b4a5a35 (30 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_none_all\x00!mi => 6ba82c1fcf428498 (16 bytes)
+### DEFINE TABLE sale_feed CHANGEFEED 1d AS SELECT region, count() AS n FROM sale GROUP BY region
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => <nonce> (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_feed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_feed\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_feed\x00 => 0ee21517becd2176 (248 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*sale_feed\x00 => 7c8d24d1c26d4fdc (320 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_feed\x00 => 0ee21517becd2176 (248 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_feed\x00!lg\x00\x02 => 0f7f294cd1b578bb (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_feed\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_feed\x00*\x05\x06eu\x00\x00 => e46d56ba900074d0 (61 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_feed\x00*\x05\x06us\x00\x00 => e4a35cba902e0e72 (61 bytes)
+### DEFINE TABLE OVERWRITE by_person AS SELECT existing, id AS of FROM person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvby_person\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnby_person\x00 => a30e0f7dd8876983 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbby_person\x00 => b23c277875ca4b66 (218 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!lg\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!lg\x00\x03 => a10fc455be289c1c (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!mi => 74440e1fd41ef4ec (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 9614109f078ff847 (30 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ftby_person\x00 => b23c277875ca4b66 (218 bytes)
+### DEFINE TABLE from_view AS SELECT existing FROM by_person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvby_person\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfrom_view\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnfrom_view\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbby_person\x00 => 8f43425de740f412 (201 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfrom_view\x00 => 6804929fa76025e7 (211 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!ftfrom_view\x00 => 6804929fa76025e7 (211 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*from_view\x00!lg\x00\x02 => 82f6be5924b84887 (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*from_view\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*from_view\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => bbca238d0afbe150 (17 bytes)
+### DEFINE TABLE from_view_counted AS SELECT count() AS n FROM by_person GROUP ALL
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvby_person\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfrom_view_counted\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnfrom_view_counted\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbby_person\x00 => 8f43425de740f412 (201 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfrom_view_counted\x00 => 9b617cf906190a9e (227 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!ftfrom_view_counted\x00 => 9b617cf906190a9e (227 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*from_view_counted\x00!lg\x00\x02 => d55cb194535b9282 (34 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*from_view_counted\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*from_view_counted\x00*\x05\x00 => cdfd7614dcd915f6 (45 bytes)
+### DEFINE TABLE sale_two_sources AS SELECT count() AS n FROM sale, person GROUP ALL
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_two_sources\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_two_sources\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale\x00 => aaf49659050e1f54 (172 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbsale_two_sources\x00 => c5ae656a48323874 (229 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ftsale_two_sources\x00 => c5ae656a48323874 (229 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale\x00!ftsale_two_sources\x00 => c5ae656a48323874 (229 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_two_sources\x00!lg\x00\x02 => ca1d6ebfc2790ded (33 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_two_sources\x00!mi => 6ba82c1fcf428498 (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*sale_two_sources\x00*\x05\x00 => eb438133aebdaa46 (45 bytes)
+### DEFINE FIELD existing ON person COMPUTED 1
+error: Computed fields cannot be indexed. Index: 'by_existing' - Field: 'existing'
+keyspace:
+### DEFINE FIELD id ON person TYPE string
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdid\x00 => c93e43ad24c7b9b0 (86 bytes)
+### DEFINE FIELD existing.sub ON person TYPE int
+error: Cannot define field `existing.sub` in field `existing` of type `string`: only an object holds a field
+keyspace:
+### DEFINE FIELD loop ON person COMPUTED loop + 1
+error: Cyclic dependency detected among field clauses: loop -> loop
+keyspace:
+### DEFINE FIELD fresh ON person TYPE int REFERENCE
+error: Cannot use the `REFERENCE` keyword with `TYPE int`. Specify only a `record` type, or a type containing only records, instead.
+keyspace:
+### DEFINE FIELD fresh ON person COMPUTED 1 READONLY
+error: Cannot use the `READONLY` keyword with `COMPUTED`.
+keyspace:
+### DEFINE FIELD fresh ON person TYPE int GRAPHQL_ALIAS '1bad'
+error: Invalid statement: GRAPHQL_ALIAS `1bad` on field is not a valid GraphQL Name; expected /[_A-Za-z][_0-9A-Za-z]*/
+keyspace:
+### DEFINE FIELD fresh ON person COMPUTED (CREATE log)
+error: Cannot define field `fresh` as `COMPUTED` bodies must be read-only.
+keyspace:
+### DEFINE FIELD nested.deep ON person COMPUTED 1
+error: Cannot define field `nested.deep` as `COMPUTED` fields must be top-level.
+keyspace:
+### DEFINE FIELD id ON person VALUE 1
+error: Cannot use the `VALUE` keyword on the `id` field.
+keyspace:
+### DEFINE FIELD id ON person TYPE bool
+error: Cannot use the `bool` type on the `id` field, as that's not a valid record id key.
+keyspace:
+### DEFINE FIELD fresh ON person TYPE object FLEXIBLE
+error: An error occurred: FLEXIBLE can only be used in SCHEMAFULL tables
+keyspace:
+### DEFINE FIELD fresh ON brand_new TYPE object FLEXIBLE
+error: The table 'brand_new' does not exist
+keyspace:
+### DEFINE FIELD fresh.sub ON person TYPE record REFERENCE
+error: Cannot use the `REFERENCE` keyword on nested field `fresh.sub`. Specify a referencing field at the root level instead.
+keyspace:
+### DEFINE FIELD in ON carried TYPE record<sale>
+error: The field 'in' already exists
+keyspace:
+### DEFINE FIELD in ON carried TYPE record<sale> COMPUTED 1
+error: The field 'in' already exists
+keyspace:
+### DEFINE FIELD OVERWRITE in ON carried TYPE record<person> ASSERT $value != NONE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcarried\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcarried\x00 => 93045fcca6b0ffee (206 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*carried\x00!fdin\x00 => eb67882742a2fac1 (112 bytes)
+### DEFINE FIELD out ON carried TYPE record<sale> ASSERT $value != NONE
+error: The field 'out' already exists
+keyspace:
+### { DEFINE FIELD obj ON person TYPE object; DEFINE FIELD obj.sub ON person TYPE int; DEFINE FIELD OVERWRITE obj ON person COMPUTED 1 }
+error: Cannot define field `obj` as `COMPUTED` since a nested field `obj.sub` already exists.
+keyspace:
+### { DEFINE FIELD calc ON person COMPUTED 1; DEFINE FIELD calc.sub ON person TYPE int }
+error: Cannot define nested field `calc.sub` as parent field `calc` is a `COMPUTED` field.
+keyspace:
+### { DEFINE FIELD a ON person COMPUTED b; DEFINE FIELD b ON person COMPUTED a }
+error: Cyclic dependency detected among field clauses: a -> b -> a
+keyspace:
+### { DEFINE INDEX by_calc ON person FIELDS calc; DEFINE FIELD calc ON person COMPUTED 1 }
+error: Computed fields cannot be indexed. Index: 'by_calc' - Field: 'calc'
+keyspace:
+### { IF (SELECT VALUE existing FROM ONLY person:1) = 'a' { DEFINE INDEX by_calc ON person FIELDS calc }; DEFINE FIELD calc ON person COMPUTED 1 }
+error: Computed fields cannot be indexed. Index: 'by_calc' - Field: 'calc'
+keyspace:
+### DEFINE INDEX fresh ON person FIELDS existing
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x01 => fcd500563d7a36cf (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ixfresh\x00 => c9b3dfed2639d4b7 (54 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!ir => af63bf4c8601bb45 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01*\x06a\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 83cbc14aee1f29f0 (19 bytes)
+### DEFINE INDEX fresh ON person FIELDS existing UNIQUE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x01 => fcd500563d7a36cf (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ixfresh\x00 => 345382cef9143808 (54 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!ir => af63bf4c8601bb45 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01*\x06a\x00\x00\x02 => 83cbc14aee1f29f0 (19 bytes)
+### DEFINE INDEX by_existing ON person FIELDS existing
+error: The index 'by_existing' already exists
+keyspace:
+### DEFINE INDEX IF NOT EXISTS by_existing ON person FIELDS existing
+NONE
+keyspace:
+### DEFINE INDEX OVERWRITE by_existing ON person FIELDS existing UNIQUE
+NONE
+keyspace:
+/!rc\x02\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x01 => 21128771a5ea3238 (11 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ixby_existing\x00 => 20158963b514c76b (60 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!ir => af63bf4c8601bb45 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01*\x06a\x00\x00\x02 => 83cbc14aee1f29f0 (19 bytes)
+### DEFINE INDEX OVERWRITE by_b ON indexed FIELDS b
+NONE
+keyspace:
+/!rc\x02\x00\x00\x00\x00\x00\x00\x00\x00indexed\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => 6fecb946d1592719 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x03 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!il\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!il\x00\x00\x00\x03 => 67e1c89c1df64909 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!ixby_b\x00 => f9ed029059369a36 (47 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x03!ir => af63bf4c8601bb45 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x03!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x03*\x02\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 666da2be7a378427 (20 bytes)
+### DEFINE INDEX OVERWRITE by_b ON indexed COUNT
+NONE
+keyspace:
+/!ic\x00\x00\x00\x00\x00\x00\x00\x00indexed\x00\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/!rc\x02\x00\x00\x00\x00\x00\x00\x00\x00indexed\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => 6fecb946d1592719 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x03 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!il\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!il\x00\x00\x00\x03 => 67e1c89c1df64909 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!ixby_b\x00 => d015aa9bf7ecc30f (45 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x03!iu\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x03!iv => a8c7f732281a3812 (8 bytes)
+### DEFINE INDEX counted ON indexed COUNT
+NONE
+keyspace:
+/!ic\x00\x00\x00\x00\x00\x00\x00\x00indexed\x00\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => 6fecb946d1592719 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x03 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!il\x00\x00\x00\x03 => 7797627416516b65 (7 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!ixcounted\x00 => 7c07e49449074b28 (48 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x03!iu\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x03!iv => a8c7f732281a3812 (8 bytes)
+### DEFINE INDEX fresh ON person FIELDS nested.x, other
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x01 => fcd500563d7a36cf (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ixfresh\x00 => 5afe33cc31d384bf (61 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!ir => 08395607b4f139a5 (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01*\x02\x02\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 83cbc14aee1f29f0 (19 bytes)
+### DEFINE INDEX fresh ON person FIELDS existing FULLTEXT ANALYZER words BM25
+NONE
+keyspace:
+/!ic\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x01 => fcd500563d7a36cf (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ixfresh\x00 => f63ec19309e752d1 (88 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!dl\x00\x00\x00\x00\x00\x00\x00\x00 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!dt\x00\x00\x00\x00\x00\x00\x00\x00 => 177539bb7acd4b11 (7 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!dv => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!dx\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => d0aa6118672cf3f8 (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!tv => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!txa\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03 => 2fc69d4439e68967 (30 bytes)
+### DEFINE INDEX ('fr' + 'esh') ON person FIELDS existing COMMENT 'a ' + 'comment'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x01 => fcd500563d7a36cf (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ixfresh\x00 => d10700f4ac67569f (66 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!ir => af63bf4c8601bb45 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01*\x06a\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 83cbc14aee1f29f0 (19 bytes)
+### DEFINE INDEX fresh ON indexed FIELDS a, b UNIQUE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => 6fecb946d1592719 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x03 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!il\x00\x00\x00\x03 => fcd500563d7a36cf (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!ixfresh\x00 => 20f31eee9519ff08 (51 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x03!ir => 08395607b4f139a5 (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x03!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x03*\x05\xa0\x19\x19 \x01\x00\x00\x02\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 666da2be7a378427 (20 bytes)
+### DEFINE INDEX fresh ON brand_new FIELDS a
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvbrand_new\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnbrand_new\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbbrand_new\x00 => 30370a128da0bc68 (177 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!bs\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!il\x00\x00\x00\x00 => fcd500563d7a36cf (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!ixfresh\x00 => cb5e09051dc9b3a0 (50 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!lg\x00\x01 => 09ba5cfaf875c33b (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00+\x00\x00\x00\x00!ir => af63bf4c8601bb45 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00+\x00\x00\x00\x00!it => cbf29ce484222325 (0 bytes)
+### DEFINE INDEX fresh ON brand_new COUNT
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvbrand_new\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnbrand_new\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbbrand_new\x00 => 30370a128da0bc68 (177 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!bs\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!il\x00\x00\x00\x00 => fcd500563d7a36cf (5 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!ixfresh\x00 => c55ce947f6762a54 (48 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!lg\x00\x01 => 09ba5cfaf875c33b (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!mi => d7876502b7aabd4b (16 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00+\x00\x00\x00\x00!iv => a8c7f732281a3812 (8 bytes)
+### DEFINE EVENT fresh ON brand_new THEN (CREATE log)
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvbrand_new\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnbrand_new\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbbrand_new\x00 => 30370a128da0bc68 (177 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!evfresh\x00 => 493435bb85d6b14f (78 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!lg\x00\x01 => 09ba5cfaf875c33b (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE FIELD fresh ON brand_new TYPE int
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvbrand_new\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnbrand_new\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbbrand_new\x00 => 30370a128da0bc68 (177 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!fc => 3918f0bcc51c1f04 (40 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!fdfresh\x00 => 60d224da3c8a1c53 (89 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!lg\x00\x01 => 09ba5cfaf875c33b (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*brand_new\x00!mi => d7876502b7aabd4b (16 bytes)
+### { DEFINE DATABASE OVERWRITE test STRICT; DEFINE INDEX fresh ON brand_new FIELDS a }
+error: The table 'brand_new' does not exist
+keyspace:
+### DEFINE ANALYZER ('fr' + 'esh') TOKENIZERS blank
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!azfresh\x00 => 25cfd885f4ec4780 (25 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x05fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ANALYZER ('wo' + 'rds') TOKENIZERS blank
+error: The analyzer 'words' already exists
+keyspace:
+### DEFINE ANALYZER (1) TOKENIZERS blank
+error: Expected `analyzer name` but found `1`
+keyspace:
+### REMOVE ANALYZER ('un' + 'used')
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!azunused\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x05unused\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### REMOVE ANALYZER ('wo' + 'rds')
+error: The analyzer 'words' is in use by index 'by_b' on table 'indexed' and cannot be removed
+keyspace:
+### REMOVE ANALYZER IF EXISTS ('no' + 'ne')
+NONE
+keyspace:
+### ALTER ANALYZER ('un' + 'used') COMMENT 'altered'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!azunused\x00 => 7d25a2b5842f0bef (46 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x05unused\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER ANALYZER (1) COMMENT 'altered'
+error: Expected `analyzer name` but found `1`
+keyspace:
+### DEFINE SEQUENCE fresh
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x06fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sdfresh\x00 => e53a31e4eb3dd322 (23 bytes)
+### DEFINE SEQUENCE fresh BATCH 50 START 100 TIMEOUT 5s
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x06fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sdfresh\x00 => d336995b7a6bbd67 (32 bytes)
+### DEFINE SEQUENCE seq
+error: The sequence 'seq' already exists
+keyspace:
+### DEFINE SEQUENCE IF NOT EXISTS seq
+NONE
+keyspace:
+### DEFINE SEQUENCE OVERWRITE seq BATCH 10 START 7
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x06seq\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sdseq\x00 => 7cf449a9b3ea702d (19 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sqseq\x00!ba\x80\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sqseq\x00!st\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+### DEFINE SEQUENCE ('fr' + 'esh') BATCH 5
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x06fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sdfresh\x00 => 07e32ba14153df9e (21 bytes)
+### DEFINE SEQUENCE ('s' + 'eq')
+error: The sequence 'seq' already exists
+keyspace:
+### DEFINE SEQUENCE (1)
+error: Expected `sequence name` but found `1`
+keyspace:
+### DEFINE API "/fresh" FOR get, post THEN { { status: 201 } } COMMENT 'made'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/fresh\x00 => 16853e2936f3c2fe (117 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE API "/fresh/:id" FOR get MIDDLEWARE api::timeout(2s) PERMISSIONS FULL THEN { { status: 200 } }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/fresh/:id\x00 => a95d4936a2d14b00 (140 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/fresh/:id\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE API "/ping" FOR get THEN { { status: 200 } }
+error: The api '/ping' already exists
+keyspace:
+### DEFINE API IF NOT EXISTS "/ping" FOR get THEN { { status: 200 } }
+NONE
+keyspace:
+### DEFINE API OVERWRITE "/ping" FOR any THEN { { status: 204 } }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/ping\x00 => c965e50f77ba4dbd (75 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/ping\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE CONFIG GRAPHQL AUTO
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cggraphql\x00 => 32bf50299107d813 (32 bytes)
+### DEFINE CONFIG GRAPHQL TABLES INCLUDE person FUNCTIONS NONE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cggraphql\x00 => 2763d101f2b75baa (41 bytes)
+### DEFINE CONFIG API MIDDLEWARE api::timeout(5s)
+error: The config for api already exists
+keyspace:
+### DEFINE CONFIG IF NOT EXISTS API MIDDLEWARE api::timeout(5s)
+NONE
+keyspace:
+### DEFINE CONFIG OVERWRITE API MIDDLEWARE api::timeout(5s)
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cgapi\x00 => 9f4281abb57681a5 (54 bytes)
+### DEFINE CONFIG DEFAULT NAMESPACE test DATABASE test
+NONE
+keyspace:
+/!cgdefault\x00 => fb23c9df198697af (25 bytes)
+### DEFINE CONFIG DEFAULT NAMESPACE 'other'
+NONE
+keyspace:
+/!cgdefault\x00 => c85d96168e7b3acd (19 bytes)
+### DEFINE ACCESS fresh ON ROOT TYPE JWT ALGORITHM HS256 KEY 'k'
+NONE
+keyspace:
+/!acfresh\x00 => 24f5996cb9055b7a (86 bytes)
+### DEFINE ACCESS fresh ON NAMESPACE TYPE JWT URL 'https://example.com/jwks' DURATION FOR SESSION 2h
+NONE
+keyspace:
+/*\x00\x00\x00\x00!acfresh\x00 => 5f605eac9db610fe (98 bytes)
+### DEFINE ACCESS fresh ON DATABASE TYPE RECORD SIGNUP (CREATE person SET existing = $e) SIGNIN (SELECT * FROM person WHERE existing = $e) DURATION FOR TOKEN 15m
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!acfresh\x00 => 797a1b17f61f3da9 (440 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ACCESS keyed ON DATABASE TYPE BEARER FOR USER DURATION FOR GRANT 30d COMMENT 'bearer'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ackeyed\x00 => d195655df487f8e6 (383 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02keyed\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ACCESS db_jwt ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret'
+error: The access method 'db_jwt' already exists in the database 'test'
+keyspace:
+### DEFINE ACCESS IF NOT EXISTS db_jwt ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret'
+NONE
+keyspace:
+### DEFINE ACCESS OVERWRITE ns_jwt ON NAMESPACE TYPE JWT ALGORITHM HS384 KEY 'other'
+NONE
+keyspace:
+/*\x00\x00\x00\x00!acns_jwt\x00 => 075811e78418eaa8 (95 bytes)
+### DEFINE ACCESS root_jwt ON ROOT TYPE JWT ALGORITHM HS512 KEY 'secret'
+error: The root access method 'root_jwt' already exists
+keyspace:
+### DEFINE ACCESS IF NOT EXISTS root_jwt ON ROOT TYPE JWT ALGORITHM ES512 KEY 'k'
+NONE
+keyspace:
+### DEFINE ACCESS IF NOT EXISTS ns_jwt ON NAMESPACE TYPE JWT ALGORITHM ES512 KEY 'k'
+NONE
+keyspace:
+### DEFINE ACCESS IF NOT EXISTS db_jwt ON DATABASE TYPE JWT ALGORITHM ES512 KEY 'k'
+NONE
+keyspace:
+### DEFINE ACCESS IF NOT EXISTS fresh ON DATABASE TYPE JWT ALGORITHM ES512 KEY 'k'
+error: The ES512 algorithm is not currently supported. Please use ES384 or another supported algorithm
+keyspace:
+### DEFINE ACCESS db_jwt ON DATABASE TYPE JWT ALGORITHM ES512 KEY 'k'
+error: The access method 'db_jwt' already exists in the database 'test'
+keyspace:
+### DEFINE ACCESS OVERWRITE db_jwt ON DATABASE TYPE JWT ALGORITHM ES512 KEY 'k'
+error: The ES512 algorithm is not currently supported. Please use ES384 or another supported algorithm
+keyspace:
+### DEFINE ACCESS ('fr' + 'esh') ON DATABASE TYPE JWT ALGORITHM HS256 KEY 'k'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!acfresh\x00 => f56bcd03daf5d444 (86 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE ACCESS ('db_' + 'jwt') ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret'
+error: The access method 'db_jwt' already exists in the database 'test'
+keyspace:
+### DEFINE ACCESS (1) ON NAMESPACE TYPE JWT ALGORITHM HS256 KEY 'k'
+error: Expected `access name` but found `1`
+keyspace:
+### ALTER TABLE person SCHEMAFULL
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 92d8aceefd4b274c (20 bytes)
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => c3df185cf56f41e3 (23 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnperson\x00 => a30e0e7dd88767d0 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => d4b924df3fc29e61 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!lg\x00\x02 => 524d28f2f265e839 (127 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!mi => d7876602b7aabefe (16 bytes)
+### ALTER TABLE person SCHEMALESS COMMENT 'people'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 401513ea604e4008 (183 bytes)
+### ALTER TABLE person PERMISSIONS FOR select FULL, FOR create NONE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 19bb5f5aaffd132f (174 bytes)
+### ALTER TABLE person CHANGEFEED 1h
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => <nonce> (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => bcc9a6e04a001f7c (192 bytes)
+### ALTER TABLE feedful CHANGEFEED 2h INCLUDE ORIGINAL
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => <nonce> (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfeedful\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfeedful\x00 => 1b7e103f50e5eeb8 (193 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00#*feedful\x00 => 20cc89aa2a03b603 (133 bytes)
+### ALTER TABLE feedful DROP CHANGEFEED
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfeedful\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfeedful\x00 => 6fb5d7bb1f11d7d9 (175 bytes)
+### ALTER TABLE person DROP COMMENT
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER TABLE person INLINE EDGES 4
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0bf3c49b1ff789c0 (177 bytes)
+### ALTER TABLE person TYPE RELATION IN person OUT person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 646ad7c33c91b4fd (205 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdin\x00 => 4fda6d042d7d6a03 (86 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdout\x00 => b8144af7194daa94 (87 bytes)
+### ALTER TABLE person TYPE NORMAL
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 52601bc51c3a96cf (174 bytes)
+### ALTER TABLE ('per' + 'son') COMMENT 'altered evaluated'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => b9adbaadc7002c7d (194 bytes)
+### ALTER TABLE (1) COMMENT 'altered number'
+error: Expected `table name` but found `1`
+keyspace:
+### ALTER TABLE missing SCHEMAFULL
+error: The table 'missing' does not exist
+keyspace:
+### ALTER TABLE IF EXISTS missing SCHEMAFULL
+NONE
+keyspace:
+### ALTER FIELD existing ON person TYPE int
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 87fdcdbe3a44812b (23 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => 0822aafc1f7962c2 (89 bytes)
+### ALTER FIELD existing ON person DROP TYPE READONLY COMMENT 'altered'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => 0f5723bbf6e72094 (93 bytes)
+### ALTER FIELD existing ON person VALUE $value + 1 ASSERT $value > 0 DEFAULT 1
+NONE
+keyspace:
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 555484717e933688 (23 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => 222500a19e006903 (119 bytes)
+### ALTER FIELD existing ON person DEFAULT ALWAYS 2 PERMISSIONS FOR select NONE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => db9cf087ad1d1be6 (93 bytes)
+### ALTER FIELD existing ON person DROP VALUE DROP ASSERT DROP DEFAULT DROP READONLY DROP COMMENT
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+### ALTER FIELD weight ON carried INLINE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcarried\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcarried\x00 => 930460cca6b101a1 (206 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*carried\x00!fdweight\x00 => fa387dcf5bf9b0a4 (88 bytes)
+### ALTER FIELD weight ON carried DROP INLINE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcarried\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcarried\x00 => 93045fcca6b0ffee (206 bytes)
+### ALTER FIELD missing ON person TYPE int
+error: The field 'missing' does not exist
+keyspace:
+### ALTER FIELD IF EXISTS missing ON person TYPE int
+NONE
+keyspace:
+### ALTER FIELD id ON person DEFAULT rand::uuid::v7()
+error: The field 'id' does not exist
+keyspace:
+### DEFINE FIELD ('fr' + 'esh') ON person TYPE int
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdfresh\x00 => 83777d11d8bce525 (86 bytes)
+### DEFINE FIELD ('fr' + 'esh') ON ('per' + 'son') TYPE int COMMENT 'a ' + 'field'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdfresh\x00 => 25c9dc1b8ae8a5b2 (96 bytes)
+### DEFINE FIELD loose.deep ON ('per' + 'son') TYPE int
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdloose.deep\x00 => b386875c17ee613f (91 bytes)
+### DEFINE FIELD tags[$i] ON person TYPE string
+error: Field path index must evaluate to an integer or string, found none
+keyspace:
+### DEFINE FIELD (1) ON person TYPE int
+error: Expected `field name` but found `1`
+keyspace:
+### DEFINE FIELD ('a' + 'b') ON (1) TYPE int
+error: Expected `table name` but found `1`
+keyspace:
+### DEFINE FIELD ('b' + 'c') ON newtable TYPE int
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvnewtable\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnnewtable\x00 => a30e117dd8876ce9 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbnewtable\x00 => 6bb5b0bc67a26938 (176 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*newtable\x00!fc => dc5087a601ce863d (37 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*newtable\x00!fdbc\x00 => 0c3f19643011c7cb (85 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*newtable\x00!lg\x00\x01 => b2c0c9c508c968c4 (25 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*newtable\x00!mi => d7876502b7aabd4b (16 bytes)
+### DEFINE FIELD ('exi' + 'sting') ON person TYPE int
+error: The field 'existing' already exists
+keyspace:
+### DEFINE FIELD IF NOT EXISTS ('exi' + 'sting') ON person TYPE int
+NONE
+keyspace:
+### DEFINE FIELD OVERWRITE ('exi' + 'sting') ON person TYPE bool
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => 2ede553306ff1685 (90 bytes)
+### DEFINE FIELD ('ex' + 'isting') ON person COMPUTED 1
+error: Computed fields cannot be indexed. Index: 'by_existing' - Field: 'existing'
+keyspace:
+### REMOVE FIELD ('exi' + 'sting') ON person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => removed
+### REMOVE FIELD existing ON ('per' + 'son')
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => removed
+### REMOVE FIELD IF EXISTS ('mis' + 'sing') ON person
+NONE
+keyspace:
+### REMOVE FIELD ('mis' + 'sing') ON person
+error: The field 'missing' does not exist
+keyspace:
+### REMOVE FIELD (1) ON person
+error: Expected `field name` but found `1`
+keyspace:
+### ALTER FIELD ('exi' + 'sting') ON person TYPE int
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => 0822aafc1f7962c2 (89 bytes)
+### ALTER FIELD existing ON ('per' + 'son') DROP TYPE COMMENT 'altered'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => 11cf1bc5633b0bfb (93 bytes)
+### ALTER FIELD IF EXISTS ('mis' + 'sing') ON person TYPE int
+NONE
+keyspace:
+### ALTER FIELD ('mis' + 'sing') ON person TYPE int
+error: The field 'missing' does not exist
+keyspace:
+### ALTER FIELD (1) ON person TYPE int
+error: Expected `field name` but found `1`
+keyspace:
+### DEFINE INDEX evaluated_ix ON person FIELDS ('na' + 'me')
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x01 => 57d15691754df73e (12 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ixevaluated_ix\x00 => 3c730fdd17f1207b (57 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!ir => af63bf4c8601bb45 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01*\x02\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 83cbc14aee1f29f0 (19 bytes)
+### DEFINE INDEX evaluated_ix ON person FIELDS name, ('ag' + 'e')
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x01 => 57d15691754df73e (12 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ixevaluated_ix\x00 => 0beddb3bcfa971ec (62 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!ir => 08395607b4f139a5 (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01*\x02\x02\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 83cbc14aee1f29f0 (19 bytes)
+### DEFINE INDEX evaluated_ix ON person FIELDS (1)
+error: Expected `field name` but found `1`
+keyspace:
+### DEFINE INDEX evaluated_ix ON person FIELDS ('fr' + 'esh') UNIQUE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x01 => 57d15691754df73e (12 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ixevaluated_ix\x00 => 8d6c14ff9ba64860 (58 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!ir => af63bf4c8601bb45 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01*\x02\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 83cbc14aee1f29f0 (19 bytes)
+### DEFINE INDEX evaluated_ix ON person FIELDS ('to' + 'tal')
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x01 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!il\x00\x00\x00\x01 => 57d15691754df73e (12 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ixevaluated_ix\x00 => 69cef2de687e4d9d (58 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!ir => af63bf4c8601bb45 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01!it => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00+\x00\x00\x00\x01*\x02\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 83cbc14aee1f29f0 (19 bytes)
+### DEFINE API 'no slash' FOR get THEN { { status: 200 } }
+error: The string could not be parsed into a path: Segment should start with /
+keyspace:
+### DEFINE API '/fresh' FOR get THEN { { status: 200 } } FOR get THEN { { status: 201 } }
+error: The method 'get' is defined in more than one FOR clause on api '/fresh'
+keyspace:
+### DEFINE API 'no slash' FOR get THEN { { status: 200 } } FOR get THEN { { status: 201 } }
+error: The string could not be parsed into a path: Segment should start with /
+keyspace:
+### DEFINE API '/fresh' FOR get, post THEN { { status: 200 } } FOR post THEN { { status: 201 } }
+error: The method 'post' is defined in more than one FOR clause on api '/fresh'
+keyspace:
+### DEFINE API IF NOT EXISTS '/ping' FOR get THEN { { status: 200 } } FOR get THEN { { status: 201 } }
+NONE
+keyspace:
+### DEFINE API '/fresh' FOR get MIDDLEWARE api::timeout(1s + 1s) THEN { { status: 200 } }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/fresh\x00 => 453bc5fa50da7fb0 (136 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE API '/fresh' FOR any MIDDLEWARE api::timeout(1s + 1s) THEN { { status: 200 } }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/fresh\x00 => add2377109cc8d6b (108 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE API '/fresh' FOR get MIDDLEWARE api::timeout(1s + 1s) THEN { { status: 200 } } COMMENT 'with ' + 'a middleware'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/fresh\x00 => f243bd6c59a9ebbe (156 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/fresh\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### DEFINE CONFIG API MIDDLEWARE api::timeout(1s + 1s)
+error: The config for api already exists
+keyspace:
+### DEFINE CONFIG OVERWRITE API MIDDLEWARE api::timeout(1s + 1s)
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cgapi\x00 => d2891be3cb677731 (54 bytes)
+### ALTER API '/ping' FOR get MIDDLEWARE api::timeout(1s + 1s) THEN { { status: 201 } }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/ping\x00 => f65462fd01372ef2 (135 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/ping\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER API '/ping' FOR any MIDDLEWARE api::timeout(1s + 1s) THEN { { status: 201 } }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/ping\x00 => 843c17a9344e1cc8 (157 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/ping\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER ACCESS ('db_' + 'jwt') ON DATABASE COMMENT 'altered'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!acdb_jwt\x00 => ec7233dd9561d358 (107 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02db_jwt\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER ACCESS ('mis' + 'sing') ON DATABASE COMMENT 'altered'
+error: The access method 'missing' does not exist in the database 'test'
+keyspace:
+### ALTER ACCESS IF EXISTS ('mis' + 'sing') ON DATABASE COMMENT 'altered'
+NONE
+keyspace:
+### ALTER ACCESS (1) ON DATABASE COMMENT 'altered'
+error: Expected `access name` but found `1`
+keyspace:
+### ALTER ACCESS ('root_' + 'jwt') ON ROOT COMMENT 'altered'
+NONE
+keyspace:
+/!acroot_jwt\x00 => fe0125f2653c8f04 (109 bytes)
+### ALTER ACCESS db_jwt ON DATABASE DURATION FOR TOKEN 1h
+NONE
+keyspace:
+### ALTER TABLE ('per' + 'son') TYPE RELATION IN person OUT person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 646ad7c33c91b4fd (205 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdin\x00 => 4fda6d042d7d6a03 (86 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdout\x00 => b8144af7194daa94 (87 bytes)
+### ALTER TABLE missing TYPE RELATION IN person OUT person
+error: The table 'missing' does not exist
+keyspace:
+### ALTER TABLE IF EXISTS missing TYPE RELATION IN person OUT person
+NONE
+keyspace:
+### ALTER FIELD id ON keyed_by READONLY
+error: Cannot use the `READONLY` keyword on the `id` field.
+keyspace:
+### ALTER FIELD id ON keyed_by FLEXIBLE
+error: Cannot use the `FLEXIBLE` keyword on the `id` field.
+keyspace:
+### ALTER FIELD id ON keyed_by VALUE 'x'
+error: Cannot use the `VALUE` keyword on the `id` field.
+keyspace:
+### ALTER FIELD id ON keyed_by DEFAULT ALWAYS 'x'
+error: Cannot use the `DEFAULT ALWAYS` keyword on the `id` field.
+keyspace:
+### ALTER FIELD id ON keyed_by TYPE bool
+error: Cannot use the `bool` type on the `id` field, as that's not a valid record id key.
+keyspace:
+### ALTER FIELD id ON keyed_by TYPE uuid DEFAULT rand::uuid() ASSERT $value != NONE COMMENT 'key'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvkeyed_by\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbkeyed_by\x00 => 7d0fd1996cc180d7 (176 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*keyed_by\x00!fdid\x00 => 46832b11623956b4 (123 bytes)
+### ALTER FIELD existing ON person FLEXIBLE
+error: An error occurred: FLEXIBLE can only be used with types containing object
+keyspace:
+### ALTER FIELD loose ON person FLEXIBLE
+error: An error occurred: FLEXIBLE can only be used in SCHEMAFULL tables
+keyspace:
+### ALTER FIELD doc ON strict FLEXIBLE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvstrict\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbstrict\x00 => 49642cf42ec43b2d (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*strict\x00!fddoc\x00 => 2ca4ffe36c0653d2 (87 bytes)
+### ALTER FIELD doc ON strict FLEXIBLE TYPE string
+error: An error occurred: FLEXIBLE can only be used with types containing object
+keyspace:
+### ALTER FIELD doc ON strict DROP FLEXIBLE TYPE string
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvstrict\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!gnstrict\x00 => a30e0f7dd8876983 (10 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbstrict\x00 => 49642cf42ec43b2d (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*strict\x00!fddoc\x00 => a8f82e36450aa16b (87 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*strict\x00!lg\x00\x03 => 15fe9640a272a864 (80 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*strict\x00!mi => d7876702b7aac0b1 (16 bytes)
+### ALTER NAMESPACE COMPACT
+error: The storage layer does not support compaction requests.
+keyspace:
+### ALTER DATABASE COMPACT
+error: The storage layer does not support compaction requests.
+keyspace:
+### ALTER TABLE person COMPACT
+error: The storage layer does not support compaction requests.
+keyspace:
+### ALTER PARAM $limit VALUE 30 + 1 COMMENT 'thirty-one'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x01limit\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!palimit\x00 => 786a6e363ed6a4f2 (38 bytes)
+### ALTER PARAM $limit DROP COMMENT PERMISSIONS NONE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x01limit\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!palimit\x00 => 0c1258b7f039c17e (25 bytes)
+### ALTER PARAM $missing VALUE 1
+error: The param '$missing' does not exist
+keyspace:
+### ALTER PARAM IF EXISTS $missing VALUE 1
+NONE
+keyspace:
+### ALTER FUNCTION fn::one($x: int) -> int { $x } COMMENT 'identity'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnone\x00 => 5f1fac7c524619c7 (82 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00one\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER FUNCTION fn::one DROP COMMENT PERMISSIONS NONE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnone\x00 => 751e6bd45808fc57 (51 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00one\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER FUNCTION fn::missing COMMENT 'x'
+error: The function 'fn::missing' does not exist
+keyspace:
+### ALTER FUNCTION IF EXISTS fn::missing COMMENT 'x'
+NONE
+keyspace:
+### ALTER EVENT audit ON person WHEN $event = 'DELETE' THEN (CREATE log) COMMENT 'deletes'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!evaudit\x00 => b70c04ccfb8afddf (98 bytes)
+### ALTER EVENT audit ON person DROP COMMENT
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+### ALTER EVENT missing ON person COMMENT 'x'
+error: The event 'missing' does not exist
+keyspace:
+### ALTER EVENT IF EXISTS missing ON person COMMENT 'x'
+NONE
+keyspace:
+### ALTER EVENT ('au' + 'dit') ON ('per' + 'son') COMMENT 'x'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!evaudit\x00 => d3b931e97a27d684 (79 bytes)
+### ALTER EVENT audit ON (1) COMMENT 'x'
+error: Expected `table name` but found `1`
+keyspace:
+### ALTER EVENT (1) ON (2) COMMENT 'x'
+error: Expected `event name` but found `1`
+keyspace:
+### ALTER SEQUENCE seq TIMEOUT 3s
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x06seq\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sdseq\x00 => 31504bc9008e56e9 (32 bytes)
+### ALTER SEQUENCE missing TIMEOUT 3s
+error: The sequence 'missing' does not exist
+keyspace:
+### ALTER SEQUENCE IF EXISTS missing TIMEOUT 3s
+NONE
+keyspace:
+### ALTER SEQUENCE ('s' + 'eq') TIMEOUT 3s
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x06seq\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sdseq\x00 => 31504bc9008e56e9 (32 bytes)
+### ALTER SEQUENCE (1) TIMEOUT 3s
+error: Expected `sequence name` but found `1`
+keyspace:
+### ALTER ANALYZER unused TOKENIZERS blank FILTERS uppercase COMMENT 'upper'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!azunused\x00 => e4d30cda90c9adc1 (44 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x05unused\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER ANALYZER unused DROP FILTERS DROP COMMENT
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!azunused\x00 => 87b0719cf0143c3f (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x05unused\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER ANALYZER missing COMMENT 'x'
+error: The analyzer 'missing' does not exist
+keyspace:
+### ALTER ANALYZER IF EXISTS missing COMMENT 'x'
+NONE
+keyspace:
+### ALTER USER db_user ON DATABASE ROLES EDITOR COMMENT 'edits'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!usdb_user\x00 => 04f264b7c568ab8e (35 bytes)
+### ALTER USER ns_user ON NAMESPACE PASSHASH 'new' DURATION FOR TOKEN 5m, FOR SESSION NONE
+NONE
+keyspace:
+/*\x00\x00\x00\x00!usns_user\x00 => c716e23fac814514 (32 bytes)
+### ALTER USER root_user ON ROOT DROP COMMENT
+NONE
+keyspace:
+### ALTER USER missing ON DATABASE ROLES EDITOR
+error: The user 'missing' does not exist in the database 'test'
+keyspace:
+### ALTER USER IF EXISTS missing ON NAMESPACE ROLES EDITOR
+NONE
+keyspace:
+### ALTER USER ('db_' + 'user') ON DATABASE ROLES EDITOR
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!usdb_user\x00 => 615374ee94e62423 (29 bytes)
+### ALTER USER ('mis' + 'sing') ON ROOT ROLES EDITOR
+error: The root user 'missing' does not exist
+keyspace:
+### ALTER CONFIG API MIDDLEWARE api::timeout(9s)
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cgapi\x00 => f8a2a7bd74976fe4 (54 bytes)
+### ALTER CONFIG IF EXISTS GRAPHQL AUTO
+NONE
+keyspace:
+### ALTER CONFIG GRAPHQL AUTO
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cggraphql\x00 => 32bf50299107d813 (32 bytes)
+### ALTER INDEX by_a ON indexed COMMENT 'by a'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => 6fecb946d1592719 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!ixby_a\x00 => 3663a4a25d1924d4 (54 bytes)
+### ALTER INDEX by_a ON indexed PREPARE REMOVE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => 6fecb946d1592719 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!ixby_a\x00 => 779420c0d662283c (47 bytes)
+### ALTER INDEX missing ON indexed COMMENT 'x'
+error: The index 'missing' does not exist
+keyspace:
+### ALTER INDEX IF EXISTS missing ON indexed COMMENT 'x'
+NONE
+keyspace:
+### ALTER INDEX ('by_' + 'a') ON ('index' + 'ed') COMMENT 'by a'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => 6fecb946d1592719 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!ixby_a\x00 => 3663a4a25d1924d4 (54 bytes)
+### ALTER INDEX (1) ON indexed COMMENT 'x'
+error: Expected `index name` but found `1`
+keyspace:
+### ALTER INDEX by_a ON (1) COMMENT 'x'
+error: Expected `table name` but found `1`
+keyspace:
+### ALTER API "/ping" COMMENT 'pinged'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/ping\x00 => cc96077d958306d9 (112 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/ping\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER API "/ping" FOR any THEN { RETURN 'fallback' }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/ping\x00 => 36752538b70a766b (127 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/ping\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER API "/ping" FOR any DROP THEN
+NONE
+keyspace:
+### ALTER API "/ping" FOR get DROP THEN
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/ping\x00 => 5f39dc0ce0dd903d (53 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/ping\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER API "/ping" FOR post THEN { RETURN 'post' } FOR get DROP THEN FOR put THEN { RETURN 'put' }
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/ping\x00 => 291b5f734bee8cab (148 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/ping\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER API "/missing" COMMENT 'x'
+error: The api '/missing' does not exist
+keyspace:
+### ALTER API IF EXISTS "/missing" COMMENT 'x'
+NONE
+keyspace:
+### ALTER ACCESS db_jwt ON DATABASE DURATION FOR TOKEN 2h, FOR SESSION 48h COMMENT 'updated'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!acdb_jwt\x00 => 7f7f1d16c2abf99e (118 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02db_jwt\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### ALTER ACCESS ns_jwt ON NAMESPACE DURATION FOR TOKEN NONE DROP COMMENT
+NONE
+keyspace:
+/*\x00\x00\x00\x00!acns_jwt\x00 => be8d375e034564ac (86 bytes)
+### ALTER ACCESS root_jwt ON ROOT AUTHENTICATE { $auth }
+NONE
+keyspace:
+/!acroot_jwt\x00 => 621679e0995a117a (111 bytes)
+### ALTER ACCESS missing ON DATABASE COMMENT 'x'
+error: The access method 'missing' does not exist in the database 'test'
+keyspace:
+### ALTER ACCESS IF EXISTS missing ON ROOT COMMENT 'x'
+NONE
+keyspace:
+### ALTER SYSTEM COMPACT
+error: The storage layer does not support compaction requests.
+keyspace:
+### ALTER SYSTEM QUERY_TIMEOUT 5s
+NONE
+keyspace:
+### ALTER SYSTEM DROP QUERY_TIMEOUT
+NONE
+keyspace:
+### INFO FOR DB
+{ accesses: { db_jwt: "DEFINE ACCESS db_jwt ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: { unused: 'DEFINE ANALYZER unused TOKENIZERS BLANK FILTERS LOWERCASE', words: 'DEFINE ANALYZER words TOKENIZERS BLANK' }, apis: { "/ping": "DEFINE API '/ping' FOR any PERMISSIONS FULL FOR get PERMISSIONS FULL THEN { { status: 200 } }" }, buckets: {  }, compatibility: 4, configs: { API: 'API MIDDLEWARE api::timeout(1s) PERMISSIONS FULL' }, extensions: {  }, functions: { one: 'DEFINE FUNCTION fn::one() { 1 } PERMISSIONS FULL' }, models: {  }, params: { limit: 'DEFINE PARAM $limit VALUE 10 PERMISSIONS FULL' }, sequences: { seq: 'DEFINE SEQUENCE seq BATCH 1000 START 0' }, tables: { by_person: 'DEFINE TABLE by_person TYPE ANY SCHEMALESS AS SELECT * FROM person PERMISSIONS NONE', carried: 'DEFINE TABLE carried TYPE RELATION IN person OUT person SCHEMALESS PERMISSIONS NONE', feedful: 'DEFINE TABLE feedful TYPE ANY SCHEMALESS CHANGEFEED 1d PERMISSIONS NONE', indexed: 'DEFINE TABLE indexed TYPE ANY SCHEMALESS PERMISSIONS NONE', keyed_by: 'DEFINE TABLE keyed_by TYPE ANY SCHEMALESS PERMISSIONS NONE', person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE', sale: 'DEFINE TABLE sale TYPE ANY SCHEMALESS PERMISSIONS NONE', strict: 'DEFINE TABLE strict TYPE NORMAL SCHEMAFULL PERMISSIONS NONE', texts: 'DEFINE TABLE texts TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: { db_user: "DEFINE USER db_user ON DATABASE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }
+keyspace:
+### INFO FOR DB STRUCTURE
+{ accesses: [{ duration: { session: NONE, token: 1h }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'db_jwt' }], analyzers: [{ filters: ['LOWERCASE'], name: 'unused', tokenizers: ['BLANK'] }, { name: 'words', tokenizers: ['BLANK'] }], apis: [{ actions: [{ action: '{ { status: 200 } }', config: { permissions: true }, methods: ['get'] }], config: { permissions: true }, path: '/ping' }], buckets: [], compatibility: 4, configs: [{ api: { middleware: { "api::timeout": ['1s'] }, permissions: true } }], extensions: [], functions: [{ args: [], block: '{ 1 }', name: 'one', permissions: true }], models: [], params: [{ name: 'limit', permissions: true, value: '10' }], sequences: [{ batch: '1000', name: 'seq', resume: '1', start: '0', timeout: NONE }], tables: [{ drop: false, id: 1, kind: { kind: 'ANY' }, name: 'by_person', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false, view: 'AS SELECT * FROM person' }, { drop: false, id: 4, kind: { enforced: false, in: [person], kind: 'RELATION', out: [person] }, name: 'carried', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { changefeed: { expiry: 1d, original: false }, drop: false, id: 5, kind: { kind: 'ANY' }, name: 'feedful', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 3, kind: { kind: 'ANY' }, name: 'indexed', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 6, kind: { kind: 'ANY' }, name: 'keyed_by', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 0, kind: { kind: 'ANY' }, name: 'person', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 2, kind: { kind: 'ANY' }, name: 'sale', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 7, kind: { kind: 'NORMAL' }, name: 'strict', permissions: { create: false, delete: false, select: false, update: false }, schemafull: true }, { drop: false, id: 8, kind: { kind: 'ANY' }, name: 'texts', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }], users: [{ duration: { session: NONE, token: 1h }, hash: '[REDACTED]', name: 'db_user', roles: ['VIEWER'], scram: '[REDACTED]' }] }
+keyspace:
+### INFO FOR TABLE person
+{ events: { audit: 'DEFINE EVENT audit ON person WHEN true THEN (CREATE log)' }, fields: { existing: 'DEFINE FIELD existing ON person TYPE string PERMISSIONS FULL', loose: 'DEFINE FIELD loose ON person TYPE object PERMISSIONS FULL' }, indexes: { by_existing: 'DEFINE INDEX by_existing ON person FIELDS existing' }, lives: {  }, tables: { by_person: 'DEFINE TABLE by_person TYPE ANY SCHEMALESS AS SELECT * FROM person PERMISSIONS NONE' } }
+keyspace:
+### INFO FOR TABLE indexed STRUCTURE
+{ events: [], fields: [], indexes: [{ cols: ['a'], index: '', name: 'by_a', table: 'indexed' }, { cols: ['b'], index: 'FULLTEXT ANALYZER words BM25(1.2,0.75)', name: 'by_b', table: 'indexed' }, { cols: ['c'], index: 'FULLTEXT ANALYZER words BM25(1.2,0.75)', name: 'by_c', table: 'indexed' }], lives: [], tables: [] }
+keyspace:
+### INFO FOR TABLE 'person'
+{ events: { audit: 'DEFINE EVENT audit ON person WHEN true THEN (CREATE log)' }, fields: { existing: 'DEFINE FIELD existing ON person TYPE string PERMISSIONS FULL', loose: 'DEFINE FIELD loose ON person TYPE object PERMISSIONS FULL' }, indexes: { by_existing: 'DEFINE INDEX by_existing ON person FIELDS existing' }, lives: {  }, tables: { by_person: 'DEFINE TABLE by_person TYPE ANY SCHEMALESS AS SELECT * FROM person PERMISSIONS NONE' } }
+keyspace:
+### INFO FOR TABLE missing
+{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }
+keyspace:
+### INFO FOR NS
+{ accesses: { ns_jwt: "DEFINE ACCESS ns_jwt ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: { second: 'DEFINE DATABASE second COMPATIBILITY 4', test: 'DEFINE DATABASE test COMPATIBILITY 4' }, users: { ns_user: "DEFINE USER ns_user ON NAMESPACE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }
+keyspace:
+### INFO FOR NS STRUCTURE
+{ accesses: [{ duration: { session: NONE, token: 1h }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'ns_jwt' }], databases: [{ compatibility: 4, id: 1, name: 'second' }, { compatibility: 4, id: 0, name: 'test' }], users: [{ duration: { session: NONE, token: 1h }, hash: '[REDACTED]', name: 'ns_user', roles: ['VIEWER'], scram: '[REDACTED]' }] }
+keyspace:
+### INFO FOR ROOT
+{ accesses: { root_jwt: "DEFINE ACCESS root_jwt ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, config: { QUERY_TIMEOUT: NONE }, defaults: {  }, namespaces: { test: 'DEFINE NAMESPACE test' }, nodes: {  }, system: { <host metrics> }, users: { root_user: "DEFINE USER root_user ON ROOT PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }
+keyspace:
+### INFO FOR ROOT STRUCTURE
+{ accesses: [{ duration: { session: NONE, token: 1h }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'root_jwt' }], config: { QUERY_TIMEOUT: NONE }, defaults: {  }, namespaces: [{ id: 0, name: 'test' }], nodes: [], system: { <host metrics> }, users: [{ duration: { session: NONE, token: 1h }, hash: '[REDACTED]', name: 'root_user', roles: ['VIEWER'], scram: '[REDACTED]' }] }
+keyspace:
+### INFO FOR USER db_user ON DATABASE
+"DEFINE USER db_user ON DATABASE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE"
+keyspace:
+### INFO FOR USER ns_user ON NAMESPACE STRUCTURE
+{ duration: { session: NONE, token: 1h }, hash: '[REDACTED]', name: 'ns_user', roles: ['VIEWER'], scram: '[REDACTED]' }
+keyspace:
+### INFO FOR USER root_user ON ROOT
+"DEFINE USER root_user ON ROOT PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE"
+keyspace:
+### INFO FOR USER missing ON DATABASE
+error: The user 'missing' does not exist in the database 'test'
+keyspace:
+### INFO FOR USER db_user
+"DEFINE USER db_user ON DATABASE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE"
+keyspace:
+### INFO FOR USER db_user STRUCTURE
+{ duration: { session: NONE, token: 1h }, hash: '[REDACTED]', name: 'db_user', roles: ['VIEWER'], scram: '[REDACTED]' }
+keyspace:
+### INFO FOR USER ns_user
+error: The user 'ns_user' does not exist in the database 'test'
+keyspace:
+### INFO FOR USER ('db' + '_user')
+"DEFINE USER db_user ON DATABASE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE"
+keyspace:
+### INFO FOR INDEX by_a ON indexed
+{ building: { active: false, armed_shards: 0, compacting: false, initial: 0, pending: 0, queued: false, status: 'ready', updated: 0 } }
+keyspace:
+### INFO FOR INDEX by_a ON indexed STRUCTURE
+{ building: { active: false, armed_shards: 0, compacting: false, initial: 0, pending: 0, queued: false, status: 'ready', updated: 0 } }
+keyspace:
+### INFO FOR INDEX ('by_' + 'a') ON ('index' + 'ed')
+{ building: { active: false, armed_shards: 0, compacting: false, initial: 0, pending: 0, queued: false, status: 'ready', updated: 0 } }
+keyspace:
+### INFO FOR INDEX missing ON indexed
+error: The index 'missing' does not exist
+keyspace:
+### REMOVE CONFIG IF EXISTS GRAPHQL
+NONE
+keyspace:
+### REMOVE CONFIG GRAPHQL
+error: The config for graphql does not exist
+keyspace:
+### REMOVE CONFIG API
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cgapi\x00 => removed
+### REMOVE CONFIG IF EXISTS DEFAULT
+NONE
+keyspace:
+### REMOVE NAMESPACE test
+NONE
+keyspace:
+/!nstest\x00 => removed
+/!rc\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x01*t\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x01*t\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+### REMOVE NAMESPACE AND EXPUNGE test
+NONE
+keyspace:
+/!nstest\x00 => removed
+/!rc\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x01*t\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x01*t\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+### REMOVE NAMESPACE missing
+error: The namespace 'missing' does not exist
+keyspace:
+### REMOVE NAMESPACE IF EXISTS missing
+NONE
+keyspace:
+### REMOVE NAMESPACE ('te' + 'st')
+NONE
+keyspace:
+/!nstest\x00 => removed
+/!rc\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x01*t\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x01*t\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+### REMOVE NAMESPACE (1)
+error: Expected `namespace name` but found `1`
+keyspace:
+### REMOVE DATABASE test
+NONE
+keyspace:
+/!rc\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00!dbtest\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+### REMOVE DATABASE AND EXPUNGE second
+NONE
+keyspace:
+/!rc\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/*\x00\x00\x00\x00!dbsecond\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x01*t\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x01*t\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+### REMOVE DATABASE missing
+error: The database 'missing' does not exist
+keyspace:
+### REMOVE DATABASE IF EXISTS missing
+NONE
+keyspace:
+### REMOVE DATABASE ('te' + 'st')
+NONE
+keyspace:
+/!rc\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!tq\x00\x00\x00\x00\x00\x00\x00\x00person\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00!dbtest\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+### REMOVE DATABASE IF EXISTS ('mis' + 'sing')
+NONE
+keyspace:
+### REMOVE TABLE person
+error: Invalid query: Cannot delete table `person` on which a view is defined, table(s) `by_person` are defined as a view on this table.
+keyspace:
+### REMOVE TABLE by_person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvby_person\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbby_person\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!lg\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!mi => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ftby_person\x00 => removed
+### REMOVE TABLE IF EXISTS by_person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvby_person\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbby_person\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!lg\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00!mi => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*by_person\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!ftby_person\x00 => removed
+### REMOVE TABLE indexed
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+... 37 changes, digest aa38faaa10f7bf7d ...
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x01!tv => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dl\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dt\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dv => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dx\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!tv => removed
+### REMOVE TABLE AND EXPUNGE indexed
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+... 37 changes, digest aa38faaa10f7bf7d ...
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x01!tv => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dl\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dt\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dv => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dx\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!tv => removed
+### REMOVE TABLE missing
+error: The table 'missing' does not exist
+keyspace:
+### REMOVE TABLE IF EXISTS missing
+NONE
+keyspace:
+### REMOVE TABLE ('in' + 'dexed')
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+... 37 changes, digest aa38faaa10f7bf7d ...
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x01!tv => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dl\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dt\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dv => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dx\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!tv => removed
+### REMOVE TABLE IF EXISTS ('mis' + 'sing')
+NONE
+keyspace:
+### REMOVE TABLE (1)
+error: Expected `table name` but found `1`
+keyspace:
+### REMOVE EVENT audit ON person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!evaudit\x00 => removed
+### REMOVE EVENT missing ON person
+error: The event 'missing' does not exist
+keyspace:
+### REMOVE EVENT IF EXISTS missing ON person
+NONE
+keyspace:
+### REMOVE EVENT ('au' + 'dit') ON ('per' + 'son')
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!evaudit\x00 => removed
+### REMOVE EVENT audit ON (1)
+error: Expected `table name` but found `1`
+keyspace:
+### REMOVE FIELD existing ON person
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => removed
+### REMOVE FIELD missing ON person
+error: The field 'missing' does not exist
+keyspace:
+### REMOVE FIELD IF EXISTS missing ON person
+NONE
+keyspace:
+### REMOVE INDEX by_a ON indexed
+NONE
+keyspace:
+/!rc\x02\x00\x00\x00\x00\x00\x00\x00\x00indexed\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => 6fecb946d1592719 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!il\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!ixby_a\x00 => removed
+### REMOVE INDEX ('by_' + 'a') ON ('index' + 'ed')
+NONE
+keyspace:
+/!rc\x02\x00\x00\x00\x00\x00\x00\x00\x00indexed\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => 6fecb946d1592719 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!il\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!ixby_a\x00 => removed
+### REMOVE INDEX (1) ON indexed
+error: Expected `index name` but found `1`
+keyspace:
+### REMOVE INDEX by_b ON indexed
+NONE
+keyspace:
+/!rc\x02\x00\x00\x00\x00\x00\x00\x00\x00indexed\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => 6fecb946d1592719 (175 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!il\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!ixby_b\x00 => removed
+### REMOVE INDEX only_text ON texts
+NONE
+keyspace:
+/!rc\x02\x00\x00\x00\x00\x00\x00\x00\x00texts\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!rc\x03\x00\x00\x00\x00\x00\x00\x00\x00texts\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!rc\x04\x00\x00\x00\x00\x00\x00\x00\x00texts\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!rc\x05\x00\x00\x00\x00\x00\x00\x00\x00texts\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!rc\x06\x00\x00\x00\x00\x00\x00\x00\x00texts\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvtexts\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbtexts\x00 => 9d9ff8b36c541c6b (173 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!il\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*texts\x00!ixonly_text\x00 => removed
+### REMOVE INDEX missing ON indexed
+error: The index 'missing' does not exist
+keyspace:
+### REMOVE INDEX IF EXISTS missing ON indexed
+NONE
+keyspace:
+### REMOVE PARAM $limit
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x01limit\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!palimit\x00 => removed
+### REMOVE PARAM $missing
+error: The param '$missing' does not exist
+keyspace:
+### REMOVE PARAM IF EXISTS $missing
+NONE
+keyspace:
+### REMOVE FUNCTION fn::one
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnone\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00one\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### REMOVE FUNCTION fn::missing
+error: The function 'fn::missing' does not exist
+keyspace:
+### REMOVE FUNCTION IF EXISTS fn::missing
+NONE
+keyspace:
+### REMOVE SEQUENCE seq
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x06seq\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sdseq\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sqseq\x00!ba\x80\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sqseq\x00!st\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+### REMOVE SEQUENCE missing
+error: The sequence 'missing' does not exist
+keyspace:
+### REMOVE SEQUENCE ('s' + 'eq')
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x06seq\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sdseq\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sqseq\x00!ba\x80\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!sqseq\x00!st\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+### REMOVE SEQUENCE IF EXISTS ('mis' + 'sing')
+NONE
+keyspace:
+### REMOVE USER ('db_' + 'user') ON DATABASE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!usdb_user\x00 => removed
+### REMOVE USER ('ns_' + 'user') ON NAMESPACE
+NONE
+keyspace:
+/*\x00\x00\x00\x00!usns_user\x00 => removed
+### REMOVE USER (1) ON ROOT
+error: Expected `user name` but found `1`
+keyspace:
+### REMOVE ACCESS ('db_' + 'jwt') ON DATABASE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!acdb_jwt\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02db_jwt\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### REMOVE ACCESS ('mis' + 'sing') ON ROOT
+error: The root access method 'missing' does not exist
+keyspace:
+### REMOVE SEQUENCE IF EXISTS missing
+NONE
+keyspace:
+### REMOVE ANALYZER words
+error: The analyzer 'words' is in use by index 'by_b' on table 'indexed' and cannot be removed
+keyspace:
+### REMOVE ANALYZER unused
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!azunused\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x05unused\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### REMOVE ANALYZER missing
+error: The analyzer 'missing' does not exist
+keyspace:
+### REMOVE ANALYZER IF EXISTS missing
+NONE
+keyspace:
+### REMOVE ACCESS root_jwt ON ROOT
+NONE
+keyspace:
+/!acroot_jwt\x00 => removed
+### REMOVE ACCESS ns_jwt ON NAMESPACE
+NONE
+keyspace:
+/*\x00\x00\x00\x00!acns_jwt\x00 => removed
+### REMOVE ACCESS db_jwt ON DATABASE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!acdb_jwt\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x02db_jwt\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### REMOVE ACCESS missing ON ROOT
+error: The root access method 'missing' does not exist
+keyspace:
+### REMOVE ACCESS missing ON NAMESPACE
+error: The access method 'missing' does not exist in the namespace 'test'
+keyspace:
+### REMOVE ACCESS missing ON DATABASE
+error: The access method 'missing' does not exist in the database 'test'
+keyspace:
+### REMOVE ACCESS IF EXISTS missing ON DATABASE
+NONE
+keyspace:
+### REMOVE API "/ping"
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ap/ping\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x07/ping\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### REMOVE API "/missing"
+error: The api '/missing' does not exist
+keyspace:
+### REMOVE API IF EXISTS "/missing"
+NONE
+keyspace:
+### REMOVE TABLE 'indexed'
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvindexed\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbindexed\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => removed
+... 37 changes, digest aa38faaa10f7bf7d ...
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x01!tv => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dl\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dt\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dv => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!dx\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00+\x00\x00\x00\x02!tv => removed
+### REMOVE USER root_user ON ROOT
+NONE
+keyspace:
+/!usroot_user\x00 => removed
+### REMOVE USER ns_user ON NAMESPACE
+NONE
+keyspace:
+/*\x00\x00\x00\x00!usns_user\x00 => removed
+### REMOVE USER db_user ON DATABASE
+NONE
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!usdb_user\x00 => removed
+### REMOVE USER missing ON ROOT
+error: The root user 'missing' does not exist
+keyspace:
+### REMOVE USER missing ON NAMESPACE
+error: The user 'missing' does not exist in the namespace 'test'
+keyspace:
+### REMOVE USER missing ON DATABASE
+error: The user 'missing' does not exist in the database 'test'
+keyspace:
+### REMOVE USER IF EXISTS missing ON NAMESPACE
+NONE
+keyspace:

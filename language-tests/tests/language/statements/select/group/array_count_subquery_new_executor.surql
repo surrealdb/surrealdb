@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -8,8 +7,10 @@ planner-strategy = ["all-ro"]
 value = "'OK'"
 
 [[test.results]]
-value = ''''Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: table, direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: table, direction: Forward]
 ''''
 
 [[test.results]]

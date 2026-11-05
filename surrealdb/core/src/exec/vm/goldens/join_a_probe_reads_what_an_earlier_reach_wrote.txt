@@ -1,0 +1,39 @@
+### FOR $i IN [1, 2, 3] { CREATE type::record('b', 100 + $i) SET k = 1, x = $i; CREATE log SET xs = (SELECT (SELECT VALUE x FROM b WHERE k = $parent.k) AS xs FROM ONLY a:1).xs }
+NONE
+records:
+{ id: log:generated, xs: [10, 20, 5, 1, 2, 3] }
+{ id: log:generated, xs: [10, 20, 5, 1, 2] }
+{ id: log:generated, xs: [10, 20, 5, 1] }
+### FOR $i IN [1, 2] { CREATE log SET n = $i; CREATE log SET seen = (SELECT VALUE (SELECT VALUE n FROM log WHERE n = $parent.n) FROM [{ n: $i }]) }
+NONE
+records:
+{ id: log:generated, n: 1 }
+{ id: log:generated, n: 2 }
+{ id: log:generated, seen: [[1]] }
+{ id: log:generated, seen: [[2]] }
+### UPDATE a SET xs = (SELECT VALUE x FROM b WHERE k = $parent.k)
+{ id: a:1, k: 1, ref: b:1, xs: [10, 20, 5] }
+{ id: a:2, k: 2f, ref: b:4, xs: [30, 40] }
+{ id: a:3, k: 'one', xs: [50] }
+{ id: a:4, xs: [60] }
+{ id: a:5, k: NULL, xs: [70] }
+{ id: a:6, k: 3dec, xs: [80] }
+{ id: a:7, k: [1, 'x'], xs: [90, 100] }
+{ id: a:8, k: 'abc', xs: [110] }
+{ id: a:9, k: 0.1f, xs: [] }
+{ id: a:10, k: -0f, xs: [130] }
+{ id: a:11, k: 9, xs: [] }
+records:
+### UPDATE a SET xs = (SELECT VALUE x FROM b WHERE k = $parent.k) RETURN xs
+{ xs: [10, 20, 5] }
+{ xs: [30, 40] }
+{ xs: [50] }
+{ xs: [60] }
+{ xs: [70] }
+{ xs: [80] }
+{ xs: [90, 100] }
+{ xs: [110] }
+{ xs: [] }
+{ xs: [130] }
+{ xs: [] }
+records:

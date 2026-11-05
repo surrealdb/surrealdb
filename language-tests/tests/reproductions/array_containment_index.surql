@@ -4,10 +4,9 @@ namespace = true
 database = true
 auth = { level = "owner" }
 
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "WHERE field CONTAINS scalar and scalar INSIDE field should use array indexes with Part::All"
+reason = "An array-element index (`FIELDS tags[*]`) answers `tags[*] CONTAINS v` and `v INSIDE tags[*]` with an index seek. `tags CONTAINS v` returns the same rows here; a stored scalar could satisfy it without holding `v` as an element, so it seeks `v` together with `NONE` and `NULL` (under which the column lists a scalar) and judges the predicate again over every record the seek yields."
 
 [[test.results]]
 value = "NONE"
@@ -34,7 +33,32 @@ value = "[{ name: 'Climate Org' }, { name: 'Green Edu' }]"
 value = "[{ name: 'Education Org' }, { name: 'Green Edu' }]"
 
 [[test.results]]
-value = """{ attributes: { projections: 'name' }, children: [{ attributes: { access: "= 'climate'", direction: 'Forward', index: 'org_topics' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = '''
+"SelectProject [ctx: Db] [projections: name]
+    Filter [ctx: Db] [predicate: mission_topic_tags CONTAINS 'climate']
+        UnionIndexScan [ctx: Db] [table: organization, branches: 3]
+            IndexScan [ctx: Db] [table: organization, index: org_topics, access: = 'climate', direction: Forward]
+            IndexScan [ctx: Db] [table: organization, index: org_topics, access: = NONE, direction: Forward]
+            IndexScan [ctx: Db] [table: organization, index: org_topics, access: = NULL, direction: Forward]
+"'''
+
+[[test.results]]
+value = "[{ name: 'Climate Org' }, { name: 'Green Edu' }]"
+
+[[test.results]]
+value = "[{ name: 'Education Org' }, { name: 'Green Edu' }]"
+
+[[test.results]]
+value = '''
+"SelectProject [ctx: Db] [projections: name]
+    IndexScan [ctx: Db] [table: organization, index: org_topics, access: = 'climate', direction: Forward]
+"'''
+
+[[test.results]]
+value = '''
+"SelectProject [ctx: Db] [projections: name]
+    IndexScan [ctx: Db] [table: organization, index: org_topics, access: = 'education', direction: Forward]
+"'''
 */
 
 -- Define index on array field elements
@@ -47,11 +71,13 @@ CREATE organization:c SET name = "Green Edu", mission_topic_tags = ["climate", "
 CREATE organization:d SET name = "Health Org", mission_topic_tags = ["health"];
 CREATE organization:e SET name = "Empty Org", mission_topic_tags = [];
 
--- Test: CONTAINS should use index
+-- CONTAINS and INSIDE over the field itself
 SELECT name FROM organization WHERE mission_topic_tags CONTAINS "climate";
-
--- Test: INSIDE (reverse) should also use index
 SELECT name FROM organization WHERE "education" INSIDE mission_topic_tags;
+EXPLAIN SELECT name FROM organization WHERE mission_topic_tags CONTAINS "climate";
 
--- Verify index usage via EXPLAIN
-SELECT name FROM organization WHERE mission_topic_tags CONTAINS "climate" EXPLAIN;
+-- The flattened spelling seeks the index, in both directions
+SELECT name FROM organization WHERE mission_topic_tags[*] CONTAINS "climate";
+SELECT name FROM organization WHERE "education" INSIDE mission_topic_tags[*];
+EXPLAIN SELECT name FROM organization WHERE mission_topic_tags[*] CONTAINS "climate";
+EXPLAIN SELECT name FROM organization WHERE "education" INSIDE mission_topic_tags[*];

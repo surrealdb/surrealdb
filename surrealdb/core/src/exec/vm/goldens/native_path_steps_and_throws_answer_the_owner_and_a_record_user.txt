@@ -1,0 +1,102 @@
+### owner: SELECT VALUE a FROM [{ a: 1 }, { a: 2 }, 3, NONE]
+1
+2
+NONE
+### owner: SELECT VALUE $this.a FROM [{ a: 1 }, 5]
+1
+NONE
+### owner: SELECT VALUE name FROM [p:1, p:2]
+NONE
+'two'
+### owner: SELECT VALUE secret FROM [p:1, p:2]
+'s1'
+'s2'
+### owner: SELECT link.* AS l FROM p
+{ l: { id: p:2, m: 9, name: 'two', secret: 's2', tags: [] } }
+{ l: NONE }
+### owner: SELECT VALUE links.* FROM p
+[{ id: p:2, m: 9, name: 'two', secret: 's2', tags: [] }, 7, 'x']
+NONE
+### owner: SELECT VALUE (NONE).* FROM p
+NONE
+NONE
+### owner: SELECT tags[WHERE n > 2] AS t FROM p
+{ t: [{ k: 'b', n: 5 }, { k: 'c', n: 3 }] }
+{ t: [] }
+### owner: SELECT VALUE tags[WHERE n > $parent.m] FROM p
+[{ k: 'b', n: 5 }, { k: 'c', n: 3 }]
+[]
+### owner: SELECT VALUE tags[WHERE k = 'b' OR n = 1].k FROM p
+['a', 'b']
+[]
+### owner: SELECT VALUE (<set> [{ n: 1 }, { n: 3 }, { n: 3 }])[WHERE n > 1] FROM p
+{{ n: 3 },}
+{{ n: 3 },}
+### owner: SELECT VALUE m[WHERE n > 1] FROM p
+NONE
+NONE
+### owner: SELECT VALUE s[WHERE $this > 1] FROM p
+{2, 3}
+NONE
+### owner: SELECT VALUE [p:1, p:2][WHERE secret = 's1'] FROM p:1
+[p:1]
+### owner: SELECT VALUE IF m > 5 THEN THROW 'big ' + <string> m ELSE m END FROM p
+error: An error occurred: big 9
+### owner: SELECT VALUE @.id FROM [p:1, { id: p:2 }, { id: 'fake' }, 3]
+p:1
+p:2
+NONE
+NONE
+### owner: SELECT * FROM (BREAK)
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### record user: SELECT VALUE a FROM [{ a: 1 }, { a: 2 }, 3, NONE]
+1
+2
+NONE
+### record user: SELECT VALUE $this.a FROM [{ a: 1 }, 5]
+1
+NONE
+### record user: SELECT VALUE name FROM [p:1, p:2]
+NONE
+'two'
+### record user: SELECT VALUE secret FROM [p:1, p:2]
+NONE
+NONE
+### record user: SELECT link.* AS l FROM p
+{ l: { id: p:2, m: 9, name: 'two', tags: [] } }
+{ l: NONE }
+### record user: SELECT VALUE links.* FROM p
+[{ id: p:2, m: 9, name: 'two', tags: [] }, 7, 'x']
+NONE
+### record user: SELECT VALUE (NONE).* FROM p
+NONE
+NONE
+### record user: SELECT tags[WHERE n > 2] AS t FROM p
+{ t: [{ k: 'b', n: 5 }, { k: 'c', n: 3 }] }
+{ t: [] }
+### record user: SELECT VALUE tags[WHERE n > $parent.m] FROM p
+[{ k: 'b', n: 5 }, { k: 'c', n: 3 }]
+[]
+### record user: SELECT VALUE tags[WHERE k = 'b' OR n = 1].k FROM p
+['a', 'b']
+[]
+### record user: SELECT VALUE (<set> [{ n: 1 }, { n: 3 }, { n: 3 }])[WHERE n > 1] FROM p
+{{ n: 3 },}
+{{ n: 3 },}
+### record user: SELECT VALUE m[WHERE n > 1] FROM p
+NONE
+NONE
+### record user: SELECT VALUE s[WHERE $this > 1] FROM p
+{2, 3}
+NONE
+### record user: SELECT VALUE [p:1, p:2][WHERE secret = 's1'] FROM p:1
+[]
+### record user: SELECT VALUE IF m > 5 THEN THROW 'big ' + <string> m ELSE m END FROM p
+error: An error occurred: big 9
+### record user: SELECT VALUE @.id FROM [p:1, { id: p:2 }, { id: 'fake' }, 3]
+p:1
+p:2
+NONE
+NONE
+### record user: SELECT * FROM (BREAK)
+error: Invalid control flow statement, break or continue statement found outside of loop.

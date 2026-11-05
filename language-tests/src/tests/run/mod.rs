@@ -5,12 +5,32 @@ use crate::tests::case::{CaseSet, TestCase};
 
 pub trait RunConfig {
 	fn name(&self, case: &CaseImports) -> String;
+
+	/// Whether the rows of a statement nothing orders are graded as a multiset: the run executes
+	/// under settings that leave their order unspecified.
+	fn unordered_rows(&self) -> bool {
+		false
+	}
 }
 
 #[derive(Debug)]
 pub struct CaseImports {
 	pub test: Arc<TestCase>,
 	pub imports: Vec<Arc<TestCase>>,
+	/// Resolved `[test.chain] setup` script, dependencies first. Empty unless
+	/// the case declares a chain.
+	///
+	/// Resolved for every build so a missing path is reported as a load error
+	/// whichever runner is in use, but read only by the upgrade runner.
+	#[cfg_attr(not(feature = "upgrade"), allow(dead_code))]
+	pub chain_setup: Vec<Arc<TestCase>>,
+	/// Resolved `[test.chain] mutate` script, dependencies first.
+	#[cfg_attr(not(feature = "upgrade"), allow(dead_code))]
+	pub chain_mutate: Vec<Arc<TestCase>>,
+	/// Resolved `[[test.repair]] script`s, positionally aligned with the
+	/// declarations in `test.repair`.
+	#[cfg_attr(not(feature = "upgrade"), allow(dead_code))]
+	pub repairs: Vec<Vec<Arc<TestCase>>>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -20,6 +40,13 @@ impl TestRunId {
 	#[allow(dead_code)]
 	pub fn new(id: usize) -> Self {
 		TestRunId(id)
+	}
+
+	/// The run's index in the set, unique within one invocation. Remote runs
+	/// build each test's namespace name from it.
+	#[cfg_attr(not(feature = "remote"), allow(dead_code))]
+	pub fn index(self) -> usize {
+		self.0
 	}
 }
 
@@ -87,9 +114,51 @@ impl<'set, 'error, 'a, T: RunConfig> RunSetBuilder<'set, 'error, 'a, T> {
 				continue;
 			};
 
+			// Chain and repair scripts resolve through the same machinery as
+			// `[env] imports`, so they pick up transitive imports and report a
+			// missing path as a load error rather than an empty run.
+			let mut resolve_one = |path: &str| {
+				self.set.resolve_imports(
+					std::slice::from_ref(&path.to_owned()),
+					case.id,
+					&case.origin,
+					self.errors,
+				)
+			};
+
+			let chain = case.config.parsed.test.chain.as_ref();
+			let chain_setup = match chain.map(|c| resolve_one(&c.setup)) {
+				None => Vec::new(),
+				Some(Some(x)) => x,
+				Some(None) => continue,
+			};
+			let chain_mutate = match chain.and_then(|c| c.mutate.as_deref()).map(&mut resolve_one) {
+				None => Vec::new(),
+				Some(Some(x)) => x,
+				Some(None) => continue,
+			};
+
+			let mut repairs = Vec::with_capacity(case.config.parsed.test.repair.len());
+			let mut repair_failed = false;
+			for repair in case.config.parsed.test.repair.iter() {
+				match resolve_one(&repair.script) {
+					Some(x) => repairs.push(x),
+					None => {
+						repair_failed = true;
+						break;
+					}
+				}
+			}
+			if repair_failed {
+				continue;
+			}
+
 			let case_imports = CaseImports {
 				test: case.clone(),
 				imports,
+				chain_setup,
+				chain_mutate,
+				repairs,
 			};
 
 			if !self.filters.iter_mut().all(|x| x(&case_imports)) {

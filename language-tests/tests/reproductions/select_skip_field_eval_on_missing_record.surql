@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "SELECT *, <expr> FROM record:missing must not evaluate <expr> for rows where the record is missing — Project's include_all path used to lazily-evaluate fields only after confirming the RecordId resolved to an Object, and the streaming-executor refactor must preserve that. Field expressions can carry side effects (mutating subqueries) that must not fire for rows we're about to drop."
+reason = "SELECT *, <expr> FROM record:missing must not evaluate <expr> for rows where the record is missing — fields are evaluated only after the RecordId is confirmed to resolve to an Object. Field expressions can carry side effects (mutating subqueries) that must not fire for rows we're about to drop."
 
 [[test.results]]
 value = "NONE"

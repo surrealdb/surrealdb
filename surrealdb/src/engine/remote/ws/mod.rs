@@ -10,15 +10,13 @@ pub(crate) mod native;
 pub(crate) mod wasm;
 
 use std::marker::PhantomData;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_channel::Sender;
 use futures::{Sink, SinkExt};
-use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
-use surrealdb_core::iam::token::Token;
-use surrealdb_core::rpc::{DbResponse, DbResult};
+use surrealdb_rpc::{DbResponse, DbResult, QueryResult, QueryResultBuilder, Token};
 use surrealdb_types::{
 	AuthError, ConnectionError, Error as TypesError, NotAllowedError, SerializationError,
 	ValidationError,
@@ -27,10 +25,10 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::conn::{Command, RequestData, Route};
-use crate::engine::remote::RouterRequest;
+use crate::engine::remote::{RemoteCommand, RouterRequest};
 use crate::engine::{SessionError, session_error_to_error};
 use crate::opt::IntoEndpoint;
-use crate::types::{Array, HashMap, Notification, Number, SurrealValue, Value};
+use crate::types::{Action, Array, HashMap, Notification, Number, SurrealValue, Value};
 use crate::{Connect, Error, Surreal};
 
 pub(crate) const PATH: &str = "rpc";
@@ -56,8 +54,47 @@ struct SessionState {
 	live_queries: HashMap<Uuid, Sender<crate::Result<Notification>>>,
 	/// Messages which ought to be replayed on a reconnect for this session
 	replay: boxcar::Vec<Command>,
+	/// The replay in progress for this session, if any.
+	///
+	/// A session's state — namespace, database, authentication, variables — is
+	/// established on the server by replaying [`Self::replay`] against it.
+	/// While a replay is in progress the session is only half-built and
+	/// requests must not run against it: they are parked in [`Self::deferred`].
+	replay_cursor: Mutex<Option<ReplayCursor>>,
+	/// Requests parked until the replay in progress finishes.
+	///
+	/// Only ever locked for the push or the drain itself, never across an
+	/// await, and only from the single router task.
+	deferred: Mutex<Vec<Route>>,
 	/// The last ID used for a request
 	last_id: AtomicI64,
+	/// Whether the session exists only in the router: its setup has not been
+	/// sent to the server yet.
+	///
+	/// A cloned session stays unattached until its first request, so a clone
+	/// nobody queries through costs no round trips, and no `Detach` when it is
+	/// dropped. Reconnects skip an unattached session for the same reason.
+	unattached: AtomicBool,
+}
+
+/// A replay in progress: the request id currently awaiting acknowledgement, and
+/// the index of the command to send once it lands.
+///
+/// The log is order-sensitive — two `set`s of one key, or a `set` followed by an
+/// `unset`, leave different end states depending on the order they are applied —
+/// and the server may apply requests that arrive together on one connection in
+/// any order. Tracking a single outstanding command is what forces the replay to
+/// go one at a time.
+#[derive(Debug, Clone, Copy)]
+struct ReplayCursor {
+	/// Request id of the command in flight.
+	awaiting: i64,
+	/// Position in [`SessionState::replay`] of the command in flight.
+	index: usize,
+	/// Whether the command in flight has already been retried with a refreshed
+	/// token. Bounds the retry to one attempt so an expiry the refresh token
+	/// cannot fix fails the session instead of looping.
+	refreshed: bool,
 }
 
 impl Default for SessionState {
@@ -66,7 +103,10 @@ impl Default for SessionState {
 			pending_requests: HashMap::new(),
 			live_queries: HashMap::new(),
 			replay: boxcar::Vec::new(),
+			replay_cursor: Mutex::new(None),
+			deferred: Mutex::new(Vec::new()),
 			last_id: AtomicI64::new(0),
+			unattached: AtomicBool::new(false),
 		}
 	}
 }
@@ -77,7 +117,12 @@ impl Clone for SessionState {
 			replay: self.replay.clone(),
 			pending_requests: HashMap::new(),
 			live_queries: HashMap::new(),
+			// The clone runs its own replay and parks its own requests; the
+			// parent's in-flight setup and backlog belong to the parent.
+			replay_cursor: Mutex::new(None),
+			deferred: Mutex::new(Vec::new()),
 			last_id: AtomicI64::new(0),
+			unattached: AtomicBool::new(true),
 		}
 	}
 }
@@ -121,8 +166,8 @@ trait WsMessage: Sized + Clone + Unpin + Send {
 /// Serialize a router request to a WebSocket message.
 fn serialize_request<M: WsMessage>(request: RouterRequest) -> M {
 	let request_value = request.into_value();
-	let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
-		.expect("router request should serialize");
+	let payload =
+		surrealdb_rpc::wire::encode(request_value).expect("router request should serialize");
 	M::binary(payload)
 }
 
@@ -162,12 +207,62 @@ where
 /// This is the core logic for processing commands from the SDK client.
 /// It's shared between native and WASM implementations.
 async fn handle_route<M, S, E>(
+	route: Route,
+	max_message_size: Option<usize>,
+	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
+	sink: &RwLock<S>,
+) -> HandleResult
+where
+	M: WsMessage,
+	S: Sink<M, Error = E> + Unpin,
+	E: std::fmt::Debug,
+{
+	let session_id = route.request.session_id;
+
+	// Get session state
+	let session_state = match sessions.get(&session_id) {
+		Some(Ok(state)) => state,
+		Some(Err(error)) => {
+			if route.response.send(Err(session_error_to_error(error))).await.is_err() {
+				trace!("Receiver dropped");
+			}
+			return HandleResult::Ok;
+		}
+		None => {
+			let error = session_error_to_error(SessionError::NotFound(session_id));
+			if route.response.send(Err(error)).await.is_err() {
+				trace!("Receiver dropped");
+			}
+			return HandleResult::Ok;
+		}
+	};
+
+	// The first request through an unattached clone sends its setup; the
+	// request then parks behind it like any other.
+	if session_state.unattached.swap(false, Ordering::SeqCst) {
+		replay_session::<M, S, E>(session_id, session_state.as_ref(), sink).await.ok();
+	}
+
+	// The session's replayed setup is still in flight, so the server has not
+	// applied all of it yet. Park the request until it has: dispatching now
+	// would race the replay and could run against a session with no namespace,
+	// no authentication, or none of its variables.
+	if replay_cursor(&session_state).is_some() {
+		park_route(&session_state, route);
+		return HandleResult::Ok;
+	}
+
+	dispatch_route::<M, S, E>(route, max_message_size, &session_state, sink).await
+}
+
+/// Send a request for a session whose setup the server has already applied.
+async fn dispatch_route<M, S, E>(
 	Route {
 		request,
 		response,
 	}: Route,
 	max_message_size: Option<usize>,
-	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
+	session_state: &Arc<SessionState>,
 	sink: &RwLock<S>,
 ) -> HandleResult
 where
@@ -179,24 +274,6 @@ where
 		command,
 		session_id,
 	} = request;
-
-	// Get session state
-	let session_state = match sessions.get(&session_id) {
-		Some(Ok(state)) => state,
-		Some(Err(error)) => {
-			if response.send(Err(session_error_to_error(error))).await.is_err() {
-				trace!("Receiver dropped");
-			}
-			return HandleResult::Ok;
-		}
-		None => {
-			let error = session_error_to_error(SessionError::NotFound(session_id));
-			if response.send(Err(error)).await.is_err() {
-				trace!("Receiver dropped");
-			}
-			return HandleResult::Ok;
-		}
-	};
 
 	// Generate a new request ID
 	let id = session_state.last_id.fetch_add(1, Ordering::SeqCst);
@@ -230,7 +307,63 @@ where
 		} => {
 			session_state.live_queries.remove(uuid);
 		}
-		_ => {}
+		Command::Use {
+			..
+		}
+		| Command::Signup {
+			..
+		}
+		| Command::Signin {
+			..
+		}
+		| Command::Authenticate {
+			..
+		}
+		| Command::Refresh {
+			..
+		}
+		| Command::Invalidate
+		| Command::Begin {
+			..
+		}
+		| Command::Rollback {
+			..
+		}
+		| Command::Commit {
+			..
+		}
+		| Command::Revoke {
+			..
+		}
+		| Command::Query {
+			..
+		}
+		| Command::ExportFile {
+			..
+		}
+		| Command::ExportBytes {
+			..
+		}
+		| Command::ImportFile {
+			..
+		}
+		| Command::Health
+		| Command::Version
+		| Command::Set {
+			..
+		}
+		| Command::Unset {
+			..
+		}
+		| Command::Attach {
+			..
+		}
+		| Command::Detach {
+			..
+		}
+		| Command::Run {
+			..
+		} => {}
 	}
 
 	// Serialize the request
@@ -306,6 +439,7 @@ where
 /// pending request or live query handler.
 async fn handle_response<M, S, E>(
 	message: &M,
+	max_message_size: Option<usize>,
 	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
 	sink: &RwLock<S>,
 ) -> HandleResult
@@ -326,8 +460,10 @@ where
 		return HandleResult::Ok;
 	};
 
-	match DbResponse::from_bytes(binary) {
-		Ok(response) => handle_db_response::<M, S, E>(response, sessions, sink).await,
+	match surrealdb_rpc::db_response_from_bytes(binary) {
+		Ok(response) => {
+			handle_db_response::<M, S, E>(response, max_message_size, sessions, sink).await
+		}
 		Err(error) => {
 			handle_parse_error(
 				Error::serialization(error.to_string(), SerializationError::Deserialization),
@@ -342,6 +478,7 @@ where
 /// Handle a successfully parsed database response.
 async fn handle_db_response<M, S, E>(
 	response: DbResponse,
+	max_message_size: Option<usize>,
 	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
 	sink: &RwLock<S>,
 ) -> HandleResult
@@ -368,6 +505,8 @@ where
 					response.result,
 					session_id,
 					&session_state,
+					max_message_size,
+					sessions,
 					sink,
 				)
 				.await
@@ -389,6 +528,8 @@ async fn handle_response_with_id<M, S, E>(
 	result: Result<DbResult, TypesError>,
 	session_id: Uuid,
 	session_state: &Arc<SessionState>,
+	max_message_size: Option<usize>,
+	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
 	sink: &RwLock<S>,
 ) -> HandleResult
 where
@@ -396,11 +537,84 @@ where
 	S: Sink<M, Error = E> + Unpin,
 	E: std::fmt::Debug,
 {
+	// An acknowledgement of a replayed setup command rather than a reply to a
+	// caller's request.
+	if let Some(cursor) = replay_cursor(session_state)
+		&& cursor.awaiting == id
+	{
+		if let Err(error) = result {
+			// An expired access token on a replayed `authenticate` is routine:
+			// the handle has been idle past the token's lifetime, or is being
+			// cloned after it elapsed. The token carries its own refresh half,
+			// so retry the command with it rather than abandoning the session —
+			// poisoning here would permanently disable a handle that holds
+			// perfectly good credentials, since a poisoned session is never
+			// replayed again and cannot route even an explicit refresh.
+			if !cursor.refreshed
+				&& let Some(Command::Authenticate {
+					token,
+				}) = session_state.replay.get(cursor.index)
+				&& let Token::WithRefresh {
+					..
+				} = token && error
+				.not_allowed_details()
+				.is_some_and(|a| matches!(a, NotAllowedError::Auth(AuthError::TokenExpired)))
+			{
+				let refresh_request = RouterRequest {
+					id: Some(id),
+					method: "authenticate",
+					params: Some(Value::Array(Array::from(vec![token.clone().into_value()]))),
+					txn: None,
+					session_id: Some(session_id),
+				};
+				let message: M = serialize_request(refresh_request);
+
+				if let Err(send_error) = send_message(sink, message).await {
+					trace!("failed to send refresh query to the server; {send_error:?}");
+					fail_replay(session_state, sessions, session_id, error).await;
+				} else {
+					// Same command, same id: stay parked on it until the
+					// refreshed attempt is answered.
+					set_replay_cursor(
+						session_state,
+						Some(ReplayCursor {
+							refreshed: true,
+							..cursor
+						}),
+					);
+				}
+				return HandleResult::Ok;
+			}
+
+			fail_replay(session_state, sessions, session_id, error).await;
+			return HandleResult::Ok;
+		}
+
+		// This command has been applied, so the next one can go out. Sending
+		// them one at a time is what keeps an order-sensitive log — a `set`
+		// followed by an `unset` of the same key — from being applied in the
+		// wrong order by a server that dispatches concurrently.
+		if send_replay_command::<M, S, E>(session_id, session_state, cursor.index + 1, sink).await {
+			return HandleResult::Ok;
+		}
+
+		// The log is exhausted (or the connection broke, which will reconnect
+		// and replay again), so release anything parked behind the replay.
+		return flush_deferred_routes::<M, S, E>(session_state, max_message_size, sink).await;
+	}
+
 	let Some(mut pending) = session_state.pending_requests.take(&id) else {
 		warn!("got response for request with id '{id}', which was not in pending requests");
 		return HandleResult::Ok;
 	};
 
+	// A request with nothing to replay is answered with the result as it is.
+	if pending.command.is_none() {
+		answer(pending, result).await;
+		return HandleResult::Ok;
+	}
+
+	let result = query_results(result);
 	match result {
 		Ok(DbResult::Query(results)) => {
 			if let Some(command) = pending.command {
@@ -413,6 +627,9 @@ where
 		Ok(DbResult::Live(_)) => {
 			tracing::error!("Unexpected live query result in response");
 		}
+		Ok(DbResult::Encoded(_)) => {
+			tracing::error!("Unexpected encoded query result in response");
+		}
 		Ok(DbResult::Other(mut value)) => {
 			if let Some(command) = pending.command {
 				if let Command::Authenticate {
@@ -421,8 +638,19 @@ where
 				} = &command
 				{
 					value = token.clone().into_value();
+					super::record_replayable(&session_state.replay, command);
+				} else if matches!(command, Command::Signup { .. }) {
+					if let Ok(token) = Token::from_value(value.clone()) {
+						super::record_replayable(
+							&session_state.replay,
+							Command::Authenticate {
+								token,
+							},
+						);
+					}
+				} else {
+					super::record_replayable(&session_state.replay, command);
 				}
-				super::record_replayable(&session_state.replay, command);
 			}
 			let result = QueryResultBuilder::started_now().finish_with_result(Ok(value));
 			if let Err(err) = pending.response_channel.send(Ok(vec![result])).await {
@@ -473,6 +701,153 @@ where
 	HandleResult::Ok
 }
 
+/// `result` with encoded results read as the values they encode.
+fn query_results(result: Result<DbResult, TypesError>) -> Result<DbResult, TypesError> {
+	result.map(|result| match result {
+		DbResult::Encoded(results) => {
+			DbResult::Query(results.into_iter().map(|result| result.into_query_result()).collect())
+		}
+		other @ DbResult::Other(_) | other @ DbResult::Query(_) | other @ DbResult::Live(_) => {
+			other
+		}
+	})
+}
+
+/// Answer `pending`, a request with no command to replay, with `result`.
+async fn answer(pending: PendingRequest, result: Result<DbResult, TypesError>) {
+	debug_assert!(pending.command.is_none(), "a command is answered where it is replayed");
+	let answer = match query_results(result) {
+		Ok(DbResult::Query(results)) => Ok(results),
+		Ok(DbResult::Other(value)) => {
+			Ok(vec![QueryResultBuilder::started_now().finish_with_result(Ok(value))])
+		}
+		Ok(DbResult::Live(_)) => {
+			tracing::error!("Unexpected live query result in response");
+			return;
+		}
+		Ok(DbResult::Encoded(_)) => {
+			tracing::error!("Unexpected encoded query result in response");
+			return;
+		}
+		Err(error) => Err(error),
+	};
+	if let Err(err) = pending.response_channel.send(answer).await {
+		tracing::error!("Failed to send query results to channel: {err:?}");
+	}
+}
+
+/// How large a response must be for its result to be decoded on a task of its own, so that the
+/// router reads on while it is decoded.
+#[cfg(not(target_family = "wasm"))]
+const DECODE_APART: usize = 64 * 1024;
+
+/// The request the response `binary` answers, taken from its session to be answered apart from
+/// the router ([`answer_encoded`]): a response larger than [`DECODE_APART`] to a request with no
+/// command to replay. `None` leaves every other response, and any whose envelope does not read
+/// as one addressed to a pending request, to [`handle_response`].
+#[cfg(not(target_family = "wasm"))]
+fn take_for_decoding_apart(
+	binary: &[u8],
+	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
+) -> Option<PendingRequest> {
+	if binary.len() <= DECODE_APART {
+		return None;
+	}
+	let route = surrealdb_rpc::wire::response_route(binary)?;
+	let Some(Value::Number(Number::Int(id))) = route.id else {
+		return None;
+	};
+	let Some(Ok(session_state)) = sessions.get(&route.session_id?) else {
+		return None;
+	};
+	if replay_cursor(&session_state).is_some_and(|cursor| cursor.awaiting == id) {
+		return None;
+	}
+	if session_state.pending_requests.get(&id)?.command.is_some() {
+		return None;
+	}
+	session_state.pending_requests.take(&id)
+}
+
+/// Answer `pending` with the response `binary` holds, decoded where this runs: the answer
+/// [`handle_response`] gives the request it takes.
+#[cfg(not(target_family = "wasm"))]
+async fn answer_encoded(binary: &[u8], pending: PendingRequest) {
+	let result = match surrealdb_rpc::db_response_from_bytes(binary) {
+		Ok(response) => response.result,
+		Err(error) => {
+			Err(Error::serialization(error.to_string(), SerializationError::Deserialization))
+		}
+	};
+	answer(pending, result).await;
+}
+
+/// Park a request behind a session's in-flight setup.
+fn park_route(session_state: &SessionState, route: Route) {
+	match session_state.deferred.lock() {
+		Ok(mut deferred) => deferred.push(route),
+		Err(poisoned) => poisoned.into_inner().push(route),
+	}
+}
+
+/// Take everything parked behind a session's setup.
+///
+/// The lock is released before the caller awaits on any of the routes, and only
+/// the router task ever touches the queue.
+fn take_deferred_routes(session_state: &SessionState) -> Vec<Route> {
+	match session_state.deferred.lock() {
+		Ok(mut deferred) => std::mem::take(&mut *deferred),
+		Err(poisoned) => std::mem::take(&mut *poisoned.into_inner()),
+	}
+}
+
+/// Dispatch the requests parked while a session's setup was in flight.
+async fn flush_deferred_routes<M, S, E>(
+	session_state: &Arc<SessionState>,
+	max_message_size: Option<usize>,
+	sink: &RwLock<S>,
+) -> HandleResult
+where
+	M: WsMessage,
+	S: Sink<M, Error = E> + Unpin,
+	E: std::fmt::Debug,
+{
+	let mut outcome = HandleResult::Ok;
+	for route in take_deferred_routes(session_state) {
+		if let HandleResult::Disconnected =
+			dispatch_route::<M, S, E>(route, max_message_size, session_state, sink).await
+		{
+			outcome = HandleResult::Disconnected;
+		}
+	}
+	outcome
+}
+
+/// Fail the requests parked behind a session setup that did not complete.
+async fn fail_deferred_routes(session_state: &SessionState, error: TypesError) {
+	for route in take_deferred_routes(session_state) {
+		route.response.send(Err(error.clone())).await.ok();
+	}
+}
+
+/// Abandon the replay in progress: poison the session and fail everything
+/// parked behind it.
+///
+/// Used when a replayed setup command is rejected, or when its reply cannot be
+/// read. Either way the session never reached the state it was cloned or
+/// reconnected into, so it is not the session the caller asked for, and the
+/// acknowledgement the replay is waiting on is never going to arrive.
+async fn fail_replay(
+	session_state: &SessionState,
+	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
+	session_id: Uuid,
+	error: TypesError,
+) {
+	set_replay_cursor(session_state, None);
+	sessions.insert(session_id, Err(SessionError::Remote(error.to_string())));
+	fail_deferred_routes(session_state, error).await;
+}
+
 /// Handle a live query notification.
 async fn handle_live_notification<M, S, E>(
 	result: Result<DbResult, TypesError>,
@@ -487,9 +862,20 @@ where
 {
 	if let Ok(DbResult::Live(notification)) = result {
 		let live_query_id = notification.id.into_inner();
+		// `Killed` is the subscription's own end: the server has removed it,
+		// and this notification is what that removal sends. The registration
+		// leaves with the notification rather than outliving the subscription
+		// it names, holding the subscriber's channel until the connection
+		// closes.
+		let ended = matches!(notification.action, Action::Killed);
+		let registration = match ended {
+			true => session_state.live_queries.take(&live_query_id),
+			false => session_state.live_queries.get(&live_query_id),
+		};
 
-		if let Some(sender) = session_state.live_queries.get(&live_query_id)
+		if let Some(sender) = registration
 			&& sender.send(Ok(notification)).await.is_err()
+			&& !ended
 		{
 			// Receiver dropped, kill the live query
 			session_state.live_queries.remove(&live_query_id);
@@ -519,7 +905,7 @@ async fn handle_parse_error(
 		session_id: Option<Uuid>,
 	}
 
-	match surrealdb_core::rpc::format::flatbuffers::decode::<ErrorResponse>(binary) {
+	match surrealdb_rpc::wire::decode(binary).and_then(|v| Ok(ErrorResponse::from_value(v)?)) {
 		Ok(ErrorResponse {
 			id,
 			session_id,
@@ -533,13 +919,32 @@ async fn handle_parse_error(
 				_ => return HandleResult::Ok,
 			};
 
-			if let Some(Value::Number(Number::Int(id_num))) = id {
-				if let Some(pending) = session_state.pending_requests.take(&id_num) {
-					let _ = pending.response_channel.send(Err(error)).await;
-				} else {
-					warn!(
-						"got response for request with id '{id_num}', which was not in pending requests"
-					);
+			match id {
+				Some(Value::Number(Number::Int(id_num))) => {
+					if let Some(pending) = session_state.pending_requests.take(&id_num) {
+						let _ = pending.response_channel.send(Err(error)).await;
+					} else if replay_cursor(&session_state).is_some_and(|c| c.awaiting == id_num) {
+						// A replayed setup command whose reply we cannot read. The
+						// session's state on the server is now unknown, so poison it
+						// and fail the requests parked behind the replay instead of
+						// waiting for an acknowledgement that will never come.
+						fail_replay(&session_state, sessions, session_id, error).await;
+					} else {
+						warn!(
+							"got response for request with id '{id_num}', which was not in pending requests"
+						);
+					}
+				}
+				// The envelope named a session but carries no usable request id,
+				// so we cannot tell which request it answers. Treat a replay in
+				// flight the same as the fully undecodable case: its
+				// acknowledgement may be exactly what this frame was, and leaving
+				// the cursor set would park every later request for the session
+				// forever.
+				_ => {
+					if replay_cursor(&session_state).is_some() {
+						fail_replay(&session_state, sessions, session_id, error).await;
+					}
 				}
 			}
 		}
@@ -566,7 +971,7 @@ async fn fail_all_pending_requests(
 	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
 	error: crate::Error,
 ) {
-	for (_, session) in sessions.to_vec() {
+	for (session_id, session) in sessions.to_vec() {
 		let Ok(session_state) = session else {
 			continue;
 		};
@@ -575,6 +980,12 @@ async fn fail_all_pending_requests(
 				pending.response_channel.send(Err(error.clone())).await.ok();
 			}
 		}
+		// The unreadable frame may have been the acknowledgement a replay was
+		// waiting on. A session mid-replay would otherwise park every later
+		// request behind an acknowledgement that never arrives.
+		if replay_cursor(&session_state).is_some() {
+			fail_replay(&session_state, sessions, session_id, error.clone()).await;
+		}
 	}
 }
 
@@ -582,7 +993,17 @@ async fn fail_all_pending_requests(
 // Session Management
 // ============================================================================
 
-/// Replay commands for a session after reconnect.
+/// Establish a session's state on the server by replaying its command log.
+///
+/// Used both to build a newly registered or cloned session and to rebuild every
+/// session after a reconnect.
+///
+/// Each command is sent with a request id recorded in
+/// [`SessionState::replay_acks`], so the router can tell when the server has
+/// applied the whole batch. Requests for the session are parked until it has:
+/// the server may apply requests that arrive together on one connection in any
+/// order, so a request dispatched alongside the replay can observe a session
+/// whose namespace, authentication or variables are not in place yet.
 async fn replay_session<M, S, E>(
 	session_id: Uuid,
 	session_state: &SessionState,
@@ -593,20 +1014,78 @@ where
 	S: Sink<M, Error = E> + Unpin,
 	E: std::fmt::Debug,
 {
-	for (_, command) in &session_state.replay {
-		let request = command
-			.clone()
-			.into_router_request(None, Some(session_id))
-			.expect("replay commands should always convert to route requests");
+	// This replay supersedes any earlier one: acknowledgements for a command
+	// sent on a connection that has since been replaced will never arrive, and
+	// leaving the cursor on it would park this session's requests forever.
+	send_replay_command::<M, S, E>(session_id, session_state, 0, sink).await;
+	Ok(())
+}
 
-		let message: M = serialize_request(request);
+/// Send the replay command at `index` and record it as the acknowledgement the
+/// session is waiting on.
+///
+/// Returns whether a command is now in flight. `false` means the session is no
+/// longer replaying, either because the log is exhausted or because the command
+/// could not be sent.
+async fn send_replay_command<M, S, E>(
+	session_id: Uuid,
+	session_state: &SessionState,
+	index: usize,
+	sink: &RwLock<S>,
+) -> bool
+where
+	M: WsMessage,
+	S: Sink<M, Error = E> + Unpin,
+	E: std::fmt::Debug,
+{
+	let Some(command) = session_state.replay.get(index) else {
+		set_replay_cursor(session_state, None);
+		return false;
+	};
 
-		if let Err(error) = send_message(sink, message).await {
-			debug!("{:?}", error);
-		}
+	let id = session_state.last_id.fetch_add(1, Ordering::SeqCst);
+	set_replay_cursor(
+		session_state,
+		Some(ReplayCursor {
+			awaiting: id,
+			index,
+			refreshed: false,
+		}),
+	);
+
+	let request = command
+		.clone()
+		.into_router_request(Some(id), Some(session_id))
+		.expect("replay commands should always convert to route requests");
+
+	let message: M = serialize_request(request);
+
+	if let Err(error) = send_message(sink, message).await {
+		// The command never reached the server, so nothing will ever
+		// acknowledge it. Drop the cursor rather than park this session's
+		// requests behind it; a broken connection is replayed again on
+		// reconnect.
+		set_replay_cursor(session_state, None);
+		debug!("{:?}", error);
+		return false;
 	}
 
-	Ok(())
+	true
+}
+
+/// The replay command this session is currently waiting to have acknowledged.
+fn replay_cursor(session_state: &SessionState) -> Option<ReplayCursor> {
+	match session_state.replay_cursor.lock() {
+		Ok(cursor) => *cursor,
+		Err(poisoned) => *poisoned.into_inner(),
+	}
+}
+
+fn set_replay_cursor(session_state: &SessionState, cursor: Option<ReplayCursor>) {
+	match session_state.replay_cursor.lock() {
+		Ok(mut slot) => *slot = cursor,
+		Err(poisoned) => *poisoned.into_inner() = cursor,
+	}
 }
 
 /// Handle new session registration.
@@ -635,7 +1114,7 @@ async fn handle_session_clone<M, S, E>(
 	old: Uuid,
 	new: Uuid,
 	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
-	sink: &RwLock<S>,
+	_sink: &RwLock<S>,
 ) where
 	M: WsMessage,
 	S: Sink<M, Error = E> + Unpin,
@@ -650,12 +1129,8 @@ async fn handle_session_clone<M, S, E>(
 					session_id: new,
 				};
 			}
-			let session_state = Arc::new(session_state);
-			sessions.insert(new, Ok(Arc::clone(&session_state)));
-
-			if let Err(error) = replay_session::<M, S, E>(new, &session_state, sink).await {
-				sessions.insert(new, Err(SessionError::Remote(error.to_string())));
-			}
+			// The setup is sent on the first request, not now.
+			sessions.insert(new, Ok(Arc::new(session_state)));
 		}
 		Some(Err(error)) => {
 			sessions.insert(new, Err(error));
@@ -676,12 +1151,29 @@ async fn handle_session_drop<M, S, E>(
 	S: Sink<M, Error = E> + Unpin,
 	E: std::fmt::Debug,
 {
+	// A session that never attached has nothing on the server to detach.
+	let unattached = match sessions.get(&session_id) {
+		Some(Ok(state)) => state.unattached.load(Ordering::SeqCst),
+		_ => false,
+	};
+	if unattached {
+		sessions.remove(&session_id);
+		return;
+	}
 	if sessions.get(&session_id).is_some() {
-		let session_state = SessionState::default();
-		session_state.replay.push(Command::Detach {
+		// Fire-and-forget: the session is going away, so there is nothing left
+		// to order the detach against and no one to hand an acknowledgement to.
+		let request = Command::Detach {
 			session_id,
-		});
-		replay_session::<M, S, E>(session_id, &session_state, sink).await.ok();
+		}
+		.into_router_request(None, Some(session_id))
+		.expect("detach should always convert to a route request");
+
+		let message: M = serialize_request(request);
+
+		if let Err(error) = send_message(sink, message).await {
+			debug!("{:?}", error);
+		}
 	}
 	sessions.remove(&session_id);
 }
@@ -709,6 +1201,9 @@ async fn handle_session<M, S, E>(
 }
 
 /// Clear all pending requests on connection reset.
+///
+/// Requests still parked behind a session's setup are failed the same way as
+/// ones already on the wire: the connection they were waiting on is gone.
 async fn clear_pending_requests(sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>) {
 	for state in sessions.values().into_iter().flatten() {
 		for request in state.pending_requests.values() {
@@ -720,6 +1215,12 @@ async fn clear_pending_requests(sessions: &HashMap<Uuid, Result<Arc<SessionState
 			request.response_channel.close();
 		}
 		state.pending_requests.clear();
+
+		let err = crate::Error::connection(
+			"Connection reset".to_string(),
+			surrealdb_types::ConnectionError::ConnectionFailed,
+		);
+		fail_deferred_routes(&state, err).await;
 	}
 }
 
@@ -800,13 +1301,29 @@ impl Surreal<Client> {
 mod tests {
 	use std::sync::Arc;
 
-	use surrealdb_core::rpc::DbResult;
-	use surrealdb_types::Error as TypesError;
+	use surrealdb_rpc::{DbResponse, DbResult, QueryResult, Token};
+	use surrealdb_types::{AuthError, Error as TypesError, NotAllowedError};
 	use tokio::sync::RwLock;
 	use uuid::Uuid;
 
-	use super::{HandleResult, PendingRequest, SessionState, WsMessage, handle_response_with_id};
-	use crate::types::Value;
+	#[cfg(not(target_family = "wasm"))]
+	use super::{DECODE_APART, answer_encoded, take_for_decoding_apart};
+	use super::{
+		HandleResult, PendingRequest, SessionState, WsMessage, fail_all_pending_requests,
+		handle_db_response, handle_live_notification, handle_parse_error, handle_response_with_id,
+		handle_route, handle_session_clone, handle_session_drop, replay_cursor, replay_session,
+	};
+	use crate::conn::{Command, RequestData, Route};
+	use crate::engine::SessionError;
+	use crate::types::{Action, Array, HashMap, Notification, Number, SurrealValue, Value};
+
+	type Sessions = HashMap<Uuid, Result<Arc<SessionState>, SessionError>>;
+
+	/// An empty session registry: these tests drive the pending-request path,
+	/// which never consults it.
+	fn no_sessions() -> Sessions {
+		HashMap::new()
+	}
 
 	/// Mock WebSocket message for testing.
 	#[derive(Clone)]
@@ -825,6 +1342,7 @@ mod tests {
 	#[tokio::test]
 	async fn handle_response_removes_pending_request() {
 		let session_state = Arc::new(SessionState::default());
+		let sessions = no_sessions();
 		let session_id = Uuid::new_v4();
 		let request_id: i64 = 1;
 
@@ -846,6 +1364,8 @@ mod tests {
 			Ok(DbResult::Other(Value::None)),
 			session_id,
 			&session_state,
+			None,
+			&sessions,
 			&sink,
 		)
 		.await;
@@ -862,9 +1382,101 @@ mod tests {
 		assert!(response.is_ok());
 	}
 
+	/// A response of `rows` rows, each a record with a long string, to request `id` of `session`.
+	#[cfg(not(target_family = "wasm"))]
+	fn large_response(id: i64, session: Uuid, rows: usize) -> Vec<u8> {
+		let row = Value::Object(crate::types::Object::from_iter([(
+			"s".to_owned(),
+			Value::String("x".repeat(100)),
+		)]));
+		let result = surrealdb_rpc::QueryResultBuilder::started_now()
+			.finish_with_result(Ok(Value::Array(Array::from(vec![row; rows]))));
+		let response = DbResponse::success(
+			Some(Value::Number(Number::Int(id))),
+			Some(session),
+			DbResult::Query(vec![result]),
+		);
+		surrealdb_rpc::wire::encode(response.into_value()).unwrap()
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	#[tokio::test]
+	async fn a_large_response_is_answered_apart_as_the_router_answers_it() {
+		let session_id = Uuid::new_v4();
+		let session_state = Arc::new(SessionState::default());
+		let sessions = no_sessions();
+		sessions.insert(session_id, Ok(Arc::clone(&session_state)));
+		let bytes = large_response(1, session_id, 2000);
+		assert!(bytes.len() > DECODE_APART);
+
+		// The router's own answer.
+		let (sender, by_router) = async_channel::bounded(1);
+		session_state.pending_requests.insert(
+			1,
+			PendingRequest {
+				command: None,
+				response_channel: sender,
+			},
+		);
+		let response = surrealdb_rpc::db_response_from_bytes(&bytes).unwrap();
+		let sink = RwLock::new(futures::sink::drain::<MockMessage>());
+		handle_db_response::<MockMessage, _, _>(response, None, &sessions, &sink).await;
+		let expected = by_router.recv().await.unwrap().unwrap();
+
+		// The answer decoded apart.
+		let (sender, apart) = async_channel::bounded(1);
+		session_state.pending_requests.insert(
+			1,
+			PendingRequest {
+				command: None,
+				response_channel: sender,
+			},
+		);
+		let pending = take_for_decoding_apart(&bytes, &sessions).expect("taken to decode apart");
+		assert!(session_state.pending_requests.is_empty());
+		answer_encoded(&bytes, pending).await;
+		let answered = apart.recv().await.unwrap().unwrap();
+		assert_eq!(format!("{answered:?}"), format!("{expected:?}"));
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	#[tokio::test]
+	async fn the_router_keeps_what_it_must_read_itself() {
+		let session_id = Uuid::new_v4();
+		let session_state = Arc::new(SessionState::default());
+		let sessions = no_sessions();
+		sessions.insert(session_id, Ok(Arc::clone(&session_state)));
+		let (sender, _receiver) = async_channel::bounded(1);
+		session_state.pending_requests.insert(
+			1,
+			PendingRequest {
+				command: Some(set_cmd("k", 1)),
+				response_channel: sender.clone(),
+			},
+		);
+		session_state.pending_requests.insert(
+			2,
+			PendingRequest {
+				command: None,
+				response_channel: sender,
+			},
+		);
+		// A command to replay.
+		assert!(take_for_decoding_apart(&large_response(1, session_id, 2000), &sessions).is_none());
+		// A small response.
+		assert!(take_for_decoding_apart(&large_response(2, session_id, 1), &sessions).is_none());
+		// An unknown session, and an unknown request.
+		assert!(
+			take_for_decoding_apart(&large_response(2, Uuid::new_v4(), 2000), &sessions).is_none()
+		);
+		assert!(take_for_decoding_apart(&large_response(3, session_id, 2000), &sessions).is_none());
+		assert_eq!(session_state.pending_requests.len(), 2);
+	}
+
 	#[tokio::test]
 	async fn handle_response_error_removes_pending_request() {
 		let session_state = Arc::new(SessionState::default());
+		let sessions = no_sessions();
 		let session_id = Uuid::new_v4();
 		let request_id: i64 = 1;
 
@@ -887,6 +1499,8 @@ mod tests {
 			Err(error),
 			session_id,
 			&session_state,
+			None,
+			&sessions,
 			&sink,
 		)
 		.await;
@@ -906,6 +1520,7 @@ mod tests {
 	#[tokio::test]
 	async fn handle_multiple_responses_cleans_up_all_entries() {
 		let session_state = Arc::new(SessionState::default());
+		let sessions = no_sessions();
 		let session_id = Uuid::new_v4();
 		let sink = RwLock::new(futures::sink::drain::<MockMessage>());
 
@@ -931,6 +1546,8 @@ mod tests {
 				Ok(DbResult::Other(Value::None)),
 				session_id,
 				&session_state,
+				None,
+				&sessions,
 				&sink,
 			)
 			.await;
@@ -948,5 +1565,406 @@ mod tests {
 			let response = receiver.recv().await.unwrap();
 			assert!(response.is_ok());
 		}
+	}
+
+	/// A registered session with `commands` queued for replay, none sent yet.
+	fn session_with_replay(commands: Vec<Command>) -> (Uuid, Arc<SessionState>, Sessions) {
+		let session_id = Uuid::new_v4();
+		let session_state = Arc::new(SessionState::default());
+		for command in commands {
+			session_state.replay.push(command);
+		}
+
+		let sessions = HashMap::new();
+		sessions.insert(session_id, Ok(Arc::clone(&session_state)));
+
+		(session_id, session_state, sessions)
+	}
+
+	fn set_cmd(key: &str, value: i64) -> Command {
+		Command::Set {
+			key: key.to_string(),
+			value: Value::Number(Number::Int(value)),
+		}
+	}
+
+	/// Acknowledge the replay command currently in flight.
+	async fn ack_replay<S>(
+		session_id: Uuid,
+		session_state: &Arc<SessionState>,
+		sessions: &Sessions,
+		sink: &RwLock<S>,
+		result: Result<DbResult, TypesError>,
+	) where
+		S: futures::Sink<MockMessage, Error = std::convert::Infallible> + Unpin,
+	{
+		let cursor = replay_cursor(session_state).expect("a replay command should be in flight");
+		handle_response_with_id::<MockMessage, _, _>(
+			cursor.awaiting,
+			result,
+			session_id,
+			session_state,
+			None,
+			sessions,
+			sink,
+		)
+		.await;
+	}
+
+	fn route_for(
+		session_id: Uuid,
+	) -> (Route, async_channel::Receiver<Result<Vec<QueryResult>, TypesError>>) {
+		let (response, receiver) = async_channel::bounded(1);
+		let route = Route {
+			request: RequestData {
+				command: Command::Health,
+				session_id,
+			},
+			response,
+		};
+		(route, receiver)
+	}
+
+	/// Regression for the clone-setup race. A session inherits its namespace,
+	/// authentication and variables by replaying commands at the server, which is
+	/// free to apply requests that arrive together in any order. So a request must
+	/// not go out while that replay is unacknowledged, and must be released once
+	/// it lands — otherwise it can execute against a half-built session.
+	#[tokio::test]
+	async fn route_waits_for_replay_acknowledgement() {
+		let (session_id, session_state, sessions) = session_with_replay(vec![set_cmd("x", 1)]);
+		let sink = RwLock::new(Vec::<MockMessage>::new());
+
+		replay_session::<MockMessage, _, _>(session_id, &session_state, &sink).await.unwrap();
+		assert_eq!(sink.read().await.len(), 1, "the replay command should be on the wire");
+
+		let (route, _receiver) = route_for(session_id);
+		assert_eq!(
+			handle_route::<MockMessage, _, _>(route, None, &sessions, &sink).await,
+			HandleResult::Ok
+		);
+		assert_eq!(
+			sink.read().await.len(),
+			1,
+			"request must not reach the wire before the session's setup is acknowledged"
+		);
+		assert_eq!(session_state.deferred.lock().unwrap().len(), 1, "request should be parked");
+
+		// The acknowledgement lands, completing the session's setup.
+		ack_replay(session_id, &session_state, &sessions, &sink, Ok(DbResult::Other(Value::None)))
+			.await;
+
+		assert!(replay_cursor(&session_state).is_none(), "replay should be finished");
+		assert!(
+			session_state.deferred.lock().unwrap().is_empty(),
+			"parked request should be released once setup is acknowledged"
+		);
+		assert_eq!(sink.read().await.len(), 2, "released request should be sent");
+		assert_eq!(session_state.pending_requests.len(), 1, "released request should be pending");
+	}
+
+	/// A clone nobody queries through must cost nothing on the wire: no attach,
+	/// no replayed setup and, when dropped, no detach.
+	#[tokio::test]
+	async fn unused_clone_sends_nothing() {
+		let (parent, _state, sessions) = session_with_replay(vec![
+			Command::Attach {
+				session_id: Uuid::nil(),
+			},
+			set_cmd("x", 1),
+		]);
+		let sink = RwLock::new(Vec::<MockMessage>::new());
+		let clone = Uuid::new_v4();
+
+		handle_session_clone::<MockMessage, _, _>(parent, clone, &sessions, &sink).await;
+		assert!(sink.read().await.is_empty(), "cloning must not touch the wire");
+		assert!(sessions.get(&clone).is_some_and(|s| s.is_ok()), "the clone is registered");
+
+		handle_session_drop::<MockMessage, _, _>(clone, &sessions, &sink).await;
+		assert!(sink.read().await.is_empty(), "dropping an unattached clone sends no detach");
+		assert!(sessions.get(&clone).is_none(), "the clone is forgotten");
+	}
+
+	/// The first request through a clone sends its setup, in order, and parks
+	/// behind it; a later drop detaches the now-attached session.
+	#[tokio::test]
+	async fn first_request_through_a_clone_attaches_it() {
+		let (parent, _state, sessions) = session_with_replay(vec![
+			Command::Attach {
+				session_id: Uuid::nil(),
+			},
+			set_cmd("x", 1),
+		]);
+		let sink = RwLock::new(Vec::<MockMessage>::new());
+		let clone = Uuid::new_v4();
+		handle_session_clone::<MockMessage, _, _>(parent, clone, &sessions, &sink).await;
+		let clone_state = sessions.get(&clone).unwrap().unwrap();
+
+		let (route, _receiver) = route_for(clone);
+		handle_route::<MockMessage, _, _>(route, None, &sessions, &sink).await;
+		assert_eq!(sink.read().await.len(), 1, "only the first setup command is in flight");
+		assert_eq!(clone_state.deferred.lock().unwrap().len(), 1, "the request parks behind it");
+
+		ack_replay(clone, &clone_state, &sessions, &sink, Ok(DbResult::Other(Value::None))).await;
+		ack_replay(clone, &clone_state, &sessions, &sink, Ok(DbResult::Other(Value::None))).await;
+		assert!(replay_cursor(&clone_state).is_none(), "setup should be finished");
+		assert_eq!(sink.read().await.len(), 3, "attach, set, then the released request");
+
+		handle_session_drop::<MockMessage, _, _>(clone, &sessions, &sink).await;
+		assert_eq!(sink.read().await.len(), 4, "an attached clone is detached");
+	}
+
+	/// The replay log is order-sensitive: two `set`s of one key leave different
+	/// end states depending on which lands last. The server may apply requests
+	/// that arrive together in any order, so the commands must go one at a time,
+	/// each only after the previous has been acknowledged.
+	#[tokio::test]
+	async fn replay_commands_are_sent_one_at_a_time() {
+		let (session_id, session_state, sessions) =
+			session_with_replay(vec![set_cmd("x", 1), set_cmd("x", 2)]);
+		let sink = RwLock::new(Vec::<MockMessage>::new());
+
+		replay_session::<MockMessage, _, _>(session_id, &session_state, &sink).await.unwrap();
+		assert_eq!(
+			sink.read().await.len(),
+			1,
+			"only the first command may be in flight; the second would be free to overtake it"
+		);
+		let first = replay_cursor(&session_state).expect("first command in flight");
+
+		ack_replay(session_id, &session_state, &sessions, &sink, Ok(DbResult::Other(Value::None)))
+			.await;
+
+		assert_eq!(
+			sink.read().await.len(),
+			2,
+			"the second command should follow its predecessor's acknowledgement"
+		);
+		let second = replay_cursor(&session_state).expect("second command in flight");
+		assert_ne!(second.awaiting, first.awaiting, "each command needs its own request id");
+
+		ack_replay(session_id, &session_state, &sessions, &sink, Ok(DbResult::Other(Value::None)))
+			.await;
+
+		assert!(
+			replay_cursor(&session_state).is_none(),
+			"the session should be ready once the log is exhausted"
+		);
+	}
+
+	fn refreshable_auth_cmd() -> Command {
+		Command::Authenticate {
+			token: Token::WithRefresh {
+				access: "expired-access".to_string(),
+				refresh: "valid-refresh".to_string(),
+			},
+		}
+	}
+
+	fn token_expired() -> TypesError {
+		TypesError::not_allowed(
+			"token expired".to_string(),
+			NotAllowedError::Auth(AuthError::TokenExpired),
+		)
+	}
+
+	/// An access token that expired while the handle sat idle is routine, and the
+	/// token carries its own refresh half. Poisoning the session would strand a
+	/// handle that holds perfectly good credentials — a poisoned session is never
+	/// replayed again and cannot route even an explicit refresh — so the command
+	/// is retried once with the refresh token instead.
+	#[tokio::test]
+	async fn expired_token_during_replay_is_refreshed_not_poisoned() {
+		let (session_id, session_state, sessions) =
+			session_with_replay(vec![refreshable_auth_cmd(), set_cmd("x", 1)]);
+		let sink = RwLock::new(Vec::<MockMessage>::new());
+
+		replay_session::<MockMessage, _, _>(session_id, &session_state, &sink).await.unwrap();
+		let first = replay_cursor(&session_state).expect("authenticate in flight");
+
+		ack_replay(session_id, &session_state, &sessions, &sink, Err(token_expired())).await;
+
+		assert!(
+			matches!(sessions.get(&session_id), Some(Ok(_))),
+			"a refreshable expiry must not poison the session"
+		);
+		let retry = replay_cursor(&session_state).expect("replay should still be in flight");
+		assert_eq!(retry.index, first.index, "the retry re-sends the same command");
+		assert!(retry.refreshed, "the retry should be recorded so it happens only once");
+		assert_eq!(sink.read().await.len(), 2, "the refreshed authenticate should be sent");
+
+		// The refreshed attempt succeeds, so the replay carries on to the `set`.
+		ack_replay(session_id, &session_state, &sessions, &sink, Ok(DbResult::Other(Value::None)))
+			.await;
+
+		let next = replay_cursor(&session_state).expect("set should now be in flight");
+		assert_eq!(next.index, first.index + 1, "the replay should advance past authenticate");
+		assert!(!next.refreshed, "a fresh command starts with no retry spent");
+	}
+
+	/// The retry is bounded: an expiry the refresh token cannot fix must fail the
+	/// session rather than loop.
+	#[tokio::test]
+	async fn expired_token_is_refreshed_only_once() {
+		let (session_id, session_state, sessions) =
+			session_with_replay(vec![refreshable_auth_cmd()]);
+		let sink = RwLock::new(Vec::<MockMessage>::new());
+
+		replay_session::<MockMessage, _, _>(session_id, &session_state, &sink).await.unwrap();
+		ack_replay(session_id, &session_state, &sessions, &sink, Err(token_expired())).await;
+		assert!(replay_cursor(&session_state).is_some_and(|c| c.refreshed));
+
+		// The refreshed attempt is rejected too.
+		ack_replay(session_id, &session_state, &sessions, &sink, Err(token_expired())).await;
+
+		assert!(replay_cursor(&session_state).is_none(), "the replay should be abandoned");
+		assert!(
+			matches!(sessions.get(&session_id), Some(Err(_))),
+			"a refresh that cannot recover should poison the session"
+		);
+		assert_eq!(sink.read().await.len(), 2, "no further refresh attempts");
+	}
+
+	/// A reply whose envelope decodes but carries no usable request id could be
+	/// the acknowledgement a replay is waiting on. Leaving the cursor set would
+	/// park every later request for that session forever.
+	#[tokio::test]
+	async fn response_without_usable_id_releases_a_parked_replay() {
+		let (session_id, session_state, sessions) = session_with_replay(vec![set_cmd("x", 1)]);
+		let sink = RwLock::new(Vec::<MockMessage>::new());
+
+		replay_session::<MockMessage, _, _>(session_id, &session_state, &sink).await.unwrap();
+		let (route, receiver) = route_for(session_id);
+		handle_route::<MockMessage, _, _>(route, None, &sessions, &sink).await;
+		assert_eq!(session_state.deferred.lock().unwrap().len(), 1);
+
+		// An error envelope naming the session but with no id at all.
+		let mut envelope = crate::types::Object::new();
+		envelope.insert("id".to_string(), Value::None);
+		envelope.insert("session".to_string(), Value::Uuid(session_id.into()));
+		let binary = surrealdb_rpc::wire::encode(Value::Object(envelope)).unwrap();
+
+		handle_parse_error(TypesError::internal("unreadable".to_string()), &binary, &sessions)
+			.await;
+
+		assert!(replay_cursor(&session_state).is_none(), "the stuck replay should be abandoned");
+		assert!(
+			receiver.recv().await.unwrap().is_err(),
+			"the parked request should be failed, not left hanging"
+		);
+	}
+
+	/// A reply that cannot be decoded is the acknowledgement a replay was waiting
+	/// on. Without releasing it the session parks every later request behind an
+	/// acknowledgement that will never arrive.
+	#[tokio::test]
+	async fn undecodable_response_releases_a_parked_replay() {
+		let (session_id, session_state, sessions) = session_with_replay(vec![set_cmd("x", 1)]);
+		let sink = RwLock::new(Vec::<MockMessage>::new());
+
+		replay_session::<MockMessage, _, _>(session_id, &session_state, &sink).await.unwrap();
+
+		let (route, receiver) = route_for(session_id);
+		handle_route::<MockMessage, _, _>(route, None, &sessions, &sink).await;
+		assert_eq!(session_state.deferred.lock().unwrap().len(), 1);
+
+		fail_all_pending_requests(&sessions, TypesError::internal("undecodable".to_string())).await;
+
+		assert!(replay_cursor(&session_state).is_none(), "the stuck replay should be abandoned");
+		assert!(
+			receiver.recv().await.unwrap().is_err(),
+			"the parked request should be failed, not left hanging"
+		);
+		assert!(
+			matches!(sessions.get(&session_id), Some(Err(_))),
+			"a session whose setup cannot be confirmed should be poisoned"
+		);
+	}
+
+	/// A session whose setup the server rejected never reaches the state the
+	/// caller asked for, so it is poisoned and the requests parked behind it are
+	/// failed rather than run against a half-built session.
+	#[tokio::test]
+	async fn failed_replay_acknowledgement_fails_parked_requests() {
+		let (session_id, session_state, sessions) = session_with_replay(vec![set_cmd("x", 1)]);
+		let sink = RwLock::new(Vec::<MockMessage>::new());
+
+		replay_session::<MockMessage, _, _>(session_id, &session_state, &sink).await.unwrap();
+		let sent_during_replay = sink.read().await.len();
+
+		let (route, receiver) = route_for(session_id);
+		handle_route::<MockMessage, _, _>(route, None, &sessions, &sink).await;
+		assert_eq!(session_state.deferred.lock().unwrap().len(), 1);
+
+		ack_replay(
+			session_id,
+			&session_state,
+			&sessions,
+			&sink,
+			Err(TypesError::internal("setup rejected".to_string())),
+		)
+		.await;
+
+		assert_eq!(
+			sink.read().await.len(),
+			sent_during_replay,
+			"a rejected setup must not release the request"
+		);
+		assert!(
+			receiver.recv().await.unwrap().is_err(),
+			"the parked request should be failed, not left hanging"
+		);
+		assert!(
+			matches!(sessions.get(&session_id), Some(Err(_))),
+			"the session should be poisoned once its setup is rejected"
+		);
+	}
+
+	/// Delivers one notification for `live` to a session that has it
+	/// registered, and reports whether the registration survived.
+	async fn deliver(action: Action) -> (bool, bool) {
+		let session_state = Arc::new(SessionState::default());
+		let live = Uuid::new_v4();
+		let (sender, subscriber) = async_channel::unbounded();
+		session_state.live_queries.insert(live, sender);
+
+		let sink = RwLock::new(futures::sink::drain::<MockMessage>());
+		let result = handle_live_notification::<MockMessage, _, _>(
+			Ok(DbResult::Live(Notification::new(
+				live.into(),
+				None,
+				action,
+				Value::None,
+				Value::None,
+			))),
+			Uuid::new_v4(),
+			&session_state,
+			&sink,
+		)
+		.await;
+
+		assert_eq!(result, HandleResult::Ok);
+		(subscriber.try_recv().is_ok(), session_state.live_queries.contains_key(&live))
+	}
+
+	/// A `Killed` notification is the subscription's end, so the registration
+	/// goes with it -- otherwise it holds the subscriber's channel until the
+	/// connection closes, and nothing later arrives to clear it.
+	#[tokio::test]
+	async fn a_killed_notification_takes_the_registration_with_it() {
+		let (delivered, registered) = deliver(Action::Killed).await;
+
+		assert!(delivered, "the subscriber is still owed the end of its subscription");
+		assert!(!registered, "the registration outlived the subscription it names");
+	}
+
+	/// Every other notification leaves the registration in place: the
+	/// subscription is still running, and more are coming.
+	#[tokio::test]
+	async fn a_change_notification_leaves_the_registration_in_place() {
+		let (delivered, registered) = deliver(Action::Create).await;
+
+		assert!(delivered, "the change reaches the subscriber");
+		assert!(registered, "the subscription is still running and still the session's");
 	}
 }

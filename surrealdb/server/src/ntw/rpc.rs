@@ -1,7 +1,6 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, State};
 use axum::response::IntoResponse;
 use axum::routing::options;
@@ -12,13 +11,12 @@ use bytes::Bytes;
 use http::HeaderMap;
 use http::header::SEC_WEBSOCKET_PROTOCOL;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
-use surrealdb_core::iam::Auth;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::mem::ALLOC;
+use surrealdb_core::mem::RefusalSite;
 use surrealdb_core::rpc::format::{Format, PROTOCOLS};
-use surrealdb_core::rpc::{DbResponse, Method, RpcProtocol};
-use tokio::sync::RwLock;
+use surrealdb_rpc::DbResponse;
+use surrealdb_rpc::capabilities::RouteTarget;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
@@ -31,6 +29,7 @@ use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
+use crate::rpc::socket::{RpcSocket, RpcUpgrade};
 use crate::rpc::websocket::Websocket;
 
 pub fn router() -> Router<Arc<RpcState>> {
@@ -41,10 +40,11 @@ pub fn router() -> Router<Arc<RpcState>> {
 }
 
 async fn get_handler(
-	ws: WebSocketUpgrade,
+	ws: RpcUpgrade,
 	Extension(state): Extension<AppState>,
 	Extension(id): Extension<RequestId>,
 	Extension(mut session): Extension<Session>,
+	cookie_policy: Option<Extension<super::auth::CookiePolicy>>,
 	State(rpc_state): State<Arc<RpcState>>,
 	headers: HeaderMap,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
@@ -54,6 +54,19 @@ async fn get_handler(
 	if !db.allows_http_route(&RouteTarget::Rpc) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Rpc);
 		return Err(NetError::ForbiddenRoute(RouteTarget::Rpc.to_string()));
+	}
+	// Enforce the configured origin allow-list on WebSocket upgrades from
+	// browsers or requests carrying an explicit Origin header.
+	if let Some(Extension(cookie_policy)) = cookie_policy
+		&& !cookie_policy.origins.is_empty()
+		&& !cookie_policy.origins.iter().any(|o| o.as_bytes() == b"*")
+	{
+		let gate = super::auth::browser_origin_allowed(&headers, &cookie_policy.origins);
+		if gate == super::auth::Gate::Denied
+			|| (gate == super::auth::Gate::NotBrowser && headers.contains_key(http::header::ORIGIN))
+		{
+			return Err(NetError::ForbiddenOrigin);
+		}
 	}
 	// Check that a valid header has been specified
 	if headers.get(SEC_WEBSOCKET_PROTOCOL).is_none() {
@@ -106,34 +119,37 @@ async fn get_handler(
 	if rpc_state.web_sockets.read().await.contains_key(&id) {
 		return Err(NetError::Request);
 	}
-	// Now let's upgrade the WebSocket connection with comprehensive buffer configuration
+	// The WebSocket's limits and buffers
+	let config = WebSocketConfig::default()
+		// The largest frame accepted, to prevent oversized frames
+		.max_frame_size(Some(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE))
+		// The largest message accepted, to prevent memory exhaustion
+		.max_message_size(Some(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE))
+		// The read buffer for incoming data
+		.read_buffer_size(*cnf::WEBSOCKET_READ_BUFFER_SIZE)
+		// The write buffer for outgoing data
+		.write_buffer_size(*cnf::WEBSOCKET_WRITE_BUFFER_SIZE)
+		// The write buffer past which backpressure applies
+		.max_write_buffer_size(*cnf::WEBSOCKET_MAX_WRITE_BUFFER_SIZE);
+	// Now let's upgrade the WebSocket connection
 	Ok(ws
 		// Set the potential WebSocket protocols (JSON, CBOR, etc.)
 		.protocols(PROTOCOLS)
-		// Set the maximum WebSocket frame size to prevent oversized frames
-		.max_frame_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
-		// Set the maximum WebSocket message size to prevent memory exhaustion
-		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
-		// Configure read buffer size for incoming data optimization
-		.read_buffer_size(*cnf::WEBSOCKET_READ_BUFFER_SIZE)
-		// Configure write buffer size for outgoing data optimization
-		.write_buffer_size(*cnf::WEBSOCKET_WRITE_BUFFER_SIZE)
-		// Set maximum write buffer size to apply backpressure when needed
-		.max_write_buffer_size(*cnf::WEBSOCKET_MAX_WRITE_BUFFER_SIZE)
-		// Handle WebSocket upgrade failures with appropriate logging
-		.on_failed_upgrade(|err| {
-			warn!("Failed to upgrade WebSocket connection: {err}");
-		})
 		// Handle the WebSocket upgrade and process messages
-		.on_upgrade(move |socket| {
-			handle_socket(Arc::clone(&state.datastore), rpc_state, socket, session, id)
-		}))
+		.on_upgrade(
+			config,
+			// Handle WebSocket upgrade failures with appropriate logging
+			|err| warn!("Failed to upgrade WebSocket connection: {err}"),
+			move |socket| {
+				handle_socket(Arc::clone(&state.datastore), rpc_state, socket, session, id)
+			},
+		))
 }
 
 async fn handle_socket(
 	datastore: Arc<Datastore>,
 	state: Arc<RpcState>,
-	ws: WebSocket,
+	ws: RpcSocket,
 	session: Session,
 	id: Uuid,
 ) {
@@ -164,97 +180,52 @@ async fn post_handler(
 		return Err(NetError::ForbiddenRoute(RouteTarget::Rpc.to_string()).into());
 	}
 
-	let rec_limit = db.config().max_object_parsing_depth as usize;
+	let rec_limit = db.parser_config().max_object_parsing_depth as usize;
 	// Get the input format from the Content-Type header
-	let fmt: Format = (&content_type).into();
+	let in_fmt: Format = (&content_type).into();
 	// Check that the input format is a valid format
-	if matches!(fmt, Format::Unsupported) {
+	if matches!(in_fmt, Format::Unsupported) {
 		return Err(NetError::InvalidType.into());
 	}
 	// Get the output format from the Accept header
 	let out: Option<Format> = accept.as_deref().map(Into::into);
-	// Check that the input format and the output format match
+	// Check that the input format and the output format match. A shaped response answers a
+	// CBOR request: shaped is CBOR with result rows as shaped blocks.
 	if let Some(out) = out
-		&& fmt != out
-	{
+		&& in_fmt != out
+		&& !matches!(
+			(in_fmt, out),
+			(Format::Cbor, Format::Cbor2 | Format::Shaped)
+				| (Format::Cbor2, Format::Cbor2 | Format::Shaped)
+		) {
 		return Err(NetError::InvalidType.into());
 	}
-	let rpc = &*rpc_state.http;
-	// Snapshot the caller's request-level auth principal BEFORE moving the
-	// session into the ephemeral slot. This principal (derived by the
-	// `SurrealAuth` middleware from Basic/Bearer headers on THIS request)
-	// is compared to the target session's stored principal to prevent
-	// session hijack across callers - see `Http::verify_caller_for_session`.
-	let caller_au: Arc<Auth> = Arc::clone(&session.au);
-	// Isolate this request's session under a unique key to prevent
-	// concurrent requests from racing on a shared session slot.
-	let request_session_id = Uuid::new_v4();
-	rpc.register_ephemeral_session(request_session_id, Arc::new(RwLock::new(session)));
+	let out_fmt = out.unwrap_or(in_fmt);
 	// Check to see available memory
-	if ALLOC.is_beyond_threshold() {
-		rpc.remove_ephemeral_session(&request_session_id);
+	if crate::ntw::memory_guard::admit(RefusalSite::Http).is_some() {
 		return Err(NetError::ServerOverloaded.into());
 	}
 	// Parse the HTTP request body
-	let result = match fmt.req_http(body, rec_limit) {
-		Ok(req) => {
-			// Preserve the raw client-provided session_id for methods that
-			// require an explicit ID (attach/detach).
-			let client_session: Option<Uuid> = req.session_id.map(Into::into);
-			let session_id = client_session.unwrap_or(request_session_id);
-			// Echo back the request id and client-supplied session id
-			// (if any) so HTTP responses match the WebSocket convention.
-			let req_id = req.id;
-			let method = req.method;
-			// Ownership gate: if the client supplied a session id that targets an existing attached
-			// session, the caller's request-level auth principal must match the
-			// session's stored principal. `Method::Attach` is the only
-			// exception - it creates a new session and has no prior
-			// principal to match against (the trait-level `attach` then
-			// enforces the global cap and UUID uniqueness). All other
-			// methods, including `Method::Detach`, go through the gate.
-			//
-			// When `client_session == Some(request_session_id)` we
-			// deliberately skip verification: the client happened to
-			// specify the ephemeral id, which matches the caller's own
-			// auth by construction. This also avoids a collision oracle.
-			let gate_result: Result<(), surrealdb_types::Error> = if method == Method::Attach {
-				Ok(())
-			} else if let Some(cid) = client_session
-				&& cid != request_session_id
-			{
-				rpc.verify_caller_for_session(&cid, caller_au.as_ref()).await
-			} else {
-				Ok(())
-			};
-			// Execute the specified method only if the gate allows.
-			let res = match gate_result {
-				Ok(()) => {
-					RpcProtocol::execute(
-						rpc,
-						req.txn.map(Into::into),
-						session_id,
-						client_session,
-						method,
-						req.params,
-					)
-					.await
-				}
-				Err(err) => Err(err),
-			};
-			// Build the HTTP response. Do not use `?` here: a failure from
-			// `res_http` would short-circuit the function and bypass the
-			// ephemeral-session cleanup below, leaking an entry per failed
-			// serialization for the server lifetime.
-			let db_response = match res {
-				Ok(result) => DbResponse::success(req_id, client_session, result),
-				Err(err) => DbResponse::failure(req_id, client_session, err),
-			};
-			fmt.res_http(db_response).map_err(Into::into)
-		}
-		Err(err) => Err(err.into()),
+	let req = in_fmt.req_http(body, rec_limit)?;
+	// Echo back the request id and client-supplied session id (if any) so
+	// HTTP responses match the WebSocket convention.
+	let req_id = req.id;
+	let client_session: Option<Uuid> = req.session_id.map(Into::into);
+	// The shared transport answers this request in `out_fmt`.
+	let res = surrealdb_core::rpc::with_response_format(
+		out_fmt.row_format(),
+		rpc_state.http.handle(
+			session,
+			req.txn.map(Into::into),
+			client_session,
+			req.method,
+			req.params,
+		),
+	)
+	.await;
+	let db_response = match res {
+		Ok(result) => DbResponse::success(req_id, client_session, result),
+		Err(err) => DbResponse::failure(req_id, client_session, err),
 	};
-	// Clean up the per-request session
-	rpc.remove_ephemeral_session(&request_session_id);
-	result
+	Ok(out_fmt.res_http(db_response)?)
 }

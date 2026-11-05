@@ -1,0 +1,14 @@
+/**
+[env]
+imports = ["gql/_mutate_perm_insert_import.surql"]
+auth = { namespace = "test", database = "test", access = "user", rid = "person:1" }
+
+[test]
+reason = "SECURITY (write == CREATE): the write an INSERT makes is gated by the table's own create permission for the session principal. `FOR create NONE` refuses the node, which the MATCH after the write does not find."
+
+[[test.results]]
+value = "[{ name: 'alice' }]"
+*/
+
+INSERT (p:person {name: 'x'})
+MATCH (m:person) RETURN m.name AS name ORDER BY name

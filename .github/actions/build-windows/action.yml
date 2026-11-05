@@ -19,14 +19,10 @@ inputs:
     description: 'Build metadata'
     required: false
     default: ''
-  onnx-version:
-    description: 'The ONNX library version'
-    required: false
-    default: '1.23.2'
   extra-features:
     description: 'Extra features enabled in the binary'
     required: false
-    default: 'storage-tikv,jwks,ml'
+    default: 'jwks'
   upload:
     description: 'Upload build artifacts'
     required: false
@@ -35,55 +31,27 @@ inputs:
     description: 'Compile with release flag'
     required: false
     default: 'true'
+  binary:
+    description: 'The executable to build and package; artifacts are named after it'
+    required: false
+    default: 'surreal'
+  package:
+    description: 'The Cargo package to build (empty = the workspace root package, which builds `surreal`)'
+    required: false
+    default: ''
 
 outputs:
   artifact-name:
     description: 'Name of the uploaded artifact'
-    value: surreal-${{ inputs.name }}.windows-${{ inputs.platform }}
+    value: ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}
 
 runs:
   using: 'composite'
   steps:
-    - name: Setup environment
-      uses: ./.github/actions/setup-environment
-      with:
-        targets: ${{ inputs.arch }}
-        # Persist the sccache disk cache as a single Swatinem entry instead of letting
-        # sccache fill the 10 GiB repo GHA cache with hundreds of individual crate entries.
-        cache-directories: 'C:\sccache'
-        save-cache: 'true'
-
-    - name: Configure sccache for Windows
-      shell: bash
-      run: |
-        # sccache-action starts the daemon before we can configure it, so stop it and
-        # restart it with the correct settings for this runner.
-        #
-        # SCCACHE_GHA_ENABLED=false / SCCACHE_DIR: switch from the GHA cache backend
-        # (which stores one entry per crate and quickly exhausts the shared 10 GiB repo
-        # cache, causing silent write failures) to a local disk cache that Swatinem
-        # saves as a single compressed GHA entry between runs.
-        #
-        # SCCACHE_CACHE_SIZE: cap disk usage so the Swatinem-managed entry stays small.
-        #
-        # SCCACHE_IDLE_TIMEOUT=0: the default 600 s idle timeout shuts the daemon down
-        # while surrealdb-core is still compiling (~16 min, the last crate to build).
-        #
-        # SCCACHE_MAX_FRAME_LENGTH=2 GiB: on warm runs sccache sends cached .rlib
-        # contents back to the client over its IPC channel; the surrealdb-core .rlib
-        # exceeds tokio_util's default 8 MiB LengthDelimitedCodec frame limit.
-        sccache --stop-server || true
-        export SCCACHE_GHA_ENABLED=false
-        export SCCACHE_DIR='C:\sccache'
-        export SCCACHE_CACHE_SIZE='2G'
-        export SCCACHE_IDLE_TIMEOUT=0
-        export SCCACHE_MAX_FRAME_LENGTH=2147483648
-        sccache --start-server
-        echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
-        echo "SCCACHE_DIR=C:\\sccache" >> "$GITHUB_ENV"
-        echo "SCCACHE_CACHE_SIZE=2G" >> "$GITHUB_ENV"
-        echo "SCCACHE_IDLE_TIMEOUT=0" >> "$GITHUB_ENV"
-        echo "SCCACHE_MAX_FRAME_LENGTH=2147483648" >> "$GITHUB_ENV"
+    # Compile-cache configuration (the S3 backend and the Windows store
+    # location) is supplied to setup-environment as inputs at the call site and
+    # read by the kache daemon it starts - this action assumes
+    # setup-environment ran before it and configures nothing itself.
 
     - name: Output package versions
       shell: bash
@@ -119,25 +87,22 @@ runs:
           extra_args="${extra_args} --release"
           compile_profile="release"
         fi
-
-        # Download libonnxruntime's static library and tell ORT crate to use it
-        tmp_dir=$(mktemp -d)
-        curl -sSL https://github.com/supertone-inc/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-win-x64-static_lib-${{ inputs.onnx-version }}.zip -o $tmp_dir/onnxruntime.zip
-        unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
-        export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
+        if [[ -n "${{ inputs.package }}" ]]; then
+          extra_args="${extra_args} --package ${{ inputs.package }}"
+        fi
 
         cargo build --no-default-features ${extra_args} --locked --target ${{ inputs.arch }}
 
         # Package
-        ./target/${{ inputs.arch }}/${compile_profile}/surreal.exe version
-        cp target/${{ inputs.arch }}/${compile_profile}/surreal.exe surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.exe
-        echo $(certutil -hashfile surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.exe SHA256 | sed -n '2p') > surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.txt
+        ./target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}.exe --version
+        cp target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}.exe ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.exe
+        echo $(certutil -hashfile ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.exe SHA256 | sed -n '2p') > ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.txt
 
     - name: Upload artifacts
       if: ${{ inputs.upload == 'true' }}
-      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: surreal-${{ inputs.name }}.windows-${{ inputs.platform }}
+        name: ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}
         path: |
-          surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.exe
-          surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.txt
+          ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.exe
+          ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.txt

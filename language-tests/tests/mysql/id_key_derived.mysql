@@ -1,0 +1,170 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_id_key.surql"]
+
+[test]
+reason = "The id of a derived table, a subquery alias or a common table expression is already the key the inner query projected, and is compared, joined and projected as a plain value; the key is never read from a value that is not a record id. Grouping, ordering and the set operations over id work on the keys."
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }, { id: 2, name: 'Jaime' }]"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 2 }, { id: 3 }, { id: 10 }]"
+
+[[test.results]]
+value = "[{ age: 42, id: 1, name: 'Tobie' }]"
+
+[[test.results]]
+value = "[{ id: 3 }, { id: 10 }]"
+
+[[test.results]]
+value = "[{ id: 2, name: 'Jaime' }, { id: 10, name: 'Ten' }]"
+
+[[test.results]]
+value = "[{ id: 3 }]"
+
+[[test.results]]
+value = "[{ bio: 'Founder', id: 1 }, { bio: 'Tester', id: 3 }]"
+
+[[test.results]]
+value = "[{ did: 1, id: 1 }, { did: 2, id: 2 }, { did: 10, id: 10 }]"
+
+[[test.results]]
+value = "[{ eid: 1, id: 1 }, { eid: 3, id: 3 }]"
+
+[[test.results]]
+value = "[{ id: 1, n: 2 }, { id: 2, n: 1 }]"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 1 }, { id: 2 }, { id: 3 }, { id: 3 }, { id: 10 }, { id: 99 }]"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 2 }, { id: 3 }, { id: 10 }, { id: 99 }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }, { id: 3, name: 'Zed' }]"
+
+[[test.results]]
+value = "[{ id: 1 }]"
+
+[[test.results]]
+value = "[{ bio: 'Founder' }]"
+
+[[test.results]]
+value = "[{ id: 1, n: 1 }, { id: 2, n: 1 }, { id: 3, n: 1 }, { id: 10, n: 1 }]"
+
+[[test.results]]
+value = "[{ id: 10, oldest: 10 }, { id: 3, oldest: 7 }]"
+
+[[test.results]]
+value = "[{ n: 1, pk: 1 }, { n: 1, pk: 2 }, { n: 1, pk: 3 }, { n: 1, pk: 10 }]"
+
+[[test.results]]
+value = "[{ age: 7, bottom: 3, n: 1, top: 3 }, { age: 10, bottom: 10, n: 1, top: 10 }, { age: 41, bottom: 2, n: 1, top: 2 }, { age: 42, bottom: 1, n: 1, top: 1 }]"
+
+[[test.results]]
+value = "[{ n: 1 }, { n: 1 }, { n: 1 }, { n: 1 }]"
+
+[[test.results]]
+value = "[{ id: 10 }, { id: 3 }, { id: 2 }, { id: 1 }]"
+
+[[test.results]]
+value = "[{ id: 10, name: 'Ten' }, { id: 3, name: 'Zed' }, { id: 2, name: 'Jaime' }, { id: 1, name: 'Tobie' }]"
+
+[[test.results]]
+value = "[{ id: 10 }]"
+
+[[test.results]]
+value = "[{ one: 1 }]"
+
+[[test.results]]
+value = "[{ kind: 'first' }, { kind: 'other' }, { kind: 'other' }, { kind: 'other' }]"
+
+[[test.results]]
+value = "[{ kind: 'first' }, { kind: 'second' }, { kind: 'other' }, { kind: 'other' }]"
+
+[[test.results]]
+value = "[{ pk: 1 }, { pk: 2 }, { pk: 3 }, { pk: 10 }]"
+
+[[test.results]]
+value = "[{ is_first: true }, { is_first: false }, { is_first: false }, { is_first: false }]"
+
+[[test.results]]
+value = "[{ not_first: false }, { not_first: true }, { not_first: true }, { not_first: true }]"
+
+[[test.results]]
+value = "[{ is_null: NULL }, { is_null: NULL }, { is_null: NULL }, { is_null: NULL }]"
+
+[[test.results]]
+value = "[{ nspacl: NULL, nspname: 'public', nspowner: 10, oid: 2200 }]"
+
+*/
+
+SELECT d.id, d.name FROM (SELECT id, name FROM person) d WHERE d.id = 1;
+
+SELECT d.id, d.name FROM (SELECT id, name FROM person) d WHERE d.id IN (1, 2) ORDER BY d.id;
+
+SELECT d.id FROM (SELECT * FROM person) d ORDER BY d.id;
+
+SELECT * FROM (SELECT * FROM person WHERE id = 1) x;
+
+SELECT d.id FROM (SELECT id FROM person) d WHERE d.id > 2 ORDER BY d.id;
+
+WITH c AS (SELECT id, name FROM person WHERE age > 8) SELECT c.id, c.name FROM c WHERE c.id > 1 ORDER BY c.id;
+
+WITH c AS (SELECT id FROM person) SELECT id FROM c WHERE id = 3;
+
+SELECT d.id, f.bio FROM (SELECT id FROM person) d JOIN profile f ON f.id = d.id ORDER BY d.id;
+
+SELECT p.id, d.id AS did FROM person p JOIN (SELECT id FROM person WHERE age > 8) d ON d.id = p.id ORDER BY p.id;
+
+SELECT d.id, e.id AS eid FROM (SELECT id FROM person) d JOIN (SELECT id FROM profile) e ON e.id = d.id ORDER BY d.id;
+
+SELECT p.id, d.n FROM person p JOIN (SELECT author, count(*) AS n FROM post GROUP BY author) d ON d.author = p.id ORDER BY p.id;
+
+SELECT id FROM (SELECT id FROM person UNION ALL SELECT id FROM profile) u ORDER BY id;
+
+SELECT id FROM person UNION SELECT id FROM profile ORDER BY id;
+
+SELECT id, name FROM person WHERE id IN (SELECT id FROM profile) ORDER BY id;
+
+SELECT id FROM person WHERE id IN (SELECT id FROM profile WHERE bio = 'Founder');
+
+SELECT (SELECT bio FROM profile WHERE id = 1) AS bio;
+
+SELECT id, count(*) AS n FROM person GROUP BY id HAVING count(*) = 1 ORDER BY id;
+
+SELECT id, max(age) AS oldest FROM person GROUP BY id ORDER BY id DESC LIMIT 2;
+
+SELECT id AS pk, count(*) AS n FROM person GROUP BY 1 ORDER BY pk;
+
+SELECT age, count(*) AS n, max(id) AS top, min(id) AS bottom FROM person GROUP BY age ORDER BY age;
+
+SELECT count(*) AS n FROM person GROUP BY id ORDER BY n;
+
+SELECT id FROM person ORDER BY 1 DESC;
+
+SELECT id, name FROM person ORDER BY id DESC;
+
+SELECT id FROM person ORDER BY id + 0 DESC LIMIT 1;
+
+SELECT 1 AS one FROM person WHERE id = 1;
+
+SELECT CASE WHEN id = 1 THEN 'first' ELSE 'other' END AS kind FROM person ORDER BY id;
+
+SELECT CASE id WHEN 1 THEN 'first' WHEN 2 THEN 'second' ELSE 'other' END AS kind FROM person ORDER BY id;
+
+SELECT coalesce(id, 0) AS pk FROM person ORDER BY id;
+
+SELECT id = 1 AS is_first FROM person ORDER BY id;
+
+SELECT id <> 1 AS not_first FROM person ORDER BY id;
+
+SELECT id = NULL AS is_null FROM person ORDER BY id;
+
+SELECT * FROM pg_catalog.pg_namespace WHERE nspname = 'public';

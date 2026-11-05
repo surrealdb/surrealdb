@@ -1,0 +1,50 @@
+[package]
+name = "surrealdb-edge-size-probe"
+# A measuring stick for `scripts/wasm-size-budget.sh`, never shipped: a wasm
+# module holding the engine as an edge worker links it, whose size the budget
+# checks.
+publish = false
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+version.workspace = true
+description = "The engine linked as an edge worker links it, for the wasm size budget"
+
+[features]
+# The lean bundle: the in-memory store and none of the optional kernels.
+default = []
+# The edge entry: the lean bundle's feature set and the shaped result format, run through
+# `Datastore::execute_edge` on a datastore built with `Builder::for_edge`, which
+# serves data statements and the edge builtins alone.
+edge-entry = ["surrealdb-core/shaped"]
+# The full bundle: every optional engine feature that builds for wasm32.
+full = [
+    "surrealdb-core/api",
+    "surrealdb-core/collate",
+    "surrealdb-core/crypto-digest",
+    "surrealdb-core/crypto-password",
+    "surrealdb-core/egraph",
+    "surrealdb-core/encoding",
+    "surrealdb-core/files",
+    "surrealdb-core/fulltext",
+    "surrealdb-core/geo",
+    "surrealdb-core/html-sanitize",
+    "surrealdb-core/maintenance-tasks",
+    "surrealdb-core/observability",
+    "surrealdb-core/regex-unicode",
+    "surrealdb-core/scram",
+    "surrealdb-core/search",
+    "surrealdb-core/shaped",
+    "surrealdb-core/text-diff",
+    "surrealdb-core/url",
+    "surrealdb-core/vector-index",
+]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+surrealdb-core = { workspace = true, features = ["kv-mem"] }
+
+[lints]
+workspace = true

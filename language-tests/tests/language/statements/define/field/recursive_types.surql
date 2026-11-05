@@ -11,13 +11,16 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = '''
 {
 	events: {},
 	fields: {
-		"foo": "DEFINE FIELD foo ON bar TYPE array<float | array<bool>> | set<number> PERMISSIONS FULL",
-		"foo.*": "DEFINE FIELD foo.* ON bar TYPE float | array<bool> | number PERMISSIONS FULL",
-		"foo.*.*": "DEFINE FIELD foo.*.* ON bar TYPE bool PERMISSIONS FOR select, create FULL, FOR update NONE"
+		"foo": "DEFINE FIELD foo ON bar TYPE array<float | array<int>> | set<number> PERMISSIONS FULL",
+		"foo.*": "DEFINE FIELD foo.* ON bar TYPE float | array<int> | number PERMISSIONS FULL",
+		"foo.*.*": "DEFINE FIELD foo.*.* ON bar TYPE int PERMISSIONS FOR select, create FULL, FOR update NONE"
 	},
 	indexes: {},
 	lives: {},
@@ -28,8 +31,11 @@ value = '''
 
 */
 DEFINE TABLE bar;
-// defining a type for the parent type should overwrite permissions for the child.
-DEFINE FIELD foo.*.* ON bar TYPE number PERMISSIONS FOR UPDATE NONE;
-// this should recursively define types for foo, foo.*, and foo.*.*
+// this recursively defines types for foo.* and foo.*.*
 DEFINE FIELD foo ON bar TYPE array<float | array<bool>> | set<number>;
+// a field the type implies takes clauses of its own
+DEFINE FIELD OVERWRITE foo.*.* ON bar PERMISSIONS FOR UPDATE NONE;
+// redefining the parent's type redefines the type of each field it implies,
+// and keeps their other clauses
+DEFINE FIELD OVERWRITE foo ON bar TYPE array<float | array<int>> | set<number>;
 INFO FOR TABLE bar;

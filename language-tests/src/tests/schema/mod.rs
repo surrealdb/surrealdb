@@ -5,27 +5,18 @@ use std::time::Duration;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
-use surrealdb_core::dbs::NewPlannerStrategy;
-use surrealdb_core::dbs::capabilities::{
+use surrealdb_core::syn::runtime::ParserSettings;
+use surrealdb_rpc::capabilities::{
 	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget,
 };
-use surrealdb_core::syn::parser::ParserSettings;
-use surrealdb_core::syn::{self};
 use surrealdb_types::{Object, RecordId, ToSql, Value};
 
-use crate::cli::Backend;
+use crate::cli::{Backend, RunMode};
+use crate::tests::feature::Feature;
 
 fn bool_or_f<T>() -> BoolOr<T> {
 	BoolOr::Bool(false)
-}
-
-fn default_planner_strategy() -> Vec<NewPlannerStrategyConfig> {
-	vec![
-		NewPlannerStrategyConfig::ComputeOnly,
-		NewPlannerStrategyConfig::AllRo,
-		NewPlannerStrategyConfig::BestEffortRo,
-	]
 }
 
 fn t() -> bool {
@@ -93,7 +84,7 @@ pub struct GraphQlDetails {
 	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct TestEnv {
 	/// Should the test be run sequentially
@@ -125,52 +116,66 @@ pub struct TestEnv {
 	/// Specifies which backends this test should run on.
 	/// If empty, the test runs on all backends.
 	/// If specified, the test only runs when the selected backend is in this list.
-	/// Valid values: "mem", "rocksdb", "surrealkv", "tikv"
+	/// Valid values: "mem", "surrealkv", "tikv"
 	#[serde(default)]
 	pub backend: Vec<Backend>,
 
 	/// Whether the test requires MVCC versioning to be enabled on the datastore.
-	/// When true, the datastore is created with `?versioned=true` in the connection string.
+	/// When true, the datastore is created with `?versioned=true` in the
+	/// connection string, and the test runs only on the backends that accept it
+	/// (see [`Backend::supports_versioning`]).
 	#[serde(default)]
 	pub versioned: bool,
-	/// Planner strategies to run this test under.
-	/// Defaults to `["compute-only", "all-ro"]` when omitted; the test is
-	/// executed once per listed strategy.
-	#[serde(default = "default_planner_strategy")]
-	pub planner_strategy: Vec<NewPlannerStrategyConfig>,
-
+	/// The compatibility level of the test's database: `3` or `4`. The
+	/// runner defines the database with `COMPATIBILITY` set to it; without
+	/// it the database takes the datastore's default, level 4. Upgrade tests
+	/// accept only `3`, the level every released binary's databases stand
+	/// at.
+	pub compatibility: Option<u8>,
+	/// Datastore configuration keys the test needs, as `--config KEY=VALUE` gives them to a run:
+	/// `[env.config] morsel_split_rows = "18446744073709551615"`. Each takes the place of the same
+	/// key given to the run, and a test that names any gets a datastore of its own. Values are
+	/// strings, since a count can exceed what TOML integers hold.
+	#[serde(default)]
+	pub config: BTreeMap<String, String>,
 	/// Whether EXPLAIN ANALYZE output omits elapsed durations, making
 	/// output deterministic for test assertions. Defaults to true in the
 	/// language test framework. Set to `false` explicitly if you need
 	/// actual elapsed times.
 	pub redact_volatile_explain_attrs: Option<bool>,
 
+	/// When set, the test is skipped on remote (`--endpoint`) runs, with this
+	/// string reported as the reason. For the handful of tests that assert
+	/// behaviour which only holds for an embedded, in-process datastore — a
+	/// connection-less `$session`, the absence of a bootstrap root user, or
+	/// process-relative file paths — and so can't be reproduced faithfully over
+	/// the API. Ignored by embedded runs.
+	pub remote_skip: Option<String>,
+
+	/// The test reaches outside its own namespace — it creates a root user,
+	/// access method or namespace, changes a system setting, or asserts on the
+	/// literal name of the namespace it runs in. Remote (`--endpoint`) runs give
+	/// it the endpoint to itself and the namespace name its config asks for;
+	/// every other test runs concurrently in a namespace named for the run.
+	///
+	/// Embedded runs ignore it: every test there already has a private
+	/// datastore, so there is nothing to share.
+	///
+	/// A test that needs this and does not declare it fails rather than races —
+	/// see [`crate::cmd::run::executor::Executor::check_root_leak`].
+	#[serde(default)]
+	pub remote_exclusive: bool,
+
+	/// The trace kinds the query asks for, as a `query` call's `trace` option
+	/// names them: `trace = ["relations", "references", "links", "variables",
+	/// "subscriptions"]`. Each statement's trace is then graded beside its value
+	/// ([`crate::tests::trace`]). Empty asks for none.
+	#[serde(default)]
+	pub trace: Vec<String>,
+
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
-}
-
-impl Default for TestEnv {
-	fn default() -> Self {
-		Self {
-			sequential: Default::default(),
-			clean: Default::default(),
-			readonly: Default::default(),
-			namespace: Default::default(),
-			database: Default::default(),
-			auth: Default::default(),
-			signup: None,
-			signin: None,
-			imports: Default::default(),
-			timeout: Default::default(),
-			capabilities: Default::default(),
-			backend: Default::default(),
-			versioned: Default::default(),
-			planner_strategy: default_planner_strategy(),
-			redact_volatile_explain_attrs: Default::default(),
-			_unused_keys: Default::default(),
-		}
-	}
 }
 
 impl TestEnv {
@@ -188,6 +193,16 @@ impl TestEnv {
 		self.database.as_ref().map(|x| x.as_str()).into_value(ENV_DEFAULT_DATABASE)
 	}
 
+	/// Whether a remote run has to give this test the endpoint to itself.
+	///
+	/// Either it says so, or it asked not to run beside anything at all, or it
+	/// declares no namespace — in which case it has nowhere but root to write
+	/// and cannot be isolated by one.
+	#[cfg_attr(not(feature = "remote"), allow(dead_code))]
+	pub fn needs_exclusive_endpoint(&self) -> bool {
+		self.remote_exclusive || self.sequential || self.namespace().is_none()
+	}
+
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("env.{x}")).collect();
 
@@ -196,58 +211,6 @@ impl TestEnv {
 		}
 
 		res
-	}
-}
-
-/// Strategy for the new streaming planner/executor in language tests.
-///
-/// Maps to `surrealdb_core::dbs::NewPlannerStrategy` but uses shorter
-/// kebab-case names for TOML configuration.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum NewPlannerStrategyConfig {
-	/// Try new planner, fall back on Unimplemented.
-	BestEffortRo,
-	/// Require new planner for all read-only statements (hard fail on Unimplemented).
-	AllRo,
-	/// Skip new planner entirely; always use legacy compute.
-	ComputeOnly,
-}
-
-impl NewPlannerStrategyConfig {
-	pub const DEFAULT_STRATEGIES: &[NewPlannerStrategyConfig] =
-		&[NewPlannerStrategyConfig::ComputeOnly, NewPlannerStrategyConfig::AllRo];
-}
-
-impl fmt::Display for NewPlannerStrategyConfig {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Self::BestEffortRo => f.write_str("best-effort-ro"),
-			Self::AllRo => f.write_str("all-ro"),
-			Self::ComputeOnly => f.write_str("compute-only"),
-		}
-	}
-}
-
-impl From<NewPlannerStrategy> for NewPlannerStrategyConfig {
-	fn from(strategy: NewPlannerStrategy) -> Self {
-		match strategy {
-			NewPlannerStrategy::BestEffortReadOnlyStatements => Self::BestEffortRo,
-			NewPlannerStrategy::ComputeOnly => Self::ComputeOnly,
-			NewPlannerStrategy::AllReadOnlyStatements => Self::AllRo,
-		}
-	}
-}
-
-impl From<NewPlannerStrategyConfig> for NewPlannerStrategy {
-	fn from(strategy: NewPlannerStrategyConfig) -> Self {
-		match strategy {
-			NewPlannerStrategyConfig::BestEffortRo => {
-				NewPlannerStrategy::BestEffortReadOnlyStatements
-			}
-			NewPlannerStrategyConfig::ComputeOnly => NewPlannerStrategy::ComputeOnly,
-			NewPlannerStrategyConfig::AllRo => NewPlannerStrategy::AllReadOnlyStatements,
-		}
 	}
 }
 
@@ -308,6 +271,10 @@ pub struct ErrorTestResult {
 #[serde(rename_all = "kebab-case")]
 pub struct ValueTestResult {
 	pub value: SurrealConfigValue,
+	/// The trace the statement sends, for a test that asks for one; none when
+	/// absent ([`crate::tests::trace`]).
+	#[serde(default)]
+	pub trace: Option<SurrealConfigValue>,
 	#[serde(default)]
 	pub skip_datetime: Option<bool>,
 	#[serde(default)]
@@ -329,6 +296,10 @@ pub struct MatchTestResult {
 	pub _match: SurrealExpr,
 	#[serde(default)]
 	pub error: Option<bool>,
+	/// The trace the statement sends, for a test that asks for one; none when
+	/// absent ([`crate::tests::trace`]).
+	#[serde(default)]
+	pub trace: Option<SurrealConfigValue>,
 }
 
 /// Duration which deserializes from both a string as well as a number.
@@ -356,15 +327,13 @@ impl<'de> Deserialize<'de> for TestDuration {
 					expr_recursion_limit: 100,
 					legacy_strands: false,
 					flexible_record_id: true,
-					files_enabled: true,
 					surrealism_enabled: true,
 					json_string_escapes: false,
+					import: false,
 				};
 
-				let v = syn::parse_with_settings(x.as_bytes(), settings, async |parser, stk| {
-					parser.parse_value(stk).await
-				})
-				.map_err(<D::Error as serde::de::Error>::custom)?;
+				let v = surrealdb_core::syn::runtime::value_with_settings(&x, settings)
+					.map_err(<D::Error as serde::de::Error>::custom)?;
 				let Value::Duration(x) = v else {
 					return Err(<D::Error as serde::de::Error>::custom("Invalid duration"));
 				};
@@ -461,13 +430,66 @@ pub struct TestDetails {
 	#[serde(default)]
 	pub wip: bool,
 
+	/// Engine features the test cannot pass without. A run started with `--without <feature>`
+	/// reports the test as skipped. See [`crate::tests::feature`].
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub requires: Vec<Feature>,
+
 	#[serde(default)]
 	pub upgrade: bool,
+
+	/// Marks an upgrade test written for the RocksDB-to-SurrealKV migration
+	/// axis (`upgrade --backend rocksdb-migration`), where the source binary
+	/// writes a `rocksdb://` store and the target opens it as `surrealkv://`.
+	/// Such a test runs on that axis only; every other axis skips it. With
+	/// `[env] versioned = true` it runs only when the axis is versioned.
+	#[serde(default)]
+	pub migration: bool,
+
+	/// The run modes this test is valid in. Absent means every mode; a present
+	/// list restricts the file to the modes it names, so an empty list runs
+	/// the file in none. See [`TestDetails::runs_in_mode`].
+	#[serde(default)]
+	pub modes: Option<Vec<RunMode>>,
+
+	/// Marks a script written in the SurrealQL of the released binary that runs
+	/// it, in a spelling the current parser no longer accepts.
+	///
+	/// Only an upgrade helper can be one: it is replayed against a spawned
+	/// released binary and never against the current checkout, so the syntax it
+	/// needs is that binary's, not this build's. The current parser's
+	/// language-test corpus check reads this flag and leaves such a file alone,
+	/// which is why it is a declared key rather than a comment.
+	///
+	/// A test body may not set it — the body executes on the upgrade target, so
+	/// its syntax must be the one that build parses.
+	#[serde(default)]
+	pub legacy_syntax: bool,
 
 	#[serde(default)]
 	pub version: Option<VersionReq>,
 	#[serde(default)]
-	pub importing_version: Option<VersionReq>,
+	pub importing_version: Option<VersionRanges>,
+
+	/// The release that introduced the feature under test — the earliest binary
+	/// able to *create* the state the test asserts on.
+	///
+	/// Distinct from `importing-version`, which excludes a hop because a released
+	/// binary is defective. Both bound the source side, so nothing but intent
+	/// separates them, and that intent is what the filename prefix mirrors and
+	/// the walk reads: a pairwise run skips hops whose source predates this, and
+	/// a chain run uses it as the default `[test.chain] since`.
+	#[serde(default)]
+	pub introduced: Option<VersionReq>,
+
+	/// Opts the test into the cumulative chain runner (`upgrade --chain`).
+	#[serde(default)]
+	pub chain: Option<TestChain>,
+
+	/// Manual steps this upgrade is documented to require, in the sense of a
+	/// release note's "after upgrading, run X". See [`TestRepair`].
+	#[serde(default)]
+	pub repair: Vec<TestRepair>,
 
 	#[serde(default)]
 	pub results: Option<TestDetailsResults>,
@@ -484,18 +506,128 @@ impl Default for TestDetails {
 			run: true,
 			issue: Default::default(),
 			wip: false,
+			requires: Default::default(),
 			upgrade: Default::default(),
+			migration: Default::default(),
+			modes: Default::default(),
+			legacy_syntax: Default::default(),
 			version: Default::default(),
 			importing_version: Default::default(),
+			introduced: Default::default(),
+			chain: Default::default(),
+			repair: Default::default(),
 			results: Default::default(),
 			_unused_keys: Default::default(),
 		}
 	}
 }
 
+/// Cumulative-chain configuration for an upgrade test.
+///
+/// The chain runner walks one datastore through every version passed to
+/// `--chain`, which CI populates from `LANG_UPGRADE_CHAIN` — a list that omits
+/// any release demanding a manual repair, and so is deliberately not the same
+/// as the adjacent-pair `LANG_UPGRADE_VERSIONS`. `setup` runs exactly once, on the first
+/// version satisfying `since`; from that version onwards the test body is run
+/// as the per-hop verification, so a feature introduced at 3.1.0 is created by
+/// 3.1.0 and re-verified by 3.1.1, 3.1.2, ... and the current checkout, against
+/// the data the earlier binaries left behind.
+///
+/// The body must be idempotent: it is executed once per remaining version and
+/// graded against the same `[[test.results]]` every time. `mutate` is the place
+/// for per-hop writes — it runs before the body on every version at or after
+/// `setup`, which is what makes each release write *through* a structure an
+/// older release created.
+///
+/// Matcher expressions in `[[test.results]]` may reference the chain position
+/// through the `$hop`, `$hops`, `$version` and `$chain` parameters, so a body
+/// whose result set grows with each `mutate` can still assert exactly.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TestChain {
+	/// Version requirement the walked version must satisfy before this feature
+	/// exists. `setup` runs on the first chain version that matches, and the
+	/// test is skipped entirely when no version in the chain does.
+	///
+	/// Defaults to the test's `[test] introduced`, which is the same fact stated
+	/// once; set it only to override the walk independently of that.
+	#[serde(default)]
+	pub since: Option<VersionReq>,
+	/// Test-root-relative path of the script that creates the feature. Resolved
+	/// exactly like an `[env] imports` entry, transitive imports included.
+	pub setup: String,
+	/// Test-root-relative path of a script run on every version at or after
+	/// `setup`, before the body. Its statements' results are not graded; a
+	/// statement that errors fails the hop.
+	#[serde(default)]
+	pub mutate: Option<String>,
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
+/// A manual step an upgrade is documented to require — the SurrealQL equivalent
+/// of a release note's "after upgrading, run `REBUILD INDEX ...`".
+///
+/// The runner brackets the declaration rather than trusting it. The body is run
+/// once before the repair, and its outcome must equal `unrepaired`; the repair
+/// script then runs, and the body is run again and graded normally. Both
+/// directions are therefore falsifiable: a requirement nobody declared fails
+/// because the first run was supposed to succeed, and a declaration that has
+/// stopped reproducing fails because the pre-repair run no longer reports the
+/// damage it claims.
+///
+/// Without this, a repair statement written straight into a test body is
+/// indistinguishable from a silent breakage that someone patched until the
+/// suite went green.
+///
+/// Because the body runs twice against the same store, it must be idempotent:
+/// a `CREATE` that succeeds on the first pass fails as "already exists" on the
+/// second. Writes in a bracketed body belong in an `UPSERT`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TestRepair {
+	/// First upgrade *target* requiring the step. Matched as `>= since`, so a
+	/// declaration for `3.3.0` also covers `3.3.0-beta.3`.
+	pub since: VersionReq,
+	/// Test-root-relative path of the script performing the repair.
+	pub script: String,
+	/// What the body does before the repair has run.
+	pub unrepaired: Unrepaired,
+	/// Why an operator has to do this. A step with no stated reason cannot be
+	/// told apart from a bug someone worked around.
+	pub reason: String,
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
+/// Observed behaviour of a test body before its declared repair has run.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Unrepaired {
+	/// A statement errors in a way the expectations do not allow.
+	Broken,
+	/// Every statement completes but at least one result differs.
+	Degraded,
+}
+
 impl TestDetails {
+	/// Whether the test is valid in `mode`: always when `modes` is absent,
+	/// otherwise only when the list names it.
+	pub fn runs_in_mode(&self, mode: RunMode) -> bool {
+		self.modes.as_ref().is_none_or(|modes| modes.contains(&mode))
+	}
+
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("test.{x}")).collect();
+
+		if let Some(chain) = self.chain.as_ref() {
+			res.extend(chain._unused_keys.keys().map(|x| format!("test.chain.{x}")));
+		}
+		for (i, repair) in self.repair.iter().enumerate() {
+			res.extend(repair._unused_keys.keys().map(|x| format!("test.repair[{i}].{x}")));
+		}
 
 		if let Some(results) = self.results.as_ref() {
 			match results {
@@ -509,9 +641,69 @@ impl TestDetails {
 				TestDetailsResults::SigninError(x) => res.append(
 					&mut x._unused_keys.keys().map(|x| format!("test.results.{x}")).collect(),
 				),
+				TestDetailsResults::RequestError(x) => res.append(
+					&mut x._unused_keys.keys().map(|x| format!("test.results.{x}")).collect(),
+				),
 			}
 		}
 		res
+	}
+}
+
+/// One or more version requirements, any of which admits a version.
+///
+/// Written as a single requirement string, or as an array of them when the
+/// versions to admit are not one contiguous range. Release order is not version
+/// order: a patch on an older line can ship after a newer line and carry a fix
+/// the newer line's early releases lack, so the releases still carrying a
+/// defect can sit on both sides of those that fixed it. Comparators within one
+/// requirement are ANDed, as semver defines; the requirements are ORed.
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub enum VersionRanges {
+	One(VersionReq),
+	Any(Vec<VersionReq>),
+}
+
+impl VersionRanges {
+	fn requirements(&self) -> &[VersionReq] {
+		match self {
+			VersionRanges::One(req) => std::slice::from_ref(req),
+			VersionRanges::Any(reqs) => reqs,
+		}
+	}
+
+	/// Whether any requirement admits `version` under strict semver matching.
+	pub fn matches(&self, version: &semver::Version) -> bool {
+		self.requirements().iter().any(|req| req.matches(version))
+	}
+
+	/// Whether any requirement admits `version` under
+	/// [`crate::version::version_matches`], which lets a prerelease satisfy a
+	/// requirement that does not name its own release.
+	#[cfg(any(feature = "upgrade", test))]
+	pub fn version_matches(&self, version: &semver::Version) -> bool {
+		self.requirements().iter().any(|req| crate::version::version_matches(req, version))
+	}
+}
+
+impl<'de> Deserialize<'de> for VersionRanges {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: de::Deserializer<'de>,
+	{
+		let value = toml::Value::deserialize(deserializer)?;
+		if value.is_array() {
+			let reqs: Vec<VersionReq> = Deserialize::deserialize(value).map_err(to_deser_error)?;
+			if reqs.is_empty() {
+				// An empty list would admit no version at all, which silently
+				// removes the test from every run.
+				return Err(to_deser_error("expected at least one version requirement"));
+			}
+			Ok(VersionRanges::Any(reqs))
+		} else {
+			Deserialize::deserialize(value).map_err(to_deser_error).map(VersionRanges::One)
+		}
 	}
 }
 
@@ -523,6 +715,9 @@ pub enum TestDetailsResults {
 	ParserError(ParsingTestResult),
 	SigninError(SigninErrorResult),
 	SignupError(SignupErrorResult),
+	/// The whole request was refused: the `dbs.process` call itself returned an error, so no
+	/// statement produced a result.
+	RequestError(RequestErrorResult),
 }
 
 impl<'de> Deserialize<'de> for TestDetailsResults {
@@ -544,6 +739,10 @@ impl<'de> Deserialize<'de> for TestDetailsResults {
 				Deserialize::deserialize(value)
 					.map_err(to_deser_error)
 					.map(TestDetailsResults::SignupError)
+			} else if t.contains_key("request-error") {
+				Deserialize::deserialize(value)
+					.map_err(to_deser_error)
+					.map(TestDetailsResults::RequestError)
 			} else {
 				Deserialize::deserialize(value)
 					.map_err(to_deser_error)
@@ -582,6 +781,15 @@ pub struct SignupErrorResult {
 	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RequestErrorResult {
+	pub request_error: BoolOr<String>,
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
 /// A wrapper around the `Value` type for SurrealDB in order to support parsing from toml.
 #[derive(Clone, Debug)]
 pub struct SurrealConfigValue(pub Value);
@@ -608,15 +816,13 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			expr_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			files_enabled: true,
 			surrealism_enabled: true,
 			json_string_escapes: false,
+			import: false,
 		};
 
-		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-			parser.parse_value(stk).await
-		})
-		.map_err(<D::Error as serde::de::Error>::custom)?;
+		let v = surrealdb_core::syn::runtime::value_with_settings(&source, settings)
+			.map_err(<D::Error as serde::de::Error>::custom)?;
 
 		Ok(SurrealConfigValue(v))
 	}
@@ -672,15 +878,13 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			expr_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			files_enabled: true,
 			surrealism_enabled: true,
 			json_string_escapes: false,
+			import: false,
 		};
 
-		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-			parser.parse_value(stk).await
-		})
-		.map_err(<D::Error as serde::de::Error>::custom)?;
+		let v = surrealdb_core::syn::runtime::value_with_settings(&source, settings)
+			.map_err(<D::Error as serde::de::Error>::custom)?;
 		if let Value::RecordId(x) = v {
 			Ok(SurrealRecordId(x))
 		} else {
@@ -716,15 +920,13 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			expr_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			files_enabled: true,
 			surrealism_enabled: true,
 			json_string_escapes: false,
+			import: false,
 		};
 
-		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-			parser.parse_value(stk).await
-		})
-		.map_err(<D::Error as serde::de::Error>::custom)?;
+		let v = surrealdb_core::syn::runtime::value_with_settings(&source, settings)
+			.map_err(<D::Error as serde::de::Error>::custom)?;
 
 		v.into_object().map(SurrealObject).map_err(|err| {
 			<D::Error as serde::de::Error>::custom(format_args!(
@@ -895,6 +1097,44 @@ pub struct BenchDetails {
 	/// slate per iteration.
 	#[serde(default)]
 	pub rebuild: bool,
+	/// Lets a `rebuild = true` bench also run on the file-backed engines
+	/// (`--backend surrealkv`), not just on `mem`.
+	///
+	/// Rebuilding re-imports the dataset before every measured iteration, and on
+	/// a file backend that writes the whole dataset to disk each time — so
+	/// expensive for most mutating benches that the file backends skip them.
+	/// A bench whose subject is the storage layer itself measures the wrong thing
+	/// on `mem` and opts in here; each iteration then builds a fresh datastore
+	/// in a directory of its own, and shuts it down and reclaims the directory
+	/// once its statement has been timed, so the run holds one dataset on disk
+	/// rather than one per sample.
+	#[serde(default)]
+	pub rebuild_file_backend: bool,
+	/// Whether `bench run --quick` includes this bench. Defaults to `true`.
+	///
+	/// Quick mode caps a bench's measurement at `QUICK_MAX_TIME` (in
+	/// `cmd/bench/run.rs`) and needs two samples for statistics, so a bench
+	/// whose single iteration, re-import included, takes longer can only ever
+	/// be reported as skipped there, after paying for a warmup and a sample.
+	/// Set `false` on such a bench so quick runs skip it up front, by name;
+	/// full runs are unaffected.
+	#[serde(default = "t")]
+	pub quick: bool,
+	/// Folds the imported graph adjacency into packed blocks before the warmup,
+	/// so the timed statement reads the folded layout. The datastore is built
+	/// with `graph_fold_threshold = 1`, the bench statement is executed once as
+	/// a priming pass — the fold queue is observation-driven, so exactly the
+	/// scopes the statement traverses are folded — and the fold queue is then
+	/// drained by the same routine the background task runs. Requires
+	/// `rebuild = false` (the priming pass would execute a mutating statement
+	/// an extra, unmeasured time) and a SurrealQL bench statement.
+	#[serde(default)]
+	pub graph_fold: bool,
+	/// Encodes folded block entries as numeric doc-ids instead of record keys
+	/// (`graph_numeric_ids = true`). Implies the same fold pass as
+	/// `graph-fold`, under the same constraints.
+	#[serde(default)]
+	pub graph_numeric_ids: bool,
 	/// Run this bench once per named dataset, each resolved (transitively) as the
 	/// bench's import for that run. Lets a single read-only scan be measured
 	/// against multiple datasets — e.g. one without indexes and one with — from a
@@ -933,4 +1173,148 @@ pub struct BenchDetails {
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
+#[cfg(test)]
+mod request_error_tests {
+	use super::*;
+
+	#[test]
+	fn request_error_table_is_not_sent_to_parser_error() {
+		let cfg: TestConfig =
+			toml::from_str("[test.results]\nrequest-error = \"refused\"").expect("parses");
+		match cfg.test.results {
+			Some(TestDetailsResults::RequestError(x)) => {
+				assert!(matches!(x.request_error, BoolOr::Value(ref t) if t == "refused"));
+			}
+			other => panic!("expected RequestError, got {other:?}"),
+		}
+	}
+
+	#[test]
+	fn unrecognised_table_still_parses_as_parser_error() {
+		let result = toml::from_str::<TestConfig>("[test.results]\nparsing-error = true");
+		assert!(matches!(result.unwrap().test.results, Some(TestDetailsResults::ParserError(_))));
+	}
+
+	#[test]
+	fn unknown_keys_beside_request_error_are_reported() {
+		let cfg: TestConfig =
+			toml::from_str("[test.results]\nrequest-error = true\nextra = 1").expect("parses");
+		assert_eq!(cfg.unused_keys(), vec!["test.results.extra".to_owned()]);
+	}
+}
+
+#[cfg(test)]
+mod bench_quick_tests {
+	use super::*;
+
+	#[test]
+	fn a_bench_runs_in_quick_mode_unless_it_opts_out() {
+		// The default is load-bearing: were it `false`, every bench would drop
+		// out of `--quick` and the PR workflow would compare nothing, green.
+		let config = toml::from_str::<TestConfig>("[bench]\nrun = true").expect("parses");
+		assert!(config.bench.quick);
+		let config = toml::from_str::<TestConfig>("[bench]\nquick = false").expect("parses");
+		assert!(!config.bench.quick);
+		assert!(config.unused_keys().is_empty(), "{:?}", config.unused_keys());
+	}
+}
+
+#[cfg(test)]
+mod modes_tests {
+	use super::*;
+
+	fn details(toml: &str) -> TestDetails {
+		toml::from_str::<TestConfig>(toml).expect("parses").test
+	}
+
+	#[test]
+	fn absent_modes_run_in_both_modes() {
+		let d = details("[test]\nrun = true");
+		assert!(d.modes.is_none());
+		assert!(d.runs_in_mode(RunMode::Request));
+		assert!(d.runs_in_mode(RunMode::Fragments));
+	}
+
+	#[test]
+	fn modes_parse_and_restrict_the_file() {
+		let d = details("[test]\nmodes = [\"request\"]");
+		assert_eq!(d.modes, Some(vec![RunMode::Request]));
+		assert!(d.runs_in_mode(RunMode::Request));
+		assert!(!d.runs_in_mode(RunMode::Fragments));
+
+		let d = details("[test]\nmodes = [\"fragments\"]");
+		assert!(!d.runs_in_mode(RunMode::Request));
+		assert!(d.runs_in_mode(RunMode::Fragments));
+	}
+
+	#[test]
+	fn both_modes_listed_run_in_both() {
+		let d = details("[test]\nmodes = [\"request\", \"fragments\"]");
+		assert!(d.runs_in_mode(RunMode::Request));
+		assert!(d.runs_in_mode(RunMode::Fragments));
+	}
+
+	#[test]
+	fn an_empty_list_runs_in_no_mode() {
+		let d = details("[test]\nmodes = []");
+		assert!(!d.runs_in_mode(RunMode::Request));
+		assert!(!d.runs_in_mode(RunMode::Fragments));
+	}
+
+	#[test]
+	fn an_unknown_mode_is_rejected() {
+		assert!(toml::from_str::<TestConfig>("[test]\nmodes = [\"streaming\"]").is_err());
+	}
+
+	#[test]
+	fn modes_is_a_declared_key_not_an_unused_one() {
+		let d = details("[test]\nmodes = [\"request\"]");
+		assert!(d.unused_keys().is_empty());
+	}
+}
+
+#[cfg(test)]
+mod version_ranges_tests {
+	use semver::Version;
+
+	use super::*;
+
+	fn importing(toml: &str) -> Option<VersionRanges> {
+		toml::from_str::<TestConfig>(toml).expect("parses").test.importing_version
+	}
+
+	fn v(s: &str) -> Version {
+		Version::parse(s).unwrap()
+	}
+
+	#[test]
+	fn a_single_string_is_one_range() {
+		let r = importing("[test]\nimporting-version = \">=3.0.1\"").unwrap();
+		assert!(matches!(r, VersionRanges::One(_)));
+		assert!(!r.version_matches(&v("3.0.0")));
+		assert!(r.version_matches(&v("3.3.0-beta.3")));
+	}
+
+	#[test]
+	fn an_array_admits_a_version_any_range_admits() {
+		// A defect fixed on 3.2 in 3.2.5 and on 3.3 before 3.3.0 leaves the
+		// damaged writers on both sides of the fixed 3.2 patches.
+		let r = importing(
+			"[test]\nimporting-version = [\"<3.2.5\", \">=3.3.0-beta.1, <3.3.0-beta.5\"]",
+		)
+		.unwrap();
+		for damaged in ["3.1.0", "3.2.4", "3.3.0-beta.3"] {
+			assert!(r.version_matches(&v(damaged)), "{damaged} should be admitted");
+		}
+		for fixed in ["3.2.5", "3.2.6", "3.3.0", "3.3.4", "3.4.0-nightly"] {
+			assert!(!r.version_matches(&v(fixed)), "{fixed} should be excluded");
+		}
+	}
+
+	#[test]
+	fn an_empty_array_is_refused() {
+		assert!(toml::from_str::<TestConfig>("[test]\nimporting-version = []").is_err());
+	}
 }

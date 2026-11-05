@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Pre-decode filter for CONTAINSANY, CONTAINSALL, CONTAINSNONE on arrays, including empty RHS lists. EXPLAIN asserts pre_decode_filter: yes."
+reason = "Pre-decode filter for CONTAINSANY, CONTAINSALL, CONTAINSNONE on arrays, including empty RHS lists. EXPLAIN shows the predicate as a filter over the table scan."
 
 [[test.results]]
 value = "{ id: pcfa:1, tags: ['alpha', 'beta', 'gamma'] }"
@@ -32,10 +31,16 @@ value = "[{ id: pcfa:1, tags: ['alpha', 'beta', 'gamma'] }, { id: pcfa:2, tags: 
 value = "[]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: pcfa, direction: Forward, predicate: tags CONTAINSANY ['beta'], pre_decode_filter: yes]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: pcfa, direction: Forward, predicate: tags CONTAINSANY ['beta'], pre_decode_filter: yes]
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: pcfa, direction: Forward, predicate: tags CONTAINSALL ['alpha', 'beta'], pre_decode_filter: yes]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: pcfa, direction: Forward, predicate: tags CONTAINSALL ['alpha', 'beta'], pre_decode_filter: yes]
+"'''
 */
 
 CREATE ONLY pcfa:1 SET tags = ['alpha', 'beta', 'gamma'];

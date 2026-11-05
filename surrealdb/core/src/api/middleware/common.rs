@@ -1,9 +1,8 @@
 use std::sync::LazyLock;
 
 use mime::Mime;
+use surrealdb_rpc::format;
 use surrealdb_types::SurrealValue;
-
-use crate::api::format;
 
 #[derive(Clone, Copy, Debug, Default, SurrealValue, PartialOrd, Ord, PartialEq, Eq)]
 #[surreal(crate = "surrealdb_types")]

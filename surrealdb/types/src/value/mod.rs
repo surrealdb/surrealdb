@@ -1,5 +1,7 @@
 /// Array value types for SurrealDB
 pub mod array;
+/// Arbitrary-precision decimal value types for SurrealDB
+pub mod bigdecimal;
 /// Binary data value types for SurrealDB
 pub mod bytes;
 /// Datetime value types for SurrealDB
@@ -27,6 +29,7 @@ pub mod regex;
 pub mod set;
 /// Table value types for SurrealDB
 pub mod table;
+mod temporal;
 /// UUID value types for SurrealDB
 pub mod uuid;
 
@@ -37,18 +40,20 @@ pub use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 pub use self::array::Array;
+pub use self::bigdecimal::{BigDecimal, BigDecimalError};
 pub use self::bytes::Bytes;
-pub use self::datetime::Datetime;
-pub use self::duration::Duration;
+pub use self::datetime::{Datetime, fmt_datetime_sql};
+pub use self::duration::{Duration, fmt_duration_sql};
 pub use self::file::File;
 pub use self::geometry::Geometry;
-pub use self::number::Number;
+pub use self::number::{Number, NumberKind, Wide};
 pub use self::object::Object;
 pub use self::range::Range;
 pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::set::Set;
 pub use self::table::Table;
+pub use self::temporal::{Date, Interval, Time, Timestamp};
 pub use self::uuid::Uuid;
 use crate::sql::{SqlFormat, ToSql};
 use crate::utils::escape::QuoteStr;
@@ -119,7 +124,18 @@ pub enum Value {
 	Object(Object),
 	/// A set of values
 	Set(Set),
+	/// A calendar date without a time zone
+	Date(Date),
+	/// A time of day without a date or time zone
+	Time(Time),
+	/// A date and time of day without a time zone
+	Timestamp(Timestamp),
+	/// A calendar-aware interval of months, days, and microseconds
+	Interval(Interval),
 }
+
+#[cfg(all(target_pointer_width = "64", feature = "regex-unicode"))]
+const _: () = assert!(std::mem::size_of::<Value>() == 56);
 
 impl Eq for Value {}
 
@@ -151,6 +167,16 @@ impl Ord for Value {
 			(Value::File(a), Value::File(b)) => a.cmp(b),
 			(Value::Range(a), Value::Range(b)) => a.cmp(b),
 			(Value::Regex(a), Value::Regex(b)) => a.cmp(b),
+			(Value::Date(a), Value::Date(b)) => a.cmp(b),
+			(Value::Time(a), Value::Time(b)) => a.cmp(b),
+			(Value::Timestamp(a), Value::Timestamp(b)) => a.cmp(b),
+			(Value::Interval(a), Value::Interval(b)) => a.cmp(b),
+
+			// The temporal variants sort after every other variant, by rank.
+			(Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Interval(_), _)
+			| (_, Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Interval(_)) => {
+				self.temporal_rank().cmp(&other.temporal_rank())
+			}
 
 			// Different variant types - define a total order
 			// Order: None < Null < Bool < Number < String < Duration < Datetime < Uuid
@@ -483,6 +509,106 @@ impl Ord for Value {
 }
 
 impl Value {
+	/// The rank of a temporal variant among the variants that sort after all others, or 0.
+	fn temporal_rank(&self) -> u8 {
+		match self {
+			Value::Date(_) => 1,
+			Value::Time(_) => 2,
+			Value::Timestamp(_) => 3,
+			Value::Interval(_) => 4,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Array(_)
+			| Value::Object(_)
+			| Value::Set(_) => 0,
+		}
+	}
+
+	/// The form of this value that wire formats without a temporal member carry: a `date` and a
+	/// `timestamp` as a datetime, a `time` as a duration since midnight, and an `interval` as its
+	/// ISO 8601 text. Every other value is returned unchanged.
+	pub fn degrade_temporal(&self) -> Value {
+		match self {
+			Value::Date(v) if *v == Date::infinity() => Value::Datetime(Datetime::MAX_UTC),
+			Value::Date(v) if *v == Date::neg_infinity() => Value::Datetime(Datetime::MIN_UTC),
+			Value::Date(v) => {
+				Value::Datetime(Datetime(v.into_inner().and_time(chrono::NaiveTime::MIN).and_utc()))
+			}
+			Value::Time(v) => Value::Duration(Duration::new(
+				v.nanos() / 1_000_000_000,
+				(v.nanos() % 1_000_000_000) as u32,
+			)),
+			Value::Timestamp(v) => Value::Datetime(Datetime(v.into_inner().and_utc())),
+			Value::Interval(v) => Value::String(v.to_string()),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Array(_)
+			| Value::Object(_)
+			| Value::Set(_) => self.clone(),
+		}
+	}
+
+	/// This value with every `date`, `time`, `timestamp` and `interval` it holds, at any depth in
+	/// an array, set or object, replaced by the form [`Value::degrade_temporal`] gives, for a
+	/// front end whose wire types have no member for them.
+	pub fn into_degraded_temporal(self) -> Value {
+		match self {
+			Value::Date(_) | Value::Time(_) | Value::Timestamp(_) | Value::Interval(_) => {
+				self.degrade_temporal()
+			}
+			Value::Array(Array(items)) => {
+				Value::Array(Array(items.into_iter().map(Value::into_degraded_temporal).collect()))
+			}
+			Value::Set(Set(items)) => {
+				Value::Set(Set(items.into_iter().map(Value::into_degraded_temporal).collect()))
+			}
+			Value::Object(Object(entries)) => Value::Object(Object(
+				entries.into_iter().map(|(k, v)| (k, v.into_degraded_temporal())).collect(),
+			)),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_) => self,
+		}
+	}
+
 	/// Returns the kind of this value
 	///
 	/// This method maps each value variant to its corresponding `Kind`.
@@ -506,6 +632,10 @@ impl Value {
 			Value::File(_) => Kind::File(Vec::new()),
 			Value::Range(_) => Kind::Range,
 			Value::Regex(_) => Kind::Regex,
+			Value::Date(_) => Kind::Date,
+			Value::Time(_) => Kind::Time,
+			Value::Timestamp(_) => Kind::Timestamp,
+			Value::Interval(_) => Kind::Interval,
 		}
 	}
 
@@ -513,9 +643,10 @@ impl Value {
 	///
 	/// Returns `None` if the value is not an array or the array is empty.
 	pub fn first(&self) -> Option<Value> {
-		match self {
-			Value::Array(arr) => arr.first().cloned(),
-			_ => None,
+		if let Value::Array(arr) = self {
+			arr.first().cloned()
+		} else {
+			None
 		}
 	}
 
@@ -534,7 +665,21 @@ impl Value {
 			Value::Object(obj) => obj.is_empty(),
 			Value::Array(arr) => arr.is_empty(),
 			Value::Set(set) => set.is_empty(),
-			_ => false,
+			Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_) => false,
 		}
 	}
 
@@ -594,10 +739,24 @@ impl Value {
 			Kind::Bool => self.is_bool(),
 			Kind::Bytes => self.is_bytes(),
 			Kind::Datetime => self.is_datetime(),
+			Kind::Date => matches!(self, Value::Date(_)),
+			Kind::Time => matches!(self, Value::Time(_)),
+			Kind::Timestamp => matches!(self, Value::Timestamp(_)),
+			Kind::Interval => matches!(self, Value::Interval(_)),
 			Kind::Decimal => self.is_decimal(),
+			Kind::BigDecimal => matches!(self, Value::Number(Number::BigDecimal(_))),
 			Kind::Duration => self.is_duration(),
 			Kind::Float => self.is_float(),
 			Kind::Int => self.is_int(),
+			Kind::I8 => self.is_i8(),
+			Kind::U8 => self.is_u8(),
+			Kind::I16 => self.is_i16(),
+			Kind::U16 => self.is_u16(),
+			Kind::I32 => self.is_i32(),
+			Kind::U32 => self.is_u32(),
+			Kind::U64 => self.is_u64(),
+			Kind::F16 => self.is_f16(),
+			Kind::F32 => self.is_f32(),
 			Kind::Number => self.is_number(),
 			Kind::Object => self.is_object(),
 			Kind::String => self.is_string(),
@@ -638,6 +797,9 @@ impl Value {
 			Kind::File(bucket) => {
 				self.is_file_and(|f| bucket.is_empty() || bucket.contains(&f.bucket().to_string()))
 			}
+			Kind::Enum(labels) => self.is_string_and(|s| labels.contains(s)),
+			// What a named type admits is held by the catalog, which no value reaches.
+			Kind::Named(_) => true,
 			Kind::Function(_, _) => {
 				// Functions are not a value type
 				false
@@ -650,9 +812,10 @@ impl Index<usize> for Value {
 	type Output = Self;
 
 	fn index(&self, index: usize) -> &Self::Output {
-		match &self {
-			Value::Array(map) => map.0.get(index).unwrap_or(&Value::None),
-			_ => &Value::None,
+		if let Value::Array(map) = self {
+			map.get(index).unwrap_or(&Value::None)
+		} else {
+			&Value::None
 		}
 	}
 }
@@ -661,9 +824,10 @@ impl Index<&str> for Value {
 	type Output = Self;
 
 	fn index(&self, index: &str) -> &Self::Output {
-		match &self {
-			Value::Object(map) => map.0.get(index).unwrap_or(&Value::None),
-			_ => &Value::None,
+		if let Value::Object(map) = self {
+			map.get(index).unwrap_or(&Value::None)
+		} else {
+			&Value::None
 		}
 	}
 }
@@ -690,37 +854,35 @@ pub trait Indexable<Idx> {
 
 impl Indexable<usize> for Value {
 	fn get(&self, index: usize) -> &Value {
-		match self {
-			Value::Array(arr) => arr.index(index),
-			_ => &Value::None,
+		if let Value::Array(arr) = self {
+			arr.index(index)
+		} else {
+			&Value::None
 		}
 	}
 	fn remove(&mut self, index: usize) -> Value {
-		match self {
-			Value::Array(arr) => arr.remove(index),
-			_ => Value::None,
+		if let Value::Array(arr) = self {
+			arr.remove(index)
+		} else {
+			Value::None
 		}
 	}
 }
 
 impl Indexable<&str> for Value {
 	fn get(&self, index: &str) -> &Value {
-		match self {
-			Value::Object(obj) => match obj.get(index) {
-				Some(v) => v,
-				None => &Value::None,
-			},
-			_ => &Value::None,
+		if let Value::Object(obj) = self {
+			obj.get(index).unwrap_or(&Value::None)
+		} else {
+			&Value::None
 		}
 	}
 
 	fn remove(&mut self, index: &str) -> Value {
-		match self {
-			Value::Object(obj) => match obj.remove(index) {
-				Some(v) => v,
-				None => Value::None,
-			},
-			_ => Value::None,
+		if let Value::Object(obj) = self {
+			obj.remove(index).unwrap_or(Value::None)
+		} else {
+			Value::None
 		}
 	}
 }
@@ -749,6 +911,10 @@ impl ToSql for Value {
 			}
 			Value::Duration(v) => v.fmt_sql(f, fmt),
 			Value::Datetime(v) => v.fmt_sql(f, fmt),
+			Value::Date(v) => v.fmt_sql(f, fmt),
+			Value::Time(v) => v.fmt_sql(f, fmt),
+			Value::Timestamp(v) => v.fmt_sql(f, fmt),
+			Value::Interval(v) => v.fmt_sql(f, fmt),
 			Value::Uuid(v) => v.fmt_sql(f, fmt),
 			Value::Array(v) => v.fmt_sql(f, fmt),
 			Value::Object(v) => v.fmt_sql(f, fmt),
@@ -784,7 +950,7 @@ mod tests {
 	#[case::object(Value::Object(Object::from_iter([("key".to_string(), Value::String("value".to_string()))])), false)]
 	#[case::array(Value::Array(Array::new()), true)]
 	#[case::array(Value::Array(Array::from(vec![Value::String("hello".to_string())])), false)]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), false)]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))), false)]
 	#[case::record_id(Value::RecordId(RecordId::new("test", "key")), false)]
 	#[case::file(Value::File(File::default()), false)]
 	#[case::range(Value::Range(Box::new(Range::unbounded())), false)]
@@ -954,22 +1120,22 @@ mod tests {
 	)]
 	#[case::object_lt_geometry(
 		Value::Object(Object::default()),
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		Ordering::Less
 	)]
 	#[case::geometry_gt_object(
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		Value::Object(Object::default()),
 		Ordering::Greater
 	)]
 	#[case::geometry_lt_bytes(
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		Value::Bytes(Bytes::default()),
 		Ordering::Less
 	)]
 	#[case::bytes_gt_geometry(
 		Value::Bytes(Bytes::default()),
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		Ordering::Greater
 	)]
 	#[case::bytes_lt_record(
@@ -1106,6 +1272,25 @@ mod tests {
 	#[case::number(Value::Number(Number::Decimal(Decimal::new(5, 0))), "5dec")]
 	#[case::number(Value::Number(Number::Decimal(Decimal::new(-5, 0))), "-5dec")]
 	#[case::number(Value::Number(Number::Decimal(Decimal::new(12345, 2))), "123.45dec")]
+	// Numbers - sized
+	#[case::number_i8(Value::Number(Number::I8(-128)), "-128i8")]
+	#[case::number_u8(Value::Number(Number::U8(5)), "5u8")]
+	#[case::number_i16(Value::Number(Number::I16(-3)), "-3i16")]
+	#[case::number_u16(Value::Number(Number::U16(65535)), "65535u16")]
+	#[case::number_i32(Value::Number(Number::I32(-42)), "-42i32")]
+	#[case::number_u32(Value::Number(Number::U32(42)), "42u32")]
+	#[case::number_u64(Value::Number(Number::U64(u64::MAX)), "18446744073709551615u64")]
+	#[case::number_f16(Value::Number(Number::F16(half::f16::from_f64(0.1))), "0.1f16")]
+	#[case::number_f16_nan(Value::Number(Number::F16(half::f16::NAN)), "<f16>NaN")]
+	#[case::number_f16_inf(Value::Number(Number::F16(half::f16::INFINITY)), "<f16>Infinity")]
+	#[case::number_f16_neg_inf(
+		Value::Number(Number::F16(half::f16::NEG_INFINITY)),
+		"<f16>-Infinity"
+	)]
+	#[case::number_f32(Value::Number(Number::F32(1.5)), "1.5f32")]
+	#[case::number_f32_nan(Value::Number(Number::F32(f32::NAN)), "<f32>NaN")]
+	#[case::number_f32_inf(Value::Number(Number::F32(f32::INFINITY)), "<f32>Infinity")]
+	#[case::number_f32_neg_inf(Value::Number(Number::F32(f32::NEG_INFINITY)), "<f32>-Infinity")]
 	// Strings - basic
 	#[case::string(Value::String("".to_string()), "''")]
 	#[case::string(Value::String("hello".to_string()), "'hello'")]
@@ -1161,9 +1346,9 @@ mod tests {
 		"items": vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))],
 	}), "{ items: [1, 2] }")]
 	// Geometry
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0))), "(0f, 0f)")]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), "(1f, 2f)")]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45f, 67.89f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo_types::Point::new(0.0, 0.0))), "(0f, 0f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))), "(1f, 2f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo_types::Point::new(-123.45, 67.89))), "(-123.45f, 67.89f)")]
 	// Bytes
 	#[case::bytes(Value::Bytes(Bytes::default()), "b\"\"")]
 	#[case::bytes(Value::Bytes(Bytes::from(::bytes::Bytes::from(vec![1_u8, 2, 3]))), "b\"010203\"")]
@@ -1261,6 +1446,26 @@ mod tests {
 		],
 		vec![Kind::None, Kind::Null]
 	)]
+	#[case::u8(
+		Value::Number(Number::U8(2)),
+		vec![
+			Kind::U8,
+			Kind::Number,
+			Kind::Any,
+			Kind::Literal(KindLiteral::Integer(2))
+		],
+		vec![Kind::Int, Kind::Float, Kind::I8, Kind::Literal(KindLiteral::Integer(1))]
+	)]
+	#[case::f32(
+		Value::Number(Number::F32(1.5)),
+		vec![
+			Kind::F32,
+			Kind::Number,
+			Kind::Any,
+			Kind::Literal(KindLiteral::Float(1.5))
+		],
+		vec![Kind::Float, Kind::F16, Kind::Int]
+	)]
 	#[case::string(
 		Value::String("".to_string()),
 		vec![Kind::String, Kind::Any, Kind::Literal(KindLiteral::String("".to_string()))],
@@ -1293,18 +1498,18 @@ mod tests {
 		vec![Kind::Record(vec!["post".into(), "comment".into()])]
 	)]
 	#[case::geometry_point(
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		vec![Kind::Geometry(vec![GeometryKind::Point]), Kind::Geometry(vec![]), Kind::Any],
 		vec![Kind::None, Kind::Null, Kind::Geometry(vec![GeometryKind::Line])]
 	)]
 	#[case::geometry_line(
-		Value::Geometry(Geometry::Line(geo::LineString::from(vec![(0.0, 0.0), (1.0, 1.0)]))),
+		Value::Geometry(Geometry::Line(geo_types::LineString::from(vec![(0.0, 0.0), (1.0, 1.0)]))),
 		vec![Kind::Geometry(vec![GeometryKind::Line]), Kind::Geometry(vec![]), Kind::Any],
 		vec![Kind::Geometry(vec![GeometryKind::Point])]
 	)]
 	#[case::geometry_polygon(
-		Value::Geometry(Geometry::Polygon(geo::Polygon::new(
-			geo::LineString::from(vec![
+		Value::Geometry(Geometry::Polygon(geo_types::Polygon::new(
+			geo_types::LineString::from(vec![
 				(0.0, 0.0),
 				(1.0, 0.0),
 				(1.0, 1.0),
@@ -1317,7 +1522,7 @@ mod tests {
 		vec![Kind::Geometry(vec![GeometryKind::Point])]
 	)]
 	#[case::geometry_multi(
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		vec![Kind::Geometry(vec![GeometryKind::Point, GeometryKind::Line]), Kind::Any],
 		vec![Kind::Geometry(vec![GeometryKind::Line, GeometryKind::Polygon])]
 	)]
@@ -1433,5 +1638,76 @@ mod tests {
 		for kind in not_kinds {
 			assert!(!value.is_kind(&kind), "{value:?} is a {kind} but should not be");
 		}
+	}
+
+	#[test]
+	fn temporal_values_order_after_every_other_variant_and_by_rank() {
+		let date = Value::Date(Date::from_days(5).unwrap());
+		let time = Value::Time(Time::from_nanos(1).unwrap());
+		let timestamp = Value::Timestamp(Timestamp::from_parts(0, 0).unwrap());
+		let interval = Value::Interval(Interval::new(0, 0, 1));
+		assert!(Value::Set(Set::default()) < date);
+		assert!(Value::Datetime(Datetime::from_timestamp(0, 0).unwrap()) < date);
+		assert!(date < time && time < timestamp && timestamp < interval);
+		assert!(Value::Date(Date::from_days(-1).unwrap()) < date);
+		assert_eq!(
+			Value::Interval(Interval::new(1, 0, 0)),
+			Value::Interval(Interval::new(0, 30, 0))
+		);
+	}
+
+	#[test]
+	fn temporal_values_render_as_keyword_prefixed_literals() {
+		let cases = [
+			(Value::Date(Date::from_days(0).unwrap()), "pd'1970-01-01'"),
+			(Value::Time(Time::from_nanos(45_000_000_000_000).unwrap()), "pt'12:30:00'"),
+			(
+				Value::Timestamp(Timestamp::from_parts(1, 500_000_000).unwrap()),
+				"ts'1970-01-01T00:00:01.500'",
+			),
+			(Value::Interval(Interval::new(14, 3, 14_706_500_000)), "ivl'P1Y2M3DT4H5M6.5S'"),
+		];
+		for (value, expected) in cases {
+			assert_eq!(value.to_sql(), expected);
+		}
+		assert_eq!(Value::Date(Date::from_days(0).unwrap()).kind(), Kind::Date);
+		assert!(Value::Interval(Interval::ZERO).is_kind(&Kind::Interval));
+		assert!(!Value::Interval(Interval::ZERO).is_kind(&Kind::Duration));
+		assert_eq!(Kind::Timestamp.to_sql(), "timestamp");
+	}
+
+	#[test]
+	fn temporal_values_degrade_for_wires_without_a_member() {
+		let date = Value::Date(Date::from_days(1).unwrap());
+		assert_eq!(
+			date.degrade_temporal(),
+			Value::Datetime(Datetime::from_timestamp(86_400, 0).unwrap())
+		);
+		let time = Value::Time(Time::from_nanos(1_500_000_000).unwrap());
+		assert_eq!(time.degrade_temporal(), Value::Duration(Duration::new(1, 500_000_000)));
+		let interval = Value::Interval(Interval::new(0, 1, 0));
+		assert_eq!(interval.degrade_temporal(), Value::String("P1D".to_owned()));
+		let nested = Value::Array(Array::from(vec![date, Value::Null]));
+		assert_eq!(
+			nested.into_degraded_temporal(),
+			Value::Array(Array::from(vec![
+				Value::Datetime(Datetime::from_timestamp(86_400, 0).unwrap()),
+				Value::Null
+			]))
+		);
+	}
+
+	#[test]
+	fn temporal_values_serialise_to_json_text() {
+		let v = Value::Array(Array::from(vec![
+			Value::Date(Date::from_days(0).unwrap()),
+			Value::Time(Time::MAX),
+			Value::Timestamp(Timestamp::from_parts(0, 0).unwrap()),
+			Value::Interval(Interval::new(-1, 0, 0)),
+		]));
+		assert_eq!(
+			v.into_json_value().to_string(),
+			r#"["1970-01-01","24:00:00","1970-01-01T00:00:00","P-1M"]"#
+		);
 	}
 }

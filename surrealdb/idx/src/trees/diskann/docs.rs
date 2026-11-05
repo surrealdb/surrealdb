@@ -1,0 +1,1239 @@
+//! DiskANN document and vector-document mapping helpers.
+//!
+//! DiskANN graph elements are keyed by compact internal element IDs, while query execution returns
+//! SurrealDB record IDs. This module owns the KV mappings between record IDs, compact document IDs,
+//! and graph element document sets. It also coordinates the process-local doc-id and doc-set caches
+//! used to keep warm lookup paths away from repeated KV reads.
+
+use std::sync::Arc;
+
+use anyhow::{Result, ensure};
+use surrealdb_datastore::Transaction;
+// The vector-to-documents mapping is a stored value, and the bucket-mutation rule
+// that keeps one entry per distinct vector travels with it.
+pub(crate) use surrealdb_datastore::values::diskann::{
+	DiskAnnElementDocs, DiskAnnElementHashedDocs, RemoveResult,
+};
+
+use crate::IndexKeyBase;
+use crate::catalog::{
+	DatabaseId, IndexId, NamespaceId, TableId, keeps_element_docs, keeps_vector_doc_elements,
+};
+use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
+use crate::env::IndexEnv;
+use crate::trees::diskann::cache::{CacheView, DiskAnnCache};
+use crate::trees::diskann::frame::FrameKv;
+use crate::trees::diskann::index::{DiskAnnContext, DiskAnnGraph};
+use crate::trees::diskann::{DiskAnnElement, ElementId};
+use crate::trees::doc_elements;
+use crate::trees::knn::Ids64;
+use crate::trees::vector::{SerializedVector, Vector};
+use crate::val::{RecordId, RecordIdKey};
+
+/// Per-index facade over the table's shared doc-ID space for DiskANN.
+///
+/// The record ↔ doc-ID mapping itself lives in [`TableDocIds`] (keys `!di`/`!dd`
+/// under the table prefix), shared by every index on the table so cross-index
+/// candidate composition can rely on one doc-ID per record. DiskANN keeps its own
+/// element/graph keys; this type only maps between record IDs and those shared
+/// doc-IDs (plus the process-local resolution cache).
+pub(crate) struct DiskAnnDocs {
+	/// Shared key builder for all DiskANN document mapping keys.
+	ikb: IndexKeyBase,
+	/// Whether the index uses shared or legacy private doc-ID mappings.
+	format_version: u16,
+}
+
+impl DiskAnnDocs {
+	pub(crate) fn with_format_version(ikb: IndexKeyBase, format_version: u16) -> Self {
+		Self {
+			ikb,
+			format_version,
+		}
+	}
+
+	/// Looks up the compact document ID for a record key without allocating a new one.
+	pub(super) async fn get_doc_id(
+		ikb: &IndexKeyBase,
+		format_version: u16,
+		tx: &Transaction,
+		id: &RecordIdKey,
+	) -> Result<Option<DocId>> {
+		if surrealdb_catalog::uses_shared_doc_ids(format_version) {
+			TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()).get_doc_id(tx, id).await
+		} else {
+			LegacyVectorDocIds::DiskAnn(ikb.clone()).get_doc_id(tx, id).await
+		}
+	}
+
+	/// Returns the existing document ID for a record key or allocates a new one in
+	/// the table's shared doc-ID space.
+	pub(super) async fn resolve(&self, env: &dyn IndexEnv, id: &RecordIdKey) -> Result<DocId> {
+		if surrealdb_catalog::uses_shared_doc_ids(self.format_version) {
+			TableDocIds::new(self.ikb.ns(), self.ikb.db(), self.ikb.table().clone())
+				.resolve_or_assign(env, id)
+				.await
+		} else {
+			LegacyVectorDocIds::DiskAnn(self.ikb.clone()).resolve_or_assign(env, id).await
+		}
+	}
+
+	fn cache_index(
+		ikb: &IndexKeyBase,
+		table_id: TableId,
+		format_version: u16,
+	) -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
+		(ikb.ns(), ikb.db(), table_id, ikb.index(), format_version)
+	}
+
+	/// Resolves one compact document ID through the shared batch/cache path.
+	pub(super) async fn get_thing_cached(
+		ikb: &IndexKeyBase,
+		format_version: u16,
+		table_id: TableId,
+		cache: &DiskAnnCache,
+		tx: &Transaction,
+		doc_id: DocId,
+		generation: Option<u64>,
+	) -> Result<Option<Arc<RecordId>>> {
+		Ok(Self::get_things_batch(ikb, format_version, table_id, cache, tx, &[doc_id], generation)
+			.await?
+			.into_iter()
+			.next()
+			.flatten())
+	}
+
+	/// Resolves compact document IDs to ordered record IDs, using cache hits before batched KV
+	/// reads.
+	///
+	/// Positive mappings are inserted into the process-local cache only when the transaction is
+	/// read-only. Write transactions may observe uncommitted `!dd` values, so those hits stay local
+	/// to the caller and are not published into the shared cache.
+	// NOTE (#7318 review followup, P3): each result here pays two `Strand`/`RecordIdKey`
+	// clones (`table.clone()` + `id.as_ref().clone()`) to assemble the `RecordId`. Per result,
+	// not per query, so KNN with `k` neighbours pays `2k` clones. `Strand` clones are cheap for
+	// the typical inline/static variants and a heap copy only for long table names. The "real"
+	// fix would make `RecordId` hold `Arc<RecordIdKey>` / `Arc<Table>` so the per-result cost
+	// becomes a pair of ref-count bumps — that's a workspace-wide refactor (every consumer of
+	// `RecordId` would change), so it's deliberately scoped out of this PR.
+	pub(super) async fn get_things_batch(
+		ikb: &IndexKeyBase,
+		format_version: u16,
+		table_id: TableId,
+		cache: &DiskAnnCache,
+		tx: &Transaction,
+		doc_ids: &[DocId],
+		generation: Option<u64>,
+	) -> Result<Vec<Option<Arc<RecordId>>>> {
+		let index = Self::cache_index(ikb, table_id, format_version);
+		let table = ikb.table().clone();
+		let mut rids = vec![None; doc_ids.len()];
+		let mut misses = Vec::new();
+		for (pos, doc_id) in doc_ids.iter().copied().enumerate() {
+			if let Some(id) = cache.get_doc_id(index, doc_id, generation) {
+				rids[pos] = Some(Arc::new(RecordId {
+					table: table.clone(),
+					key: id.as_ref().clone(),
+				}));
+			} else {
+				misses.push((pos, doc_id));
+			}
+		}
+		if misses.is_empty() {
+			return Ok(rids);
+		}
+		let miss_ids: Vec<DocId> = misses.iter().map(|(_, doc_id)| *doc_id).collect();
+		let ids = if surrealdb_catalog::uses_shared_doc_ids(format_version) {
+			TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
+				.get_record_ids_batch(tx, &miss_ids)
+				.await?
+		} else {
+			LegacyVectorDocIds::DiskAnn(ikb.clone()).get_record_ids_batch(tx, &miss_ids).await?
+		};
+		let cache_misses = !tx.writeable();
+		for ((pos, doc_id), id) in misses.into_iter().zip(ids) {
+			if let Some(id) = id {
+				let id = if cache_misses {
+					cache.insert_doc_id(index, doc_id, generation, id)
+				} else {
+					Arc::new(id)
+				};
+				rids[pos] = Some(Arc::new(RecordId {
+					table: table.clone(),
+					key: id.as_ref().clone(),
+				}));
+			}
+		}
+		Ok(rids)
+	}
+
+	/// Evicts the cached doc-ID → record resolution for a removed document.
+	///
+	/// The record ↔ doc-ID mapping is shared across the table's indexes and is
+	/// removed centrally at record purge (see `doc::index`'s `remove_doc_id`), so
+	/// this only drops the process-local cache entry. Doc-IDs are never recycled.
+	pub(super) fn remove(&self, doc_id: DocId, table_id: TableId, cache: &DiskAnnCache) {
+		cache.remove_doc_id(Self::cache_index(&self.ikb, table_id, self.format_version), doc_id);
+	}
+}
+
+/// Manages vector-to-document mappings in the DiskANN index.
+pub(crate) struct DiskAnnVecDocs {
+	/// Shared key builder for `!dq` and `!dh` mapping keys.
+	ikb: IndexKeyBase,
+	/// Stable table id used to scope process-local cache entries.
+	table_id: TableId,
+	/// Process-local doc-set cache keyed by graph element ID.
+	cache: DiskAnnCache,
+	/// Whether vector mappings are stored by vector hash (`!dh`) instead of full vector key
+	/// (`!dq`).
+	use_hashed_vector: bool,
+	/// Stored index format used to scope process-local cache entries.
+	format_version: u16,
+}
+
+impl DiskAnnVecDocs {
+	pub(super) fn new(
+		ikb: IndexKeyBase,
+		table_id: TableId,
+		cache: DiskAnnCache,
+		use_hashed_vector: bool,
+		format_version: u16,
+	) -> Self {
+		Self {
+			ikb,
+			table_id,
+			cache,
+			use_hashed_vector,
+			format_version,
+		}
+	}
+
+	/// Records that `doc` holds a vector in `element`, in the doc-ID →
+	/// elements mapping of an index that keeps one.
+	async fn link_doc(&self, kv: &FrameKv<'_>, doc: DocId, element: ElementId) -> Result<()> {
+		if keeps_vector_doc_elements(self.format_version) {
+			doc_elements::link(kv, &self.ikb.new_dk_key(doc), element).await?;
+		}
+		Ok(())
+	}
+
+	/// Records that `doc` no longer holds a vector in `element`, in the doc-ID
+	/// → elements mapping of an index that keeps one.
+	async fn unlink_doc(&self, kv: &FrameKv<'_>, doc: DocId, element: ElementId) -> Result<()> {
+		if keeps_vector_doc_elements(self.format_version) {
+			doc_elements::unlink(kv, &self.ikb.new_dk_key(doc), element).await?;
+		}
+		Ok(())
+	}
+
+	/// Records `docs` as `element`'s documents, in the element → doc-IDs
+	/// mapping of an index that keeps one.
+	async fn set_element_docs(
+		&self,
+		kv: &FrameKv<'_>,
+		element: ElementId,
+		docs: &Ids64,
+	) -> Result<()> {
+		if keeps_element_docs(self.format_version) {
+			kv.set_key(&self.ikb.new_dm_key(element), docs).await?;
+		}
+		Ok(())
+	}
+
+	/// Drops `element` from the element → doc-IDs mapping of an index that
+	/// keeps one.
+	async fn del_element_docs(&self, kv: &FrameKv<'_>, element: ElementId) -> Result<()> {
+		if keeps_element_docs(self.format_version) {
+			kv.del_key(&self.ikb.new_dm_key(element)).await?;
+		}
+		Ok(())
+	}
+
+	/// The elements holding each of `docs`' vectors, in input order, read in
+	/// one multi-get from the doc-ID → elements mapping. Only meaningful for an
+	/// index that keeps the mapping, which answers `None` for every document
+	/// otherwise.
+	pub(super) async fn elements_of(
+		&self,
+		tx: &Transaction,
+		docs: &[DocId],
+	) -> Result<Vec<Option<Ids64>>> {
+		let keys = docs.iter().map(|doc| self.ikb.new_dk_key(*doc)).collect();
+		tx.get_many_key(keys, None).await
+	}
+
+	fn cache_index(&self) -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
+		(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index(), self.format_version)
+	}
+
+	fn evict_cached_doc_set(&self, element_id: ElementId) {
+		self.cache.remove_doc_set(self.cache_index(), element_id);
+	}
+
+	/// Returns document id sets for multiple candidate vectors in input order.
+	///
+	/// Search already has graph element IDs and candidate vectors at this point. Warm element-doc
+	/// cache hits avoid vector-key encoding and KV reads entirely; misses still batch through the
+	/// persisted vector-doc keys so KV remains the source of truth. `view` is `tx`'s view of the
+	/// cache: cached sets are used, and misses published, as it allows, and only a read-only `tx`
+	/// publishes.
+	pub(super) async fn get_docs_batch(
+		&self,
+		tx: &Transaction,
+		view: &CacheView,
+		candidates: &[(ElementId, &Vector)],
+	) -> Result<Vec<Option<Ids64>>> {
+		let index = self.cache_index();
+		let publish = if tx.writeable() {
+			None
+		} else {
+			view.publication()
+		};
+		let mut doc_sets = vec![None; candidates.len()];
+		let mut misses = Vec::new();
+		for (pos, (element_id, vector)) in candidates.iter().enumerate() {
+			if let Some(docs) = self.cache.get_doc_set(index, *element_id, view) {
+				doc_sets[pos] = Some(docs);
+			} else {
+				misses.push((pos, *element_id, SerializedVector::from(*vector)));
+			}
+		}
+		if misses.is_empty() {
+			return Ok(doc_sets);
+		}
+		if self.use_hashed_vector {
+			let keys: Vec<_> = misses
+				.iter()
+				.map(|(_, _, ser_vec)| self.ikb.new_dh_key(ser_vec.compute_hash()))
+				.collect();
+			let docs: Vec<Option<DiskAnnElementHashedDocs>> = tx.get_many_key(keys, None).await?;
+			for ((pos, _, ser_vec), docs) in misses.into_iter().zip(docs) {
+				if let Some((element_id, docs)) = docs.and_then(|docs| docs.get_docs(&ser_vec)) {
+					if let Some(stamp) = publish {
+						self.cache.insert_doc_set(index, element_id, stamp, docs.clone());
+					}
+					doc_sets[pos] = Some(docs);
+				}
+			}
+			return Ok(doc_sets);
+		}
+		let keys: Vec<_> =
+			misses.iter().map(|(_, _, ser_vec)| self.ikb.new_dq_key(ser_vec)).collect();
+		let docs: Vec<Option<DiskAnnElementDocs>> = tx.get_many_key(keys, None).await?;
+		for ((pos, _, _), docs) in misses.into_iter().zip(docs) {
+			if let Some(docs) = docs {
+				if let Some(stamp) = publish {
+					self.cache.insert_doc_set(index, docs.e_id, stamp, docs.docs.clone());
+				}
+				doc_sets[pos] = Some(docs.docs);
+			}
+		}
+		Ok(doc_sets)
+	}
+
+	/// Resolves graph candidates to document id sets in input order.
+	///
+	/// Doc sets the cache cannot serve are read in one multi-get: by element id on an index that
+	/// keeps the element → doc-IDs mapping, and otherwise through each element's vector, which is
+	/// then read only for element IDs whose doc set is not already cached. `view` is used, and
+	/// published under, as [`Self::get_docs_batch`] uses it.
+	pub(super) async fn get_docs_by_element_batch(
+		&self,
+		tx: &Transaction,
+		view: &CacheView,
+		candidates: &[(ElementId, f64)],
+	) -> Result<Vec<(ElementId, f64, Option<Ids64>)>> {
+		let index = self.cache_index();
+		let publish = if tx.writeable() {
+			None
+		} else {
+			view.publication()
+		};
+		let mut resolved: Vec<_> = candidates
+			.iter()
+			.map(|(element_id, distance)| (*element_id, *distance, None))
+			.collect();
+		if keeps_element_docs(self.format_version) {
+			let mut misses = Vec::new();
+			for (pos, (element_id, _)) in candidates.iter().copied().enumerate() {
+				match self.cache.get_doc_set(index, element_id, view) {
+					Some(docs) => resolved[pos].2 = Some(docs),
+					None => misses.push((pos, element_id)),
+				}
+			}
+			if misses.is_empty() {
+				return Ok(resolved);
+			}
+			let keys =
+				misses.iter().map(|(_, element_id)| self.ikb.new_dm_key(*element_id)).collect();
+			let sets: Vec<Option<Ids64>> = tx.get_many_key(keys, None).await?;
+			for ((pos, element_id), docs) in misses.into_iter().zip(sets) {
+				if let (Some(docs), Some(stamp)) = (&docs, publish) {
+					self.cache.insert_doc_set(index, element_id, stamp, docs.clone());
+				}
+				resolved[pos].2 = docs;
+			}
+			return Ok(resolved);
+		}
+		let mut element_misses = Vec::new();
+		let mut element_keys = Vec::new();
+		for (pos, (element_id, _)) in candidates.iter().copied().enumerate() {
+			if let Some(docs) = self.cache.get_doc_set(index, element_id, view) {
+				resolved[pos].2 = Some(docs);
+			} else if let Some(element) = self.cache.get_element(index, element_id, view) {
+				if !element.deleted {
+					element_misses.push((
+						pos,
+						element_id,
+						Some(Vector::from(element.vector.clone())),
+					));
+				}
+			} else {
+				element_misses.push((pos, element_id, None));
+				element_keys.push(self.ikb.new_de_key(element_id));
+			}
+		}
+		if !element_keys.is_empty() {
+			let elements: Vec<Option<DiskAnnElement>> = tx.get_many_key(element_keys, None).await?;
+			let mut fetched = elements.into_iter();
+			for (_, element_id, vector) in &mut element_misses {
+				if vector.is_some() {
+					continue;
+				}
+				let Some(element) = fetched.next().flatten() else {
+					continue;
+				};
+				let element = match publish {
+					Some(stamp) => self.cache.insert_element(index, *element_id, stamp, element),
+					None => Arc::new(element),
+				};
+				if !element.deleted {
+					*vector = Some(Vector::from(element.vector.clone()));
+				}
+			}
+		}
+		element_misses.retain(|(_, _, vector)| vector.is_some());
+		if element_misses.is_empty() {
+			return Ok(resolved);
+		}
+		let doc_candidates: Vec<_> = element_misses
+			.iter()
+			.filter_map(|(_, element_id, vector)| {
+				vector.as_ref().map(|vector| (*element_id, vector))
+			})
+			.collect();
+		let docs = self.get_docs_batch(tx, view, &doc_candidates).await?;
+		for ((pos, _, _), docs) in element_misses.into_iter().zip(docs) {
+			resolved[pos].2 = docs;
+		}
+		Ok(resolved)
+	}
+
+	/// Asserts that, on an index keeping the element → doc-IDs mapping, `!dm`
+	/// holds for every live graph element exactly the documents its
+	/// vector-keyed entry (`!dq` or `!dh`) holds, and that no `!dm` entry
+	/// outlives its element. Returns the number of live elements checked.
+	#[cfg(test)]
+	pub(super) async fn assert_element_docs_match(&self, tx: &Transaction) -> Result<usize> {
+		use std::collections::BTreeSet;
+
+		use surrealdb_kvs::Direction;
+
+		use crate::key::schema::{DiskannElementDocSetKey, DiskannElementKey};
+		use crate::key::{KVKeyDecode, KVValue};
+
+		if !keeps_element_docs(self.format_version) {
+			return Ok(0);
+		}
+		let sorted = |docs: Option<Ids64>| docs.map(|d| d.iter().collect::<Vec<DocId>>());
+		let mut live = BTreeSet::new();
+		let mut cursor =
+			tx.open_vals_cursor(self.ikb.new_de_range()?, Direction::Forward, 0, None).await?;
+		loop {
+			let batch = cursor.next_batch(1000).await?;
+			if batch.is_empty() {
+				break;
+			}
+			for (key, value) in batch.iter() {
+				let element_id = DiskannElementKey::decode_key(key)?.element_id;
+				let element = DiskAnnElement::kv_decode_value(value, ())?;
+				if element.deleted {
+					continue;
+				}
+				let mapped = if self.use_hashed_vector {
+					let bucket: Option<DiskAnnElementHashedDocs> = tx
+						.get_key(&self.ikb.new_dh_key(element.vector.compute_hash()), None)
+						.await?;
+					bucket.and_then(|b| b.get_docs(&element.vector))
+				} else {
+					let ed: Option<DiskAnnElementDocs> =
+						tx.get_key(&self.ikb.new_dq_key(&element.vector), None).await?;
+					ed.map(|ed| (ed.e_id, ed.docs))
+				};
+				let expected =
+					sorted(mapped.filter(|(e_id, _)| *e_id == element_id).map(|(_, docs)| docs));
+				let got = sorted(tx.get_key(&self.ikb.new_dm_key(element_id), None).await?);
+				assert_eq!(
+					got, expected,
+					"element {element_id}: `!dm` differs from its vector entry"
+				);
+				live.insert(element_id);
+			}
+		}
+		let mut cursor =
+			tx.open_vals_cursor(self.ikb.new_dm_range()?, Direction::Forward, 0, None).await?;
+		loop {
+			let batch = cursor.next_batch(1000).await?;
+			if batch.is_empty() {
+				break;
+			}
+			for (key, _) in batch.iter() {
+				let element_id = DiskannElementDocSetKey::decode_key(key)?.element_id;
+				assert!(live.contains(&element_id), "`!dm` outlives element {element_id}");
+			}
+		}
+		Ok(live.len())
+	}
+
+	#[cfg(test)]
+	async fn get_docs_batch_uncached(
+		&self,
+		tx: &Transaction,
+		candidates: &[(ElementId, &Vector)],
+	) -> Result<Vec<Option<Ids64>>> {
+		let ser_vecs: Vec<_> =
+			candidates.iter().map(|(_, vector)| SerializedVector::from(*vector)).collect();
+		if self.use_hashed_vector {
+			let keys: Vec<_> = ser_vecs
+				.iter()
+				.map(|ser_vec| self.ikb.new_dh_key(ser_vec.compute_hash()))
+				.collect();
+			let docs: Vec<Option<DiskAnnElementHashedDocs>> = tx.get_many_key(keys, None).await?;
+			return Ok(ser_vecs
+				.into_iter()
+				.zip(docs)
+				.map(|(ser_vec, docs)| {
+					docs.and_then(|docs| docs.get_docs(&ser_vec).map(|(_, d)| d))
+				})
+				.collect());
+		}
+		let keys: Vec<_> = ser_vecs.iter().map(|ser_vec| self.ikb.new_dq_key(ser_vec)).collect();
+		let docs: Vec<Option<DiskAnnElementDocs>> = tx.get_many_key(keys, None).await?;
+		Ok(docs.into_iter().map(|docs| docs.map(|docs| docs.docs)).collect())
+	}
+
+	/// Resolves each distinct vector of `inserts` against the vector → docs mapping, in one
+	/// multi-get, and returns the ones the graph does not hold yet.
+	///
+	/// `inserts` is in plan order. Every doc carrying a vector the graph already holds is appended
+	/// to that vector's doc set here: its `!dq`/`!dh` entry is rewritten, the doc is linked to the
+	/// element in the doc → elements mapping, and the element's cached doc set is evicted. Docs
+	/// sharing a vector the graph does not hold come back together, as one [`StagedVector`] in the
+	/// order the vector first appears, so the vector gets one element carrying all of them.
+	///
+	/// Reads and writes go through the frame's transaction, so a vector phase A removed reads as
+	/// absent and gets a fresh element.
+	pub(super) async fn stage_inserts(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		inserts: Vec<(DocId, SerializedVector)>,
+	) -> Result<Vec<StagedVector>> {
+		let staged = StagedVector::group(inserts);
+		if staged.is_empty() {
+			return Ok(staged);
+		}
+		let kv = ctx.kv();
+		if self.use_hashed_vector {
+			return self.stage_hashed(&kv, staged).await;
+		}
+		let keys: Vec<_> = staged.iter().map(|v| self.ikb.new_dq_key(&v.ser_vec)).collect();
+		let found: Vec<Option<DiskAnnElementDocs>> = kv.get_many_key(keys).await?;
+		// A short answer would leave the trailing vectors unresolved, silently.
+		ensure!(
+			found.len() == staged.len(),
+			"{} vector mappings read for {} requested",
+			found.len(),
+			staged.len()
+		);
+		let mut fresh = Vec::new();
+		for (vector, found) in staged.into_iter().zip(found) {
+			let Some(mut ed) = found else {
+				fresh.push(vector);
+				continue;
+			};
+			let added = add_docs(&mut ed.docs, &vector.docs);
+			if added.is_empty() {
+				continue;
+			}
+			self.evict_cached_doc_set(ed.e_id);
+			kv.set_key(&self.ikb.new_dq_key(&vector.ser_vec), &ed).await?;
+			self.set_element_docs(&kv, ed.e_id, &ed.docs).await?;
+			for doc in added {
+				self.link_doc(&kv, doc, ed.e_id).await?;
+			}
+		}
+		Ok(fresh)
+	}
+
+	/// [`Self::stage_inserts`] for an index that maps vectors by hash: one bucket read per distinct
+	/// hash, and each bucket written once with every doc appended to it.
+	async fn stage_hashed(
+		&self,
+		kv: &FrameKv<'_>,
+		staged: Vec<StagedVector>,
+	) -> Result<Vec<StagedVector>> {
+		let mut hashes: Vec<[u8; 32]> = Vec::new();
+		let mut bucket_of = Vec::with_capacity(staged.len());
+		for vector in &staged {
+			let hash = vector.ser_vec.compute_hash();
+			let bucket = match hashes.iter().position(|h| *h == hash) {
+				Some(bucket) => bucket,
+				None => {
+					hashes.push(hash);
+					hashes.len() - 1
+				}
+			};
+			bucket_of.push(bucket);
+		}
+		let keys: Vec<_> = hashes.iter().map(|hash| self.ikb.new_dh_key(*hash)).collect();
+		let mut buckets: Vec<Option<DiskAnnElementHashedDocs>> = kv.get_many_key(keys).await?;
+		// A short answer would leave a vector without its bucket.
+		ensure!(
+			buckets.len() == hashes.len(),
+			"{} vector buckets read for {} requested",
+			buckets.len(),
+			hashes.len()
+		);
+		let mut changed = vec![false; buckets.len()];
+		let mut links = Vec::new();
+		let mut doc_sets = Vec::new();
+		let mut fresh = Vec::new();
+		for (vector, bucket) in staged.into_iter().zip(bucket_of) {
+			let held =
+				buckets[bucket].as_mut().and_then(|ehd| ehd.get_element_docs(&vector.ser_vec));
+			let Some(ed) = held else {
+				fresh.push(vector);
+				continue;
+			};
+			let added = add_docs(&mut ed.docs, &vector.docs);
+			if added.is_empty() {
+				continue;
+			}
+			changed[bucket] = true;
+			self.evict_cached_doc_set(ed.e_id);
+			doc_sets.push((ed.e_id, ed.docs.clone()));
+			links.extend(added.into_iter().map(|doc| (doc, ed.e_id)));
+		}
+		for ((hash, bucket), changed) in hashes.iter().zip(&buckets).zip(changed) {
+			if let (true, Some(ehd)) = (changed, bucket) {
+				kv.set_key(&self.ikb.new_dh_key(*hash), ehd).await?;
+			}
+		}
+		for (element, docs) in doc_sets {
+			self.set_element_docs(kv, element, &docs).await?;
+		}
+		for (doc, element) in links {
+			self.link_doc(kv, doc, element).await?;
+		}
+		Ok(fresh)
+	}
+
+	/// For vectors [`Self::stage_inserts`] staged and the graph has just given an element: writes
+	/// each vector's `!dq`/`!dh` mapping to its element and docs, links every doc to the element in
+	/// the doc → elements mapping, and evicts the element's cached doc set.
+	pub(super) async fn commit_fresh<I>(&self, ctx: &DiskAnnContext<'_>, fresh: I) -> Result<()>
+	where
+		I: IntoIterator<Item = (StagedVector, ElementId)>,
+	{
+		let kv = ctx.kv();
+		for (vector, element_id) in fresh {
+			let StagedVector {
+				ser_vec,
+				docs,
+				..
+			} = vector;
+			let Some((&first, rest)) = docs.split_first() else {
+				continue;
+			};
+			if self.use_hashed_vector {
+				let key = self.ikb.new_dh_key(ser_vec.compute_hash());
+				let mut ehd = match kv.get_key(&key).await? {
+					None => DiskAnnElementHashedDocs::new(element_id, ser_vec.clone(), first),
+					Some(mut ehd) => {
+						ehd.add(element_id, ser_vec.clone(), first);
+						ehd
+					}
+				};
+				if let Some(ed) = ehd.get_element_docs(&ser_vec) {
+					add_docs(&mut ed.docs, rest);
+					self.set_element_docs(&kv, element_id, &ed.docs).await?;
+				}
+				kv.set_key(&key, &ehd).await?;
+			} else {
+				let mut ed = DiskAnnElementDocs::new(element_id, first);
+				add_docs(&mut ed.docs, rest);
+				kv.set_key(&self.ikb.new_dq_key(&ser_vec), &ed).await?;
+				self.set_element_docs(&kv, element_id, &ed.docs).await?;
+			}
+			self.evict_cached_doc_set(element_id);
+			for doc in docs {
+				self.link_doc(&kv, doc, element_id).await?;
+			}
+		}
+		Ok(())
+	}
+
+	async fn remove_hashed(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		graph: &DiskAnnGraph,
+		ser_vec: SerializedVector,
+		doc_id: DocId,
+	) -> Result<()> {
+		let kv = ctx.kv();
+		let key = self.ikb.new_dh_key(ser_vec.compute_hash());
+		if let Some(mut ehd) = kv.get_key(&key).await? {
+			match ehd.remove(&ser_vec, doc_id) {
+				RemoveResult::Empty(e_id) => {
+					kv.del_key(&key).await?;
+					self.del_element_docs(&kv, e_id).await?;
+					self.unlink_doc(&kv, doc_id, e_id).await?;
+					self.evict_cached_doc_set(e_id);
+					graph.remove(ctx, e_id).await?;
+				}
+				RemoveResult::BucketShrunk {
+					e_id,
+				} => {
+					kv.set_key(&key, &ehd).await?;
+					if let Some(ed) = ehd.get_element_docs(&ser_vec) {
+						self.set_element_docs(&kv, e_id, &ed.docs).await?;
+					}
+					self.unlink_doc(&kv, doc_id, e_id).await?;
+					self.evict_cached_doc_set(e_id);
+				}
+				RemoveResult::EntryRemoved {
+					e_id,
+				} => {
+					kv.set_key(&key, &ehd).await?;
+					self.del_element_docs(&kv, e_id).await?;
+					self.unlink_doc(&kv, doc_id, e_id).await?;
+					self.evict_cached_doc_set(e_id);
+					graph.remove(ctx, e_id).await?;
+				}
+				RemoveResult::Unchanged => {}
+			}
+		}
+		Ok(())
+	}
+
+	pub(super) async fn remove(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		vec: &Vector,
+		doc_id: DocId,
+		graph: &DiskAnnGraph,
+	) -> Result<()> {
+		let ser_vec = vec.into();
+		if self.use_hashed_vector {
+			return self.remove_hashed(ctx, graph, ser_vec, doc_id).await;
+		}
+		let kv = ctx.kv();
+		let key = self.ikb.new_dq_key(&ser_vec);
+		if let Some(mut ed) = kv.get_key(&key).await?
+			&& let Some(new_docs) = ed.docs.remove(doc_id)
+		{
+			self.unlink_doc(&kv, doc_id, ed.e_id).await?;
+			if new_docs.is_empty() {
+				kv.del_key(&key).await?;
+				self.del_element_docs(&kv, ed.e_id).await?;
+				self.evict_cached_doc_set(ed.e_id);
+				graph.remove(ctx, ed.e_id).await?;
+			} else {
+				ed.docs = new_docs;
+				kv.set_key(&key, &ed).await?;
+				self.set_element_docs(&kv, ed.e_id, &ed.docs).await?;
+				self.evict_cached_doc_set(ed.e_id);
+			}
+		}
+		Ok(())
+	}
+}
+
+/// A distinct vector [`DiskAnnVecDocs::stage_inserts`] found absent from the vector → docs
+/// mapping, with every doc of the batch that carries it.
+pub(super) struct StagedVector {
+	ser_vec: SerializedVector,
+	vector: Vector,
+	/// Every doc in the batch carrying this exact vector, in plan order, without repeats.
+	docs: Vec<DocId>,
+}
+
+impl StagedVector {
+	/// The vector, as the graph inserts it.
+	pub(super) fn vector(&self) -> &Vector {
+		&self.vector
+	}
+
+	/// Groups `inserts` by exact vector, in the order each vector first appears, collecting each
+	/// vector's docs in plan order without repeats.
+	fn group(inserts: Vec<(DocId, SerializedVector)>) -> Vec<Self> {
+		let mut staged: Vec<Self> = Vec::new();
+		let mut by_hash: ahash::HashMap<[u8; 32], Vec<usize>> = ahash::HashMap::default();
+		for (doc, ser_vec) in inserts {
+			let slots = by_hash.entry(ser_vec.compute_hash()).or_default();
+			match slots.iter().copied().find(|&slot| staged[slot].ser_vec == ser_vec) {
+				Some(slot) => {
+					let docs = &mut staged[slot].docs;
+					if !docs.contains(&doc) {
+						docs.push(doc);
+					}
+				}
+				None => {
+					slots.push(staged.len());
+					staged.push(Self {
+						vector: Vector::from(ser_vec.clone()),
+						ser_vec,
+						docs: vec![doc],
+					});
+				}
+			}
+		}
+		staged
+	}
+}
+
+/// Adds every doc of `docs` to `set`, returning the ones it did not already hold.
+fn add_docs(set: &mut Ids64, docs: &[DocId]) -> Vec<DocId> {
+	let mut added = Vec::new();
+	for &doc in docs {
+		if let Some(grown) = set.insert(doc) {
+			*set = grown;
+			added.push(doc);
+		}
+	}
+	added
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_kvs::TransactionType;
+
+	use super::*;
+	use crate::test_env::TestIndexStore;
+
+	fn ikb() -> IndexKeyBase {
+		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
+	}
+
+	/// Every test in this module runs on the legacy private doc-ID layout (format version 0),
+	/// so cache entries live under that format version.
+	fn cache_index() -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
+		(NamespaceId(1), DatabaseId(2), TableId(4), IndexId(3), 0)
+	}
+
+	/// A reader's view at the absent generation, with no continuity span.
+	fn view() -> CacheView {
+		CacheView::reader(1, None, None)
+	}
+
+	#[tokio::test]
+	async fn diskann_docs_batch_populates_and_uses_doc_id_cache() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		{
+			let ctx = ds.env(TransactionType::Write).await;
+			let docs = LegacyVectorDocIds::DiskAnn(ikb.clone());
+			// Legacy doc ids are assigned sequentially from zero.
+			docs.resolve_or_assign(&ctx, &RecordIdKey::Number(11)).await?;
+			docs.resolve_or_assign(&ctx, &RecordIdKey::Number(22)).await?;
+			docs.resolve_or_assign(&ctx, &RecordIdKey::Number(33)).await?;
+			ctx.tx().commit().await?;
+		}
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got =
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[2, 0, 9], Some(5))
+				.await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(33));
+		assert_eq!(&got[1].as_ref().unwrap().key, &RecordIdKey::Number(11));
+		assert!(got[2].is_none());
+		assert_eq!(
+			cache.get_doc_id(cache_index(), 0, Some(5)).unwrap().as_ref(),
+			&RecordIdKey::Number(11)
+		);
+		assert_eq!(
+			cache.get_doc_id(cache_index(), 2, Some(5)).unwrap().as_ref(),
+			&RecordIdKey::Number(33)
+		);
+		// Unresolved doc ids are not negatively cached.
+		assert!(cache.get_doc_id(cache_index(), 9, Some(5)).is_none());
+		tx.cancel().await?;
+
+		let tx = ds.transaction(TransactionType::Write).await?;
+		LegacyVectorDocIds::DiskAnn(ikb.clone()).remove(&tx, &RecordIdKey::Number(11)).await?;
+		tx.commit().await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert!(
+			LegacyVectorDocIds::DiskAnn(ikb.clone())
+				.get_doc_id(&tx, &RecordIdKey::Number(11))
+				.await?
+				.is_none()
+		);
+		// The KV mapping is gone, but the warmed cache entry still serves the doc id.
+		let cached =
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0], Some(5)).await?;
+		assert_eq!(&cached[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_docs_batch_does_not_cache_write_transaction_mappings() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let ctx = ds.env(TransactionType::Write).await;
+		let doc_id = LegacyVectorDocIds::DiskAnn(ikb.clone())
+			.resolve_or_assign(&ctx, &RecordIdKey::Number(99))
+			.await?;
+
+		// The write transaction sees its own uncommitted mapping…
+		let got = DiskAnnDocs::get_things_batch(
+			&ikb,
+			0,
+			TableId(4),
+			&cache,
+			ctx.tx().as_ref(),
+			&[doc_id],
+			Some(5),
+		)
+		.await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(99));
+		// …but the hit stays local: writable transactions never publish into the shared cache.
+		assert!(cache.get_doc_id(cache_index(), doc_id, Some(5)).is_none());
+		ctx.tx().cancel().await?;
+
+		// Nothing was committed, so a fresh read resolves nothing and still caches nothing.
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[doc_id], Some(5))
+				.await?,
+			vec![None]
+		);
+		assert!(cache.get_doc_id(cache_index(), doc_id, Some(5)).is_none());
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_docs_batch_ignores_doc_id_cache_from_old_generation() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		{
+			let ctx = ds.env(TransactionType::Write).await;
+			LegacyVectorDocIds::DiskAnn(ikb.clone())
+				.resolve_or_assign(&ctx, &RecordIdKey::Number(11))
+				.await?;
+			ctx.tx().commit().await?;
+		}
+
+		// Warm the cache at generation 5.
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got =
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0], Some(5)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
+		tx.cancel().await?;
+		assert!(cache.get_doc_id(cache_index(), 0, Some(6)).is_none());
+
+		// Re-point doc id 0 at another record: `remove` frees the id and the next assignment
+		// reuses it.
+		{
+			let ctx = ds.env(TransactionType::Write).await;
+			let docs = LegacyVectorDocIds::DiskAnn(ikb.clone());
+			docs.remove(&ctx.tx(), &RecordIdKey::Number(11)).await?;
+			let doc_id = docs.resolve_or_assign(&ctx, &RecordIdKey::Number(22)).await?;
+			assert_eq!(doc_id, 0);
+			ctx.tx().commit().await?;
+		}
+
+		// A generation-6 read ignores the stale generation-5 entry and refetches from KV.
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got =
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0], Some(6)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_docs_remove_evicts_doc_id_cache() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let id = RecordIdKey::Number(77);
+		{
+			let ctx = ds.env(TransactionType::Write).await;
+			LegacyVectorDocIds::DiskAnn(ikb.clone()).resolve_or_assign(&ctx, &id).await?;
+			ctx.tx().commit().await?;
+		}
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got =
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0], Some(5)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &id);
+		assert!(cache.get_doc_id(cache_index(), 0, Some(5)).is_some());
+		tx.cancel().await?;
+
+		// `remove` is cache-only: it evicts the process-local doc-id entry and never recycles
+		// ids (the record ↔ doc-id mapping is deleted centrally at record purge), so the KV
+		// mapping survives.
+		let docs = DiskAnnDocs::with_format_version(ikb.clone(), 0);
+		docs.remove(0, TableId(4), &cache);
+		assert!(cache.get_doc_id(cache_index(), 0, Some(5)).is_none());
+
+		// The mapping is still in KV, so a fresh lookup re-resolves it and re-warms the cache.
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let reloaded =
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0], Some(5)).await?;
+		assert_eq!(&reloaded[0].as_ref().unwrap().key, &id);
+		assert!(cache.get_doc_id(cache_index(), 0, Some(5)).is_some());
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	/// A read-only lookup publishes the doc set it read, and later lookups at the same generation
+	/// are served it without KV. A writable transaction publishes nothing: its reads include its
+	/// own uncommitted writes.
+	#[tokio::test]
+	async fn diskann_vec_docs_populates_and_uses_doc_set_cache() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false, 0);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let vector = Vector::from(ser_vec.clone());
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.set_key(
+			&ikb.new_dq_key(&ser_vec),
+			&DiskAnnElementDocs {
+				e_id: 7,
+				docs: Ids64::One(42),
+			},
+		)
+		.await?;
+		assert_eq!(
+			vec_docs.get_docs_batch(&tx, &view(), &[(7, &vector)]).await?,
+			vec![Some(Ids64::One(42))]
+		);
+		assert!(cache.get_doc_set(cache_index(), 7, &view()).is_none());
+		tx.commit().await?;
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(
+			vec_docs.get_docs_batch(&tx, &view(), &[(7, &vector)]).await?,
+			vec![Some(Ids64::One(42))]
+		);
+		assert_eq!(cache.get_doc_set(cache_index(), 7, &view()), Some(Ids64::One(42)));
+		tx.cancel().await?;
+
+		// With the KV mapping gone and no generation advanced, the cached set is what serves.
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.del_key(&ikb.new_dq_key(&ser_vec)).await?;
+		tx.commit().await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(
+			vec_docs.get_docs_batch(&tx, &view(), &[(7, &vector)]).await?,
+			vec![Some(Ids64::One(42))]
+		);
+		assert_eq!(vec_docs.get_docs_batch_uncached(&tx, &[(7, &vector)]).await?, vec![None]);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_vec_docs_resolves_warmed_element_docs_without_vector_mapping() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false, 0);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		tx.set_key(
+			&ikb.new_de_key(7),
+			&DiskAnnElement {
+				vector: ser_vec.clone(),
+				deleted: false,
+			},
+		)
+		.await?;
+		tx.set_key(
+			&ikb.new_dq_key(&ser_vec),
+			&DiskAnnElementDocs {
+				e_id: 7,
+				docs: Ids64::One(42),
+			},
+		)
+		.await?;
+		tx.commit().await?;
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(
+			vec_docs.get_docs_by_element_batch(&tx, &view(), &[(7, 0.5)]).await?,
+			vec![(7, 0.5, Some(Ids64::One(42)))]
+		);
+		assert_eq!(cache.get_doc_set(cache_index(), 7, &view()), Some(Ids64::One(42)));
+		tx.cancel().await?;
+
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.del_key(&ikb.new_de_key(7)).await?;
+		tx.del_key(&ikb.new_dq_key(&ser_vec)).await?;
+		tx.commit().await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(
+			vec_docs.get_docs_by_element_batch(&tx, &view(), &[(7, 0.5)]).await?,
+			vec![(7, 0.5, Some(Ids64::One(42)))]
+		);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_vec_docs_resolves_element_doc_cache_misses_in_order() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false, 0);
+		let first_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let second_vec = SerializedVector::F32(vec![3.0, 4.0]);
+		for (element_id, ser_vec, docs) in
+			[(7, first_vec.clone(), Ids64::One(70)), (9, second_vec.clone(), Ids64::One(90))]
+		{
+			tx.set_key(
+				&ikb.new_de_key(element_id),
+				&DiskAnnElement {
+					vector: ser_vec.clone(),
+					deleted: false,
+				},
+			)
+			.await?;
+			tx.set_key(
+				&ikb.new_dq_key(&ser_vec),
+				&DiskAnnElementDocs {
+					e_id: element_id,
+					docs,
+				},
+			)
+			.await?;
+		}
+		tx.commit().await?;
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(
+			vec_docs
+				.get_docs_by_element_batch(&tx, &view(), &[(9, 0.9), (8, 0.8), (7, 0.7)])
+				.await?,
+			vec![(9, 0.9, Some(Ids64::One(90))), (8, 0.8, None), (7, 0.7, Some(Ids64::One(70)))]
+		);
+		assert_eq!(cache.get_doc_set(cache_index(), 9, &view()), Some(Ids64::One(90)));
+		assert_eq!(cache.get_doc_set(cache_index(), 7, &view()), Some(Ids64::One(70)));
+		assert!(cache.get_doc_set(cache_index(), 8, &view()).is_none());
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_vec_docs_caches_hashed_docs_after_disambiguating_vector() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true, 0);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let other_vec = SerializedVector::F32(vec![9.0, 9.0]);
+		let vector = Vector::from(ser_vec.clone());
+		// Built through the bucket's own constructors, which is the only way in
+		// now that it owns the one-entry-per-vector invariant. The colliding
+		// vector is added first so the vector under test is not the first match.
+		let mut bucket = DiskAnnElementHashedDocs::new(5, other_vec, 5);
+		bucket.add(9, ser_vec.clone(), 42);
+		tx.set_key(&ikb.new_dh_key(ser_vec.compute_hash()), &bucket).await?;
+		tx.commit().await?;
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(
+			vec_docs.get_docs_batch(&tx, &view(), &[(9, &vector)]).await?,
+			vec![Some(Ids64::One(42))]
+		);
+		assert_eq!(cache.get_doc_set(cache_index(), 9, &view()), Some(Ids64::One(42)));
+		tx.cancel().await?;
+
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.del_key(&ikb.new_dh_key(ser_vec.compute_hash())).await?;
+		tx.commit().await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(
+			vec_docs.get_docs_batch(&tx, &view(), &[(9, &vector)]).await?,
+			vec![Some(Ids64::One(42))]
+		);
+		assert_eq!(vec_docs.get_docs_batch_uncached(&tx, &[(9, &vector)]).await?, vec![None]);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_vec_docs_resolves_hashed_element_doc_cache_misses() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true, 0);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let other_vec = SerializedVector::F32(vec![9.0, 9.0]);
+		tx.set_key(
+			&ikb.new_de_key(9),
+			&DiskAnnElement {
+				vector: ser_vec.clone(),
+				deleted: false,
+			},
+		)
+		.await?;
+		// Built through the bucket's own constructors, which is the only way in
+		// now that it owns the one-entry-per-vector invariant. The colliding
+		// vector is added first so the vector under test is not the first match.
+		let key = ikb.new_dh_key(ser_vec.compute_hash());
+		let mut bucket = DiskAnnElementHashedDocs::new(5, other_vec, 5);
+		bucket.add(9, ser_vec, 42);
+		tx.set_key(&key, &bucket).await?;
+		tx.commit().await?;
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(
+			vec_docs.get_docs_by_element_batch(&tx, &view(), &[(9, 0.9)]).await?,
+			vec![(9, 0.9, Some(Ids64::One(42)))]
+		);
+		assert_eq!(cache.get_doc_set(cache_index(), 9, &view()), Some(Ids64::One(42)));
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_vec_docs_missing_element_doc_candidate_returns_none() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb, TableId(4), cache.clone(), false, 0);
+
+		assert_eq!(
+			vec_docs.get_docs_by_element_batch(&tx, &view(), &[(99, 0.99)]).await?,
+			vec![(99, 0.99, None)]
+		);
+		assert!(cache.get_doc_set(cache_index(), 99, &view()).is_none());
+		tx.cancel().await?;
+		Ok(())
+	}
+}

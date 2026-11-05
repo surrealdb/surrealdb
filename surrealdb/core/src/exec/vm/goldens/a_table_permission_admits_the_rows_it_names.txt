@@ -1,0 +1,43 @@
+### SELECT * FROM refs FETCH a, b, c
+{ a: { id: owned:1, owner: user:reader, v: 1 }, b: NONE, c: NONE, d: [owned:1, owned:2, denied:1], e: linked:2, f: { x: owned:3, y: [guarded:1] }, g: guarded:1, h: missing:1, i: for_other:1, id: refs:1 }
+### SELECT * FROM refs FETCH d
+{ a: owned:1, b: owned:2, c: denied:1, d: [{ id: owned:1, owner: user:reader, v: 1 }, NONE, NONE], e: linked:2, f: { x: owned:3, y: [guarded:1] }, g: guarded:1, h: missing:1, i: for_other:1, id: refs:1 }
+### SELECT * FROM refs FETCH e, i
+{ a: owned:1, b: owned:2, c: denied:1, d: [owned:1, owned:2, denied:1], e: NONE, f: { x: owned:3, y: [guarded:1] }, g: guarded:1, h: missing:1, i: NONE, id: refs:1 }
+### SELECT * FROM refs FETCH f.x, f.y
+{ a: owned:1, b: owned:2, c: denied:1, d: [owned:1, owned:2, denied:1], e: linked:2, f: { x: { id: owned:3, owner: user:reader, v: 3 }, y: [{ id: guarded:1, twice: 2, v: 1 }] }, g: guarded:1, h: missing:1, i: for_other:1, id: refs:1 }
+### SELECT * FROM refs FETCH g
+{ a: owned:1, b: owned:2, c: denied:1, d: [owned:1, owned:2, denied:1], e: linked:2, f: { x: owned:3, y: [guarded:1] }, g: { id: guarded:1, twice: 2, v: 1 }, h: missing:1, i: for_other:1, id: refs:1 }
+### SELECT * FROM refs FETCH h
+error: The table 'missing' does not exist
+### SELECT VALUE d FROM refs FETCH d
+[{ id: owned:1, owner: user:reader, v: 1 }, NONE, NONE]
+### SELECT * FROM owned FETCH owner
+{ id: owned:1, owner: NONE, v: 1 }
+{ id: owned:3, owner: NONE, v: 3 }
+### SELECT * FROM owned
+{ id: owned:1, owner: user:reader, v: 1 }
+{ id: owned:3, owner: user:reader, v: 3 }
+### SELECT v FROM owned WHERE v > 1
+{ v: 3 }
+### SELECT count() FROM owned GROUP ALL
+{ count: 2 }
+### SELECT * FROM owned ORDER BY v DESC LIMIT 1
+{ id: owned:3, owner: user:reader, v: 3 }
+### SELECT * FROM owned:1..4
+{ id: owned:1, owner: user:reader, v: 1 }
+{ id: owned:3, owner: user:reader, v: 3 }
+### SELECT * FROM owned:2
+(no rows)
+### SELECT * FROM denied
+(no rows)
+### SELECT count() FROM denied GROUP ALL
+{ count: 0 }
+### SELECT * FROM for_reader
+{ id: for_reader:1, v: 1 }
+### SELECT * FROM for_other
+(no rows)
+### SELECT * FROM named
+{ id: named:1, tag: 'apple' }
+### SELECT * FROM linked
+{ id: linked:1, owner: user:reader }

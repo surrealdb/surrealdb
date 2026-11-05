@@ -1,0 +1,43 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL substring, substr and mid count positions from 1, count a negative position from the end, and answer the empty string for position 0 or a count below 1; a string, float or decimal position or count is rounded to an integer, and a count up to the largest BIGINT takes the rest of the string"
+
+[[test.results]]
+value = "[{ a: 'Hello', b: 'World', c: 'Wor', d: 'Hello' }]"
+
+[[test.results]]
+value = "[{ a: '', b: 'llo', c: 'll', d: '', e: '', f: NULL }]"
+
+[[test.results]]
+value = "[{ a: 'b', b: 'cd', c: 'ef' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, n: '1', p: '2' }]"
+
+[[test.results]]
+value = "[{ v: 'b' }]"
+
+[[test.results]]
+value = "[{ a: 'bc', b: '', c: 'a', d: 'bc' }]"
+*/
+
+SELECT substring('Hello World', 1, 5) AS a, substring('Hello World', 7) AS b, substr('Hello World', 7, 3) AS c, mid('Hello World', 1, 5) AS d;
+
+SELECT substring('Hello', 0, 3) AS a, substring('Hello', -3) AS b, substring('Hello', -3, 2) AS c, substring('Hello', 2, -1) AS d, substring('Hello', 9) AS e, substring(NULL, 1) AS f;
+
+SELECT substring('abc', '2', '1') AS a, substring('abcdef', 2.6, 2) AS b, substring('abcdef', '-2') AS c;
+
+CREATE TABLE subs (id INT, p VARCHAR(10), n VARCHAR(10));
+
+INSERT INTO subs (id, p, n) VALUES (1, '2', '1');
+
+SELECT substring('abc', p, n) AS v FROM subs;
+
+SELECT substring('abc', 2, 9223372036854775807) AS a, substring('abc', 9223372036854775807, 2) AS b, substring('abc', -3, 1) AS c, mid('abc', 2, 9223372036854775807) AS d;

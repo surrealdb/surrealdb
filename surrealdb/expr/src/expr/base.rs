@@ -1,0 +1,31 @@
+use std::fmt;
+
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+pub enum Base {
+	#[default]
+	Root,
+	Ns,
+	Db,
+}
+
+impl fmt::Display for Base {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Ns => f.write_str("NAMESPACE"),
+			Self::Db => f.write_str("DATABASE"),
+			Self::Root => f.write_str("ROOT"),
+		}
+	}
+}
+
+impl ToSql for Base {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		match self {
+			Self::Ns => write_sql!(f, sql_fmt, "NAMESPACE"),
+			Self::Db => write_sql!(f, sql_fmt, "DATABASE"),
+			Self::Root => write_sql!(f, sql_fmt, "ROOT"),
+		}
+	}
+}

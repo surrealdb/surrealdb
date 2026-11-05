@@ -9,6 +9,7 @@ use reqwest::Body as ReqBody;
 use reqwest::header::{CONTENT_TYPE, HeaderValue};
 
 use super::classes::Headers;
+use crate::expr::logical::EffectSet;
 use crate::fnc::script::fetch::RequestError;
 use crate::fnc::script::fetch::body::{Body, BodyData, BodyKind};
 use crate::fnc::script::fetch::classes::{
@@ -29,13 +30,30 @@ pub async fn fetch<'js>(
 	let url = js_req.url;
 
 	// Check if the url is allowed to be fetched.
-	let query_ctx = if let Some(query_ctx) = ctx.userdata::<QueryContext<'js>>() {
-		Arc::clone(query_ctx.context)
+	let (query_ctx, no_write) = if let Some(query_ctx) = ctx.userdata::<QueryContext<'js>>() {
+		(Arc::clone(query_ctx.context), query_ctx.opt.no_write)
 	} else {
 		panic!(
 			"Trying to fetch a URL but no QueryContext is present. QueryContext is required for checking if the URL is allowed to be fetched."
 		)
 	};
+
+	// A frame that refuses an external write (a LIVE clause, and every other
+	// no-write frame) refuses a fetch that sends data out, the way it refuses
+	// `http::post`: `fetch` reaches the network through its own client, not the
+	// builtin dispatch, so the refusal is applied here. A write method or a
+	// request body is a write; a plain GET or HEAD read with no body is left
+	// alone, as `http::get` is, so a projection may still enrich itself from the
+	// network without a side effect.
+	let writes = js_req.init.body.is_some()
+		|| !matches!(js_req.init.method, reqwest::Method::GET | reqwest::Method::HEAD);
+	let fetch_effects = if writes {
+		EffectSet::READS_EXTERNAL.union(EffectSet::WRITES_EXTERNAL)
+	} else {
+		EffectSet::READS_EXTERNAL
+	};
+	crate::fnc::script::refuse_builtin_in_frame(no_write, "fetch", fetch_effects)
+		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
 
 	query_ctx
 		.check_allowed_net(&url)
@@ -55,8 +73,8 @@ pub async fn fetch<'js>(
 			Arc::new(
 				HttpClient::new_with_redirect_policy(
 					cap.allow_net.clone(),
-					cap.allow_net.clone(),
-					&query_ctx.config,
+					cap.deny_net.clone(),
+					&query_ctx.config.http,
 					|attempt| attempt.error("unexpected redirect"),
 				)
 				.map_err(|e| {
@@ -72,8 +90,8 @@ pub async fn fetch<'js>(
 			Arc::new(
 				HttpClient::new_with_redirect_policy(
 					cap.allow_net.clone(),
-					cap.allow_net.clone(),
-					&query_ctx.config,
+					cap.deny_net.clone(),
+					&query_ctx.config.http,
 					|attempt| attempt.stop(),
 				)
 				.map_err(|e| {

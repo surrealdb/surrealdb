@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "When the analyzer turns `a IN [v]` into `a = v` (single-element IN normalised in `extract_simple_condition`) or encodes `b != NONE` after an equality prefix as `(MoreThan, NONE)`, the residual stripper in `IndexConditionMatcher` must mirror both rewrites. Without the fix the original AST leaves survived in the residual Filter even though the IndexScan already satisfied them, costing per-row predicate evaluation."
@@ -26,13 +25,19 @@ value = "[{ a: 2, b: 10, id: t:r3 }]"
 value = "[{ id: t:r1 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]\n    IndexScan [ctx: Db] [index: idx_ab, access: [1, 10], direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [table: t, index: idx_ab, access: [1, 10], direction: Forward]
+''''
 
 [[test.results]]
 value = "[{ id: t:r1 }, { id: t:r2 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]\n    IndexScan [ctx: Db] [index: idx_ab, access: [1] MoreThan NONE, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [table: t, index: idx_ab, access: [1] MoreThan NONE, direction: Forward]
+''''
 */
 DEFINE TABLE t;
 DEFINE INDEX idx_ab ON t FIELDS a, b;

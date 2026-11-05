@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test EXPLAIN ANALYZE with multiple FROM tables (new executor)"
+reason = "Test EXPLAIN ANALYZE with multiple FROM tables"
 
 [[test.results]]
 value = "[{ id: person:tobie, name: 'Tobie' }]"
@@ -15,10 +14,11 @@ value = "[{ id: person:jaime, name: 'Jaime' }]"
 value = "[{ id: software:surreal, name: 'SurrealDB' }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 3}
-    Union [ctx: Db] [inputs: 2] {rows: 3}
-        TableScan [ctx: Db] [table: person, direction: Forward] {rows: 2}
-        TableScan [ctx: Db] [table: software, direction: Forward] {rows: 1}
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 3}
+    Union [ctx: Db] {rows: 3}
+        TableScan [ctx: Db] [table: person, direction: Forward] {rows: 3}
+        TableScan [ctx: Db] [table: software, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 */

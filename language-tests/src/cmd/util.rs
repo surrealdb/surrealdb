@@ -1,17 +1,15 @@
 use anyhow::Result;
-use surrealdb_core::dbs::capabilities::Targets;
-use surrealdb_core::dbs::{Capabilities, NewPlannerStrategy, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::{Capabilities, Targets};
 use surrealdb_types::Value as SurValue;
 
-use crate::tests::TestRun;
-use crate::tests::run::RunConfig;
 use crate::tests::schema::{
 	AuthLevel, BoolOr, Capabilities as TestCapabilities, SchemaTarget, TestAuth, TestConfig,
 };
 
-/// Builds a `Session` from a test config and a specific planner strategy.
-pub fn session_from_test_config(config: &TestConfig, strategy: NewPlannerStrategy) -> Session {
+/// Builds a `Session` from a test config.
+pub fn session_from_test_config(config: &TestConfig) -> Session {
 	let env = &config.env;
 
 	let ns = env.namespace();
@@ -68,8 +66,6 @@ pub fn session_from_test_config(config: &TestConfig, strategy: NewPlannerStrateg
 	session.ns = ns.map(|x| x.to_owned());
 	session.db = db.map(|x| x.to_owned());
 
-	session.new_planner_strategy = strategy;
-
 	session.redact_volatile_explain_attrs = env.redact_volatile_explain_attrs.unwrap_or(true);
 
 	session
@@ -80,18 +76,12 @@ pub struct ImportFailure {
 	pub message: String,
 }
 
-pub async fn run_imports<T: RunConfig>(
-	run: &TestRun<T>,
-	session: Session,
-	dbs: &Datastore,
-) -> Result<Option<ImportFailure>> {
-	run_imports_list(&run.case.imports, session, dbs).await
-}
-
 /// Runs an explicit list of import cases against the datastore, after defining
-/// the session's namespace/database. Used by [`run_imports`] (which forwards the
-/// test's resolved imports) and by the bench runner, which may substitute a
-/// per-variant import chain (see `[bench].datasets`).
+/// the session's namespace/database, the database at the compatibility level
+/// `compatibility` when one is given. Used by the test runner's embedded
+/// executor (which forwards the test's resolved imports) and by the bench
+/// runner, which may substitute a per-variant import chain (see
+/// `[bench].datasets`).
 ///
 /// Imports always run as `Session::owner()` retargeted (via `process_use`) to the
 /// session's `(ns, db)`, so the populated data depends only on `(ns, db)` and the
@@ -101,6 +91,7 @@ pub async fn run_imports<T: RunConfig>(
 pub async fn run_imports_list(
 	imports: &[std::sync::Arc<crate::tests::case::TestCase>],
 	mut session: Session,
+	compatibility: Option<u8>,
 	dbs: &Datastore,
 ) -> Result<Option<ImportFailure>> {
 	if let Some(ref x) = session.ns {
@@ -110,7 +101,9 @@ pub async fn run_imports_list(
 	}
 
 	if let Some(ref x) = session.db {
-		dbs.execute(&format!("DEFINE DATABASE `{x}`"), &session, None).await?;
+		let level =
+			compatibility.map(|level| format!(" COMPATIBILITY {level}")).unwrap_or_default();
+		dbs.execute(&format!("DEFINE DATABASE `{x}`{level}"), &session, None).await?;
 	}
 
 	let mut import_session = Session::owner();

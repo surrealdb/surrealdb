@@ -23,18 +23,79 @@ impl serde::de::Error for Error {
 	}
 }
 
-fn deserialize_number<'de, V>(n: &Number, visitor: V) -> Result<V::Value, Error>
+/// How a fractional Decimal is offered to a visitor.
+#[derive(Clone, Copy)]
+enum Fraction {
+	/// As `f64`, for a target that asked for a float or an integer: a float
+	/// target accepts the nearest `f64`, and an integer target refuses it.
+	Float,
+	/// As `f64` when that reproduces the Decimal exactly, and otherwise as its
+	/// decimal text, for a self-describing target such as `rust_decimal::Decimal`
+	/// or `serde_json::Value`, so the value is never rounded on the way in.
+	Exact,
+}
+
+fn deserialize_number<'de, V>(n: &Number, visitor: V, fraction: Fraction) -> Result<V::Value, Error>
 where
 	V: Visitor<'de>,
 {
 	match n {
 		Number::Int(v) => visitor.visit_i64(*v),
+		Number::I8(v) => visitor.visit_i8(*v),
+		Number::U8(v) => visitor.visit_u8(*v),
+		Number::I16(v) => visitor.visit_i16(*v),
+		Number::U16(v) => visitor.visit_u16(*v),
+		Number::I32(v) => visitor.visit_i32(*v),
+		Number::U32(v) => visitor.visit_u32(*v),
+		Number::U64(v) => visitor.visit_u64(*v),
+		Number::F16(v) => visitor.visit_f32(f32::from(*v)),
+		Number::F32(v) => visitor.visit_f32(*v),
 		Number::Float(v) => visitor.visit_f64(*v),
+		// A bigdecimal that fits a decimal is offered as that decimal. Any other value is offered
+		// as its text, since no visitor method takes an arbitrary-precision number.
+		Number::BigDecimal(v) => match rust_decimal::Decimal::try_from(v.as_ref()) {
+			Ok(decimal) => deserialize_number(&Number::Decimal(decimal), visitor, fraction),
+			Err(_) => visitor.visit_string(v.to_string()),
+		},
 		Number::Decimal(decimal) => {
-			if let Some(v) = decimal.to_i128() {
-				visitor.visit_i128(v)
-			} else {
-				Err(serde::de::Error::custom("decimal value not in range of an i128"))
+			// A whole Decimal is offered as the narrowest of `u64`, `i64`, `u128` and
+			// `i128` that holds it, so integer visitors of any width accept it. A
+			// fractional Decimal is offered as described by `Fraction`, so it is never
+			// truncated to an integer.
+			if decimal.is_integer() {
+				if let Some(v) = decimal.to_u64() {
+					return visitor.visit_u64(v);
+				}
+				if let Some(v) = decimal.to_i64() {
+					return visitor.visit_i64(v);
+				}
+				if let Some(v) = decimal.to_u128() {
+					return visitor.visit_u128(v);
+				}
+				if let Some(v) = decimal.to_i128() {
+					return visitor.visit_i128(v);
+				}
+				return Err(serde::de::Error::custom("decimal value not in range of an i128"));
+			}
+			let float = decimal.to_f64();
+			match fraction {
+				Fraction::Float => match float {
+					Some(v) => visitor.visit_f64(v),
+					None => {
+						Err(serde::de::Error::custom("decimal value not representable as an f64"))
+					}
+				},
+				Fraction::Exact => match float {
+					// `f64` keeps a numeric target numeric when nothing is lost: the
+					// shortest text of the float parses back to the same Decimal
+					Some(v)
+						if v.to_string().parse::<rust_decimal::Decimal>().ok()
+							== Some(*decimal) =>
+					{
+						visitor.visit_f64(v)
+					}
+					_ => visitor.visit_string(decimal.to_string()),
+				},
 			}
 		}
 	}
@@ -46,9 +107,10 @@ macro_rules! deserialize_number {
 		where
 			V: Visitor<'de>,
 		{
-			match self {
-				Value::Number(n) => deserialize_number(&n, visitor),
-				_ => Err(self.invalid_type(&visitor)),
+			if let Value::Number(n) = self {
+				deserialize_number(&n, visitor, Fraction::Float)
+			} else {
+				Err(self.invalid_type(&visitor))
 			}
 		}
 	};
@@ -143,12 +205,16 @@ impl<'de> serde::Deserializer<'de> for Value {
 		match self {
 			Value::Null => visitor.visit_unit(),
 			Value::Bool(v) => visitor.visit_bool(v),
-			Value::Number(n) => deserialize_number(&n, visitor),
+			Value::Number(n) => deserialize_number(&n, visitor, Fraction::Exact),
 			Value::String(v) => visitor.visit_string(v),
 			Value::Array(v) => visit_array(v, visitor),
 			Value::Object(v) => v.deserialize_any(visitor),
 			Value::None => visitor.visit_none(),
 			Value::Bytes(bytes) => visitor.visit_bytes(&bytes),
+			Value::Date(v) => visitor.visit_string(v.to_string()),
+			Value::Time(v) => visitor.visit_string(v.to_string()),
+			Value::Timestamp(v) => visitor.visit_string(v.to_string()),
+			Value::Interval(v) => visitor.visit_string(v.to_string()),
 			Value::Datetime(datetime) => {
 				let value = datetime
 					.into_inner()
@@ -182,7 +248,12 @@ impl<'de> serde::Deserializer<'de> for Value {
 				);
 				Value::Object(object).deserialize_any(visitor)
 			}
-			_ => Err(self.invalid_type(&visitor)),
+			Value::Geometry(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Set(_) => Err(self.invalid_type(&visitor)),
 		}
 	}
 
@@ -204,9 +275,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::None => visitor.visit_none(),
-			_ => visitor.visit_some(self),
+		if let Value::None = self {
+			visitor.visit_none()
+		} else {
+			visitor.visit_some(self)
 		}
 	}
 
@@ -226,7 +298,26 @@ impl<'de> serde::Deserializer<'de> for Value {
 				variant,
 				value: None,
 			}),
-			other => Err(serde::de::Error::invalid_type(other.unexpected(), &"string or map")),
+			other @ (Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Array(_)
+			| Value::Set(_)) => Err(serde::de::Error::invalid_type(other.unexpected(), &"string or map")),
 		}
 	}
 
@@ -269,9 +360,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::Bool(v) => visitor.visit_bool(v),
-			_ => Err(self.invalid_type(&visitor)),
+		if let Value::Bool(v) = self {
+			visitor.visit_bool(v)
+		} else {
+			Err(self.invalid_type(&visitor))
 		}
 	}
 
@@ -295,7 +387,29 @@ impl<'de> serde::Deserializer<'de> for Value {
 	{
 		match self {
 			Value::String(v) => visitor.visit_string(v),
-			_ => Err(self.invalid_type(&visitor)),
+			Value::Number(Number::Decimal(d)) => visitor.visit_string(d.to_string()),
+			Value::Number(Number::BigDecimal(d)) => visitor.visit_string(d.to_string()),
+			other @ Value::None
+			| other @ Value::Null
+			| other @ Value::Bool(_)
+			| other @ Value::Number(_)
+			| other @ Value::Bytes(_)
+			| other @ Value::Duration(_)
+			| other @ Value::Datetime(_)
+			| other @ Value::Date(_)
+			| other @ Value::Time(_)
+			| other @ Value::Timestamp(_)
+			| other @ Value::Interval(_)
+			| other @ Value::Uuid(_)
+			| other @ Value::Geometry(_)
+			| other @ Value::Table(_)
+			| other @ Value::RecordId(_)
+			| other @ Value::File(_)
+			| other @ Value::Range(_)
+			| other @ Value::Regex(_)
+			| other @ Value::Array(_)
+			| other @ Value::Object(_)
+			| other @ Value::Set(_) => Err(other.invalid_type(&visitor)),
 		}
 	}
 
@@ -310,9 +424,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::Bytes(v) => visitor.visit_bytes(&v),
-			_ => Err(self.invalid_type(&visitor)),
+		if let Value::Bytes(v) = self {
+			visitor.visit_bytes(&v)
+		} else {
+			Err(self.invalid_type(&visitor))
 		}
 	}
 
@@ -320,9 +435,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::Null => visitor.visit_unit(),
-			_ => Err(self.invalid_type(&visitor)),
+		if let Value::Null = self {
+			visitor.visit_unit()
+		} else {
+			Err(self.invalid_type(&visitor))
 		}
 	}
 
@@ -337,9 +453,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::Array(v) => visit_array(v, visitor),
-			_ => Err(self.invalid_type(&visitor)),
+		if let Value::Array(v) = self {
+			visit_array(v, visitor)
+		} else {
+			Err(self.invalid_type(&visitor))
 		}
 	}
 
@@ -366,9 +483,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::Object(v) => v.deserialize_any(visitor),
-			_ => Err(self.invalid_type(&visitor)),
+		if let Value::Object(v) = self {
+			v.deserialize_any(visitor)
+		} else {
+			Err(self.invalid_type(&visitor))
 		}
 	}
 
@@ -397,7 +515,26 @@ impl<'de> serde::Deserializer<'de> for Value {
 				let value = Value::Object(object);
 				value.deserialize_struct(name, fields, visitor)
 			}
-			_ => Err(self.invalid_type(&visitor)),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Date(_)
+			| Value::Time(_)
+			| Value::Timestamp(_)
+			| Value::Interval(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Set(_) => Err(self.invalid_type(&visitor)),
 		}
 	}
 
@@ -690,6 +827,10 @@ impl Value {
 			Value::Bytes(_) => Unexpected::Seq,
 			Value::Duration(_) => Unexpected::Other("duration"),
 			Value::Datetime(_) => Unexpected::Other("datetime"),
+			Value::Date(_) => Unexpected::Other("date"),
+			Value::Time(_) => Unexpected::Other("time"),
+			Value::Timestamp(_) => Unexpected::Other("timestamp"),
+			Value::Interval(_) => Unexpected::Other("interval"),
 			Value::Uuid(_) => Unexpected::Other("uuid"),
 			Value::Geometry(_) => Unexpected::Other("geometry"),
 			Value::Table(_) => Unexpected::Other("table"),

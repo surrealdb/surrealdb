@@ -59,8 +59,8 @@ mkdir -p "$ROOT/$OUT_DIR"
 SLUG="$(echo "$FILTER" | tr '/ ' '__')"
 LOG="$ROOT/$OUT_DIR/$SLUG.measure.txt"
 
-# rocksdb needs its cargo feature; surrealkv is already in `bench`.
-FEATURES="bench"; [ "$BACKEND" = "rocksdb" ] && FEATURES="bench,backend-rocksdb"
+# surrealkv is already in `bench`.
+FEATURES="bench"
 
 # shellcheck disable=SC2086
 cargo run --profile profiling --features "$FEATURES" -- bench run --backend "$BACKEND" $SAVE $QUICK ${DATASET[@]+"${DATASET[@]}"} "$FILTER" \

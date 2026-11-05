@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Verify brute-force KNN (NearestNeighbor::K) works in the new streaming executor"
+reason = "Verify brute-force KNN (NearestNeighbor::K)"
 
 [[test.results]]
 value = "'OK'"

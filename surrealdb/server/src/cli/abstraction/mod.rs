@@ -17,6 +17,8 @@ pub(crate) struct AuthArguments {
 	#[arg(help = "Database authentication password to use when connecting")]
 	#[arg(
 		env = "SURREAL_PASS",
+		// Keep the value out of `--help`: clap prints an env var's current value unless this is set.
+		hide_env_values = true,
 		short = 'p',
 		long = "password",
 		visible_alias = "pass",
@@ -26,6 +28,8 @@ pub(crate) struct AuthArguments {
 	#[arg(help = "Authentication token in JWT format to use when connecting")]
 	#[arg(
 		env = "SURREAL_TOKEN",
+		// Keep the value out of `--help`: clap prints an env var's current value unless this is set.
+		hide_env_values = true,
 		short = 't',
 		long = "token",
 		conflicts_with_all = ["username", "password", "auth_level"],

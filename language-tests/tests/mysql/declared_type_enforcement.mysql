@@ -1,0 +1,49 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A column's declared type is enforced on every SQL write: an over-long VARCHAR is refused with MySQL's message, a CHAR(n) is stored without its trailing spaces, DECIMAL(5,2) rounds half away from zero and refuses an overflow with MySQL's message, and DATETIME(0) rounds to whole seconds"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "Data too long for column 'v' at row 1 (field `v` of `dt:1`, SQL TYPE varchar(3))"
+
+[[test.results]]
+value = "[{ c: 'ab', id: 1, n: 123.46dec, ts: ts'2026-10-27T12:00:01', v: 'abc' }]"
+
+[[test.results]]
+value = "[{ c: 'ab', id: 1, n: 123.46dec, ts: ts'2026-10-27T12:00:01', v: 'abc' }]"
+
+[[test.results]]
+error = "Out of range value for column 'n' at row 1 (field `n` of `dt:2`, SQL TYPE decimal(5,2))"
+
+[[test.results]]
+error = "Out of range value for column 'n' at row 1 (field `n` of `dt:2`, SQL TYPE decimal(5,2))"
+
+[[test.results]]
+value = "[{ id: 2, v: 'ab ' }]"
+
+[[test.results]]
+error = "Data too long for column 'v' at row 1 (field `v` of `dt:1`, SQL TYPE varchar(3))"
+
+[[test.results]]
+error = "Out of range value for column 'n' at row 1 (field `n` of `dt:1`, SQL TYPE decimal(5,2))"
+
+[[test.results]]
+value = "[{ c: 'ab', id: 1, n: 123.46dec, v: 'abc' }, { c: NONE, id: 2, n: NONE, v: 'ab ' }]"
+*/
+
+CREATE TABLE dt (id INT PRIMARY KEY, v VARCHAR(3), c CHAR(4), n DECIMAL(5,2), ts DATETIME(0));
+INSERT INTO dt (id, v) VALUES (1, 'abcd');
+INSERT INTO dt (id, v, c, n, ts) VALUES (1, 'abc', 'ab      ', 123.455, CAST('2026-10-27 12:00:00.5' AS DATETIME));
+SELECT id, v, c, n, ts FROM dt;
+INSERT INTO dt (id, n) VALUES (2, 1000.00);
+INSERT INTO dt (id, n) VALUES (2, 999.995);
+INSERT INTO dt (id, v) VALUES (2, 'ab   ');
+UPDATE dt SET v = 'abcd' WHERE id = 1;
+UPDATE dt SET n = 99999.5 WHERE id = 1;
+SELECT id, v, c, n FROM dt ORDER BY id;

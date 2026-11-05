@@ -1,0 +1,2119 @@
+use std::collections::HashSet;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::net::IpAddr;
+
+use ipnet::IpNet;
+use surrealdb_iam::{Auth, Level};
+use url::Url;
+
+use crate::Method;
+
+mod error;
+
+pub use self::error::Error;
+
+pub trait Target<Item: ?Sized = Self> {
+	fn matches(&self, elem: &Item) -> bool;
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub struct FuncTarget(pub String, pub Option<String>);
+
+impl fmt::Display for FuncTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match &self.1 {
+			Some(name) => write!(f, "{}:{name}", self.0),
+			None => write!(f, "{}::*", self.0),
+		}
+	}
+}
+
+impl Target for FuncTarget {
+	fn matches(&self, elem: &FuncTarget) -> bool {
+		match self {
+			Self(family, Some(name)) => {
+				family == &elem.0 && (elem.1.as_ref().is_some_and(|n| n == name))
+			}
+			Self(family, None) => family == &elem.0,
+		}
+	}
+}
+
+impl Target<str> for FuncTarget {
+	fn matches(&self, elem: &str) -> bool {
+		if let Some(x) = self.1.as_ref() {
+			let Some((f, r)) = elem.split_once("::") else {
+				return false;
+			};
+
+			f == self.0 && r == x
+		} else {
+			let f = elem.split_once("::").map(|(f, _)| f).unwrap_or(elem);
+			f == self.0
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseFuncTargetError {
+	InvalidWildcardFamily,
+	InvalidName,
+}
+
+impl std::error::Error for ParseFuncTargetError {}
+impl fmt::Display for ParseFuncTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match *self {
+			ParseFuncTargetError::InvalidName => {
+				write!(f, "invalid function target name")
+			}
+			ParseFuncTargetError::InvalidWildcardFamily => {
+				write!(
+					f,
+					"invalid function target wildcard family, only first part of function can be wildcarded"
+				)
+			}
+		}
+	}
+}
+
+impl std::str::FromStr for FuncTarget {
+	type Err = ParseFuncTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let s = s.trim();
+
+		if s.is_empty() {
+			return Err(ParseFuncTargetError::InvalidName);
+		}
+
+		if let Some(family) = s.strip_suffix("::*") {
+			if family.contains("::") {
+				return Err(ParseFuncTargetError::InvalidWildcardFamily);
+			}
+
+			if !family.bytes().all(|x| x.is_ascii_alphanumeric()) {
+				return Err(ParseFuncTargetError::InvalidName);
+			}
+
+			return Ok(FuncTarget(family.to_string(), None));
+		}
+
+		if !s.bytes().all(|x| x.is_ascii_alphanumeric() || x == b':') {
+			return Err(ParseFuncTargetError::InvalidName);
+		}
+
+		if let Some((first, rest)) = s.split_once("::") {
+			Ok(FuncTarget(first.to_string(), Some(rest.to_string())))
+		} else {
+			Ok(FuncTarget(s.to_string(), None))
+		}
+	}
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub enum ExperimentalTarget {
+	Surrealism,
+	/// `POST /kvexport`, which serves the stored bytes of the whole keyspace.
+	KvExport,
+}
+
+impl fmt::Display for ExperimentalTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Surrealism => write!(f, "surrealism"),
+			Self::KvExport => write!(f, "kvexport"),
+		}
+	}
+}
+
+impl Target for ExperimentalTarget {
+	fn matches(&self, elem: &ExperimentalTarget) -> bool {
+		self == elem
+	}
+}
+
+impl Target<str> for ExperimentalTarget {
+	fn matches(&self, elem: &str) -> bool {
+		match self {
+			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
+			Self::KvExport => elem.eq_ignore_ascii_case("kvexport"),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseExperimentalTargetError {
+	InvalidName,
+}
+
+impl std::error::Error for ParseExperimentalTargetError {}
+impl fmt::Display for ParseExperimentalTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match *self {
+			ParseExperimentalTargetError::InvalidName => {
+				write!(f, "invalid experimental target name")
+			}
+		}
+	}
+}
+
+impl std::str::FromStr for ExperimentalTarget {
+	type Err = ParseExperimentalTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s.trim().to_ascii_lowercase().as_str() {
+			"surrealism" => Ok(ExperimentalTarget::Surrealism),
+			"kvexport" => Ok(ExperimentalTarget::KvExport),
+			_ => Err(ParseExperimentalTargetError::InvalidName),
+		}
+	}
+}
+
+/// A network target: a rule in `allow_net` / `deny_net`, or the endpoint a
+/// request is addressed to.
+///
+/// A rule matches a request target when the request falls inside it, and one
+/// rule matches another when the first covers every endpoint the second does —
+/// see [`Target::matches`]. A request is always a [`NetTarget::Host`] or a
+/// [`NetTarget::IPNet`]; a [`NetTarget::Wildcard`] only ever appears as a rule.
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub enum NetTarget {
+	/// One host, on one port or on any port.
+	Host(url::Host<String>, Option<u16>),
+	/// An IP address or CIDR block, on any port.
+	IPNet(IpNet),
+	/// Every host strictly below `suffix`, written `*.<suffix>[:<port>]`.
+	///
+	/// `suffix` is lowercase ASCII (IDNA labels in punycode), has at least two
+	/// labels and no trailing dot. `*.example.com` matches `api.example.com`
+	/// and `a.b.example.com`, and not `example.com` itself or
+	/// `notexample.com`. With a port, only that port; without one, any port.
+	/// IP addresses are never matched.
+	Wildcard {
+		suffix: String,
+		port: Option<u16>,
+	},
+}
+
+impl NetTarget {
+	/// Whether a rule with port `rule` covers a target with port `target`: a
+	/// port-less rule covers every port, a port-bearing one only its own.
+	fn port_covers(rule: Option<u16>, target: Option<u16>) -> bool {
+		match rule {
+			None => true,
+			Some(port) => target == Some(port),
+		}
+	}
+
+	/// Canonicalises a [`url::Host`] so equivalent host spellings compare equal:
+	/// domain names are lowercased with trailing root dots stripped, and
+	/// IPv4-mapped IPv6 literals (`::ffff:a.b.c.d`) unwrap to their IPv4 form.
+	pub fn canonical_host<S: AsRef<str>>(host: url::Host<S>) -> url::Host<String> {
+		match host {
+			url::Host::Domain(domain) => {
+				url::Host::Domain(common::net::trim_root_dot(domain.as_ref()).to_ascii_lowercase())
+			}
+			url::Host::Ipv4(v4) => url::Host::Ipv4(v4),
+			url::Host::Ipv6(v6) => match IpAddr::V6(v6).to_canonical() {
+				IpAddr::V4(v4) => url::Host::Ipv4(v4),
+				IpAddr::V6(v6) => url::Host::Ipv6(v6),
+			},
+		}
+	}
+
+	/// Canonicalises an [`IpNet`] by unwrapping IPv4-mapped IPv6 networks
+	/// (`::ffff:a.b.c.d/96..=128`) into their IPv4 network equivalents.
+	fn canonical_ipnet(ipnet: IpNet) -> IpNet {
+		match ipnet {
+			IpNet::V4(_) => ipnet,
+			IpNet::V6(v6) => {
+				if let Some(v4) = v6.addr().to_ipv4_mapped()
+					&& v6.prefix_len() >= 96
+					&& let Ok(v4_net) = ipnet::Ipv4Net::new(v4, v6.prefix_len() - 96)
+				{
+					IpNet::V4(v4_net)
+				} else {
+					IpNet::V6(v6)
+				}
+			}
+		}
+	}
+
+	/// Extracts the canonical [`IpAddr`] when `host` is an IP literal.
+	fn canonical_host_ip(host: &url::Host<String>) -> Option<IpAddr> {
+		match host {
+			url::Host::Ipv4(ip) => Some(IpAddr::V4(*ip)),
+			url::Host::Ipv6(ip) => Some(IpAddr::V6(*ip).to_canonical()),
+			url::Host::Domain(_) => None,
+		}
+	}
+
+	/// Compares two [`url::Host`] values after canonicalising domain case,
+	/// trailing root dots, and IPv4-mapped IPv6 literals.
+	fn hosts_match(a: &url::Host<String>, b: &url::Host<String>) -> bool {
+		match (a, b) {
+			(url::Host::Domain(a), url::Host::Domain(b)) => {
+				common::net::trim_root_dot(a).eq_ignore_ascii_case(common::net::trim_root_dot(b))
+			}
+			(a, b) => Self::canonical_host_ip(a)
+				.zip(Self::canonical_host_ip(b))
+				.is_some_and(|(a, b)| a == b),
+		}
+	}
+}
+
+impl fmt::Display for NetTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Host(host, Some(port)) => write!(f, "{host}:{port}"),
+			Self::Host(host, None) => write!(f, "{host}"),
+			Self::IPNet(ipnet) => write!(f, "{ipnet}"),
+			Self::Wildcard {
+				suffix,
+				port: Some(port),
+			} => write!(f, "*.{suffix}:{port}"),
+			Self::Wildcard {
+				suffix,
+				port: None,
+			} => write!(f, "*.{suffix}"),
+		}
+	}
+}
+
+impl Target for NetTarget {
+	/// Whether `self`, read as a rule, covers every endpoint `tgt` names.
+	///
+	/// For a request target that is plain membership. For a rule target it is
+	/// a subset check: a `Host` rule never covers a `Wildcard`, and a
+	/// `Wildcard` covers another only when the other's suffix lies at or below
+	/// its own and the ports are compatible.
+	fn matches(&self, tgt: &Self) -> bool {
+		match self {
+			// If self contains a host and port, the elem must match both the host and port
+			Self::Host(host, Some(port)) => match tgt {
+				Self::Host(tgt_host, Some(tgt_port)) => {
+					Self::hosts_match(host, tgt_host) && port == tgt_port
+				}
+				Self::Host(..)
+				| Self::IPNet(_)
+				| Self::Wildcard {
+					..
+				} => false,
+			},
+			// If self contains a host but no port, the elem must match the host only
+			Self::Host(host, None) => match tgt {
+				Self::Host(tgt_host, _) => Self::hosts_match(host, tgt_host),
+				Self::IPNet(tgt_ipnet) => Self::canonical_host_ip(host)
+					.is_some_and(|ip| IpNet::from(ip).contains(&Self::canonical_ipnet(*tgt_ipnet))),
+				Self::Wildcard {
+					..
+				} => false,
+			},
+			// If self is an IPNet, it can match both an IPNet or a Host elem that contains an
+			// IPAddr
+			Self::IPNet(ipnet) => {
+				let ipnet = Self::canonical_ipnet(*ipnet);
+				match tgt {
+					Self::IPNet(tgt_ipnet) => ipnet.contains(&Self::canonical_ipnet(*tgt_ipnet)),
+					Self::Host(host, _) => {
+						Self::canonical_host_ip(host).is_some_and(|ip| ipnet.contains(&ip))
+					}
+					Self::Wildcard {
+						..
+					} => false,
+				}
+			}
+			// A wildcard matches domain names below its suffix, and narrower
+			// wildcards, never an IP address
+			Self::Wildcard {
+				suffix,
+				port,
+			} => match tgt {
+				Self::Host(url::Host::Domain(tgt_host), tgt_port) => {
+					Self::port_covers(*port, *tgt_port)
+						&& common::net::host_is_under(tgt_host, suffix)
+				}
+				Self::Wildcard {
+					suffix: tgt_suffix,
+					port: tgt_port,
+				} => {
+					Self::port_covers(*port, *tgt_port)
+						&& common::net::suffix_covers(suffix, tgt_suffix)
+				}
+				Self::Host(..) | Self::IPNet(_) => false,
+			},
+		}
+	}
+}
+
+/// Why a string is not a valid [`NetTarget`].
+#[derive(Debug)]
+pub struct ParseNetTargetError {
+	wildcard: Option<common::net::WildcardHostError>,
+}
+
+impl std::error::Error for ParseNetTargetError {}
+impl fmt::Display for ParseNetTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match &self.wildcard {
+			Some(reason) => {
+				write!(f, "The provided network target is not a valid wildcard host: {reason}")
+			}
+			None => write!(
+				f,
+				"The provided network target is not a valid host name, wildcard host, IP address or CIDR block"
+			),
+		}
+	}
+}
+
+impl From<common::net::WildcardHostError> for ParseNetTargetError {
+	fn from(reason: common::net::WildcardHostError) -> Self {
+		Self {
+			wildcard: Some(reason),
+		}
+	}
+}
+
+impl std::str::FromStr for NetTarget {
+	type Err = ParseNetTargetError;
+
+	/// Parses `<host>[:<port>]`, `*.<domain>[:<port>]`, an IP address or a
+	/// CIDR block.
+	///
+	/// Any input containing `*` is either a well-formed wildcard or an error;
+	/// it is never read as an exact host that would match nothing.
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		use common::net::{
+			WildcardHostError, check_wildcard_suffix, split_wildcard_host, trim_root_dot,
+		};
+
+		if let Some((domain, port)) = split_wildcard_host(s)? {
+			let suffix = match url::Host::parse(domain) {
+				Ok(url::Host::Domain(domain)) => domain.to_ascii_lowercase(),
+				Ok(url::Host::Ipv4(_) | url::Host::Ipv6(_)) => {
+					return Err(WildcardHostError::IpAddress.into());
+				}
+				Err(_) => {
+					return Err(WildcardHostError::NotAHostPattern.into());
+				}
+			};
+			let suffix = check_wildcard_suffix(trim_root_dot(&suffix))?.to_owned();
+			return Ok(NetTarget::Wildcard {
+				suffix,
+				port,
+			});
+		}
+
+		// If it's a valid IPNet, return it
+		if let Ok(ipnet) = s.parse::<IpNet>() {
+			return Ok(NetTarget::IPNet(Self::canonical_ipnet(ipnet)));
+		}
+
+		// If it's a valid IPAddr, return it as an IPNet
+		if let Ok(ipnet) = s.parse::<IpAddr>() {
+			return Ok(NetTarget::IPNet(IpNet::from(ipnet.to_canonical())));
+		}
+
+		// Parse the host and port parts from a string in the form of 'host' or
+		// 'host:port'
+		if let Ok(url) = Url::parse(format!("http://{s}").as_str())
+			&& let Some(host) = url.host()
+		{
+			let host = Self::canonical_host(host);
+			// Url::parse will return port=None if the provided port was 80 (given we are
+			// using the http scheme). Get the original port from the string.
+			if let Some(Ok(port)) = s.split(':').next_back().map(|p| p.parse::<u16>()) {
+				return Ok(NetTarget::Host(host, Some(port)));
+			} else {
+				return Ok(NetTarget::Host(host, None));
+			}
+		}
+
+		Err(ParseNetTargetError {
+			wildcard: None,
+		})
+	}
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub struct MethodTarget {
+	pub method: Method,
+}
+
+// impl display
+impl fmt::Display for MethodTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.method.to_str())
+	}
+}
+
+impl Target for MethodTarget {
+	fn matches(&self, elem: &Self) -> bool {
+		self.method == elem.method
+	}
+}
+
+#[derive(Debug)]
+pub struct ParseMethodTargetError;
+
+impl std::error::Error for ParseMethodTargetError {}
+impl fmt::Display for ParseMethodTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "The provided method target is not a valid RPC method")
+	}
+}
+
+impl std::str::FromStr for MethodTarget {
+	type Err = ParseMethodTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let method = Method::parse_case_insensitive(s);
+		if method == Method::Unknown {
+			Err(ParseMethodTargetError)
+		} else {
+			Ok(MethodTarget {
+				method,
+			})
+		}
+	}
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub enum RouteTarget {
+	Health,
+	Export,
+	KvExport,
+	Import,
+	Rpc,
+	Version,
+	Sync,
+	Sql,
+	Signin,
+	Signup,
+	Key,
+	Bucket,
+	GraphQL,
+	Api,
+	Mcp,
+	Gql,
+	Postgres,
+	MySql,
+}
+
+// impl display
+impl fmt::Display for RouteTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			RouteTarget::Health => write!(f, "health"),
+			RouteTarget::Export => write!(f, "export"),
+			RouteTarget::KvExport => write!(f, "kvexport"),
+			RouteTarget::Import => write!(f, "import"),
+			RouteTarget::Rpc => write!(f, "rpc"),
+			RouteTarget::Version => write!(f, "version"),
+			RouteTarget::Sync => write!(f, "sync"),
+			RouteTarget::Sql => write!(f, "sql"),
+			RouteTarget::Signin => write!(f, "signin"),
+			RouteTarget::Signup => write!(f, "signup"),
+			RouteTarget::Key => write!(f, "key"),
+			RouteTarget::Bucket => write!(f, "bucket"),
+			RouteTarget::GraphQL => write!(f, "graphql"),
+			RouteTarget::Api => write!(f, "api"),
+			RouteTarget::Mcp => write!(f, "mcp"),
+			RouteTarget::Gql => write!(f, "gql"),
+			RouteTarget::Postgres => write!(f, "postgres"),
+			RouteTarget::MySql => write!(f, "mysql"),
+		}
+	}
+}
+
+impl Target for RouteTarget {
+	fn matches(&self, elem: &Self) -> bool {
+		*self == *elem
+	}
+}
+
+#[derive(Debug)]
+pub struct ParseRouteTargetError;
+
+impl std::error::Error for ParseRouteTargetError {}
+impl fmt::Display for ParseRouteTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "The provided route target is not a valid HTTP route")
+	}
+}
+
+impl std::str::FromStr for RouteTarget {
+	type Err = ParseRouteTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"health" => Ok(RouteTarget::Health),
+			"export" => Ok(RouteTarget::Export),
+			"kvexport" => Ok(RouteTarget::KvExport),
+			"import" => Ok(RouteTarget::Import),
+			"rpc" => Ok(RouteTarget::Rpc),
+			"version" => Ok(RouteTarget::Version),
+			"sync" => Ok(RouteTarget::Sync),
+			"sql" => Ok(RouteTarget::Sql),
+			"signin" => Ok(RouteTarget::Signin),
+			"signup" => Ok(RouteTarget::Signup),
+			"key" => Ok(RouteTarget::Key),
+			"bucket" => Ok(RouteTarget::Bucket),
+			"graphql" => Ok(RouteTarget::GraphQL),
+			"api" => Ok(RouteTarget::Api),
+			"mcp" => Ok(RouteTarget::Mcp),
+			"gql" => Ok(RouteTarget::Gql),
+			"postgres" => Ok(RouteTarget::Postgres),
+			"mysql" => Ok(RouteTarget::MySql),
+			_ => Err(ParseRouteTargetError),
+		}
+	}
+}
+
+/// A single MCP tool-name target for the `--allow-mcp` / `--deny-mcp`
+/// capability. Mirrors [`MethodTarget`] (RPC) and [`RouteTarget`] (HTTP) but
+/// keyed on MCP tool names. Matching is case-insensitive.
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub struct McpToolTarget(pub String);
+
+impl fmt::Display for McpToolTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
+
+impl Target for McpToolTarget {
+	fn matches(&self, elem: &Self) -> bool {
+		self.0.eq_ignore_ascii_case(&elem.0)
+	}
+}
+
+impl Target<str> for McpToolTarget {
+	fn matches(&self, elem: &str) -> bool {
+		self.0.eq_ignore_ascii_case(elem)
+	}
+}
+
+#[derive(Debug)]
+pub struct ParseMcpToolTargetError;
+
+impl std::error::Error for ParseMcpToolTargetError {}
+impl fmt::Display for ParseMcpToolTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "The provided MCP tool target is not a valid MCP tool name")
+	}
+}
+
+/// The canonical set of MCP tool names that may be targeted by the
+/// `--allow-mcp` / `--deny-mcp` capability flags. Kept in sync with the
+/// `#[tool]` handlers registered on `McpService`.
+pub const MCP_TOOL_NAMES: &[&str] = &[
+	"query", "select", "create", "insert", "upsert", "update", "delete", "relate", "info", "list",
+	"use", "run", "gql", "graphql",
+];
+
+impl std::str::FromStr for McpToolTarget {
+	type Err = ParseMcpToolTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let s = s.trim();
+		if MCP_TOOL_NAMES.iter().any(|n| n.eq_ignore_ascii_case(s)) {
+			Ok(McpToolTarget(s.to_ascii_lowercase()))
+		} else {
+			Err(ParseMcpToolTargetError)
+		}
+	}
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub enum ArbitraryQueryTarget {
+	Guest,
+	Record,
+	System,
+}
+
+impl fmt::Display for ArbitraryQueryTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Guest => write!(f, "guest"),
+			Self::Record => write!(f, "record"),
+			Self::System => write!(f, "system"),
+		}
+	}
+}
+
+impl<'a> From<&'a Level> for ArbitraryQueryTarget {
+	fn from(level: &'a Level) -> Self {
+		match level {
+			Level::No => ArbitraryQueryTarget::Guest,
+			Level::Root => ArbitraryQueryTarget::System,
+			Level::Namespace(_) => ArbitraryQueryTarget::System,
+			Level::Database(_, _) => ArbitraryQueryTarget::System,
+			Level::Record(_, _, _) => ArbitraryQueryTarget::Record,
+		}
+	}
+}
+
+impl<'a> From<&'a Auth> for ArbitraryQueryTarget {
+	fn from(auth: &'a Auth) -> Self {
+		auth.level().into()
+	}
+}
+
+impl Target for ArbitraryQueryTarget {
+	fn matches(&self, elem: &ArbitraryQueryTarget) -> bool {
+		self == elem
+	}
+}
+
+impl Target<str> for ArbitraryQueryTarget {
+	fn matches(&self, elem: &str) -> bool {
+		match self {
+			Self::Guest => elem.eq_ignore_ascii_case("guest"),
+			Self::Record => elem.eq_ignore_ascii_case("record"),
+			Self::System => elem.eq_ignore_ascii_case("system"),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseArbitraryQueryTargetError {
+	InvalidName,
+}
+
+impl std::error::Error for ParseArbitraryQueryTargetError {}
+impl fmt::Display for ParseArbitraryQueryTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match *self {
+			ParseArbitraryQueryTargetError::InvalidName => {
+				write!(f, "invalid query target name")
+			}
+		}
+	}
+}
+
+impl std::str::FromStr for ArbitraryQueryTarget {
+	type Err = ParseArbitraryQueryTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s.trim().to_ascii_lowercase().as_str() {
+			"guest" => Ok(ArbitraryQueryTarget::Guest),
+			"record" => Ok(ArbitraryQueryTarget::Record),
+			"system" => Ok(ArbitraryQueryTarget::System),
+			_ => Err(ParseArbitraryQueryTargetError::InvalidName),
+		}
+	}
+}
+
+/// The authentication subject class permitted to invoke the `eval::*` functions
+/// (`eval::surql`, `eval::gql`).
+///
+/// This mirrors [`ArbitraryQueryTarget`] exactly — the subject is derived from
+/// the session auth level — but is a *separate, additive* gate: an `eval`
+/// invocation must satisfy both the arbitrary-query capability (because running
+/// a nested query *is* an arbitrary query) and this one. The default is
+/// [`Targets::None`] (no subject), so eval is denied out of the box and must be
+/// explicitly enabled (e.g. `--allow-eval-query system`). Because both gates
+/// must pass, eval can never grant a subject more query power than the
+/// front-door arbitrary-query capability allows.
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub enum EvalQueryTarget {
+	Guest,
+	Record,
+	System,
+}
+
+impl fmt::Display for EvalQueryTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Guest => write!(f, "guest"),
+			Self::Record => write!(f, "record"),
+			Self::System => write!(f, "system"),
+		}
+	}
+}
+
+impl<'a> From<&'a Level> for EvalQueryTarget {
+	fn from(level: &'a Level) -> Self {
+		match level {
+			Level::No => EvalQueryTarget::Guest,
+			Level::Root => EvalQueryTarget::System,
+			Level::Namespace(_) => EvalQueryTarget::System,
+			Level::Database(_, _) => EvalQueryTarget::System,
+			Level::Record(_, _, _) => EvalQueryTarget::Record,
+		}
+	}
+}
+
+impl<'a> From<&'a Auth> for EvalQueryTarget {
+	fn from(auth: &'a Auth) -> Self {
+		auth.level().into()
+	}
+}
+
+impl Target for EvalQueryTarget {
+	fn matches(&self, elem: &EvalQueryTarget) -> bool {
+		self == elem
+	}
+}
+
+impl Target<str> for EvalQueryTarget {
+	fn matches(&self, elem: &str) -> bool {
+		match self {
+			Self::Guest => elem.eq_ignore_ascii_case("guest"),
+			Self::Record => elem.eq_ignore_ascii_case("record"),
+			Self::System => elem.eq_ignore_ascii_case("system"),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseEvalQueryTargetError {
+	InvalidName,
+}
+
+impl std::error::Error for ParseEvalQueryTargetError {}
+impl fmt::Display for ParseEvalQueryTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match *self {
+			ParseEvalQueryTargetError::InvalidName => {
+				write!(f, "invalid eval query target name")
+			}
+		}
+	}
+}
+
+impl std::str::FromStr for EvalQueryTarget {
+	type Err = ParseEvalQueryTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s.trim().to_ascii_lowercase().as_str() {
+			"guest" => Ok(EvalQueryTarget::Guest),
+			"record" => Ok(EvalQueryTarget::Record),
+			"system" => Ok(EvalQueryTarget::System),
+			_ => Err(ParseEvalQueryTargetError::InvalidName),
+		}
+	}
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Targets<T: Hash + Eq + PartialEq + Ord> {
+	None,
+	Some(HashSet<T>),
+	All,
+}
+
+impl<T: Target + Hash + Eq + PartialEq + Ord> From<T> for Targets<T> {
+	fn from(t: T) -> Self {
+		let mut set = HashSet::new();
+		set.insert(t);
+		Self::Some(set)
+	}
+}
+
+impl<T: Hash + Eq + PartialEq + Ord + fmt::Debug + fmt::Display> Targets<T> {
+	pub fn matches<S>(&self, elem: &S) -> bool
+	where
+		S: ?Sized,
+		T: Target<S>,
+	{
+		match self {
+			Self::None => false,
+			Self::All => true,
+			Self::Some(targets) => targets.iter().any(|t| t.matches(elem)),
+		}
+	}
+}
+
+impl<T: Target + Hash + Eq + PartialEq + Ord + fmt::Display> fmt::Display for Targets<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::None => write!(f, "none"),
+			Self::All => write!(f, "all"),
+			Self::Some(targets) => write!(
+				f,
+				"{}",
+				targets.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", ")
+			),
+		}
+	}
+}
+
+impl<T: Hash + Eq + PartialEq + Ord> Hash for Targets<T> {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		match self {
+			Self::None => state.write_u8(0),
+			Self::All => state.write_u8(1),
+			Self::Some(targets) => {
+				let mut sorted = targets.iter().collect::<Vec<&T>>();
+				sorted.sort();
+				sorted.hash(state);
+			}
+		}
+	}
+}
+
+fn is_all_allowed<T: Hash + Eq + Ord>(allow: &Targets<T>, deny: &Targets<T>) -> bool {
+	matches!(allow, Targets::All) && matches!(deny, Targets::None)
+}
+
+#[derive(Debug, Clone, Hash)]
+pub struct Capabilities {
+	scripting: bool,
+	guest_access: bool,
+	live_query_notifications: bool,
+
+	allow_funcs: Targets<FuncTarget>,
+	deny_funcs: Targets<FuncTarget>,
+	pub allow_net: Targets<NetTarget>,
+	pub deny_net: Targets<NetTarget>,
+	allow_rpc: Targets<MethodTarget>,
+	deny_rpc: Targets<MethodTarget>,
+	allow_mcp: Targets<McpToolTarget>,
+	deny_mcp: Targets<McpToolTarget>,
+	allow_http: Targets<RouteTarget>,
+	deny_http: Targets<RouteTarget>,
+	allow_experimental: Targets<ExperimentalTarget>,
+	deny_experimental: Targets<ExperimentalTarget>,
+	allow_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	deny_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	allow_eval_query: Targets<EvalQueryTarget>,
+	deny_eval_query: Targets<EvalQueryTarget>,
+}
+
+impl fmt::Display for Capabilities {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(
+			f,
+			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_mcp={}, deny_mcp={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}, allow_eval_query={}, deny_eval_query={},",
+			self.scripting,
+			self.guest_access,
+			self.live_query_notifications,
+			self.allow_funcs,
+			self.deny_funcs,
+			self.allow_net,
+			self.deny_net,
+			self.allow_rpc,
+			self.deny_rpc,
+			self.allow_mcp,
+			self.deny_mcp,
+			self.allow_http,
+			self.deny_http,
+			self.allow_experimental,
+			self.deny_experimental,
+			self.allow_arbitrary_query,
+			self.deny_arbitrary_query,
+			self.allow_eval_query,
+			self.deny_eval_query,
+		)
+	}
+}
+
+impl Default for Capabilities {
+	fn default() -> Self {
+		Self {
+			scripting: false,
+			guest_access: false,
+			live_query_notifications: true,
+
+			allow_funcs: Targets::All,
+			deny_funcs: Targets::None,
+			allow_net: Targets::None,
+			deny_net: Targets::None,
+			allow_rpc: Targets::All,
+			deny_rpc: Targets::None,
+			allow_mcp: Targets::All,
+			deny_mcp: Targets::None,
+			allow_http: Targets::All,
+			deny_http: Targets::None,
+			allow_experimental: Targets::None,
+			deny_experimental: Targets::None,
+			allow_arbitrary_query: Targets::All,
+			deny_arbitrary_query: Targets::None,
+			// Denied out of the box (even under `Capabilities::all()` /
+			// `--allow-all`): eval must be explicitly enabled per subject class.
+			allow_eval_query: Targets::None,
+			deny_eval_query: Targets::None,
+		}
+	}
+}
+
+impl Capabilities {
+	pub fn all() -> Self {
+		Self {
+			scripting: true,
+			guest_access: true,
+			live_query_notifications: true,
+
+			allow_funcs: Targets::All,
+			deny_funcs: Targets::None,
+			allow_net: Targets::All,
+			deny_net: Targets::None,
+			allow_rpc: Targets::All,
+			deny_rpc: Targets::None,
+			allow_mcp: Targets::All,
+			deny_mcp: Targets::None,
+			allow_http: Targets::All,
+			deny_http: Targets::None,
+			allow_experimental: Targets::None,
+			deny_experimental: Targets::None,
+			allow_arbitrary_query: Targets::All,
+			deny_arbitrary_query: Targets::None,
+			// Denied out of the box (even under `Capabilities::all()` /
+			// `--allow-all`): eval must be explicitly enabled per subject class.
+			allow_eval_query: Targets::None,
+			deny_eval_query: Targets::None,
+		}
+	}
+
+	pub fn none() -> Self {
+		Self {
+			scripting: false,
+			guest_access: false,
+			live_query_notifications: false,
+
+			allow_funcs: Targets::None,
+			deny_funcs: Targets::None,
+			allow_net: Targets::None,
+			deny_net: Targets::None,
+			allow_rpc: Targets::None,
+			deny_rpc: Targets::None,
+			allow_mcp: Targets::None,
+			deny_mcp: Targets::None,
+			allow_http: Targets::None,
+			deny_http: Targets::None,
+			allow_experimental: Targets::None,
+			deny_experimental: Targets::None,
+			allow_arbitrary_query: Targets::None,
+			deny_arbitrary_query: Targets::None,
+			allow_eval_query: Targets::None,
+			deny_eval_query: Targets::None,
+		}
+	}
+
+	pub fn with_scripting(mut self, scripting: bool) -> Self {
+		self.scripting = scripting;
+		self
+	}
+
+	pub fn with_guest_access(mut self, guest_access: bool) -> Self {
+		self.guest_access = guest_access;
+		self
+	}
+
+	pub fn with_live_query_notifications(mut self, live_query_notifications: bool) -> Self {
+		self.live_query_notifications = live_query_notifications;
+		self
+	}
+
+	pub fn with_functions(mut self, allow_funcs: Targets<FuncTarget>) -> Self {
+		self.allow_funcs = allow_funcs;
+		self
+	}
+
+	pub fn allowed_functions_mut(&mut self) -> &mut Targets<FuncTarget> {
+		&mut self.allow_funcs
+	}
+
+	pub fn without_functions(mut self, deny_funcs: Targets<FuncTarget>) -> Self {
+		self.deny_funcs = deny_funcs;
+		self
+	}
+
+	pub fn denied_functions_mut(&mut self) -> &mut Targets<FuncTarget> {
+		&mut self.deny_funcs
+	}
+
+	pub fn allowed_functions_ref(&self) -> &Targets<FuncTarget> {
+		&self.allow_funcs
+	}
+
+	pub fn denied_functions_ref(&self) -> &Targets<FuncTarget> {
+		&self.deny_funcs
+	}
+
+	pub fn with_experimental(mut self, allow_experimental: Targets<ExperimentalTarget>) -> Self {
+		self.allow_experimental = allow_experimental;
+		self
+	}
+
+	pub fn allowed_experimental_features_mut(&mut self) -> &mut Targets<ExperimentalTarget> {
+		&mut self.allow_experimental
+	}
+
+	pub fn without_experimental(mut self, deny_experimental: Targets<ExperimentalTarget>) -> Self {
+		self.deny_experimental = deny_experimental;
+		self
+	}
+
+	pub fn denied_experimental_features_mut(&mut self) -> &mut Targets<ExperimentalTarget> {
+		&mut self.deny_experimental
+	}
+
+	pub fn with_arbitrary_query(
+		mut self,
+		allow_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	) -> Self {
+		self.allow_arbitrary_query = allow_arbitrary_query;
+		self
+	}
+
+	pub fn without_arbitrary_query(
+		mut self,
+		deny_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	) -> Self {
+		self.deny_arbitrary_query = deny_arbitrary_query;
+		self
+	}
+
+	pub fn with_eval_query(mut self, allow_eval_query: Targets<EvalQueryTarget>) -> Self {
+		self.allow_eval_query = allow_eval_query;
+		self
+	}
+
+	pub fn without_eval_query(mut self, deny_eval_query: Targets<EvalQueryTarget>) -> Self {
+		self.deny_eval_query = deny_eval_query;
+		self
+	}
+
+	pub fn with_network_targets(mut self, allow_net: Targets<NetTarget>) -> Self {
+		self.allow_net = allow_net;
+		self
+	}
+
+	pub fn allowed_network_targets_ref(&self) -> &Targets<NetTarget> {
+		&self.allow_net
+	}
+
+	pub fn allowed_network_targets_mut(&mut self) -> &mut Targets<NetTarget> {
+		&mut self.allow_net
+	}
+
+	pub fn without_network_targets(mut self, deny_net: Targets<NetTarget>) -> Self {
+		self.deny_net = deny_net;
+		self
+	}
+
+	pub fn denied_network_targets_ref(&self) -> &Targets<NetTarget> {
+		&self.deny_net
+	}
+
+	pub fn denied_network_targets_mut(&mut self) -> &mut Targets<NetTarget> {
+		&mut self.deny_net
+	}
+
+	pub fn with_rpc_methods(mut self, allow_rpc: Targets<MethodTarget>) -> Self {
+		self.allow_rpc = allow_rpc;
+		self
+	}
+
+	pub fn without_rpc_methods(mut self, deny_rpc: Targets<MethodTarget>) -> Self {
+		self.deny_rpc = deny_rpc;
+		self
+	}
+
+	pub fn with_mcp_tools(mut self, allow_mcp: Targets<McpToolTarget>) -> Self {
+		self.allow_mcp = allow_mcp;
+		self
+	}
+
+	pub fn allowed_mcp_tools_mut(&mut self) -> &mut Targets<McpToolTarget> {
+		&mut self.allow_mcp
+	}
+
+	pub fn without_mcp_tools(mut self, deny_mcp: Targets<McpToolTarget>) -> Self {
+		self.deny_mcp = deny_mcp;
+		self
+	}
+
+	pub fn denied_mcp_tools_mut(&mut self) -> &mut Targets<McpToolTarget> {
+		&mut self.deny_mcp
+	}
+
+	pub fn with_http_routes(mut self, allow_http: Targets<RouteTarget>) -> Self {
+		self.allow_http = allow_http;
+		self
+	}
+
+	pub fn without_http_routes(mut self, deny_http: Targets<RouteTarget>) -> Self {
+		self.deny_http = deny_http;
+		self
+	}
+
+	pub fn allows_scripting(&self) -> bool {
+		self.scripting
+	}
+
+	pub fn allows_guest_access(&self) -> bool {
+		self.guest_access
+	}
+
+	pub fn allows_live_query_notifications(&self) -> bool {
+		self.live_query_notifications
+	}
+
+	pub fn allows_function_name(&self, target: &str) -> bool {
+		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
+	}
+
+	/// Check whether a parsed `FuncTarget` (possibly a wildcard like `fn::*`)
+	/// is covered by the server's function capability configuration.
+	pub fn allows_function_target(&self, target: &FuncTarget) -> bool {
+		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
+	}
+
+	/// Check whether the extension function `target` is covered by the
+	/// server's function capability configuration.
+	///
+	/// `ext::` and its alias `mod::` name the same extensions, so `target` is
+	/// matched under both families: an allow entry in either admits it and a
+	/// deny entry in either refuses it. Which family `target` or the
+	/// configuration is written in never changes the outcome. A target in any
+	/// other family is checked as [`Self::allows_function_target`] checks it.
+	pub fn allows_extension_function_target(&self, target: &FuncTarget) -> bool {
+		let alias = match target.0.as_str() {
+			"ext" => "mod",
+			"mod" => "ext",
+			_ => return self.allows_function_target(target),
+		};
+		let other = FuncTarget(alias.to_string(), target.1.clone());
+		let allowed = self.allow_funcs.matches(target) || self.allow_funcs.matches(&other);
+		let denied = self.deny_funcs.matches(target) || self.deny_funcs.matches(&other);
+		allowed && !denied
+	}
+
+	pub fn allows_experimental(&self, target: &ExperimentalTarget) -> bool {
+		self.allow_experimental.matches(target) && !self.deny_experimental.matches(target)
+	}
+
+	pub fn allows_experimental_name(&self, target: &str) -> bool {
+		self.allow_experimental.matches(target) && !self.deny_experimental.matches(target)
+	}
+
+	pub fn allows_query(&self, target: &ArbitraryQueryTarget) -> bool {
+		self.allow_arbitrary_query.matches(target) && !self.deny_arbitrary_query.matches(target)
+	}
+
+	/// Whether the given subject class may invoke the `eval::*` functions.
+	///
+	/// This is an additive gate on top of [`Capabilities::allows_query`]; both
+	/// must pass for an `eval` invocation to proceed.
+	pub fn allows_eval_query(&self, target: &EvalQueryTarget) -> bool {
+		self.allow_eval_query.matches(target) && !self.deny_eval_query.matches(target)
+	}
+
+	pub fn allows_network_target(&self, target: &NetTarget) -> bool {
+		self.allow_net.matches(target) && !self.deny_net.matches(target)
+	}
+
+	/// Whether every outbound network target is permitted (`allow_net` is
+	/// [`Targets::All`] and `deny_net` is [`Targets::None`]).
+	pub fn allows_all_network_targets(&self) -> bool {
+		is_all_allowed(&self.allow_net, &self.deny_net)
+	}
+
+	pub fn matches_any_allow_net(&self, target: &NetTarget) -> bool {
+		self.allow_net.matches(target)
+	}
+
+	pub fn matches_any_deny_net(&self, target: &NetTarget) -> bool {
+		self.deny_net.matches(target)
+	}
+
+	pub fn allows_rpc_method(&self, target: &MethodTarget) -> bool {
+		self.allow_rpc.matches(target) && !self.deny_rpc.matches(target)
+	}
+
+	pub fn allows_mcp_tool(&self, target: &McpToolTarget) -> bool {
+		self.allow_mcp.matches(target) && !self.deny_mcp.matches(target)
+	}
+
+	pub fn allows_http_route(&self, target: &RouteTarget) -> bool {
+		self.allow_http.matches(target) && !self.deny_http.matches(target)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::str::FromStr;
+
+	use test_log::test;
+
+	use super::*;
+
+	#[test]
+	fn test_invalid_func_target() {
+		FuncTarget::from_str("te::*st").unwrap_err();
+		FuncTarget::from_str("\0::st").unwrap_err();
+		FuncTarget::from_str("").unwrap_err();
+		FuncTarget::from_str("❤️").unwrap_err();
+	}
+
+	#[test]
+	fn test_func_target() {
+		assert!(FuncTarget::from_str("test").unwrap().matches("test"));
+		assert!(!FuncTarget::from_str("test").unwrap().matches("test2"));
+
+		assert!(!FuncTarget::from_str("test::").unwrap().matches("test"));
+
+		assert!(FuncTarget::from_str("test::*").unwrap().matches("test::name"));
+		assert!(!FuncTarget::from_str("test::*").unwrap().matches("test2::name"));
+
+		assert!(FuncTarget::from_str("test::name").unwrap().matches("test::name"));
+		assert!(!FuncTarget::from_str("test::name").unwrap().matches("test::name2"));
+	}
+
+	#[test]
+	fn test_experimental_target() {
+		assert_eq!(
+			ExperimentalTarget::from_str("surrealism").unwrap(),
+			ExperimentalTarget::Surrealism
+		);
+		// Neither GQL nor files is an experimental target.
+		ExperimentalTarget::from_str("gql").unwrap_err();
+		ExperimentalTarget::from_str("files").unwrap_err();
+		ExperimentalTarget::from_str("opengql").unwrap_err();
+		ExperimentalTarget::from_str("").unwrap_err();
+
+		assert_eq!(ExperimentalTarget::Surrealism.to_string(), "surrealism");
+		assert_eq!(
+			ExperimentalTarget::from_str(&ExperimentalTarget::Surrealism.to_string()).unwrap(),
+			ExperimentalTarget::Surrealism
+		);
+		assert!(!ExperimentalTarget::Surrealism.matches("kvexport"));
+
+		assert_eq!(ExperimentalTarget::from_str("kvexport").unwrap(), ExperimentalTarget::KvExport);
+		assert_eq!(ExperimentalTarget::KvExport.to_string(), "kvexport");
+		assert!(ExperimentalTarget::KvExport.matches("KVEXPORT"));
+		assert!(!ExperimentalTarget::KvExport.matches("export"));
+	}
+
+	/// `/kvexport` answers to a target of its own, so it can be denied without
+	/// denying `/export`, and the reverse.
+	#[test]
+	fn the_kvexport_route_is_its_own_target() {
+		assert_eq!(RouteTarget::from_str("kvexport").unwrap(), RouteTarget::KvExport);
+		assert_eq!(RouteTarget::KvExport.to_string(), "kvexport");
+		let caps = Capabilities::default()
+			.without_http_routes(Targets::Some([RouteTarget::KvExport].into()));
+		assert!(!caps.allows_http_route(&RouteTarget::KvExport));
+		assert!(caps.allows_http_route(&RouteTarget::Export));
+		let caps = Capabilities::default()
+			.without_http_routes(Targets::Some([RouteTarget::Export].into()));
+		assert!(caps.allows_http_route(&RouteTarget::KvExport));
+		assert!(!caps.allows_http_route(&RouteTarget::Export));
+	}
+
+	/// The experimental capability that enables `/kvexport` is off by default,
+	/// including under `Capabilities::all()`.
+	#[test]
+	fn kvexport_is_not_enabled_by_default() {
+		assert!(!Capabilities::default().allows_experimental(&ExperimentalTarget::KvExport));
+		assert!(!Capabilities::all().allows_experimental(&ExperimentalTarget::KvExport));
+		let caps = Capabilities::default()
+			.with_experimental(Targets::Some([ExperimentalTarget::KvExport].into()));
+		assert!(caps.allows_experimental(&ExperimentalTarget::KvExport));
+	}
+
+	#[test]
+	fn test_net_target() {
+		// IPNet IPv4
+		assert!(
+			NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("10.0.1.0/24").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("10.0.1.2").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("20.0.1.0/24").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("20.0.1.0").unwrap())
+		);
+
+		// IPNet IPv6
+		assert!(
+			NetTarget::from_str("2001:db8::1")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8::1").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8::1").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8:abcd:12::/64").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db9::1").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db9:abcd:12::1/64").unwrap())
+		);
+
+		// Host domain with and without port
+		assert!(
+			NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:80").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("www.example.com").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("www.example.com:80").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:80").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:443").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
+
+		// Host IPv4 with and without port
+		assert!(
+			NetTarget::from_str("127.0.0.1")
+				.unwrap()
+				.matches(&NetTarget::from_str("127.0.0.1").unwrap()),
+			"Host IPv4 without port matches itself"
+		);
+		assert!(
+			NetTarget::from_str("127.0.0.1")
+				.unwrap()
+				.matches(&NetTarget::from_str("127.0.0.1:80").unwrap()),
+			"Host IPv4 without port matches Host IPv4 with port"
+		);
+		assert!(
+			NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("10.0.0.1:80").unwrap()),
+			"IPv4 network matches Host IPv4 with port"
+		);
+		assert!(
+			NetTarget::from_str("127.0.0.1:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("127.0.0.1:80").unwrap()),
+			"Host IPv4 with port matches itself"
+		);
+		assert!(
+			!NetTarget::from_str("127.0.0.1:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("127.0.0.1").unwrap()),
+			"Host IPv4 with port does not match Host IPv4 without port"
+		);
+		assert!(
+			!NetTarget::from_str("127.0.0.1:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("127.0.0.1:443").unwrap()),
+			"Host IPv4 with port does not match Host IPv4 with different port"
+		);
+
+		// Host IPv6 with and without port
+		assert!(
+			NetTarget::from_str("[2001:db8::1]")
+				.unwrap()
+				.matches(&NetTarget::from_str("[2001:db8::1]").unwrap()),
+			"Host IPv6 without port matches itself"
+		);
+		assert!(
+			NetTarget::from_str("[2001:db8::1]")
+				.unwrap()
+				.matches(&NetTarget::from_str("[2001:db8::1]:80").unwrap()),
+			"Host IPv6 without port matches Host IPv6 with port"
+		);
+		assert!(
+			NetTarget::from_str("2001:db8::1")
+				.unwrap()
+				.matches(&NetTarget::from_str("[2001:db8::1]:80").unwrap()),
+			"IPv6 addr matches Host IPv6 with port"
+		);
+		assert!(
+			NetTarget::from_str("2001:db8::/64")
+				.unwrap()
+				.matches(&NetTarget::from_str("[2001:db8::1]:80").unwrap()),
+			"IPv6 network matches Host IPv6 with port"
+		);
+		assert!(
+			NetTarget::from_str("[2001:db8::1]:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("[2001:db8::1]:80").unwrap()),
+			"Host IPv6 with port matches itself"
+		);
+		assert!(
+			!NetTarget::from_str("[2001:db8::1]:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("[2001:db8::1]").unwrap()),
+			"Host IPv6 with port does not match Host IPv6 without port"
+		);
+		assert!(
+			!NetTarget::from_str("[2001:db8::1]:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("[2001:db8::1]:443").unwrap()),
+			"Host IPv6 with port does not match Host IPv6 with different port"
+		);
+
+		// Test invalid targets
+		assert!(NetTarget::from_str("exam^ple.com").is_err());
+		assert!(NetTarget::from_str("example.com:80:80").is_err());
+		assert!(NetTarget::from_str("11111.3.4.5").is_err());
+		assert!(NetTarget::from_str("2001:db8::1/129").is_err());
+		assert!(NetTarget::from_str("[2001:db8::1").is_err());
+	}
+
+	#[test]
+	fn test_net_target_ipv4_mapped_ipv6_and_trailing_dot_canonicalisation() {
+		// IPv4-mapped IPv6 targets match IPv4 rules and vice versa
+		assert!(net("127.0.0.1").matches(&net("[::ffff:127.0.0.1]:80")));
+		assert!(net("127.0.0.0/8").matches(&net("[::ffff:127.0.0.1]:80")));
+		assert!(net("169.254.0.0/16").matches(&net("[::ffff:169.254.169.254]:80")));
+		assert!(net("127.0.0.1:80").matches(&net("[::ffff:127.0.0.1]:80")));
+		assert!(net("[::ffff:127.0.0.1]:80").matches(&net("127.0.0.1:80")));
+
+		// Even when a request target is constructed with a raw IPv4-mapped IPv6 Host
+		let raw_mapped =
+			NetTarget::Host(url::Host::Ipv6("::ffff:169.254.169.254".parse().unwrap()), Some(80));
+		assert!(net("169.254.169.254").matches(&raw_mapped));
+		assert!(net("169.254.0.0/16").matches(&raw_mapped));
+		assert!(net("169.254.169.254:80").matches(&raw_mapped));
+
+		// Trailing root dots on exact host rules and request targets match
+		assert!(net("example.com").matches(&net("example.com.")));
+		assert!(net("example.com.").matches(&net("example.com")));
+		assert!(net("example.com:443").matches(&net("example.com.:443")));
+		let raw_trailing = NetTarget::Host(url::Host::Domain("example.com.".to_string()), Some(80));
+		assert!(net("example.com").matches(&raw_trailing));
+		assert!(net("example.com:80").matches(&raw_trailing));
+		assert!(
+			net("*.example.com").matches(&NetTarget::Host(
+				url::Host::Domain("api.example.com..".to_string()),
+				None,
+			))
+		);
+	}
+
+	fn net(s: &str) -> NetTarget {
+		NetTarget::from_str(s).unwrap()
+	}
+
+	#[test]
+	fn test_wildcard_net_target_matches_subdomains_only() {
+		let rule = net("*.google.com");
+		assert_eq!(
+			rule,
+			NetTarget::Wildcard {
+				suffix: "google.com".to_string(),
+				port: None
+			}
+		);
+		for host in ["www.google.com", "a.b.google.com", "www.google.com:443", "api.google.com:80"]
+		{
+			assert!(rule.matches(&net(host)), "{host}");
+		}
+		for host in [
+			"google.com",
+			"google.com:443",
+			"evilgoogle.com",
+			"www.evilgoogle.com",
+			"google.com.evil.com",
+			"www.google.co",
+			"127.0.0.1",
+			"[::1]:443",
+		] {
+			assert!(!rule.matches(&net(host)), "{host}");
+		}
+		// An IP or CIDR request target is never below a domain
+		assert!(!rule.matches(&net("10.0.0.0/8")));
+	}
+
+	#[test]
+	fn test_wildcard_net_target_normalises_case_trailing_dot_and_idna() {
+		// The rule is stored lowercase without the root dot, and prints as such
+		for spelling in ["*.Google.COM", "*.google.com."] {
+			let rule = net(spelling);
+			assert_eq!(rule.to_string(), "*.google.com", "{spelling}");
+			assert!(rule.matches(&net("WWW.GOOGLE.COM")), "{spelling}");
+			assert!(rule.matches(&net("www.google.com.")), "{spelling}");
+		}
+		// A request host built straight from its parts is matched without regard to case
+		let mixed = NetTarget::Host(url::Host::Domain("Www.Google.Com".to_string()), None);
+		assert!(net("*.google.com").matches(&mixed));
+		// Unicode labels are compared in their punycode form
+		let rule = net("*.bücher.example");
+		assert_eq!(rule.to_string(), "*.xn--bcher-kva.example");
+		assert!(rule.matches(&net("shop.bücher.example")));
+		assert!(rule.matches(&net("shop.xn--bcher-kva.example")));
+	}
+
+	#[test]
+	fn test_wildcard_net_target_ports() {
+		let any_port = net("*.example.com");
+		let one_port = net("*.example.com:443");
+		assert_eq!(one_port.to_string(), "*.example.com:443");
+		assert_eq!(net(&one_port.to_string()), one_port);
+		assert_eq!(net(&any_port.to_string()), any_port);
+
+		assert!(any_port.matches(&net("api.example.com")));
+		assert!(any_port.matches(&net("api.example.com:8080")));
+		assert!(one_port.matches(&net("api.example.com:443")));
+		assert!(!one_port.matches(&net("api.example.com:80")));
+		// A port-bearing rule does not match a target that names no port, as for a Host rule
+		assert!(!one_port.matches(&net("api.example.com")));
+		// The default port is the one written, not dropped
+		assert!(net("*.example.com:80").matches(&net("api.example.com:80")));
+	}
+
+	#[test]
+	fn test_wildcard_net_target_subset() {
+		let wide = net("*.example.com");
+		// A wildcard covers itself and every narrower wildcard
+		assert!(wide.matches(&wide));
+		assert!(wide.matches(&net("*.api.example.com")));
+		assert!(wide.matches(&net("*.api.example.com:443")));
+		assert!(!wide.matches(&net("*.notexample.com")));
+		assert!(!net("*.api.example.com").matches(&wide));
+		// Ports: a port-less wildcard covers a port-bearing one, not the other way round
+		assert!(!net("*.example.com:443").matches(&wide));
+		assert!(net("*.example.com:443").matches(&net("*.api.example.com:443")));
+		assert!(!net("*.example.com:443").matches(&net("*.api.example.com:80")));
+		// An exact host or an address range never covers a wildcard
+		assert!(!net("api.example.com").matches(&wide));
+		assert!(!net("example.com").matches(&wide));
+		assert!(!net("0.0.0.0/0").matches(&wide));
+		// Targets<NetTarget> applies the same subset check member by member
+		let allow = Targets::Some([net("*.example.com"), net("other.org")].into());
+		assert!(allow.matches(&net("*.eu.example.com")));
+		assert!(!allow.matches(&net("*.other.org")));
+		assert!(Targets::<NetTarget>::All.matches(&wide));
+	}
+
+	#[test]
+	fn test_wildcard_net_target_parse_rejections() {
+		for entry in [
+			"*",
+			"*.",
+			"*.com",
+			"*.com.",
+			"*.:443",
+			"a.*.com",
+			"*foo.com",
+			"foo.*.com",
+			"foo.com.*",
+			"**.foo.com",
+			"*.*.foo.com",
+			"*.foo..com",
+			"*.1.2.3.4",
+			"*.1.2.3",
+			"*.[2001:db8::1]",
+			"*.10.0.0.0/8",
+			"10.*.0.0/16",
+			"*.0.0.0/0",
+			"2001:db8::*",
+			"*.foo.com/path",
+			"*.user@foo.com",
+			"*.foo.com:http",
+			"*.foo.com:70000",
+			"*.foo.com:80:80",
+		] {
+			let err = NetTarget::from_str(entry).unwrap_err();
+			assert!(err.to_string().contains("wildcard"), "{entry}: {err}");
+		}
+		assert_eq!(
+			NetTarget::from_str("*.com").unwrap_err().to_string(),
+			"The provided network target is not a valid wildcard host: a wildcard must be followed by a domain of at least two labels, as in '*.example.com'"
+		);
+		assert_eq!(
+			NetTarget::from_str("a.*.com").unwrap_err().to_string(),
+			"The provided network target is not a valid wildcard host: a wildcard is only allowed as the whole leftmost label, as in '*.example.com'"
+		);
+		assert_eq!(
+			NetTarget::from_str("*.1.2.3.4").unwrap_err().to_string(),
+			"The provided network target is not a valid wildcard host: a wildcard cannot be applied to an IP address; use a CIDR block such as '10.0.0.0/8'"
+		);
+	}
+
+	#[test]
+	fn test_wildcard_net_capabilities_deny_wins() {
+		// A wildcard deny under a global allow refuses every subdomain, and only those
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::All)
+			.without_network_targets(Targets::Some([net("*.google.com")].into()));
+		assert!(!caps.allows_network_target(&net("www.google.com")));
+		assert!(!caps.allows_network_target(&net("a.b.google.com:443")));
+		assert!(caps.allows_network_target(&net("google.com")));
+		assert!(caps.allows_network_target(&net("evilgoogle.com")));
+		// A wildcard deny overrides an exact allow below it
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::Some([net("api.example.com")].into()))
+			.without_network_targets(Targets::Some([net("*.example.com")].into()));
+		assert!(!caps.allows_network_target(&net("api.example.com")));
+		// The same wildcard on both sides: deny wins
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::Some([net("*.example.com")].into()))
+			.without_network_targets(Targets::Some([net("*.example.com")].into()));
+		assert!(!caps.allows_network_target(&net("api.example.com")));
+		assert!(!caps.allows_network_target(&net("*.example.com")));
+		// An exact deny below a wildcard allow carves that host out
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::Some([net("*.example.com")].into()))
+			.without_network_targets(Targets::Some([net("secret.example.com")].into()));
+		assert!(caps.allows_network_target(&net("api.example.com")));
+		assert!(!caps.allows_network_target(&net("secret.example.com")));
+		assert!(!caps.allows_network_target(&net("secret.example.com:443")));
+		// A wider wildcard deny refuses a narrower wildcard request
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::All)
+			.without_network_targets(Targets::Some([net("*.example.com")].into()));
+		assert!(!caps.allows_network_target(&net("*.api.example.com")));
+		// A port-bearing wildcard deny refuses that port only
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::Some([net("*.example.com")].into()))
+			.without_network_targets(Targets::Some([net("*.example.com:80")].into()));
+		assert!(caps.allows_network_target(&net("api.example.com:443")));
+		assert!(!caps.allows_network_target(&net("api.example.com:80")));
+		// A wildcard allow does not widen to the apex or to IP addresses
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::Some([net("*.example.com")].into()));
+		assert!(!caps.allows_network_target(&net("example.com")));
+		assert!(!caps.allows_network_target(&net("93.184.216.34")));
+	}
+
+	#[test]
+	fn test_mcp_tool_target() {
+		assert!(
+			McpToolTarget::from_str("query")
+				.unwrap()
+				.matches(&McpToolTarget::from_str("QUERY").unwrap())
+		);
+		assert!(McpToolTarget::from_str("graphql").unwrap().matches("graphql"));
+		assert!(!McpToolTarget::from_str("graphql").unwrap().matches("gql"));
+		McpToolTarget::from_str("not_a_tool").unwrap_err();
+
+		let caps = Capabilities::default();
+		assert!(caps.allows_mcp_tool(&McpToolTarget::from_str("query").unwrap()));
+
+		let caps = Capabilities::default().without_mcp_tools(Targets::<McpToolTarget>::from(
+			McpToolTarget::from_str("graphql").unwrap(),
+		));
+		assert!(caps.allows_mcp_tool(&McpToolTarget::from_str("query").unwrap()));
+		assert!(!caps.allows_mcp_tool(&McpToolTarget::from_str("graphql").unwrap()));
+	}
+
+	#[test]
+	fn test_method_target() {
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("query").unwrap())
+		);
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("Query").unwrap())
+		);
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("QUERY").unwrap())
+		);
+		assert!(
+			!MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("ping").unwrap())
+		);
+	}
+
+	#[test]
+	fn test_targets() {
+		assert!(Targets::<NetTarget>::All.matches(&NetTarget::from_str("example.com").unwrap()));
+		assert!(Targets::<FuncTarget>::All.matches("http::get"));
+		assert!(!Targets::<NetTarget>::None.matches(&NetTarget::from_str("example.com").unwrap()));
+		assert!(!Targets::<FuncTarget>::None.matches("http::get"));
+		assert!(
+			Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
+		assert!(
+			!Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
+				.matches(&NetTarget::from_str("www.example.com").unwrap())
+		);
+		assert!(
+			Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
+				.matches("http::get")
+		);
+		assert!(
+			!Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
+				.matches("http::post")
+		);
+	}
+
+	/// `ext::` and `mod::` name the same extensions, so a capability written
+	/// in either family covers a target written in either.
+	#[test]
+	fn extension_targets_match_under_both_families() {
+		let t = |s: &str| FuncTarget::from_str(s).unwrap();
+		let allow = |list: &[&str]| {
+			Capabilities::default()
+				.with_functions(Targets::Some(list.iter().map(|s| t(s)).collect()))
+		};
+		for (caps, target, allowed) in [
+			(allow(&["ext::*"]), "mod::demo::f", true),
+			(allow(&["mod::*"]), "ext::demo::f", true),
+			(allow(&["mod::demo::f"]), "ext::demo::f", true),
+			(allow(&["ext::other"]), "mod::demo::f", false),
+			(
+				allow(&["ext::*"]).without_functions(Targets::Some([t("mod::*")].into())),
+				"ext::demo::f",
+				false,
+			),
+			(
+				allow(&["mod::*"]).without_functions(Targets::Some([t("ext::demo::f")].into())),
+				"mod::demo::f",
+				false,
+			),
+			(allow(&["fn::*"]), "mod::demo::f", false),
+			(allow(&["ext::*"]), "fn::demo", false),
+		] {
+			assert_eq!(caps.allows_extension_function_target(&t(target)), allowed, "{target}");
+		}
+	}
+
+	#[test]
+	fn test_capabilities() {
+		// When scripting is allowed
+		{
+			let caps = Capabilities::default().with_scripting(true);
+			assert!(caps.allows_scripting());
+		}
+
+		// When scripting is denied
+		{
+			let caps = Capabilities::default().with_scripting(false);
+			assert!(!caps.allows_scripting());
+		}
+
+		// When guest access is allowed
+		{
+			let caps = Capabilities::default().with_guest_access(true);
+			assert!(caps.allows_guest_access());
+		}
+
+		// When guest access is denied
+		{
+			let caps = Capabilities::default().with_guest_access(false);
+			assert!(!caps.allows_guest_access());
+		}
+
+		// When live query notifications are allowed
+		{
+			let cap = Capabilities::default().with_live_query_notifications(true);
+			assert!(cap.allows_live_query_notifications());
+		}
+
+		// When live query notifications are disabled
+		{
+			let cap = Capabilities::default().with_live_query_notifications(false);
+			assert!(!cap.allows_live_query_notifications());
+		}
+
+		// When all nets are allowed
+		{
+			let caps = Capabilities::default()
+				.with_network_targets(Targets::<NetTarget>::All)
+				.without_network_targets(Targets::<NetTarget>::None);
+			assert!(caps.allows_network_target(&NetTarget::from_str("example.com").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("example.com:80").unwrap()));
+		}
+
+		// When all nets are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_network_targets(Targets::<NetTarget>::All)
+				.without_network_targets(Targets::<NetTarget>::All);
+			assert!(!caps.allows_network_target(&NetTarget::from_str("example.com").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("example.com:80").unwrap()));
+		}
+
+		// When some nets are allowed and some are denied, deny overrides the allow
+		// rules
+		{
+			let caps = Capabilities::default()
+				.with_network_targets(Targets::<NetTarget>::Some(
+					[NetTarget::from_str("example.com").unwrap()].into(),
+				))
+				.without_network_targets(Targets::<NetTarget>::Some(
+					[NetTarget::from_str("example.com:80").unwrap()].into(),
+				));
+			assert!(caps.allows_network_target(&NetTarget::from_str("example.com").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("example.com:443").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("example.com:80").unwrap()));
+		}
+
+		// When all funcs are allowed
+		{
+			let caps = Capabilities::default()
+				.with_functions(Targets::<FuncTarget>::All)
+				.without_functions(Targets::<FuncTarget>::None);
+			assert!(caps.allows_function_name("http::get"));
+			assert!(caps.allows_function_name("http::post"));
+		}
+
+		// When all funcs are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_functions(Targets::<FuncTarget>::All)
+				.without_functions(Targets::<FuncTarget>::All);
+			assert!(!caps.allows_function_name("http::get"));
+			assert!(!caps.allows_function_name("http::post"));
+		}
+
+		// When some funcs are allowed and some are denied, deny overrides the allow
+		// rules
+		{
+			let caps = Capabilities::default()
+				.with_functions(Targets::<FuncTarget>::Some(
+					[FuncTarget::from_str("http::*").unwrap()].into(),
+				))
+				.without_functions(Targets::<FuncTarget>::Some(
+					[FuncTarget::from_str("http::post").unwrap()].into(),
+				));
+			assert!(caps.allows_function_name("http::get"));
+			assert!(caps.allows_function_name("http::put"));
+			assert!(!caps.allows_function_name("http::post"));
+		}
+
+		// When all RPC methods are allowed
+		{
+			let caps = Capabilities::default()
+				.with_rpc_methods(Targets::<MethodTarget>::All)
+				.without_rpc_methods(Targets::<MethodTarget>::None);
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("ping").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
+		}
+
+		// When all RPC methods are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_rpc_methods(Targets::<MethodTarget>::All)
+				.without_rpc_methods(Targets::<MethodTarget>::All);
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("ping").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
+		}
+
+		// When all RPC methods are denied
+		{
+			let caps = Capabilities::default().without_rpc_methods(Targets::<MethodTarget>::All);
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("ping").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
+		}
+
+		// When some RPC methods are allowed and some are denied, deny overrides the
+		// allow rules
+		{
+			let caps = Capabilities::default()
+				.with_rpc_methods(Targets::<MethodTarget>::Some(
+					[
+						MethodTarget::from_str("select").unwrap(),
+						MethodTarget::from_str("create").unwrap(),
+						MethodTarget::from_str("insert").unwrap(),
+						MethodTarget::from_str("update").unwrap(),
+						MethodTarget::from_str("query").unwrap(),
+						MethodTarget::from_str("run").unwrap(),
+					]
+					.into(),
+				))
+				.without_rpc_methods(Targets::<MethodTarget>::Some(
+					[
+						MethodTarget::from_str("query").unwrap(),
+						MethodTarget::from_str("run").unwrap(),
+					]
+					.into(),
+				));
+
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("create").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("insert").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("update").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("run").unwrap()));
+		}
+
+		// When all HTTP routes are allowed
+		{
+			let caps = Capabilities::default()
+				.with_http_routes(Targets::<RouteTarget>::All)
+				.without_http_routes(Targets::<RouteTarget>::None);
+			assert!(caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("postgres").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("mysql").unwrap()));
+		}
+
+		// When all HTTP routes are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_http_routes(Targets::<RouteTarget>::All)
+				.without_http_routes(Targets::<RouteTarget>::All);
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+		}
+
+		// When all HTTP routes are denied at the same time
+		{
+			let caps = Capabilities::default().without_http_routes(Targets::<RouteTarget>::All);
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+		}
+
+		// When some HTTP routes are allowed and some are denied, deny overrides the
+		// allow rules
+		{
+			let caps = Capabilities::default()
+				.with_http_routes(Targets::<RouteTarget>::Some(
+					[
+						RouteTarget::from_str("version").unwrap(),
+						RouteTarget::from_str("import").unwrap(),
+						RouteTarget::from_str("export").unwrap(),
+						RouteTarget::from_str("key").unwrap(),
+						RouteTarget::from_str("sql").unwrap(),
+						RouteTarget::from_str("rpc").unwrap(),
+					]
+					.into(),
+				))
+				.without_http_routes(Targets::<RouteTarget>::Some(
+					[RouteTarget::from_str("sql").unwrap(), RouteTarget::from_str("rpc").unwrap()]
+						.into(),
+				));
+
+			assert!(caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("import").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("key").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("rpc").unwrap()));
+		}
+
+		// When all arbitrary query targets are allowed
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::All)
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::None);
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When all arbitrary query targets are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::All)
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::All);
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When all arbitrary query targets are denied
+		{
+			let caps = Capabilities::default()
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::All);
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When some arbitrary query targets are allowed and some are denied, deny
+		// overrides the allow rules
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::Some(
+					[
+						ArbitraryQueryTarget::from_str("guest").unwrap(),
+						ArbitraryQueryTarget::from_str("record").unwrap(),
+					]
+					.into(),
+				))
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::Some(
+					[
+						ArbitraryQueryTarget::from_str("record").unwrap(),
+						ArbitraryQueryTarget::from_str("system").unwrap(),
+					]
+					.into(),
+				));
+
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+	}
+
+	#[test]
+	fn test_eval_query() {
+		// Denied out of the box for every subject — including under
+		// `Capabilities::all()` / `--allow-all`.
+		for caps in [Capabilities::default(), Capabilities::all(), Capabilities::none()] {
+			assert!(!caps.allows_eval_query(&EvalQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_eval_query(&EvalQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_eval_query(&EvalQueryTarget::from_str("system").unwrap()));
+		}
+
+		// Explicitly enabled for a single subject class.
+		{
+			let caps = Capabilities::all()
+				.with_eval_query(Targets::<EvalQueryTarget>::from(EvalQueryTarget::System));
+			assert!(caps.allows_eval_query(&EvalQueryTarget::System));
+			assert!(!caps.allows_eval_query(&EvalQueryTarget::Record));
+			assert!(!caps.allows_eval_query(&EvalQueryTarget::Guest));
+		}
+
+		// Deny overrides allow.
+		{
+			let caps = Capabilities::all()
+				.with_eval_query(Targets::<EvalQueryTarget>::All)
+				.without_eval_query(Targets::<EvalQueryTarget>::from(EvalQueryTarget::Record));
+			assert!(caps.allows_eval_query(&EvalQueryTarget::System));
+			assert!(!caps.allows_eval_query(&EvalQueryTarget::Record));
+		}
+	}
+}

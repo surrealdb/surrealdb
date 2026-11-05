@@ -1,0 +1,29 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A function the engine function answers still works in the expressions a write lowers"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, n: -7i32, s: 'HELLO' }]"
+
+[[test.results]]
+value = "[{ id: 1, n: 7i32, s: 'hello' }]"
+
+[[test.results]]
+value = "[{ id: 1, n: 7i32, s: 'hello' }]"
+
+*/
+
+CREATE TABLE wr (id INT PRIMARY KEY, s VARCHAR(20), n INT);
+
+INSERT INTO wr (id, s, n) VALUES (1, 'HELLO', -7);
+
+UPDATE wr SET s = lower(s), n = abs(n);
+
+SELECT id, s, n FROM wr;

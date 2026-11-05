@@ -17,6 +17,7 @@ use async_graphql::dynamic::{
 	Field, FieldFuture, FieldValue, InputObject, InputValue, Object, Type, TypeRef,
 };
 use async_graphql::{Name, Value as GraphqlValue};
+use surrealdb_expr::parser::TopLevelExpr;
 use surrealdb_strand::Strand;
 
 use super::error::{GraphqlError, resolver_error};
@@ -24,15 +25,14 @@ use super::schema::{
 	SchemaContext, graphql_to_sql_kind_with_scope, kind_to_type_with_enum_prefix, unwrap_type,
 };
 use super::tables::{CachedRecord, cond_from_filter, idiom_to_graphql_name};
-use super::utils::{GraphqlValueUtils, execute_plan};
-use crate::catalog::providers::TableProvider;
+use super::utils::{GraphqlValueUtils, execute_statement};
 use crate::catalog::{FieldDefinition, TableDefinition, TableType};
 use crate::dbs::Session;
 use crate::expr::part::Part;
 use crate::expr::statements::{
 	CreateStatement, DeleteStatement, RelateStatement, UpdateStatement, UpsertStatement,
 };
-use crate::expr::{Cond, Data, Expr, Kind, Literal, LogicalPlan, Output, TopLevelExpr};
+use crate::expr::{Cond, Data, Expr, Kind, Literal, Output};
 use crate::kvs::Datastore;
 use crate::val::{Object as SurObject, RecordId, TableName, Value};
 
@@ -104,12 +104,15 @@ fn graphql_input_to_sql_object(
 			matches!(&fd.name.0[0], Part::Field(n) if n == key_str)
 		});
 		let storage_key: String = matched
-			.and_then(|fd| match &fd.name.0[0] {
-				Part::Field(n) => Some(n.as_str().to_owned()),
-				_ => None,
+			.and_then(|fd| {
+				if let Part::Field(n) = &fd.name.0[0] {
+					Some(n.as_str().to_owned())
+				} else {
+					None
+				}
 			})
 			.unwrap_or_else(|| key_str.to_owned());
-		let kind = matched.and_then(|fd| fd.field_kind.clone()).unwrap_or(Kind::Any);
+		let kind: Kind = matched.and_then(|fd| fd.field_kind.clone()).unwrap_or(Kind::Any);
 		let enum_scope = format!("{tb_name}_{key_str}");
 		let sql_val = graphql_to_sql_kind_with_scope(val, kind, Some(&enum_scope))?;
 		map.insert(storage_key.into(), sql_val);
@@ -132,18 +135,17 @@ fn kind_to_input_type_ref(
 	// Check if the kind (after stripping option) is a record type.
 	// Record fields should be represented as ID in input types (the user passes
 	// a record ID string, not a nested object).
-	match &kind {
-		Kind::Record(_) => {
-			let ty = TypeRef::named(TypeRef::ID);
-			return Ok(if optional {
-				ty
-			} else {
-				TypeRef::NonNull(Box::new(ty))
-			});
-		}
+	if let Kind::Record(_) = &kind {
+		let ty = TypeRef::named(TypeRef::ID);
+		return Ok(if optional {
+			ty
+		} else {
+			TypeRef::NonNull(Box::new(ty))
+		});
+	} else if let Kind::Array(inner, _) = &kind {
 		// `array<record<T>>` — same reasoning: the inner Object output type is
 		// not a valid input. Map to `[ID!]` (or `[ID!]!` when non-optional).
-		Kind::Array(inner, _) if matches!(**inner, Kind::Record(_)) => {
+		if matches!(**inner, Kind::Record(_)) {
 			let inner_ty = TypeRef::NonNull(Box::new(TypeRef::named(TypeRef::ID)));
 			let list_ty = TypeRef::List(Box::new(inner_ty));
 			return Ok(if optional {
@@ -152,24 +154,22 @@ fn kind_to_input_type_ref(
 				TypeRef::NonNull(Box::new(list_ty))
 			});
 		}
-		Kind::Either(ks) => {
-			// Strip None/Null variants to see what's underneath
-			let non_none: Vec<&Kind> =
-				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-			if non_none.len() == 1 {
-				match non_none[0] {
-					// option<record<T>> -> nullable ID
-					Kind::Record(_) => return Ok(TypeRef::named(TypeRef::ID)),
-					// option<array<record<T>>> -> nullable [ID!]
-					Kind::Array(inner, _) if matches!(**inner, Kind::Record(_)) => {
-						let inner_ty = TypeRef::NonNull(Box::new(TypeRef::named(TypeRef::ID)));
-						return Ok(TypeRef::List(Box::new(inner_ty)));
-					}
-					_ => {}
+	} else if let Kind::Either(ks) = &kind {
+		// Strip None/Null variants to see what's underneath
+		let non_none: Vec<&Kind> =
+			ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
+		if non_none.len() == 1 {
+			if let Kind::Record(_) = non_none[0] {
+				// option<record<T>> -> nullable ID
+				return Ok(TypeRef::named(TypeRef::ID));
+			} else if let Kind::Array(inner, _) = non_none[0] {
+				// option<array<record<T>>> -> nullable [ID!]
+				if matches!(**inner, Kind::Record(_)) {
+					let inner_ty = TypeRef::NonNull(Box::new(TypeRef::named(TypeRef::ID)));
+					return Ok(TypeRef::List(Box::new(inner_ty)));
 				}
 			}
 		}
-		_ => {}
 	}
 
 	// For all other kinds, delegate to the standard kind_to_type with is_input=true
@@ -182,7 +182,7 @@ fn generate_input_types(
 	fds: &[FieldDefinition],
 	is_relation: bool,
 	types: &mut Vec<Type>,
-) -> Result<(String, String, String), GraphqlError> {
+) -> Result<(String, Option<String>, String), GraphqlError> {
 	let cap_name = capitalize_first(tb_name);
 	let create_name = format!("Create{cap_name}Input");
 	let update_name = format!("Update{cap_name}Input");
@@ -209,9 +209,13 @@ fn generate_input_types(
 			.field(InputValue::new("out", TypeRef::named_nn(TypeRef::ID)));
 	}
 
+	// An input object type must define a field (GraphQL spec 3.10), and every
+	// update field comes from a declared field definition.
+	let mut update_has_fields = false;
+
 	// Add fields from field definitions
 	for fd in fds.iter() {
-		let Some(ref kind) = fd.field_kind else {
+		let Some(kind) = fd.field_kind.clone() else {
 			continue;
 		};
 		if fd.name.is_id() {
@@ -232,7 +236,8 @@ fn generate_input_types(
 		// write and `READONLY` rejects writes entirely. Advertising them as
 		// settable in `Create*Input` / `Update*Input` / `Upsert*Input` would
 		// mislead schema introspection (the user-supplied value is silently
-		// dropped at SurrealQL evaluation time).
+		// dropped at SurrealQL evaluation time). A field derived from a named
+		// record id component is both, so it is never an input.
 		if fd.computed.is_some() || fd.readonly {
 			continue;
 		}
@@ -272,10 +277,14 @@ fn generate_input_types(
 			update_iv = update_iv.description(d);
 		}
 		update_input = update_input.field(update_iv);
+		update_has_fields = true;
 	}
 
 	types.push(Type::InputObject(create_input));
-	types.push(Type::InputObject(update_input));
+	let update_name = update_has_fields.then_some(update_name);
+	if update_has_fields {
+		types.push(Type::InputObject(update_input));
+	}
 	types.push(Type::InputObject(upsert_input));
 
 	Ok((create_name, update_name, upsert_name))
@@ -374,7 +383,7 @@ pub async fn process_mutations(
 		let tb_name_str = tb_name.as_str().to_string();
 		let is_relation = matches!(tb.table_type, TableType::Relation(_));
 
-		let fds = schema_ctx.tx.all_tb_fields(schema_ctx.ns, schema_ctx.db, &tb.name, None).await?;
+		let fds = schema_ctx.table_fields(&tb_name).await?;
 
 		// Generate input types — fields are camelCased / aliased via the
 		// shared `naming` helpers (see GitHub issues #4537 and #4552).
@@ -394,13 +403,17 @@ pub async fn process_mutations(
 
 		// --- Single-record mutations ---
 		mutation = add_create_field(mutation, &ctx, &create_input_name);
-		mutation = add_update_field(mutation, &ctx, &update_input_name);
+		if let Some(name) = &update_input_name {
+			mutation = add_update_field(mutation, &ctx, name);
+		}
 		mutation = add_upsert_field(mutation, &ctx, &upsert_input_name);
 		mutation = add_delete_field(mutation, &ctx);
 
 		// --- Bulk mutations ---
 		mutation = add_create_many_field(mutation, &ctx, &create_input_name);
-		mutation = add_update_many_field(mutation, &ctx, &update_input_name);
+		if let Some(name) = &update_input_name {
+			mutation = add_update_many_field(mutation, &ctx, name);
+		}
 		mutation = add_upsert_many_field(mutation, &ctx, &upsert_input_name);
 		mutation = add_delete_many_field(mutation, &ctx);
 	}
@@ -479,14 +492,16 @@ fn add_update_field(mutation: Object, tc: &MutationTableContext, input_name: &st
 						cond: None,
 						output: None,
 						timeout: Expr::Literal(Literal::None),
-						..Default::default()
+						with: None,
+						explain: None,
 					};
 
-					let plan = LogicalPlan {
-						expressions: vec![TopLevelExpr::Expr(Expr::Update(Box::new(stmt)))],
-					};
-
-					let res = execute_plan(&kvs, sess, plan).await?;
+					let res = execute_statement(
+						&kvs,
+						sess,
+						TopLevelExpr::Expr(Expr::Update(Box::new(stmt))),
+					)
+					.await?;
 					extract_single_record(res)
 				})
 			},
@@ -532,14 +547,16 @@ fn add_upsert_field(mutation: Object, tc: &MutationTableContext, input_name: &st
 						cond: None,
 						output: None,
 						timeout: Expr::Literal(Literal::None),
-						..Default::default()
+						with: None,
+						explain: None,
 					};
 
-					let plan = LogicalPlan {
-						expressions: vec![TopLevelExpr::Expr(Expr::Upsert(Box::new(stmt)))],
-					};
-
-					let res = execute_plan(&kvs, sess, plan).await?;
+					let res = execute_statement(
+						&kvs,
+						sess,
+						TopLevelExpr::Expr(Expr::Upsert(Box::new(stmt))),
+					)
+					.await?;
 					extract_single_record(res)
 				})
 			},
@@ -575,14 +592,16 @@ fn add_delete_field(mutation: Object, tc: &MutationTableContext) -> Object {
 						cond: None,
 						output: None,
 						timeout: Expr::Literal(Literal::None),
-						..Default::default()
+						with: None,
+						explain: None,
 					};
 
-					let plan = LogicalPlan {
-						expressions: vec![TopLevelExpr::Expr(Expr::Delete(Box::new(stmt)))],
-					};
-
-					let _res = execute_plan(&kvs, sess, plan).await?;
+					let _res = execute_statement(
+						&kvs,
+						sess,
+						TopLevelExpr::Expr(Expr::Delete(Box::new(stmt))),
+					)
+					.await?;
 					Ok(Some(FieldValue::value(GraphqlValue::Boolean(true))))
 				})
 			},
@@ -687,14 +706,16 @@ fn add_update_many_field(mutation: Object, tc: &MutationTableContext, input_name
 						cond,
 						output: None,
 						timeout: Expr::Literal(Literal::None),
-						..Default::default()
+						with: None,
+						explain: None,
 					};
 
-					let plan = LogicalPlan {
-						expressions: vec![TopLevelExpr::Expr(Expr::Update(Box::new(stmt)))],
-					};
-
-					let res = execute_plan(&kvs, sess, plan).await?;
+					let res = execute_statement(
+						&kvs,
+						sess,
+						TopLevelExpr::Expr(Expr::Update(Box::new(stmt))),
+					)
+					.await?;
 					extract_record_list(res)
 				})
 			},
@@ -741,14 +762,16 @@ fn add_upsert_many_field(mutation: Object, tc: &MutationTableContext, input_name
 						cond,
 						output: None,
 						timeout: Expr::Literal(Literal::None),
-						..Default::default()
+						with: None,
+						explain: None,
 					};
 
-					let plan = LogicalPlan {
-						expressions: vec![TopLevelExpr::Expr(Expr::Upsert(Box::new(stmt)))],
-					};
-
-					let res = execute_plan(&kvs, sess, plan).await?;
+					let res = execute_statement(
+						&kvs,
+						sess,
+						TopLevelExpr::Expr(Expr::Upsert(Box::new(stmt))),
+					)
+					.await?;
 					extract_record_list(res)
 				})
 			},
@@ -786,17 +809,20 @@ fn add_delete_many_field(mutation: Object, tc: &MutationTableContext) -> Object 
 						cond,
 						output: Some(Output::Before),
 						timeout: Expr::Literal(Literal::None),
-						..Default::default()
+						with: None,
+						explain: None,
 					};
 
-					let plan = LogicalPlan {
-						expressions: vec![TopLevelExpr::Expr(Expr::Delete(Box::new(stmt)))],
-					};
-
-					let res = execute_plan(&kvs, sess, plan).await?;
-					let count = match res {
-						Value::Array(a) => a.len() as i64,
-						_ => 0,
+					let res = execute_statement(
+						&kvs,
+						sess,
+						TopLevelExpr::Expr(Expr::Delete(Box::new(stmt))),
+					)
+					.await?;
+					let count = if let Value::Array(a) = res {
+						a.len() as i64
+					} else {
+						0
 					};
 					Ok(Some(FieldValue::value(GraphqlValue::Number(count.into()))))
 				})
@@ -845,6 +871,12 @@ fn parse_where_arg(
 }
 
 /// Execute a CREATE for a normal (non-relation) table.
+///
+/// The record is named by `id_opt` when the input gives one, and by the table
+/// otherwise. A component of a record id that the `id` field names is a derived
+/// field and not an input, so `data_obj` holds none: such a table takes its key
+/// from the id given or from the `DEFAULT` of its `id` field, and a create that
+/// gives neither fails with the component it lacks.
 async fn execute_normal_create(
 	kvs: &Arc<Datastore>,
 	sess: &Arc<Session>,
@@ -877,11 +909,8 @@ async fn execute_normal_create(
 		timeout: Expr::Literal(Literal::None),
 	};
 
-	let plan = LogicalPlan {
-		expressions: vec![TopLevelExpr::Expr(Expr::Create(Box::new(stmt)))],
-	};
-
-	let res = execute_plan(kvs, sess, plan).await?;
+	let res =
+		execute_statement(kvs, sess, TopLevelExpr::Expr(Expr::Create(Box::new(stmt)))).await?;
 	extract_single_record(res)
 }
 
@@ -934,11 +963,8 @@ async fn execute_relate_create(
 		timeout: Expr::Literal(Literal::None),
 	};
 
-	let plan = LogicalPlan {
-		expressions: vec![TopLevelExpr::Expr(Expr::Relate(Box::new(stmt)))],
-	};
-
-	let res = execute_plan(kvs, sess, plan).await?;
+	let res =
+		execute_statement(kvs, sess, TopLevelExpr::Expr(Expr::Relate(Box::new(stmt)))).await?;
 	extract_single_record(res)
 }
 
@@ -947,23 +973,21 @@ async fn execute_relate_create(
 /// The full result object is cached in a [`CachedRecord`] so that field
 /// resolvers can extract values directly without additional database queries.
 fn extract_single_record(val: Value) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
-	match val {
-		Value::Object(obj) => {
-			let rid = match obj.get("id") {
-				Some(Value::RecordId(rid)) => rid.clone(),
-				_ => return Err(resolver_error("Mutation result missing 'id' field").into()),
-			};
-			Ok(Some(FieldValue::owned_any(CachedRecord {
-				rid,
-				version: None,
-				data: obj,
-			})))
-		}
-		Value::None | Value::Null => Ok(None),
-		_ => {
-			error!("Unexpected mutation result type: {val:?}");
-			Err(resolver_error("Unexpected mutation result").into())
-		}
+	if let Value::Object(obj) = val {
+		let rid = match obj.get("id") {
+			Some(Value::RecordId(rid)) => rid.clone(),
+			_ => return Err(resolver_error("Mutation result missing 'id' field").into()),
+		};
+		Ok(Some(FieldValue::owned_any(CachedRecord {
+			rid,
+			version: None,
+			data: obj,
+		})))
+	} else if matches!(val, Value::None | Value::Null) {
+		Ok(None)
+	} else {
+		error!("Unexpected mutation result type: {val:?}");
+		Err(resolver_error("Unexpected mutation result").into())
 	}
 }
 
@@ -972,34 +996,30 @@ fn extract_single_record(val: Value) -> Result<Option<FieldValue<'static>>, asyn
 /// Each result object is cached in a [`CachedRecord`] for efficient field
 /// resolution.
 fn extract_record_list(val: Value) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
-	match val {
-		Value::Array(arr) => {
-			let items: Result<Vec<FieldValue>, GraphqlError> = arr
-				.0
-				.into_iter()
-				.map(|v| match v {
-					Value::Object(obj) => {
-						let rid = match obj.get("id") {
-							Some(Value::RecordId(rid)) => rid.clone(),
-							_ => return Err(resolver_error("Mutation result missing 'id' field")),
-						};
-						Ok(FieldValue::owned_any(CachedRecord {
-							rid,
-							version: None,
-							data: obj,
-						}))
-					}
-					_ => {
-						error!("Expected object in mutation result, found: {v:?}");
-						Err(resolver_error("Unexpected mutation result format"))
-					}
-				})
-				.collect();
-			Ok(Some(FieldValue::list(items?)))
-		}
-		_ => {
-			error!("Expected array result for bulk mutation, found: {val:?}");
-			Err(resolver_error("Unexpected bulk mutation result format").into())
-		}
+	if let Value::Array(arr) = val {
+		let items: Result<Vec<FieldValue>, GraphqlError> = arr
+			.0
+			.into_iter()
+			.map(|v| {
+				if let Value::Object(obj) = v {
+					let rid = match obj.get("id") {
+						Some(Value::RecordId(rid)) => rid.clone(),
+						_ => return Err(resolver_error("Mutation result missing 'id' field")),
+					};
+					Ok(FieldValue::owned_any(CachedRecord {
+						rid,
+						version: None,
+						data: obj,
+					}))
+				} else {
+					error!("Expected object in mutation result, found: {v:?}");
+					Err(resolver_error("Unexpected mutation result format"))
+				}
+			})
+			.collect();
+		Ok(Some(FieldValue::list(items?)))
+	} else {
+		error!("Expected array result for bulk mutation, found: {val:?}");
+		Err(resolver_error("Unexpected bulk mutation result format").into())
 	}
 }

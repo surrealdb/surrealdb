@@ -1,0 +1,17 @@
+### CREATE stock:1 SET n = 1
+{ id: stock:1, n: 1 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f6fd904fbfd0b102 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => ce5c988359547a52 (31 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(1) }), "n": Number(Int(1))}))
+### CREATE stock:2 SET n = 5
+{ id: stock:2, n: 5 }
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*stock\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => f6fd8c4fbfd0aa36 (9 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 302dbbb0adf4be39 (19 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*trail\x00*\x03xxxxxxxxxxxxxxxxxxxx\x00 => 453387de8a62a3d6 (31 bytes)notified:
+Create Object(Object({"id": RecordId(RecordId { table: Table("stock"), key: Number(2) }), "n": Number(Int(5))}))
+### UPDATE stock:2 SET n = 6
+(no rows)
+keyspace:
+notified:

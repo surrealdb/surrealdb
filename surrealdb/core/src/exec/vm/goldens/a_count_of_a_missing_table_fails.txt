@@ -1,0 +1,6 @@
+### SELECT count() FROM missing GROUP ALL
+error: The table 'missing' does not exist
+### SELECT count() FROM missing:1 GROUP ALL
+error: The table 'missing' does not exist
+### SELECT count() FROM missing WHERE n = 1 GROUP ALL
+error: The table 'missing' does not exist

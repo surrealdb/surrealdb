@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
-use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::kvs::{Datastore, QueryRequest, QuerySource};
+use surrealdb_rpc::{QueryResult, QueryResultBuilder};
 use surrealdb_types::Variables;
 use tokio::sync::RwLock;
 
@@ -84,7 +85,10 @@ impl McpSession {
 			);
 			return Ok(vec![QueryResultBuilder::started_now().finish_with_result(Err(err))]);
 		}
-		self.run_to_results(self.ds.execute_gql(query, &session, vars)).await
+		self.run_to_results(
+			self.ds.run(QueryRequest::new(QuerySource::gql(query), &session).with_variables(vars)),
+		)
+		.await
 	}
 
 	/// Execute a GraphQL request against the namespace and database selected on
@@ -223,6 +227,50 @@ impl McpSession {
 				Ok(vec![QueryResultBuilder::started_now().finish_with_result(Err(err))])
 			}
 		}
+	}
+
+	/// Derive a session pinned to an explicit `(namespace, database)`,
+	/// sharing this session's datastore, authentication and configuration
+	/// but owning its own `use` state.
+	///
+	/// A `None` component leaves that half of the scope as it is on the
+	/// source session, so a caller may override the database while
+	/// inheriting the namespace. Mutating the returned session's scope does
+	/// not affect the session it was derived from, which is what makes it
+	/// safe to hand to a single stateless request.
+	pub(crate) async fn derive_scoped(&self, ns: Option<String>, db: Option<String>) -> Self {
+		let mut scoped = self.session.read().await.clone();
+		if ns.is_some() {
+			scoped.ns = ns;
+		}
+		if db.is_some() {
+			scoped.db = db;
+		}
+		Self {
+			ds: Arc::clone(&self.ds),
+			session: RwLock::new(scoped),
+			config: Arc::clone(&self.config),
+		}
+	}
+
+	/// Build a session directly from an authenticated `Session`, pinned to
+	/// an explicit scope. Used to serve a request that arrives without any
+	/// prior handshake, where the caller's credentials and scope both come
+	/// from the request itself.
+	pub(crate) fn from_request(
+		ds: Arc<Datastore>,
+		mut session: Session,
+		ns: Option<String>,
+		db: Option<String>,
+		config: Arc<McpConfig>,
+	) -> Self {
+		if ns.is_some() {
+			session.ns = ns;
+		}
+		if db.is_some() {
+			session.db = db;
+		}
+		Self::with_config(ds, session, config)
 	}
 
 	/// Read-only access to the underlying datastore for permission checks

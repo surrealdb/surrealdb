@@ -1,0 +1,19 @@
+/**
+[env]
+namespace = true
+database = true
+timeout = 30000
+imports = ["mysql/_nested_correlation.surql"]
+
+[test]
+reason = "a column of the outermost query read three and four levels down, with a column of a query in between read in the same query, is the column of the row each query is on"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 2 }]"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 2 }]"
+*/
+
+select u.id from users u where exists (select 1 from posts p where p.owner_id = u.id and exists (select 1 from posts q where q.id = p.id and exists (select 1 from posts r where r.owner_id = u.id))) order by 1;
+select u.id from users u where exists (select 1 from posts p where exists (select 1 from posts q where exists (select 1 from posts r where exists (select 1 from posts s where s.owner_id = u.id and s.id = p.id and r.id = q.id and s.id > 10)))) order by 1;

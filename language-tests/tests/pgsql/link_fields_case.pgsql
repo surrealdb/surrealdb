@@ -1,0 +1,39 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_link_fields_case.surql"]
+
+[test]
+reason = "A field is a link only under the exact name it is declared by: with Dept declared as a link and a separate field dept holding plain integers, dept is compared and written as the plain integer it holds."
+
+[[test.results]]
+value = "[{ name: 'Eve' }]"
+
+[[test.results]]
+value = "[{ name: 'Eve' }, { name: 'Sam' }]"
+
+[[test.results]]
+value = "[{ name: 'Eve' }]"
+
+[[test.results]]
+value = "[{ dept: 3, id: 3, name: 'Ann' }]"
+
+[[test.results]]
+value = "[{ dept: 4, id: 3 }]"
+
+[[test.results]]
+value = "[{ name: 'Ann' }]"
+*/
+
+SELECT name FROM person WHERE dept = 1;
+
+SELECT name FROM person WHERE dept IN (1, 2) ORDER BY name;
+
+SELECT name FROM person WHERE DEPT = 1;
+
+INSERT INTO person (id, name, dept) VALUES (3, 'Ann', 3) RETURNING id, name, dept;
+
+UPDATE person SET dept = 4 WHERE id = 3 RETURNING id, dept;
+
+SELECT name FROM person WHERE dept = 4;

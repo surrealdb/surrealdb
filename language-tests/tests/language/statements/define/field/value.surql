@@ -1,5 +1,6 @@
 /**
 [test]
+reason = "A field's `VALUE` clause reads `$value` as the value written to the field. `$value` is bound by the write's own frame, so a `LET $value` binds a request variable of that name and the frame's binding still shadows it: the write that follows reads the field's value, not the one the `LET` bound."
 
 [[test.results]]
 value = "NONE"

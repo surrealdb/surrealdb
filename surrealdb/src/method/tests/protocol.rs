@@ -54,11 +54,7 @@ impl conn::Sealed for Client {
 			let (route_tx, route_rx) = async_channel::bounded(capacity);
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
-			let router = Router {
-				features,
-				sender: route_tx,
-				config: address.config,
-			};
+			let router = Router::from_route_sender(route_tx, features, address.config);
 			server::mock(route_rx);
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 			Ok((OnceLock::with_value(router), watch::channel(None), session_clone).into())

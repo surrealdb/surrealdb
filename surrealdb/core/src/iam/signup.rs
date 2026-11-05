@@ -3,22 +3,27 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
+use surrealdb_cnf::SERVER_NAME;
+use surrealdb_rpc::Token;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
-use super::access::{authenticate_record, create_refresh_token_record};
+use super::access::{
+	access_session, authenticate_record, create_refresh_token_record, reset_previous_principal,
+	session_data_for_record,
+};
 use crate::catalog;
+use crate::catalog::Error as CatalogError;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
-use crate::cnf::SERVER_NAME;
 use crate::dbs::Session;
-use crate::err::Error;
+use crate::err::exec_error;
+use crate::exec::Error as ExecError;
 use crate::iam::issue::{config, expiration};
-use crate::iam::token::{Claims, Token};
-use crate::iam::{Actor, Auth, Level, Role, algorithm_to_jwt_algorithm};
-use crate::kvs::Datastore;
-use crate::kvs::LockType::*;
+use crate::iam::token::{Audience, Claims};
+use crate::iam::{Actor, Auth, Error as AuthError, Level, algorithm_to_jwt_algorithm};
 use crate::kvs::TransactionType::*;
-use crate::types::PublicVariables;
+use crate::kvs::{Datastore, is_retryable_transaction_conflict};
+use crate::types::{PublicValue, PublicVariables};
 use crate::val::Value;
 
 /// Registers a new user and returns an authentication token.
@@ -96,7 +101,7 @@ pub async fn signup(
 			// Currently, signup is only supported at the database level
 			super::signup::db_access(kvs, session, ns, db, ac, vars).await
 		}
-		_ => Err(anyhow::Error::new(Error::InvalidSignup)),
+		_ => Err(anyhow::Error::new(AuthError::InvalidSignup)),
 	}
 }
 
@@ -173,12 +178,12 @@ pub async fn db_access(
 	vars: PublicVariables,
 ) -> Result<Token> {
 	// Create a new readonly transaction
-	let tx = kvs.transaction(Read, Optimistic).await?;
+	let tx = kvs.transaction(Read).await?;
 	let db_def = match catch!(tx, tx.get_db_by_name(&ns, &db, None).await) {
 		Some(db) => db,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(Error::DbNotFound {
+			return Err(CatalogError::DbNotFound {
 				name: db,
 			}
 			.into());
@@ -189,7 +194,7 @@ pub async fn db_access(
 		catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac, None).await)
 	else {
 		let _ = tx.cancel().await;
-		bail!(Error::AccessNotFound);
+		bail!(AuthError::AccessNotFound);
 	};
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
@@ -197,29 +202,27 @@ pub async fn db_access(
 	// Check the access method type
 	// Currently, only the record access method supports signup
 	let catalog::AccessType::Record(ref at) = av.access_type else {
-		bail!(Error::AccessMethodMismatch)
+		bail!(AuthError::AccessMethodMismatch)
 	};
 
 	// Check if the record access method supports issuing tokens
 	let Some(iss) = &at.jwt.issue else {
-		bail!(Error::AccessMethodMismatch)
+		bail!(AuthError::AccessMethodMismatch)
 	};
 
-	let Some(val) = &at.signup else {
-		bail!(Error::AccessRecordNoSignup);
+	let Some(val) = &av.signup else {
+		bail!(AuthError::AccessRecordNoSignup);
 	};
 	// Setup the query params
 	// Setup the system session for finding the signup record
-	let mut sess = Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Editor);
-	sess.ip.clone_from(&session.ip);
-	sess.or.clone_from(&session.or);
+	let sess = access_session(&av, Some(ns.as_str()), Some(db.as_str()), session)?;
 	// Compute the value with the params
 	match kvs.evaluate(val, &sess, Some(vars)).await {
 		// The signup value succeeded
 		Ok(val) => {
 			// There is a record returned
 			let Ok(mut rid) = val.into_record() else {
-				bail!(Error::NoRecordFound)
+				bail!(AuthError::NoRecordFound)
 			};
 			// Create the authentication key
 			let key = config(iss.alg, &iss.key)?;
@@ -230,6 +233,7 @@ pub async fn db_access(
 				nbf: Some(Utc::now().timestamp()),
 				exp: expiration(av.token_duration)?,
 				jti: Some(Uuid::new_v4().to_string()),
+				aud: at.jwt.audience.as_ref().map(|a| Audience::from_configured(a)),
 				ns: Some(ns.clone()),
 				db: Some(db.clone()),
 				ac: Some(ac.clone()),
@@ -239,8 +243,7 @@ pub async fn db_access(
 			// AUTHENTICATE clause
 			if let Some(au) = &av.authenticate {
 				// Setup the system session for finding the signin record
-				let mut sess =
-					Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Editor);
+				let mut sess = access_session(&av, Some(ns.as_str()), Some(db.as_str()), session)?;
 				sess.rd = Some(
 					crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
 						.expect("record id conversion should succeed"),
@@ -251,10 +254,20 @@ pub async fn db_access(
 					)
 					.expect("claims conversion should succeed"),
 				);
-				sess.ip.clone_from(&session.ip);
-				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
 			}
+			// CONTEXT clause. Evaluated once, after the identity has settled,
+			// so `$auth` is the final record. Independent of AUTHENTICATE.
+			let data = session_data_for_record(
+				kvs,
+				&av,
+				ns.as_str(),
+				db.as_str(),
+				PublicValue::RecordId(rid.clone()),
+				&claims,
+				session,
+			)
+			.await?;
 			// Create refresh token if defined for the record access method
 			let refresh = match &at.bearer {
 				Some(_) => Some(
@@ -273,7 +286,11 @@ pub async fn db_access(
 			trace!("Signing up with access method `{}`", ac);
 			// Create the authentication token
 			let enc = encode(&Header::new(algorithm_to_jwt_algorithm(iss.alg)), &claims, &key);
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(av.session_duration)?;
 			// Set the authentication on the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(claims.into_claims_object().into())
 					.expect("claims conversion should succeed"),
@@ -285,7 +302,8 @@ pub async fn db_access(
 				crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
 					.expect("record id conversion should succeed"),
 			);
-			session.exp = expiration(av.session_duration)?;
+			session.data = data;
+			session.exp = session_exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_sql(),
 				Default::default(),
@@ -301,27 +319,26 @@ pub async fn db_access(
 					},
 					None => Token::Access(token),
 				}),
-				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
+				_ => Err(anyhow::Error::new(AuthError::TokenMakingFailed)),
 			}
 		}
-		Err(e) => match e.downcast_ref() {
-			// If the SIGNUP clause throws a specific error, authentication fails with that error
-			Some(Error::Thrown(_)) => Err(e),
+		// If the SIGNUP clause throws a specific error, authentication fails with that error
+		Err(e) if matches!(exec_error(&e), Some(ExecError::Thrown(_))) => Err(e),
+		Err(e) => {
 			// If the SIGNUP clause failed due to an unexpected error, be more specific
 			// This allows clients to handle these errors, which may be retryable
-			Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
+			if is_retryable_transaction_conflict(&e) {
 				debug!("Unexpected error found while executing a SIGNUP clause: {e}");
-				Err(anyhow::Error::new(Error::UnexpectedAuth))
-			}
-			// Otherwise, return a generic error unless it should be forwarded
-			_ => {
-				if kvs.config().insecure_forward_access_errors {
+				Err(anyhow::Error::new(AuthError::UnexpectedAuth))
+			} else {
+				// Otherwise, return a generic error unless it should be forwarded
+				if kvs.config().iam.insecure_forward_access_errors {
 					Err(e)
 				} else {
-					Err(anyhow::Error::new(Error::AccessRecordSignupQueryFailed))
+					Err(anyhow::Error::new(AuthError::AccessRecordSignupQueryFailed))
 				}
 			}
-		},
+		}
 	}
 }
 
@@ -329,9 +346,68 @@ pub async fn db_access(
 #[allow(clippy::unwrap_used)]
 mod tests {
 	use chrono::Duration;
+	use surrealdb_types::ToSql;
 
 	use super::*;
 	use crate::iam::Role;
+
+	/// A `SIGNUP` that names the rows it writes through a function call signs
+	/// the caller up, and its write lands.
+	///
+	/// Rows named by a call are resolved when the statement runs rather than
+	/// at plan time, which is one of the shapes the write pre-flight declines,
+	/// so the clause reaches the engine that runs such a form. The `SELECT`
+	/// afterwards is the half that matters: a clause whose write is skipped
+	/// rather than run still returns the record the signup needs and would
+	/// otherwise pass.
+	#[tokio::test]
+	async fn a_signup_naming_its_rows_by_call_writes_them() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM user WHERE name = $user )
+				SIGNUP {
+					LET $rec = (CREATE type::record('user', $user) SET name = $user)[0];
+					UPDATE type::record('user', $user) SET seen = true;
+					RETURN $rec;
+				}
+				DURATION FOR SESSION 2h
+			;
+			"#,
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("user", "user");
+		let res = db_access(
+			&ds,
+			&mut sess,
+			"test".to_string(),
+			"test".to_string(),
+			"user".to_string(),
+			vars,
+		)
+		.await;
+
+		assert!(res.is_ok(), "Failed to signup: {:?}", res);
+		assert_eq!(sess.au.id(), "user:user");
+
+		// The declined `UPDATE` must have written, not merely not raised.
+		let owner = Session::owner().with_ns("test").with_db("test");
+		let mut res = ds.execute("SELECT VALUE seen FROM user:user", &owner, None).await.unwrap();
+		let seen = res.remove(0).output().unwrap();
+		assert_eq!(seen.to_sql(), "[true]", "the SIGNUP's UPDATE did not write");
+	}
 
 	#[tokio::test]
 	async fn test_record_signup() {
@@ -452,7 +528,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_signup_record_with_refresh() {
-		use crate::iam::{Token, signin};
+		use surrealdb_rpc::Token;
+
+		use crate::iam::signin;
 
 		// Test without refresh
 		{
@@ -647,10 +725,9 @@ mod tests {
 			)
 			.await;
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
-				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-			}
+			let AuthError::InvalidAuth = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected InvalidAuth");
+			};
 		}
 	}
 
@@ -1029,10 +1106,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			.await;
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				Error::Thrown(e) => assert_eq!(e, "This user is not enabled"),
-				e => panic!("Unexpected error, expected Thrown found {e:?}"),
-			}
+			let ExecError::Thrown(e) = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected Thrown");
+			};
+			assert_eq!(e, "This user is not enabled");
 		}
 
 		// Test AUTHENTICATE clause not returning a value
@@ -1074,10 +1151,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			.await;
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
-				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-			}
+			let AuthError::InvalidAuth = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected InvalidAuth");
+			};
 		}
 	}
 
@@ -1157,14 +1233,18 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
 					e1, e2
 				),
-				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
-					Error::UnexpectedAuth => {}
-					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-				},
-				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
-					Error::UnexpectedAuth => {}
-					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-				},
+				(Err(e1), Ok(_)) => {
+					let AuthError::UnexpectedAuth = e1.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected UnexpectedAuth");
+					};
+				}
+				(Ok(_), Err(e2)) => {
+					let AuthError::UnexpectedAuth = e2.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected UnexpectedAuth");
+					};
+				}
 			}
 		}
 
@@ -1237,15 +1317,92 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
 					e1, e2
 				),
-				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
-					Error::UnexpectedAuth => {}
-					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-				},
-				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
-					Error::UnexpectedAuth => {}
-					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-				},
+				(Err(e1), Ok(_)) => {
+					let AuthError::UnexpectedAuth = e1.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected UnexpectedAuth");
+					};
+				}
+				(Ok(_), Err(e2)) => {
+					let AuthError::UnexpectedAuth = e2.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected UnexpectedAuth");
+					};
+				}
 			}
 		}
+	}
+}
+
+/// `CONTEXT` on the record-signup path.
+#[cfg(test)]
+mod context_clause_tests {
+	use surrealdb_types::Value as PV;
+
+	use super::*;
+
+	/// Signup settles on the newly created record, and CONTEXT sees it.
+	#[tokio::test]
+	async fn signup_computes_the_context() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNUP ( CREATE type::record('user', $id) )
+				SIGNIN ( SELECT * FROM type::record('user', $id) )
+				CONTEXT ( RETURN { me: $auth } )
+				DURATION FOR SESSION 2h;
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("id", 1);
+		db_access(&ds, &mut sess, "test".to_string(), "test".to_string(), "user".to_string(), vars)
+			.await
+			.expect("signup failed");
+
+		let data = sess.data.as_ref().expect("data").public().clone().into_object().unwrap();
+		assert_eq!(data.get("me"), Some(&PV::RecordId(surrealdb_types::RecordId::new("user", 1))));
+	}
+
+	/// An access method without the clause is untouched on this path too.
+	#[tokio::test]
+	async fn signup_without_the_clause_leaves_no_data() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNUP ( CREATE type::record('user', $id) )
+				SIGNIN ( SELECT * FROM type::record('user', $id) )
+				DURATION FOR SESSION 2h;
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("id", 1);
+		db_access(&ds, &mut sess, "test".to_string(), "test".to_string(), "user".to_string(), vars)
+			.await
+			.expect("signup failed");
+		assert!(sess.data.is_none());
 	}
 }

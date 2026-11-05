@@ -1,0 +1,8 @@
+### after `RETURN NONE`: { DELETE type::record('editor', 1);\n			   RETURN [(SELECT id, writer, editor FROM book ORDER BY id),\n			           (SELECT VALUE id FROM likes)] }
+[[{ editor: NONE, id: book:1, writer: author:1 }, { editor: NONE, id: book:2, writer: author:2 }], []]
+### after `RETURN NONE`: { DELETE type::record('author', 1);\n			   RETURN [(SELECT id, writer, editor FROM book ORDER BY id),\n			           (SELECT VALUE id FROM likes)] }
+[[{ editor: editor:1, id: book:2, writer: author:2 }], [likes:generated]]
+### after `RETURN NONE`: { DELETE type::record('author', 2);\n			   RETURN [(SELECT id, writer, editor FROM book ORDER BY id),\n			           (SELECT VALUE id FROM likes)] }
+[[{ editor: NONE, id: book:1, writer: author:1 }], []]
+### after `DEFINE FIELD fan ON extra_3 TYPE option<record<author>> REFERENCE ON DELETE REJECT;\n			 CREATE extra_3:1 SET fan = author:2;`: { DELETE type::record('author', 2);\n			   RETURN [(SELECT id, writer, editor FROM book ORDER BY id),\n			           (SELECT VALUE id FROM likes)] }
+error: Cannot delete `author:2` as it is referenced by `extra_3:1` with an ON DELETE REJECT clause

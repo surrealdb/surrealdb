@@ -8,7 +8,7 @@ use futures_util::{SinkExt, TryStreamExt};
 use http::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use surrealdb_core::cnf::CommonConfig;
+use surrealdb_core::syn::ParserConfig;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
@@ -152,7 +152,7 @@ impl Socket {
 				let json = message.to_string();
 				// Then we parse the JSON in to SurrealQL.
 				let surrealql =
-					surrealdb_core::syn::value_legacy_strand(&json, &CommonConfig::default())?;
+					surrealdb_core::syn::value_legacy_strand(&json, &ParserConfig::default())?;
 				// Then we convert the SurrealQL in to CBOR.
 				let cbor = surrealdb_core::rpc::format::cbor::encode(surrealql)?;
 				// THen output the message.

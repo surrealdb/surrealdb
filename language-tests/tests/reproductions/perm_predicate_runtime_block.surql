@@ -4,28 +4,35 @@ imports = ["reproductions/perm_predicate_runtime_block_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:test" }
 
 [test]
-reason = "A permission predicate that writes via a custom-function body must be blocked at runtime on both the streaming SELECT path and the legacy UPDATE path, and must not create the row (GHSA-66r2-5gwj-gxm2)."
+reason = """
+	A PERMISSIONS guard that reaches a write through a user-defined function
+	body is refused where the write is reached, and must not write: a `select`
+	guard, evaluated with permission enforcement disabled
+	(GHSA-66r2-5gwj-gxm2), and an `update` guard alike, since no PERMISSIONS
+	clause may have an effect. Each function writes only after its guard is
+	defined, so the definition-time check accepted both guards.
+"""
 
-# 0: SELECT — streaming path. It errors; the exact wording is wrapped
+# 0: SELECT evaluates the select guard. It errors; the exact wording is wrapped
 # differently per planner config ("Failed to check permission: ..."), so only
 # assert that an error occurred.
 [[test.results]]
 error = true
 
-# 1: UPDATE — legacy compute path, stable error wording across configs.
+# 1: UPDATE evaluates the update guard, whose write is refused the same way.
 [[test.results]]
-error = "A PERMISSIONS clause cannot contain a statement that modifies data"
+error = true
 
-# 2: the predicate's write was blocked, so audit is empty.
+# 2: neither guard wrote.
 [[test.results]]
 value = "[]"
 */
 
--- 0: SELECT triggers the SELECT-permission predicate (streaming path) -> blocked.
-SELECT * FROM victim;
+-- 0: reading triggers the select guard -> its write is refused.
+SELECT * FROM readable;
 
--- 1: UPDATE triggers the UPDATE-permission predicate (legacy path) -> blocked.
-UPDATE victim:1 SET visible = false;
+-- 1: writing triggers the update guard -> its write is refused.
+UPDATE writable:1 SET n = 1;
 
--- 2: the predicate must not have written to `audit`.
-SELECT * FROM audit;
+-- 2: neither `audit:reader` nor `audit:writer` is present.
+SELECT * FROM audit ORDER BY id;

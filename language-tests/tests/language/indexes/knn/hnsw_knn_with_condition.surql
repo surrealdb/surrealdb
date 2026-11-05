@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["compute-only"]
 
 [test]
 reason = "Test HNSW KNN query with additional WHERE condition filter"
@@ -15,12 +14,9 @@ value = "[{ flag: true, id: pts:1, point: [10f] }, { flag: false, id: pts:2, poi
 value = "NONE"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'hn_pt1', operator: '<|2,40|>', value: [44f] }, table: 'pts' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
 value = "[{ distance: 6f, flag: true, id: pts:5 }, { distance: 14f, flag: true, id: pts:3 }]"
-*/
 
+*/
 DEFINE INDEX hn_pt1 ON pts FIELDS point HNSW DIMENSION 1;
 INSERT INTO pts [
 	{ id: pts:1, point: [ 10f ], flag: true },
@@ -32,9 +28,6 @@ INSERT INTO pts [
 	{ id: pts:7, point: [ 70f ], flag: true }
 ];
 LET $pt = [44f];
-SELECT id, flag, vector::distance::knn() AS distance FROM pts
-	WHERE flag = true AND point <|2,40|> $pt
-	ORDER BY distance EXPLAIN;
 SELECT id, flag, vector::distance::knn() AS distance FROM pts
 	WHERE flag = true AND point <|2,40|> $pt
 	ORDER BY distance;

@@ -1,0 +1,31 @@
+### { CREATE refused:1; LET $auth = 1 }
+'auth' is a protected variable and cannot be set
+### FOR $i IN [1] { LET $token = $i }
+'token' is a protected variable and cannot be set
+### IF true { LET $access = 1 } ELSE { NONE }
+'access' is a protected variable and cannot be set
+### { LET $x = 1; { LET $session = $x } }
+'session' is a protected variable and cannot be set
+### { LET $auth = 1; DEFINE TABLE refused_first }
+'auth' is a protected variable and cannot be set
+### RETURN [LET $x = 1]
+Invalid statement: LET statements can only appear at the top level of a query or inside a block expression
+### SELECT { a: LET $x = 1 } AS a FROM person
+Invalid statement: LET statements can only appear at the top level of a query or inside a block expression
+### { CREATE refused:2; RETURN type::is_int(LET $x = 1) }
+Invalid statement: LET statements can only appear at the top level of a query or inside a block expression
+### SELECT $this AS row, count() FROM person GROUP ALL
+Invalid query: Found a `$this` parameter refering to the document of a group by select statement
+Select statements with a group by currently have no defined document to refer to
+### SELECT *, count() AS c FROM person GROUP BY age
+Invalid query: Incorrect selector for aggregate selection, expression `*` within in selector cannot be aggregated in a group.
+### SELECT * FROM person FOR UPDATE
+Invalid query: SELECT ... FOR UPDATE requires record ids as targets
+### SELECT * FROM [1] FOR UPDATE
+Invalid query: SELECT ... FOR UPDATE requires record ids as targets
+### SELECT count() FROM person:1 GROUP ALL FOR UPDATE
+Invalid query: SELECT ... FOR UPDATE cannot be combined with GROUP BY or SPLIT
+### SELECT * FROM person:1, person:2 LIMIT 1 FOR UPDATE
+Invalid query: SELECT ... FOR UPDATE cannot be combined with LIMIT over multiple targets
+### { CREATE refused:3; SELECT * FROM person:1..3 FOR UPDATE }
+Invalid query: SELECT ... FOR UPDATE requires record ids as targets

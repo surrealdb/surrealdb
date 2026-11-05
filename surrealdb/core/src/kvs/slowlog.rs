@@ -6,11 +6,13 @@
 //! includes the normalized SQL statement and any selected bound parameters.
 //!
 //! Key behaviors:
-//! - Parameters are extracted by traversing the AST using `VisitExpression` and looking for
-//!   `Expr::Param` nodes. For each parameter, we lookup its value in the current `Context`.
+//! - Parameters are extracted by visiting the value the caller names as the parameter source — the
+//!   statement in expression form, or the plan of a statement the engine ran — for `$param`
+//!   references. For each parameter, we lookup its value in the current `Context`.
 //! - Optional filters can be applied to control which parameters are logged:
 //!   - `param_deny` takes precedence and excludes any matching parameter names.
-//!   - If `param_allow` is non-empty, only those parameter names are included.
+//!   - Only parameter names explicitly listed in `param_allow` are included; when `param_allow` is
+//!     empty, no parameters are logged.
 //! - For readability, both the SQL statement and parameter values are rendered to SQL and
 //!   whitespace is collapsed so the entire log fits on one line.
 //!
@@ -24,6 +26,7 @@ use web_time::Instant;
 
 use crate::catalog::{Permission, Permissions};
 use crate::ctx::FrozenContext;
+use crate::ctx::reason::Reason;
 use crate::expr::visit::{Visit, Visitor};
 
 #[derive(Clone)]
@@ -35,8 +38,8 @@ use crate::expr::visit::{Visit, Visitor};
 /// - an optional deny-list of parameter names to exclude from logs.
 ///
 /// Deny rules take precedence over allow rules. When the allow-list is empty,
-/// all parameters are allowed by default (subject to the deny-list). When not
-/// empty, only parameters present in the allow-list will be logged.
+/// no parameters are logged by default. Only parameters present in the
+/// allow-list (and not present in the deny-list) will be logged.
 pub(crate) struct SlowLog(Arc<Inner>);
 
 struct Inner {
@@ -91,8 +94,8 @@ impl SlowLog {
 	/// Parameters:
 	/// - `duration`: Minimum elapsed time a statement must take before it is considered "slow" and
 	///   logged.
-	/// - `param_allow`: If non-empty, only parameters with names in this list are included in the
-	///   log output.
+	/// - `param_allow`: The names of the parameters whose values are included in the log output.
+	///   When empty, no parameter value is logged.
 	/// - `param_deny`: Parameter names that should never be logged. This list always takes
 	///   precedence over `param_allow`.
 	pub(super) fn new(
@@ -115,43 +118,80 @@ impl SlowLog {
 		if !self.0.param_deny.is_empty() && self.0.param_deny.iter().any(|s| s == name) {
 			return false;
 		}
-		// If allow list is empty, everything is allowed by default
+		// If allow list is empty, no parameters are logged by default
 		if self.0.param_allow.is_empty() {
-			return true;
+			return false;
 		}
-		// Otherwise only names in the allow list are allowed
+		// Only names in the allow list are allowed
 		self.0.param_allow.iter().any(|s| s == name)
 	}
 
 	/// Check whether the supplied statement should be slow-logged and emit a
 	/// log line if the threshold is exceeded.
 	///
-	/// This function:
-	/// - Computes elapsed time since `start` and returns early if under the threshold.
-	/// - Traverses the statement AST to collect `$param` names via `VisitExpression`.
-	/// - Applies deny-list then allow-list filtering to parameter names, and looks up their current
-	///   values from the `Context`.
-	/// - Renders the SQL and parameter values, collapsing whitespace so the output is a single line
-	///   suitable for log processing.
-	pub(crate) fn check_log<S: SlowLogVisit + ToSql>(
+	/// `stm` is rendered as the entry's query text. `params` is walked for
+	/// the `$param` references whose current values the entry lists, after
+	/// the deny-list and then the allow-list; it is `stm` itself for a
+	/// statement in expression form, and the plan of a statement the
+	/// streaming engine ran. Both renderings collapse whitespace so the entry
+	/// is a single line.
+	///
+	/// Returns whether an entry was emitted.
+	pub(crate) fn check_log<T: ToSql, P: SlowLogVisit>(
 		&self,
 		ctx: &FrozenContext,
 		start: &Instant,
-		stm: &S,
-	) {
+		stm: &T,
+		params: &P,
+	) -> bool {
 		let elapsed = start.elapsed();
 		if elapsed < self.0.duration {
-			return;
+			return false;
 		}
 
-		// Extract params
-		let params = self.extract_params(ctx, stm);
+		let params = self.extract_params(ctx, params);
 		// Ensure the query is logged on a single line by collapsing whitespace
 		let stm = stm.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
 		warn!("Slow query detected - time: {elapsed:#?} - query: {stm} - params: [ {params} ]");
+		true
 	}
 
-	fn extract_params<S: SlowLogVisit + ToSql>(&self, ctx: &FrozenContext, stm: &S) -> String {
+	/// Emit an entry for a batch of statements that its query timeout or its
+	/// cancellation stopped before it completed, when the batch had run for at
+	/// least the threshold by then.
+	///
+	/// The entry reports the time since `batch_start` and the `reason`, and
+	/// names `stm`, the statement the interruption stopped: the one it cut
+	/// short, whose `params` are listed as [`SlowLog::check_log`] lists them,
+	/// or the one it kept from starting, which passes no `params` since it
+	/// never ran. The statement is rendered only once the threshold is met.
+	///
+	/// Returns whether an entry was emitted.
+	pub(crate) fn check_log_interrupted<T: ToSql, P: SlowLogVisit>(
+		&self,
+		ctx: &FrozenContext,
+		batch_start: &Instant,
+		reason: Reason,
+		stm: &T,
+		params: Option<&P>,
+	) -> bool {
+		let elapsed = batch_start.elapsed();
+		if elapsed < self.0.duration {
+			return false;
+		}
+		let reason = match reason {
+			Reason::Timedout(timeout) => format!("timed out after {timeout}"),
+			Reason::Canceled => "cancelled".to_string(),
+		};
+		let params = params.map_or_else(String::new, |params| self.extract_params(ctx, params));
+		let stm = stm.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
+		warn!(
+			"Slow query detected - time: {elapsed:#?} - batch did not complete ({reason}) - query: {stm} - params: [ {params} ]"
+		);
+		true
+	}
+
+	fn extract_params<P: SlowLogVisit>(&self, ctx: &FrozenContext, params: &P) -> String {
 		let mut visitor = ParamVisitor {
 			params: String::new(),
 			slow_log: self,
@@ -159,7 +199,7 @@ impl SlowLog {
 		};
 
 		// no errors can happen
-		let _ = stm.visit(&mut visitor);
+		let _ = params.visit(&mut visitor);
 
 		visitor.params
 	}
@@ -180,10 +220,10 @@ mod tests {
 	}
 
 	#[test]
-	fn defaults_allow_all() {
+	fn defaults_deny_all() {
 		let s = slowlog(&[], &[]);
-		assert!(s.is_param_allowed("a"));
-		assert!(s.is_param_allowed("any"));
+		assert!(!s.is_param_allowed("a"));
+		assert!(!s.is_param_allowed("any"));
 	}
 
 	#[test]
@@ -195,11 +235,11 @@ mod tests {
 	}
 
 	#[test]
-	fn deny_list_only_excludes() {
+	fn deny_list_without_allow_denies_all() {
 		let s = slowlog(&[], &["secret", "token"]);
 		assert!(!s.is_param_allowed("secret"));
 		assert!(!s.is_param_allowed("token"));
-		assert!(s.is_param_allowed("other"));
+		assert!(!s.is_param_allowed("other"));
 	}
 
 	#[test]
@@ -210,9 +250,9 @@ mod tests {
 	}
 
 	#[test]
-	fn allow_list_empty_means_all_except_denied() {
+	fn allow_list_empty_denies_all() {
 		let s = slowlog(&[], &["nope"]);
-		assert!(s.is_param_allowed("ok"));
+		assert!(!s.is_param_allowed("ok"));
 		assert!(!s.is_param_allowed("nope"));
 	}
 }

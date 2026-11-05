@@ -1,4 +1,7 @@
-use anyhow::{Result, anyhow};
+use std::io::IsTerminal;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use anyhow::{Result, anyhow, bail};
 use clap::Args;
 use futures::StreamExt;
 use rustyline::error::ReadlineError;
@@ -11,8 +14,8 @@ use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
 use surrealdb::{IndexedResults, Notification, Stats};
-use surrealdb_core::cnf::CommonConfig;
-use surrealdb_core::dbs::Capabilities as CoreCapabilities;
+use surrealdb_core::syn::runtime::ParserConfig;
+use surrealdb_rpc::capabilities::Capabilities as CoreCapabilities;
 use surrealdb_types::{SurrealValue, ToSql, Value, object};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
@@ -111,9 +114,11 @@ pub async fn init(
 	// Create a new terminal REPL
 	let mut rl = Editor::new()?;
 	// Set custom input validation
+	let rejected = AtomicBool::new(false);
 	rl.set_helper(Some(InputValidator {
 		multi,
 		capabilities: &capabilities,
+		rejected: &rejected,
 	}));
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
@@ -171,6 +176,8 @@ pub async fn init(
 		);
 	}
 
+	// Whether any input failed to parse or any statement returned an error
+	let mut failed = false;
 	// Loop over each command-line input
 	loop {
 		// Prompt the user to input SQL and check the input.
@@ -203,17 +210,32 @@ pub async fn init(
 		match surrealdb_core::syn::parse_with_capabilities(
 			&line,
 			&capabilities,
-			&CommonConfig::default(),
+			&ParserConfig::default(),
 		) {
-			Ok(mut query) => {
+			Ok(query) => {
 				let init_length = query.num_statements();
 				let vars = query.get_let_statements();
 
+				// The parse validates the line and tells us how many results to
+				// expect; the server gets the user's own text. Re-rendering the
+				// AST would send something the user did not write, so any gap
+				// in `ToSql` would silently rewrite their query.
+				//
+				// The capture expressions are appended on their own lines so a
+				// trailing line comment cannot swallow them. They are the final
+				// top-level expressions, and so the final results. A name comes
+				// back from `get_let_statements` unescaped, so it is rendered
+				// as a `Param` rather than interpolated: `$`a-b`` reads the
+				// variable, `$a-b` is a subtraction.
+				let mut request = line.trim_end().to_string();
+				request.push_str("\n;");
 				for var in &vars {
-					query.add_param(var.clone());
+					request.push('\n');
+					request.push('$');
+					request.push_str(&common::fmt::EscapeKwFreeIdent(var).to_sql());
+					request.push(';');
 				}
-
-				query.add_param("session".to_string());
+				request.push_str("\n$session;");
 
 				// Extract the namespace and database from the current prompt
 				let (prompt_ns, _) = split_prompt(&prompt)?;
@@ -223,7 +245,7 @@ pub async fn init(
 					continue;
 				}
 				// Run the query provided
-				let mut result = client.query(query.to_sql()).with_stats().await;
+				let mut result = client.query(request).with_stats().await;
 
 				let mut use_ns = None;
 				let mut use_db = None;
@@ -244,8 +266,9 @@ pub async fn init(
 					}
 				}
 
-				let result = process(pretty, json, result);
+				let result = process(pretty, json, result, &mut failed);
 				let result_is_error = result.is_err();
+				failed |= result_is_error;
 				print(result);
 				if result_is_error {
 					continue;
@@ -263,12 +286,19 @@ pub async fn init(
 				}
 			}
 			Err(e) => {
+				failed = true;
 				eprintln!("{e}\n");
 			}
 		}
 	}
 	// Save the inputs to the history
 	let _ = rl.save_history("history.txt");
+	// A script piping statements in has no one watching each result, so a
+	// failure must reach it as the exit status. An interactive session has
+	// already shown every error to the person who typed it.
+	if (failed || rejected.load(Ordering::Relaxed)) && !std::io::stdin().is_terminal() {
+		bail!("One or more statements failed");
+	}
 	// All ok
 	Ok(())
 }
@@ -293,9 +323,10 @@ fn process(
 	pretty: bool,
 	json: bool,
 	res: surrealdb::Result<WithStats<IndexedResults>>,
+	failed: &mut bool,
 ) -> Result<String> {
 	// Check query response for an error
-	let mut response = res?;
+	let mut response = res.inspect_err(|_| *failed = true)?;
 	// Get the number of statements the query contained
 	let num_statements = response.num_statements();
 	// Prepare a single value from the query response
@@ -305,7 +336,10 @@ fn process(
 			anyhow!("Expected some result for a query with index {index}, but found none")
 		})?;
 
-		let output = result.unwrap_or_else(|e| Value::String(e.to_string()));
+		let output = result.unwrap_or_else(|e| {
+			*failed = true;
+			Value::String(e.to_string())
+		});
 		vec.push((stats, output));
 	}
 
@@ -420,6 +454,10 @@ struct InputValidator<'a> {
 	/// If omitting semicolon causes newline.
 	multi: bool,
 	capabilities: &'a CoreCapabilities,
+	/// Set when an input is refused as unparseable. Rustyline reports the
+	/// refusal and reads on, so a piped line that does not parse never reaches
+	/// the command loop, and this is the only record that it was dropped.
+	rejected: &'a AtomicBool,
 }
 
 #[expect(clippy::if_same_then_else)]
@@ -445,7 +483,10 @@ impl Validator for InputValidator<'_> {
 				self.capabilities,
 				&Default::default(),
 			) {
-				Err(e) => Invalid(Some(format!(" --< {e}"))),
+				Err(e) => {
+					self.rejected.store(true, Ordering::Relaxed);
+					Invalid(Some(format!(" --< {e}")))
+				}
 				_ => Valid(None),
 			}
 		};

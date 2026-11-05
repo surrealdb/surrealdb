@@ -10,24 +10,50 @@
 
 #![allow(clippy::unwrap_used)]
 #![recursion_limit = "256"]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 mod common;
 
+use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
 use common::test_datastore;
 use rmcp::ServiceExt;
 use rmcp::model::{
-	CallToolRequestParams, ClientInfo, CompleteRequestParams, GetPromptRequestParams,
-	PromptMessageContent, ReadResourceRequestParams, Reference, ResourceContents,
+	CallToolRequestParams, ClientConfig, CompleteRequestParams, ContentBlock,
+	GetPromptRequestParams, ReadResourceRequestParams, Reference, ResourceContents,
 };
 use rmcp::service::RunningService;
 use serde_json::json;
 use surrealdb_core::dbs::Session;
+use surrealdb_core::kvs::Datastore;
 use surrealdb_mcp::McpService;
+use surrealdb_rpc::capabilities::{Capabilities, McpToolTarget, Targets};
 use tokio::time::timeout;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Ceiling on every round-trip a test in this file performs against the
+/// server, and on every server-task join.
+///
+/// Sized to absorb scheduling jitter on a heavily loaded CI runner while
+/// staying two orders of magnitude below the harness' global timeout, so a
+/// stalled transport fails the single test that stalled instead of consuming
+/// the whole run's budget.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Await `fut`, panicking with `label` if it does not settle within
+/// [`DEFAULT_TIMEOUT`].
+///
+/// Every await that depends on the server making progress goes through here:
+/// a stall must surface as a named timeout failure, never as a test that
+/// simply never returns.
+async fn within<F: Future>(label: &str, fut: F) -> F::Output {
+	match timeout(DEFAULT_TIMEOUT, fut).await {
+		Ok(output) => output,
+		Err(_) => panic!("`{label}` did not complete within {DEFAULT_TIMEOUT:?}"),
+	}
+}
 
 /// Spin up an `McpService` on one side of an in-memory duplex and return a
 /// connected rmcp client peer plus the join handle for the server task.
@@ -36,8 +62,16 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 /// `Session::default()` behaves as owner, so the server can DEFINE schema for
 /// the duration of the test without extra bootstrapping.
 async fn spawn_server()
--> (RunningService<rmcp::RoleClient, ClientInfo>, tokio::task::JoinHandle<Result<(), String>>) {
-	let ds = test_datastore().await;
+-> (RunningService<rmcp::RoleClient, ClientConfig>, tokio::task::JoinHandle<Result<(), String>>) {
+	spawn_server_with(test_datastore().await).await
+}
+
+/// Like [`spawn_server`] but serves a caller-provided datastore, so a test can
+/// install a specific capability set (e.g. a denied MCP tool via
+/// [`Datastore::set_capabilities`]) before the server starts.
+async fn spawn_server_with(
+	ds: Arc<Datastore>,
+) -> (RunningService<rmcp::RoleClient, ClientConfig>, tokio::task::JoinHandle<Result<(), String>>) {
 	let service =
 		McpService::new(ds, Some("test".to_string()), Some("test".to_string()), Session::owner());
 	let (server_io, client_io) = tokio::io::duplex(8192);
@@ -48,11 +82,12 @@ async fn spawn_server()
 		Ok(())
 	});
 
-	// `ClientInfo` implements `ClientHandler` and provides a sensible default
+	// `ClientConfig` implements `ClientHandler` and provides a sensible default
 	// InitializeRequest via `get_info()`, so we can drive the handshake
 	// without constructing any non-exhaustive structs ourselves.
-	let client =
-		ClientInfo::default().serve(client_io).await.expect("client failed to complete handshake");
+	let client = within("client handshake", ClientConfig::default().serve(client_io))
+		.await
+		.expect("client failed to complete handshake");
 	(client, server_handle)
 }
 
@@ -61,7 +96,7 @@ fn tool_text(result: &rmcp::model::CallToolResult) -> String {
 	result
 		.content
 		.iter()
-		.filter_map(|c| c.raw.as_text())
+		.filter_map(|c| c.as_text())
 		.map(|t| t.text.as_str())
 		.collect::<Vec<_>>()
 		.join("\n")
@@ -72,12 +107,16 @@ fn resource_text(result: &rmcp::model::ReadResourceResult) -> String {
 	result
 		.contents
 		.iter()
-		.filter_map(|c| match c {
-			ResourceContents::TextResourceContents {
+		.filter_map(|c| {
+			if let ResourceContents::TextResourceContents {
 				text,
 				..
-			} => Some(text.as_str()),
-			_ => None,
+			} = c
+			{
+				Some(text.as_str())
+			} else {
+				None
+			}
 		})
 		.collect::<Vec<_>>()
 		.join("\n")
@@ -90,10 +129,10 @@ fn resource_text(result: &rmcp::model::ReadResourceResult) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn stdio_handshake_reports_server_info() {
 	let (client, server) = spawn_server().await;
-	let info = client.peer_info().expect("server info should be set after handshake").clone();
+	let info = client.peer_info().expect("server info should be set after handshake");
 
 	// Instructions are our curated LLM-facing docs -- must be non-empty.
-	let instructions = info.instructions.expect("server should send instructions");
+	let instructions = info.instructions.clone().expect("server should send instructions");
 	assert!(!instructions.is_empty(), "instructions should be non-empty");
 	assert!(
 		instructions.contains("SurrealDB"),
@@ -106,12 +145,8 @@ async fn stdio_handshake_reports_server_info() {
 	assert!(info.capabilities.prompts.is_some(), "prompts capability must be advertised");
 	assert!(info.capabilities.completions.is_some(), "completions capability must be advertised");
 
-	client.cancel().await.expect("client cancel");
-	timeout(DEFAULT_TIMEOUT, server)
-		.await
-		.expect("server join timeout")
-		.expect("server task panic")
-		.ok();
+	within("client cancel", client.cancel()).await.expect("client cancel");
+	within("server join", server).await.expect("server task panic").ok();
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +156,7 @@ async fn stdio_handshake_reports_server_info() {
 #[tokio::test(flavor = "multi_thread")]
 async fn stdio_tools_list_matches_surface() {
 	let (client, server) = spawn_server().await;
-	let tools = client.list_all_tools().await.expect("list_all_tools");
+	let tools = within("list_all_tools", client.list_all_tools()).await.expect("list_all_tools");
 
 	let mut names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
 	names.sort_unstable();
@@ -150,7 +185,76 @@ async fn stdio_tools_list_matches_surface() {
 		);
 	}
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
+	server.abort();
+}
+
+/// Providers that accept only object schemas (OpenAI-style function
+/// parameters, Moonshot) reject a request carrying any tool whose input schema
+/// has a boolean `items` or property subschema, so none may be advertised.
+#[tokio::test(flavor = "multi_thread")]
+async fn stdio_tool_input_schemas_have_no_boolean_subschemas() {
+	fn boolean_subschemas(path: &str, schema: &serde_json::Value, found: &mut Vec<String>) {
+		use serde_json::Value;
+		// `false` is a valid schema that providers accept; only `true` is refused.
+		fn visit(path: String, sub: &Value, found: &mut Vec<String>) {
+			match sub {
+				Value::Bool(true) => found.push(path),
+				Value::Array(subs) => {
+					for (i, sub) in subs.iter().enumerate() {
+						visit(format!("{path}[{i}]"), sub, found);
+					}
+				}
+				other @ Value::Null
+				| other @ Value::Bool(_)
+				| other @ Value::Number(_)
+				| other @ Value::String(_)
+				| other @ Value::Object(_) => boolean_subschemas(&path, other, found),
+			}
+		}
+		let Some(map) = schema.as_object() else {
+			return;
+		};
+		for keyword in [
+			"items",
+			"contains",
+			"not",
+			"if",
+			"then",
+			"else",
+			"propertyNames",
+			"additionalProperties",
+			"additionalItems",
+			"unevaluatedProperties",
+			"unevaluatedItems",
+			"anyOf",
+			"oneOf",
+			"allOf",
+			"prefixItems",
+		] {
+			if let Some(sub) = map.get(keyword) {
+				visit(format!("{path}.{keyword}"), sub, found);
+			}
+		}
+		for keyword in ["properties", "patternProperties", "$defs", "definitions"] {
+			if let Some(subs) = map.get(keyword).and_then(|v| v.as_object()) {
+				for (name, sub) in subs {
+					visit(format!("{path}.{keyword}.{name}"), sub, found);
+				}
+			}
+		}
+	}
+
+	let (client, server) = spawn_server().await;
+	let tools = within("list_all_tools", client.list_all_tools()).await.expect("list_all_tools");
+	let mut found = Vec::new();
+	for tool in &tools {
+		let schema = serde_json::Value::Object((*tool.input_schema).clone());
+		boolean_subschemas(tool.name.as_ref(), &schema, &mut found);
+	}
+	assert!(found.is_empty(), "boolean subschemas advertised: {found:?}");
+
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
@@ -162,14 +266,64 @@ async fn stdio_tools_list_matches_surface() {
 async fn stdio_call_query() {
 	let (client, server) = spawn_server().await;
 	let args = json!({ "query": "RETURN 1 + 1" }).as_object().cloned().unwrap();
-	let result = client
-		.call_tool(CallToolRequestParams::new("query").with_arguments(args))
-		.await
-		.expect("query tool call");
+	let result = within(
+		"query tool call",
+		client.call_tool(CallToolRequestParams::new("query").with_arguments(args)),
+	)
+	.await
+	.expect("query tool call");
 	let text = tool_text(&result);
 	assert!(text.contains('2'), "expected 2 in result: {text}");
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
+	server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stdio_denied_tool_returns_capability_denied() {
+	// Model `--deny-mcp select`: deny the `select` tool while every other tool
+	// stays allowed, then drive the real dispatch path to confirm the gate.
+	let ds = test_datastore().await;
+	ds.set_capabilities(
+		Capabilities::default()
+			.without_mcp_tools(Targets::from(McpToolTarget("select".to_string()))),
+	)
+	.expect("set capabilities");
+	let (client, server) = spawn_server_with(ds).await;
+
+	// The denied tool is rejected in-band before its handler runs: `is_error`
+	// is set and the payload carries the `capability_denied` kind, not a
+	// protocol error and not a silent success.
+	let select_args = json!({ "target": "person" }).as_object().cloned().unwrap();
+	let denied = within(
+		"denied select tool call",
+		client.call_tool(CallToolRequestParams::new("select").with_arguments(select_args)),
+	)
+	.await
+	.expect("select tool call");
+	assert_eq!(denied.is_error, Some(true), "a denied tool must report an error");
+	let denied_text = tool_text(&denied);
+	assert!(
+		denied_text.contains("capability_denied"),
+		"expected a capability_denied outcome, got: {denied_text}"
+	);
+
+	// A tool that was not denied still runs normally through the same gate.
+	let query_args = json!({ "query": "RETURN 1 + 1" }).as_object().cloned().unwrap();
+	let allowed = within(
+		"allowed query tool call",
+		client.call_tool(CallToolRequestParams::new("query").with_arguments(query_args)),
+	)
+	.await
+	.expect("query tool call");
+	let allowed_text = tool_text(&allowed);
+	assert!(
+		!allowed.is_error.unwrap_or(false),
+		"a tool that was not denied should succeed: {allowed_text}"
+	);
+	assert!(allowed_text.contains('2'), "expected 2 in result: {allowed_text}");
+
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
@@ -183,14 +337,16 @@ async fn stdio_call_run_preserves_types() {
 	.as_object()
 	.cloned()
 	.unwrap();
-	let result = client
-		.call_tool(CallToolRequestParams::new("run").with_arguments(args))
-		.await
-		.expect("run tool call");
+	let result = within(
+		"run tool call",
+		client.call_tool(CallToolRequestParams::new("run").with_arguments(args)),
+	)
+	.await
+	.expect("run tool call");
 	let text = tool_text(&result);
 	assert!(text.contains("10"), "expected sum=10, got: {text}");
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
@@ -199,20 +355,24 @@ async fn stdio_call_list_tables_after_define() {
 	let (client, server) = spawn_server().await;
 
 	let define = json!({ "query": "DEFINE TABLE widget;" }).as_object().cloned().unwrap();
-	client
-		.call_tool(CallToolRequestParams::new("query").with_arguments(define))
-		.await
-		.expect("define table via query");
+	within(
+		"define table via query",
+		client.call_tool(CallToolRequestParams::new("query").with_arguments(define)),
+	)
+	.await
+	.expect("define table via query");
 
 	let list = json!({ "kind": "tables" }).as_object().cloned().unwrap();
-	let result = client
-		.call_tool(CallToolRequestParams::new("list").with_arguments(list))
-		.await
-		.expect("list tables call");
+	let result = within(
+		"list tables call",
+		client.call_tool(CallToolRequestParams::new("list").with_arguments(list)),
+	)
+	.await
+	.expect("list tables call");
 	let text = tool_text(&result);
 	assert!(text.contains("widget"), "expected `widget` in list output: {text}");
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
@@ -228,43 +388,50 @@ async fn stdio_call_graphql_returns_envelope() {
 	.as_object()
 	.cloned()
 	.unwrap();
-	client
-		.call_tool(CallToolRequestParams::new("query").with_arguments(seed))
-		.await
-		.expect("seed via query tool");
+	within(
+		"seed via query tool",
+		client.call_tool(CallToolRequestParams::new("query").with_arguments(seed)),
+	)
+	.await
+	.expect("seed via query tool");
 
 	let args = json!({ "query": "query{ foos { id, val } }" }).as_object().cloned().unwrap();
-	let result = client
-		.call_tool(CallToolRequestParams::new("graphql").with_arguments(args))
-		.await
-		.expect("graphql tool call");
+	let result = within(
+		"graphql tool call",
+		client.call_tool(CallToolRequestParams::new("graphql").with_arguments(args)),
+	)
+	.await
+	.expect("graphql tool call");
 	let text = tool_text(&result);
 	assert!(text.contains("foos"), "expected `foos` in GraphQL envelope: {text}");
 	assert!(text.contains("42"), "expected the seeded value in GraphQL envelope: {text}");
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn stdio_call_gql_reports_disabled_capability() {
-	// The default in-memory datastore does not enable the experimental
-	// `gql` capability. The `gql` tool must still be registered and return
-	// a clear in-band error rather than being absent from the tool surface.
+async fn stdio_call_gql_runs_without_experimental_capability() {
+	// GQL is enabled by default: the `gql` tool is registered and executes the
+	// query in-band, rather than being absent from the tool surface or refused
+	// as an experimental capability. (This query is a GQL parse error, which is
+	// itself an acceptable in-band result — the point is it is not gated.)
 	let (client, server) = spawn_server().await;
 
 	let args = json!({ "query": "MATCH (n) RETURN n" }).as_object().cloned().unwrap();
-	let result = client
-		.call_tool(CallToolRequestParams::new("gql").with_arguments(args))
-		.await
-		.expect("gql tool call");
+	let result = within(
+		"gql tool call",
+		client.call_tool(CallToolRequestParams::new("gql").with_arguments(args)),
+	)
+	.await
+	.expect("gql tool call");
 	let text = tool_text(&result);
 	assert!(
-		text.contains("gql") && text.contains("not enabled"),
-		"expected an experimental-capability error: {text}"
+		!text.contains("Experimental capability"),
+		"gql must no longer be gated as an experimental capability: {text}"
 	);
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
@@ -285,20 +452,23 @@ async fn stdio_call_use_switches_context() {
 		running.waiting().await.map_err(|e| format!("wait: {e}"))?;
 		Ok::<(), String>(())
 	});
-	let client =
-		ClientInfo::default().serve(client_io).await.expect("client failed to complete handshake");
+	let client = within("client handshake", ClientConfig::default().serve(client_io))
+		.await
+		.expect("client failed to complete handshake");
 
 	let args = json!({ "namespace": "ns2", "database": "db2" }).as_object().cloned().unwrap();
-	let result = client
-		.call_tool(CallToolRequestParams::new("use").with_arguments(args))
-		.await
-		.expect("use call");
+	let result = within(
+		"use call",
+		client.call_tool(CallToolRequestParams::new("use").with_arguments(args)),
+	)
+	.await
+	.expect("use call");
 	let text = tool_text(&result);
 	assert!(!result.is_error.unwrap_or(false), "use should succeed: {text}");
 	assert!(text.contains("ns2"), "expected ns2 in result: {text}");
 	assert!(text.contains("db2"), "expected db2 in result: {text}");
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
@@ -307,15 +477,17 @@ async fn stdio_call_use_rejects_nonexistent_namespace() {
 	let (client, server) = spawn_server().await;
 
 	let args = json!({ "namespace": "missing_ns" }).as_object().cloned().unwrap();
-	let result = client
-		.call_tool(CallToolRequestParams::new("use").with_arguments(args))
-		.await
-		.expect("use call should complete with an in-band error");
+	let result = within(
+		"use call",
+		client.call_tool(CallToolRequestParams::new("use").with_arguments(args)),
+	)
+	.await
+	.expect("use call should complete with an in-band error");
 	assert_eq!(result.is_error, Some(true));
 	let text = tool_text(&result).to_ascii_lowercase();
 	assert!(text.contains("missing_ns") && text.contains("does not exist"), "got: {text}");
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
@@ -327,16 +499,18 @@ async fn stdio_call_invalid_params_returns_error() {
 	// error, not a panic or a raw executor message.
 	let args =
 		json!({ "function": "math::sum; DROP person", "args": [] }).as_object().cloned().unwrap();
-	let err = client
-		.call_tool(CallToolRequestParams::new("run").with_arguments(args))
-		.await
-		.expect_err("invalid function name should produce an error");
+	let err = within(
+		"run tool call with invalid function name",
+		client.call_tool(CallToolRequestParams::new("run").with_arguments(args)),
+	)
+	.await
+	.expect_err("invalid function name should produce an error");
 
 	let msg = format!("{err}");
 	assert!(!msg.contains("src/"), "error must not leak source paths: {msg}");
 	assert!(!msg.contains("panicked"), "error must not leak panics: {msg}");
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
@@ -350,15 +524,19 @@ async fn stdio_resources_list_and_read() {
 
 	// Seed a table so the schema endpoints have something to read.
 	let seed = json!({ "query": "DEFINE TABLE cat;" }).as_object().cloned().unwrap();
-	client
-		.call_tool(CallToolRequestParams::new("query").with_arguments(seed))
-		.await
-		.expect("seed cat table");
+	within(
+		"seed cat table",
+		client.call_tool(CallToolRequestParams::new("query").with_arguments(seed)),
+	)
+	.await
+	.expect("seed cat table");
 
 	// Fixed, context-independent resources only. Schema URIs are advertised
 	// via `resources/templates/list`, not `resources/list`, because they
 	// require a `(namespace, database[, table])` expansion.
-	let resources = client.list_all_resources().await.expect("list_all_resources");
+	let resources = within("list_all_resources", client.list_all_resources())
+		.await
+		.expect("list_all_resources");
 	let uris: Vec<&str> = resources.iter().map(|r| r.uri.as_ref()).collect();
 	let mut expected_static =
 		vec!["surrealdb://instructions", "surrealdb://info", "surrealdb://version"];
@@ -368,17 +546,20 @@ async fn stdio_resources_list_and_read() {
 	assert_eq!(actual_static, expected_static, "static resource surface drifted");
 
 	for uri in &expected_static {
-		let result = client
-			.read_resource(ReadResourceRequestParams::new(*uri))
-			.await
-			.unwrap_or_else(|e| panic!("read {uri} failed: {e}"));
+		let result = within(
+			"read static resource",
+			client.read_resource(ReadResourceRequestParams::new(*uri)),
+		)
+		.await
+		.unwrap_or_else(|e| panic!("read {uri} failed: {e}"));
 		let text = resource_text(&result);
 		assert!(!text.is_empty(), "resource {uri} should have non-empty text");
 	}
 
 	// The parameterised schema URIs should expose both templates.
-	let templates =
-		client.list_all_resource_templates().await.expect("list_all_resource_templates");
+	let templates = within("list_all_resource_templates", client.list_all_resource_templates())
+		.await
+		.expect("list_all_resource_templates");
 	let template_uris: Vec<&str> = templates.iter().map(|t| t.uri_template.as_ref()).collect();
 	for expected in [
 		"surrealdb://schema/ns/{namespace}/db/{database}",
@@ -393,10 +574,12 @@ async fn stdio_resources_list_and_read() {
 	// Whole-database schema: must come back as self-describing JSON that
 	// echoes the namespace/database from the URI (so clients caching by URI
 	// cannot be tricked into misattributing the body).
-	let db_schema = client
-		.read_resource(ReadResourceRequestParams::new("surrealdb://schema/ns/test/db/test"))
-		.await
-		.expect("read database schema");
+	let db_schema = within(
+		"read database schema",
+		client.read_resource(ReadResourceRequestParams::new("surrealdb://schema/ns/test/db/test")),
+	)
+	.await
+	.expect("read database schema");
 	let db_text = resource_text(&db_schema);
 	assert!(!db_text.is_empty(), "database schema should be non-empty");
 	let db_json: serde_json::Value =
@@ -406,12 +589,14 @@ async fn stdio_resources_list_and_read() {
 	assert!(db_json.get("schema").is_some(), "schema key missing: {db_text}");
 
 	// Per-table schema. Body should likewise echo the full identity.
-	let table_schema = client
-		.read_resource(ReadResourceRequestParams::new(
+	let table_schema = within(
+		"read per-table schema",
+		client.read_resource(ReadResourceRequestParams::new(
 			"surrealdb://schema/ns/test/db/test/table/cat",
-		))
-		.await
-		.expect("read per-table schema");
+		)),
+	)
+	.await
+	.expect("read per-table schema");
 	let table_text = resource_text(&table_schema);
 	assert!(!table_text.is_empty(), "per-table schema should be non-empty");
 	let table_json: serde_json::Value =
@@ -423,16 +608,23 @@ async fn stdio_resources_list_and_read() {
 	// Legacy session-scoped URIs must be rejected so clients get an explicit
 	// "resource not found" instead of silently observing whichever NS/DB the
 	// session happens to be on.
-	let legacy = client.read_resource(ReadResourceRequestParams::new("surrealdb://schema")).await;
+	let legacy = within(
+		"read legacy schema URI",
+		client.read_resource(ReadResourceRequestParams::new("surrealdb://schema")),
+	)
+	.await;
 	assert!(legacy.is_err(), "legacy surrealdb://schema URI should no longer resolve");
-	let legacy_table =
-		client.read_resource(ReadResourceRequestParams::new("surrealdb://schema/cat")).await;
+	let legacy_table = within(
+		"read legacy per-table schema URI",
+		client.read_resource(ReadResourceRequestParams::new("surrealdb://schema/cat")),
+	)
+	.await;
 	assert!(
 		legacy_table.is_err(),
 		"legacy surrealdb://schema/<table> URI should no longer resolve"
 	);
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
@@ -444,7 +636,8 @@ async fn stdio_resources_list_and_read() {
 async fn stdio_prompts_list_and_get() {
 	let (client, server) = spawn_server().await;
 
-	let prompts = client.list_all_prompts().await.expect("list_all_prompts");
+	let prompts =
+		within("list_all_prompts", client.list_all_prompts()).await.expect("list_all_prompts");
 	let mut names: Vec<&str> = prompts.iter().map(|p| p.name.as_ref()).collect();
 	names.sort_unstable();
 
@@ -461,19 +654,22 @@ async fn stdio_prompts_list_and_get() {
 
 	// Getting an existing prompt must return a non-empty message whose text
 	// refers only to the current tool surface.
-	let result = client
-		.get_prompt(GetPromptRequestParams::new("schema_explorer"))
-		.await
-		.expect("get schema_explorer prompt");
+	let result = within(
+		"get schema_explorer prompt",
+		client.get_prompt(GetPromptRequestParams::new("schema_explorer")),
+	)
+	.await
+	.expect("get schema_explorer prompt");
 	assert!(!result.messages.is_empty(), "schema_explorer prompt must have messages");
 	let combined: String = result
 		.messages
 		.iter()
-		.filter_map(|m| match &m.content {
-			PromptMessageContent::Text {
-				text,
-			} => Some(text.as_str()),
-			_ => None,
+		.filter_map(|m| {
+			if let ContentBlock::Text(text) = &m.content {
+				Some(text.text.as_str())
+			} else {
+				None
+			}
 		})
 		.collect::<Vec<_>>()
 		.join("\n");
@@ -486,14 +682,16 @@ async fn stdio_prompts_list_and_get() {
 	}
 
 	// Unknown prompt names must surface as an error.
-	let err = client
-		.get_prompt(GetPromptRequestParams::new("does_not_exist"))
-		.await
-		.expect_err("unknown prompt should error");
+	let err = within(
+		"get unknown prompt",
+		client.get_prompt(GetPromptRequestParams::new("does_not_exist")),
+	)
+	.await
+	.expect_err("unknown prompt should error");
 	let msg = format!("{err}");
 	assert!(msg.contains("does_not_exist"), "error should name the unknown prompt: {msg}");
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
@@ -508,19 +706,18 @@ async fn stdio_completion_suggests_tables() {
 	// Seed a pair of tables so completion has something to return.
 	let seed =
 		json!({ "query": "DEFINE TABLE alpha; DEFINE TABLE beta;" }).as_object().cloned().unwrap();
-	client
-		.call_tool(CallToolRequestParams::new("query").with_arguments(seed))
-		.await
-		.expect("seed tables");
+	within(
+		"seed tables",
+		client.call_tool(CallToolRequestParams::new("query").with_arguments(seed)),
+	)
+	.await
+	.expect("seed tables");
 
 	let req = CompleteRequestParams::new(
 		Reference::for_prompt("query_builder"),
-		rmcp::model::ArgumentInfo {
-			name: "table".to_string(),
-			value: String::new(),
-		},
+		rmcp::model::ArgumentInfo::new("table".to_string(), String::new()),
 	);
-	let result = client.complete(req).await.expect("complete");
+	let result = within("complete", client.complete(req)).await.expect("complete");
 	let values = result.completion.values;
 	assert!(
 		values.iter().any(|v| v == "alpha"),
@@ -531,7 +728,7 @@ async fn stdio_completion_suggests_tables() {
 		"expected `beta` among completion values: {values:?}"
 	);
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();
 }
 
@@ -543,23 +740,19 @@ async fn stdio_completion_suggests_tables() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn stdio_uses_base_session_when_auth_enabled_and_guest_disabled() {
-	use std::sync::Arc;
-
-	use surrealdb_core::dbs::Capabilities;
 	use surrealdb_core::kvs::Datastore;
+	use surrealdb_rpc::capabilities::Capabilities;
 
 	// Datastore with auth *enabled* and guest access *disabled* -- the worst
 	// case for the old behaviour where `Session::default()` was used as the
 	// fallback. With the fix in place, the STDIO path should supply
 	// `Session::owner()` as the base session and every tool call should work.
-	let ds = Arc::new(
-		Datastore::builder()
-			.with_auth(true)
-			.with_capabilities(Capabilities::default())
-			.build_with_path("memory")
-			.await
-			.expect("datastore"),
-	);
+	let ds = Datastore::builder()
+		.with_auth(true)
+		.with_capabilities(Capabilities::default())
+		.build_with_path("memory")
+		.await
+		.expect("datastore");
 	// Bootstrap NS/DB so `default_ns`/`default_db` resolve to something real.
 	ds.execute("DEFINE NAMESPACE test;", &Session::owner(), None).await.expect("ns");
 	ds.execute("DEFINE DATABASE test;", &Session::owner().with_ns("test"), None).await.expect("db");
@@ -572,23 +765,26 @@ async fn stdio_uses_base_session_when_auth_enabled_and_guest_disabled() {
 		running.waiting().await.map_err(|e| format!("wait: {e}"))?;
 		Ok::<_, String>(())
 	});
-	let client =
-		ClientInfo::default().serve(client_io).await.expect("client failed to complete handshake");
+	let client = within("client handshake", ClientConfig::default().serve(client_io))
+		.await
+		.expect("client failed to complete handshake");
 
 	// Any schema-modifying operation requires a non-anonymous session, so
 	// this is a tight proof that the base session is actually threaded in.
 	let args = json!({ "query": "DEFINE TABLE widget;" }).as_object().cloned().unwrap();
-	let result = client
-		.call_tool(CallToolRequestParams::new("query").with_arguments(args))
-		.await
-		.expect("define table must succeed with base owner session");
+	let result = within(
+		"define table via query",
+		client.call_tool(CallToolRequestParams::new("query").with_arguments(args)),
+	)
+	.await
+	.expect("define table must succeed with base owner session");
 	let text = tool_text(&result);
 	assert!(
 		!text.to_lowercase().contains("not enough permissions"),
 		"base session should be owner, got permission error: {text}"
 	);
 
-	client.cancel().await.expect("client cancel");
+	within("client cancel", client.cancel()).await.expect("client cancel");
 	server_handle.abort();
 }
 
@@ -601,7 +797,7 @@ async fn stdio_server_terminates_cleanly() {
 	let (client, server) = spawn_server().await;
 	// Dropping the client closes its side of the duplex; the server task must
 	// then exit on its own within a reasonable timeout.
-	client.cancel().await.expect("client cancel");
-	let joined = timeout(DEFAULT_TIMEOUT, server).await.expect("server did not terminate in time");
+	within("client cancel", client.cancel()).await.expect("client cancel");
+	let joined = within("server termination", server).await;
 	joined.expect("server task panicked").expect("server task returned an error");
 }

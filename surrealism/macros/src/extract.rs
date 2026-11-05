@@ -16,14 +16,61 @@ pub(crate) struct FnSignatureParts {
 	pub result_type: proc_macro2::TokenStream,
 	pub is_result: bool,
 	pub is_async: bool,
+	/// The transaction parameter, when the function declared one: its binding
+	/// and its written type, verbatim.
+	///
+	/// Excluded from `arg_patterns`, `arg_wire_names`, `tuple_type` and
+	/// `tuple_pattern`, so SurrealQL never sees it as an argument. The mode is
+	/// deliberately *not* parsed out of the type — codegen asks the type system
+	/// via `TxMode::WRITEABLE` instead, so a type alias works and a bogus mode
+	/// is a compile error at the author's signature.
+	pub tx: Option<TxParam>,
+}
+
+/// The transaction parameter of a `#[surrealism]` function.
+pub(crate) struct TxParam {
+	pub pattern: syn::Pat,
+	pub ty: Box<Type>,
+}
+
+/// Whether a type's last path segment is `Transaction`.
+///
+/// Matched shallowly, consistent with the `Result` detection below, so
+/// `Transaction`, `Transaction<ReadWrite>` and `surrealism::Transaction` are all
+/// recognised and an alias is not. Two attributes settle the cases the spelling
+/// cannot:
+///
+/// - `#[tx]` on the first parameter forces it to be the handle. That is how an alias for the SDK
+///   type is declared, since the spelling no longer says so.
+/// - `#[name = "..."]` declares the parameter a SurrealQL argument. That is how a plugin's own
+///   first-position type called `Transaction` keeps its meaning.
+fn is_transaction_type(ty: &Type) -> bool {
+	let Type::Path(TypePath {
+		path,
+		..
+	}) = ty
+	else {
+		return false;
+	};
+	path.segments.last().is_some_and(|seg| seg.ident == "Transaction")
+}
+
+/// Whether a parameter carries `#[tx]`.
+fn has_tx_attr(attrs: &[syn::Attribute]) -> bool {
+	attrs.iter().any(|attr| matches!(&attr.meta, Meta::Path(p) if p.is_ident("tx")))
 }
 
 /// Derive the wire name from a pattern binding, falling back to positional
 /// names like `_0`, `_1` for non-ident patterns.
+///
+/// `index` counts the SurrealQL arguments, not the Rust parameters, so a
+/// transaction handle does not shift the names of everything after it: the same
+/// argument is `_0` whether or not the function declared a handle.
 fn wire_name_from_pat(pat: &Pat, index: usize) -> String {
-	match pat {
-		Pat::Ident(ident) => ident.ident.to_string(),
-		_ => format!("_{index}"),
+	if let Pat::Ident(ident) = pat {
+		ident.ident.to_string()
+	} else {
+		format!("_{index}")
 	}
 }
 
@@ -61,6 +108,7 @@ pub(crate) fn extract_fn_signature(sig: &syn::Signature) -> syn::Result<FnSignat
 	let mut arg_patterns = Vec::new();
 	let mut arg_wire_names = Vec::new();
 	let mut arg_types: Vec<&Box<Type>> = Vec::new();
+	let mut tx = None;
 
 	for (index, arg) in sig.inputs.iter().enumerate() {
 		match arg {
@@ -70,8 +118,29 @@ pub(crate) fn extract_fn_signature(sig: &syn::Signature) -> syn::Result<FnSignat
 				attrs,
 				..
 			}) => {
+				let named = parse_param_name_attr(attrs);
+				let forced = has_tx_attr(attrs);
+				// Only the first parameter may be the transaction handle. A
+				// `Transaction` anywhere else is almost certainly a mistake, and
+				// silently treating it as a SurrealQL argument would be worse
+				// than saying so. A parameter carrying `#[name = "..."]` is
+				// declared an argument by its author, so the spelling of its
+				// type is not read.
+				if forced || (named.is_none() && is_transaction_type(ty)) {
+					if index != 0 {
+						return Err(syn::Error::new_spanned(
+							ty,
+							"the `Transaction` parameter must come first",
+						));
+					}
+					tx = Some(TxParam {
+						pattern: *pat.clone(),
+						ty: ty.clone(),
+					});
+					continue;
+				}
 				let wire_name =
-					parse_param_name_attr(attrs).unwrap_or_else(|| wire_name_from_pat(pat, index));
+					named.unwrap_or_else(|| wire_name_from_pat(pat, arg_wire_names.len()));
 				validate_export_name(&wire_name);
 				arg_wire_names.push(wire_name);
 				arg_patterns.push(*pat.clone());
@@ -131,5 +200,6 @@ pub(crate) fn extract_fn_signature(sig: &syn::Signature) -> syn::Result<FnSignat
 		result_type,
 		is_result,
 		is_async: sig.asyncness.is_some(),
+		tx,
 	})
 }

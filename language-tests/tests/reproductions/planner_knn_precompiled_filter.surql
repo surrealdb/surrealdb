@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Brute-force KNN must apply precompiled residual filters before top-K"

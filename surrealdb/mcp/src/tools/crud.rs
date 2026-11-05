@@ -8,7 +8,7 @@ use rmcp::ErrorData;
 use rmcp::model::CallToolResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use surrealdb_core::dbs::QueryResult;
+use surrealdb_rpc::QueryResult;
 use surrealdb_types::Variables;
 
 use super::{
@@ -25,7 +25,7 @@ use crate::session::McpSession;
 /// SurrealDB value. See [`json_to_surreal_value`] for the recognised
 /// shapes.
 fn bind_data(session: &McpSession, json: &serde_json::Value) -> Result<Variables, ErrorData> {
-	let core = session.datastore().config();
+	let core = session.datastore().parser_config();
 	let mut vars = Variables::new();
 	vars.insert("data", json_to_surreal_value(json, session.config(), core.as_ref())?);
 	Ok(vars)
@@ -75,33 +75,162 @@ pub struct SelectParams {
 	/// references in one round-trip rather than issuing follow-up
 	/// queries.
 	pub fetch_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
+}
+
+/// Build [`surrealdb_core::syn::ParserSettings`] from the running datastore's
+/// [`surrealdb_core::syn::ParserConfig`].
+fn parser_settings(session: &McpSession) -> surrealdb_core::syn::ParserSettings {
+	let core = session.datastore().parser_config();
+	surrealdb_core::syn::ParserSettings::from_config(core.as_ref())
+}
+
+/// Validate a `SELECT` projection list (`fields`) before interpolating it into a
+/// `SELECT` statement.
+///
+/// Rejects empty fragments, trailing clauses (`OMIT`, `FROM`, `WHERE`, `;`),
+/// non-read-only expressions, and unclosed comments.
+fn validate_fields_clause(session: &McpSession, fields: &str) -> Result<(), ErrorData> {
+	if fields.trim().is_empty() {
+		return Err(crate::error::invalid_params("SELECT fields clause cannot be empty"));
+	}
+	let parsed =
+		surrealdb_core::syn::runtime::fields_with_settings(fields, parser_settings(session), true)
+			.map_err(|e| {
+				crate::error::invalid_params(format!("Invalid SELECT fields clause: {e}"))
+			})?;
+	if !parsed.read_only() {
+		return Err(crate::error::invalid_params("SELECT fields clause must be read-only"));
+	}
+	validate_select_probe(session, "SELECT fields", &format!("SELECT {fields}\nFROM __mcp_probe"))
+}
+
+/// Validate a `WHERE` expression fragment before interpolating it into a
+/// `SELECT`, `UPSERT`, `UPDATE`, or `DELETE` statement.
+///
+/// The fragment must parse as a single complete read-only expression with no
+/// trailing clauses (`ORDER BY`, `LIMIT`, `RETURN`, `TIMEOUT`, `;`) or statement
+/// keywords.
+fn validate_where_clause(session: &McpSession, where_clause: &str) -> Result<(), ErrorData> {
+	if where_clause.trim().is_empty() {
+		return Err(crate::error::invalid_params("WHERE clause cannot be empty"));
+	}
+	let parsed = surrealdb_core::syn::runtime::expr_with_settings(
+		where_clause,
+		parser_settings(session),
+		true,
+	)
+	.map_err(|e| crate::error::invalid_params(format!("Invalid WHERE clause: {e}")))?;
+	if !parsed.read_only() {
+		return Err(crate::error::invalid_params("WHERE clause must be a read-only expression"));
+	}
+	validate_select_probe(
+		session,
+		"WHERE",
+		&format!("SELECT * FROM __mcp_probe\nWHERE (\n{where_clause}\n)\nORDER BY __mcp_probe"),
+	)
+}
+
+/// Parse `probe_sql` as a SurrealQL query and verify that it resolves to a
+/// single read-only statement.
+fn validate_select_probe(
+	session: &McpSession,
+	clause_name: &str,
+	probe_sql: &str,
+) -> Result<(), ErrorData> {
+	let ast =
+		surrealdb_core::syn::runtime::query_with_settings(probe_sql, parser_settings(session))
+			.map_err(|e| {
+				crate::error::invalid_params(format!("Invalid {clause_name} clause: {e}"))
+			})?;
+	if ast.expressions.len() != 1 || !ast.expressions[0].read_only() {
+		return Err(crate::error::invalid_params(format!(
+			"{clause_name} clause must be a single read-only clause"
+		)));
+	}
+	Ok(())
+}
+
+/// Parse `query_sql` as a SurrealQL query and verify that it resolves to a
+/// single statement.
+fn validate_single_statement(session: &McpSession, query_sql: &str) -> Result<(), ErrorData> {
+	let ast =
+		surrealdb_core::syn::runtime::query_with_settings(query_sql, parser_settings(session))
+			.map_err(|e| crate::error::invalid_params(format!("Invalid statement: {e}")))?;
+	if ast.expressions.len() != 1 {
+		return Err(crate::error::invalid_params(
+			"Structured CRUD tool must resolve to a single statement",
+		));
+	}
+	Ok(())
 }
 
 pub async fn select(session: &McpSession, p: SelectParams) -> Result<CallToolResult, ErrorData> {
 	validate_identifier(&p.target)?;
+	if let Some(f) = &p.fields {
+		validate_fields_clause(session, f)?;
+	}
 	let fields = p.fields.as_deref().unwrap_or("*");
-	let mut q = format!("SELECT {fields} FROM {}", p.target);
+	let mut q = format!("SELECT {fields}\nFROM {}", p.target);
 	if let Some(w) = &p.where_clause {
-		q.push_str(&format!(" WHERE {w}"));
+		validate_where_clause(session, w)?;
+		q.push_str(&format!("\nWHERE {w}"));
 	}
 	if let Some(s) = &p.split_clause {
-		q.push_str(&format!(" SPLIT {s}"));
+		if s.trim().is_empty() {
+			return Err(crate::error::invalid_params("SPLIT clause cannot be empty"));
+		}
+		validate_select_probe(
+			session,
+			"SPLIT",
+			&format!("SELECT {fields}\nFROM {}\nSPLIT {s}\nORDER BY __mcp_probe", p.target),
+		)?;
+		q.push_str(&format!("\nSPLIT {s}"));
 	}
 	if let Some(g) = &p.group_clause {
-		q.push_str(&format!(" GROUP BY {g}"));
+		if g.trim().is_empty() {
+			return Err(crate::error::invalid_params("GROUP BY clause cannot be empty"));
+		}
+		validate_select_probe(
+			session,
+			"GROUP BY",
+			&format!("SELECT {fields}\nFROM {}\nGROUP BY {g}\nORDER BY __mcp_probe", p.target),
+		)?;
+		q.push_str(&format!("\nGROUP BY {g}"));
 	}
 	if let Some(o) = &p.order_clause {
-		q.push_str(&format!(" ORDER BY {o}"));
+		if o.trim().is_empty() {
+			return Err(crate::error::invalid_params("ORDER BY clause cannot be empty"));
+		}
+		validate_select_probe(
+			session,
+			"ORDER BY",
+			&format!("SELECT * FROM {}\nORDER BY {o}\nLIMIT 1\nSTART 0", p.target),
+		)?;
+		q.push_str(&format!("\nORDER BY {o}"));
 	}
 	if let Some(l) = p.limit_clause {
-		q.push_str(&format!(" LIMIT {l}"));
+		q.push_str(&format!("\nLIMIT {l}"));
 	}
 	if let Some(s) = p.start_clause {
-		q.push_str(&format!(" START {s}"));
+		q.push_str(&format!("\nSTART {s}"));
 	}
 	if let Some(f) = &p.fetch_clause {
-		q.push_str(&format!(" FETCH {f}"));
+		if f.trim().is_empty() {
+			return Err(crate::error::invalid_params("FETCH clause cannot be empty"));
+		}
+		validate_select_probe(
+			session,
+			"FETCH",
+			&format!("SELECT * FROM {}\nFETCH {f}\nVERSION d'1970-01-01T00:00:00Z'", p.target),
+		)?;
+		q.push_str(&format!("\nFETCH {f}"));
 	}
+	validate_select_probe(session, "SELECT", &q)?;
 	let results = session.execute(&q, None).await?;
 	Ok(collapse_single(session, results))
 }
@@ -116,6 +245,11 @@ pub struct CreateParams {
 	/// uuid, ...) -- e.g. `{"price": {"$ql": "9.99dec"}, "customer":
 	/// {"$ql": "customer:alice"}}`.
 	pub data: Option<serde_json::Value>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn create(session: &McpSession, p: CreateParams) -> Result<CallToolResult, ErrorData> {
@@ -143,6 +277,11 @@ pub struct InsertParams {
 	/// Whether this is a relation insert.
 	#[serde(default)]
 	pub relation: bool,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn insert(session: &McpSession, p: InsertParams) -> Result<CallToolResult, ErrorData> {
@@ -185,6 +324,11 @@ pub struct UpsertParams {
 	/// Optional `WHERE` clause (SurrealQL expression fragment). For dynamic
 	/// values use `$param` bindings via the raw `query` tool.
 	pub where_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn upsert(session: &McpSession, p: UpsertParams) -> Result<CallToolResult, ErrorData> {
@@ -193,8 +337,10 @@ pub async fn upsert(session: &McpSession, p: UpsertParams) -> Result<CallToolRes
 		resolve_update_mode(p.content_data.as_ref(), p.merge_data.as_ref(), p.patch_data.as_ref())?;
 	let mut q = format!("UPSERT {} {mode} $data", p.target);
 	if let Some(w) = &p.where_clause {
-		q.push_str(&format!(" WHERE {w}"));
+		validate_where_clause(session, w)?;
+		q.push_str(&format!("\nWHERE {w}"));
 	}
+	validate_single_statement(session, &q)?;
 	let results = session.execute(&q, Some(bind_data(session, data)?)).await?;
 	Ok(collapse_single(session, results))
 }
@@ -214,6 +360,11 @@ pub struct UpdateParams {
 	/// Optional `WHERE` clause (SurrealQL expression fragment). For dynamic
 	/// values use `$param` bindings via the raw `query` tool.
 	pub where_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn update(session: &McpSession, p: UpdateParams) -> Result<CallToolResult, ErrorData> {
@@ -222,8 +373,10 @@ pub async fn update(session: &McpSession, p: UpdateParams) -> Result<CallToolRes
 		resolve_update_mode(p.content_data.as_ref(), p.merge_data.as_ref(), p.patch_data.as_ref())?;
 	let mut q = format!("UPDATE {} {mode} $data", p.target);
 	if let Some(w) = &p.where_clause {
-		q.push_str(&format!(" WHERE {w}"));
+		validate_where_clause(session, w)?;
+		q.push_str(&format!("\nWHERE {w}"));
 	}
+	validate_single_statement(session, &q)?;
 	let results = session.execute(&q, Some(bind_data(session, data)?)).await?;
 	Ok(collapse_single(session, results))
 }
@@ -235,14 +388,21 @@ pub struct DeleteParams {
 	/// Optional `WHERE` clause (SurrealQL expression fragment). For dynamic
 	/// values use `$param` bindings via the raw `query` tool.
 	pub where_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn delete(session: &McpSession, p: DeleteParams) -> Result<CallToolResult, ErrorData> {
 	validate_identifier(&p.target)?;
 	let mut q = format!("DELETE FROM {}", p.target);
 	if let Some(w) = &p.where_clause {
-		q.push_str(&format!(" WHERE {w}"));
+		validate_where_clause(session, w)?;
+		q.push_str(&format!("\nWHERE {w}"));
 	}
+	validate_single_statement(session, &q)?;
 	let results = session.execute(&q, None).await?;
 	Ok(collapse_single(session, results))
 }
@@ -259,6 +419,11 @@ pub struct RelateParams {
 	/// Embed typed SurrealDB values via `{"$ql": "<expr>"}` (e.g.
 	/// `{"order": {"$ql": "order:o1"}, "quantity": 2}`).
 	pub content_data: Option<serde_json::Value>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn relate(session: &McpSession, p: RelateParams) -> Result<CallToolResult, ErrorData> {
@@ -296,7 +461,6 @@ fn resolve_update_mode<'a>(
 
 #[cfg(test)]
 mod tests {
-	use std::sync::Arc;
 
 	use serde_json::json;
 	use surrealdb_core::dbs::Session;
@@ -305,7 +469,7 @@ mod tests {
 	use super::*;
 
 	async fn session() -> McpSession {
-		let ds = Arc::new(Datastore::new("memory").await.expect("datastore"));
+		let ds = Datastore::new("memory").await.expect("datastore");
 		ds.execute("DEFINE NAMESPACE test;", &Session::owner(), None).await.expect("ns");
 		ds.execute("DEFINE DATABASE test;", &Session::owner().with_ns("test"), None)
 			.await
@@ -344,6 +508,7 @@ mod tests {
 				group_clause: None,
 				split_clause: None,
 				fetch_clause: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -366,6 +531,7 @@ mod tests {
 				group_clause: None,
 				split_clause: None,
 				fetch_clause: Some("owner".into()),
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -389,7 +555,12 @@ mod tests {
 			.expect("value");
 		match value {
 			serde_json::Value::Array(mut arr) if !arr.is_empty() => arr.remove(0),
-			other => other,
+			other @ serde_json::Value::Null
+			| other @ serde_json::Value::Bool(_)
+			| other @ serde_json::Value::Number(_)
+			| other @ serde_json::Value::String(_)
+			| other @ serde_json::Value::Array(_)
+			| other @ serde_json::Value::Object(_) => other,
 		}
 	}
 
@@ -417,6 +588,7 @@ mod tests {
 			CreateParams {
 				target: "product:bad".into(),
 				data: Some(json!({ "price": "9.99" })),
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -434,6 +606,7 @@ mod tests {
 			CreateParams {
 				target: "product:good".into(),
 				data: Some(json!({ "price": { "$ql": "9.99dec" } })),
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -464,6 +637,7 @@ mod tests {
 				]),
 				ignore: true,
 				relation: true,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -480,5 +654,259 @@ mod tests {
 			Some("ok"),
 			"INSERT with both relation and ignore must parse cleanly; got: {structured}"
 		);
+	}
+
+	/// The schema of a table whose `id` names its components.
+	const READING: &str = "DEFINE TABLE reading SCHEMALESS; \
+		DEFINE FIELD id ON reading TYPE [city: string, time: datetime];";
+
+	/// The create tool derives the record id from the components the data
+	/// carries, answers with the components as fields, and refuses data that
+	/// leaves one out rather than drawing a key at random.
+	#[tokio::test]
+	async fn create_derives_the_record_id_from_the_components_of_a_named_id() {
+		let session = session().await;
+		session.execute(READING, None).await.expect("schema");
+
+		let created = create(
+			&session,
+			CreateParams {
+				target: "reading".into(),
+				data: Some(json!({
+					"city": "London",
+					"time": { "$ql": "d'2024-01-01T00:00:00Z'" },
+					"temp": 1,
+				})),
+				scope: Default::default(),
+			},
+		)
+		.await
+		.expect("call returns");
+		let structured = created.structured_content.as_ref().expect("structured");
+		assert_eq!(structured.get("status").and_then(|v| v.as_str()), Some("ok"), "{structured}");
+		assert_eq!(
+			first_row(&created),
+			json!({
+				"city": "London",
+				"id": "reading:['London', d'2024-01-01T00:00:00Z']",
+				"temp": 1,
+				"time": "2024-01-01T00:00:00Z",
+			})
+		);
+
+		let refused = create(
+			&session,
+			CreateParams {
+				target: "reading".into(),
+				data: Some(json!({ "city": "London", "temp": 2 })),
+				scope: Default::default(),
+			},
+		)
+		.await
+		.expect("call returns");
+		let structured = refused.structured_content.as_ref().expect("structured");
+		assert_eq!(structured.get("status").and_then(|v| v.as_str()), Some("error"));
+		assert_eq!(
+			structured.get("error").and_then(|v| v.as_str()),
+			Some(
+				"Cannot create a record in `reading` without the record id component `time`: set `time`, give the record id, or define a DEFAULT on the `id` field"
+			)
+		);
+	}
+
+	/// The update tool may restate a component of the record id and may not
+	/// change it: the refusal names the value written and the record keeps its
+	/// key and its fields.
+	#[tokio::test]
+	async fn update_cannot_change_a_component_of_a_named_id() {
+		let session = session().await;
+		session.execute(READING, None).await.expect("schema");
+		session
+			.execute(
+				"CREATE reading SET city = 'London', time = d'2024-01-01T00:00:00Z', temp = 1;",
+				None,
+			)
+			.await
+			.expect("seed");
+
+		let refused = update(
+			&session,
+			UpdateParams {
+				target: "reading".into(),
+				content_data: None,
+				merge_data: Some(json!({ "city": "Paris" })),
+				patch_data: None,
+				where_clause: Some("city = 'London'".into()),
+				scope: Default::default(),
+			},
+		)
+		.await
+		.expect("call returns");
+		let structured = refused.structured_content.as_ref().expect("structured");
+		assert_eq!(structured.get("status").and_then(|v| v.as_str()), Some("error"));
+		assert_eq!(
+			structured.get("error").and_then(|v| v.as_str()),
+			Some(
+				"Found 'Paris' for the `city` field, but it is part of the record id of `reading` and does not match it"
+			)
+		);
+
+		let merged = update(
+			&session,
+			UpdateParams {
+				target: "reading".into(),
+				content_data: None,
+				merge_data: Some(json!({ "city": "London", "temp": 2 })),
+				patch_data: None,
+				where_clause: Some("city = 'London'".into()),
+				scope: Default::default(),
+			},
+		)
+		.await
+		.expect("call returns");
+		let structured = merged.structured_content.as_ref().expect("structured");
+		assert_eq!(structured.get("status").and_then(|v| v.as_str()), Some("ok"), "{structured}");
+		assert_eq!(
+			first_row(&merged),
+			json!({
+				"city": "London",
+				"id": "reading:['London', d'2024-01-01T00:00:00Z']",
+				"temp": 2,
+				"time": "2024-01-01T00:00:00Z",
+			})
+		);
+	}
+
+	/// A record id with an array key is not a target of the structured tools,
+	/// so no record of such a table is named through them: they are given the
+	/// table, and the key is derived.
+	#[tokio::test]
+	async fn an_array_record_id_is_not_a_target() {
+		let session = session().await;
+		session.execute(READING, None).await.expect("schema");
+		let rejected = create(
+			&session,
+			CreateParams {
+				target: "reading:['London', d'2024-01-01T00:00:00Z']".into(),
+				data: Some(json!({ "temp": 3 })),
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(rejected.is_err(), "an array key reached the statement");
+	}
+
+	#[tokio::test]
+	async fn crud_clauses_reject_statement_injection_and_mutations() {
+		let session = session().await;
+		session
+			.execute("CREATE person:alice SET name = 'Alice', age = 30;", None)
+			.await
+			.expect("seed");
+
+		// Injecting a second statement or FROM clause via `fields` must be rejected.
+		let bad_fields = select(
+			&session,
+			SelectParams {
+				target: "person".into(),
+				fields: Some("* FROM person; DELETE person; --".into()),
+				where_clause: None,
+				order_clause: None,
+				limit_clause: None,
+				start_clause: None,
+				group_clause: None,
+				split_clause: None,
+				fetch_clause: None,
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(bad_fields.is_err(), "fields clause smuggling FROM/statement must fail");
+
+		// Injecting a mutation expression via `fields` must be rejected.
+		let mut_fields = select(
+			&session,
+			SelectParams {
+				target: "person".into(),
+				fields: Some("(DELETE person)".into()),
+				where_clause: None,
+				order_clause: None,
+				limit_clause: None,
+				start_clause: None,
+				group_clause: None,
+				split_clause: None,
+				fetch_clause: None,
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(mut_fields.is_err(), "mutating fields clause must fail");
+
+		// Injecting a second statement or trailing clause via `where_clause` must be rejected.
+		let bad_where = select(
+			&session,
+			SelectParams {
+				target: "person".into(),
+				fields: None,
+				where_clause: Some("age > 10; DELETE person".into()),
+				order_clause: None,
+				limit_clause: None,
+				start_clause: None,
+				group_clause: None,
+				split_clause: None,
+				fetch_clause: None,
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(bad_where.is_err(), "where_clause smuggling statement must fail");
+
+		let bad_where_mut = delete(
+			&session,
+			DeleteParams {
+				target: "person".into(),
+				where_clause: Some("(CREATE secret:1) IS NOT NONE".into()),
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(bad_where_mut.is_err(), "mutating where_clause in delete must fail");
+
+		// Injecting trailing clauses via `order_clause` or `fetch_clause` must be rejected.
+		let bad_order = select(
+			&session,
+			SelectParams {
+				target: "person".into(),
+				fields: None,
+				where_clause: None,
+				order_clause: Some("name ASC LIMIT 1".into()),
+				limit_clause: None,
+				start_clause: None,
+				group_clause: None,
+				split_clause: None,
+				fetch_clause: None,
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(bad_order.is_err(), "order_clause smuggling LIMIT must fail");
+
+		let bad_fetch = select(
+			&session,
+			SelectParams {
+				target: "person".into(),
+				fields: None,
+				where_clause: None,
+				order_clause: None,
+				limit_clause: None,
+				start_clause: None,
+				group_clause: None,
+				split_clause: None,
+				fetch_clause: Some("name; DELETE person".into()),
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(bad_fetch.is_err(), "fetch_clause smuggling statement must fail");
 	}
 }

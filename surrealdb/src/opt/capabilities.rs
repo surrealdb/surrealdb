@@ -3,49 +3,35 @@
 use std::collections::HashSet;
 use std::mem;
 
-use surrealdb_core::dbs::NewPlannerStrategy;
-use surrealdb_core::dbs::capabilities::{
-	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,
-	ParseNetTargetError, Targets,
+use surrealdb_rpc::capabilities::{
+	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, McpToolTarget,
+	ParseFuncTargetError, ParseMcpToolTargetError, ParseNetTargetError, Targets,
 };
 
-/// Strategy for the streaming query planner.
+/// The retired planner-strategy setting.
 ///
-/// Controls how the new streaming planner/executor is used for query processing.
+/// The engine has a single execution path, so no value selects anything. The
+/// type remains so that code written against [`Capabilities::with_planner_strategy`]
+/// keeps compiling.
+#[deprecated(note = "the engine has a single execution path; the planner strategy has no effect")]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum PlannerStrategy {
-	/// Try the new planner for read-only statements, fall back to compute on unimplemented.
-	/// This is the default.
+	/// Has no effect.
 	BestEffort,
-	/// Skip the new planner entirely; always use the compute executor.
+	/// Has no effect.
 	ComputeOnly,
-	/// Require the new planner for all read-only statements.
-	/// Unimplemented features become hard errors instead of falling back.
+	/// Has no effect.
 	AllReadOnly,
-}
-
-/// Not public API
-#[doc(hidden)]
-impl From<PlannerStrategy> for NewPlannerStrategy {
-	fn from(strategy: PlannerStrategy) -> Self {
-		match strategy {
-			PlannerStrategy::BestEffort => NewPlannerStrategy::BestEffortReadOnlyStatements,
-			PlannerStrategy::ComputeOnly => NewPlannerStrategy::ComputeOnly,
-			PlannerStrategy::AllReadOnly => NewPlannerStrategy::AllReadOnlyStatements,
-		}
-	}
 }
 
 /// A list of features that are still experimental
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum ExperimentalFeature {
-	/// Enable the Files feature.
-	Files,
 	/// Enable Surrealism feature.
 	Surrealism,
-	/// Enable the GQL query language.
-	Gql,
+	/// Enable the `POST /kvexport` endpoint.
+	KvExport,
 }
 
 /// Not public API
@@ -53,9 +39,8 @@ pub enum ExperimentalFeature {
 impl From<&ExperimentalFeature> for ExperimentalTarget {
 	fn from(feature: &ExperimentalFeature) -> Self {
 		match feature {
-			ExperimentalFeature::Files => ExperimentalTarget::Files,
 			ExperimentalFeature::Surrealism => ExperimentalTarget::Surrealism,
-			ExperimentalFeature::Gql => ExperimentalTarget::Gql,
+			ExperimentalFeature::KvExport => ExperimentalTarget::KvExport,
 		}
 	}
 }
@@ -92,7 +77,7 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 /// example:
 /// ```
 /// # use surrealdb::opt::capabilities::Capabilities;
-/// # fn cap() -> surrealdb::Result<Capabilities>{
+/// # fn cap() -> Result<Capabilities, Box<dyn std::error::Error>> {
 /// # let cap =
 /// Capabilities::none()
 ///     .with_function_allowed("http::*")?
@@ -115,34 +100,34 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 /// # Examples
 ///
 /// Create a new instance, and allow all capabilities
-#[cfg_attr(feature = "kv-rocksdb", doc = "```no_run")]
-#[cfg_attr(not(feature = "kv-rocksdb"), doc = "```ignore")]
+#[cfg_attr(feature = "kv-surrealkv", doc = "```no_run")]
+#[cfg_attr(not(feature = "kv-surrealkv"), doc = "```ignore")]
 /// # use surrealdb::opt::capabilities::Capabilities;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
-/// # use surrealdb::engine::local::RocksDb;
+/// # use surrealdb::engine::local::SurrealKv;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// let capabilities = Capabilities::all();
 /// let config = Config::default().capabilities(capabilities);
-/// let db = Surreal::new::<RocksDb>(("temp.db", config)).await?;
+/// let db = Surreal::new::<SurrealKv>(("temp.db", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
 /// Create a new instance, and allow certain functions
-#[cfg_attr(feature = "kv-rocksdb", doc = "```no_run")]
-#[cfg_attr(not(feature = "kv-rocksdb"), doc = "```ignore")]
+#[cfg_attr(feature = "kv-surrealkv", doc = "```no_run")]
+#[cfg_attr(not(feature = "kv-surrealkv"), doc = "```ignore")]
 /// # use std::str::FromStr;
-/// # use surrealdb::engine::local::RocksDb;
+/// # use surrealdb::engine::local::SurrealKv;
 /// # use surrealdb::opt::capabilities::Capabilities;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
 /// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let capabilities = Capabilities::default()
 ///     .with_function_denied("http::*")?;
 /// let config = Config::default().capabilities(capabilities);
-/// let db = Surreal::new::<RocksDb>(("temp.db", config)).await?;
+/// let db = Surreal::new::<SurrealKv>(("temp.db", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -176,11 +161,7 @@ impl Capabilities {
 	/// Create a builder with all capabilities enabled.
 	pub fn all() -> Self {
 		Capabilities {
-			cap: CoreCapabilities::all()
-				.with_functions(Targets::All)
-				.without_functions(Targets::None)
-				.with_network_targets(Targets::All)
-				.without_network_targets(Targets::None),
+			cap: CoreCapabilities::all(),
 		}
 	}
 
@@ -217,19 +198,13 @@ impl Capabilities {
 		}
 	}
 
-	/// Set the planner strategy for query processing.
-	///
-	/// Controls how the streaming query planner/executor is used:
-	/// - [`PlannerStrategy::BestEffort`] (default): Try the new planner for read-only statements,
-	///   fall back to compute on unimplemented features.
-	/// - [`PlannerStrategy::ComputeOnly`]: Skip the new planner entirely; always use the compute
-	///   executor.
-	/// - [`PlannerStrategy::AllReadOnly`]: Require the new planner for all read-only statements.
-	///   Unimplemented features become hard errors.
-	pub fn with_planner_strategy(self, strategy: PlannerStrategy) -> Self {
-		Self {
-			cap: self.cap.with_planner_strategy(strategy.into()),
-		}
+	/// Has no effect: the engine has a single execution path.
+	#[deprecated(
+		note = "the engine has a single execution path; the planner strategy has no effect"
+	)]
+	#[allow(deprecated)]
+	pub fn with_planner_strategy(self, _strategy: PlannerStrategy) -> Self {
+		self
 	}
 
 	/// Set the allow list to allow all functions
@@ -408,6 +383,9 @@ impl Capabilities {
 	///
 	/// Adding a net target to the allow list overwrites previously set
 	/// allow-all or allow-none filters.
+	///
+	/// A target is `host[:port]`, `*.domain[:port]` (every subdomain of
+	/// `domain`, not `domain` itself), an IP address or a CIDR block.
 	pub fn allow_net_target<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -419,6 +397,9 @@ impl Capabilities {
 	///
 	/// Adding a net target to the allow list overwrites previously set
 	/// allow-all or allow-none filters.
+	///
+	/// A target is `host[:port]`, `*.domain[:port]` (every subdomain of
+	/// `domain`, not `domain` itself), an IP address or a CIDR block.
 	pub fn with_net_target_allowed<S: AsRef<str>>(
 		mut self,
 		func: S,
@@ -446,6 +427,9 @@ impl Capabilities {
 	///
 	/// Adding a net target to the deny list overwrites previously set deny-all
 	/// or deny-none filters.
+	///
+	/// A target is `host[:port]`, `*.domain[:port]` (every subdomain of
+	/// `domain`, not `domain` itself), an IP address or a CIDR block.
 	pub fn deny_net_target<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -457,6 +441,9 @@ impl Capabilities {
 	///
 	/// Adding a net target to the deny list overwrites previously set deny-all
 	/// or deny-none filters.
+	///
+	/// A target is `host[:port]`, `*.domain[:port]` (every subdomain of
+	/// `domain`, not `domain` itself), an IP address or a CIDR block.
 	pub fn with_net_target_denied<S: AsRef<str>>(
 		mut self,
 		func: S,
@@ -472,6 +459,134 @@ impl Capabilities {
 				let mut set = HashSet::new();
 				set.insert(target);
 				*self.cap.denied_network_targets_mut() = Targets::Some(set);
+			}
+			Targets::Some(x) => {
+				x.insert(target);
+			}
+		}
+		Ok(self)
+	}
+
+	/// Set the allow list to allow all MCP tools
+	pub fn allow_all_mcp_tools(&mut self) -> &mut Self {
+		*self.cap.allowed_mcp_tools_mut() = Targets::All;
+		self
+	}
+
+	/// Set the allow list to allow all MCP tools
+	pub fn with_all_mcp_tools_allowed(mut self) -> Self {
+		self.allow_all_mcp_tools();
+		self
+	}
+
+	/// Set the deny list to deny all MCP tools
+	pub fn deny_all_mcp_tools(&mut self) -> &mut Self {
+		*self.cap.denied_mcp_tools_mut() = Targets::All;
+		self
+	}
+
+	/// Set the deny list to deny all MCP tools
+	pub fn with_all_mcp_tools_denied(mut self) -> Self {
+		self.deny_all_mcp_tools();
+		self
+	}
+
+	/// Set the allow list to allow no MCP tools
+	pub fn allow_no_mcp_tools(&mut self) -> &mut Self {
+		*self.cap.allowed_mcp_tools_mut() = Targets::None;
+		self
+	}
+
+	/// Set the allow list to allow no MCP tools
+	pub fn with_no_mcp_tools_allowed(mut self) -> Self {
+		self.allow_no_mcp_tools();
+		self
+	}
+
+	/// Set the deny list to deny no MCP tools
+	pub fn deny_no_mcp_tools(&mut self) -> &mut Self {
+		*self.cap.denied_mcp_tools_mut() = Targets::None;
+		self
+	}
+
+	/// Set the deny list to deny no MCP tools
+	pub fn with_no_mcp_tools_denied(mut self) -> Self {
+		self.deny_no_mcp_tools();
+		self
+	}
+
+	/// Add an MCP tool to the allow lists
+	///
+	/// Adding a tool to the allow list overwrites previously set allow-all or
+	/// allow-none filters. The name must be a valid MCP tool (e.g. `query`,
+	/// `select`, `graphql`); unknown names are rejected.
+	pub fn allow_mcp_tool<S: AsRef<str>>(
+		&mut self,
+		tool: S,
+	) -> Result<&mut Self, ParseMcpToolTargetError> {
+		self.allow_mcp_tool_str(tool.as_ref())
+	}
+
+	/// Add an MCP tool to the allow lists
+	///
+	/// Adding a tool to the allow list overwrites previously set allow-all or
+	/// allow-none filters. The name must be a valid MCP tool (e.g. `query`,
+	/// `select`, `graphql`); unknown names are rejected.
+	pub fn with_mcp_tool_allowed<S: AsRef<str>>(
+		mut self,
+		tool: S,
+	) -> Result<Self, ParseMcpToolTargetError> {
+		self.allow_mcp_tool(tool)?;
+		Ok(self)
+	}
+
+	fn allow_mcp_tool_str(&mut self, s: &str) -> Result<&mut Self, ParseMcpToolTargetError> {
+		let target: McpToolTarget = s.parse()?;
+		match self.cap.allowed_mcp_tools_mut() {
+			Targets::None | Targets::All => {
+				let mut set = HashSet::new();
+				set.insert(target);
+				*self.cap.allowed_mcp_tools_mut() = Targets::Some(set);
+			}
+			Targets::Some(x) => {
+				x.insert(target);
+			}
+		}
+		Ok(self)
+	}
+
+	/// Add an MCP tool to the deny lists
+	///
+	/// Adding a tool to the deny list overwrites previously set deny-all or
+	/// deny-none filters. The name must be a valid MCP tool (e.g. `query`,
+	/// `select`, `graphql`); unknown names are rejected.
+	pub fn deny_mcp_tool<S: AsRef<str>>(
+		&mut self,
+		tool: S,
+	) -> Result<&mut Self, ParseMcpToolTargetError> {
+		self.deny_mcp_tool_str(tool.as_ref())
+	}
+
+	/// Add an MCP tool to the deny lists
+	///
+	/// Adding a tool to the deny list overwrites previously set deny-all or
+	/// deny-none filters. The name must be a valid MCP tool (e.g. `query`,
+	/// `select`, `graphql`); unknown names are rejected.
+	pub fn with_mcp_tool_denied<S: AsRef<str>>(
+		mut self,
+		tool: S,
+	) -> Result<Self, ParseMcpToolTargetError> {
+		self.deny_mcp_tool(tool)?;
+		Ok(self)
+	}
+
+	fn deny_mcp_tool_str(&mut self, s: &str) -> Result<&mut Self, ParseMcpToolTargetError> {
+		let target: McpToolTarget = s.parse()?;
+		match self.cap.denied_mcp_tools_mut() {
+			Targets::None | Targets::All => {
+				let mut set = HashSet::new();
+				set.insert(target);
+				*self.cap.denied_mcp_tools_mut() = Targets::Some(set);
 			}
 			Targets::Some(x) => {
 				x.insert(target);
@@ -660,5 +775,51 @@ impl From<CoreCapabilities> for Capabilities {
 		Self {
 			cap,
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// Resolve the built capabilities and ask whether `tool` would be allowed,
+	/// exercising the same `allows_mcp_tool` gate the MCP dispatcher uses.
+	fn allows(cap: &Capabilities, tool: &str) -> bool {
+		let core: CoreCapabilities = cap.clone().into();
+		core.allows_mcp_tool(&McpToolTarget(tool.to_string()))
+	}
+
+	#[test]
+	fn mcp_tools_allowed_by_default() {
+		let cap = Capabilities::default();
+		assert!(allows(&cap, "query"));
+		assert!(allows(&cap, "graphql"));
+	}
+
+	#[test]
+	fn deny_single_mcp_tool_leaves_the_rest_allowed() {
+		let cap = Capabilities::default().with_mcp_tool_denied("graphql").unwrap();
+		assert!(allows(&cap, "query"));
+		assert!(!allows(&cap, "graphql"));
+	}
+
+	#[test]
+	fn allow_only_named_mcp_tools_from_none() {
+		let cap = Capabilities::none().with_mcp_tool_allowed("query").unwrap();
+		assert!(allows(&cap, "query"));
+		assert!(!allows(&cap, "select"));
+	}
+
+	#[test]
+	fn deny_all_mcp_tools() {
+		let cap = Capabilities::default().with_all_mcp_tools_denied();
+		assert!(!allows(&cap, "query"));
+		assert!(!allows(&cap, "graphql"));
+	}
+
+	#[test]
+	fn unknown_mcp_tool_is_rejected() {
+		assert!(Capabilities::default().with_mcp_tool_denied("not_a_tool").is_err());
+		assert!(Capabilities::default().with_mcp_tool_allowed("not_a_tool").is_err());
 	}
 }

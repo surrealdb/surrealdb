@@ -1,5 +1,6 @@
 pub mod api;
 mod auth;
+pub mod bucket;
 pub mod client_ip;
 pub mod error;
 pub mod export;
@@ -7,23 +8,30 @@ pub mod export;
 pub mod gql;
 #[cfg(feature = "graphql")]
 pub mod graphql;
+pub mod grpc;
 pub(crate) mod headers;
 pub mod health;
 pub mod import;
 mod input;
 pub mod key;
+pub mod kvexport;
 #[cfg(feature = "mcp")]
 pub mod mcp;
-pub mod ml;
+pub(crate) mod memory_guard;
 pub(crate) mod output;
 mod params;
+mod rate_limit;
 mod ready;
+pub mod refresh;
 pub mod rpc;
+mod scope;
 mod signals;
 pub mod signin;
+pub mod signout;
 pub mod signup;
 pub mod sql;
 pub mod sync;
+pub(crate) mod timeout;
 mod tracer;
 pub mod version;
 
@@ -41,7 +49,6 @@ use axum_server::Handle;
 use axum_server::accept::NoDelayAcceptor;
 use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
 use http::header;
-use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb_core::CommunityComposer;
 use surrealdb_core::channel::Receiver;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
@@ -60,6 +67,7 @@ use tower_http::sensitive_headers::{
 };
 use tower_http::trace::TraceLayer;
 
+use self::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 /// Re-exported so an edition overriding `/ready` can reuse the community
 /// readiness decision; pair it with [`community_router`] to omit the built-in
 /// `/ready` route.
@@ -126,6 +134,21 @@ const LOG: &str = "surrealdb::net";
 pub trait RouterFactory: TransactionBuilderFactory {
 	/// Build and return the base Router. The server will attach shared state and layers.
 	fn configure_router(router_state: Self::RouterState) -> Router<Arc<RpcState>>;
+
+	/// Paths of this composer's own routes that answer while the instance is still
+	/// starting, as `/ready` and `/health` do. Everything else is refused with
+	/// `503` until the deferred startup work has completed.
+	///
+	/// Until startup completes, the readiness gate removes the `Authorization`
+	/// header from every request it lets through, so a route listed here sees an
+	/// anonymous session and its credentials are never checked against a
+	/// datastore that is not settled yet. Such a route is reachable by any caller
+	/// that can reach the listener, so list only one whose handler decides what to
+	/// reveal without a session, and reveals nothing an anonymous caller may not
+	/// see. Community lists none.
+	fn startup_routes() -> &'static [&'static str] {
+		&[]
+	}
 }
 
 /// Default router implementation for the community edition.
@@ -159,15 +182,19 @@ pub fn community_router(exclude: &[&str]) -> Router<Arc<RpcState>> {
 	}
 	router = router
 		.merge(export::router())
+		.merge(kvexport::router())
 		.merge(import::router())
 		.merge(rpc::router())
+		.merge(grpc::router())
 		.merge(version::router())
 		.merge(sync::router())
 		.merge(sql::router())
 		.merge(signin::router())
+		.merge(refresh::router())
+		.merge(signout::router())
 		.merge(signup::router())
 		.merge(key::router())
-		.merge(ml::router())
+		.merge(bucket::router())
 		.merge(api::router());
 
 	#[cfg(feature = "graphql")]
@@ -228,6 +255,9 @@ pub struct Readiness {
 /// - `client_ip`: [`ClientIp::Socket`] (extract the client IP from the raw socket)
 /// - `no_identification_headers`: `false` (include `Server` and version headers)
 /// - `allow_origin`: empty (allow all origins)
+/// - `durable_session_ttl`:
+///   [`DEFAULT_DURABLE_SESSION_TTL`](crate::cnf::DEFAULT_DURABLE_SESSION_TTL)
+/// - `cookie_auth`: `false` (no session cookies)
 ///
 /// # Example
 ///
@@ -241,6 +271,8 @@ pub struct Readiness {
 ///     client_ip: ClientIp::None,
 ///     no_identification_headers: true,
 ///     allow_origin: vec!["https://example.com".to_string()],
+///     durable_session_ttl: Duration::from_secs(3600),
+///     cookie_auth: false,
 /// };
 /// ```
 #[derive(Clone, Debug)]
@@ -252,6 +284,21 @@ pub struct RouterOptions {
 	/// Allowed CORS origins. When empty (the default), all origins are allowed.
 	/// Each entry should be a valid origin string (e.g. `"https://example.com"`).
 	pub allow_origin: Vec<String>,
+	/// How long an attached HTTP RPC session lives without being used: it
+	/// expires between one and one and a half times this long after its last
+	/// request. Must be at least one millisecond, or building the router
+	/// panics. Attached sessions are stored in the datastore, so they survive
+	/// server restarts and any node sharing the datastore serves them.
+	pub durable_session_ttl: Duration,
+	/// When `true`, `/signin/cookie` and `/signup/cookie` issue the access token
+	/// as an `HttpOnly` cookie (plus an `HttpOnly` refresh cookie for record
+	/// access methods with `WITH REFRESH`), `/refresh/cookie` rotates them,
+	/// `/signout` clears them, and the access cookie is accepted as a
+	/// credential from allowed browser origins (see
+	/// `ntw::auth::browser_origin_allowed`).
+	/// Requires a non-empty `allow_origin`; [`SurrealRouter::build`] refuses the
+	/// combination otherwise.
+	pub cookie_auth: bool,
 }
 
 impl Default for RouterOptions {
@@ -260,6 +307,8 @@ impl Default for RouterOptions {
 			client_ip: client_ip::ClientIp::Socket,
 			no_identification_headers: false,
 			allow_origin: Vec::new(),
+			durable_session_ttl: crate::cnf::DEFAULT_DURABLE_SESSION_TTL,
+			cookie_auth: false,
 		}
 	}
 }
@@ -270,8 +319,18 @@ impl From<&Config> for RouterOptions {
 			client_ip: cfg.client_ip,
 			no_identification_headers: cfg.no_identification_headers,
 			allow_origin: cfg.allow_origin.clone(),
+			durable_session_ttl: cfg.durable_session_ttl,
+			cookie_auth: cfg.cookie_auth,
 		}
 	}
+}
+
+/// Parses the configured CORS origins into header values.
+fn allow_origin_values(origins: &[String]) -> Result<Vec<http::HeaderValue>> {
+	origins
+		.iter()
+		.map(|o| o.parse().map_err(|_| anyhow::anyhow!("invalid CORS origin: {o}")))
+		.collect()
 }
 
 /// A fully-configured SurrealDB router ready to be served.
@@ -385,9 +444,25 @@ impl SurrealRouter {
 		readiness: Readiness,
 	) -> Result<Self> {
 		let opt = opt.into();
+		// The origin gate that protects the cookie matches each request's Origin
+		// exactly against the list, so the list must be explicit: a wildcard entry
+		// would never match and is refused rather than left to fail silently.
+		if opt.cookie_auth && opt.allow_origin.is_empty() {
+			anyhow::bail!("cookie authentication requires an explicit --allow-origin list");
+		}
+		if opt.cookie_auth && opt.allow_origin.iter().any(|o| o == "*") {
+			anyhow::bail!("cookie authentication refuses a wildcard --allow-origin");
+		}
 		// Clone the readiness flag for the gate layer before moving `readiness`
 		// into the shared app state.
-		let gate_ready = Arc::clone(&readiness.ready);
+		let gate = ready::Gate {
+			ready: Arc::clone(&readiness.ready),
+			startup_routes: F::startup_routes(),
+		};
+		let cookie_policy = auth::CookiePolicy {
+			enabled: opt.cookie_auth,
+			origins: allow_origin_values(&opt.allow_origin)?.into(),
+		};
 		let app_state = AppState {
 			client_ip: opt.client_ip,
 			datastore: Arc::clone(&ds),
@@ -421,19 +496,18 @@ impl SurrealRouter {
 					// Don't compress gRPC
 					.and(NotForContentType::GRPC)
 					// Don't compress images
-					.and(NotForContentType::IMAGES),
+					.and(NotForContentType::IMAGES)
+					// Don't compress a keyspace copy: the stored bytes are mostly
+					// compact already, and deflating them costs the source more
+					// CPU than the transfer saves
+					.and(NotForContentType::const_new(kvexport::CONTENT_TYPE)),
 			),
 		);
 
 		let allow_origin: AllowOrigin = if opt.allow_origin.is_empty() {
 			Any.into()
 		} else {
-			let origins: Vec<http::HeaderValue> = opt
-				.allow_origin
-				.iter()
-				.map(|o| o.parse().map_err(|_| anyhow::anyhow!("invalid CORS origin: {o}")))
-				.collect::<Result<Vec<_>, _>>()?;
-			AllowOrigin::list(origins)
+			AllowOrigin::list(allow_origin_values(&opt.allow_origin)?)
 		};
 
 		let allow_header = vec![
@@ -483,6 +557,7 @@ impl SurrealRouter {
 
 		let service = service
 			.layer(AddExtensionLayer::new(app_state))
+			.layer(AddExtensionLayer::new(cookie_policy))
 			.layer(middleware::from_fn(client_ip::client_ip_middleware))
 			.layer(SetSensitiveRequestHeadersLayer::from_shared(Arc::clone(&headers)))
 			.layer(
@@ -497,13 +572,13 @@ impl SurrealRouter {
 			// Gate user-facing endpoints with 503 until startup completes. Sits
 			// ahead of auth so gated requests short-circuit before authentication
 			// touches the (still-initialising) datastore.
-			.layer(middleware::from_fn_with_state(gate_ready, ready::readiness_gate))
-			.layer(auth::SurrealAuthLayer)
-			.layer(headers::add_server_header(!opt.no_identification_headers)?)
-			.layer(headers::add_version_header(!opt.no_identification_headers)?)
-			// Apply CORS headers to relevant responses
+			.layer(middleware::from_fn_with_state(gate, ready::readiness_gate))
+			// Apply CORS headers to relevant responses. Sits ahead of the rate
+			// limiter and the auth layer so the responses they emit — 429s
+			// with Retry-After in particular — carry CORS headers that
+			// cross-origin browser clients are allowed to read.
 			.layer({
-				let cors = CorsLayer::new()
+				let mut cors = CorsLayer::new()
 					.allow_methods([
 						http::Method::GET,
 						http::Method::PUT,
@@ -515,12 +590,33 @@ impl SurrealRouter {
 					.allow_headers(allow_header)
 					.allow_origin(allow_origin)
 					.max_age(Duration::from_secs(86400));
+				// Browsers only attach the session cookie to a cross-origin
+				// request when the response allows credentials; the explicit
+				// origin list checked above makes that safe.
+				if opt.cookie_auth {
+					cors = cors.allow_credentials(true);
+				}
 
+				// Expose Retry-After so cross-origin browser clients can read
+				// the backoff hint on rate-limited responses.
+				#[cfg(not(feature = "mcp"))]
+				let expose_headers = vec![header::RETRY_AFTER];
 				#[cfg(feature = "mcp")]
-				let cors = cors.expose_headers(mcp_expose_headers);
+				let expose_headers = {
+					let mut expose = vec![header::RETRY_AFTER];
+					expose.extend(mcp_expose_headers);
+					expose
+				};
 
-				cors
-			});
+				cors.expose_headers(expose_headers)
+			})
+			// Throttle authentication attempts per client address ahead of the
+			// auth layer, so a limited request performs no credential
+			// verification work at all.
+			.layer(middleware::from_fn(rate_limit::auth_rate_limit_middleware))
+			.layer(auth::SurrealAuthLayer)
+			.layer(headers::add_server_header(!opt.no_identification_headers)?)
+			.layer(headers::add_version_header(!opt.no_identification_headers)?);
 
 		// Build the route tree from the RouterFactory
 		let axum_app = F::configure_router(router_state);
@@ -542,10 +638,19 @@ impl SurrealRouter {
 		// (if metrics are enabled) is threaded through so the WebSocket I/O
 		// paths can increment per-protocol byte counters without grabbing any
 		// global state.
-		let rpc_state = Arc::new(RpcState::new_with_metrics(Arc::clone(&ds), prometheus_observer));
+		let rpc_state = Arc::new(RpcState::new_with_options(
+			Arc::clone(&ds),
+			prometheus_observer,
+			opt.durable_session_ttl,
+		));
 
 		// Apply state
 		let axum_app = axum_app.with_state(Arc::clone(&rpc_state));
+
+		// Add the `/ns/{ns}[/db/{db}]/{method}` forms. This wraps the finished
+		// router, so a scoped request is rewritten before any middleware reads
+		// its path.
+		let axum_app = scope::mount(axum_app);
 
 		Ok(Self {
 			router: axum_app,

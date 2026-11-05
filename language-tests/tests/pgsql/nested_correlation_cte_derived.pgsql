@@ -1,0 +1,19 @@
+/**
+[env]
+namespace = true
+database = true
+timeout = 30000
+imports = ["pgsql/_nested_correlation.surql"]
+
+[test]
+reason = "a column of the outermost query read in a common table expression and in a derived table of a subquery nested in another is the column of the row the outermost query is on"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 2 }]"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 2 }]"
+*/
+
+select u.id from users u where exists (select 1 from posts p where p.owner_id = u.id and exists (with c as (select o.id from posts o where o.owner_id = u.id) select 1 from c where c.id = p.id)) order by 1;
+select u.id from users u where exists (select 1 from posts p where p.owner_id = u.id and exists (select 1 from (select u.id as x from posts q) d where d.x = p.owner_id)) order by 1;

@@ -18,7 +18,7 @@ pub struct Signin;
 pub trait Credentials<Action>: SurrealValue {}
 
 /// Credentials for the root user
-#[derive(Debug, Clone, SurrealValue)]
+#[derive(Clone, SurrealValue)]
 #[surreal(crate = "crate::types")]
 pub struct Root {
 	/// The username of the root user
@@ -29,10 +29,19 @@ pub struct Root {
 	pub password: String,
 }
 
+impl fmt::Debug for Root {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Root")
+			.field("username", &self.username)
+			.field("password", &"[REDACTED]")
+			.finish()
+	}
+}
+
 impl Credentials<Signin> for Root {}
 
 /// Credentials for the namespace user
-#[derive(Debug, Clone, SurrealValue)]
+#[derive(Clone, SurrealValue)]
 #[surreal(crate = "crate::types")]
 pub struct Namespace {
 	/// The namespace the user has access to
@@ -46,10 +55,20 @@ pub struct Namespace {
 	pub password: String,
 }
 
+impl fmt::Debug for Namespace {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Namespace")
+			.field("namespace", &self.namespace)
+			.field("username", &self.username)
+			.field("password", &"[REDACTED]")
+			.finish()
+	}
+}
+
 impl Credentials<Signin> for Namespace {}
 
 /// Credentials for the database user
-#[derive(Debug, Clone, SurrealValue)]
+#[derive(Clone, SurrealValue)]
 #[surreal(crate = "crate::types")]
 pub struct Database {
 	/// The namespace the user has access to
@@ -66,10 +85,20 @@ pub struct Database {
 	pub password: String,
 }
 
+impl fmt::Debug for Database {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Database")
+			.field("namespace", &self.namespace)
+			.field("database", &self.database)
+			.field("username", &self.username)
+			.field("password", &"[REDACTED]")
+			.finish()
+	}
+}
+
 impl Credentials<Signin> for Database {}
 
 /// Credentials for the record user
-#[derive(Debug)]
 pub struct Record<P: SurrealValue> {
 	/// The namespace the user has access to
 	pub namespace: String,
@@ -79,6 +108,17 @@ pub struct Record<P: SurrealValue> {
 	pub access: String,
 	/// The additional params to use
 	pub params: P,
+}
+
+impl<P: SurrealValue> fmt::Debug for Record<P> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Record")
+			.field("namespace", &self.namespace)
+			.field("database", &self.database)
+			.field("access", &self.access)
+			.field("params", &"[REDACTED]")
+			.finish()
+	}
 }
 
 impl<P: SurrealValue> SurrealValue for Record<P> {
@@ -176,16 +216,13 @@ impl<T, P> Credentials<T> for Record<P> where P: SurrealValue {}
 /// use surrealdb::opt::auth::{Token, AccessToken, RefreshToken};
 ///
 /// // Create a token with only access token (legacy mode)
-/// let legacy_token = Token {
-///     access: AccessToken::from("access_token_string"),
-///     refresh: None,
-/// };
+/// let legacy_token = Token::from(AccessToken::from("access_token_string"));
 ///
 /// // Create a token with both access and refresh tokens
-/// let modern_token = Token {
-///     access: AccessToken::from("access_token_string"),
-///     refresh: Some(RefreshToken::from("refresh_token_string")),
-/// };
+/// let modern_token = Token::from((
+///     AccessToken::from("access_token_string"),
+///     RefreshToken::from("refresh_token_string"),
+/// ));
 ///
 /// // Access token values securely
 /// let access_value = modern_token.access.as_insecure_token();
@@ -228,14 +265,13 @@ impl SurrealValue for Token {
 	}
 
 	fn from_value(value: Value) -> Result<Self, crate::Error> {
-		match value {
-			Value::String(string) => Ok(Token::from(string)),
-			value => {
-				let mut obj = Object::from_value(value)?;
-				let access = AccessToken::from_value(obj.remove("access").unwrap_or_default())?;
-				let refresh = RefreshToken::from_value(obj.remove("refresh").unwrap_or_default())?;
-				Ok(Token::from((access, refresh)))
-			}
+		if let Value::String(string) = value {
+			Ok(Token::from(string))
+		} else {
+			let mut obj = Object::from_value(value)?;
+			let access = AccessToken::from_value(obj.remove("access").unwrap_or_default())?;
+			let refresh = RefreshToken::from_value(obj.remove("refresh").unwrap_or_default())?;
+			Ok(Token::from((access, refresh)))
 		}
 	}
 }
@@ -383,6 +419,38 @@ impl From<String> for Token {
 		Self {
 			access: AccessToken(SecureToken(token)),
 			refresh: None,
+		}
+	}
+}
+
+/// Wraps the wire form an engine returns in the secrecy-preserving type the
+/// SDK hands to callers.
+impl From<surrealdb_rpc::Token> for Token {
+	fn from(token: surrealdb_rpc::Token) -> Self {
+		match token {
+			surrealdb_rpc::Token::Access(access) => Self {
+				access: AccessToken(SecureToken(access)),
+				refresh: None,
+			},
+			surrealdb_rpc::Token::WithRefresh {
+				access,
+				refresh,
+			} => Self {
+				access: AccessToken(SecureToken(access)),
+				refresh: Some(RefreshToken(SecureToken(refresh))),
+			},
+		}
+	}
+}
+
+impl From<Token> for surrealdb_rpc::Token {
+	fn from(token: Token) -> Self {
+		match token.refresh {
+			Some(refresh) => Self::WithRefresh {
+				access: token.access.0.0,
+				refresh: refresh.0.0,
+			},
+			None => Self::Access(token.access.0.0),
 		}
 	}
 }

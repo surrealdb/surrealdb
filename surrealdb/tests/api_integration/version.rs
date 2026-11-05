@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-#![cfg(any(feature = "kv-mem", feature = "kv-surrealkv", feature = "kv-rocksdb"))]
+#![cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 
 use surrealdb::opt::Config;
 use surrealdb::types::Value;

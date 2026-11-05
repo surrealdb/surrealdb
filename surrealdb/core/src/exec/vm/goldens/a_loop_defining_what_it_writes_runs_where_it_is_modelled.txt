@@ -1,0 +1,8 @@
+### FOR $i IN 0..3 { IF $i = 1 { DEFINE TABLE lt; DEFINE FIELD k ON lt VALUE 7 }; CREATE type::record('lt', $i) }
+Err(Error { code: -32000, message: "The table 'lt' already exists", details: AlreadyExists(Some(Table { name: "lt" })), cause: None })
+### FOR $i IN 0..2 { DEFINE FIELD OVERWRITE m ON lt VALUE $i; UPDATE lt SET n = m }
+Ok(None)
+### IF true { DEFINE FIELD OVERWRITE o ON lt VALUE 'o'; UPDATE lt:1 }
+Ok(Array(Array([])))
+### SELECT * FROM lt ORDER BY id
+Ok(Array(Array([])))

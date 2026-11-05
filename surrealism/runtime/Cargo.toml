@@ -1,6 +1,6 @@
 [package]
 name = "surrealism-runtime"
-version = "0.5.0-beta.1"
+version = "0.8.0-nightly"
 description = "Runtime for Surrealism"
 edition.workspace = true
 authors.workspace = true
@@ -13,6 +13,7 @@ license-file.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+common.workspace = true
 hex.workspace = true
 ipnet.workspace = true
 parking_lot.workspace = true
@@ -24,10 +25,24 @@ surrealism-types = { workspace = true, features = ["host"] }
 tar.workspace = true
 zstd.workspace = true
 semver.workspace = true
+sha2.workspace = true
 wasmtime-wasi.workspace = true
+wasmtime-wasi-http.workspace = true
+bytes.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client", "http1"] }
+rustls = { workspace = true, features = ["aws_lc_rs"] }
+tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }
+webpki-roots.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, default-features = false, features = ["sync", "io-util"] }
+# `time` for the bounded wait on an invocation slot in `Engines::acquire_slot`.
+# Named here rather than relied on through feature unification, so this crate
+# still builds when it is the only one asking.
+tokio = { workspace = true, default-features = false, features = ["sync", "io-util", "time", "net"] }
 tracing.workspace = true
 web-time.workspace = true
 

@@ -6,7 +6,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use jsonwebtoken::EncodingKey;
 
 use crate::catalog;
-use crate::err::Error;
+use crate::iam::Error as AuthError;
 
 pub(crate) fn config(alg: catalog::Algorithm, key: &str) -> Result<EncodingKey> {
 	match alg {
@@ -32,17 +32,17 @@ pub(crate) fn config(alg: catalog::Algorithm, key: &str) -> Result<EncodingKey> 
 	}
 }
 
-pub(crate) fn expiration(d: Option<Duration>) -> Result<Option<i64>> {
-	let exp = match d {
+pub(crate) fn expiration(d: Option<impl Into<Duration>>) -> Result<Option<i64>> {
+	let exp = match d.map(Into::into) {
 		Some(v) => {
 			// The defined duration must be valid
 			match ChronoDuration::from_std(v) {
 				// The resulting expiration must be valid
 				Ok(d) => match Utc::now().checked_add_signed(d) {
 					Some(exp) => Some(exp.timestamp()),
-					None => bail!(Error::AccessInvalidExpiration),
+					None => bail!(AuthError::AccessInvalidExpiration),
 				},
-				Err(_) => bail!(Error::AccessInvalidDuration),
+				Err(_) => bail!(AuthError::AccessInvalidDuration),
 			}
 		}
 		_ => None,

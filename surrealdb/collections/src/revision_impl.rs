@@ -2,7 +2,17 @@
 
 use revision::{DeserializeRevisioned, Error, Revisioned, SerializeRevisioned};
 
-use crate::{VecMap, VecSet};
+use crate::vec_set::sort_by_cmp;
+use crate::{VecMap, VecSet, bounded};
+
+/// Builds a set from decoded elements, taking them in `Ord` order.
+///
+/// Elements are sorted and elements that compare equal are merged. A sequence that no order can
+/// sort into a strictly ascending run is refused.
+fn set_from_decoded<T: Ord>(items: Vec<T>) -> Result<VecSet<T>, Error> {
+	VecSet::try_from_vec(items)
+		.ok_or_else(|| Error::Deserialize("a set whose elements have no consistent order".into()))
+}
 
 impl<K: SerializeRevisioned + Ord, V: SerializeRevisioned> SerializeRevisioned for VecMap<K, V> {
 	#[inline]
@@ -25,8 +35,8 @@ impl<K: DeserializeRevisioned + Ord, V: DeserializeRevisioned> DeserializeRevisi
 {
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, Error> {
-		let len = usize::deserialize_revisioned(reader)?;
-		let mut items = Vec::with_capacity(len);
+		let len = bounded::read_len(reader)?;
+		let mut items = Vec::with_capacity(bounded::prealloc::<(K, V)>(len));
 		for _ in 0..len {
 			let k = K::deserialize_revisioned(reader)?;
 			if let Some((prev_k, _)) = items.last()
@@ -68,20 +78,9 @@ impl<T: SerializeRevisioned + Ord> SerializeRevisioned for VecSet<T> {
 impl<T: DeserializeRevisioned + Ord> DeserializeRevisioned for VecSet<T> {
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, Error> {
-		let len = usize::deserialize_revisioned(reader)?;
-		let mut items = Vec::with_capacity(len);
-		for _ in 0..len {
-			let v = T::deserialize_revisioned(reader)?;
-			if let Some(prev) = items.last()
-				&& v <= *prev
-			{
-				return Err(Error::Deserialize(
-					"VecSet revision payload: elements not strictly ascending".into(),
-				));
-			}
-			items.push(v);
-		}
-		Ok(VecSet::from_sorted_vec_unchecked(items))
+		let len = bounded::read_len(reader)?;
+		let items = bounded::read_vec_with(reader, len, T::deserialize_revisioned)?;
+		set_from_decoded(items)
 	}
 }
 
@@ -105,6 +104,18 @@ where
 		}
 		Ok(())
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		let len = usize::deserialize_revisioned(reader)?;
+		for _ in 0..len {
+			K::skip_revisioned_slice(reader)?;
+			V::skip_revisioned_slice(reader)?;
+		}
+		Ok(())
+	}
 }
 
 impl<T> revision::SkipRevisioned for VecSet<T>
@@ -115,6 +126,17 @@ where
 		let len = usize::deserialize_revisioned(reader)?;
 		for _ in 0..len {
 			T::skip_revisioned(reader)?;
+		}
+		Ok(())
+	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		let len = usize::deserialize_revisioned(reader)?;
+		for _ in 0..len {
+			T::skip_revisioned_slice(reader)?;
 		}
 		Ok(())
 	}
@@ -139,7 +161,7 @@ where
 // `BTreeMap` / `Vec` and would force an intermediate `BTreeMap` /
 // `BTreeSet` allocation (plus tree teardown) on the way to a `VecMap` /
 // `VecSet`. We instead parse directly into a sorted `Vec<(K, V)>` /
-// `Vec<T>` and construct via `from_sorted_vec_unchecked`, and skip the
+// `Vec<T>`, and skip the
 // offset-table prologue with `revision::slice_reader::advance_read` — a
 // 4 KB stack-buffer read loop with no heap allocation (the crate's own
 // decoder still `vec![0u8; n]`s the discard buffer).
@@ -147,10 +169,18 @@ where
 // Wire byte order may diverge from `K::Ord` / `T::Ord` when entries have
 // varying-length keys (the encoder sorts by raw bytes — e.g. Strand keys
 // `"a"` and `"bb"` sort by `(1, "a")` vs `(2, "bb")` rather than UTF-8
-// codepoint order), so we re-sort by `K::Ord` / `T::Ord` after
-// collecting. For the common case (equal-length keys, or all-ASCII
-// without length variation) the sort is a near no-op on already-sorted
-// input.
+// codepoint order), and a payload written under an earlier order of `T`
+// is out of `T::Ord` order. Decoding therefore takes the entries in
+// `K::Ord` / `T::Ord` order:
+//
+// * a map re-sorts with a sort that cannot panic and refuses duplicate keys;
+// * a set (the indexed body and the plain revision-1 body alike) goes through
+//   `VecSet::try_from_vec`, which merges elements that compare equal and refuses a sequence no
+//   order can sort.
+//
+// Every length read from the payload is a claim: preallocation is capped
+// by `bounded::prealloc`, so memory grows only as entries are decoded.
+// Strictly ascending input (the common case) is taken without sorting.
 // -----------------------------------------------------------------------------
 
 /// Bit flag on the leading byte of an indexed-map/seq/set body indicating
@@ -182,7 +212,7 @@ where
 		let indexed = (flag_buf[0] & INDEXED_FLAG_BIT) != 0;
 		let len = usize::deserialize_revisioned(r)?;
 
-		let mut entries: Vec<(K, V)> = Vec::with_capacity(len);
+		let mut entries: Vec<(K, V)> = Vec::with_capacity(bounded::prealloc::<(K, V)>(len));
 		if !indexed {
 			// Legacy `(K, V)*` body. Entries are sorted by wire bytes,
 			// which may differ from `K::Ord` for varying-length keys.
@@ -200,10 +230,13 @@ where
 			let table_bytes = len.checked_mul(8).ok_or_else(|| {
 				Error::Deserialize("indexed-map offset table size overflow".into())
 			})?;
-			revision::slice_reader::advance_read(r, table_bytes + 8)?;
+			let skip = table_bytes.checked_add(8).ok_or_else(|| {
+				Error::Deserialize("indexed-map offset table size overflow".into())
+			})?;
+			revision::slice_reader::advance_read(r, skip)?;
 			// Two passes: dense keys first (a sorted ascending run by
 			// wire bytes), then dense values in matching order.
-			let mut keys: Vec<K> = Vec::with_capacity(len);
+			let mut keys: Vec<K> = Vec::with_capacity(bounded::prealloc::<K>(len));
 			for _ in 0..len {
 				keys.push(K::deserialize_revisioned(r)?);
 			}
@@ -212,12 +245,14 @@ where
 				entries.push((k, v));
 			}
 		}
-		// Re-sort by `K::Ord` and reject duplicate keys (which the
-		// encoder won't produce, but a corrupt or hand-rolled payload
-		// could).
-		entries.sort_by(|a, b| a.0.cmp(&b.0));
-		if entries.windows(2).any(|w| w[0].0 == w[1].0) {
-			return Err(Error::Deserialize("indexed-map decode: duplicate keys".into()));
+		// Re-sort by `K::Ord` without any path that can panic, then refuse
+		// duplicate keys (which the encoder does not produce) and any
+		// sequence the order leaves out of strict ascent.
+		let entries = sort_by_cmp(entries, |a, b| a.0.cmp(&b.0));
+		if entries.iter().zip(entries.iter().skip(1)).any(|(a, b)| a.0 >= b.0) {
+			return Err(Error::Deserialize(
+				"indexed-map decode: duplicate or unorderable keys".into(),
+			));
 		}
 		Ok(VecMap::from_sorted_vec_unchecked(entries))
 	}
@@ -249,35 +284,25 @@ where
 {
 	type Item = T;
 	fn serialize_indexed_set<W: std::io::Write>(&self, w: &mut W) -> Result<(), Error> {
+		// The decoder collapses equal elements, so a set written with its
+		// invariant broken would read back without complaint: debug builds
+		// refuse to encode one.
+		debug_assert!(
+			self.iter().zip(self.iter().skip(1)).all(|(a, b)| a < b),
+			"indexed-set encode: elements are not distinct and ascending"
+		);
 		revision::optimised::indexed::serialize_indexed_set_iter(self.iter(), w)
 	}
 	fn deserialize_indexed_set<R: std::io::Read>(r: &mut R) -> Result<Self, Error> {
-		let mut flag_buf = [0u8; 1];
-		r.read_exact(&mut flag_buf).map_err(Error::Io)?;
-		let indexed = (flag_buf[0] & INDEXED_FLAG_BIT) != 0;
-		let len = usize::deserialize_revisioned(r)?;
-
-		let mut entries: Vec<T> = Vec::with_capacity(len);
-		if !indexed {
-			for _ in 0..len {
-				entries.push(T::deserialize_revisioned(r)?);
-			}
-		} else {
-			// Indexed seq/set body: `[elem_off; len]` table (4 bytes
-			// each), then dense elements.
-			let table_bytes = len.checked_mul(4).ok_or_else(|| {
-				Error::Deserialize("indexed-set offset table size overflow".into())
-			})?;
-			revision::slice_reader::advance_read(r, table_bytes)?;
-			for _ in 0..len {
-				entries.push(T::deserialize_revisioned(r)?);
-			}
-		}
-		entries.sort();
-		if entries.windows(2).any(|w| w[0] == w[1]) {
-			return Err(Error::Deserialize("indexed-set decode: duplicate elements".into()));
-		}
-		Ok(VecSet::from_sorted_vec_unchecked(entries))
+		// Prologue parsing belongs to `revision`, which owns the set of body
+		// shapes an indexed set can take (legacy, offset-table, strided). A
+		// local copy of that parsing decodes whatever shape it was written
+		// against and silently misreads the rest, so read the element list
+		// through the crate and layer `VecSet`'s own contract on top: equal
+		// elements merge so a payload holding them decodes to the set they
+		// describe rather than failing.
+		let entries: Vec<T> = revision::optimised::indexed::deserialize_indexed_seq(r)?;
+		set_from_decoded(entries)
 	}
 	/// Skip a serialised indexed-set without materialising any elements.
 	///
@@ -344,6 +369,25 @@ mod tests {
 		let mut w = Vec::new();
 		value.serialize_revisioned(&mut w).expect("serialize_revisioned");
 		w
+	}
+
+	/// The slice skip and the reader skip agree: both consume a value whole, and both refuse it
+	/// with its last byte missing.
+	fn assert_skip_agrees<T: SerializeRevisioned + revision::SkipRevisioned>(value: &T) {
+		let bytes = revision_bytes(value);
+		assert_eq!(revision::skip_slice::<T>(&bytes).unwrap(), bytes.len());
+		let cut = &bytes[..bytes.len() - 1];
+		assert!(revision::skip_slice::<T>(cut).is_err());
+		assert!(T::skip_revisioned(&mut &cut[..]).is_err());
+	}
+
+	#[test]
+	fn slice_skip_agrees_with_reader_skip() {
+		let map: VecMap<String, u32> =
+			[("a".into(), 1u32), ("b".into(), 2), ("c".into(), 3)].into_iter().collect();
+		assert_skip_agrees(&map);
+		let set: VecSet<u32> = [1u32, 2, 3].into_iter().collect();
+		assert_skip_agrees(&set);
 	}
 
 	// ---- VecMap byte-equality with BTreeMap ----
@@ -538,23 +582,42 @@ mod tests {
 	}
 
 	#[test]
-	fn vec_set_revision_decode_rejects_descending_elements() {
+	fn vec_set_revision_decode_sorts_descending_elements() {
 		let mut w = Vec::new();
 		2usize.serialize_revisioned(&mut w).unwrap();
 		2u32.serialize_revisioned(&mut w).unwrap();
 		1u32.serialize_revisioned(&mut w).unwrap();
-		let err = VecSet::<u32>::deserialize_revisioned(&mut w.as_slice()).unwrap_err();
-		assert!(matches!(err, Error::Deserialize(_)));
+		let set = VecSet::<u32>::deserialize_revisioned(&mut w.as_slice()).unwrap();
+		assert_eq!(set.iter().copied().collect::<Vec<_>>(), [1, 2]);
 	}
 
 	#[test]
-	fn vec_set_revision_decode_rejects_duplicate_elements() {
+	fn vec_set_revision_decode_merges_duplicate_elements() {
 		let mut w = Vec::new();
 		2usize.serialize_revisioned(&mut w).unwrap();
 		1u32.serialize_revisioned(&mut w).unwrap();
 		1u32.serialize_revisioned(&mut w).unwrap();
-		let err = VecSet::<u32>::deserialize_revisioned(&mut w.as_slice()).unwrap_err();
-		assert!(matches!(err, Error::Deserialize(_)));
+		let set = VecSet::<u32>::deserialize_revisioned(&mut w.as_slice()).unwrap();
+		assert_eq!(set.iter().copied().collect::<Vec<_>>(), [1]);
+	}
+
+	/// An indexed-set payload holding equal elements decodes to the set they
+	/// describe, in both body shapes: below the offset-table threshold and at
+	/// or above it.
+	#[test]
+	fn indexed_set_decode_collapses_equal_elements() {
+		use revision::optimised::indexed::{IndexedSetEncoded, serialize_indexed_set_iter};
+		for len in [2u32, 3, 16] {
+			// Every element written twice, in descending order.
+			let written: Vec<u32> = (0..len).rev().flat_map(|i| [i, i]).collect();
+			let mut bytes = Vec::new();
+			serialize_indexed_set_iter(written.iter(), &mut bytes).unwrap();
+			bytes.push(0xEF);
+			let mut reader: &[u8] = &bytes;
+			let set = VecSet::<u32>::deserialize_indexed_set(&mut reader).unwrap();
+			assert_eq!(set.iter().copied().collect::<Vec<_>>(), (0..len).collect::<Vec<_>>());
+			assert_eq!(reader, &[0xEF], "the whole payload is consumed at length {len}");
+		}
 	}
 
 	// ---- Skip fast path (delegates to revision's O(1) indexed skip) ----
@@ -648,6 +711,28 @@ mod tests {
 		let mut reader: &[u8] = &bytes;
 		VecSet::<String>::skip_indexed_set(&mut reader).unwrap();
 		assert_eq!(reader, &[0xEF]);
+	}
+
+	#[test]
+	fn deserialize_indexed_set_round_trips_every_shape() {
+		// Whichever body shape the encoder picks for a given length and
+		// element type, the decoder must recover the same set.
+		use revision::optimised::indexed::IndexedSetEncoded;
+		for n in [0usize, 1, 7, 8, 16, 64] {
+			let uniform: VecSet<u32> = (0..n as u32).collect();
+			let mut bytes = Vec::new();
+			uniform.serialize_indexed_set(&mut bytes).unwrap();
+			let mut reader: &[u8] = &bytes;
+			assert_eq!(VecSet::<u32>::deserialize_indexed_set(&mut reader).unwrap(), uniform);
+			assert!(reader.is_empty(), "n={n}: uniform decode left {} bytes", reader.len());
+
+			let varying: VecSet<String> = (0..n).map(|i| "ab".repeat(i + 1)).collect();
+			let mut bytes = Vec::new();
+			varying.serialize_indexed_set(&mut bytes).unwrap();
+			let mut reader: &[u8] = &bytes;
+			assert_eq!(VecSet::<String>::deserialize_indexed_set(&mut reader).unwrap(), varying);
+			assert!(reader.is_empty(), "n={n}: varying decode left {} bytes", reader.len());
+		}
 	}
 
 	#[test]

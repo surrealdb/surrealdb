@@ -1,420 +1,512 @@
 //! Aggregation planning for the planner.
 //!
-//! Handles GROUP BY, aggregate function extraction, and the `AggregateExtractor` visitor.
+//! Handles GROUP BY, aggregate function extraction, and the `AggregateExtractor` rewrite.
 
-use std::sync::Arc;
+use std::ops::Bound;
 
-use super::Planner;
-use super::util::{derive_field_name, idiom_to_field_path};
+use surrealdb_types::ToSql;
+
 use crate::err::Error;
-use crate::exec::field_path::FieldPathPart;
-use crate::exec::operators::{
-	AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
+use crate::exec::Error as ExecError;
+use crate::exec::function::FunctionRegistry;
+use crate::exec::operators::{AggregateId, aggregate_field_name};
+use crate::exec::planner::util::SELECT_ITERATION_PARAMS;
+use crate::expr::Function;
+use crate::expr::logical::{
+	LogicalCall, LogicalExpr, LogicalField, LogicalFields, LogicalRecordIdKey, OutputPath,
 };
-use crate::expr::field::{Field, Fields};
-use crate::expr::visit::{MutVisitor, VisitMut};
-use crate::expr::{Expr, Function, FunctionCall, Idiom, Literal};
+use crate::expr::operator::BinaryOperator;
 
-/// Build a nested output path from an idiom for use as an [`AggregateField::output_path`].
-///
-/// Single source of truth: delegates to [`idiom_to_field_path`] so the
-/// projection pipeline and the aggregation pipeline always agree on output
-/// field names. The returned `Vec<String>` is the flattened form of the
-/// canonical [`FieldPath`]:
-///
-/// - Graph-traversal aliases (`` ->friends->person AS buddy ``) collapse to a single flat key (the
-///   alias identifier).
-/// - Multi-part idioms (`AS foo.bar`) nest as `["foo", "bar"]`.
-/// - Single-part idioms whose identifier contains a dot (`` AS `foo.bar` ``) stay a single flat
-///   `["foo.bar"]` key.
-/// - Execution-only parts (array filters, indices, method calls, etc.) are dropped via
-///   `Idiom::simplify`, matching projection behaviour.
-fn alias_output_path(idiom: &Idiom) -> Vec<String> {
-	idiom_to_field_path(idiom)
-		.0
-		.into_iter()
-		.map(|part| match part {
-			FieldPathPart::Field(s) | FieldPathPart::Lookup(s) => s,
-			// `idiom_to_field_path` walks `Idiom::simplify`, which strips
-			// indices and First/Last markers, so these variants should not
-			// appear here. If a future change to `idiom_to_field_path`
-			// emits them anyway, render them in their textual form rather
-			// than panicking — preserving the "produce a stable string
-			// key" invariant.
-			FieldPathPart::Index(i) => format!("[{i}]"),
-			FieldPathPart::First => "[0]".to_string(),
-			FieldPathPart::Last => "[$]".to_string(),
-		})
-		.collect()
+// ============================================================================
+// Logical analysis
+// ============================================================================
+
+/// One aggregate call of a projected expression, before any of its
+/// expressions is compiled.
+#[derive(Debug, Clone)]
+pub(crate) struct AggregateCallAnalysis {
+	/// The function the call names.
+	pub(crate) id: AggregateId,
 }
 
-// ============================================================================
-// impl Planner — Aggregation
-// ============================================================================
+/// The aggregates a projected expression holds, as the planner extracts them.
+#[derive(Debug, Clone)]
+pub(crate) struct AggregateInfoAnalysis {
+	/// The calls, in the order of their `_aN` placeholders.
+	pub(crate) calls: Vec<AggregateCallAnalysis>,
+}
 
-impl<'ctx> Planner<'ctx> {
-	/// Plan aggregation fields from SELECT expression and GROUP BY.
-	///
-	/// Returns the aggregate fields and the physical expressions for group keys.
-	#[allow(clippy::type_complexity)]
-	pub(crate) async fn plan_aggregation(
-		&self,
-		fields: &Fields,
-		group_by: &[crate::expr::idiom::Idiom],
-	) -> Result<(Vec<AggregateField>, Vec<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
-		use surrealdb_types::ToSql;
+/// A projected field of an aggregation, before any of its expressions is
+/// compiled.
+#[derive(Debug, Clone)]
+pub(crate) struct AggregateFieldAnalysis {
+	/// The aggregates of the field, when it holds any or reads the row.
+	pub(crate) info: Option<AggregateInfoAnalysis>,
+}
 
-		// Build alias -> expression map from SELECT fields
-		let mut alias_to_expr: std::collections::HashMap<String, Expr> =
-			std::collections::HashMap::new();
-		match fields {
-			Fields::Value(selector) => {
-				if let Some(alias) = &selector.alias {
-					alias_to_expr.insert(alias.to_sql(), selector.expr.clone());
-				}
-			}
-			Fields::Select(field_list) => {
-				for field in field_list {
-					if let Field::Single(selector) = field
-						&& let Some(alias) = &selector.alias
-					{
-						alias_to_expr.insert(alias.to_sql(), selector.expr.clone());
+/// An aggregation's grouping keys and projected fields, before any of their
+/// expressions is compiled.
+#[derive(Debug, Clone)]
+pub(crate) struct AggregationAnalysis {
+	pub(crate) fields: Vec<AggregateFieldAnalysis>,
+}
+
+/// What an expression analyses to: its aggregates, or else the expression
+/// itself as a field evaluated once for the group.
+type AggregateInfoOrFallback = (Option<AggregateInfoAnalysis>, Option<LogicalExpr>);
+
+/// Read the keys and fields of an aggregation over `fields` grouped by
+/// `group_by` as [`Planner::plan_aggregation`] reads them, without compiling
+/// any expression.
+pub(crate) fn analyse_aggregation(
+	registry: &FunctionRegistry,
+	fields: &LogicalFields,
+	group_by: &[LogicalExpr],
+) -> Result<AggregationAnalysis, Error> {
+	let analyse =
+		|expr: &LogicalExpr, alias: Option<&OutputPath>| -> Result<AggregateFieldAnalysis, Error> {
+			let info = match find_group_key_index(expr, alias, group_by) {
+				Some(_) => None,
+				None => analyse_aggregate_info(registry, expr.clone())?.0,
+			};
+			Ok(AggregateFieldAnalysis {
+				info,
+			})
+		};
+
+	let fields = match fields {
+		LogicalFields::Value {
+			expr,
+			alias,
+		} => vec![analyse(expr, alias.as_ref())?],
+		LogicalFields::Select(field_list) => {
+			let mut analysed = Vec::with_capacity(field_list.len());
+			for field in field_list {
+				match field {
+					LogicalField::All => {
+						return Err(ExecError::Query {
+							message: "Incorrect selector for aggregate selection, expression `*` within in selector cannot be aggregated in a group."
+								.to_string(),
+						}
+						.into());
+					}
+					LogicalField::Single {
+						expr,
+						alias,
+						..
+					} => {
+						analysed.push(analyse(expr, alias.as_ref())?);
 					}
 				}
 			}
+			analysed
+		}
+	};
+	Ok(AggregationAnalysis {
+		fields,
+	})
+}
+
+/// Extract the aggregate calls of `expr` with [`AggregateExtractor`].
+///
+/// An expression carrying no aggregate of its own still has to reduce to one
+/// value per group, and which way it reduces depends on whether the row can
+/// influence it: an expression that cannot is returned as the non-aggregate
+/// fallback and evaluated once per group, while one that reads the row is
+/// wrapped in the implicit collect aggregate, keeping each row's value.
+pub(crate) fn analyse_aggregate_info(
+	registry: &FunctionRegistry,
+	mut expr: LogicalExpr,
+) -> Result<AggregateInfoOrFallback, Error> {
+	let mut extractor = AggregateExtractor::new(registry);
+	extractor.extract(&mut expr)?;
+
+	if extractor.aggregates.is_empty() {
+		// No aggregate was found, so the extractor left `expr` unchanged.
+		//
+		// An expression the row cannot influence has one value for the
+		// whole group, so it is evaluated once as a non-aggregate field
+		// rather than collected. Collecting it would return an array whose
+		// length is the group's row count, which no reading of GROUP BY
+		// produces.
+		if !expr_reads_row(&expr, registry) {
+			return Ok((None, Some(expr)));
 		}
 
-		// Build group-by expressions, expanding aliases
-		let mut group_by_exprs = Vec::with_capacity(group_by.len());
-		for idiom in group_by {
-			let idiom_str = idiom.to_sql();
-			let expr = if let Some(select_expr) = alias_to_expr.get(&idiom_str) {
-				select_expr.clone()
-			} else {
-				Expr::Idiom(idiom.clone())
-			};
-			let physical_expr = self.physical_expr(expr).await?;
-			group_by_exprs.push(physical_expr);
-		}
-
-		match fields {
-			Fields::Value(selector) => {
-				let group_key_index =
-					find_group_key_index(&selector.expr, selector.alias.as_ref(), group_by);
-				let is_group_key = group_key_index.is_some();
-
-				let (aggregate_expr_info, fallback_expr) = if is_group_key {
-					(None, None)
-				} else {
-					self.extract_aggregate_info(selector.expr.clone()).await?
-				};
-
-				Ok((
-					vec![AggregateField::new(
-						String::new(),
-						is_group_key,
-						group_key_index,
-						aggregate_expr_info,
-						fallback_expr,
-					)],
-					group_by_exprs,
-				))
-			}
-
-			Fields::Select(field_list) => {
-				let mut aggregates = Vec::with_capacity(field_list.len());
-
-				for field in field_list {
-					match field {
-						Field::All => {
-							return Err(Error::Query {
-								message: "Incorrect selector for aggregate selection, expression `*` within in selector cannot be aggregated in a group."
-									.to_string(),
-							});
-						}
-						Field::Single(selector) => {
-							// For an explicit alias, walk the idiom parts
-							// so `AS foo.bar` nests as `[foo, bar]` while
-							// `` AS `foo.bar` `` stays a flat single key.
-							// For an unaliased idiom expression (e.g.
-							// `SELECT address.city ...`), walk the source
-							// idiom's parts to preserve the same nesting
-							// structure. Other unaliased expressions
-							// derive a flat name.
-							let output_path = if let Some(alias) = &selector.alias {
-								alias_output_path(alias)
-							} else if let Expr::Idiom(idiom) = &selector.expr {
-								alias_output_path(idiom)
-							} else {
-								vec![derive_field_name(&selector.expr)]
-							};
-
-							let group_key_index = find_group_key_index(
-								&selector.expr,
-								selector.alias.as_ref(),
-								group_by,
-							);
-							let is_group_key = group_key_index.is_some();
-
-							let (aggregate_expr_info, fallback_expr) = if is_group_key {
-								(None, None)
-							} else {
-								self.extract_aggregate_info(selector.expr.clone()).await?
-							};
-
-							aggregates.push(AggregateField::with_output_path(
-								output_path,
-								is_group_key,
-								group_key_index,
-								aggregate_expr_info,
-								fallback_expr,
-							));
-						}
-					}
-				}
-
-				Ok((aggregates, group_by_exprs))
-			}
-		}
-	}
-
-	/// Extract aggregate function information from an expression.
-	///
-	/// Uses `AggregateExtractor` to walk the expression tree. If no aggregates
-	/// are found, uses implicit `array::group` aggregation.
-	///
-	/// Takes `expr` by value. When no aggregate functions are found, the visitor
-	/// leaves the expression unchanged, so we can use it directly for the
-	/// implicit `array::group` fallback without an extra clone.
-	#[allow(clippy::type_complexity)]
-	#[allow(clippy::clone_on_ref_ptr)] // Several paths clone `Arc<dyn AggregateFunction>` from concrete registry entries
-	pub(crate) async fn extract_aggregate_info(
-		&self,
-		mut expr: Expr,
-	) -> Result<(Option<AggregateExprInfo>, Option<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
-		let registry = self.function_registry();
-
-		let mut extractor = AggregateExtractor::new(registry);
-		let _ = extractor.visit_mut_expr(&mut expr);
-
-		if let Some(err) = extractor.error {
-			return Err(err);
-		}
-
-		if extractor.aggregates.is_empty() {
-			// No aggregates found — the visitor left expr unchanged
-			let argument_expr = self.physical_expr(expr).await?;
-			let array_group = registry
-				.get_aggregate("array::group")
-				.expect("array::group should always be registered")
-				.clone();
-			return Ok((
-				Some(AggregateExprInfo {
-					aggregates: vec![ExtractedAggregate {
-						function: array_group,
-						argument_expr,
-						extra_args: vec![],
-					}],
-					post_expr: None,
-				}),
-				None,
-			));
-		}
-
-		let mut extracted_aggregates = Vec::new();
-		for (name, call) in extractor.aggregates {
-			let func = if name.as_str() == "count" {
-				registry.get_count_aggregate(!call.arguments.is_empty())
-			} else {
-				Arc::clone(registry.get_aggregate(&name).expect("aggregate function should exist"))
-			};
-
-			let mut args = call.arguments.into_iter();
-			let argument_expr = if let Some(first_arg) = args.next() {
-				self.physical_expr(first_arg).await
-			} else {
-				self.physical_expr(Expr::Literal(Literal::None)).await
-			}?;
-
-			let mut extra_args = Vec::new();
-			for arg in args {
-				extra_args.push(self.physical_expr(arg).await?);
-			}
-
-			extracted_aggregates.push(ExtractedAggregate {
-				function: func,
-				argument_expr,
-				extra_args,
-			});
-		}
-
-		// expr has been modified by the visitor (aggregate calls replaced with
-		// placeholder idioms like `_a0`)
-		let is_direct_single_aggregate = extracted_aggregates.len() == 1 && {
-			use surrealdb_types::ToSql;
-			matches!(&expr, Expr::Idiom(i) if i.to_sql() == "_a0")
-		};
-
-		let post_expr = if is_direct_single_aggregate {
-			None
-		} else {
-			Some(self.physical_expr(expr).await?)
-		};
-
-		Ok((
-			Some(AggregateExprInfo {
-				aggregates: extracted_aggregates,
-				post_expr,
+		// The expression reads the row, so the group is reduced by
+		// collecting each row's value, duplicates included.
+		// The fold is `array::collect`, not `array::group`, because
+		// `array::group` returns deduplicated values.
+		return Ok((
+			Some(AggregateInfoAnalysis {
+				calls: vec![AggregateCallAnalysis {
+					id: AggregateId::ImplicitCollect,
+				}],
 			}),
 			None,
-		))
+		));
 	}
+
+	let mut calls = Vec::with_capacity(extractor.aggregates.len());
+	for (name, call) in extractor.aggregates {
+		let id = AggregateId::of_call(name.as_str(), !call.args.is_empty());
+		calls.push(AggregateCallAnalysis {
+			id,
+		});
+	}
+
+	Ok((
+		Some(AggregateInfoAnalysis {
+			calls,
+		}),
+		None,
+	))
 }
 
 // ============================================================================
 // Free Functions
 // ============================================================================
 
-/// Find the index of the group-by key for an expression.
-pub(super) fn find_group_key_index(
-	expr: &Expr,
-	alias: Option<&Idiom>,
-	group_by: &[crate::expr::idiom::Idiom],
-) -> Option<usize> {
-	use surrealdb_types::ToSql;
+/// Whether evaluating `expr` can depend on which row of the group it sees.
+///
+/// After `GROUP BY` a group is a set of rows, so a projected expression has one
+/// value for the group only if the row cannot influence it. That is the
+/// question this answers, and it decides how an expression carrying no
+/// aggregate of its own is reduced: one that reads no row is evaluated once,
+/// one that does has its per-row values collected.
+///
+/// The analysis walks to the leaves rather than matching whole shapes, so
+/// `math::abs(-7)` reduces the same way `-7` and `4 + 3` do. Every
+/// expression with no row reference gets this treatment, so the outcome can
+/// be predicted from the query text.
+///
+/// A row is read through a field of its own, through `$this`/`$self`/`$parent`,
+/// or by a body that plan time cannot see. These expressions are therefore
+/// row-dependent. The cases are:
+///
+/// - A read of the row's own field (`name`, and `address.city` as an [`LogicalExpr::Access`] over
+///   one), and the record id the document is addressed by (`@`).
+/// - Any call target other than a builtin — a user-defined function, script, model, module or silo
+///   package — whose body can reach the row via `$parent`.
+/// - A projection function such as `type::field`, and an index function behind `@@`/`<|..|>`, both
+///   bound to the row being projected or matched.
+/// - A writer builtin, whose number of effects depends on how many times it runs, so it is not a
+///   value to be reduced.
+/// - Blocks, closures, subqueries and statements, which carry bodies, and graph traversal, methods,
+///   destructuring and recursion, which reach the record or run a body of their own.
+///
+/// Non-determinism is a separate axis and does not make an expression
+/// row-*dependent*: `rand()`, `time::now()` and a generated record id are
+/// evaluated once for the group, which is what PostgreSQL does with `random()`
+/// under `GROUP BY`.
+fn expr_reads_row(expr: &LogicalExpr, registry: &FunctionRegistry) -> bool {
+	!is_row_independent(expr, registry, false)
+}
 
-	if let Expr::Idiom(idiom) = expr
-		&& let Some(idx) = group_by.iter().position(|g| g.to_sql() == idiom.to_sql())
+/// `current_is_independent` says whether [`LogicalExpr::Current`] — the value
+/// the enclosing body is applied to — is itself free of the row. A projected
+/// expression is entered with nothing applied, so the row is what a bare
+/// `Current` would stand for and the flag starts `false`; a body whose base is
+/// row-independent raises it, which is what lets `$config.label` reduce the way
+/// `$config` does.
+fn is_row_independent(
+	expr: &LogicalExpr,
+	registry: &FunctionRegistry,
+	current_is_independent: bool,
+) -> bool {
+	let sub = |e: &LogicalExpr| is_row_independent(e, registry, current_is_independent);
+
+	match expr {
+		// A scalar literal is fixed; the composite forms carry expressions.
+		LogicalExpr::Literal(_) => true,
+		LogicalExpr::Array(exprs) | LogicalExpr::Set(exprs) => exprs.iter().all(sub),
+		LogicalExpr::Object(entries) => entries.iter().all(|(_, value)| sub(value)),
+		LogicalExpr::RecordId(record_id) => {
+			record_id_key_is_row_independent(&record_id.key, registry, current_is_independent)
+		}
+		// `math::PI` and friends resolve to a fixed value.
+		LogicalExpr::Constant(_) => true,
+		// A mock generates its ids afresh on each evaluation, so the value it
+		// denotes is not shared across the rows of a group even though it
+		// reads none of them.
+		LogicalExpr::Mock(_) => false,
+		// A parameter resolves from the session, the statement or a block,
+		// none of which vary across a group — except the three that are bound
+		// to the row being projected and would otherwise read one row on the
+		// whole group's behalf.
+		LogicalExpr::Param(param) => !SELECT_ITERATION_PARAMS.contains(&param.as_str()),
+		// A field of the row, and the record id the row is addressed by.
+		LogicalExpr::Field(_) | LogicalExpr::Doc => false,
+		// The value the enclosing body is applied to.
+		LogicalExpr::Current => current_is_independent,
+		// Navigation within the value the step is applied to.
+		LogicalExpr::Access {
+			base,
+			..
+		}
+		| LogicalExpr::First(base)
+		| LogicalExpr::Last(base)
+		| LogicalExpr::Each(base)
+		| LogicalExpr::Flatten {
+			base,
+			..
+		} => sub(base),
+		// The index is evaluated against the row rather than against `base`,
+		// so it is judged in the position the whole path is judged in.
+		LogicalExpr::Index {
+			base,
+			index,
+		} => sub(base) && sub(index),
+		LogicalExpr::SetField {
+			base,
+			value,
+			..
+		} => sub(base) && sub(value),
+		// A body is evaluated with an element of `base` as the current value,
+		// so what `Current` stands for inside it is as row-free as `base` is.
+		// A bare field name inside such a body is still a read of the row,
+		// which is what makes `a[WHERE b = 1]` collect.
+		LogicalExpr::Filter {
+			base,
+			predicate: body,
+		}
+		| LogicalExpr::Optional {
+			base,
+			then: body,
+		} => {
+			let base_is_independent = sub(base);
+			base_is_independent && is_row_independent(body, registry, base_is_independent)
+		}
+		LogicalExpr::Broadcast {
+			base,
+			body,
+			..
+		} => {
+			let base_is_independent = sub(base);
+			base_is_independent && is_row_independent(body, registry, base_is_independent)
+		}
+		LogicalExpr::Prefix {
+			expr,
+			..
+		} => sub(expr),
+		// A range postfix only bounds its operand; an applied value runs a body
+		// of its own.
+		LogicalExpr::Postfix {
+			expr,
+			..
+		} => sub(expr),
+		LogicalExpr::Invoke {
+			..
+		} => false,
+		LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} => {
+			// `@@` and `<|..|>` dispatch index functions bound to the row
+			// being matched, whatever their operands look like.
+			!matches!(op, BinaryOperator::Matches(_) | BinaryOperator::NearestNeighbor(_))
+				&& sub(left) && sub(right)
+		}
+		LogicalExpr::Call(call) => call_is_row_independent(call, registry, current_is_independent),
+		// Reaches the record, names a source, or runs a body of its own.
+		LogicalExpr::Table(_)
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => false,
+	}
+}
+
+/// Whether a call can be shown to reach the row only through its arguments.
+fn call_is_row_independent(
+	call: &LogicalCall,
+	registry: &FunctionRegistry,
+	current_is_independent: bool,
+) -> bool {
+	// Only a builtin has no body of its own to reach the row with.
+	let Function::Normal(name) = &call.receiver else {
+		return false;
+	};
+	let name = name.as_str();
+
+	// A projection or index function reads the row it is bound to, and a
+	// writer's effects multiply with the number of evaluations.
+	if registry.is_projection(name)
+		|| registry.is_index_function(name)
+		|| crate::expr::method::is_writer_builtin(name)
 	{
+		return false;
+	}
+
+	// An aggregate reduces the group rather than describing one row. The
+	// extractor removes aggregate calls before this runs, so this guards
+	// against future callers.
+	if registry.get_aggregate(name).is_some() {
+		return false;
+	}
+
+	// An unregistered name is not known to be free of a row reference. It
+	// would fail at evaluation anyway, so refusing to reduce it costs nothing.
+	let Some(func) = registry.get(name) else {
+		return false;
+	};
+
+	// A function whose effects outlive the statement — `sequence::nextval`,
+	// a bucket write, a non-safe HTTP request — must not have the number of
+	// times it runs decided by how the rows grouped. Reading the row is not
+	// the only way an expression can owe an answer per row.
+	if func.mutates_state() {
+		return false;
+	}
+
+	call.args.iter().all(|arg| is_row_independent(arg, registry, current_is_independent))
+}
+
+fn record_id_key_is_row_independent(
+	key: &LogicalRecordIdKey,
+	registry: &FunctionRegistry,
+	current_is_independent: bool,
+) -> bool {
+	let bound_is_row_independent = |bound: &Bound<LogicalRecordIdKey>| match bound {
+		Bound::Included(key) | Bound::Excluded(key) => {
+			record_id_key_is_row_independent(key, registry, current_is_independent)
+		}
+		Bound::Unbounded => true,
+	};
+
+	match key {
+		// A generated key is a fresh value per evaluation, not a row
+		// reference; reducing it to one value for the group is correct.
+		LogicalRecordIdKey::Number(_)
+		| LogicalRecordIdKey::String(_)
+		| LogicalRecordIdKey::Uuid(_)
+		| LogicalRecordIdKey::Generate(_) => true,
+		LogicalRecordIdKey::Array(exprs) => {
+			exprs.iter().all(|expr| is_row_independent(expr, registry, current_is_independent))
+		}
+		LogicalRecordIdKey::Object(entries) => entries
+			.iter()
+			.all(|(_, value)| is_row_independent(value, registry, current_is_independent)),
+		LogicalRecordIdKey::Range(range) => {
+			bound_is_row_independent(&range.start) && bound_is_row_independent(&range.end)
+		}
+	}
+}
+
+/// Find the index of the group-by key for an expression: the expression is
+/// one written in `GROUP BY` (a path, or any other expression), or its alias is. A key and an alias
+/// are the same name when they render the same, which is how a key spelled as an alias
+/// (`GROUP BY total` for `… AS total`) is matched.
+pub(super) fn find_group_key_index(
+	expr: &LogicalExpr,
+	alias: Option<&OutputPath>,
+	group_by: &[LogicalExpr],
+) -> Option<usize> {
+	if let Some(idx) = group_by.iter().position(|g| g == expr) {
 		return Some(idx);
 	}
 
-	if let Some(alias) = alias
-		&& let Some(idx) = group_by.iter().position(|g| g.to_sql() == alias.to_sql())
-	{
-		return Some(idx);
+	if let Some(alias) = alias {
+		let alias = alias.to_sql();
+		if let Some(idx) = group_by.iter().position(|g| g.to_sql() == alias) {
+			return Some(idx);
+		}
 	}
 
 	None
 }
 
 // ============================================================================
-// AggregateExtractor Visitor
+// AggregateExtractor
 // ============================================================================
 
-/// Visitor that extracts aggregate functions from an expression.
+/// Rewrites a projected expression so each outermost aggregate call becomes a
+/// read of a placeholder field (`_a0`, `_a1`, …), recording the calls it
+/// replaced in order.
 struct AggregateExtractor<'a> {
-	registry: &'a crate::exec::function::FunctionRegistry,
-	aggregates: Vec<(String, FunctionCall)>,
+	registry: &'a FunctionRegistry,
+	aggregates: Vec<(String, LogicalCall)>,
 	aggregate_count: usize,
 	inside_aggregate: bool,
-	error: Option<Error>,
 }
 
 impl<'a> AggregateExtractor<'a> {
-	fn new(registry: &'a crate::exec::function::FunctionRegistry) -> Self {
+	fn new(registry: &'a FunctionRegistry) -> Self {
 		Self {
 			registry,
 			aggregates: Vec::new(),
 			aggregate_count: 0,
 			inside_aggregate: false,
-			error: None,
 		}
 	}
 
-	fn contains_aggregate_call(&self, expr: &Expr) -> bool {
-		if let Expr::FunctionCall(func_call) = expr
-			&& let Function::Normal(name) = &func_call.receiver
+	fn contains_aggregate_call(&self, expr: &LogicalExpr) -> bool {
+		if let LogicalExpr::Call(call) = expr
+			&& let Function::Normal(name) = &call.receiver
 		{
 			return self.registry.get_aggregate(name.as_str()).is_some();
 		}
 		false
 	}
-}
 
-impl MutVisitor for AggregateExtractor<'_> {
-	type Error = std::convert::Infallible;
-
-	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
-		if self.error.is_some() {
-			return Ok(());
-		}
-
-		if let Expr::FunctionCall(func_call) = expr
-			&& let Function::Normal(name) = &func_call.receiver
+	/// Rewrites `expr` in place. Descends into every nested scalar except a
+	/// `Subquery`, which is planned on its own. `array::distinct` wrapping an
+	/// aggregate is not itself extracted: the aggregate inside it is, and the
+	/// wrapper stays in the post-expression. A nested aggregate is an error.
+	fn extract(&mut self, expr: &mut LogicalExpr) -> Result<(), Error> {
+		if let LogicalExpr::Call(call) = expr
+			&& let Function::Normal(name) = &call.receiver
 		{
 			if name.as_str() == "array::distinct"
-				&& !func_call.arguments.is_empty()
-				&& self.contains_aggregate_call(&func_call.arguments[0])
+				&& call.args.first().is_some_and(|arg| self.contains_aggregate_call(arg))
 			{
-				return expr.visit_mut(self);
+				for arg in &mut call.args {
+					self.extract(arg)?;
+				}
+				return Ok(());
 			}
 
 			if self.registry.get_aggregate(name.as_str()).is_some() {
 				if self.inside_aggregate {
-					self.error = Some(Error::Query {
+					return Err(ExecError::Query {
 						message: "Nested aggregate functions are not supported".to_string(),
-					});
-					return Ok(());
+					}
+					.into());
 				}
+				let name = name.clone();
 
 				self.inside_aggregate = true;
-				for arg in &mut func_call.arguments {
-					arg.visit_mut(self)?;
+				for arg in &mut call.args {
+					self.extract(arg)?;
 				}
 				self.inside_aggregate = false;
 
-				if self.error.is_some() {
-					return Ok(());
-				}
-
 				let field_name = aggregate_field_name(self.aggregate_count);
-				self.aggregates.push((name.clone(), func_call.as_ref().clone()));
+				self.aggregates.push((name, (**call).clone()));
 				self.aggregate_count += 1;
 
-				*expr = Expr::Idiom(Idiom::field(field_name));
+				*expr = LogicalExpr::Field(field_name.into());
 				return Ok(());
 			}
 		}
 
-		expr.visit_mut(self)
-	}
-
-	fn visit_mut_function_call(&mut self, f: &mut FunctionCall) -> Result<(), Self::Error> {
-		if self.error.is_some() {
-			return Ok(());
+		for child in expr.children_mut() {
+			self.extract(child)?;
 		}
-		for arg in &mut f.arguments {
-			self.visit_mut_expr(arg)?;
-		}
-		Ok(())
-	}
-
-	fn visit_mut_select(
-		&mut self,
-		_s: &mut crate::expr::statements::SelectStatement,
-	) -> Result<(), Self::Error> {
-		Ok(())
-	}
-
-	fn visit_mut_create(
-		&mut self,
-		_s: &mut crate::expr::statements::CreateStatement,
-	) -> Result<(), Self::Error> {
-		Ok(())
-	}
-
-	fn visit_mut_update(
-		&mut self,
-		_s: &mut crate::expr::statements::UpdateStatement,
-	) -> Result<(), Self::Error> {
-		Ok(())
-	}
-
-	fn visit_mut_delete(
-		&mut self,
-		_s: &mut crate::expr::statements::DeleteStatement,
-	) -> Result<(), Self::Error> {
 		Ok(())
 	}
 }

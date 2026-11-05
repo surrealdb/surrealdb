@@ -6,7 +6,7 @@ pub mod base64 {
 	};
 	use base64::{Engine, alphabet};
 
-	use crate::err::Error;
+	use crate::expr::Error;
 	use crate::fnc::args::Optional;
 	use crate::val::{Bytes, Value};
 
@@ -44,7 +44,7 @@ pub mod base64 {
 pub mod cbor {
 	use anyhow::Result;
 
-	use crate::err::Error;
+	use crate::expr::Error;
 	use crate::rpc::format::cbor;
 	use crate::val::{Bytes, Value};
 
@@ -66,14 +66,14 @@ pub mod cbor {
 				message: "invalid cbor".to_owned(),
 			})?;
 		// Convert public value back to internal
-		Ok(crate::sql::expression::convert_public_value_to_internal(public_val))
+		Ok(crate::val::convert_public::convert_public_value_to_internal(public_val))
 	}
 }
 
 pub mod json {
 	use anyhow::Result;
 
-	use crate::err::Error;
+	use crate::expr::Error;
 	use crate::rpc::format::json;
 	use crate::val::Value;
 
@@ -96,7 +96,7 @@ pub mod json {
 				message: "Invalid JSON".to_owned(),
 			})?;
 		let public_val = crate::rpc::format::json::json_to_value(json);
-		Ok(crate::sql::expression::convert_public_value_to_internal(public_val))
+		Ok(crate::val::convert_public::convert_public_value_to_internal(public_val))
 	}
 }
 
@@ -155,20 +155,18 @@ mod tests {
 	fn test_json_decode_object() {
 		let input = r#"{"name":"test","value":42}"#.to_string();
 		let result = json::decode((input,)).unwrap();
-		match result {
-			Value::Object(_) => {}
-			other => panic!("expected object, got: {other:?}"),
-		}
+		let Value::Object(_) = result else {
+			panic!("expected object, got: {result:?}");
+		};
 	}
 
 	#[test]
 	fn test_json_decode_array() {
 		let input = r#"[1, 2, 3]"#.to_string();
 		let result = json::decode((input,)).unwrap();
-		match result {
-			Value::Array(_) => {}
-			other => panic!("expected array, got: {other:?}"),
-		}
+		let Value::Array(_) = result else {
+			panic!("expected array, got: {result:?}");
+		};
 	}
 
 	#[test]

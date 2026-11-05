@@ -1,0 +1,270 @@
+### owner: SELECT * FROM [item:1, item:3, closed:1, 5, NONE, NULL]
+{ id: item:1, n: 1, secret: 's1', twice: 2 }
+{ hidden: true, id: item:3, n: 3, twice: 6 }
+{ id: closed:1, n: 100 }
+5
+### owner: SELECT * FROM [[item:1, item:2], 3, [4]]
+{ id: item:1, n: 1, secret: 's1', twice: 2 }
+{ id: item:2, n: 2, secret: 's2', twice: 4 }
+3
+4
+### owner: SELECT VALUE secret FROM [item:1, item:2]
+'s1'
+'s2'
+### owner: SELECT n, twice FROM [item:2, { n: 5 }] WHERE n > 1
+{ n: 2, twice: 4 }
+{ n: 5, twice: NONE }
+### owner: SELECT * FROM { a: 1 }
+{ a: 1 }
+### owner: SELECT * FROM [item:1, item:2] LIMIT 1 START 1
+{ id: item:2, n: 2, secret: 's2', twice: 4 }
+### owner: SELECT * FROM [item:1, item:2] LIMIT 0
+(no rows)
+### owner: SELECT count() FROM [item:1, item:2, item:3] GROUP ALL
+{ count: 3 }
+### owner: SELECT * FROM |item:1..3|
+{ id: item:1, n: 1, secret: 's1', twice: 2 }
+{ id: item:2, n: 2, secret: 's2', twice: 4 }
+### owner: SELECT * FROM array::shuffle([item:3])
+{ hidden: true, id: item:3, n: 3, twice: 6 }
+### owner: SELECT * FROM array::at(array::shuffle([item:1]), 0)
+{ id: item:1, n: 1, secret: 's1', twice: 2 }
+### owner: SELECT * FROM array::at(array::shuffle([item:1]), 0) LIMIT 0
+(no rows)
+### owner: SELECT * FROM array::at(array::shuffle([item:3]), 0)
+{ hidden: true, id: item:3, n: 3, twice: 6 }
+### owner: SELECT * FROM array::at(array::shuffle([closed:1]), 0)
+{ id: closed:1, n: 100 }
+### owner: SELECT * FROM array::at(array::shuffle([item:1..=2]), 0)
+{ id: item:1, n: 1, secret: 's1', twice: 2 }
+{ id: item:2, n: 2, secret: 's2', twice: 4 }
+### owner: SELECT * FROM type::table(array::at(array::shuffle(['item']), 0))
+{ id: item:1, n: 1, secret: 's1', twice: 2 }
+{ id: item:2, n: 2, secret: 's2', twice: 4 }
+{ hidden: true, id: item:3, n: 3, twice: 6 }
+### owner: SELECT n FROM type::table(array::at(array::shuffle(['item']), 0)) LIMIT 1
+{ n: 1 }
+### owner: SELECT * FROM type::table(array::at(array::shuffle(['closed']), 0))
+{ id: closed:1, n: 100 }
+### owner: SELECT * FROM type::table(array::at(array::shuffle(['nope']), 0))
+error: The table 'nope' does not exist
+### owner: SELECT * FROM type::table(array::at(array::shuffle(['nope']), 0)) LIMIT 0
+error: The table 'nope' does not exist
+### owner: SELECT * FROM array::shuffle([5])
+5
+### owner: SELECT * FROM [1, 2], open
+1
+2
+{ id: open:1, n: 10, of: item:1 }
+{ id: open:2, n: 20, of: item:3 }
+{ id: open:3, n: 2, of: item:9 }
+### owner: SELECT * FROM open:1, [item:2], array::shuffle([open:2])
+{ id: open:1, n: 10, of: item:1 }
+{ id: item:2, n: 2, secret: 's2', twice: 4 }
+{ id: open:2, n: 20, of: item:3 }
+### owner: SELECT * FROM (SELECT * FROM item WHERE n > 1)
+{ id: item:2, n: 2, secret: 's2', twice: 4 }
+{ hidden: true, id: item:3, n: 3, twice: 6 }
+### owner: SELECT n FROM (SELECT * FROM item ORDER BY n DESC LIMIT 2)
+{ n: 3 }
+{ n: 2 }
+### owner: SELECT * FROM (SELECT VALUE n FROM item)
+1
+2
+3
+### owner: SELECT * FROM (SELECT VALUE id FROM item)
+{ id: item:1, n: 1, secret: 's1', twice: 2 }
+{ id: item:2, n: 2, secret: 's2', twice: 4 }
+{ hidden: true, id: item:3, n: 3, twice: 6 }
+### owner: SELECT * FROM (SELECT VALUE of FROM open) LIMIT 2
+{ id: item:1, n: 1, secret: 's1', twice: 2 }
+{ hidden: true, id: item:3, n: 3, twice: 6 }
+### owner: SELECT VALUE $this FROM (SELECT VALUE id FROM item)
+item:1
+item:2
+item:3
+### owner: SELECT * FROM (SELECT * FROM ONLY item:1)
+{ id: item:1, n: 1, secret: 's1', twice: 2 }
+### owner: SELECT * FROM (SELECT * FROM item) LIMIT 0
+(no rows)
+### owner: SELECT * FROM (SELECT * FROM (SELECT * FROM item)) LIMIT 1
+{ id: item:1, n: 1, secret: 's1', twice: 2 }
+### owner: SELECT * FROM (SELECT * FROM item), [7]
+{ id: item:1, n: 1, secret: 's1', twice: 2 }
+{ id: item:2, n: 2, secret: 's2', twice: 4 }
+{ hidden: true, id: item:3, n: 3, twice: 6 }
+7
+### owner: { LET $t = type::table('item'); RETURN SELECT * FROM $t }
+[{ id: item:1, n: 1, secret: 's1', twice: 2 }, { id: item:2, n: 2, secret: 's2', twice: 4 }, { hidden: true, id: item:3, n: 3, twice: 6 }]
+### owner: { LET $r = item:2; RETURN SELECT n, twice FROM $r }
+[{ n: 2, twice: 4 }]
+### owner: { LET $a = [item:1, 7]; RETURN SELECT * FROM $a WHERE n > 0 }
+[{ id: item:1, n: 1, secret: 's1', twice: 2 }]
+### owner: SELECT n, (SELECT VALUE count() FROM item GROUP ALL)[0] AS total FROM open
+{ n: 10, total: 3 }
+{ n: 20, total: 3 }
+{ n: 2, total: 3 }
+### owner: SELECT * FROM open WHERE n > (SELECT VALUE math::mean(n) FROM open GROUP ALL)[0]
+{ id: open:2, n: 20, of: item:3 }
+### owner: SELECT n, (SELECT * FROM closed) AS c FROM open
+{ c: [{ id: closed:1, n: 100 }], n: 10 }
+{ c: [{ id: closed:1, n: 100 }], n: 20 }
+{ c: [{ id: closed:1, n: 100 }], n: 2 }
+### owner: SELECT n, (SELECT VALUE n FROM item WHERE n < $parent.n) AS below FROM open
+{ below: [1, 2, 3], n: 10 }
+{ below: [1, 2, 3], n: 20 }
+{ below: [1], n: 2 }
+### owner: SELECT (SELECT VALUE twice FROM ONLY $parent.of) AS t FROM open
+{ t: 2 }
+{ t: 6 }
+{ t: NONE }
+### owner: SELECT n FROM open WHERE (SELECT VALUE hidden FROM ONLY $parent.of) != true
+{ n: 10 }
+{ n: 2 }
+### owner: SELECT (SELECT VALUE x FROM [{ x: $parent.n }]) AS x FROM open
+{ x: [10] }
+{ x: [20] }
+{ x: [2] }
+### owner: SELECT (SELECT VALUE count() FROM item GROUP ALL) AS a, (SELECT VALUE n FROM item WHERE n = $parent.n) AS b FROM open
+{ a: [3], b: [] }
+{ a: [3], b: [] }
+{ a: [3], b: [2] }
+### owner: SELECT VALUE (SELECT VALUE n FROM item LIMIT 1) FROM open LIMIT 0
+(no rows)
+### owner: SELECT math::sum((SELECT VALUE n FROM item)) AS s FROM open GROUP ALL
+error: Incorrect arguments for function math::sum(). Argument 1 was the wrong type. Expected `number` but found `[1, 2, 3]`
+### owner: SELECT * FROM (SELECT (SELECT VALUE n FROM item WHERE n < $parent.n) AS b FROM open)
+{ b: [1, 2, 3] }
+{ b: [1, 2, 3] }
+{ b: [1] }
+### record user: SELECT * FROM [item:1, item:3, closed:1, 5, NONE, NULL]
+{ id: item:1, n: 1, twice: 2 }
+5
+### record user: SELECT * FROM [[item:1, item:2], 3, [4]]
+{ id: item:1, n: 1, twice: 2 }
+{ id: item:2, n: 2, twice: 4 }
+3
+4
+### record user: SELECT VALUE secret FROM [item:1, item:2]
+NONE
+NONE
+### record user: SELECT n, twice FROM [item:2, { n: 5 }] WHERE n > 1
+{ n: 2, twice: 4 }
+{ n: 5, twice: NONE }
+### record user: SELECT * FROM { a: 1 }
+{ a: 1 }
+### record user: SELECT * FROM [item:1, item:2] LIMIT 1 START 1
+{ id: item:2, n: 2, twice: 4 }
+### record user: SELECT * FROM [item:1, item:2] LIMIT 0
+(no rows)
+### record user: SELECT count() FROM [item:1, item:2, item:3] GROUP ALL
+{ count: 2 }
+### record user: SELECT * FROM |item:1..3|
+{ id: item:1, n: 1, twice: 2 }
+{ id: item:2, n: 2, twice: 4 }
+### record user: SELECT * FROM array::shuffle([item:3])
+(no rows)
+### record user: SELECT * FROM array::at(array::shuffle([item:1]), 0)
+{ id: item:1, n: 1, twice: 2 }
+### record user: SELECT * FROM array::at(array::shuffle([item:1]), 0) LIMIT 0
+(no rows)
+### record user: SELECT * FROM array::at(array::shuffle([item:3]), 0)
+(no rows)
+### record user: SELECT * FROM array::at(array::shuffle([closed:1]), 0)
+(no rows)
+### record user: SELECT * FROM array::at(array::shuffle([item:1..=2]), 0)
+{ id: item:1, n: 1, twice: 2 }
+{ id: item:2, n: 2, twice: 4 }
+### record user: SELECT * FROM type::table(array::at(array::shuffle(['item']), 0))
+{ id: item:1, n: 1, twice: 2 }
+{ id: item:2, n: 2, twice: 4 }
+### record user: SELECT n FROM type::table(array::at(array::shuffle(['item']), 0)) LIMIT 1
+{ n: 1 }
+### record user: SELECT * FROM type::table(array::at(array::shuffle(['closed']), 0))
+(no rows)
+### record user: SELECT * FROM type::table(array::at(array::shuffle(['nope']), 0))
+error: The table 'nope' does not exist
+### record user: SELECT * FROM type::table(array::at(array::shuffle(['nope']), 0)) LIMIT 0
+error: The table 'nope' does not exist
+### record user: SELECT * FROM array::shuffle([5])
+5
+### record user: SELECT * FROM [1, 2], open
+1
+2
+{ id: open:1, n: 10, of: item:1 }
+{ id: open:2, n: 20, of: item:3 }
+{ id: open:3, n: 2, of: item:9 }
+### record user: SELECT * FROM open:1, [item:2], array::shuffle([open:2])
+{ id: open:1, n: 10, of: item:1 }
+{ id: item:2, n: 2, twice: 4 }
+{ id: open:2, n: 20, of: item:3 }
+### record user: SELECT * FROM (SELECT * FROM item WHERE n > 1)
+{ id: item:2, n: 2, twice: 4 }
+### record user: SELECT n FROM (SELECT * FROM item ORDER BY n DESC LIMIT 2)
+{ n: 2 }
+{ n: 1 }
+### record user: SELECT * FROM (SELECT VALUE n FROM item)
+1
+2
+### record user: SELECT * FROM (SELECT VALUE id FROM item)
+{ id: item:1, n: 1, twice: 2 }
+{ id: item:2, n: 2, twice: 4 }
+### record user: SELECT * FROM (SELECT VALUE of FROM open) LIMIT 2
+{ id: item:1, n: 1, twice: 2 }
+### record user: SELECT VALUE $this FROM (SELECT VALUE id FROM item)
+item:1
+item:2
+### record user: SELECT * FROM (SELECT * FROM ONLY item:1)
+{ id: item:1, n: 1, twice: 2 }
+### record user: SELECT * FROM (SELECT * FROM item) LIMIT 0
+(no rows)
+### record user: SELECT * FROM (SELECT * FROM (SELECT * FROM item)) LIMIT 1
+{ id: item:1, n: 1, twice: 2 }
+### record user: SELECT * FROM (SELECT * FROM item), [7]
+{ id: item:1, n: 1, twice: 2 }
+{ id: item:2, n: 2, twice: 4 }
+7
+### record user: { LET $t = type::table('item'); RETURN SELECT * FROM $t }
+[{ id: item:1, n: 1, twice: 2 }, { id: item:2, n: 2, twice: 4 }]
+### record user: { LET $r = item:2; RETURN SELECT n, twice FROM $r }
+[{ n: 2, twice: 4 }]
+### record user: { LET $a = [item:1, 7]; RETURN SELECT * FROM $a WHERE n > 0 }
+[{ id: item:1, n: 1, twice: 2 }]
+### record user: SELECT n, (SELECT VALUE count() FROM item GROUP ALL)[0] AS total FROM open
+{ n: 10, total: 2 }
+{ n: 20, total: 2 }
+{ n: 2, total: 2 }
+### record user: SELECT * FROM open WHERE n > (SELECT VALUE math::mean(n) FROM open GROUP ALL)[0]
+{ id: open:2, n: 20, of: item:3 }
+### record user: SELECT n, (SELECT * FROM closed) AS c FROM open
+{ c: [], n: 10 }
+{ c: [], n: 20 }
+{ c: [], n: 2 }
+### record user: SELECT n, (SELECT VALUE n FROM item WHERE n < $parent.n) AS below FROM open
+{ below: [1, 2], n: 10 }
+{ below: [1, 2], n: 20 }
+{ below: [1], n: 2 }
+### record user: SELECT (SELECT VALUE twice FROM ONLY $parent.of) AS t FROM open
+{ t: 2 }
+{ t: NONE }
+{ t: NONE }
+### record user: SELECT n FROM open WHERE (SELECT VALUE hidden FROM ONLY $parent.of) != true
+{ n: 10 }
+{ n: 20 }
+{ n: 2 }
+### record user: SELECT (SELECT VALUE x FROM [{ x: $parent.n }]) AS x FROM open
+{ x: [10] }
+{ x: [20] }
+{ x: [2] }
+### record user: SELECT (SELECT VALUE count() FROM item GROUP ALL) AS a, (SELECT VALUE n FROM item WHERE n = $parent.n) AS b FROM open
+{ a: [2], b: [] }
+{ a: [2], b: [] }
+{ a: [2], b: [2] }
+### record user: SELECT VALUE (SELECT VALUE n FROM item LIMIT 1) FROM open LIMIT 0
+(no rows)
+### record user: SELECT math::sum((SELECT VALUE n FROM item)) AS s FROM open GROUP ALL
+error: Incorrect arguments for function math::sum(). Argument 1 was the wrong type. Expected `number` but found `[1, 2]`
+### record user: SELECT * FROM (SELECT (SELECT VALUE n FROM item WHERE n < $parent.n) AS b FROM open)
+{ b: [1, 2] }
+{ b: [1, 2] }
+{ b: [1] }

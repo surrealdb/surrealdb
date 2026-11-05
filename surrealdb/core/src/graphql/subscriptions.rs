@@ -6,22 +6,20 @@ use async_graphql::dynamic::{
 	FieldValue, InputValue, Subscription, SubscriptionField, SubscriptionFieldFuture, TypeRef,
 };
 use async_graphql::{Name, Value as GraphqlValue};
-use async_stream::try_stream;
+use surrealdb_expr::parser::TopLevelExpr;
 use surrealdb_types::{Action as PublicAction, Notification as PublicNotification, ToSql};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::error::{GraphqlError, resolver_error};
 use super::tables::{CachedRecord, filter_name_from_table, parse_filter_arg};
-use super::utils::{GraphqlValueUtils, execute_plan};
+use super::utils::{GraphqlValueUtils, execute_statement};
 use crate::catalog::{FieldDefinition, TableDefinition};
 use crate::dbs::Session;
 use crate::expr::field::Selector;
-use crate::expr::plan::TopLevelExpr;
-use crate::expr::statements::{KillStatement, LiveFields, LiveStatement};
-use crate::expr::{
-	BinaryOperator, Cond, Expr, Fetch, Fetchs, Field, Fields, Idiom, Literal, LogicalPlan, Part,
-};
+use crate::expr::statements::live::LiveFields;
+use crate::expr::statements::{KillStatement, LiveStatement};
+use crate::expr::{BinaryOperator, Cond, Expr, Fetch, Fetchs, Field, Fields, Idiom, Literal, Part};
 use crate::kvs::Datastore;
 use crate::val::{RecordId, TableName, Value};
 
@@ -132,26 +130,26 @@ fn make_table_subscription_field(
 			let fields = projected_live_fields(&ctx, &selectable_fields);
 			let cond = parse_subscription_cond(args, &fds, &tb_name)?;
 			let fetch = parse_fetch_arg(args)?;
-			let live_id =
-				start_table_live_query(ds, &live_sess, &tb_name, fields, cond, fetch).await?;
-			let mut receiver = router.subscribe(live_id);
 			let cleanup =
-				LiveQueryCleanup::new(Arc::clone(ds), live_sess, live_id, Arc::clone(router));
+				start_owned_live_query(ds, live_sess, router, &tb_name, fields, cond, fetch)
+					.await?;
+			let receiver = router.subscribe(cleanup.live_id);
 
-			Ok(try_stream! {
-				let _cleanup = cleanup;
+			// unfold is used here instead of try_async_stream, because try_async_stream causes a
+			// baffling requirement for `ctx` to have a static lifetime.
+			let stream = futures::stream::unfold((receiver, cleanup), |mut f| async move {
 				loop {
-					let Some(notification) = receiver.recv().await else {
-						break;
-					};
-					if matches!(notification.action, PublicAction::Killed) {
-						break;
+					let notification = f.0.recv().await?;
+					if let PublicAction::Killed = notification.action {
+						return None;
 					}
+
 					if let Some(value) = notification_to_field_value(notification) {
-						yield value;
+						return Some((Ok(value), f));
 					}
 				}
-			})
+			});
+			Ok(stream)
 		})
 	})
 	.description(format!("LIVE query notifications for `{}`", tb.name))
@@ -268,21 +266,16 @@ fn parse_fetch_arg(
 		return Ok(None);
 	}
 
-	let values: Vec<String> = match fetch_value {
-		GraphqlValue::List(items) => {
-			let mut out = Vec::with_capacity(items.len());
-			for item in items {
-				let Some(path) = item.as_string() else {
-					return Err(async_graphql::Error::new("fetch must be a list of strings"));
-				};
-				out.push(path);
-			}
-			out
-		}
-		_ => {
-			return Err(async_graphql::Error::new("fetch must be a list of strings"));
-		}
+	let GraphqlValue::List(items) = fetch_value else {
+		return Err(async_graphql::Error::new("fetch must be a list of strings"));
 	};
+	let mut values: Vec<String> = Vec::with_capacity(items.len());
+	for item in items {
+		let Some(path) = item.as_string() else {
+			return Err(async_graphql::Error::new("fetch must be a list of strings"));
+		};
+		values.push(path);
+	}
 
 	if values.is_empty() {
 		return Ok(None);
@@ -292,7 +285,7 @@ fn parse_fetch_arg(
 	for path in values {
 		let idiom = crate::syn::idiom(&path)
 			.map_err(|_| async_graphql::Error::new(format!("Invalid fetch path: {path}")))?;
-		fetches.push(Fetch(Expr::Idiom(idiom.into())));
+		fetches.push(Fetch(Expr::Idiom(idiom)));
 	}
 
 	Ok(Some(Fetchs::new(fetches)))
@@ -315,12 +308,46 @@ fn notification_to_field_value(notification: PublicNotification) -> Option<Field
 }
 
 fn extract_record_id(obj: &crate::val::Object, fallback: &Value) -> Option<RecordId> {
-	match obj.get("id") {
-		Some(Value::RecordId(rid)) => Some(rid.clone()),
-		_ => match fallback {
-			Value::RecordId(rid) => Some(rid.clone()),
-			_ => None,
-		},
+	if let Some(Value::RecordId(rid)) = obj.get("id") {
+		Some(rid.clone())
+	} else if let Value::RecordId(rid) = fallback {
+		Some(rid.clone())
+	} else {
+		None
+	}
+}
+
+/// Register the live query on a task of its own and hand back its cleanup guard.
+///
+/// The registration commits before its result reaches the caller. Were the
+/// registration awaited inline, or were a bare id sent across the channel,
+/// dropping the caller before it takes ownership of the guard would leave a
+/// live query nobody kills. Running the registration on its own task and
+/// wrapping the id in [`LiveQueryCleanup`] before sending ensures the guard's
+/// `Drop` runs whether the caller disappears before `send`, after `send` while
+/// the guard is still buffered in the channel, or after the stream is built.
+async fn start_owned_live_query(
+	ds: &Arc<Datastore>,
+	sess: Session,
+	router: &Arc<NotificationRouter>,
+	table: &TableName,
+	fields: LiveFields,
+	cond: Option<Cond>,
+	fetch: Option<Fetchs>,
+) -> Result<LiveQueryCleanup, async_graphql::Error> {
+	let (tx, rx) = tokio::sync::oneshot::channel();
+	let ds = Arc::clone(ds);
+	let router = Arc::clone(router);
+	let table = table.clone();
+	tokio::spawn(async move {
+		let started = start_table_live_query(&ds, &sess, &table, fields, cond, fetch)
+			.await
+			.map(|live_id| LiveQueryCleanup::new(ds, sess, live_id, router));
+		let _ = tx.send(started);
+	});
+	match rx.await {
+		Ok(started) => started,
+		Err(_) => Err(resolver_error("the LIVE query registration was aborted").into()),
 	}
 }
 
@@ -333,24 +360,20 @@ async fn start_table_live_query(
 	fetch: Option<Fetchs>,
 ) -> Result<Uuid, async_graphql::Error> {
 	let stmt = LiveStatement {
-		id: Uuid::new_v4(),
-		node: Uuid::new_v4(),
+		id: Uuid::nil(),
+		node: Uuid::nil(),
 		fields,
 		what: Expr::Table(table.clone()),
 		cond,
 		fetch,
 	};
-	let plan = LogicalPlan {
-		expressions: vec![TopLevelExpr::Live(Box::new(stmt))],
-	};
-	let res = execute_plan(ds, sess, plan).await?;
+	let res = execute_statement(ds, sess, TopLevelExpr::Live(Box::new(stmt))).await?;
 
-	match res {
-		Value::Uuid(id) => Ok(id.into()),
-		value => {
-			Err(resolver_error(format!("LIVE query did not return a UUID, got {}", value.to_sql()))
-				.into())
-		}
+	if let Value::Uuid(id) = res {
+		Ok(id.into())
+	} else {
+		Err(resolver_error(format!("LIVE query did not return a UUID, got {}", res.to_sql()))
+			.into())
 	}
 }
 
@@ -362,10 +385,7 @@ async fn kill_live_query(
 	let stmt = KillStatement {
 		id: Expr::Literal(Literal::Uuid(live_id.into())),
 	};
-	let plan = LogicalPlan {
-		expressions: vec![TopLevelExpr::Kill(stmt)],
-	};
-	let _ = execute_plan(ds, sess, plan).await?;
+	let _ = execute_statement(ds, sess, TopLevelExpr::Kill(stmt)).await?;
 	Ok(())
 }
 
@@ -406,5 +426,82 @@ impl Drop for LiveQueryCleanup {
 				trace!(?err, ?live_id, "failed to cleanup GraphQL live query");
 			}
 		});
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::time::Duration;
+
+	use super::*;
+	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
+	use crate::kvs::TransactionType;
+
+	async fn table_live_count(ds: &Datastore, table: &TableName) -> usize {
+		let txn = ds.transaction(TransactionType::Read).await.unwrap();
+		let ns = txn.expect_ns_by_name("test").await.unwrap().namespace_id;
+		let db = txn.expect_db_by_name("test", "test").await.unwrap().database_id;
+		let lives = txn.all_tb_lives(ns, db, table, None).await.unwrap();
+		txn.cancel().await.unwrap();
+		lives.len()
+	}
+
+	#[tokio::test]
+	async fn dropping_setup_after_send_before_recv_still_kills_live_query() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let sess = Session::owner().with_ns("test").with_db("test").with_rt(true);
+		for res in ds
+			.execute(
+				"DEFINE NAMESPACE test; DEFINE DATABASE test; DEFINE TABLE person SCHEMALESS;",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap()
+		{
+			res.result.unwrap();
+		}
+		let router = Arc::new(NotificationRouter::new(16));
+		let table = TableName::from("person");
+
+		let mut setup = Box::pin(start_owned_live_query(
+			&ds,
+			sess,
+			&router,
+			&table,
+			LiveFields::Select(Fields::all()),
+			None,
+			None,
+		));
+
+		// Poll once so the registration task is spawned and `setup` parks on
+		// `rx.await` while keeping the `oneshot::Receiver` alive.
+		assert!(futures::poll!(setup.as_mut()).is_pending());
+
+		// Drive the runtime without polling `setup` again until the spawned
+		// task has committed the LIVE query and buffered `Ok(LiveQueryCleanup)`
+		// in the still-open channel.
+		tokio::time::timeout(Duration::from_secs(5), async {
+			while table_live_count(&ds, &table).await == 0 {
+				tokio::task::yield_now().await;
+			}
+		})
+		.await
+		.expect("the registration task must register the live query");
+		tokio::task::yield_now().await;
+		assert_eq!(table_live_count(&ds, &table).await, 1);
+
+		// Cancel `setup` before `rx.await` is polled again. Dropping the
+		// `oneshot::Receiver` drops the buffered `LiveQueryCleanup` guard,
+		// which spawns `kill_live_query`.
+		drop(setup);
+
+		tokio::time::timeout(Duration::from_secs(5), async {
+			while table_live_count(&ds, &table).await != 0 {
+				tokio::task::yield_now().await;
+			}
+		})
+		.await
+		.expect("dropping the unread guard must kill the registered live query");
 	}
 }

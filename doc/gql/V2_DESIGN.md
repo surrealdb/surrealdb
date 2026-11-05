@@ -140,23 +140,30 @@ pub(crate) struct MatchColumn { pub name: String, pub expr: Expr }
 pub(crate) struct MatchOrder { pub expr: Expr, pub ascending: bool }
 ```
 
-### Variant plumbing (`Expr::Match(Box<MatchPlan>)`)
+### Variant plumbing (`LogicalOp::Match(LogicalMatch { plan: Box<MatchPlan> })`)
 
-- `expr/expression.rs`: variant; `read_only() → true`; `is_static() → false`;
-  `needs_parentheses() → true`; `compute()` arm → hard error "GQL MATCH requires
-  the streaming execution engine; it cannot run under the compute-only planner
-  strategy" (precedent: the `Expr::Explain` compute arm). **`impl ToSql for Expr`
-  must special-case Match BEFORE the sql conversion** (it round-trips via
-  `From<expr::Expr> for sql::Expr`), delegating to a dedicated deterministic
+A `MatchPlan` is a relational plan, so it is carried by the logical plan and not
+by the expression AST. `Expr` has no variant that can hold one, which is what
+makes most of the invariants below structural rather than guarded.
+
+- `expr/logical/mod.rs`: variant, an opaque leaf — `children()` is empty and no
+  binding pass rewrites through it, because binding-table semantics are not row
+  semantics. `read_only()` is false for a plan carrying mutation stages
+  (`MatchPlan::has_mutations`); its scalars are reached through
+  `MatchPlan::visit_exprs`, which the plan's own `visit_scalars` arm delegates
+  to.
+- `dbs/top_level.rs`: `TopLevelStatement::Plan(Box<LogicalOp>)` is the
+  executor's carrier for a front end that emits a plan rather than a statement,
+  and `QuerySource::Plan(Vec<LogicalOp>)` is how one is submitted. A plan has
+  no SurrealQL surface form, so `impl ToSql for TopLevelStatement` renders it
+  directly; a `Match` node's attribute is the deterministic
   `impl ToSql for MatchPlan` (GQL-ish rendering; never panics).
-- `sql/expression.rs` `From<expr::Expr> for sql::Expr`: Match arm →
-  `sql::Expr::Literal(Literal::None)` + `tracing::error!` + `debug_assert!(false)`,
-  with the documented invariant: **`Expr::Match` is only constructed by the GQL
-  lowering at top level and never enters a `sql::Ast`, the catalog, or `Revisioned`
-  serialization** (which serializes Expr as SurrealQL text). `From<sql::Expr>`
-  needs no arm.
-- `expr/visit.rs`: Visit + MutVisitor arms walking every reachable Expr
-  (predicates, columns, order, skip, limit).
+- **A plan is only constructed by a front end at top level and never enters a
+  `sql::Ast`, the catalog, or `Revisioned` serialization** (which serializes as
+  SurrealQL text). The invariant is structural: no `sql::Expr` or `expr::Expr`
+  variant can carry a plan, and no SurrealQL parses to one.
+- A plan runs only on the execution engine: the entry that could otherwise route
+  around it, `fnc::eval::run_eval`, rejects a `MatchPlan` with a hard error.
 
 ## 3. Binding rows
 
@@ -198,9 +205,9 @@ relational frontend — see §10.)
 
 Conventions for all: `metrics: Arc<OperatorMetrics>` + `monitor_stream`;
 `buffer_stream(input.execute(ctx)?, input.access_mode(), input.cardinality_hint(),
-ctx.root().ctx.config.operator_buffer_size)`; `access_mode` combines children +
+ctx.root().ctx.config.exec.operator_buffer_size)`; `access_mode` combines children +
 embedded predicate exprs; `required_context` ≥ Database; WASM cfg patterns as in
-`scan/graph.rs`; EXPLAIN-stable `name()`/`attrs()` (predicates via PhysicalExpr
+`scan/graph.rs`; EXPLAIN-stable `name()`/`attrs()` (predicates via Clause
 ToSql). First: extract `compute_graph_ranges`/`decode_graph_edge`/cursor batching
 from `scan/graph.rs` into `pub(crate)` `scan/graph_keys.rs` (~130 lines moved).
 
@@ -210,7 +217,7 @@ from `scan/graph.rs` into `pub(crate)` `scan/graph_keys.rs` (~130 lines moved).
   land in `TableScan.predicate` after prefix-strip. Delegates cardinality/ordering.
 - **Expand** (~450L): `{ input, source, direction, edge_tables, edge_binding:
   Full(name)|IdOnly(name), target_binding, target_label, predicate:
-  Option<Arc<dyn PhysicalExpr>>, optional: bool }`. Per row: source id (Null source
+  Option<Clause>, optional: bool }`. Per row: source id (Null source
   → null-row if optional else skip) → adjacency via graph_keys → batch FieldState
   fetch of edges → target rid from edge `out`/`in` per direction → label filter →
   batch FieldState fetch of targets (miss/deny drops candidate) → candidate row =
@@ -222,8 +229,7 @@ from `scan/graph.rs` into `pub(crate)` `scan/graph_keys.rs` (~130 lines moved).
   target_label }` — bind a node from a bound edge's endpoint; FieldState fetch;
   1:≤1, order-preserving.
 - **HashJoin** (~450L, PR-B): `{ build, probe, keys: Vec<String>, join_type:
-  Inner|Left|Cross, null_template: Vec<String>, residual: Option<Arc<dyn
-  PhysicalExpr>> }`. Key = `Vec<Value>` of `<binding>.id` per side (FieldPath
+  Inner|Left|Cross, null_template: Vec<String>, residual: Option<Clause> }`. Key = `Vec<Value>` of `<binding>.id` per side (FieldPath
   extraction, no fetch). Build = GroupMap pattern (hash bucket + linear probe over
   PartialEq, per Aggregate aggregate.rs:~220-299) plus an insertion-ordered
   `Vec<Value>` of build rows so `Cross` emits deterministically (HashMap iteration
@@ -328,23 +334,22 @@ Project [columns: p, b]
             Bind [binding: a]  ← TableScan [table: person]
 ```
 
-## 7. Strategy matrix & plumbing
+## 7. Plumbing
 
-- `.gql` language-tests default to `[all-ro, best-effort]` (dialect-aware default
-  in `language-tests/src/tests/schema/mod.rs` + `cmd/run/mod.rs`); one pinned test
-  `errors/compute_only_strategy.gql` (`planner-strategy = ["compute-only"]`)
-  asserts the compute-arm error.
-- `gql/mod.rs`: `pub struct PreparedGqlQuery(pub(crate) LogicalPlan)`
-  (+Debug+ToSql via MatchPlan renderer); `lower` / `parse_to_plan_with_settings`
-  (replaces `parse_to_ast_with_settings`) / `parse_with_capabilities` return it;
-  experimental gate unchanged.
-- `kvs/ds.rs`: `parse_gql` → `PreparedGqlQuery`; `execute_gql` signature
-  unchanged; new `pub process_gql(PreparedGqlQuery, sess, vars)` + pub(crate)
-  cancel/txn variants (split `process_with_transaction_inner` into ast-shim +
-  plan-level inner).
-- `rpc/protocol.rs`: `QueryForm::Plan(PreparedGqlQuery)` added; `Parsed(Ast)`
-  untouched (12 other call sites); run_query 8→12 arms; gql handler builds Plan.
-- language-tests arm: `parse_to_plan_with_settings` + `dbs.process_gql`.
+- `.gql` language-tests run once, on the one engine.
+- `gql/mod.rs`: `pub struct PreparedGqlQuery(pub LogicalOp)` — the single
+  `LogicalOp::Match` the query runs as (+Debug+ToSql via MatchPlan renderer);
+  `lower` / `parse_to_plan_with_settings` / `parse_with_capabilities` return
+  it; experimental gate unchanged.
+- `kvs/ds.rs`: `parse_gql` lowers the text and returns its `LogicalOp`s,
+  reached from `statements_for` when the request names `Dialect::Gql`. There is
+  no GQL-specific entry point: every dialect goes through `Datastore::run` /
+  `run_streaming` with a `QueryRequest`.
+- `rpc/protocol.rs`: the `gql` handler submits
+  `QueryForm::Text(&query, Dialect::Gql)`, which `run_query` turns into one
+  `QuerySource::in_dialect` call.
+- language-tests arm: `parse_to_plan_with_settings`, then
+  `dbs.run(QueryRequest::new(QuerySource::Plan(plan.0), session))`.
   (Deferred: there is no `[test] explain` harness key. Plan-shape coverage lives
   in Rust snapshot tests over the `MatchPlan` `ToSql` renderer —
   `surrealdb/core/src/gql/lower/test.rs` and the `to_sql_renders_*` tests in
@@ -367,8 +372,8 @@ Project [columns: p, b]
   validation per R6 (max<min stays rejected; cross-variable refs inside a
   quantified edge's inline predicate rejected: "a predicate inside a quantified
   edge may only reference that edge").
-- `lower/expr.rs`: guards/NNF/literals/params verbatim (~480L; still building
-  sql::Expr → `.into()` per slot is acceptable); Role×ScopeKind deleted → uniform
+- `lower/expr.rs`: guards/NNF/literals/params verbatim (builds `LogicalExpr`
+  directly); Role×ScopeKind deleted → uniform
   binding addressing; `nullable()` amendment (Variable nullable iff optional-bound).
 - `lower/mod.rs` rewritten: output spec per R7/R8 (column naming + dup-check +
   lower_count reused).
@@ -383,10 +388,10 @@ Project [columns: p, b]
 ## 9. Guards (cnf knobs)
 
 `gql_max_path_rows` (1M), `gql_max_join_build_rows` (1M), `gql_max_output_rows`
-(1M) — `CommonConfig` fields in `surrealdb/core/src/cnf/mod.rs` (NOT global
-statics: every operator that reads them already holds the execution
-`CommonConfig` via `ctx.root().ctx.config`, so they are per-datastore and
-settable programmatically as well as via the `SURREAL_GQL_MAX_*` env vars, which
+(1M) — `ExecConfig` fields in `surrealdb/core/src/exec/config.rs` (NOT global
+statics: every operator that reads them already holds the execution config via
+`ctx.root().ctx.config.exec`, so they are per-datastore and settable
+programmatically as well as via the `SURREAL_GQL_MAX_*` env vars, which
 `ConfigMap::from_env` routes into the same fields). Errors name the env knob.
 `SURREAL_GQL_MAX_PATH_ROWS` is enforced **per source row** in `PathExpand` (the
 live+emitted counter resets for each input row), so it caps the single-source
@@ -417,15 +422,15 @@ graph-specific traversal operators.
 When that frontend lands, the expected shape is:
 
 - A composable **`Expr::Join`** logical node (a binary relational operator whose children are
-  sub-`Expr`s) lives in `Expr` *alongside* `Expr::Match` — both are single-statement logical
+  sub-`Expr`s) lives in `Expr` *alongside* `LogicalOp::Match` — both are single-statement logical
   units in the common `Expr` layer; convergence happens there, not by collapsing one into the
-  other. (`Expr::Match` is a whole `MATCH…RETURN` query block; `Expr::Join` is one operator
+  other. (`LogicalOp::Match` is a whole `MATCH…RETURN` query block; `Expr::Join` is one operator
   within a SELECT.)
 - Both lower to the same `operators/join/` family. Today that family is `HashJoin` only
   (equi-join / cross); the relational planner additionally needs nested-loop (theta joins),
   index-nested-loop, and sort-merge — they belong in `operators/join/` next to `HashJoin`.
 - `HashJoin`'s `keys: Vec<String>` (binding names, `<binding>.id` per side) generalizes to a
-  composite `Vec<(Arc<dyn PhysicalExpr>, Arc<dyn PhysicalExpr>)>` for arbitrary/asymmetric
+  composite `Vec<(Clause, Clause)>` for arbitrary/asymmetric
   equi-join conditions (the only GQL→SQL shape change in the operator). See `operators/join/mod.rs`.
 - The binding-row convention and the FieldState-aware `scan/fetch.rs` helper are the shared
   substrate; a relational frontend reuses both unchanged.

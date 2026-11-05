@@ -4,9 +4,9 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use common::lazy_env_parse;
 use console_subscriber::ConsoleLayer;
-use surrealdb_core::lazy_env_parse;
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 use tracing_subscriber::registry::LookupSpan;
@@ -26,6 +26,15 @@ pub fn new<S>() -> Result<Box<dyn Layer<S> + Send + Sync>>
 where
 	S: Subscriber + for<'a> LookupSpan<'a> + Send + Sync,
 {
+	// `console-subscriber` asserts that Tokio was built with `--cfg tokio_unstable` and
+	// panics inside `spawn()` otherwise. RUSTFLAGS reach every crate in the build, so the
+	// cfg is visible here exactly when it is visible to Tokio.
+	if !cfg!(tokio_unstable) {
+		bail!(
+			"the `tokio-console` feature needs Tokio's task tracing: rebuild with \
+			 RUSTFLAGS=\"--cfg tokio_unstable\""
+		);
+	}
 	let socket_addr = match &*TOKIO_CONSOLE_SOCKET_ADDR {
 		Some(addr) => addr.parse().context("failed to parse Tokio Console socket address")?,
 		None => DEFAULT_TOKIO_CONSOLE_ADDR,

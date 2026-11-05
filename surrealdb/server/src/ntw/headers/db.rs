@@ -1,7 +1,8 @@
 use axum_extra::headers;
 use axum_extra::headers::Header;
 use http::{HeaderName, HeaderValue};
-use surrealdb::headers::DB;
+
+use super::DB;
 
 /// Typed header implementation for the database header.
 /// It's used to specify the database to use for database operations.

@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["compute-only"]
 
 [test]
 reason = "Deleting IN/OUT records before RELATION should not leave phantom UNIQUE index entries"

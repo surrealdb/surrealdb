@@ -1,13 +1,13 @@
-//! Sleep function for the streaming executor.
+//! Sleep function for the engine.
 //!
 //! This provides an async sleep function that respects the context cancellation.
 
 use anyhow::Result;
 
-use crate::exec::function::FunctionRegistry;
-use crate::exec::physical_expr::EvalContext;
+use crate::define_async_function;
+use crate::exec::EvalContext;
+use crate::exec::function::ScalarFunction;
 use crate::val::Value;
-use crate::{define_async_function, register_functions};
 
 // =========================================================================
 // Implementation function
@@ -31,7 +31,7 @@ async fn sleep_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 
 	// Sleep with cancellation support
 	tokio::select! {
-		_ = tokio::time::sleep(duration.0) => Ok(Value::None),
+		_ = common::time::sleep(duration.0) => Ok(Value::None),
 		_ = cancellation.cancelled() => {
 			// Cancelled, return None without error
 			Ok(Value::None)
@@ -43,12 +43,14 @@ async fn sleep_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 // Function definition using the macro
 // =========================================================================
 
-define_async_function!(Sleep, "sleep", (duration: Duration) -> None, sleep_impl);
+define_async_function!(Sleep, "sleep", effects: EffectSet::BLOCKING, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (duration: Duration) -> None, sleep_impl);
 
 // =========================================================================
 // Registration
 // =========================================================================
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(registry, Sleep,);
-}
+// The delay is the effect of this call, not the NONE it returns.
+// `EffectSet::BLOCKING` declares that, so a rewrite rule may neither drop
+// the call nor repeat it.
+/// The `sleep` scalar builtin.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[&Sleep];

@@ -1,0 +1,25 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL integer attributes are read in any case and order; ZEROFILL implies UNSIGNED"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ a: 255u8, b: 200u8, c: -5i32, id: 1 }]"
+
+[[test.results]]
+error = "Couldn't coerce value for field `a` of `z:2`: Expected `none | null | u8` but found `-1`"
+
+[[test.results]]
+value = "[{ a: 255u8, b: 200u8, c: -5i32, id: 1 }]"
+*/
+
+CREATE TABLE z (id INT PRIMARY KEY, a TINYINT ZEROFILL, b TINYINT unsigned zerofill, c INT SIGNED);
+INSERT INTO z (id, a, b, c) VALUES (1, 255, 200, -5);
+INSERT INTO z (id, a, b, c) VALUES (2, -1, 0, 0);
+SELECT id, a, b, c FROM z ORDER BY id;

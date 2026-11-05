@@ -47,6 +47,17 @@ value = "{ user: { name: 'Tobie', tags: ['admin', 'user'] } }"
 [[test.results]]
 value = "[{ id: 1 }, { id: 2 }]"
 
+[[test.results]]
+error = "Incorrect arguments for function encoding::cbor::decode(). invalid cbor"
+
+[[test.results]]
+error = "Incorrect arguments for function encoding::cbor::decode(). invalid cbor"
+
+[[test.results]]
+error = "Incorrect arguments for function encoding::cbor::decode(). invalid cbor"
+
+[[test.results]]
+error = "Incorrect arguments for function encoding::cbor::decode(). invalid cbor"
 */
 
 encoding::cbor::decode(b"A163666F6F63626172");
@@ -64,3 +75,9 @@ encoding::cbor::decode(encoding::cbor::encode([]));
 encoding::cbor::decode(encoding::cbor::encode({}));
 encoding::cbor::decode(encoding::cbor::encode({ user: { name: "Tobie", tags: ["admin", "user"] } }));
 encoding::cbor::decode(encoding::cbor::encode([{ id: 1 }, { id: 2 }]));
+-- Tags 0, 9 and 13 (a datetime, uuid and duration as text) are refused
+encoding::cbor::decode(b"C06161");
+encoding::cbor::decode(b"C96161");
+encoding::cbor::decode(b"CD6161");
+-- An integer outside the signed 64-bit range is refused
+encoding::cbor::decode(b"1BFFFFFFFFFFFFFFFF");

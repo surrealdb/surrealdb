@@ -4,11 +4,11 @@ use axum::http::{HeaderMap, Method};
 use axum::response::IntoResponse;
 use axum::routing::any;
 use axum::{Extension, Router};
+use surrealdb_catalog::ApiMethod;
 use surrealdb_core::api::err::ApiError;
 use surrealdb_core::api::request::ApiRequest;
-use surrealdb_core::catalog::ApiMethod;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_types::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 use uuid::Uuid;
@@ -33,7 +33,7 @@ async fn handler(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	Path((ns, db, path)): Path<(String, String, String)>,
-	headers: HeaderMap,
+	mut headers: HeaderMap,
 	Query(Params {
 		inner: query,
 	}): Query<Params>,
@@ -98,6 +98,10 @@ async fn handler(
 	// describe the "internal state" of the value...
 	let body = Value::Bytes(body.into());
 
+	// User-defined API code can read and return the request headers, so the
+	// HttpOnly credential cookies never reach it.
+	super::auth::strip_credential_cookies(&mut headers);
+
 	let req = ApiRequest {
 		method,
 		headers,
@@ -126,7 +130,25 @@ async fn handler(
 		Value::None => Vec::new(),
 		Value::Bytes(x) => x.into_inner().to_vec(),
 		Value::String(s) => s.into_bytes(),
-		_ => {
+		Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Array(_)
+		| Value::Object(_)
+		| Value::Set(_) => {
 			return Err(ApiHandlerError(
 				ApiError::InvalidApiResponse(
 					"HTTP API response body must be None, bytes, or string; other values are not supported".into(),

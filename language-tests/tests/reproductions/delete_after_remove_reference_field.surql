@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "After REMOVE FIELD (which now purges the reference keys it wrote), deleting the formerly-referenced record succeeds and does not cascade, since the field — and thus its ON DELETE strategy — is gone. Before reference-key cleanup the orphaned key made the delete error with FdNotFound."
+reason = "After REMOVE FIELD (which purges the reference keys it wrote), deleting the formerly-referenced record succeeds and does not cascade, since the field — and thus its ON DELETE strategy — is gone."
 
 [[test.results]]
 value = "NONE"

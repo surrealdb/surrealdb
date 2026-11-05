@@ -8,7 +8,7 @@ value = "NONE"
 error = "The table 'test' does not exist"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: {  }, users: {  } }"
 */
 
 ALTER TABLE IF EXISTS test COMMENT 'bla';

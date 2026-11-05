@@ -1,0 +1,17 @@
+/**
+[env]
+imports = ["reproductions/7453_import.surql"]
+
+[test]
+reason = "Introspection of the types an aliased table and its nested object field generate: the table's object type keeps the table name, which record links to it name, while its query fields use the alias, and a nested field is exposed under its alias"
+issue = 7453
+
+[[test.results]]
+value = "{ lower: { fields: [{ name: 'id' }, { name: 'createdAt' }, { name: 'price' }], name: 'widget' }, price: { fields: [{ name: 'inEuro' }], name: 'widget_price' }, query: { fields: [{ name: 'widgets' }, { name: 'Widget' }, { name: 'widgets_aggregate' }, { name: 'widgetsConnection' }, { name: '_get' }] }, upper: NULL }"
+*/
+{
+  query: __type(name: "Query") { fields { name } }
+  upper: __type(name: "Widget") { name fields { name } }
+  lower: __type(name: "widget") { name fields { name } }
+  price: __type(name: "widget_price") { name fields { name } }
+}

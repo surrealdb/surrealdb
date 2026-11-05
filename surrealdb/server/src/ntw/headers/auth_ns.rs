@@ -1,7 +1,8 @@
 use axum_extra::headers;
 use axum_extra::headers::Header;
 use http::{HeaderName, HeaderValue};
-use surrealdb::headers::AUTH_NS;
+
+use super::AUTH_NS;
 
 /// Typed header implementation for the `surreal-auth-ns` header.
 /// It's used to specify the namespace to use for the basic authentication.

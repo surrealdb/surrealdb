@@ -1,0 +1,1003 @@
+//! Typed canonical-SurrealQL-text storage for catalog definitions.
+//!
+//! Catalog definitions store everything the user wrote as an expression,
+//! type annotation, idiom path, field list, block, or API route as canonical
+//! text (the same rendering those constructs' wire formats have always
+//! used). Every grammar stored this way parses on its own, so a definition
+//! that is made of several clauses stores one text per clause rather than one
+//! text for the whole construct. [`SurqlText<T>`] wraps that text together with
+//! the type `T` it compiles back to, so definition text can never be passed
+//! where a plain `String` is expected (or vice versa), and so re-parsing is
+//! only reachable through one funnel: [`SurqlText::compile`], driven by the
+//! per-grammar [`SurqlTarget`] impls in this module. No other code may parse
+//! stored definition text.
+//!
+//! Wire format: a `SurqlText<T>` encodes byte-for-byte as its inner `String`
+//! (varint length + UTF-8), which is itself byte-identical to the
+//! text-on-the-wire encodings of `Expr`, `Idiom`, and `Block`. It must NEVER
+//! gain a `#[revisioned]` derive: the derive writes a u16 revision header
+//! that bare `String` (and the hand-written `Revisioned` impls of the
+//! expression types this storage replaced) does not have, so adding one
+//! would silently break compatibility with every stored definition. The
+//! hand-written impls below delegate to `String`'s encoding directly.
+//!
+//! # No AST type is part of a live stored shape
+//!
+//! Every field of every `Stored*` definition now holds a scalar, a vocabulary
+//! enum, or one of these text wrappers. The AST types that still carry
+//! `Revisioned` impls — `Expr` and `Idiom` (hand-written), `Kind`, `Fields`,
+//! `Groups`, `Fetchs` and their nested parts (derived), and
+//! `catalog::aggregation`'s analysis types — are reachable on the wire only
+//! from a `#[revision(end = N, convert_fn = ...)]` field, which exists to read
+//! bytes written before this migration and cannot be reached by an encode.
+//!
+//! That is the invariant to protect when adding a field: an AST type appearing
+//! in a *live* stored field is a bug, not a shortcut. The types whose
+//! `Revisioned` impls do not descend from an AST — `ChangeFeed`, `Filter`,
+//! `Tokenizer`, `Language`, `Operation`, and everything in `val` — are
+//! genuinely stored and unaffected.
+
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
+use std::sync::OnceLock;
+
+use revision::{
+	DeserializeRevisioned, Revisioned, SerializeRevisioned, SkipRevisioned, WalkRevisioned,
+};
+use surrealdb_expr::parser;
+use surrealdb_expr::val::stored::schema::{Floor, SchemaError, StoredField};
+use surrealdb_expr::val::stored::{Encoder, Item};
+use surrealdb_kvs::Release;
+use surrealdb_types::{SqlFormat, ToSql};
+
+use crate::api_path::Path;
+use crate::catalog::KeyStructure;
+use crate::expr::arrival::{Arrival, LATEST_ARRIVAL};
+use crate::expr::logical::{LogicalExpr, LogicalOp};
+use crate::expr::{Block, Cond, Expr, Fields, Idiom, KeyNames, Kind, KindLiteral};
+use crate::val::Value;
+
+/// A type that round-trips through the canonical SurrealQL text stored in
+/// catalog definitions.
+///
+/// `render_canonical` produces the exact stored form (which for each impl
+/// matches the rendering that type's wire format has always used), and
+/// `parse_canonical` re-parses it. Every SurrealQL grammar here reads under the
+/// storage wire contract's parser profile,
+/// [`parser::ParserSettings::STORED_TEXT`] — the full grammar with
+/// bounded storage limits, independent of the datastore's live
+/// capabilities and configuration. The text was already validated once, when
+/// the `DEFINE`/`ALTER`/`LIVE` statement that produced it ran; see the
+/// constant's documentation for the full reasoning. [`Path`] is the one target
+/// whose grammar is its own rather than SurrealQL's; its impl documents what
+/// that changes.
+pub trait SurqlTarget: Sized {
+	/// The name of the grammar this target's text is written in. The schema lock records it as
+	/// part of the field's wire type (`text:<grammar>`), so two targets that read the same stored
+	/// bytes under different grammars stay distinct types.
+	const GRAMMAR: &'static str;
+
+	/// Render this value to its canonical stored SurrealQL text.
+	fn render_canonical(&self) -> String;
+	/// Re-parse canonical stored text back into this type.
+	fn parse_canonical(text: &str) -> anyhow::Result<Self>;
+}
+
+/// Canonical SurrealQL text stored in a catalog definition, tagged with the
+/// type `T` it compiles back to.
+///
+/// Construction is deliberately narrow: [`SurqlText::new`] renders a value
+/// through its [`SurqlTarget`] impl (the DEFINE/ALTER path), and
+/// [`SurqlText::from_raw`] wraps text that is already known to be canonical
+/// (revision decode `convert_fn`s and test fixtures). There is no
+/// `From<String>`, no `Deref<Target = str>`, and no way to treat one
+/// grammar's text as another's.
+pub struct SurqlText<T> {
+	text: String,
+	/// `fn() -> T` keeps auto traits (`Send`/`Sync`) and variance independent
+	/// of `T`; the parameter exists only to pin the compile target.
+	target: PhantomData<fn() -> T>,
+}
+
+/// Canonical text of an expression (`VALUE`/`ASSERT`/`WHEN`/`THEN`/
+/// permission clauses, API actions, fetch targets, ...).
+pub type ExprText = SurqlText<Expr>;
+/// Canonical text of a kind-grammar type annotation (`TYPE`, function
+/// argument/return types).
+pub type KindText = SurqlText<Kind>;
+/// Canonical text of an idiom path (index columns).
+pub type IdiomText = SurqlText<Idiom>;
+/// Canonical text of a `SELECT`-clause field list (live subscriptions).
+pub type FieldsText = SurqlText<Fields>;
+/// Canonical text of a `{ ... }` block (function bodies).
+pub type BlockText = SurqlText<Block>;
+/// Canonical text of an API's route path (`/users/:id<int>/*rest`).
+pub type PathText = SurqlText<Path>;
+/// Canonical text of an expression, compiled to the logical scalar the
+/// streaming engine evaluates. The same grammar and the same stored bytes as
+/// [`ExprText`]; only the compile target differs. See [`SurqlText::to_logical`].
+pub type LogicalExprText = SurqlText<LogicalExpr>;
+/// Canonical text of a `{ ... }` block, compiled to the logical operator the
+/// streaming engine runs. The same grammar and the same stored bytes as
+/// [`BlockText`]; only the compile target differs. See
+/// [`SurqlText::<Block>::to_logical`].
+pub type LogicalBlockText = SurqlText<LogicalOp>;
+
+impl<T> SurqlText<T> {
+	/// Wraps text that is already canonical: the revision-decode
+	/// `convert_fn` path (old structured values render through the same
+	/// canonical rendering) and test fixtures. Everything else should
+	/// construct via [`SurqlText::new`].
+	pub fn from_raw(text: impl Into<String>) -> Self {
+		Self {
+			text: text.into(),
+			target: PhantomData,
+		}
+	}
+
+	pub fn as_str(&self) -> &str {
+		&self.text
+	}
+}
+
+impl<T: SurqlTarget> SurqlText<T> {
+	/// Renders a value to its canonical stored text.
+	pub fn new(value: &T) -> Self {
+		Self::from_raw(value.render_canonical())
+	}
+
+	/// Re-parses the stored text back into its compile target.
+	///
+	/// The error is the parser's own, unwrapped: several consumers propagate
+	/// it to users verbatim, and the stored text parsing successfully is an
+	/// internal invariant anyway (it parsed when the statement that produced
+	/// it ran).
+	pub fn compile(&self) -> anyhow::Result<T> {
+		T::parse_canonical(&self.text)
+	}
+}
+
+impl SurqlText<Expr> {
+	/// The same stored text, retargeted at the logical scalar.
+	///
+	/// Expression text is one grammar with two compile targets: the
+	/// expression layer's [`Expr`], which the legacy engine evaluates, and the
+	/// logical [`LogicalExpr`], which the streaming engine evaluates. Both
+	/// compile from the stored text; nothing converts one compiled form into
+	/// the other. This is the one way to obtain a [`LogicalExprText`] from a
+	/// definition, so the two targets can never disagree about which text
+	/// they came from.
+	pub fn to_logical(&self) -> LogicalExprText {
+		LogicalExprText::from_raw(self.text.clone())
+	}
+}
+
+impl SurqlText<Kind> {
+	/// The text of the type of an `id` field whose components are named, in the
+	/// form the `DEFINE FIELD` statement writes it, as in
+	/// `[city: string, time: datetime]`. The names and the types come from `key`,
+	/// so the text agrees with the structure by construction.
+	///
+	/// A structure with no names, which no `id` field has, renders as the plain
+	/// tuple.
+	pub fn new_keyed(key: &KeyStructure) -> Self {
+		let kinds: Vec<Kind> = key
+			.components
+			.iter()
+			.map(|component| component.declared.clone().unwrap_or(Kind::Any))
+			.collect();
+		match &key.names {
+			Some(names) => Self::from_raw(names.fmt_keyed(&kinds).to_sql()),
+			None => Self::new(&Kind::Literal(KindLiteral::Array(kinds))),
+		}
+	}
+
+	/// Re-parses the text of the type of an `id` field: [`SurqlText::compile`],
+	/// except that the outermost tuple may name its components, which are returned
+	/// beside the kind. Text with no component names compiles to its plain kind,
+	/// with no names.
+	///
+	/// Reading never refuses a table over its names: names that do not form a valid
+	/// list (a repeat, a reserved name) are dropped with a warning, and the kind is
+	/// returned without them.
+	pub fn compile_keyed(&self) -> anyhow::Result<(Kind, Option<KeyNames>)> {
+		Ok(parser::id_kind_for_definition(&self.text)?)
+	}
+}
+
+impl SurqlText<Block> {
+	/// The same stored text, retargeted at the logical operator. The block
+	/// form and the logical form compile from the same bytes; nothing converts
+	/// one compiled form into the other.
+	pub fn to_logical(&self) -> LogicalBlockText {
+		LogicalBlockText::from_raw(self.text.clone())
+	}
+}
+
+// Manual impls so `T` needs no bounds (it is phantom).
+impl<T> Clone for SurqlText<T> {
+	fn clone(&self) -> Self {
+		Self::from_raw(self.text.clone())
+	}
+}
+
+impl<T> fmt::Debug for SurqlText<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_tuple("SurqlText").field(&self.text).finish()
+	}
+}
+
+impl<T> PartialEq for SurqlText<T> {
+	fn eq(&self, other: &Self) -> bool {
+		self.text == other.text
+	}
+}
+
+impl<T> Eq for SurqlText<T> {}
+
+impl<T> Hash for SurqlText<T> {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		self.text.hash(state)
+	}
+}
+
+/// Splices the raw stored text (zero-parse), exactly as the bare-`String`
+/// fields this type replaced rendered via `ToSql for String`.
+impl<T> ToSql for SurqlText<T> {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(&self.text);
+	}
+}
+
+impl<T> fmt::Display for SurqlText<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str(&self.text)
+	}
+}
+
+/// The `INFO FOR ...` representation of stored text is the text itself.
+impl<T> From<SurqlText<T>> for Value {
+	fn from(v: SurqlText<T>) -> Self {
+		Value::String(v.text.into())
+	}
+}
+
+impl<T> Revisioned for SurqlText<T> {
+	fn revision() -> u16 {
+		1
+	}
+}
+
+impl<T> SerializeRevisioned for SurqlText<T> {
+	#[inline]
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		SerializeRevisioned::serialize_revisioned(&self.text, writer)
+	}
+}
+
+impl<T> DeserializeRevisioned for SurqlText<T> {
+	#[inline]
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		<String as DeserializeRevisioned>::deserialize_revisioned(reader).map(Self::from_raw)
+	}
+}
+
+impl<T> SkipRevisioned for SurqlText<T> {
+	#[inline]
+	fn skip_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
+		<String as SkipRevisioned>::skip_revisioned(reader)
+	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		<String as SkipRevisioned>::skip_revisioned_slice(reader)
+	}
+}
+
+impl<T> WalkRevisioned for SurqlText<T> {
+	type Walker<'r, R: revision::BorrowedReader + 'r> = revision::LeafWalker<'r, SurqlText<T>, R>;
+
+	#[inline]
+	fn walk_revisioned<'r, R: revision::BorrowedReader>(
+		reader: &'r mut R,
+	) -> Result<Self::Walker<'r, R>, revision::Error> {
+		Ok(revision::LeafWalker::new(reader))
+	}
+}
+
+/// The stored form of a text is a `STRING` item, the same bytes as the `String` it wraps.
+///
+/// The text's release floor is the newest release among everything it uses. Parsing a text costs
+/// far more than reading it, so it is parsed only when some syntax could be newer than the first
+/// release; a text that does not parse has no known release, and the entry that holds it then
+/// takes the floor of the entry it replaces.
+impl<T: SurqlTarget + Arrival> StoredField for SurqlText<T> {
+	fn encode_item(&self, enc: &mut Encoder, prior: Option<Item<'_>>) -> Result<(), SchemaError> {
+		self.text.encode_item(enc, prior)
+	}
+
+	fn decode_item(item: Item<'_>, depth: u32) -> Result<Self, SchemaError> {
+		String::decode_item(item, depth).map(Self::from_raw)
+	}
+
+	fn floor(&self, acc: &mut Floor) -> Result<(), SchemaError> {
+		if LATEST_ARRIVAL <= Release::FIRST_STORED {
+			return Ok(());
+		}
+		match T::parse_canonical(&self.text) {
+			Ok(parsed) => acc.raise(parsed.arrival()),
+			Err(_) => acc.unparsable_text = true,
+		}
+		Ok(())
+	}
+
+	fn into_vm_value(self) -> Result<Value, SchemaError> {
+		self.text.into_vm_value()
+	}
+
+	fn from_vm_value(value: Value) -> Result<Self, SchemaError> {
+		String::from_vm_value(value).map(Self::from_raw)
+	}
+
+	fn write_type_name(out: &mut String) {
+		out.push_str("text:");
+		out.push_str(T::GRAMMAR);
+	}
+}
+
+impl SurqlTarget for Expr {
+	const GRAMMAR: &'static str = "expr";
+
+	fn render_canonical(&self) -> String {
+		self.to_stored_sql()
+	}
+
+	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
+		Ok(parser::expr_for_definition(text)?)
+	}
+}
+
+impl SurqlTarget for Cond {
+	const GRAMMAR: &'static str = "cond";
+
+	fn render_canonical(&self) -> String {
+		self.0.to_stored_sql()
+	}
+
+	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
+		Ok(Cond(parser::expr_for_definition(text)?))
+	}
+}
+
+/// The logical form of expression text. Reads the flat parse under the same
+/// stored-text profile as [`Expr`], with identical complete-input checks and
+/// credential preparation. Collections, operators and relational reads are
+/// built in their logical representation.
+///
+/// Definitions are never rendered from this target: the `DEFINE`/`ALTER` path
+/// renders the [`Expr`] it parsed, and a [`LogicalExprText`] is only ever
+/// obtained from an [`ExprText`] through [`SurqlText::to_logical`]. The
+/// rendering here is the scalar's SurrealQL, which re-parses to the same
+/// scalar for every shape that has one.
+impl SurqlTarget for LogicalExpr {
+	const GRAMMAR: &'static str = "logical_expr";
+
+	fn render_canonical(&self) -> String {
+		self.to_sql()
+	}
+
+	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
+		Ok(parser::logical_expr_for_definition(text)?)
+	}
+}
+
+/// The logical form of block text: the flat parse is read under the stored-text
+/// profile into the [`LogicalOp::Sequence`] that runs it. Only obtained from a [`BlockText`]
+/// through [`SurqlText::<Block>::to_logical`]; definitions are never rendered from it.
+impl SurqlTarget for LogicalOp {
+	const GRAMMAR: &'static str = "logical_block";
+
+	fn render_canonical(&self) -> String {
+		self.to_sql()
+	}
+
+	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
+		Ok(parser::logical_block_for_definition(text)?)
+	}
+}
+
+impl SurqlTarget for Kind {
+	const GRAMMAR: &'static str = "kind";
+
+	fn render_canonical(&self) -> String {
+		self.to_sql()
+	}
+
+	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
+		Ok(parser::kind_for_definition(text)?)
+	}
+}
+
+impl SurqlTarget for Idiom {
+	const GRAMMAR: &'static str = "idiom";
+
+	fn render_canonical(&self) -> String {
+		self.to_stored_sql()
+	}
+
+	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
+		Ok(parser::idiom_for_definition(text)?)
+	}
+}
+
+impl SurqlTarget for Fields {
+	const GRAMMAR: &'static str = "fields";
+
+	fn render_canonical(&self) -> String {
+		self.to_stored_sql()
+	}
+
+	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
+		Ok(parser::fields_for_definition(text)?)
+	}
+}
+
+impl SurqlTarget for Block {
+	const GRAMMAR: &'static str = "block";
+
+	fn render_canonical(&self) -> String {
+		self.to_stored_sql()
+	}
+
+	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
+		Ok(parser::block_for_definition(text)?)
+	}
+}
+
+/// The one target whose grammar is not SurrealQL: an API route is `/`-separated
+/// segments, and only a typed segment's `<kind>` annotation goes through the
+/// parser. `Path`'s own `FromStr` owns that grammar, and it settles the limits
+/// question by using the default parser settings rather than
+/// [`ParserSettings::STORED_TEXT`](parser::ParserSettings::STORED_TEXT)
+/// — unchanged from when the path was decoded rather than compiled, so a route
+/// whose kind annotation exceeds the configured depth has always been
+/// unreadable, and this is not the place to start changing that.
+impl SurqlTarget for Path {
+	const GRAMMAR: &'static str = "path";
+
+	fn render_canonical(&self) -> String {
+		self.to_sql()
+	}
+
+	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
+		text.parse()
+	}
+}
+
+/// An expression clause of a definition, compiled to its logical form on
+/// first use and kept for the life of the definition.
+///
+/// A definition is read from the catalog cache far more often than any one
+/// clause is planned, and the streaming engine plans a clause each time a
+/// statement binds a table that declares it. Compiling once per definition
+/// rather than once per statement is what makes carrying the logical form on
+/// the runtime definition worthwhile; the [`OnceLock`] is that cache.
+///
+/// Identity is the text: two bodies with the same stored text are equal
+/// whatever their compile state, so a definition compares and hashes as it
+/// did before the body was attached to it.
+pub struct LogicalBody {
+	text: LogicalExprText,
+	compiled: OnceLock<Result<LogicalExpr, String>>,
+}
+
+impl LogicalBody {
+	/// A body over already-stored expression text.
+	pub fn new(text: &ExprText) -> Self {
+		Self {
+			text: text.to_logical(),
+			compiled: OnceLock::new(),
+		}
+	}
+
+	/// A body for a compiled expression, over the text `to_stored` writes for
+	/// it. This is how a definition built from a `DEFINE` statement gets its
+	/// body: the text is rendered from the statement's expression exactly as it
+	/// is about to be persisted, so the body compiles what the catalog will
+	/// hand back, never the in-memory expression itself.
+	pub fn of(expr: &Expr) -> Self {
+		Self::new(&ExprText::new(expr))
+	}
+
+	/// The stored text this body compiles.
+	pub fn text(&self) -> &LogicalExprText {
+		&self.text
+	}
+
+	/// The logical form of the clause, compiled on first call.
+	///
+	/// Fails when the text has no logical form; the failure is remembered, so
+	/// repeated calls neither re-parse nor change their answer.
+	pub fn logical(&self) -> anyhow::Result<&LogicalExpr> {
+		self.compiled
+			.get_or_init(|| self.text.compile().map_err(|e| format!("{e:#}")))
+			.as_ref()
+			.map_err(|message| anyhow::anyhow!("{message}"))
+	}
+}
+
+impl Clone for LogicalBody {
+	/// The compiled form is not carried across a clone: the clone recompiles
+	/// on first use, which keeps a clone as cheap as the text it copies.
+	fn clone(&self) -> Self {
+		Self {
+			text: self.text.clone(),
+			compiled: OnceLock::new(),
+		}
+	}
+}
+
+impl fmt::Debug for LogicalBody {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_tuple("LogicalBody").field(&self.text.as_str()).finish()
+	}
+}
+
+impl PartialEq for LogicalBody {
+	fn eq(&self, other: &Self) -> bool {
+		self.text == other.text
+	}
+}
+
+impl Eq for LogicalBody {}
+
+impl Hash for LogicalBody {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		self.text.hash(state)
+	}
+}
+
+/// A block clause of a definition — a function body — compiled to its logical
+/// operator on first use and kept for the life of the definition. The block
+/// counterpart of [`LogicalBody`], with the same identity and caching rules.
+pub struct LogicalBlockBody {
+	text: LogicalBlockText,
+	compiled: OnceLock<Result<LogicalOp, String>>,
+}
+
+impl LogicalBlockBody {
+	/// A body over already-stored block text.
+	pub fn new(text: &BlockText) -> Self {
+		Self {
+			text: text.to_logical(),
+			compiled: OnceLock::new(),
+		}
+	}
+
+	/// A body for a compiled block, over the text `to_stored` writes for it.
+	pub fn of(block: &Block) -> Self {
+		Self::new(&BlockText::new(block))
+	}
+
+	/// The stored text this body compiles.
+	pub fn text(&self) -> &LogicalBlockText {
+		&self.text
+	}
+
+	/// The logical form of the block, compiled on first call.
+	///
+	/// Fails when the block has no logical form — it writes — and the failure
+	/// is remembered, so repeated calls neither re-parse nor change their
+	/// answer.
+	pub fn logical(&self) -> anyhow::Result<&LogicalOp> {
+		self.compiled
+			.get_or_init(|| self.text.compile().map_err(|e| format!("{e:#}")))
+			.as_ref()
+			.map_err(|message| anyhow::anyhow!("{message}"))
+	}
+}
+
+impl Clone for LogicalBlockBody {
+	/// The compiled form is not carried across a clone; see [`LogicalBody`].
+	fn clone(&self) -> Self {
+		Self {
+			text: self.text.clone(),
+			compiled: OnceLock::new(),
+		}
+	}
+}
+
+impl fmt::Debug for LogicalBlockBody {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_tuple("LogicalBlockBody").field(&self.text.as_str()).finish()
+	}
+}
+
+impl PartialEq for LogicalBlockBody {
+	fn eq(&self, other: &Self) -> bool {
+		self.text == other.text
+	}
+}
+
+impl Eq for LogicalBlockBody {}
+
+impl Hash for LogicalBlockBody {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		self.text.hash(state)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn wire_format_is_bare_string() {
+		// The whole compatibility story rests on this: a SurqlText encodes
+		// exactly like the String it wraps (no revision header).
+		let text = ExprText::from_raw("$auth.role = 'admin'");
+		let mut wrapped = Vec::new();
+		SerializeRevisioned::serialize_revisioned(&text, &mut wrapped).unwrap();
+		let mut bare = Vec::new();
+		SerializeRevisioned::serialize_revisioned(&"$auth.role = 'admin'".to_string(), &mut bare)
+			.unwrap();
+		assert_eq!(wrapped, bare);
+
+		let decoded: ExprText =
+			DeserializeRevisioned::deserialize_revisioned(&mut wrapped.as_slice()).unwrap();
+		assert_eq!(decoded, text);
+	}
+
+	#[test]
+	fn round_trips_each_grammar() {
+		let e: Expr = ExprText::from_raw("$value + 1").compile().unwrap();
+		assert_eq!(ExprText::new(&e).as_str(), "$value + 1");
+
+		let k: Kind = KindText::from_raw("array<record<person>>").compile().unwrap();
+		assert_eq!(KindText::new(&k).as_str(), "array<record<person>>");
+
+		let i: Idiom = IdiomText::from_raw("field[0]").compile().unwrap();
+		assert_eq!(IdiomText::new(&i).as_str(), "field[0]");
+	}
+
+	#[test]
+	fn expression_text_compiles_to_its_logical_form_too() {
+		// One grammar, two compile targets, and a bare identifier means the
+		// same field on both: the logical funnel is the expression funnel
+		// followed by lowering, so the field-context decision below applies
+		// to it unchanged.
+		let text = ExprText::from_raw("person.age > $value");
+		let logical = text.to_logical().compile().unwrap();
+		assert!(matches!(&logical, LogicalExpr::Binary { .. }), "{logical:?}");
+		assert_eq!(LogicalExprText::new(&logical).as_str(), "person.age > $value");
+		let field = ExprText::from_raw("person").to_logical().compile().unwrap();
+		assert!(matches!(&field, LogicalExpr::Field(_)), "{field:?}");
+	}
+
+	#[test]
+	fn a_body_compiles_once_and_remembers_a_failure() {
+		let body = LogicalBody::new(&ExprText::from_raw("a + b"));
+		let first: *const LogicalExpr = body.logical().unwrap();
+		let second: *const LogicalExpr = body.logical().unwrap();
+		assert_eq!(first, second, "the compiled form is cached on the body");
+
+		// Stored text a later version wrote, or text this one can no longer
+		// read, has no logical form. The body reports that rather than
+		// panicking, and keeps reporting it rather than recompiling and
+		// possibly answering differently.
+		let no_form = ExprText::from_raw("a +");
+		assert!(no_form.compile().is_err());
+		let body = LogicalBody::new(&no_form);
+		assert!(body.logical().is_err());
+		assert!(body.logical().is_err());
+	}
+
+	#[test]
+	fn a_body_is_its_text() {
+		let expr: Expr = ExprText::from_raw("a + 1").compile().unwrap();
+		let from_expr = LogicalBody::of(&expr);
+		let from_text = LogicalBody::new(&ExprText::from_raw("a + 1"));
+		assert_eq!(from_expr, from_text);
+		from_expr.logical().unwrap();
+		assert_eq!(from_expr, from_text, "compile state does not enter equality");
+		assert_eq!(from_expr.clone(), from_expr);
+	}
+
+	#[test]
+	fn a_top_level_bare_identifier_compiles_to_a_field() {
+		// `expr_for_definition` parses in field context, which is what every
+		// clause stored as expression text means: `VALUE person` selects the
+		// document's `person`, not the table.
+		//
+		// Repointing that funnel at table context would silently reinterpret
+		// every already-stored clause whose top level is a bare identifier, so
+		// this is pinned rather than left to the funnel's implementation.
+		let compiled = ExprText::from_raw("person").compile().unwrap();
+		assert!(
+			matches!(&compiled, Expr::Idiom(_)),
+			"a top-level bare identifier must compile to an idiom, got {compiled:?}"
+		);
+	}
+
+	#[test]
+	fn a_nested_table_position_survives_the_field_context_funnel() {
+		// The funnel starts in field context, but the context setters save and
+		// restore rather than latch, so a statement inside stored text
+		// re-establishes table context for its own source list. This is what
+		// makes one field-context funnel correct for every stored grammar;
+		// `StoredEventDefinition.then` stores exactly this shape.
+		let compiled = ExprText::from_raw("(CREATE person)").compile().unwrap();
+		let Expr::Create(stmt) = &compiled else {
+			panic!("expected a CREATE statement, got {compiled:?}");
+		};
+		assert_eq!(
+			stmt.what,
+			vec![Expr::Table("person".into())],
+			"a statement's source list must re-establish table context"
+		);
+	}
+
+	#[test]
+	fn a_statement_shaped_expression_round_trips_through_stored_text() {
+		// Rendering applies `CoverStmts` parenthesization and compiling parses
+		// it away, so the pair is an identity for the statement shapes that
+		// reach stored text. Without this, the two halves could drift apart
+		// and only a definition that is written *and then read* would notice.
+		for text in ["(CREATE person)", "(SELECT * FROM person)", "(UPDATE person)"] {
+			let compiled = ExprText::from_raw(text).compile().unwrap();
+			assert_eq!(
+				ExprText::new(&compiled).as_str(),
+				text,
+				"stored text for {text} did not survive compile then render"
+			);
+		}
+	}
+
+	#[test]
+	fn stored_idiom_text_escapes_more_weakly_than_idiom_rendering() {
+		// `IdiomText` renders through `Idiom::to_raw_string` (`EscapeKwFreeIdent`,
+		// which backticks only a name that would not lex as an identifier),
+		// while rendering the same idiom into a statement goes through
+		// `EscapeIdent` (which also backticks reserved words). So an index
+		// column named after a keyword is stored bare and displayed
+		// backticked.
+		//
+		// Both re-parse to the same path, because the idiom parser accepts a
+		// keyword-shaped token as a part. It is pinned because harmonising the
+		// two would change the stored bytes of every index column on disk.
+		let idiom: Idiom = IdiomText::from_raw("select").compile().unwrap();
+		assert_eq!(IdiomText::new(&idiom).as_str(), "select");
+		assert_eq!(idiom.to_sql(), "`select`");
+	}
+
+	#[test]
+	fn trailing_content_is_rejected() {
+		// Every stored-text grammar is parsed by a routine that stops at the
+		// first token it cannot continue with (the Pratt expression parser
+		// exits on a token with no continuation binding power; the idiom,
+		// field-list and kind parsers stop at the first token that is not a
+		// further part/field/union arm). Without an end-of-input check the
+		// tail would be silently dropped, so stored text that is not entirely
+		// consumed must fail to compile rather than compile to its prefix.
+		for text in ["$value + 1 bogus", "1, 2"] {
+			assert!(
+				ExprText::from_raw(text).compile().is_err(),
+				"expression text {text:?} should not compile to its prefix"
+			);
+		}
+		for text in ["a.b bogus", "a.b, c"] {
+			assert!(
+				IdiomText::from_raw(text).compile().is_err(),
+				"idiom text {text:?} should not compile to its prefix"
+			);
+		}
+		for text in ["int bogus", "int, string"] {
+			assert!(
+				KindText::from_raw(text).compile().is_err(),
+				"kind text {text:?} should not compile to its prefix"
+			);
+		}
+		for text in ["a, b bogus", "VALUE a bogus"] {
+			assert!(
+				FieldsText::from_raw(text).compile().is_err(),
+				"field-list text {text:?} should not compile to its prefix"
+			);
+		}
+	}
+
+	/// A union one of whose outermost members is `any`, which the kind grammar
+	/// refuses, compiles to the `any` it admits, so a catalog holding one, as
+	/// the kind of a definition implied for the elements of
+	/// `array | array<int>`, stays readable. Text that is not such a union is
+	/// refused as the grammar refuses it.
+	#[test]
+	fn kind_text_of_a_union_with_an_any_member_compiles_to_any() {
+		for text in [
+			"any | int",
+			"int | any",
+			"any | any",
+			"int | any | string",
+			"array<int | string> | any",
+			"{ a: int | string } | any | 'x|y'",
+			"record<a | b> | any",
+		] {
+			assert_eq!(KindText::from_raw(text).compile().unwrap(), Kind::Any, "{text}");
+		}
+		for text in [
+			"any | ",
+			"any | bogus<",
+			"any | int bogus",
+			"array<any | int>",
+			"{ a: any | int }",
+			"any int",
+		] {
+			assert!(KindText::from_raw(text).compile().is_err(), "{text}");
+		}
+	}
+
+	/// Beyond the stored-text ceiling, compiling fails rather than overflowing.
+	///
+	/// The ceiling exists because "it already survived this lowering when it
+	/// was written" holds within one process at one configuration and not
+	/// across a cluster: a node with a raised
+	/// `SURREAL_MAX_EXPRESSION_PARSING_DEPTH` can write a definition that a
+	/// default-configured reader re-parses on every catalog-cache miss. An
+	/// unbounded re-parse there is a SIGSEGV, which nothing can catch; an error
+	/// is something every stored-text consumer already degrades from.
+	///
+	/// Runs on a default-sized thread on purpose: the point is that the depth
+	/// is rejected before the lowering recurses, so no unusual stack is needed.
+	#[test]
+	fn compile_is_bounded_so_it_cannot_overflow_the_stack() {
+		let past_ceiling = format!("{}1{}", "[".repeat(5_000), "]".repeat(5_000));
+		let text = ExprText::from_raw(past_ceiling);
+		assert!(
+			text.to_logical().compile().is_err(),
+			"logical compilation rejects excessive depth"
+		);
+		let compiled = text.compile();
+		assert!(
+			compiled.is_err(),
+			"stored text past the ceiling must fail to compile rather than recurse into it"
+		);
+	}
+
+	#[test]
+	fn compile_is_not_bound_by_fresh_input_limits() {
+		// A definition written under raised fresh-input limits can exceed the
+		// defaults. Both runtime and logical compilation use the bounded
+		// stored-text profile independently of the reader's configuration.
+		// Admitted deep trees are materialized and dropped on an explicit
+		// stack; rejection beyond the ceiling is tested on a default stack.
+
+		// 200-deep array nesting: past the default object_recursion_limit (100).
+		let deep_array = format!("{}1{}", "[".repeat(200), "]".repeat(200));
+		// 300-term operator chain: past the default expr_recursion_limit (128).
+		let deep_chain = format!("{}1", "1 + ".repeat(300));
+
+		assert!(
+			parser::expr(&deep_array).is_err(),
+			"fresh-input parsing should still enforce the default depth limits"
+		);
+		assert!(
+			parser::expr(&deep_chain).is_err(),
+			"fresh-input parsing should still enforce the default expression depth limit"
+		);
+
+		std::thread::Builder::new()
+			.stack_size(16 * 1024 * 1024)
+			.spawn(move || {
+				let text = ExprText::from_raw(deep_array);
+				assert!(
+					text.to_logical().compile().is_ok(),
+					"logical arrays use the stored-text ceiling"
+				);
+				let compiled = text.compile();
+				assert!(
+					compiled.is_ok(),
+					"stored-text compile admits depth within its ceiling: {:?}",
+					compiled.err()
+				);
+
+				let text = ExprText::from_raw(deep_chain);
+				assert!(
+					text.to_logical().compile().is_ok(),
+					"logical operators use the stored-text ceiling"
+				);
+				let compiled = text.compile();
+				assert!(
+					compiled.is_ok(),
+					"stored-text compile admits expressions within its ceiling: {:?}",
+					compiled.err()
+				);
+			})
+			.expect("spawning the deep-compile thread")
+			.join()
+			.expect("deep-compile thread panicked");
+	}
+
+	/// The text of a type that names its components round-trips: compiling it
+	/// yields the plain tuple and the names, and rendering the structure built
+	/// from them yields the same text.
+	#[test]
+	fn keyed_kind_text_round_trips() {
+		for text in [
+			"[city: string, time: datetime]",
+			"[`my city`: string]",
+			"[`value`: int, string: string, `option`: int]",
+			"[a: record<person>, b: bool, c: uuid, d: duration]",
+		] {
+			let (kind, names) = KindText::from_raw(text).compile_keyed().unwrap();
+			let names = names.unwrap_or_else(|| panic!("`{text}` names its components"));
+			assert!(
+				matches!(&kind, Kind::Literal(KindLiteral::Array(kinds)) if kinds.len() == names.len())
+			);
+
+			let key = KeyStructure::from_stored_id_field(&kind, &names).unwrap();
+			assert_eq!(KindText::new_keyed(&key).as_str(), text);
+		}
+	}
+
+	/// Text with no component names compiles to its plain kind, with no names.
+	#[test]
+	fn unnamed_kind_text_compiles_to_the_plain_kind() {
+		for text in
+			["[string, int]", "[]", "record<person>", "string | int", "array<string>", "any"]
+		{
+			let text = KindText::from_raw(text);
+			let (kind, names) = text.compile_keyed().unwrap();
+			assert_eq!(names, None, "{}", text.as_str());
+			assert_eq!(kind, text.compile().unwrap(), "{}", text.as_str());
+		}
+	}
+
+	/// Only the id compiles names: the plain compile of the same text refuses
+	/// them.
+	#[test]
+	fn plain_kind_text_refuses_names() {
+		assert!(KindText::from_raw("[city: string, time: datetime]").compile().is_err());
+		assert!(KindText::from_raw("[city: string, time: datetime]").compile_keyed().is_ok());
+	}
+
+	/// Names that cannot form a valid list (a repeat, a reserved name) are dropped
+	/// when the text is read: the type compiles to the plain tuple with no names, so
+	/// that a table is never unreadable over them.
+	#[test]
+	fn keyed_kind_text_with_invalid_names_compiles_without_names() {
+		for (text, kinds) in [
+			("[a: string, a: int]", vec![Kind::String, Kind::Int]),
+			("[a: string, `a`: int]", vec![Kind::String, Kind::Int]),
+			("[id: string]", vec![Kind::String]),
+			("[in: string, b: int]", vec![Kind::String, Kind::Int]),
+			("[a: bool, out: int]", vec![Kind::Bool, Kind::Int]),
+		] {
+			let (kind, names) = KindText::from_raw(text).compile_keyed().unwrap();
+			assert_eq!(kind, Kind::Literal(KindLiteral::Array(kinds)), "{text}");
+			assert_eq!(names, None, "{text}");
+		}
+	}
+
+	/// Text that is not a type, or that names something other than the whole type,
+	/// does not compile.
+	#[test]
+	fn keyed_kind_text_that_is_not_a_type_does_not_compile() {
+		for text in ["[a: string, int]", "[a: string b: int]", "[a: string] | none"] {
+			assert!(KindText::from_raw(text).compile_keyed().is_err(), "{text}");
+		}
+	}
+
+	/// A structure that has no names renders as the plain tuple.
+	#[test]
+	fn a_structure_without_names_renders_as_the_plain_tuple() {
+		let (kind, names) = KindText::from_raw("[a: string, b: datetime]").compile_keyed().unwrap();
+		let mut key = KeyStructure::from_stored_id_field(&kind, &names.unwrap()).unwrap();
+		key.names = None;
+		assert_eq!(KindText::new_keyed(&key).as_str(), "[string, datetime]");
+	}
+}

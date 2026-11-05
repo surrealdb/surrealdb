@@ -233,6 +233,107 @@ mod http_integration {
 		Ok(())
 	}
 
+	// GHSA-2v9j: the `Surreal-NS`/`Surreal-DB` headers select the session context
+	// independently of the authenticated level. A Database-level principal must
+	// not be able to point them at a foreign namespace/database and query it
+	// without a `USE` (the Basic-auth "header pivot").
+	#[test(tokio::test)]
+	async fn session_ns_db_headers_confined_to_auth_level() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (addr, _server) = common::start_server_with_guests().await.unwrap();
+		let url = &format!("http://{addr}/sql");
+		let client = reqwest::Client::builder().build()?;
+
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		// Define a Database-level user in ns/db (as root, in that context).
+		{
+			let res = client
+				.post(url)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth(USER, Some(PASS))
+				.body("DEFINE USER dbuser ON DATABASE PASSWORD 'dbpass' ROLES OWNER")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "define user failed: {}", res.text().await?);
+		}
+
+		// Cross-database pivot: dbuser is Database(ns, db), but the selected
+		// context (`Surreal-NS`/`Surreal-DB`) points at a sibling db.
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", "other_db")
+				.header(header::ACCEPT, "application/json")
+				.basic_auth("dbuser", Some("dbpass"))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 401, "cross-database header pivot must be rejected");
+		}
+
+		// Cross-namespace pivot.
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
+				.header("surreal-ns", "other_ns")
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth("dbuser", Some("dbpass"))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 401, "cross-namespace header pivot must be rejected");
+		}
+
+		// Regression: a context matching the authenticated level is allowed.
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth("dbuser", Some("dbpass"))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			let status = res.status();
+			assert_eq!(
+				status,
+				200,
+				"legitimate same-tenant access must be allowed: {}",
+				res.text().await?
+			);
+		}
+
+		// Regression: an unscoped ROOT session may select any context.
+		{
+			let res = client
+				.post(url)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth(USER, Some(PASS))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_ne!(res.status(), 401, "root must be able to select any namespace/database");
+		}
+
+		Ok(())
+	}
+
 	#[test(tokio::test)]
 	async fn bearer_auth() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_guests().await.unwrap();
@@ -656,6 +757,594 @@ mod http_integration {
 		Ok(())
 	}
 
+	/// A versioned export is refused with a failing status, before any body.
+	///
+	/// The export runs as a job the transport streams, so a refusal raised inside
+	/// that job arrives after the status line has been sent and the body opened:
+	/// it reaches the caller as an empty dump that reports success. The status is
+	/// what this asserts, because it is the only part an operator scripting
+	/// `POST /export` sees before they have a file they believe is a backup.
+	#[test(tokio::test)]
+	async fn export_endpoint_refuses_versions() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = &format!("http://{addr}/export");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		let res = client
+			.post(url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/json")
+			.body(r#"{"versions":true}"#)
+			.send()
+			.await?;
+		let status = res.status();
+		let body = res.text().await?;
+		assert_ne!(
+			status, 200,
+			"a versioned export answered success, so a caller keeps an empty dump as a backup; \
+			 body: {body}"
+		);
+		assert!(
+			body.contains("Versioned export is not supported"),
+			"the refusal must say why; status {status}, body: {body}"
+		);
+
+		Ok(())
+	}
+
+	/// An export that was not asked for the database's own definition does not
+	/// carry it, and one left at the default still does.
+	///
+	/// `DEFINE DATABASE OVERWRITE` rewrites the target's `STRICT` flag, `COMMENT`
+	/// and `CHANGEFEED` — clauses an export scoped to a few tables was never
+	/// asked to touch, and which the caller would only discover had moved after
+	/// restoring. Driven over HTTP because the flag has to survive the serialized
+	/// config to reach the exporter, which is the path `surreal export` takes.
+	#[test(tokio::test)]
+	async fn export_endpoint_carries_database_clauses_only_when_selected()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = &format!("http://{addr}/export");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body(format!(
+				"DEFINE DATABASE OVERWRITE `{db}` COMMENT 'seeded'; DEFINE TABLE person;"
+			))
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+		// Left at the default, the dump carries the clause.
+		let body = client.get(url).basic_auth(USER, Some(PASS)).send().await?.text().await?;
+		assert!(
+			body.contains("DEFINE DATABASE"),
+			"a full export dropped the database's own definition: {body}"
+		);
+
+		// Deselected, it does not — and the tables still come through, so the
+		// flag turned off the section rather than the export.
+		let body = client
+			.post(url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/json")
+			.body(r#"{"database_definition":false,"tables":["person"]}"#)
+			.send()
+			.await?
+			.text()
+			.await?;
+		assert!(
+			!body.contains("DEFINE DATABASE"),
+			"an export that deselected the database definition still rewrites the target's \
+			 clauses: {body}"
+		);
+		assert!(body.contains("DEFINE TABLE person"), "the selected table is missing: {body}");
+
+		Ok(())
+	}
+
+	/// A database holding no clauses of its own exports no `DEFINE DATABASE`, so
+	/// restoring it leaves a clause already on the target in place.
+	///
+	/// This pins a trade rather than a repair. `DEFINE DATABASE` is authorized at
+	/// `Edit` on `Database` in the *namespace* — a database-level `OWNER` is
+	/// refused it — so a dump carrying the line can only be restored by a
+	/// namespace-level principal. Emitting it unconditionally would let a restore
+	/// clear a target's clauses, and would put every restore behind that floor,
+	/// including a database-level principal restoring their own database.
+	///
+	/// Repairing this should fail here, so the floor is raised on purpose rather
+	/// than as a side effect.
+	#[test(tokio::test)]
+	async fn export_omits_database_clauses_a_source_does_not_hold()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		// A source holding no clause of its own exports no `DEFINE DATABASE`.
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body("DEFINE TABLE person;")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		let dump = client
+			.get(format!("http://{addr}/export"))
+			.basic_auth(USER, Some(PASS))
+			.send()
+			.await?
+			.text()
+			.await?;
+		assert!(
+			!dump.contains("DEFINE DATABASE"),
+			"a database holding no clauses exported a definition for them: {dump}"
+		);
+
+		// Restored over a target that holds one, the target keeps it.
+		let target = Ulid::new().to_string();
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body(format!("DEFINE DATABASE `{target}` COMMENT 'set on the target';"))
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		let res = client
+			.post(format!("http://{addr}/import"))
+			.basic_auth(USER, Some(PASS))
+			.header("surreal-db", &target)
+			.body(dump)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "the import failed: {}", res.text().await?);
+
+		let info = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.header("surreal-db", &target)
+			.body("INFO FOR NS;")
+			.send()
+			.await?
+			.text()
+			.await?;
+		assert!(
+			info.contains("set on the target"),
+			"the restore cleared a clause the source did not carry, so the authorization floor \
+			 this pins has moved: {info}"
+		);
+
+		Ok(())
+	}
+
+	/// One `POST /kvexport` response, taken apart and checked against its digest.
+	///
+	/// A reference reader of the wire format: it accepts a body only if the digest
+	/// matches every byte before it, the header and every frame are whole, the end
+	/// tag is present, and nothing follows it.
+	struct KvExport {
+		header: serde_json::Value,
+		frames: Vec<(Vec<u8>, Vec<u8>)>,
+	}
+
+	fn try_parse_kvexport(bytes: &[u8]) -> Result<KvExport, String> {
+		fn take<'a>(input: &mut &'a [u8]) -> Result<&'a [u8], String> {
+			let len = input.get(..4).ok_or("a length is truncated")?;
+			let len = u32::from_le_bytes(len.try_into().unwrap()) as usize;
+			let field = input.get(4..4 + len).ok_or("a field is truncated")?;
+			*input = &input[4 + len..];
+			Ok(field)
+		}
+		if bytes.len() <= 32 {
+			return Err("the body is shorter than a digest".into());
+		}
+		let (body, digest) = bytes.split_at(bytes.len() - 32);
+		if blake3::hash(body).as_bytes() != digest {
+			return Err("the digest does not match the body".into());
+		}
+		let rest = body.strip_prefix(b"SKVX").ok_or("the body does not open with the magic")?;
+		let (format, mut input) = rest.split_first().ok_or("the format byte is missing")?;
+		if *format != 1 {
+			return Err(format!("unknown format {format}"));
+		}
+		let header = serde_json::from_slice(take(&mut input)?).map_err(|err| err.to_string())?;
+		let mut frames = Vec::new();
+		loop {
+			let (tag, next) = input.split_first().ok_or("the frames end without an end tag")?;
+			input = next;
+			match tag {
+				0 => break,
+				1 => {
+					let key = take(&mut input)?.to_vec();
+					let value = take(&mut input)?.to_vec();
+					frames.push((key, value));
+				}
+				other => return Err(format!("unknown tag {other}")),
+			}
+		}
+		if !input.is_empty() {
+			return Err("bytes follow the end tag".into());
+		}
+		Ok(KvExport {
+			header,
+			frames,
+		})
+	}
+
+	fn parse_kvexport(bytes: &[u8]) -> KvExport {
+		try_parse_kvexport(bytes).expect("the response is a whole kvexport stream")
+	}
+
+	fn hex(key: &[u8]) -> String {
+		key.iter().map(|byte| format!("{byte:02x}")).collect()
+	}
+
+	async fn start_kvexport_server(args: &str) -> (String, common::Child) {
+		common::start_server(StartServerArguments {
+			args: args.to_string(),
+			..Default::default()
+		})
+		.await
+		.unwrap()
+	}
+
+	#[test(tokio::test)]
+	async fn kvexport_endpoint() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_kvexport_server("--allow-experimental kvexport").await;
+		let url = format!("http://{addr}/kvexport");
+		let client = Client::builder().connect_timeout(Duration::from_secs(5)).build()?;
+
+		// Some data for the keyspace to hold, beyond the catalog the server creates
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+		let mut sql = String::from("DEFINE TABLE kvexported;");
+		for n in 0..25 {
+			sql.push_str(&format!("CREATE kvexported:{n} SET n = {n};"));
+		}
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.header("surreal-ns", &ns)
+			.header("surreal-db", &db)
+			.header(header::ACCEPT, "application/json")
+			.body(sql)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+		// Without credentials the keyspace is not served
+		let res = client.post(&url).send().await?;
+		assert_eq!(res.status(), 401);
+
+		// A root user below owner is refused, because the frames carry what an
+		// export redacts
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.header(header::ACCEPT, "application/json")
+			.body("DEFINE USER viewer ON ROOT PASSWORD 'viewer' ROLES VIEWER")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		let res = client.post(&url).basic_auth("viewer", Some("viewer")).send().await?;
+		assert_eq!(res.status(), 403);
+
+		// A request that cannot name a cursor is refused whole
+		for body in [
+			json!({"after": "abc"}),
+			json!({"after": "zz"}),
+			json!({"after": 7}),
+			json!({"latest_only": "yes"}),
+			json!({"limit_keys": 10}),
+		] {
+			let res = client
+				.post(&url)
+				.basic_auth(USER, Some(PASS))
+				.header(header::CONTENT_TYPE, "application/json")
+				.body(body.to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 400, "{body}");
+		}
+
+		// One request streams the whole keyspace, uncompressed even when the
+		// client accepts compression. This client leaves decoding to the test, so
+		// a compressed response would show its `Content-Encoding`.
+		let res = Client::builder()
+			.no_gzip()
+			.build()?
+			.post(&url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::ACCEPT_ENCODING, "gzip, deflate, br, zstd")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		assert_eq!(res.headers()[header::CONTENT_TYPE], "application/vnd.surrealdb.kvexport");
+		assert!(res.headers().get(header::CONTENT_ENCODING).is_none(), "the stream was compressed");
+		let whole = parse_kvexport(&res.bytes().await?);
+		let keys: Vec<&[u8]> = whole.frames.iter().map(|(key, _)| key.as_slice()).collect();
+		let (version, ordered) = keys.split_last().unwrap();
+		assert_eq!(*version, b"!v", "the version key comes last");
+		// The header describes the keyspace the frames carry
+		let stamped = u16::from_be_bytes(whole.frames.last().unwrap().1.as_slice().try_into()?);
+		assert_eq!(whole.header["major"], json!(stamped), "header: {}", whole.header);
+		assert!(
+			ordered.windows(2).all(|pair| pair[0] < pair[1]),
+			"keys before the version key are not in strictly ascending order"
+		);
+		assert!(!keys.contains(&b"!bv".as_slice()), "the bootstrap sentinel was served");
+		// The frames carry what a SurrealQL export redacts, which is why the route
+		// is opt-in
+		let user = whole
+			.frames
+			.iter()
+			.find(|(key, _)| key.starts_with(b"/!usviewer"))
+			.expect("the stream did not carry the user defined above");
+		assert!(
+			user.1.windows(b"argon2".len()).any(|w| w == b"argon2"),
+			"the stored password hash is not in the stream"
+		);
+		// A record key spells its table as a null-terminated string between `*`s
+		let table = b"*kvexported\0*";
+		let records: Vec<&[u8]> = keys
+			.iter()
+			.copied()
+			.filter(|key| key.windows(table.len()).any(|w| w == table))
+			.collect();
+		assert_eq!(records.len(), 25, "the stream carried {} of 25 seeded records", records.len());
+
+		// Resuming after a key carries what follows it, and the version key again
+		let cut = ordered.len() / 2;
+		let res = client
+			.post(&url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/json")
+			.body(json!({"after": hex(ordered[cut])}).to_string())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let resumed = parse_kvexport(&res.bytes().await?);
+		let resumed_keys: Vec<&[u8]> =
+			resumed.frames.iter().map(|(key, _)| key.as_slice()).collect();
+		assert_eq!(resumed_keys.last(), Some(&b"!v".as_slice()));
+		assert_eq!(
+			resumed_keys.first().copied(),
+			ordered.get(cut + 1).copied(),
+			"the resumed stream did not start after the cursor"
+		);
+		assert_eq!(
+			resumed_keys.len(),
+			ordered.len() - cut,
+			"the resumed stream did not carry everything after the cursor and the version key"
+		);
+
+		Ok(())
+	}
+
+	/// A resume key is carried in the request body as hex, so one longer than a
+	/// megabyte makes a body larger than the 2 MiB default limit of a body
+	/// extractor. The route reads its own body with a limit of its own.
+	#[test(tokio::test)]
+	async fn kvexport_accepts_a_cursor_longer_than_the_default_body_limit()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_kvexport_server("--allow-experimental kvexport").await;
+		let url = format!("http://{addr}/kvexport");
+		let client = Client::builder().no_gzip().build()?;
+		let res = client.post(&url).basic_auth(USER, Some(PASS)).send().await?;
+		assert_eq!(res.status(), 200);
+		let whole = parse_kvexport(&res.bytes().await?);
+		let keys: Vec<&[u8]> = whole.frames.iter().map(|(key, _)| key.as_slice()).collect();
+		let (_, ordered) = keys.split_last().unwrap();
+		assert!(ordered.len() > 3, "the catalog the server creates is too small to resume in");
+
+		// A position between two stored keys that is 1.5 MiB long
+		let mut after = ordered[2].to_vec();
+		after.resize(after.len() + 1536 * 1024, 0);
+		let body = json!({"after": hex(&after)}).to_string();
+		assert!(body.len() > 2 * 1024 * 1024, "the request is under the default body limit");
+		let res = client
+			.post(&url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/json")
+			.body(body)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let resumed = parse_kvexport(&res.bytes().await?);
+		let resumed_keys: Vec<&[u8]> =
+			resumed.frames.iter().map(|(key, _)| key.as_slice()).collect();
+		assert_eq!(resumed_keys.first().copied(), ordered.get(3).copied());
+		assert_eq!(resumed_keys.len(), ordered.len() - 2);
+		Ok(())
+	}
+
+	/// A reader of the format does not accept a stream that stops early, or one
+	/// that has changed, however the damage falls.
+	#[test(tokio::test)]
+	async fn kvexport_streams_are_refused_by_a_reference_reader_when_damaged()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_kvexport_server("--allow-experimental kvexport").await;
+		let res = Client::builder()
+			.no_gzip()
+			.build()?
+			.post(format!("http://{addr}/kvexport"))
+			.basic_auth(USER, Some(PASS))
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.bytes().await?.to_vec();
+		try_parse_kvexport(&body)?;
+		for len in (0..body.len()).step_by(97).chain([body.len() - 33, body.len() - 1]) {
+			assert!(try_parse_kvexport(&body[..len]).is_err(), "a body cut to {len} verified");
+		}
+		for at in (0..body.len()).step_by(89).chain([body.len() - 33, body.len() - 1]) {
+			let mut changed = body.clone();
+			changed[at] ^= 0x01;
+			assert!(
+				try_parse_kvexport(&changed).is_err(),
+				"a body with byte {at} changed verified"
+			);
+		}
+		Ok(())
+	}
+
+	/// The route is off unless enabled, answers to a route target of its own, and
+	/// is unaffected by denying `/export`.
+	#[test(tokio::test)]
+	async fn kvexport_is_opt_in_and_has_its_own_route_target()
+	-> Result<(), Box<dyn std::error::Error>> {
+		for (args, status) in [
+			// Off by default, and `--allow-all` does not turn on an experimental
+			// capability
+			("", 403),
+			("--allow-all", 403),
+			("--allow-experimental surrealism", 403),
+			("--allow-experimental kvexport", 200),
+			("--allow-experimental kvexport --deny-experimental kvexport", 403),
+			("--allow-experimental kvexport --deny-http kvexport", 403),
+			("--allow-experimental kvexport --deny-http export", 200),
+			("--deny-http export", 403),
+		] {
+			let (addr, _server) = start_kvexport_server(args).await;
+			let res = Client::default()
+				.post(format!("http://{addr}/kvexport"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await?;
+			assert_eq!(res.status(), status, "{args}: {}", res.text().await?);
+			// A caller who is not authorised learns nothing more than that
+			if status == 403 {
+				let res = Client::default().post(format!("http://{addr}/kvexport")).send().await?;
+				assert_eq!(res.status(), 403, "{args}: an anonymous caller was told more");
+			}
+		}
+		Ok(())
+	}
+
+	/// The capability can also be given through the environment, which is how a
+	/// deployment that does not edit the command line enables it.
+	#[test(tokio::test)]
+	async fn kvexport_is_enabled_by_the_environment() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server(StartServerArguments {
+			vars: Some(
+				[("SURREAL_CAPS_ALLOW_EXPERIMENTAL".to_string(), "kvexport".to_string())].into(),
+			),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		let res = Client::default()
+			.post(format!("http://{addr}/kvexport"))
+			.basic_auth(USER, Some(PASS))
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		Ok(())
+	}
+
+	/// A datastore that answers versioned reads has history the stream does not
+	/// carry, so it is refused unless the caller accepts that. With `latest_only`
+	/// the stream carries each key's latest value, and a key that was overwritten
+	/// is served once.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn kvexport_refuses_a_versioned_store_unless_latest_only()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let path = common::tmp_file("kvexport-versioned.db");
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(format!("surrealkv://{path}?versioned=true&retention=1h")),
+			args: "--allow-experimental kvexport".to_string(),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		let url = format!("http://{addr}/kvexport");
+		let client = Client::builder().no_gzip().build()?;
+
+		// A record written twice leaves two versions behind
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.header("surreal-ns", &ns)
+			.header("surreal-db", &db)
+			.header(header::ACCEPT, "application/json")
+			.body("CREATE kvexported:1 SET n = 1; UPDATE kvexported:1 SET n = 2;")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+		for body in [None, Some(json!({})), Some(json!({"latest_only": false}))] {
+			let mut req = client.post(&url).basic_auth(USER, Some(PASS));
+			if let Some(body) = &body {
+				req = req.header(header::CONTENT_TYPE, "application/json").body(body.to_string());
+			}
+			let res = req.send().await?;
+			assert_eq!(res.status(), 409, "{body:?}");
+			assert!(res.text().await?.contains("latest_only"), "{body:?}");
+		}
+		let res = client
+			.post(&url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/json")
+			.body(json!({"latest_only": true}).to_string())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let whole = parse_kvexport(&res.bytes().await?);
+		assert_eq!(whole.frames.last().map(|(key, _)| key.as_slice()), Some(b"!v".as_slice()));
+		let keys: Vec<&[u8]> = whole.frames.iter().map(|(key, _)| key.as_slice()).collect();
+		let (_, ordered) = keys.split_last().unwrap();
+		assert!(
+			ordered.windows(2).all(|pair| pair[0] < pair[1]),
+			"a key was served more than once, or out of order"
+		);
+		let table = b"*kvexported\0*";
+		let records =
+			keys.iter().filter(|key| key.windows(table.len()).any(|w| w == table)).count();
+		assert_eq!(records, 1, "the overwritten record was not served exactly once");
+		Ok(())
+	}
+
 	#[test(tokio::test)]
 	async fn health_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
@@ -900,6 +1589,104 @@ mod http_integration {
 		Ok(())
 	}
 
+	/// A client that reads only the status line can tell a failed import from a
+	/// complete one.
+	///
+	/// The endpoint applies a dump statement by statement, committing each on
+	/// its own and carrying on past one that fails, so a restore can lose part
+	/// of a database and still run to the end. Which statements were lost is in
+	/// the response body, but the thing a restore pipeline gates on — a shell
+	/// script, a deployment step, a health check — is the status, and a status
+	/// that reads the same either way turns a partial restore into a silent
+	/// one.
+	///
+	/// The complete import is asserted alongside it, because a handler that
+	/// reported every import as a failure would satisfy the failing half on its
+	/// own.
+	#[test(tokio::test)]
+	async fn import_endpoint_status_separates_a_failed_import_from_a_complete_one()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = &format!("http://{addr}/import");
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Create namespace and database
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		// A dump every statement of which applies
+		let complete_status = {
+			let data = r#"
+				OPTION IMPORT;
+				DEFINE TABLE whole SCHEMALESS PERMISSIONS NONE;
+				INSERT { id: whole:1 };
+				INSERT { id: whole:2 };
+			"#;
+			let res = client.post(url).basic_auth(USER, Some(PASS)).body(data).send().await?;
+			let status = res.status();
+			let body = res.text().await?;
+			assert_eq!(status, 200, "body: {body}");
+			// The body names the statements that did not apply, so a complete
+			// import names none.
+			assert_eq!(body, "[]", "a complete import must name no failed statement");
+			status
+		};
+
+		// The same dump with one statement that cannot apply, between two that
+		// can
+		{
+			let data = r#"
+				OPTION IMPORT;
+				DEFINE TABLE part SCHEMALESS PERMISSIONS NONE;
+				INSERT { id: part:1 };
+				INSERT { id: part:1 };
+				INSERT { id: part:2 };
+			"#;
+			let res = client.post(url).basic_auth(USER, Some(PASS)).body(data).send().await?;
+			let status = res.status();
+			let body = res.text().await?;
+			assert_ne!(
+				status, complete_status,
+				"a failed import answered with the status of a complete one, so a caller reading \
+				 the status line cannot tell them apart. body: {body}"
+			);
+			assert_eq!(status, 422, "body: {body}");
+			// The dump was executed and part of it is now in the database,
+			// which is what separates this from the 400 a body that is not a
+			// dump is answered with.
+			assert!(
+				body.contains("already exists"),
+				"the response must still name the statement that did not apply, body: {body}"
+			);
+		}
+
+		// The statements either side of the failure applied, which is the
+		// database the status is reporting on
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body("SELECT VALUE id FROM part ORDER BY id")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+			let body = res.text().await?;
+			assert!(body.contains("part:1") && body.contains("part:2"), "body: {body}");
+		}
+
+		Ok(())
+	}
+
 	#[test(tokio::test)]
 	async fn rpc_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
@@ -1118,6 +1905,189 @@ mod http_integration {
 				);
 			}
 		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn signin_rate_limit() -> Result<(), Box<dyn std::error::Error>> {
+		use std::collections::HashMap;
+		// Opt in with a burst of 3 and a one-token-per-minute refill: no
+		// wall-clock the test can plausibly spend (including debug-build
+		// Argon2 comparisons on each failed attempt) refills a token
+		// mid-test, so the drain is deterministic. Refill behaviour itself
+		// is unit-tested with a controlled clock.
+		let vars: HashMap<String, String> = [
+			("SURREAL_HTTP_AUTH_RATE_LIMIT_ENABLED".to_string(), "true".to_string()),
+			("SURREAL_HTTP_AUTH_RATE_LIMIT_BURST".to_string(), "3".to_string()),
+			("SURREAL_HTTP_AUTH_RATE_LIMIT_PER_MINUTE".to_string(), "1".to_string()),
+		]
+		.into();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			vars: Some(vars),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		let url = &format!("http://{addr}/signin");
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+		let body = serde_json::to_string(
+			json!({ "user": USER, "pass": "wrong-password" }).as_object().unwrap(),
+		)?;
+
+		// The first three attempts consume the burst: they fail
+		// authentication (401) but are not rate limited.
+		for i in 0..3 {
+			let res = client.post(url).body(body.clone()).send().await?;
+			assert_eq!(res.status(), 401, "attempt {i} body: {}", res.text().await?);
+		}
+
+		// The fourth rapid attempt is rejected with 429 and a Retry-After
+		// hint, and a cross-origin caller is allowed to read that header.
+		let res = client
+			.post(url)
+			.header(header::ORIGIN, "http://example.com")
+			.body(body.clone())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 429, "body: {}", res.text().await?);
+		let retry_after: u64 =
+			res.headers().get("Retry-After").expect("Retry-After header").to_str()?.parse()?;
+		assert!(retry_after >= 1, "Retry-After: {retry_after}");
+		let exposed = res
+			.headers()
+			.get("Access-Control-Expose-Headers")
+			.expect("Access-Control-Expose-Headers header")
+			.to_str()?
+			.to_ascii_lowercase();
+		assert!(exposed.contains("retry-after"), "exposed headers: {exposed}");
+
+		// The limiter sits ahead of the authentication layer: a request
+		// carrying credentials that layer would reject is still answered with
+		// 429, so no credential verification runs for a limited request.
+		let res = client
+			.post(url)
+			.basic_auth(USER, Some("wrong-password"))
+			.body(body.clone())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 429, "basic-auth body: {}", res.text().await?);
+
+		// Signup draws from the same per-address budget, so it is throttled
+		// before its handler ever runs.
+		let res = client.post(format!("http://{addr}/signup")).body(body.clone()).send().await?;
+		assert_eq!(res.status(), 429, "signup body: {}", res.text().await?);
+
+		// A real CORS preflight is answered even while the bucket is empty.
+		let res = client
+			.request(Method::OPTIONS, url)
+			.header(header::ORIGIN, "http://example.com")
+			.header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+			.send()
+			.await?;
+		assert!(res.status().is_success(), "preflight status: {}", res.status());
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn signin_and_signup_ignore_an_expired_token() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// A database user whose tokens live for one second, and a record access
+		// method that can be signed up to.
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body(
+				r#"DEFINE USER u ON DB PASSWORD 'pass' DURATION FOR TOKEN 1s, FOR SESSION 1h;
+				DEFINE ACCESS acc ON DATABASE TYPE RECORD
+					SIGNUP (CREATE user SET name = $name)
+					SIGNIN (SELECT * FROM user WHERE name = $name);"#,
+			)
+			.send()
+			.await?;
+		assert!(res.status().is_success(), "body: {}", res.text().await?);
+
+		let signin = |ns: &str, db: &str| {
+			serde_json::to_string(&json!({"ns": ns, "db": db, "user": "u", "pass": "pass"}))
+		};
+		let res =
+			client.post(format!("http://{addr}/signin")).body(signin(&ns, &db)?).send().await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		let body: serde_json::Value = serde_json::from_str(&res.text().await?)?;
+		let expired = body["token"].as_str().unwrap().to_string();
+
+		// Let the token expire.
+		tokio::time::sleep(Duration::from_millis(2500)).await;
+
+		// The expired token is refused wherever it is used to act.
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.bearer_auth(&expired)
+			.body("RETURN 1")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+
+		// It does not stop a client from exchanging credentials for a new one.
+		let res = client
+			.post(format!("http://{addr}/signin"))
+			.bearer_auth(&expired)
+			.body(signin(&ns, &db)?)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "signin body: {}", res.text().await?);
+		let body: serde_json::Value = serde_json::from_str(&res.text().await?)?;
+		let fresh = body["token"].as_str().unwrap().to_string();
+		assert_ne!(fresh, expired);
+
+		let res = client
+			.post(format!("http://{addr}/signup"))
+			.bearer_auth(&expired)
+			.body(serde_json::to_string(&json!({"ns": ns, "db": db, "ac": "acc", "name": "bob"}))?)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "signup body: {}", res.text().await?);
+
+		// Bad credentials are still refused under an expired token.
+		let res = client
+			.post(format!("http://{addr}/signin"))
+			.bearer_auth(&expired)
+			.body(serde_json::to_string(
+				&json!({"ns": ns, "db": db, "user": "u", "pass": "wrong"}),
+			)?)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+
+		// A malformed token is not an expired one: it is refused on every route.
+		let res = client
+			.post(format!("http://{addr}/signin"))
+			.bearer_auth("not-a-token")
+			.body(signin(&ns, &db)?)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 401, "body: {}", res.text().await?);
 
 		Ok(())
 	}
@@ -1493,15 +2463,14 @@ mod http_integration {
 			let res = client
 				.post(url)
 				.basic_auth(USER, Some(PASS))
-				.header(header::ACCEPT, surrealdb_core::api::format::FLATBUFFERS)
+				.header(header::ACCEPT, surrealdb_rpc::format::FLATBUFFERS)
 				.body("CREATE foo")
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let bytes = res.bytes().await?;
-			let value: surrealdb_types::Value =
-				surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
-					.expect("flatbuffers SQL response should decode to Value");
+			let value: surrealdb_types::Value = surrealdb_types::decode(&bytes)
+				.expect("flatbuffers SQL response should decode to Value");
 			let array = value.into_array().unwrap();
 			assert_eq!(array.len(), 1);
 			let result = array.into_iter().next().unwrap().into_object().unwrap();
@@ -2574,8 +3543,8 @@ mod http_integration {
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("surreal-ns", ns.parse()?);
 		headers.insert("surreal-db", db.parse()?);
-		headers.insert(header::ACCEPT, surrealdb_core::api::format::FLATBUFFERS.parse()?);
-		headers.insert(header::CONTENT_TYPE, surrealdb_core::api::format::FLATBUFFERS.parse()?);
+		headers.insert(header::ACCEPT, surrealdb_rpc::format::FLATBUFFERS.parse()?);
+		headers.insert(header::CONTENT_TYPE, surrealdb_rpc::format::FLATBUFFERS.parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
 			.default_headers(headers)
@@ -2671,7 +3640,7 @@ mod http_integration {
 
 			// Check that other routes are allowed
 			// GET
-			for route in ["status", "health", "version", "sync", "ml/export/test/1.0.0"] {
+			for route in ["status", "health", "version", "sync"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
@@ -2683,7 +3652,7 @@ mod http_integration {
 				assert_ne!(res.status(), 403, "body: {}", res.text().await.unwrap());
 			}
 			// POST
-			for route in ["signin", "signup", "key/test", "ml/import"] {
+			for route in ["signin", "signup", "key/test"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
@@ -2737,7 +3706,7 @@ mod http_integration {
 
 			// Check that denied routes are disallowed
 			// GET
-			for route in ["version", "sync", "export", "ml/export/test/1.0.0"] {
+			for route in ["version", "sync", "export"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
@@ -2749,7 +3718,7 @@ mod http_integration {
 				assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
 			}
 			// POST
-			for route in ["sql", "signin", "signup", "key/test", "import", "ml/import"] {
+			for route in ["sql", "signin", "signup", "key/test", "import"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
@@ -2883,11 +3852,10 @@ mod http_integration {
 
 	#[test(tokio::test)]
 	async fn experimental_capabilities() {
-		// Allow 1
+		// Buckets need no experimental capability
 		{
-			// Start server disallowing routes for queries, exporting and importing
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-experimental * --allow-experimental files".to_string(),
+				args: "--deny-experimental *".to_string(),
 				// Auth disabled to ensure unauthorized errors are due to capabilities
 				auth: false,
 				..Default::default()
@@ -2909,7 +3877,6 @@ mod http_integration {
 				.unwrap();
 			let base_url = &format!("http://{addr}");
 
-			// Check that denied routes are disallowed
 			let res = client
 				.post(format!("{base_url}/sql"))
 				.basic_auth(USER, Some(PASS))
@@ -2922,11 +3889,10 @@ mod http_integration {
 			assert_eq!(res[0]["status"], "OK", "body: {res}");
 			assert_eq!(res[0]["result"], serde_json::Value::Null, "body: {res}");
 		}
-		// Deny 1
+		// A denied experimental capability is refused, whatever else is allowed
 		{
-			// Start server disallowing routes for queries, exporting and importing
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-experimental files --allow-experimental *".to_string(),
+				args: "--deny-experimental surrealism --allow-experimental *".to_string(),
 				// Auth disabled to ensure unauthorized errors are due to capabilities
 				auth: false,
 				..Default::default()
@@ -2948,32 +3914,27 @@ mod http_integration {
 				.unwrap();
 			let base_url = &format!("http://{addr}");
 
-			// Check that denied routes are disallowed
 			let res = client
 				.post(format!("{base_url}/sql"))
 				.basic_auth(USER, Some(PASS))
-				.body("DEFINE BUCKET test BACKEND \"memory\"")
+				.body("RETURN ext::nonexistent()")
 				.send()
 				.await
 				.unwrap();
 			let res = res.text().await.unwrap();
-			assert!(
-				res.contains("expected the experimental files feature to be enabled"),
-				"body: {}",
-				res
-			);
+			assert!(res.contains("Surrealism extensions are not enabled"), "body: {}", res);
 		}
 	}
 
 	async fn start_bucket_permission_test_server(
-		planner_strategy: Option<&str>,
+		retired_planner_strategy: Option<&str>,
 	) -> Result<(String, common::Child, Client), Box<dyn std::error::Error>> {
 		const NS: &str = "bucket_permission_ns";
 		const DB: &str = "bucket_permission_db";
 
-		let mut args = "--allow-experimental files".to_string();
-		if let Some(planner_strategy) = planner_strategy {
-			args.push_str(&format!(" --planner-strategy {planner_strategy}"));
+		let mut args = String::new();
+		if let Some(retired_planner_strategy) = retired_planner_strategy {
+			args.push_str(&format!("--planner-strategy {retired_planner_strategy}"));
 		}
 		let (addr, server) = common::start_server(StartServerArguments {
 			args,
@@ -3469,8 +4430,10 @@ mod http_integration {
 		Ok(())
 	}
 
+	/// `--planner-strategy` selects nothing; a server started with a retired
+	/// value runs the same single engine.
 	#[test(tokio::test)]
-	async fn bucket_list_is_denied_for_record_users_in_compute_only_planner()
+	async fn a_retired_planner_strategy_flag_is_accepted_and_ignored()
 	-> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server, client) =
 			start_bucket_permission_test_server(Some("compute-only")).await?;
@@ -3820,6 +4783,270 @@ mod http_integration {
 		Ok(())
 	}
 
+	// ------------------------------
+	// Durable RPC sessions
+	// ------------------------------
+
+	/// `--durable-session-ttl` (in seconds) for the two expiry tests below
+	/// (`rpc_durable_session_expires_after_ttl` and
+	/// `rpc_durable_session_expires_without_restart`).
+	///
+	/// Short enough to watch a session expire within the test, and comfortably
+	/// longer than [`durable_rpc_setup_session`] takes on a loaded runner:
+	/// `attach`, a root `signin` (a deliberately CPU-slow argon2 verification)
+	/// and `use`, each a full HTTP round-trip. A session is only guaranteed to
+	/// outlive its last request by one TTL, so a setup step slower than that
+	/// could see the session expire and fail its `must succeed` assertion. See
+	/// also [`DURABLE_EXPIRY_WAIT`].
+	const DURABLE_EXPIRY_TTL_SECS: u64 = 5;
+
+	/// How long to idle before asserting a session has expired. A session
+	/// expires at most one and a half TTLs after its last request, so this
+	/// exceeds one and a half times [`DURABLE_EXPIRY_TTL_SECS`] with margin,
+	/// decoupling the assertion from how long setup took.
+	const DURABLE_EXPIRY_WAIT: Duration = Duration::from_secs(9);
+
+	/// A JSON `/rpc` client for the durable-session tests.
+	fn durable_rpc_client() -> Result<Client, Box<dyn std::error::Error>> {
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		Ok(reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?)
+	}
+
+	/// POST one authenticated RPC request and return the JSON response body.
+	async fn durable_rpc_send(
+		client: &Client,
+		addr: &str,
+		body: serde_json::Value,
+	) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+		let res = client
+			.post(format!("http://{addr}/rpc"))
+			.basic_auth(USER, Some(PASS))
+			.body(body.to_string())
+			.send()
+			.await?;
+		assert!(res.status().is_success(), "http status: {}", res.status());
+		Ok(res.json().await?)
+	}
+
+	/// Attach `sid`, sign it in as root, and select `ns`/`db` on it — the
+	/// session state the durable-session tests expect to find again, or not.
+	async fn durable_rpc_setup_session(
+		client: &Client,
+		addr: &str,
+		sid: uuid::Uuid,
+		ns: &str,
+		db: &str,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let body = json!({"id": "attach", "method": "attach", "session": sid});
+		let res = durable_rpc_send(client, addr, body).await?;
+		assert!(res.get("error").is_none(), "attach must succeed: {res}");
+		let body = json!({
+			"id": "signin",
+			"method": "signin",
+			"session": sid,
+			"params": [{"user": USER, "pass": PASS}],
+		});
+		let res = durable_rpc_send(client, addr, body).await?;
+		assert!(res.get("error").is_none(), "signin must succeed: {res}");
+		let body = json!({
+			"id": "use",
+			"method": "use",
+			"session": sid,
+			"params": [ns, db],
+		});
+		let res = durable_rpc_send(client, addr, body).await?;
+		assert!(res.get("error").is_none(), "use must succeed: {res}");
+		Ok(())
+	}
+
+	/// A client-attached session survives a full server restart: the same
+	/// session id resumes with its authentication and selected
+	/// namespace/database intact, and stays bound to the principal that
+	/// authenticated it.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_durable_session_survives_restart() -> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let (addr, server) = common::start_server(StartServerArguments {
+			path: Some(path.clone()),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		durable_rpc_setup_session(&client, &addr, sid, &ns, &db).await?;
+
+		// Restart the server on the same datastore.
+		server.kill();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			..Default::default()
+		})
+		.await?;
+
+		// The stored session still refuses anonymous callers, exactly
+		// like an in-memory one (and indistinguishably from a missing
+		// session).
+		let body = json!({
+			"id": "anon",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = client.post(format!("http://{addr}/rpc")).body(body.to_string()).send().await?;
+		let res: serde_json::Value = res.json().await?;
+		assert!(res.get("error").is_some(), "anonymous resume must be refused: {res}");
+
+		// The owning principal resumes the session with its `USE` state
+		// intact.
+		let body = json!({
+			"id": "resume",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN $session.ns"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_none(), "resume after restart must succeed: {res}");
+		assert!(
+			res.to_string().contains(&ns),
+			"restored session should still be on namespace {ns}: {res}"
+		);
+
+		// Attaching the same id again correctly reports that the session
+		// already exists — the durable copy is the session.
+		let body = json!({"id": "re-attach", "method": "attach", "session": sid});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(
+			res.get("error").is_some(),
+			"attach on a live durable session must report it exists: {res}"
+		);
+		Ok(())
+	}
+
+	/// A persisted session expires: past the configured TTL it can no longer
+	/// be resumed, even by the principal that owned it.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_durable_session_expires_after_ttl() -> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let args = format!("--durable-session-ttl {DURABLE_EXPIRY_TTL_SECS}s");
+		let (addr, server) = common::start_server(StartServerArguments {
+			path: Some(path.clone()),
+			args: args.clone(),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
+
+		// Kill the server, then idle past the TTL so the durable copy is expired
+		// before the restart. The wait exceeds the TTL (which was itself sized to
+		// clear setup), so expiry is driven by the idle window, not by how long
+		// the argon2-bearing setup happened to take.
+		server.kill();
+		tokio::time::sleep(DURABLE_EXPIRY_WAIT).await;
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			args,
+			..Default::default()
+		})
+		.await?;
+
+		let body = json!({
+			"id": "expired",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_some(), "an expired session must not resume: {res}");
+		Ok(())
+	}
+
+	/// The TTL is enforced by the running server, not only across a restart: a
+	/// client idle past `--durable-session-ttl` is rejected on its next request
+	/// to the node that served it all along.
+	#[test(tokio::test)]
+	async fn rpc_durable_session_expires_without_restart() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (addr, _server) = common::start_server(StartServerArguments {
+			args: format!("--durable-session-ttl {DURABLE_EXPIRY_TTL_SECS}s"),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
+
+		// No restart. The idle wait exceeds the TTL (sized to clear the
+		// argon2-bearing setup), so the rejection is driven by the idle window,
+		// not by a setup that happened to overrun a tight TTL.
+		tokio::time::sleep(DURABLE_EXPIRY_WAIT).await;
+		let body = json!({
+			"id": "idle",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_some(), "an idle-past-TTL session must be rejected: {res}");
+		Ok(())
+	}
+
+	/// `detach` removes the durable copy immediately: the session cannot be
+	/// resumed after a restart even though its TTL has not elapsed.
+	///
+	/// The server is started with the deprecated `--durable-sessions` flag,
+	/// which must still be accepted and change nothing.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_detached_durable_session_cannot_be_resumed()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let args = "--durable-sessions".to_string();
+		let (addr, server) = common::start_server(StartServerArguments {
+			path: Some(path.clone()),
+			args: args.clone(),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
+		let body = json!({"id": "detach", "method": "detach", "session": sid});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_none(), "detach must succeed: {res}");
+
+		server.kill();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			args,
+			..Default::default()
+		})
+		.await?;
+
+		let body = json!({
+			"id": "resume",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_some(), "a detached session must not resume: {res}");
+		Ok(())
+	}
+
 	/// Regression coverage: the `attach` -> `signup` -> `signin` sequence
 	/// over HTTP `/rpc` must succeed when the caller forwards the bearer
 	/// token returned by `signup` on the subsequent `signin` request.
@@ -3957,6 +5184,248 @@ mod http_integration {
 			"signin must return a fresh access token: {body}"
 		);
 
+		Ok(())
+	}
+
+	/// A server for the `/bucket` route, with a presign secret and a folder a
+	/// `file://` bucket may use. Returns the base URL of the `test/app`
+	/// database's buckets; the folder lives as long as the returned guard.
+	async fn start_bucket_route_server(
+		allow_guests: bool,
+	) -> Result<
+		(String, String, common::Child, Client, tempfile::TempDir),
+		Box<dyn std::error::Error>,
+	> {
+		let dir = tempfile::tempdir()?;
+		let folder = std::fs::canonicalize(dir.path())?.to_string_lossy().into_owned();
+		let mut vars = std::collections::HashMap::new();
+		vars.insert(
+			"SURREAL_BUCKET_PRESIGN_SECRET".to_string(),
+			"http-integration-presign-secret-0000".to_string(),
+		);
+		vars.insert("SURREAL_BUCKET_FOLDER_ALLOWLIST".to_string(), folder.clone());
+		let args = if allow_guests {
+			"--allow-guests".to_string()
+		} else {
+			String::new()
+		};
+		let (addr, server) = common::start_server(StartServerArguments {
+			args,
+			vars: Some(vars),
+			..Default::default()
+		})
+		.await?;
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("surreal-ns", "test".parse()?);
+		headers.insert("surreal-db", "app".parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder().default_headers(headers).build()?;
+
+		let body = root_sql(
+			&client,
+			&addr,
+			&format!(
+				r#"
+					DEFINE BUCKET mem BACKEND "memory";
+					DEFINE BUCKET fs BACKEND "file:{folder}";
+					DEFINE BUCKET public BACKEND "memory" PERMISSIONS FULL;
+					DEFINE BUCKET private BACKEND "memory" PERMISSIONS NONE;
+					f"public:/hi.txt".put("hello", {{ content_type: "text/plain" }});
+					f"private:/hi.txt".put("secret");
+				"#
+			),
+		)
+		.await?;
+		assert_all_sql_ok(&body, "bucket route setup");
+		let base = format!("http://{addr}/ns/test/db/app/bucket");
+		Ok((addr, base, server, client, dir))
+	}
+
+	/// The stored type is served, never a guessed one, and every object
+	/// response carries the headers that keep an uploaded `text/html` from
+	/// running on the database's origin.
+	#[test(tokio::test)]
+	async fn bucket_route_serves_the_stored_content_type() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (_addr, base, _server, client, _dir) = start_bucket_route_server(false).await?;
+
+		let res = client
+			.put(format!("{base}/mem/a.png"))
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "image/png")
+			.body("png")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 201);
+
+		for method in [Method::GET, Method::HEAD] {
+			let res = client
+				.request(method.clone(), format!("{base}/mem/a.png"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "{method}");
+			assert_eq!(res.headers()[header::CONTENT_TYPE], "image/png", "{method}");
+			assert_eq!(res.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{method}");
+			assert_eq!(res.headers()[header::CONTENT_SECURITY_POLICY], "sandbox", "{method}");
+		}
+
+		// Written without a type, served as the "no type" type whatever the key.
+		let res = client
+			.put(format!("{base}/mem/b.png"))
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/octet-stream")
+			.body("png")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 201);
+		let res =
+			client.get(format!("{base}/mem/b.png")).basic_auth(USER, Some(PASS)).send().await?;
+		assert_eq!(res.headers()[header::CONTENT_TYPE], "application/octet-stream");
+
+		// `If-None-Match: *` never replaces an object.
+		let res = client
+			.put(format!("{base}/mem/a.png"))
+			.basic_auth(USER, Some(PASS))
+			.header(header::IF_NONE_MATCH, "*")
+			.header(header::CONTENT_TYPE, "application/octet-stream")
+			.body("replaced")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 412);
+		Ok(())
+	}
+
+	/// The file backend has nowhere to keep a type, so it refuses one rather
+	/// than dropping it. `application/octet-stream`, or no header, is no type.
+	#[test(tokio::test)]
+	async fn bucket_route_refuses_a_content_type_the_backend_cannot_keep()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (_addr, base, _server, client, _dir) = start_bucket_route_server(false).await?;
+
+		for (content_type, expected) in [
+			(Some("text/plain"), 415),
+			(Some("application/x-www-form-urlencoded"), 415),
+			(Some("application/octet-stream"), 201),
+			(None, 201),
+		] {
+			let mut req =
+				client.put(format!("{base}/fs/a.txt")).basic_auth(USER, Some(PASS)).body("x");
+			if let Some(content_type) = content_type {
+				req = req.header(header::CONTENT_TYPE, content_type);
+			}
+			let res = req.send().await?;
+			assert_eq!(res.status(), expected, "{content_type:?}");
+		}
+		Ok(())
+	}
+
+	/// An upload URL binds its type: the uploader must send exactly it.
+	#[test(tokio::test)]
+	async fn bucket_route_holds_a_presigned_upload_to_its_type()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _base, _server, client, _dir) = start_bucket_route_server(false).await?;
+		let body = root_sql(
+			&client,
+			&addr,
+			r#"RETURN file::presign_put(f"mem:/up.png", { content_type: "image/png" }).path;"#,
+		)
+		.await?;
+		let path = body[0]["result"].as_str().expect("a presigned path").to_string();
+		let anonymous = reqwest::Client::new();
+
+		for (content_type, expected) in
+			[("text/html", 403), ("application/octet-stream", 403), ("image/png", 201)]
+		{
+			let res = anonymous
+				.put(format!("http://{addr}{path}"))
+				.header(header::CONTENT_TYPE, content_type)
+				.body("x")
+				.send()
+				.await?;
+			assert_eq!(res.status(), expected, "{content_type}");
+		}
+		Ok(())
+	}
+
+	/// An anonymous request is a guest: refused unless the node allows
+	/// guests, and then judged by the bucket's clause like a guest's query.
+	#[test(tokio::test)]
+	async fn bucket_route_admits_guests_only_where_the_node_allows_them()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let anonymous = reqwest::Client::new();
+		for (allow_guests, public, private) in [(false, 403, 403), (true, 200, 403)] {
+			let (_addr, base, _server, _client, _dir) =
+				start_bucket_route_server(allow_guests).await?;
+			let res = anonymous.get(format!("{base}/public/hi.txt")).send().await?;
+			assert_eq!(res.status(), public, "public, allow_guests={allow_guests}");
+			if res.status() == 200 {
+				assert_eq!(res.headers()[header::CONTENT_TYPE], "text/plain");
+				assert_eq!(res.text().await?, "hello");
+			}
+			let res = anonymous.get(format!("{base}/private/hi.txt")).send().await?;
+			assert_eq!(res.status(), private, "private, allow_guests={allow_guests}");
+			// A guest never lists, as `file::list` refuses guests.
+			let res = anonymous.get(format!("{base}/public/")).send().await?;
+			assert_eq!(res.status(), 403, "list, allow_guests={allow_guests}");
+		}
+		Ok(())
+	}
+
+	/// `GET` on a bucket lists it with `file::list`'s options; `POST` on an
+	/// object copies or renames it.
+	#[test(tokio::test)]
+	async fn bucket_route_lists_copies_and_renames() -> Result<(), Box<dyn std::error::Error>> {
+		let (_addr, base, _server, client, _dir) = start_bucket_route_server(false).await?;
+		for key in ["/a.txt", "/b/c.txt", "/b/d.txt"] {
+			let res = client
+				.put(format!("{base}/mem{key}"))
+				.basic_auth(USER, Some(PASS))
+				.header(header::CONTENT_TYPE, "text/plain")
+				.body("x")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 201, "{key}");
+		}
+
+		let list = |query: &str| {
+			client.get(format!("{base}/mem/?{query}")).basic_auth(USER, Some(PASS)).send()
+		};
+		let entries: serde_json::Value = list("delimiter=/").await?.json().await?;
+		let keys: Vec<&str> = entries
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|e| e["key"].as_str().or(e["prefix"].as_str()).unwrap())
+			.collect();
+		assert_eq!(keys, ["/a.txt", "/b/"]);
+		assert_eq!(list("bogus=1").await?.status(), 400);
+		assert_eq!(list("delimiter=,").await?.status(), 400);
+
+		let transfer = |key: &str, body: serde_json::Value| {
+			client
+				.post(format!("{base}/mem{key}"))
+				.basic_auth(USER, Some(PASS))
+				.header(header::CONTENT_TYPE, "application/json")
+				.body(body.to_string())
+				.send()
+		};
+		let res = transfer("/a.txt", json!({ "action": "copy", "target": "/b/c.txt" })).await?;
+		assert_eq!(res.status(), 201);
+		let res = transfer(
+			"/a.txt",
+			json!({ "action": "copy", "target": "/b/c.txt", "overwrite": false }),
+		)
+		.await?;
+		assert_eq!(res.status(), 412);
+		let res = transfer("/a.txt", json!({ "action": "rename", "target": "/e.txt" })).await?;
+		assert_eq!(res.status(), 201);
+		let res = transfer("/a.txt", json!({ "action": "rename", "target": "/f.txt" })).await?;
+		assert_eq!(res.status(), 404, "the source moved");
+		let res =
+			client.get(format!("{base}/mem/e.txt")).basic_auth(USER, Some(PASS)).send().await?;
+		assert_eq!(res.headers()[header::CONTENT_TYPE], "text/plain", "a rename keeps the type");
 		Ok(())
 	}
 }

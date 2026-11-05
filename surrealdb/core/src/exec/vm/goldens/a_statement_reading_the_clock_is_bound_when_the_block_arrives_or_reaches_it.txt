@@ -1,0 +1,6 @@
+### FOR $i IN 0..3 { CREATE t SET n = time::unix() }
+[3]
+### FOR $i IN 0..3 { CREATE t SET n = $i, at = time::now(); SELECT * FROM t WHERE at < time::now() }
+[3]
+### { DEFINE FIELD OVERWRITE m ON t VALUE 1; CREATE t:9 SET n = 1, at = time::now(); RETURN SELECT VALUE id FROM t WHERE at < time::now() }
+[1]

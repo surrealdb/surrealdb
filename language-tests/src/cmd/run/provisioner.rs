@@ -4,11 +4,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
+use surrealdb_cnf::ConfigMap;
 use surrealdb_core::channel;
-use surrealdb_core::cnf::ConfigMap;
-use surrealdb_core::dbs::Capabilities;
-use surrealdb_core::dbs::capabilities::Targets;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::{Capabilities, Targets};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::cli::Backend;
@@ -20,15 +19,19 @@ struct CreateInfo {
 	id_gen: AtomicUsize,
 	backend: Backend,
 	dir: Option<String>,
+	/// The datastore configuration keys every datastore of the run is opened
+	/// with, beside the ones the runner sets itself.
+	config: Vec<(String, String)>,
 }
 
 impl CreateInfo {
-	pub async fn new(backend: Backend) -> Result<Self> {
+	pub async fn new(backend: Backend, config: Vec<(String, String)>) -> Result<Self> {
 		if let Backend::Memory = backend {
 			return Ok(CreateInfo {
 				id_gen: AtomicUsize::new(0),
 				backend,
 				dir: None,
+				config,
 			});
 		}
 		let temp_dir = std::env::temp_dir();
@@ -50,10 +53,18 @@ impl CreateInfo {
 			id_gen: AtomicUsize::new(0),
 			backend,
 			dir: Some(dir.to_str().unwrap().to_string()),
+			config,
 		})
 	}
 
-	pub async fn produce_ds(&self, versioned: bool, cap: Capabilities) -> Result<Ds> {
+	/// A datastore opened with the keys of the run and then `own`, the keys a test names for
+	/// itself, which take the place of the run's keys of the same name.
+	pub async fn produce_ds(
+		&self,
+		versioned: bool,
+		cap: Capabilities,
+		own: &[(String, String)],
+	) -> Result<Ds> {
 		let mut path = None;
 
 		let allows_live = cap.allows_live_query_notifications();
@@ -81,11 +92,20 @@ impl CreateInfo {
 		// now-empty allowlist denies *all* `mapper()` access — every mapper test
 		// would then fail with `File access denied`. This also sets a single
 		// global allowlist shared by every language test.
+		let config = self.config.iter().chain(own).fold(
+			ConfigMap::empty()
+				.with_key_value("file_allowlist", "../tests")
+				// `SURREAL_BUCKET_PRESIGN_SECRET`, so `file::presign_*` can mint.
+				// Any value of the minimum length serves; no test pins a signature.
+				.with_key_value("bucket_presign_secret", "language-tests-presign-secret-0000"),
+			|config, (key, value)| config.with_key_value(key.as_str(), value.as_str()),
+		);
 		let builder = Datastore::builder()
+			.without_maintenance_tasks()
 			.with_capabilities(cap)
 			.with_auth(true)
 			.with_temporary_directory(Some(sort_temp_dir))
-			.with_config(ConfigMap::empty().with_key_value("file_allowlist", "../tests"));
+			.with_config(config);
 
 		let builder = if allows_live {
 			let (send, _) = channel::bounded(15_000);
@@ -96,23 +116,9 @@ impl CreateInfo {
 
 		let ds = match self.backend {
 			Backend::Memory => {
-				if versioned {
-					builder.build_with_path("mem://?versioned=true&retention=1h").await?
-				} else {
-					builder.build_with_path("mem://").await?
-				}
-			}
-			Backend::RocksDb => {
-				let p = self.produce_path();
-				let ds = if versioned {
-					builder
-						.build_with_path(&format!("rocksdb://{p}?versioned=true&retention=1h"))
-						.await?
-				} else {
-					builder.build_with_path(&format!("rocksdb://{p}")).await?
-				};
-				path = Some(p);
-				ds
+				// Opened without versioning, which this backend cannot serve; the
+				// runner filters versioned tests off it (see cmd/run).
+				builder.build_with_path("mem://").await?
 			}
 			Backend::SurrealKv => {
 				let p = self.produce_path();
@@ -127,54 +133,21 @@ impl CreateInfo {
 				ds
 			}
 			Backend::TikV => {
-				let p = "127.0.0.1:2379";
-				let ds = builder.build_with_path(&format!("tikv://{p}")).await?;
-				// Every TiKV datastore in a run aliases the one physical cluster, so a
-				// freshly built handle still sees whatever earlier tests left behind.
-				// Physically drop the entire keyspace out-of-transaction; `bootstrap`
-				// below then re-seeds the node keys. See `reset_storage`.
-				ds.unsafe_destroy_range(vec![0u8], vec![0xffu8]).await?;
-				ds
+				anyhow::bail!(
+					"the TiKV backend is built from surrealdb-tikv: run its server and pass --endpoint"
+				)
+			}
+			Backend::Other => {
+				anyhow::bail!("the `other` backend names a server's engine: pass --endpoint")
 			}
 		};
 
 		ds.bootstrap().await?;
 
 		Ok(Ds {
-			store: Arc::new(ds),
+			store: ds,
 			path,
 		})
-	}
-
-	/// Reset a reused datastore's storage between tests.
-	///
-	/// Only TiKV needs this. Every TiKV datastore in a run aliases the one
-	/// physical cluster, so the reused base datastore can observe keys left
-	/// behind by `clean`/create-path tests — whose post-run cleanup the harness
-	/// does not verify — and the next base test then fails the retained-key
-	/// check on that foreign data. Embedded backends give each datastore its
-	/// own directory, so there is nothing to reset, hence the no-op.
-	///
-	/// We physically drop the keys via `unsafe_destroy_range` rather than a
-	/// transactional `delr`: the wipe runs serially (`--jobs 1`) with no open
-	/// transaction, so the MVCC-bypass hazards do not apply, and it avoids both
-	/// the `delr` key cap and the tombstone build-up of wiping on every test.
-	///
-	/// Crucially we wipe *around* the node/bootstrap keys rather than the whole
-	/// keyspace: `/!ic` (index-compaction queue), `/!nd` (cluster membership)
-	/// and `/!nh` / `/!ni` (namespace-ID generator) live contiguously in
-	/// `[/!ic, /!ns)`, and nothing a test creates falls in that band (tests
-	/// create `/!ac`, `/!cg`, `/!eq` below it and `/!ns`, `/!tl`, `/!us` plus
-	/// the `/*` data keys at or above it). Preserving that block keeps this
-	/// long-lived datastore registered, so we skip the per-test `bootstrap`
-	/// (three node-registry transactions) that a full wipe would force —
-	/// these are the same prefixes the retained-key check whitelists.
-	async fn reset_storage(&self, ds: &Datastore) -> Result<()> {
-		if let Backend::TikV = self.backend {
-			ds.unsafe_destroy_range(vec![0u8], b"/!ic".to_vec()).await?;
-			ds.unsafe_destroy_range(b"/!ns".to_vec(), vec![0xffu8]).await?;
-		}
-		Ok(())
 	}
 
 	fn produce_path(&self) -> String {
@@ -199,8 +172,8 @@ pub struct Ds {
 pub struct Provisioner {
 	send: Sender<Ds>,
 	recv: Receiver<Ds>,
-	grade_send: Sender<Box<Datastore>>,
-	grade_recv: Receiver<Box<Datastore>>,
+	grade_send: Sender<Arc<Datastore>>,
+	grade_recv: Receiver<Arc<Datastore>>,
 	create_info: Arc<CreateInfo>,
 }
 
@@ -212,6 +185,7 @@ enum PermitInner {
 	Create {
 		versioned: bool,
 		capabilities: Box<Capabilities>,
+		config: Vec<(String, String)>,
 	},
 }
 
@@ -223,13 +197,13 @@ pub enum CanReuse {
 #[must_use]
 pub struct Permit {
 	info: Arc<CreateInfo>,
-	grade_send: Sender<Box<Datastore>>,
-	grade_ds: Box<Datastore>,
+	grade_send: Sender<Arc<Datastore>>,
+	grade_ds: Arc<Datastore>,
 	inner: PermitInner,
 }
 
 impl Permit {
-	pub async fn with<F: AsyncFnOnce(&Arc<Datastore>, &Box<Datastore>) -> (CanReuse, R), R>(
+	pub async fn with<F: AsyncFnOnce(&Arc<Datastore>, &Arc<Datastore>) -> (CanReuse, R), R>(
 		self,
 		f: F,
 	) -> Result<R> {
@@ -241,17 +215,13 @@ impl Permit {
 				channel,
 			} => {
 				sender = Some(channel);
-				// The create path wipes at build time; the reused base datastore is
-				// never rebuilt, so reset it here to clear any cruft a prior test
-				// (e.g. a `clean` test defining extra namespaces) left on the shared
-				// physical cluster before handing it to this test.
-				self.info.reset_storage(ds.store.as_ref()).await?;
 				ds
 			}
 			PermitInner::Create {
 				versioned,
 				capabilities,
-			} => self.info.produce_ds(versioned, *capabilities).await?,
+				config,
+			} => self.info.produce_ds(versioned, *capabilities, &config).await?,
 		};
 
 		let (can_reuse, res) = f(&store.store, &self.grade_ds).await;
@@ -278,7 +248,7 @@ impl Permit {
 				}
 				// We need to send back a new datastore otherwise the que might get exhausted and
 				// jobs will get stuck forever waiting for a new task.
-				let ds = match self.info.produce_ds(false, Capabilities::all()).await {
+				let ds = match self.info.produce_ds(false, Capabilities::all(), &[]).await {
 					Ok(x) => x,
 					Err(e) => {
 						println!(
@@ -295,14 +265,15 @@ impl Permit {
 		}
 
 		// Shutdown the datastore before removing its directory to ensure all file descriptors
-		// are closed This is critical for RocksDB which can have many open file handles
+		// are closed. This is critical for file-backed engines, which can have many open file
+		// handles
 		if let Err(e) = store.store.shutdown().await {
 			println!("Failed to shutdown datastore before cleanup: {e}");
 		}
 
 		if let Some(remove_path) = &store.path {
 			// Remove the directory synchronously to ensure cleanup completes before next test
-			// This prevents file descriptor exhaustion on backends like RocksDB
+			// This prevents file descriptor exhaustion on file-backed backends
 			if let Err(e) = tokio::fs::remove_dir_all(&remove_path).await {
 				println!("Failed to remove temporary directory {remove_path}: {e}");
 			}
@@ -311,8 +282,9 @@ impl Permit {
 	}
 }
 
-async fn create_grade_ds() -> Box<Datastore> {
+async fn create_grade_ds() -> Arc<Datastore> {
 	let ds = Datastore::builder()
+		.without_maintenance_tasks()
 		.with_capabilities(
 			Capabilities::none()
 				.with_functions(Targets::All)
@@ -331,17 +303,25 @@ async fn create_grade_ds() -> Box<Datastore> {
 		.await
 		.unwrap();
 
-	Box::new(ds)
+	ds
 }
 
 impl Provisioner {
-	pub async fn new(num_jobs: usize, backend: Backend) -> Result<Self> {
-		let info = CreateInfo::new(backend).await?;
+	pub async fn new(
+		num_jobs: usize,
+		backend: Backend,
+		config: Vec<(String, String)>,
+	) -> Result<Self> {
+		let info = CreateInfo::new(backend, config).await?;
 
 		let (send, recv) = mpsc::channel(num_jobs);
-		for _ in 0..num_jobs {
-			let ds =
-				info.produce_ds(false, Capabilities::all().with_experimental(Targets::All)).await?;
+		for at in 0..num_jobs {
+			let ds = info
+				.produce_ds(false, Capabilities::all().with_experimental(Targets::All), &[])
+				.await?;
+			if at == 0 {
+				report_memory(&ds.store, &info.config)?;
+			}
 			send.try_send(ds).unwrap();
 		}
 		let (grade_send, grade_recv) = mpsc::channel(num_jobs);
@@ -385,6 +365,7 @@ impl Provisioner {
 				inner: PermitInner::Create {
 					versioned: env.versioned,
 					capabilities: Box::new(capabilities),
+					config: env.config.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
 				},
 			}
 		}
@@ -422,5 +403,361 @@ impl Provisioner {
 }
 
 fn is_base_environment(env: &TestEnv) -> bool {
-	!env.clean && !env.versioned && matches!(env.capabilities, BoolOr::Bool(true))
+	!env.clean
+		&& !env.versioned
+		&& env.config.is_empty()
+		&& matches!(env.capabilities, BoolOr::Bool(true))
+}
+
+/// Pool of connections to a remote SurrealDB instance for `--endpoint` runs.
+///
+/// Mirrors the embedded [`Provisioner`]: hands out one connection per parallel
+/// job (each its own session, so test-under-test signins don't bleed across
+/// jobs) plus a local embedded "grade" datastore for evaluating `@match` matcher
+/// expressions (which must run locally, never against the remote server). After
+/// a test, the connection is reset to root and returned to the pool; on a panic
+/// it is replaced with a fresh connection.
+#[cfg(feature = "remote")]
+pub struct RemoteProvisioner {
+	send: Sender<crate::cmd::remote::RemoteConn>,
+	recv: Receiver<crate::cmd::remote::RemoteConn>,
+	grade_send: Sender<Arc<Datastore>>,
+	grade_recv: Receiver<Arc<Datastore>>,
+	root_baseline: Arc<super::executor::RootSnapshot>,
+	/// The scratch namespace the default compatibility level is read through
+	/// ([`super::executor::probe_compatibility`]).
+	compatibility_probe: String,
+}
+
+#[cfg(feature = "remote")]
+impl RemoteProvisioner {
+	pub async fn new(
+		num_jobs: usize,
+		endpoint: String,
+		user: String,
+		pass: String,
+		run_prefix: &str,
+	) -> Result<Self> {
+		use crate::cmd::remote::RemoteConn;
+
+		let mut conns = Vec::with_capacity(num_jobs);
+		for _ in 0..num_jobs {
+			conns.push(RemoteConn::connect(&endpoint, &user, &pass).await?);
+		}
+
+		// The endpoint's root state as the run found it. Concurrently running
+		// tests are forbidden from changing it, so one reading taken here serves
+		// every leak check for the rest of the run — and anything already on the
+		// endpoint is recorded as pre-existing rather than blamed on a test.
+		//
+		// The default compatibility level is read beside it, by a probe that leaves
+		// the connection's session on a removed namespace; `RemotePermit::with`
+		// resets the session before the connection's next test.
+		let compatibility_probe = super::executor::compatibility_probe(run_prefix);
+		let mut root_baseline = super::executor::snapshot_root(&conns[0]).await?;
+		root_baseline.compatibility =
+			super::executor::probe_compatibility(&conns[0], &compatibility_probe).await?;
+		let root_baseline = Arc::new(root_baseline);
+
+		let (send, recv) = mpsc::channel(num_jobs);
+		for conn in conns {
+			send.try_send(conn).unwrap();
+		}
+		let (grade_send, grade_recv) = mpsc::channel(num_jobs);
+		for _ in 0..num_jobs {
+			grade_send.try_send(create_grade_ds().await).unwrap();
+		}
+		Ok(RemoteProvisioner {
+			send,
+			recv,
+			grade_send,
+			grade_recv,
+			root_baseline,
+			compatibility_probe,
+		})
+	}
+
+	/// The endpoint's root state before any test ran; see [`Self::new`].
+	pub fn root_baseline(&self) -> Arc<super::executor::RootSnapshot> {
+		self.root_baseline.clone()
+	}
+
+	pub async fn obtain(&mut self) -> RemotePermit {
+		let conn = self.recv.recv().await.expect("Connection channel closed early");
+		let grade_ds = self.grade_recv.recv().await.expect("Datastore channel closed early");
+		RemotePermit {
+			conn,
+			grade_ds,
+			send: self.send.clone(),
+			grade_send: self.grade_send.clone(),
+		}
+	}
+
+	/// Return root to the state recorded before the run and report what survived;
+	/// see [`super::executor::sweep_to_baseline`] for why this is needed at all.
+	///
+	/// Call once, after every job has finished — it borrows a pooled connection
+	/// and returns it, so a running test would be competing for it, and the
+	/// baseline only describes an idle endpoint.
+	pub async fn sweep_to_baseline(&mut self) -> Result<super::executor::SweepResidue> {
+		use anyhow::Context;
+
+		let baseline = self.root_baseline.clone();
+		let conn =
+			self.recv.recv().await.context("connection pool closed before the final sweep")?;
+		let residue =
+			super::executor::sweep_to_baseline(&conn, &baseline, &self.compatibility_probe).await;
+		// Back into the pool either way, so `shutdown` closes it with the rest.
+		self.send.try_send(conn).ok();
+		residue
+	}
+
+	pub async fn shutdown(mut self) -> Result<()> {
+		mem::drop(self.send);
+		mem::drop(self.grade_send);
+		// Dropping each connection closes its session/socket.
+		while self.recv.recv().await.is_some() {}
+		while let Some(ds) = self.grade_recv.recv().await {
+			if let Err(e) = ds.shutdown().await {
+				println!("Warning: Datastore shutdown error: {e}");
+			}
+		}
+		Ok(())
+	}
+}
+
+#[cfg(feature = "remote")]
+#[must_use]
+pub struct RemotePermit {
+	conn: crate::cmd::remote::RemoteConn,
+	grade_ds: Arc<Datastore>,
+	send: Sender<crate::cmd::remote::RemoteConn>,
+	grade_send: Sender<Arc<Datastore>>,
+}
+
+#[cfg(feature = "remote")]
+impl RemotePermit {
+	pub async fn with<
+		F: AsyncFnOnce(&crate::cmd::remote::RemoteConn, &Arc<Datastore>) -> (CanReuse, R),
+		R,
+	>(
+		mut self,
+		f: F,
+	) -> Result<R> {
+		// Give each test a fresh session — the embedded harness does, and the SDK
+		// can't otherwise unset a leaked namespace/database/auth.
+		//
+		// A failed reconnect leaves the previous client in place, still carrying the
+		// last test's namespace/database selection. `prepare` re-authenticates but
+		// only calls `use_ns`/`use_db` for a test that names them, so a test that
+		// names neither would run against whatever the previous test selected and
+		// report a wrong result rather than an error. Refuse to run it. The pooled
+		// resources still go back: the failure is typically transient, and holding
+		// them back would starve the pool.
+		if let Err(e) = self.conn.reset_session().await {
+			self.grade_send
+				.try_send(self.grade_ds)
+				.expect("Too many datastores entered into datastore channel");
+			self.send
+				.try_send(self.conn)
+				.expect("Too many connections entered into connection channel");
+			return Err(e.context("Failed to reset the remote session before running a test"));
+		}
+
+		let (can_reuse, res) = f(&self.conn, &self.grade_ds).await;
+
+		// Return (or recreate, on panic) the grade datastore.
+		if let CanReuse::Reset = can_reuse {
+			if let Err(e) = self.grade_ds.shutdown().await {
+				println!("Failed to shutdown panicking datastore: {e}");
+			}
+			self.grade_send
+				.try_send(create_grade_ds().await)
+				.expect("Too many datastores entered into datastore channel");
+		} else {
+			self.grade_send
+				.try_send(self.grade_ds)
+				.expect("Too many datastores entered into datastore channel");
+		}
+
+		// Return the *same* connection to the pool. A panic in the test future
+		// doesn't corrupt the SDK client (unlike the embedded grade datastore above,
+		// which is rebuilt): whatever the test wrote lives in its namespace and is
+		// removed by the snapshot-diff cleanup. We deliberately don't drop-and-
+		// reconnect on this return path — a transient connect failure would return
+		// nothing to the channel and starve the pool. The session is reset (and root
+		// re-authenticated) at the *start* of the next `with`, so the connection's
+		// current auth/namespace state here is irrelevant.
+		self.send
+			.try_send(self.conn)
+			.expect("Too many connections entered into connection channel");
+
+		Ok(res)
+	}
+}
+
+/// Print the memory limits `ds` holds, and fail where a memory or morsel
+/// setting the run set with `--config` is not the one it holds: a key that does
+/// not reach the datastore would leave every test running under the defaults
+/// while the run reports otherwise.
+fn report_memory(ds: &Datastore, config: &[(String, String)]) -> Result<()> {
+	match ds.memory_limit() {
+		Some(limit) => {
+			println!(
+				" memory_limit: {limit} bytes, query_memory_max: {} bytes",
+				ds.query_memory_max()
+			)
+		}
+		None => println!(" memory_limit: none (unlimited governor)"),
+	}
+	for (key, value) in config {
+		match key.as_str() {
+			// A `0` asks for the default, which the datastore holds resolved.
+			"memory_limit" => match parse_bytes(value)? {
+				0 => anyhow::ensure!(
+					ds.memory_limit().is_some(),
+					"memory_limit={value} did not reach the datastore (it holds none)"
+				),
+				wanted => anyhow::ensure!(
+					ds.memory_limit() == Some(wanted),
+					"memory_limit={value} did not reach the datastore (it holds {:?})",
+					ds.memory_limit()
+				),
+			},
+			"query_memory_max" => {
+				let wanted = match parse_bytes(value)? {
+					0 => ds.memory_limit().unwrap_or_else(|| ds.query_memory_max()),
+					wanted => wanted,
+				};
+				anyhow::ensure!(
+					ds.query_memory_max() == wanted,
+					"query_memory_max={value} did not reach the datastore (it holds {})",
+					ds.query_memory_max()
+				);
+			}
+			"memory_wait" => {
+				let wanted = std::time::Duration::from_millis(value.parse()?);
+				anyhow::ensure!(
+					ds.memory_wait() == wanted,
+					"memory_wait={value} did not reach the datastore (it holds {:?})",
+					ds.memory_wait()
+				);
+			}
+			key if key.starts_with("morsel_") => {
+				let held = ds.morsel_knobs();
+				let Some((_, held)) = held.iter().find(|(name, _)| *name == key) else {
+					// A morsel key the datastore does not report is not one the lane checks.
+					continue;
+				};
+				let wanted = if key.ends_with("_bytes") {
+					parse_bytes(value)?.to_string()
+				} else if held == "true" || held == "false" {
+					value.trim().parse::<bool>()?.to_string()
+				} else {
+					value.trim().parse::<usize>()?.to_string()
+				};
+				anyhow::ensure!(
+					*held == wanted,
+					"{key}={value} did not reach the datastore (it holds {held})"
+				);
+			}
+			_ => {}
+		}
+	}
+	Ok(())
+}
+
+/// A byte count as the datastore's configuration reads it: digits with an
+/// optional `B`, `K`, `KB`, `KiB`, `M`, `MB`, `MiB`, `G`, `GB` or `GiB`
+/// suffix, which is not case-sensitive.
+fn parse_bytes(value: &str) -> Result<usize> {
+	let value = value.trim();
+	let split = value.find(|c: char| !c.is_ascii_digit()).unwrap_or(value.len());
+	let (number, suffix) = value.split_at(split);
+	let multiplier: usize = match suffix.trim().to_lowercase().as_str() {
+		"" | "b" => 1,
+		"k" | "kb" | "kib" => 1 << 10,
+		"m" | "mb" | "mib" => 1 << 20,
+		"g" | "gb" | "gib" => 1 << 30,
+		other => anyhow::bail!("unknown size suffix `{other}` in `{value}`"),
+	};
+	Ok(number.parse::<usize>()?.saturating_mul(multiplier))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A byte count reads digits and the suffixes the datastore reads.
+	#[test]
+	fn byte_counts_parse_as_the_datastore_reads_them() {
+		assert_eq!(parse_bytes("8388608").unwrap(), 8_388_608);
+		assert_eq!(parse_bytes("8MiB").unwrap(), 8_388_608);
+		assert_eq!(parse_bytes("1 gb").unwrap(), 1 << 30);
+		assert!(parse_bytes("8 parsecs").is_err());
+	}
+
+	/// A key given with `--config` reaches the datastore the runner opens, and
+	/// the check that the limit was applied accepts it.
+	#[tokio::test]
+	async fn a_config_key_reaches_the_datastore() {
+		let config = vec![("memory_limit".to_owned(), "8388608".to_owned())];
+		let info = CreateInfo::new(Backend::Memory, config.clone()).await.unwrap();
+		let ds = info.produce_ds(false, Capabilities::all(), &[]).await.unwrap();
+		assert_eq!(ds.store.memory_limit(), Some(8_388_608));
+		report_memory(&ds.store, &config).unwrap();
+		let wrong = vec![("memory_limit".to_owned(), "1MiB".to_owned())];
+		assert!(report_memory(&ds.store, &wrong).is_err());
+		let default = vec![("query_memory_max".to_owned(), "0".to_owned())];
+		report_memory(&ds.store, &default).unwrap();
+	}
+
+	/// A morsel key given with `--config` reaches the datastore the runner opens, and the check
+	/// that it was applied accepts it.
+	#[tokio::test]
+	async fn a_morsel_key_reaches_the_datastore() {
+		let config = vec![
+			("morsel_split_rows".to_owned(), "1".to_owned()),
+			("morsel_target_bytes".to_owned(), "1".to_owned()),
+			("morsel_places".to_owned(), "0".to_owned()),
+			("morsel_steal_always".to_owned(), "true".to_owned()),
+		];
+		let info = CreateInfo::new(Backend::Memory, config.clone()).await.unwrap();
+		let ds = info.produce_ds(false, Capabilities::all(), &[]).await.unwrap();
+		let held = ds.store.morsel_knobs();
+		assert!(held.contains(&("morsel_split_rows", "1".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_target_bytes", "1".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_places", "0".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_steal_always", "true".to_owned())), "{held:?}");
+		report_memory(&ds.store, &config).unwrap();
+		let wrong = vec![("morsel_places".to_owned(), "3".to_owned())];
+		assert!(report_memory(&ds.store, &wrong).is_err());
+		let wrong = vec![("morsel_steal_always".to_owned(), "false".to_owned())];
+		assert!(report_memory(&ds.store, &wrong).is_err());
+	}
+
+	/// A key a test names for itself takes the place of the run's key of the same name, and the
+	/// run's other keys stay: a test that must run serially under a run that forces morsels.
+	#[tokio::test]
+	async fn a_key_a_test_names_takes_the_place_of_the_runs() {
+		let config = vec![
+			("morsel_split_rows".to_owned(), "1".to_owned()),
+			("morsel_places".to_owned(), "0".to_owned()),
+		];
+		let info = CreateInfo::new(Backend::Memory, config).await.unwrap();
+		let own = vec![("morsel_split_rows".to_owned(), usize::MAX.to_string())];
+		let ds = info.produce_ds(false, Capabilities::all(), &own).await.unwrap();
+		let held = ds.store.morsel_knobs();
+		assert!(held.contains(&("morsel_split_rows", usize::MAX.to_string())), "{held:?}");
+		assert!(held.contains(&("morsel_places", "0".to_owned())), "{held:?}");
+		let env: TestEnv =
+			toml::from_str("[config]\nmorsel_split_rows = \"18446744073709551615\"\n").unwrap();
+		assert_eq!(
+			env.config.get("morsel_split_rows").map(String::as_str),
+			Some("18446744073709551615")
+		);
+		let mut env = env;
+		env.capabilities = BoolOr::Bool(true);
+		assert!(!is_base_environment(&env));
+	}
 }

@@ -1,0 +1,40 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_temporal_columns.surql"]
+
+[test]
+reason = "MySQL DATE is a date, TIME an interval, DATETIME a timestamp, TIMESTAMP a datetime and YEAR a u16, and CAST and date_add follow them"
+
+[[test.results]]
+value = "[{ d: pd'2026-10-27', dt: ts'2026-10-27T12:30:00', id: 1, t: ivl'PT12H30M', ts: d'2026-10-27T12:30:00Z', y: 2026u16 }]"
+
+[[test.results]]
+value = "[{ d: pd'1999-12-31', dt: ts'1999-12-31T23:59:59', id: 2, t: ivl'PT-838H-59M-59S', ts: d'1999-12-31T23:59:59Z', y: 1999u16 }]"
+
+[[test.results]]
+value = "[{ d: pd'2026-10-27', dt: ts'2026-10-27T12:30:00', t: ivl'PT12H30M', ts: d'2026-10-27T12:30:00Z', y: 2026u16 }, { d: pd'1999-12-31', dt: ts'1999-12-31T23:59:59', t: ivl'PT-838H-59M-59S', ts: d'1999-12-31T23:59:59Z', y: 1999u16 }]"
+
+[[test.results]]
+value = "[{ d: pd'2026-10-27', dt: ts'2026-10-27T00:00:00', t: ivl'PT12H30M' }]"
+
+[[test.results]]
+value = "[{ next_day: pd'2026-10-28', next_hour: ts'2026-10-27T01:00:00', next_month: ts'2026-11-27T12:30:00' }]"
+
+[[test.results]]
+value = "[{ id: 1 }]"
+
+*/
+
+INSERT INTO temporal_my (id, d, t, dt, ts, y) VALUES (1, CAST('2026-10-27' AS DATE), CAST('12:30:00' AS TIME), CAST('2026-10-27 12:30:00' AS DATETIME), CAST('2026-10-27 12:30:00' AS DATETIME), 2026);
+
+INSERT INTO temporal_my (id, d, t, dt, ts, y) VALUES (2, CAST('1999-12-31' AS DATE), CAST('-838:59:59' AS TIME), CAST('1999-12-31 23:59:59' AS DATETIME), CAST('1999-12-31 23:59:59' AS DATETIME), 1999);
+
+SELECT d, t, dt, ts, y FROM temporal_my ORDER BY id;
+
+SELECT CAST('2026-10-27 12:30:00' AS DATE) AS d, CAST('12:30:00' AS TIME) AS t, CAST('2026-10-27' AS DATETIME) AS dt;
+
+SELECT date_add(d, INTERVAL 1 DAY) AS next_day, date_add(d, INTERVAL 1 HOUR) AS next_hour, date_add(dt, INTERVAL 1 MONTH) AS next_month FROM temporal_my WHERE id = 1;
+
+SELECT id FROM temporal_my WHERE d > '2000-01-01';

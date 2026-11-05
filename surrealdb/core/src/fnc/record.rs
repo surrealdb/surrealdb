@@ -1,29 +1,39 @@
 use anyhow::Result;
-use reblessive::tree::Stk;
 
+use crate::catalog::Error as CatalogError;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::FlowResultExt as _;
-use crate::expr::paths::ID;
+use crate::exe::FlowResultExt as _;
 use crate::val::{RecordId, Value};
 
 pub async fn exists(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
-	(arg,): (RecordId,),
+	(ctx, opt, doc): (&FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(rid,): (RecordId,),
 ) -> Result<Value> {
+	if let crate::val::RecordIdKey::Object(key) = &rid.key
+		&& let Some(id) = key.get("id")
+	{
+		return Ok(Value::Bool(!id.is_none()));
+	}
 	if let Some(opt) = opt {
-		let v = match Value::RecordId(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()
-		{
-			Ok(v) => v,
+		// A record exists for the caller when a read of it by id finds
+		// one under the caller's permissions, so a record the caller may
+		// not select does not exist for it. No computed field is derived.
+		let exec = crate::exec::entry::frame(ctx, opt, doc).await;
+		let exec_ctx = exec.dive()?;
+		let found = crate::exec::operators::fetch::record_exists(&exec_ctx, &rid, opt.perms)
+			.await
+			.map(Value::Bool)
+			.catch_return();
+		match found {
+			Ok(found) => Ok(found),
 			// An undefined table means the record cannot exist.
-			Err(e) if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) => {
-				return Ok(Value::Bool(false));
+			Err(e) if matches!(e.downcast_ref(), Some(CatalogError::TbNotFound { .. })) => {
+				Ok(Value::Bool(false))
 			}
-			Err(e) => return Err(e),
-		};
-		Ok(Value::Bool(!v.is_none()))
+			Err(e) => Err(e),
+		}
 	} else {
 		Ok(Value::None)
 	}
@@ -39,14 +49,12 @@ pub fn tb((arg,): (RecordId,)) -> Result<Value> {
 
 pub mod is {
 	use anyhow::Result;
-	use reblessive::tree::Stk;
 
 	use crate::catalog::providers::TableProvider;
 	use crate::ctx::FrozenContext;
 	use crate::dbs::Options;
 	use crate::doc::CursorDoc;
-	use crate::err::Error;
-	use crate::expr::Base;
+	use crate::expr::{Base, Error};
 	use crate::iam::{Action, ResourceKind};
 	use crate::val::value::Cast;
 	use crate::val::{RecordId, Value};
@@ -64,7 +72,7 @@ pub mod is {
 	///
 	/// Returns `true` if the record is an edge, `false` otherwise
 	pub async fn edge(
-		(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+		(ctx, opt, doc): (&FrozenContext, Option<&Options>, Option<&CursorDoc>),
 		(arg,): (Value,),
 	) -> Result<Value> {
 		match opt {

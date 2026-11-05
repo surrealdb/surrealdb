@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/order_by_field_select_perm_leak_import.surql"]
 auth = { namespace = "test", database = "test", access = "test", rid = "users:attacker" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "A record user with table SELECT but a restrictive field-level SELECT permission must not recover the ordering of the hidden field via ORDER BY when an index covers it. The field value is correctly nulled; the row order must NOT follow the hidden values (it must stay in record-id order), otherwise the index walk leaks a value-ordering oracle across other users' records."

@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::syn;
-use crate::syn::parser::ParserSettings;
+use crate::syn::ParserSettings;
 use crate::types::{PublicArray, PublicNumber, PublicObject, PublicValue};
 
 pub fn encode(value: PublicValue) -> anyhow::Result<Vec<u8>> {
@@ -25,8 +24,24 @@ pub fn decode(value: &[u8], limit: usize) -> anyhow::Result<PublicValue> {
 		..Default::default()
 	};
 
-	syn::parse_with_settings(value, settings, async |parser, stk| parser.parse_value(stk).await)
+	let value = std::str::from_utf8(value).map_err(|err| anyhow::anyhow!(err.to_string()))?;
+	surrealdb_expr::parser::value_with_settings(value, settings)
 		.map_err(|err| anyhow::anyhow!(err.to_string()))
+}
+
+/// The `id` of a request envelope whose decoding failed, so that the failure
+/// can be answered to the call that caused it. `None` when the bytes are not a
+/// JSON object or carry no usable `id`.
+pub fn request_id(value: &[u8]) -> Option<PublicValue> {
+	let serde_json::Value::Object(mut envelope) = serde_json::from_slice(value).ok()? else {
+		return None;
+	};
+	let id = json_to_value(envelope.remove("id")?);
+	if matches!(id, PublicValue::Null | PublicValue::Number(_) | PublicValue::String(_)) {
+		Some(id)
+	} else {
+		None
+	}
 }
 
 /// Converts a `serde_json::Value` into a `PublicValue`. Uses an RFC 8259

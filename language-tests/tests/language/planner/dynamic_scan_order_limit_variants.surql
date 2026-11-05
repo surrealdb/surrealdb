@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "DynamicScan (type::table) handles ORDER BY + LIMIT correctly for various orderings"

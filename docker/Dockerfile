@@ -3,7 +3,7 @@
 # This stage is used to build the SurrealDB linux binary
 ###
 
-FROM docker.io/rockylinux/rockylinux:9@sha256:53f4c6dcb34e1403bd93207351f0af9a593610faeb7165cb8a037346765199b0 AS builder
+FROM docker.io/rockylinux/rockylinux:9@sha256:8101994123cf3d0a8fee517bee7f39e555c7d92bd2d9eb3303cc988a0eeed00f AS builder
 
 RUN dnf install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11 openssl-devel \
 	&& dnf clean all
@@ -12,7 +12,7 @@ ENV OPENSSL_NO_VENDOR=1
 
 # Install rust
 ARG RUST_VERSION=1.95.0
-ARG RUSTUP_SHA256=6c30b75a75b28a96fd913a037c8581b580080b6ee9b8169a3c0feb1af7fe8caf
+ARG RUSTUP_SHA256=9502b514362a21096210d498f143b8cdacda365d3dfcf45e8f5541e089ccafc0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh \
     && echo "${RUSTUP_SHA256}  /tmp/rustup.sh" | sha256sum -c - \
     && bash /tmp/rustup.sh -y --default-toolchain ${RUST_VERSION}
@@ -47,7 +47,7 @@ RUN apk add --no-cache tzdata
 #
 # Development image (built on the CI environment)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:9f2379c134b72a7fdd73694db2adec6d524a35b19bc346507e9e4685abeff459 AS dev-ci
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:0802cb09843f198ecf859a0b37272a2a44ecb11b632279346dce4fc54418a099 AS dev-ci
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -85,7 +85,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built on the CI environment)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:0dc86136587f0ac15d61d307dcd8193e4a9880d26d2f2659b9e2b142640eecc0 AS prod-ci
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:3f1283dc2a6a48c25cd2e1c7730a871b19b721975240e108e0d6a73b555a3a20 AS prod-ci
 
 COPY --from=dev-ci /surreal /surreal
 
@@ -93,9 +93,11 @@ COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
 COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
-COPY --from=dev-ci /data /data
+# Chainguard's `nonroot` is uid/gid 65532. COPY creates the destination directory as
+# root, so the owner is set explicitly or the volume root is unwritable by the runtime user.
+COPY --from=dev-ci --chown=65532:65532 /data /data
 
-COPY --from=dev-ci /logs /logs
+COPY --from=dev-ci --chown=65532:65532 /logs /logs
 
 USER nonroot
 
@@ -111,7 +113,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Development image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:9f2379c134b72a7fdd73694db2adec6d524a35b19bc346507e9e4685abeff459 AS dev
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:0802cb09843f198ecf859a0b37272a2a44ecb11b632279346dce4fc54418a099 AS dev
 
 ARG SURREALDB_BINARY=target/release/surreal
 
@@ -146,7 +148,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:0dc86136587f0ac15d61d307dcd8193e4a9880d26d2f2659b9e2b142640eecc0 AS prod
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:3f1283dc2a6a48c25cd2e1c7730a871b19b721975240e108e0d6a73b555a3a20 AS prod
 
 COPY --from=dev /surreal /surreal
 
@@ -154,9 +156,11 @@ COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
 COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
-COPY --from=dev /data /data
+# Chainguard's `nonroot` is uid/gid 65532. COPY creates the destination directory as
+# root, so the owner is set explicitly or the volume root is unwritable by the runtime user.
+COPY --from=dev --chown=65532:65532 /data /data
 
-COPY --from=dev /logs /logs
+COPY --from=dev --chown=65532:65532 /logs /logs
 
 USER nonroot
 

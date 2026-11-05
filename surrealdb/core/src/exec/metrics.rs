@@ -5,8 +5,7 @@
 //! [`monitor_stream`] function wraps a [`ValueBatchStream`] so that every
 //! yielded batch automatically updates the metrics and emits a tracing span.
 //!
-//! This replaces the former `InstrumentedStream` / `instrument_stream` pair
-//! with a single wrapper that handles both tracing and metrics collection.
+//! The same wrapper handles both tracing and metrics collection.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -68,6 +67,48 @@ pub(crate) struct OperatorMetrics {
 	/// Like `skipped_rows`, the scan accumulates per cursor batch and flushes
 	/// via [`OperatorMetrics::add_edges_scanned`].
 	edges_scanned: AtomicU64,
+	/// Graph adjacency entries served from packed block chunks by the merged
+	/// adjacency reader, and entries served from per-edge pointer keys. The
+	/// two split `edges_scanned` by storage tier, making the fold's effect
+	/// observable: a fully folded scope scans blocks only. Accumulated per
+	/// cursor and flushed via [`OperatorMetrics::add_block_hits`] /
+	/// [`OperatorMetrics::add_delta_hits`].
+	block_hits: AtomicU64,
+	delta_hits: AtomicU64,
+	/// Inline sidecar cache lookups by a graph or reference scan: a hit is a
+	/// present, live cache serving a `(source, direction)` without opening a
+	/// cursor; a miss is an eligible lookup that found the key absent or
+	/// spilled and fell back to the scan. Accumulated per source and flushed
+	/// via [`OperatorMetrics::add_cache_hits`] /
+	/// [`OperatorMetrics::add_cache_misses`].
+	cache_hits: AtomicU64,
+	cache_misses: AtomicU64,
+	/// Inline-payload predicate evaluations by a graph scan (truthy or
+	/// falsy — the edges served without fetching their records), and edges
+	/// whose payload was unusable and fell back to the record path.
+	props_evals: AtomicU64,
+	props_fallbacks: AtomicU64,
+	/// Candidate records fetched for per-candidate evaluation *inside* an ANN
+	/// search (the truthy-document filters' record fetch + permission gate +
+	/// cond evaluation), one per unique candidate evaluated. This counts
+	/// evaluations, not KV reads: the underlying record read may be served
+	/// from the transaction cache (the pendings scan and the neighbourhood
+	/// prefetch batch-warm it), and a candidate is counted even if its fetch
+	/// subsequently errors. For index-covered predicates the KNN prefilter keeps this at
+	/// zero, and EXPLAIN ANALYZE renders it so that this is visible.
+	/// Deliberately excludes the exact tier's bounded
+	/// resolve-stage fetches, which happen outside any traversal.
+	records_fetched: AtomicU64,
+	/// Whether a bitmap branch declined to produce its bitmap (budget
+	/// overflow, a strict-mode propagation, or a permission or legacy-format-key
+	/// gate) and was dropped from its parent's composition. Distinguishes a
+	/// dropped branch from a genuinely empty candidate set in EXPLAIN
+	/// ANALYZE, where both otherwise render `rows: 0`. Discloses only that
+	/// the branch declined, never any cardinality.
+	branch_dropped: AtomicBool,
+	/// What the morsels of the statement's scans did, recorded only where the statement's
+	/// configuration asks for it to be rendered (`morsel_explain_analyze`).
+	morsels: std::sync::Mutex<Option<crate::exec::vm::MorselMetrics>>,
 }
 
 impl OperatorMetrics {
@@ -84,6 +125,15 @@ impl OperatorMetrics {
 			elapsed_ns: AtomicU64::new(0),
 			skipped_rows: AtomicU64::new(0),
 			edges_scanned: AtomicU64::new(0),
+			block_hits: AtomicU64::new(0),
+			delta_hits: AtomicU64::new(0),
+			cache_hits: AtomicU64::new(0),
+			cache_misses: AtomicU64::new(0),
+			props_evals: AtomicU64::new(0),
+			props_fallbacks: AtomicU64::new(0),
+			records_fetched: AtomicU64::new(0),
+			branch_dropped: AtomicBool::new(false),
+			morsels: std::sync::Mutex::new(None),
 		}
 	}
 
@@ -94,7 +144,7 @@ impl OperatorMetrics {
 
 	/// Enable metrics collection on this instance.
 	///
-	/// Called by `AnalyzePlan` to activate recording before execution.
+	/// Called by `analysed_run` to activate recording before the statement runs.
 	/// After this call, [`monitor_stream`] will wrap streams with the
 	/// full timing/counting/tracing instrumentation.
 	pub(crate) fn enable(&self) {
@@ -126,6 +176,13 @@ impl OperatorMetrics {
 		self.skipped_rows.fetch_add(n, Ordering::Relaxed);
 	}
 
+	/// Record `n` output rows directly, for operators that produce their
+	/// result outside a monitored stream (the bitmap candidate nodes, whose
+	/// "rows" are candidate doc-IDs computed during the parent's execution).
+	pub(crate) fn add_output_rows(&self, n: u64) {
+		self.output_rows.fetch_add(n, Ordering::Relaxed);
+	}
+
 	/// Total graph adjacency-key entries scanned so far.
 	pub(crate) fn edges_scanned(&self) -> u64 {
 		self.edges_scanned.load(Ordering::Relaxed)
@@ -136,8 +193,99 @@ impl OperatorMetrics {
 		self.edges_scanned.fetch_add(n, Ordering::Relaxed);
 	}
 
+	/// Graph adjacency entries served from packed blocks so far.
+	pub(crate) fn block_hits(&self) -> u64 {
+		self.block_hits.load(Ordering::Relaxed)
+	}
+
+	/// Graph adjacency entries served from per-edge pointer keys so far.
+	pub(crate) fn delta_hits(&self) -> u64 {
+		self.delta_hits.load(Ordering::Relaxed)
+	}
+
+	/// Record `n` adjacency entries served from per-edge pointer keys.
+	pub(crate) fn add_delta_hits(&self, n: u64) {
+		self.delta_hits.fetch_add(n, Ordering::Relaxed);
+	}
+
+	/// Inline-cache lookups served without a cursor so far.
+	pub(crate) fn cache_hits(&self) -> u64 {
+		self.cache_hits.load(Ordering::Relaxed)
+	}
+
+	/// Record `n` inline-cache lookups served without a cursor.
+	pub(crate) fn add_cache_hits(&self, n: u64) {
+		self.cache_hits.fetch_add(n, Ordering::Relaxed);
+	}
+
+	/// Eligible inline-cache lookups that fell back to the scan so far.
+	pub(crate) fn cache_misses(&self) -> u64 {
+		self.cache_misses.load(Ordering::Relaxed)
+	}
+
+	/// Record `n` eligible inline-cache lookups that fell back to the scan.
+	pub(crate) fn add_cache_misses(&self, n: u64) {
+		self.cache_misses.fetch_add(n, Ordering::Relaxed);
+	}
+
+	/// Inline-payload predicate evaluations so far.
+	pub(crate) fn props_evals(&self) -> u64 {
+		self.props_evals.load(Ordering::Relaxed)
+	}
+
+	/// Record `n` inline-payload predicate evaluations.
+	pub(crate) fn add_props_evals(&self, n: u64) {
+		self.props_evals.fetch_add(n, Ordering::Relaxed);
+	}
+
+	/// Edges whose payload fell back to the record path so far.
+	pub(crate) fn props_fallbacks(&self) -> u64 {
+		self.props_fallbacks.load(Ordering::Relaxed)
+	}
+
+	/// Record `n` edges whose payload fell back to the record path.
+	pub(crate) fn add_props_fallbacks(&self, n: u64) {
+		self.props_fallbacks.fetch_add(n, Ordering::Relaxed);
+	}
+
+	/// Candidate records fetched for in-traversal evaluation so far.
+	pub(crate) fn records_fetched(&self) -> u64 {
+		self.records_fetched.load(Ordering::Relaxed)
+	}
+
+	/// Record `n` candidate records fetched for in-traversal evaluation by an
+	/// ANN search's truthy-document filter.
+	pub(crate) fn add_records_fetched(&self, n: u64) {
+		self.records_fetched.fetch_add(n, Ordering::Relaxed);
+	}
+
+	/// Whether this operator's bitmap branch declined and was dropped.
+	pub(crate) fn branch_dropped(&self) -> bool {
+		self.branch_dropped.load(Ordering::Relaxed)
+	}
+
+	/// Record that this operator's bitmap branch declined to produce its
+	/// bitmap and was dropped from its parent's composition.
+	pub(crate) fn set_branch_dropped(&self) {
+		self.branch_dropped.store(true, Ordering::Relaxed);
+	}
+
+	/// Add what the morsels of one scan did.
+	pub(crate) fn add_morsels(&self, scan: &crate::exec::vm::MorselMetrics) {
+		self.morsels
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.get_or_insert_with(Default::default)
+			.absorb(scan);
+	}
+
+	/// What the morsels of the statement's scans did, when it was recorded.
+	pub(crate) fn morsels(&self) -> Option<crate::exec::vm::MorselMetrics> {
+		self.morsels.lock().unwrap_or_else(|e| e.into_inner()).clone()
+	}
+
 	/// Record one batch of `rows` values, adding `delta_ns` to elapsed time.
-	fn record_batch(&self, rows: u64, delta_ns: u64) {
+	pub(crate) fn record_batch(&self, rows: u64, delta_ns: u64) {
 		self.output_rows.fetch_add(rows, Ordering::Relaxed);
 		self.output_batches.fetch_add(1, Ordering::Relaxed);
 		self.elapsed_ns.fetch_add(delta_ns, Ordering::Relaxed);
@@ -145,8 +293,17 @@ impl OperatorMetrics {
 
 	/// Record elapsed time without a batch (e.g. when `poll_next` returns
 	/// `Pending` or `None`).
-	fn record_elapsed(&self, delta_ns: u64) {
+	pub(crate) fn record_elapsed(&self, delta_ns: u64) {
 		self.elapsed_ns.fetch_add(delta_ns, Ordering::Relaxed);
+	}
+}
+
+/// Lets an ANN truthy-document filter count its in-traversal candidate
+/// evaluations against the surrounding scan operator's metrics, without the
+/// index layer naming this one.
+impl crate::idx::trees::gate::CandidateFetchCounter for OperatorMetrics {
+	fn record_fetch(&self) {
+		self.add_records_fetched(1);
 	}
 }
 
@@ -161,8 +318,7 @@ impl OperatorMetrics {
 ///   2. Wall-clock time is measured around the inner `poll_next`.
 ///   3. If a batch is yielded, the metrics are updated with the row count and elapsed time.
 ///
-/// This replaces the former `InstrumentedStream` with a single wrapper that
-/// handles both tracing and metrics collection.
+/// Tracing and metrics collection are both handled by this one wrapper.
 struct MetricsStream {
 	inner: ValueBatchStream,
 	metrics: Arc<OperatorMetrics>,
@@ -189,7 +345,7 @@ impl Stream for MetricsStream {
 
 		match &result {
 			Poll::Ready(Some(Ok(batch))) => {
-				let rows = batch.values.len() as u64;
+				let rows = batch.len() as u64;
 				span.record("size", rows);
 				this.metrics.record_batch(rows, delta);
 				this.batch_idx += 1;

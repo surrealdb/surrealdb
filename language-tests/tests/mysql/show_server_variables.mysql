@@ -1,0 +1,77 @@
+/**
+[env]
+namespace = true
+database = "shop"
+
+[test]
+reason = "SHOW VARIABLES, SHOW ENGINES, SHOW COLLATION and SHOW CHARACTER SET answer with the server's own settings, a switch is listed as ON or OFF, the query cache and tx_isolation that MySQL 8.0.3 removed are not listed, a LIKE pattern that ends in a backslash matches a name that ends in one, and statements without rows answer with none"
+
+[[test.results]]
+value = "[{ Value: '8.0.35-SurrealDB', Variable_name: 'version' }, { Value: 'SurrealDB', Variable_name: 'version_comment' }]"
+
+[[test.results]]
+value = "[{ Value: 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION', Variable_name: 'sql_mode' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ Value: 'ON', Variable_name: 'autocommit' }]"
+
+[[test.results]]
+value = "[{ Value: 'OFF', Variable_name: 'sql_auto_is_null' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ Comment: 'Supports transactions, row-level locking, and foreign keys', Engine: 'InnoDB', Savepoints: 'YES', Support: 'DEFAULT', Transactions: 'YES', XA: 'NO' }]"
+
+[[test.results]]
+value = "[{ Charset: 'utf8mb4', Collation: 'utf8mb4_0900_ai_ci', Compiled: 'Yes', Default: 'Yes', Id: 255, Pad_attribute: 'NO PAD', Sortlen: 0 }]"
+
+[[test.results]]
+value = """[{ Charset: 'utf8mb4', "Default collation": 'utf8mb4_0900_ai_ci', Description: 'UTF-8 Unicode', Maxlen: 4 }]"""
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+*/
+
+SHOW VARIABLES LIKE 'version%';
+SHOW VARIABLES LIKE 'SQL_MODE';
+SHOW VARIABLES LIKE 'no_such_variable';
+SHOW VARIABLES LIKE 'autocommit';
+SHOW VARIABLES LIKE 'sql_auto_is_null';
+SHOW VARIABLES LIKE 'tx_isolation';
+SHOW VARIABLES LIKE 'query_cache%';
+SHOW ENGINES;
+SHOW COLLATION;
+SHOW CHARACTER SET;
+SHOW STATUS;
+SHOW WARNINGS;
+SHOW ERRORS;
+SHOW PROCESSLIST;
+SHOW VARIABLES LIKE 'a#&-~[b](c){d}|e^f$g+h?i*j.k';
+SHOW VARIABLES LIKE 'sql_mode\\';
+SHOW CHARACTER SET LIKE 'utf8mb4\\';

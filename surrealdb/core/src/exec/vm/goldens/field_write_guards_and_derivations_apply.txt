@@ -1,0 +1,385 @@
+### owner: UPDATE g:1 SET up = 9
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 9 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 9 }
+### owner: UPDATE g:1 SET up = 2
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 2 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 2 }
+### owner: UPDATE g SET up += 1
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 6 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 6 }
+### owner: CREATE g:2 SET n = 2, mk = 'ok'
+{ id: g:2, mk: 'ok', n: 2, reads: 5, twice: 4 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:2, mk: 'ok', n: 2, reads: 5, twice: 4 }
+### owner: CREATE g:3 SET n = 3, mk = 'no'
+{ id: g:3, mk: 'no', n: 3, reads: 7, twice: 6 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:3, mk: 'no', n: 3, reads: 7, twice: 6 }
+### owner: UPDATE g:1 SET mk = 'changed'
+{ id: g:1, mk: 'changed', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'changed', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### owner: UPDATE g:1 SET own = 'x'
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'x', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'x', reads: 3, twice: 2, up: 5 }
+### owner: UPDATE g:1 SET n = 2, own = 'y'
+{ id: g:1, mk: 'ok', n: 2, opt: { k: 1 }, own: 'y', reads: 5, twice: 4, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 2, opt: { k: 1 }, own: 'y', reads: 5, twice: 4, up: 5 }
+### owner: UPDATE g:1 MERGE { opt: { k: 13 } }
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 13 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 13 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### owner: UPDATE g:1 MERGE { opt: { k: 14 } }
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 14 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 14 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### owner: UPDATE g:1 SET opt = NONE
+{ id: g:1, mk: 'ok', n: 1, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, own: 'o', reads: 3, twice: 2, up: 5 }
+### owner: CREATE g:4 SET n = 3, asks = 5
+{ asks: 5, id: g:4, n: 3, reads: 7, twice: 6 }
+records:
+g: { asks: 5, id: g:4, n: 3, reads: 7, twice: 6 }
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### owner: CREATE g:5 SET n = 3, asks = 1, opt = { k: 13 }
+{ asks: 1, id: g:5, n: 3, opt: { k: 13 }, reads: 7, twice: 6 }
+records:
+g: { asks: 1, id: g:5, n: 3, opt: { k: 13 }, reads: 7, twice: 6 }
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### owner: UPDATE g:1 SET n = 4
+{ id: g:1, mk: 'ok', n: 4, opt: { k: 1 }, own: 'o', reads: 9, twice: 8, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 4, opt: { k: 1 }, own: 'o', reads: 9, twice: 8, up: 5 }
+### owner: INSERT INTO g { id: g:7, n: 7, mk: 'no' }
+{ id: g:7, mk: 'no', n: 7, reads: 15, twice: 14 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:7, mk: 'no', n: 7, reads: 15, twice: 14 }
+### owner: UPSERT g:1 SET up = 1, mk = 'ok'
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### owner: CREATE cyc:1 SET a = 1
+error: Cannot write to table 'cyc': the DEFAULT, VALUE, ASSERT or COMPUTED clauses of the fields a, b depend on each other in a cycle
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### owner: UPDATE cyc SET b = 2
+(no rows)
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### record user: UPDATE g:1 SET up = 9
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 9 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 9 }
+### record user: UPDATE g:1 SET up = 2
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### record user: UPDATE g SET up += 1
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 6 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 6 }
+### record user: CREATE g:2 SET n = 2, mk = 'ok'
+{ id: g:2, mk: 'ok', n: 2, reads: 5, twice: 4 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:2, mk: 'ok', n: 2, reads: 5, twice: 4 }
+### record user: CREATE g:3 SET n = 3, mk = 'no'
+{ id: g:3, n: 3, reads: 7, twice: 6 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:3, n: 3, reads: 7, twice: 6 }
+### record user: UPDATE g:1 SET mk = 'changed'
+{ id: g:1, mk: 'changed', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'changed', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### record user: UPDATE g:1 SET own = 'x'
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### record user: UPDATE g:1 SET n = 2, own = 'y'
+{ id: g:1, mk: 'ok', n: 2, opt: { k: 1 }, own: 'y', reads: 5, twice: 4, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 2, opt: { k: 1 }, own: 'y', reads: 5, twice: 4, up: 5 }
+### record user: UPDATE g:1 MERGE { opt: { k: 13 } }
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### record user: UPDATE g:1 MERGE { opt: { k: 14 } }
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 14 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 14 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### record user: UPDATE g:1 SET opt = NONE
+{ id: g:1, mk: 'ok', n: 1, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, own: 'o', reads: 3, twice: 2, up: 5 }
+### record user: CREATE g:4 SET n = 3, asks = 5
+{ asks: 5, id: g:4, n: 3, reads: 7, twice: 6 }
+records:
+g: { asks: 5, id: g:4, n: 3, reads: 7, twice: 6 }
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### record user: CREATE g:5 SET n = 3, asks = 1, opt = { k: 13 }
+{ asks: 1, id: g:5, n: 3, opt: {  }, reads: 7, twice: 6 }
+records:
+g: { asks: 1, id: g:5, n: 3, opt: {  }, reads: 7, twice: 6 }
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### record user: UPDATE g:1 SET n = 4
+{ id: g:1, mk: 'ok', n: 4, opt: { k: 1 }, own: 'o', reads: 9, twice: 8, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 4, opt: { k: 1 }, own: 'o', reads: 9, twice: 8, up: 5 }
+### record user: INSERT INTO g { id: g:7, n: 7, mk: 'no' }
+{ id: g:7, n: 7, reads: 15, twice: 14 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:7, n: 7, reads: 15, twice: 14 }
+### record user: UPSERT g:1 SET up = 1, mk = 'ok'
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### record user: CREATE cyc:1 SET a = 1
+error: Cannot write to table 'cyc': the DEFAULT, VALUE, ASSERT or COMPUTED clauses of the fields a, b depend on each other in a cycle
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### record user: UPDATE cyc SET b = 2
+(no rows)
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### other record user: UPDATE g:1 SET up = 9
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 9 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 9 }
+### other record user: UPDATE g:1 SET up = 2
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### other record user: UPDATE g SET up += 1
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 6 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 6 }
+### other record user: CREATE g:2 SET n = 2, mk = 'ok'
+{ id: g:2, mk: 'ok', n: 2, reads: 5, twice: 4 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:2, mk: 'ok', n: 2, reads: 5, twice: 4 }
+### other record user: CREATE g:3 SET n = 3, mk = 'no'
+{ id: g:3, n: 3, reads: 7, twice: 6 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:3, n: 3, reads: 7, twice: 6 }
+### other record user: UPDATE g:1 SET mk = 'changed'
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### other record user: UPDATE g:1 SET own = 'x'
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### other record user: UPDATE g:1 SET n = 2, own = 'y'
+{ id: g:1, mk: 'ok', n: 2, opt: { k: 1 }, own: 'y', reads: 5, twice: 4, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 2, opt: { k: 1 }, own: 'y', reads: 5, twice: 4, up: 5 }
+### other record user: UPDATE g:1 MERGE { opt: { k: 13 } }
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### other record user: UPDATE g:1 MERGE { opt: { k: 14 } }
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 14 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 14 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### other record user: UPDATE g:1 SET opt = NONE
+{ id: g:1, mk: 'ok', n: 1, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, own: 'o', reads: 3, twice: 2, up: 5 }
+### other record user: CREATE g:4 SET n = 3, asks = 5
+{ asks: 5, id: g:4, n: 3, reads: 7, twice: 6 }
+records:
+g: { asks: 5, id: g:4, n: 3, reads: 7, twice: 6 }
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### other record user: CREATE g:5 SET n = 3, asks = 1, opt = { k: 13 }
+{ asks: 1, id: g:5, n: 3, opt: {  }, reads: 7, twice: 6 }
+records:
+g: { asks: 1, id: g:5, n: 3, opt: {  }, reads: 7, twice: 6 }
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### other record user: UPDATE g:1 SET n = 4
+{ id: g:1, mk: 'ok', n: 4, opt: { k: 1 }, own: 'o', reads: 9, twice: 8, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 4, opt: { k: 1 }, own: 'o', reads: 9, twice: 8, up: 5 }
+### other record user: INSERT INTO g { id: g:7, n: 7, mk: 'no' }
+{ id: g:7, n: 7, reads: 15, twice: 14 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:7, n: 7, reads: 15, twice: 14 }
+### other record user: UPSERT g:1 SET up = 1, mk = 'ok'
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### other record user: CREATE cyc:1 SET a = 1
+error: Cannot write to table 'cyc': the DEFAULT, VALUE, ASSERT or COMPUTED clauses of the fields a, b depend on each other in a cycle
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### other record user: UPDATE cyc SET b = 2
+(no rows)
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database editor: UPDATE g:1 SET up = 9
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 9 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 9 }
+### database editor: UPDATE g:1 SET up = 2
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 2 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 2 }
+### database editor: UPDATE g SET up += 1
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 6 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 6 }
+### database editor: CREATE g:2 SET n = 2, mk = 'ok'
+{ id: g:2, mk: 'ok', n: 2, reads: 5, twice: 4 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:2, mk: 'ok', n: 2, reads: 5, twice: 4 }
+### database editor: CREATE g:3 SET n = 3, mk = 'no'
+{ id: g:3, mk: 'no', n: 3, reads: 7, twice: 6 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:3, mk: 'no', n: 3, reads: 7, twice: 6 }
+### database editor: UPDATE g:1 SET mk = 'changed'
+{ id: g:1, mk: 'changed', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'changed', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database editor: UPDATE g:1 SET own = 'x'
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'x', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'x', reads: 3, twice: 2, up: 5 }
+### database editor: UPDATE g:1 SET n = 2, own = 'y'
+{ id: g:1, mk: 'ok', n: 2, opt: { k: 1 }, own: 'y', reads: 5, twice: 4, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 2, opt: { k: 1 }, own: 'y', reads: 5, twice: 4, up: 5 }
+### database editor: UPDATE g:1 MERGE { opt: { k: 13 } }
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 13 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 13 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database editor: UPDATE g:1 MERGE { opt: { k: 14 } }
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 14 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 14 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database editor: UPDATE g:1 SET opt = NONE
+{ id: g:1, mk: 'ok', n: 1, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, own: 'o', reads: 3, twice: 2, up: 5 }
+### database editor: CREATE g:4 SET n = 3, asks = 5
+{ asks: 5, id: g:4, n: 3, reads: 7, twice: 6 }
+records:
+g: { asks: 5, id: g:4, n: 3, reads: 7, twice: 6 }
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database editor: CREATE g:5 SET n = 3, asks = 1, opt = { k: 13 }
+{ asks: 1, id: g:5, n: 3, opt: { k: 13 }, reads: 7, twice: 6 }
+records:
+g: { asks: 1, id: g:5, n: 3, opt: { k: 13 }, reads: 7, twice: 6 }
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database editor: UPDATE g:1 SET n = 4
+{ id: g:1, mk: 'ok', n: 4, opt: { k: 1 }, own: 'o', reads: 9, twice: 8, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 4, opt: { k: 1 }, own: 'o', reads: 9, twice: 8, up: 5 }
+### database editor: INSERT INTO g { id: g:7, n: 7, mk: 'no' }
+{ id: g:7, mk: 'no', n: 7, reads: 15, twice: 14 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:7, mk: 'no', n: 7, reads: 15, twice: 14 }
+### database editor: UPSERT g:1 SET up = 1, mk = 'ok'
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database editor: CREATE cyc:1 SET a = 1
+error: Cannot write to table 'cyc': the DEFAULT, VALUE, ASSERT or COMPUTED clauses of the fields a, b depend on each other in a cycle
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database editor: UPDATE cyc SET b = 2
+(no rows)
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database viewer: UPDATE g:1 SET up = 9
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 9 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 9 }
+### database viewer: UPDATE g:1 SET up = 2
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database viewer: UPDATE g SET up += 1
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 6 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 6 }
+### database viewer: CREATE g:2 SET n = 2, mk = 'ok'
+{ id: g:2, mk: 'ok', n: 2, reads: 5, twice: 4 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:2, mk: 'ok', n: 2, reads: 5, twice: 4 }
+### database viewer: CREATE g:3 SET n = 3, mk = 'no'
+{ id: g:3, n: 3, reads: 7, twice: 6 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:3, n: 3, reads: 7, twice: 6 }
+### database viewer: UPDATE g:1 SET mk = 'changed'
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database viewer: UPDATE g:1 SET own = 'x'
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database viewer: UPDATE g:1 SET n = 2, own = 'y'
+{ id: g:1, mk: 'ok', n: 2, opt: { k: 1 }, own: 'y', reads: 5, twice: 4, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 2, opt: { k: 1 }, own: 'y', reads: 5, twice: 4, up: 5 }
+### database viewer: UPDATE g:1 MERGE { opt: { k: 13 } }
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database viewer: UPDATE g:1 MERGE { opt: { k: 14 } }
+{ id: g:1, mk: 'ok', n: 1, opt: { k: 14 }, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 14 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database viewer: UPDATE g:1 SET opt = NONE
+{ id: g:1, mk: 'ok', n: 1, own: 'o', reads: 3, twice: 2, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, own: 'o', reads: 3, twice: 2, up: 5 }
+### database viewer: CREATE g:4 SET n = 3, asks = 5
+{ asks: 5, id: g:4, n: 3, reads: 7, twice: 6 }
+records:
+g: { asks: 5, id: g:4, n: 3, reads: 7, twice: 6 }
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database viewer: CREATE g:5 SET n = 3, asks = 1, opt = { k: 13 }
+{ asks: 1, id: g:5, n: 3, opt: {  }, reads: 7, twice: 6 }
+records:
+g: { asks: 1, id: g:5, n: 3, opt: {  }, reads: 7, twice: 6 }
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database viewer: UPDATE g:1 SET n = 4
+{ id: g:1, mk: 'ok', n: 4, opt: { k: 1 }, own: 'o', reads: 9, twice: 8, up: 5 }
+records:
+g: { id: g:1, mk: 'ok', n: 4, opt: { k: 1 }, own: 'o', reads: 9, twice: 8, up: 5 }
+### database viewer: INSERT INTO g { id: g:7, n: 7, mk: 'no' }
+{ id: g:7, n: 7, reads: 15, twice: 14 }
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+g: { id: g:7, n: 7, reads: 15, twice: 14 }
+### database viewer: UPSERT g:1 SET up = 1, mk = 'ok'
+error: Cannot perform multiplication with 'none' and 'int'
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database viewer: CREATE cyc:1 SET a = 1
+error: Cannot write to table 'cyc': the DEFAULT, VALUE, ASSERT or COMPUTED clauses of the fields a, b depend on each other in a cycle
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }
+### database viewer: UPDATE cyc SET b = 2
+(no rows)
+records:
+g: { id: g:1, mk: 'ok', n: 1, opt: { k: 1 }, own: 'o', reads: 3, twice: 2, up: 5 }

@@ -1,0 +1,50 @@
+### owner: IF true { SELECT * FROM doc ORDER BY id }
+[{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }, { echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }]
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: { FOR $i IN 1..3 { IF $i = 2 { UPDATE doc SET n += 1 RETURN AFTER } } }
+NONE
+records:
+{ echoed: 's1', id: doc:1, n: 2, open: 1, secret: 's1', twice: 4, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+### owner: { IF true { LET $d = SELECT secret, echoed FROM doc ORDER BY id; RETURN $d } }
+[{ echoed: 's1', secret: 's1' }, { echoed: 's2', secret: 's2' }]
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: { IF true { DEFINE FIELD extra ON doc VALUE 1 }; RETURN SELECT * FROM doc ORDER BY id }
+[{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }, { echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }]
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### owner: { IF (SELECT VALUE secret FROM ONLY doc:1) = 's1' { RETURN 'seen' }; 'hidden' }
+'seen'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: IF true { SELECT * FROM doc ORDER BY id }
+[{ id: doc:1, n: 1, open: 1, twice: 2 }, { echoed: NONE, id: doc:2, n: 2, open: 2, twice: 4, veiled: 'v2' }]
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: { FOR $i IN 1..3 { IF $i = 2 { UPDATE doc SET n += 1 RETURN AFTER } } }
+NONE
+records:
+{ echoed: 's1', id: doc:1, n: 2, open: 1, secret: 's1', twice: 4, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 3, open: 2, secret: 's2', twice: 6, veiled: 'v2' }
+### record user: { IF true { LET $d = SELECT secret, echoed FROM doc ORDER BY id; RETURN $d } }
+[{ echoed: NONE, secret: NONE }, { echoed: NONE, secret: NONE }]
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: { IF true { DEFINE FIELD extra ON doc VALUE 1 }; RETURN SELECT * FROM doc ORDER BY id }
+error: IAM error: Not enough permissions to perform this action: Not enough permissions to perform this action
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }
+### record user: { IF (SELECT VALUE secret FROM ONLY doc:1) = 's1' { RETURN 'seen' }; 'hidden' }
+'hidden'
+records:
+{ echoed: 's1', id: doc:1, n: 1, open: 1, secret: 's1', twice: 2, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 2, open: 2, secret: 's2', twice: 4, veiled: 'v2' }

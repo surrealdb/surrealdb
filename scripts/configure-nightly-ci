@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Configure a disposable CI checkout, including child Cargo processes.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+source scripts/nightly-env.sh
+: "${GITHUB_ENV:?configure-nightly-ci is only for a disposable CI checkout}"
+: "${GITHUB_OUTPUT:?configure-nightly-ci requires a GitHub Actions output file}"
+echo "threads=$SURREAL_RUSTC_THREADS" >> "$GITHUB_OUTPUT"
+printf "\n[target.'cfg(all())']\nrustflags = [\"%s\"]\n" "$SURREAL_NIGHTLY_RUSTFLAGS" >> .cargo/config.toml
+for name in RUSTUP_TOOLCHAIN SURREAL_RUSTC_THREADS SURREAL_NIGHTLY_RUSTFLAGS RUSTDOCFLAGS CARGO_UNSTABLE_RUSTDOC_MERGEABLE_INFO; do
+    echo "$name=${!name}" >> "$GITHUB_ENV"
+done
+if [[ ${CARGO_ENCODED_RUSTFLAGS+x} ]]; then
+    echo "CARGO_ENCODED_RUSTFLAGS=$CARGO_ENCODED_RUSTFLAGS" >> "$GITHUB_ENV"
+elif [[ ${RUSTFLAGS+x} ]]; then
+    echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
+fi
+rustc -Vv

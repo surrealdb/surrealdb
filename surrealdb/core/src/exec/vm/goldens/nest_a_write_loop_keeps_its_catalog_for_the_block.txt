@@ -1,0 +1,128 @@
+### FOR $i IN 0..8 { CREATE type::record('t', $i) SET n = $i } (record user: false)
+NONE
+[{ id: t:0, n: 0 }, { id: t:1, n: 1 }, { id: t:2, n: 2 }, { id: t:3, n: 3 }, { id: t:4, n: 4 }, { id: t:5, n: 5 }, { id: t:6, n: 6 }, { id: t:7, n: 7 }]
+[]
+[{ at: NONE, of: t:0 }, { at: NONE, of: t:1 }, { at: NONE, of: t:2 }, { at: NONE, of: t:3 }, { at: NONE, of: t:4 }, { at: NONE, of: t:5 }, { at: NONE, of: t:6 }, { at: NONE, of: t:7 }]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+error: The table 'fresh' does not exist
+### FOR $i IN 0..8 { CREATE type::record('t', $i) SET n = $i } (record user: true)
+NONE
+[{ id: t:0, n: 0 }, { id: t:1, n: 1 }, { id: t:2, n: 2 }, { id: t:3, n: 3 }, { id: t:4, n: 4 }, { id: t:5, n: 5 }, { id: t:6, n: 6 }, { id: t:7, n: 7 }]
+[]
+[{ at: NONE, of: t:0 }, { at: NONE, of: t:1 }, { at: NONE, of: t:2 }, { at: NONE, of: t:3 }, { at: NONE, of: t:4 }, { at: NONE, of: t:5 }, { at: NONE, of: t:6 }, { at: NONE, of: t:7 }]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+[]
+### FOR $i IN 0..8 { CREATE type::record('t', $i) SET n = $i % 3 } (record user: false)
+error: Database index `by_n` already contains 0, with record `t:0`
+[]
+[]
+[]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+error: The table 'fresh' does not exist
+### FOR $i IN 0..8 { CREATE type::record('t', $i) SET n = $i % 3 } (record user: true)
+error: Database index `by_n` already contains 0, with record `t:0`
+[]
+[]
+[]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+[]
+### FOR $i IN 0..8 { UPSERT type::record('sale', $i % 3) SET region = <string> ($i % 2), amount = $i } (record user: false)
+NONE
+[]
+[{ c: 1, high: 6, id: by_region:['0'], region: '0', total: 6f }, { c: 2, high: 7, id: by_region:['1'], region: '1', total: 12f }]
+[]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+error: The table 'fresh' does not exist
+### FOR $i IN 0..8 { UPSERT type::record('sale', $i % 3) SET region = <string> ($i % 2), amount = $i } (record user: true)
+NONE
+[]
+[{ c: 1, high: 6, id: by_region:['0'], region: '0', total: 6f }, { c: 2, high: 7, id: by_region:['1'], region: '1', total: 12f }]
+[]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+[]
+### FOR $i IN 0..6 { DELETE type::record('root', $i) } (record user: false)
+NONE
+[]
+[]
+[]
+[]
+[]
+error: The table 'fresh' does not exist
+### FOR $i IN 0..6 { DELETE type::record('root', $i) } (record user: true)
+NONE
+[]
+[]
+[]
+[]
+[]
+[]
+### FOR $i IN 0..6 { CREATE type::record('shut', $i) SET n = $i } (record user: false)
+NONE
+[]
+[]
+[]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[{ id: shut:0, n: 0 }, { id: shut:1, n: 1 }, { id: shut:2, n: 2 }, { id: shut:3, n: 3 }, { id: shut:4, n: 4 }, { id: shut:5, n: 5 }]
+error: The table 'fresh' does not exist
+### FOR $i IN 0..6 { CREATE type::record('shut', $i) SET n = $i } (record user: true)
+NONE
+[]
+[]
+[]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[{ id: shut:0, n: 0 }, { id: shut:1, n: 1 }, { id: shut:2, n: 2 }]
+[]
+### FOR $i IN 0..5 { CREATE type::record('fresh', $i) SET n = $i } (record user: false)
+NONE
+[]
+[]
+[]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+[{ id: fresh:0, n: 0 }, { id: fresh:1, n: 1 }, { id: fresh:2, n: 2 }, { id: fresh:3, n: 3 }, { id: fresh:4, n: 4 }]
+### FOR $i IN 0..5 { CREATE type::record('fresh', $i) SET n = $i } (record user: true)
+NONE
+[]
+[]
+[]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+[]
+### FOR $i IN 0..6 { CREATE type::record('t', $i) SET n = $i; DEFINE FIELD OVERWRITE m ON t VALUE $i * 10 } (record user: false)
+error: Cannot perform multiplication with 'none' and 'int'
+[]
+[]
+[]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+error: The table 'fresh' does not exist
+### FOR $i IN 0..6 { IF $i = 3 { DEFINE INDEX by_m ON t FIELDS m UNIQUE }; CREATE type::record('t', $i) SET n = $i, m = $i } (record user: false)
+NONE
+[{ id: t:0, m: 0, n: 0 }, { id: t:1, m: 1, n: 1 }, { id: t:2, m: 2, n: 2 }, { id: t:3, m: 3, n: 3 }, { id: t:4, m: 4, n: 4 }, { id: t:5, m: 5, n: 5 }]
+[]
+[{ at: NONE, of: t:0 }, { at: NONE, of: t:1 }, { at: NONE, of: t:2 }, { at: NONE, of: t:3 }, { at: NONE, of: t:4 }, { at: NONE, of: t:5 }]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+error: The table 'fresh' does not exist
+### FOR $i IN 0..6 { IF $i = 3 { DEFINE INDEX by_m ON t FIELDS m UNIQUE }; CREATE type::record('t', $i) SET n = $i, m = $i % 2 } (record user: false)
+error: Database index `by_m` already contains 1, with record `t:3`
+[]
+[]
+[]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+error: The table 'fresh' does not exist
+### FOR $i IN 0..6 { CREATE type::record('t', $i) SET n = $i; IF $i = 2 { REMOVE EVENT noted ON t } } (record user: false)
+NONE
+[{ id: t:0, n: 0 }, { id: t:1, n: 1 }, { id: t:2, n: 2 }, { id: t:3, n: 3 }, { id: t:4, n: 4 }, { id: t:5, n: 5 }]
+[]
+[{ at: NONE, of: t:0 }, { at: NONE, of: t:1 }, { at: NONE, of: t:2 }]
+[{ id: mid:0, up: root:0 }, { id: mid:1, up: root:1 }, { id: mid:2, up: root:2 }, { id: mid:3, up: root:3 }, { id: mid:4, up: root:4 }, { id: mid:5, up: root:5 }]
+[]
+error: The table 'fresh' does not exist

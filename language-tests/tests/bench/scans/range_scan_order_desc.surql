@@ -15,4 +15,4 @@ run = false
 */
 
 -- 1000 records starting at the 60th percentile of the keyspace, sorted by score.
-SELECT * FROM record:60000..61000 ORDER BY score DESC;
+SELECT * FROM record:6000..7000 ORDER BY score DESC;

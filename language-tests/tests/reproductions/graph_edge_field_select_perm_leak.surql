@@ -4,7 +4,7 @@ imports = ["reproductions/graph_edge_field_select_perm_leak_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "person:bob" }
 
 [test]
-reason = "Streaming graph/reference traversals that materialise full edge/record objects (GraphEdgeScan FullEdge, ReferenceScan FullRecord) must apply the SAME field-level SELECT permissions and read-time COMPUTED fields as a direct `SELECT *` / FETCH. Pre-fix, `resolve_record_batch` enforced only the TABLE-level permission, so a record user traversing `->(SELECT * FROM knows)` saw the restricted `secret` field (a field-permission bypass) and was missing the `label` computed field — diverging from both the legacy compute-only executor and a plain `SELECT * FROM knows`. This test runs under all planner strategies (compute-only, all-ro, best-effort-ro); pre-fix the streaming strategies leaked `secret` while compute-only did not."
+reason = "Graph/reference traversals that materialise full edge/record objects (GraphEdgeScan FullEdge, ReferenceScan FullRecord) must apply the SAME field-level SELECT permissions and read-time COMPUTED fields as a direct `SELECT *` / FETCH: a record user traversing `->(SELECT * FROM knows)` must not see the restricted `secret` field, and must see the `label` computed field."
 
 # 1. Direct SELECT on the edge table: baseline. `secret` is hidden by the
 #    field permission; `label` is computed.

@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "AS aliases must respect the idiom structure parsed by SurrealQL: `AS foo.bar` (multi-part idiom) nests output into `{ foo: { bar: _ } }`, while backtick-quoted `AS \\`foo.bar\\`` (single-part idiom with a dotted name) stays a flat key `'foo.bar'`. Both the projection (`plan_projections` / `plan_projections_fast`) and aggregation (`plan_aggregation` → `alias_output_path`) planner strategies must agree."
+reason = "AS aliases must respect the idiom structure parsed by SurrealQL: `AS foo.bar` (multi-part idiom) nests output into `{ foo: { bar: _ } }`, while backtick-quoted `AS \\`foo.bar\\`` (single-part idiom with a dotted name) stays a flat key `'foo.bar'`. The projection path (`plan_projections` / `plan_projections_fast`) and the aggregation path (`plan_aggregation` → `alias_output_path`) must agree."
 
 [[test.results]]
 value = "[{ findingCount: 10, id: scan:1, state: 'test' }]"

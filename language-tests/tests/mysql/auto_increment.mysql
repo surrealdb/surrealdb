@@ -1,0 +1,48 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A MySQL AUTO_INCREMENT column takes the next number of a sequence of its own when an insert leaves it out, whether it is the id of the row or another column, and keeps a number an insert gives"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, name: 'a' }, { id: 2, name: 'b' }]"
+
+[[test.results]]
+value = "[{ id: 3, name: 'c' }]"
+
+[[test.results]]
+value = "[{ id: 10, name: 'given' }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'a' }, { id: 2, name: 'b' }, { id: 3, name: 'c' }, { id: 10, name: 'given' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+match = "$result.len() = 2"
+
+[[test.results]]
+value = "[{ n: 1i32, name: 'x' }, { n: 2i32, name: 'y' }]"
+*/
+
+CREATE TABLE auto_items (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(20));
+
+INSERT INTO auto_items (name) VALUES ('a'), ('b');
+
+INSERT INTO auto_items (name) VALUES ('c');
+
+INSERT INTO auto_items (id, name) VALUES (10, 'given');
+
+SELECT id, name FROM auto_items ORDER BY id;
+
+CREATE TABLE auto_numbered (n INT AUTO_INCREMENT, name VARCHAR(20), PRIMARY KEY (n));
+
+INSERT INTO auto_numbered (name) VALUES ('x'), ('y');
+
+SELECT n, name FROM auto_numbered ORDER BY n;

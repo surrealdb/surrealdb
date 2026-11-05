@@ -4,9 +4,9 @@ use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
-use std::io::Write;
 use std::iter::FromIterator;
 
+#[cfg(feature = "storekey")]
 use storekey::{BorrowDecode, BorrowReader, DecodeError, Encode, EncodeError, Writer};
 
 use crate::search::search_sorted_by;
@@ -58,10 +58,114 @@ impl<T: Ord> Ord for VecSet<T> {
 	}
 }
 
+/// Whether `v` is in strictly ascending `Ord` order (sorted, no equal neighbours).
+fn is_strictly_ascending<T: Ord>(v: &[T]) -> bool {
+	v.iter().zip(v.iter().skip(1)).all(|(a, b)| a < b)
+}
+
+/// Sorts `v` by `cmp`, stably, without any path that can panic whatever `cmp` returns.
+///
+/// This is a bottom-up merge sort over a permutation of indices. `std`'s sorts may panic, or abort,
+/// when the comparison they are given is not a total order, and the values reaching a decode path
+/// come from stored bytes. A comparison that is not a total order here yields some permutation of
+/// the input, never a panic. Input already in non-descending order is returned as it is, with no
+/// allocation. Otherwise the cost is O(n log n) comparisons and two `Vec<usize>` buffers of length
+/// `n`, reused across every merge level.
+pub(crate) fn sort_by_cmp<T>(v: Vec<T>, mut cmp: impl FnMut(&T, &T) -> Ordering) -> Vec<T> {
+	if v.iter().zip(v.iter().skip(1)).all(|(a, b)| cmp(a, b) != Ordering::Greater) {
+		return v;
+	}
+	let n = v.len();
+	let mut src: Vec<usize> = (0..n).collect();
+	let mut dst: Vec<usize> = vec![0; n];
+	let mut width = 1usize;
+	while width < n {
+		let run = width.saturating_mul(2);
+		for (from, to) in src.chunks(run).zip(dst.chunks_mut(run)) {
+			let (left, right) = from.split_at(width.min(from.len()));
+			merge_runs(&v, left, right, to, &mut cmp);
+		}
+		std::mem::swap(&mut src, &mut dst);
+		width = run;
+	}
+	// `src` is a permutation of `0..n`: each merge places every index it was given exactly once.
+	let mut slots: Vec<Option<T>> = v.into_iter().map(Some).collect();
+	src.iter().filter_map(|&i| slots.get_mut(i).and_then(Option::take)).collect()
+}
+
+/// Merges the index runs `left` and `right` into `out`, taking from `left` on ties (stable).
+fn merge_runs<T>(
+	v: &[T],
+	left: &[usize],
+	right: &[usize],
+	out: &mut [usize],
+	cmp: &mut impl FnMut(&T, &T) -> Ordering,
+) {
+	let mut l = left.iter().copied().peekable();
+	let mut r = right.iter().copied().peekable();
+	for slot in out.iter_mut() {
+		let next = match (l.peek().copied(), r.peek().copied()) {
+			(Some(a), Some(b)) => {
+				let right_first = match (v.get(b), v.get(a)) {
+					(Some(rv), Some(lv)) => cmp(rv, lv) == Ordering::Less,
+					_ => false,
+				};
+				if right_first {
+					r.next();
+					b
+				} else {
+					l.next();
+					a
+				}
+			}
+			(Some(a), None) => {
+				l.next();
+				a
+			}
+			(None, Some(b)) => {
+				r.next();
+				b
+			}
+			(None, None) => break,
+		};
+		*slot = next;
+	}
+}
+
+/// Sorts `v` by `Ord`, stably, and cannot panic whatever `Ord` does.
+///
+/// `Ord` implementations that are not total orders (such as an approximate cross-type numeric
+/// comparison) make `std`'s sorts unsafe to call on decoded data. Elements the order cannot
+/// separate keep their input order. See [`sort_by_cmp`].
+pub(crate) fn sort_by_ord<T: Ord>(v: Vec<T>) -> Vec<T> {
+	sort_by_cmp(v, |a, b| a.cmp(b))
+}
+
 impl<T: Ord> VecSet<T> {
 	#[must_use]
 	pub fn new() -> Self {
 		Self::default()
+	}
+
+	/// Builds a set from elements in any order, with or without duplicates.
+	///
+	/// Strictly ascending input is taken as it is, with no allocation. Otherwise the elements are
+	/// sorted by `Ord` and elements that compare equal are merged, keeping the first of each run.
+	/// Returns `None` if the result is still not strictly ascending, which only an `Ord` that is
+	/// not a total order can cause; the caller decides how to refuse. Cannot panic whatever `Ord`
+	/// does.
+	#[must_use]
+	pub fn try_from_vec(entries: Vec<T>) -> Option<Self> {
+		if is_strictly_ascending(&entries) {
+			return Some(Self {
+				entries,
+			});
+		}
+		let mut entries = sort_by_ord(entries);
+		entries.dedup_by(|a, b| Ord::cmp(&*a, &*b) == Ordering::Equal);
+		is_strictly_ascending(&entries).then_some(Self {
+			entries,
+		})
 	}
 
 	/// Creates a new `VecSet` with space preallocated for `capacity` entries.
@@ -77,8 +181,8 @@ impl<T: Ord> VecSet<T> {
 	///
 	/// The invariant is checked with a `debug_assert!` and is **not** enforced
 	/// in release builds; callers must guarantee it. Use this when converting
-	/// from an already-ordered source (e.g. `BTreeSet`, revision-decoded
-	/// payloads) to avoid re-sorting and deduplicating.
+	/// from an already-ordered source (e.g. `BTreeSet`) to avoid re-sorting and
+	/// deduplicating. For data of unknown order use [`try_from_vec`](Self::try_from_vec).
 	#[must_use]
 	pub fn from_sorted_vec_unchecked(entries: Vec<T>) -> Self {
 		debug_assert!(
@@ -138,6 +242,22 @@ impl<T: Ord> VecSet<T> {
 			true
 		} else {
 			false
+		}
+	}
+
+	/// Restore the set's invariant — distinct elements in ascending order —
+	/// after elements were changed in place through [`get_mut`](Self::get_mut),
+	/// [`first_mut`](Self::first_mut) or [`last_mut`](Self::last_mut).
+	///
+	/// Elements that compare equal under `Ord` collapse to the first in sorted
+	/// order, as [`FromIterator`] collapses them, and the sort cannot panic
+	/// whatever `Ord` does ([`sort_by_ord`]). A set whose elements are already
+	/// distinct and ascending is checked in one pass and left as it is.
+	pub fn normalize(&mut self) {
+		if !is_strictly_ascending(&self.entries) {
+			let mut entries = sort_by_ord(std::mem::take(&mut self.entries));
+			entries.dedup_by(|a, b| Ord::cmp(&*a, &*b) == Ordering::Equal);
+			self.entries = entries;
 		}
 	}
 
@@ -337,11 +457,10 @@ impl<T: Ord> IntoIterator for VecSet<T> {
 
 impl<T: Ord> FromIterator<T> for VecSet<T> {
 	fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-		let mut v: Vec<T> = iter.into_iter().collect();
-		v.sort();
-		v.dedup();
+		let mut entries = sort_by_ord(iter.into_iter().collect());
+		entries.dedup_by(|a, b| Ord::cmp(&*a, &*b) == Ordering::Equal);
 		Self {
-			entries: v,
+			entries,
 		}
 	}
 }
@@ -362,8 +481,9 @@ impl<T: Ord> From<BTreeSet<T>> for VecSet<T> {
 	}
 }
 
+#[cfg(feature = "storekey")]
 impl<F, T: Encode<F>> Encode<F> for VecSet<T> {
-	fn encode<W: Write>(&self, w: &mut Writer<W>) -> Result<(), EncodeError> {
+	fn encode<W: std::io::Write>(&self, w: &mut Writer<W>) -> Result<(), EncodeError> {
 		for item in &self.entries {
 			w.mark_terminator();
 			item.encode(w)?;
@@ -372,25 +492,22 @@ impl<F, T: Encode<F>> Encode<F> for VecSet<T> {
 	}
 }
 
+#[cfg(feature = "storekey")]
 impl<'de, F, T: BorrowDecode<'de, F> + Ord> BorrowDecode<'de, F> for VecSet<T> {
-	/// Deserialises a storekey set as a sequence of items, appending each with
-	/// [`push`](VecSet::push).
+	/// Deserialises a storekey set as a sequence of items, then builds the set with
+	/// [`try_from_vec`](VecSet::try_from_vec).
 	///
-	/// **Wire contract:** Elements must appear in **strictly ascending** order (matching
-	/// [`Encode`] for `VecSet` / `BTreeSet`). If a decoded element is less than or equal to
-	/// the previous one, decoding fails with [`DecodeError::InvalidFormat`] in all builds.
+	/// **Wire contract:** [`Encode`] writes elements in ascending `Ord` order, and strictly
+	/// ascending input is taken as it is. Elements are read in any order and taken in `Ord` order,
+	/// with elements that compare equal merged, so a key written under an earlier order of `T`
+	/// still decodes; it re-encodes in the current order. A sequence that no order can sort into a
+	/// strictly ascending run fails with [`DecodeError::InvalidFormat`] in all builds.
 	fn borrow_decode(r: &mut BorrowReader<'de>) -> Result<Self, DecodeError> {
-		let mut set = VecSet::new();
+		let mut items = Vec::new();
 		while !r.read_terminal()? {
-			let item = T::borrow_decode(r)?;
-			if let Some(prev) = set.last()
-				&& item <= *prev
-			{
-				return Err(DecodeError::InvalidFormat);
-			}
-			set.push(item);
+			items.push(T::borrow_decode(r)?);
 		}
-		Ok(set)
+		VecSet::try_from_vec(items).ok_or(DecodeError::InvalidFormat)
 	}
 }
 
@@ -418,6 +535,27 @@ mod tests {
 
 	fn set_of<I: IntoIterator<Item = i32>>(iter: I) -> VecSet<i32> {
 		iter.into_iter().collect()
+	}
+
+	/// An element whose `Ord` answers `Greater` for every pair, so no order sorts it.
+	#[derive(Debug, PartialEq, Eq)]
+	struct Contrary;
+
+	impl PartialOrd for Contrary {
+		fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+			Some(self.cmp(other))
+		}
+	}
+
+	impl Ord for Contrary {
+		fn cmp(&self, _: &Self) -> Ordering {
+			Ordering::Greater
+		}
+	}
+
+	#[test]
+	fn try_from_vec_refuses_elements_no_order_sorts() {
+		assert!(VecSet::try_from_vec(vec![Contrary, Contrary]).is_none());
 	}
 
 	#[test]
@@ -696,6 +834,22 @@ mod tests {
 		let s = set_of([3, 1, 2]);
 		let v: Vec<_> = (&s).into_iter().copied().collect();
 		assert_eq!(v, vec![1, 2, 3]);
+	}
+
+	#[test]
+	fn normalize_restores_order_and_distinctness_in_place() {
+		let mut s = set_of([1, 2, 3, 4]);
+		*s.get_mut(0).unwrap() = 4;
+		*s.get_mut(1).unwrap() = 9;
+		s.normalize();
+		assert_sorted(&s);
+		assert_eq!(s.iter().copied().collect::<Vec<_>>(), vec![3, 4, 9]);
+		// A set already in order keeps its elements and its buffer.
+		let mut s = set_of([1, 2, 3]);
+		let buffer = s.iter().as_slice().as_ptr();
+		s.normalize();
+		assert_eq!(s.iter().copied().collect::<Vec<_>>(), vec![1, 2, 3]);
+		assert_eq!(s.iter().as_slice().as_ptr(), buffer);
 	}
 
 	#[test]

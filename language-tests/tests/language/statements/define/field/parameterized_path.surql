@@ -11,48 +11,56 @@ reason = "DEFINE/ALTER/REMOVE FIELD accept parameterized bracket indices and sub
 [[test.results]]
 value = "NONE"
 
-# 1: DEFINE FIELD data[$idx]
+# 1: DEFINE FIELD data — the array the index is in
 [[test.results]]
 value = "NONE"
 
-# 2: INFO FOR TABLE thing
+# 2: DEFINE FIELD data[$idx]
+[[test.results]]
+value = "NONE"
+
+# 3: INFO FOR TABLE thing
 [[test.results]]
 match = "$result.fields['data[0]'] = /DEFINE FIELD data\\[0\\].*TYPE number/"
 
-# 3: ALTER FIELD data[$idx]
+# 4: ALTER FIELD data[$idx]
 [[test.results]]
 value = "NONE"
 
-# 4: INFO FOR TABLE thing
+# 5: INFO FOR TABLE thing
 [[test.results]]
 match = "$result.fields['data[0]'] = /DEFINE FIELD data\\[0\\].*COMMENT 'altered'/"
 
-# 5: REMOVE FIELD data[$idx]
+# 6: REMOVE FIELD data[$idx]
 [[test.results]]
 value = "NONE"
 
-# 6: INFO FOR TABLE thing
+# 7: INFO FOR TABLE thing
 [[test.results]]
-match = "$result.fields = {}"
+match = "object::keys($result.fields) = ['data']"
 
-# 7: LET $key = "city"
-[[test.results]]
-value = "NONE"
-
-# 8: DEFINE FIELD addr[$key]
+# 8: LET $key = "city"
 [[test.results]]
 value = "NONE"
 
-# 9: INFO FOR TABLE thing
+# 9: DEFINE FIELD addr — the object the key is in
+[[test.results]]
+value = "NONE"
+
+# 10: DEFINE FIELD addr[$key]
+[[test.results]]
+value = "NONE"
+
+# 11: INFO FOR TABLE thing
 [[test.results]]
 match = "$result.fields['addr.city'] = /DEFINE FIELD addr\\.city.*TYPE string/"
 
-# 10: DEFINE FIELD bad[true]
+# 12: DEFINE FIELD bad[true]
 [[test.results]]
 match = "$error = /Field path index must evaluate to an integer/"
 error = true
 
-# 11: DEFINE FIELD bad[?id > 0]
+# 13: DEFINE FIELD bad[?id > 0]
 [[test.results]]
 match = "$error = /not allowed in a field path/"
 error = true
@@ -60,6 +68,7 @@ error = true
 
 -- DEFINE FIELD with a parameterized integer index resolves to a static path.
 LET $idx = 0;
+DEFINE FIELD data ON TABLE thing TYPE array;
 DEFINE FIELD data[$idx] ON TABLE thing TYPE number;
 INFO FOR TABLE thing;
 
@@ -73,6 +82,7 @@ INFO FOR TABLE thing;
 
 -- A parameterized string key resolves to an object key.
 LET $key = "city";
+DEFINE FIELD addr ON TABLE thing TYPE object;
 DEFINE FIELD addr[$key] ON TABLE thing TYPE string;
 INFO FOR TABLE thing;
 

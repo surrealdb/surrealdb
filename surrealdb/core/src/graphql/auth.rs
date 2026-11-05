@@ -13,12 +13,12 @@ use std::sync::Arc;
 use async_graphql::dynamic::indexmap::IndexMap;
 use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, TypeRef};
 use async_graphql::{Name, Value as GraphqlValue};
+use surrealdb_rpc::Token;
 
 use super::error::{GraphqlError, auth_error, resolver_error};
 use super::utils::GraphqlValueUtils;
-use crate::catalog::{AccessDefinition, AccessType};
+use crate::catalog::AccessDefinition;
 use crate::dbs::Session;
-use crate::iam::token::Token;
 use crate::iam::{signin, signup};
 use crate::kvs::Datastore;
 use crate::types::PublicVariables;
@@ -42,15 +42,9 @@ pub fn add_auth_mutations(
 	db: &str,
 	datastore: &Arc<Datastore>,
 ) -> Object {
-	let has_signin = accesses.iter().any(|ac| match &ac.access_type {
-		AccessType::Record(rec) => rec.signin.is_some(),
-		_ => false,
-	});
+	let has_signin = accesses.iter().any(|ac| ac.signin.is_some());
 
-	let has_signup = accesses.iter().any(|ac| match &ac.access_type {
-		AccessType::Record(rec) => rec.signup.is_some(),
-		_ => false,
-	});
+	let has_signup = accesses.iter().any(|ac| ac.signup.is_some());
 
 	let mut mutation = mutation;
 
@@ -223,7 +217,9 @@ fn build_public_variables(
 			GraphqlValue::Boolean(b) => vars.insert(key_str.to_string(), *b),
 			GraphqlValue::Enum(s) => vars.insert(key_str.to_string(), s.as_str().to_string()),
 			// For complex types (lists, nested objects), convert to string
-			other => vars.insert(key_str.to_string(), other.to_string()),
+			other @ (GraphqlValue::Binary(_) | GraphqlValue::List(_) | GraphqlValue::Object(_)) => {
+				vars.insert(key_str.to_string(), other.to_string())
+			}
 		}
 	}
 

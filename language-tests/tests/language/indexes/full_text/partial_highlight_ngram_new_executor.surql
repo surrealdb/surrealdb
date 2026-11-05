@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test partial highlights and offsets with ngram analyzer (new executor)"
+reason = "Test partial highlights and offsets with ngram analyzer"
 
 [[test.results]]
 value = "[{ content: 'Hello World!', id: blog:1 }]"
@@ -15,9 +14,9 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id, content] {rows: 1}
-    Compute [ctx: Db] [fields: content = search::highlight(...)] {rows: 1}
-        FullTextScan [ctx: Db] [index: blog_content, query: Hello] {rows: 1}
+value = '''
+'SelectProject [ctx: Db] [projections: id, content] {rows: 1}
+    FullTextScan [ctx: Db] [table: blog, index: blog_content, query: Hello] {rows: 1}
 
 Total rows: 1''''
 
@@ -34,9 +33,9 @@ value = "[{ content: '<em>Hello</em> World!', id: blog:1 }]"
 value = "[{ content: 'H<em>el</em>lo World!', id: blog:1 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id, content] {rows: 1}
-    Compute [ctx: Db] [fields: content = search::offsets(...)] {rows: 1}
-        FullTextScan [ctx: Db] [index: blog_content, query: el] {rows: 1}
+value = '''
+'SelectProject [ctx: Db] [projections: id, content] {rows: 1}
+    FullTextScan [ctx: Db] [table: blog, index: blog_content, query: el] {rows: 1}
 
 Total rows: 1''''
 

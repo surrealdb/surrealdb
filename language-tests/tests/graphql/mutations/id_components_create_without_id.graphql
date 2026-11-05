@@ -1,0 +1,16 @@
+/**
+[env]
+imports = ["../id_components_import.surql"]
+
+[test]
+reason = "GraphQL create has no input for a component of the record id, so a create that gives no id makes no key and fails with the component it lacks; the key is not drawn at random"
+
+[[test.results]]
+error = "Internal Error: Query execution failed: Cannot create a record in `reading` without the record id component `city`: set `city`, give the record id, or define a DEFAULT on the `id` field"
+*/
+mutation {
+	createReading(data: { temp: 9 }) {
+		city
+		temp
+	}
+}

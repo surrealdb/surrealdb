@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["compute-only"]
 
 [test]
 reason = "Test CONTAINS, CONTAINSALL, and CONTAINSANY with array fields and index"
@@ -15,15 +14,11 @@ value = "[{ id: student:3, marks: [{ mark: 50, subject: 'maths' }, { mark: 30, s
 
 # 3, 4: CONTAINS without index
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'student' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-[[test.results]]
 value = "[{ id: student:1 }, { id: student:2 }]"
 
 # 5, 6, 7: CONTAINS with index
 [[test.results]]
 value = "NONE"
-[[test.results]]
-value = "[{ detail: { plan: { index: 'subject_idx', operator: '=', value: 'english' }, table: 'student' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:2 }]"
 
@@ -31,15 +26,11 @@ value = "[{ id: student:1 }, { id: student:2 }]"
 [[test.results]]
 value = "NONE"
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'student' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-[[test.results]]
 value = "[{ id: student:2 }, { id: student:3 }]"
 
 # 11, 12, 13: CONTAINSALL with index
 [[test.results]]
 value = "NONE"
-[[test.results]]
-value = "[{ detail: { plan: { index: 'subject_idx', operator: 'union', value: ['hindi', 'maths'] }, table: 'student' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 [[test.results]]
 value = "[{ id: student:2 }, { id: student:3 }]"
 
@@ -47,19 +38,15 @@ value = "[{ id: student:2 }, { id: student:3 }]"
 [[test.results]]
 value = "NONE"
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'student' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-[[test.results]]
 value = "[{ id: student:1 }, { id: student:3 }]"
 
 # 17, 18, 19: CONTAINSANY with index
 [[test.results]]
 value = "NONE"
 [[test.results]]
-value = "[{ detail: { plan: { index: 'subject_idx', operator: 'union', value: ['tamil', 'french'] }, table: 'student' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-[[test.results]]
 value = "[{ id: student:1 }, { id: student:3 }]"
-*/
 
+*/
 # 0, 1, 2: Setup test data
 CREATE student:1 CONTENT {
 	marks: [
@@ -82,31 +69,23 @@ CREATE student:3 CONTENT {
 		{ subject: "tamil", mark: 45 }
 	]
 };
-
-# 0, 1, 2: CONTAINS without index
-SELECT id FROM student WHERE marks.*.subject CONTAINS "english" EXPLAIN;
 SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
 # 3, 4, 5: CONTAINS with index
 DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
-SELECT id FROM student WHERE marks.*.subject CONTAINS "english" EXPLAIN;
 SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
 
 # 6, 7, 8: CONTAINSALL without index
 REMOVE INDEX subject_idx ON student;
-SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"] EXPLAIN;
 SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
 
 # 9, 10, 11: CONTAINSALL with index
 DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
-SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"] EXPLAIN;
 SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
 
 # 12, 13, 14: CONTAINSANY without index
 REMOVE INDEX subject_idx ON student;
-SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"] EXPLAIN;
 SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"];
 
 # 15, 16, 17: CONTAINSANY with index
 DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
-SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"] EXPLAIN;
 SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"];

@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["compute-only"]
 
 [test]
 reason = "CASCADE DELETE on RELATION tables should clean UNIQUE index entries"

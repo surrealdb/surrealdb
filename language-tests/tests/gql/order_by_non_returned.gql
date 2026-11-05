@@ -5,7 +5,7 @@ database = true
 imports = ["gql/_schema.surql"]
 
 [test]
-reason = "V2_DESIGN R7 / §8 flip: WITHOUT DISTINCT, ORDER BY may reference any binding expression, not only RETURN items — sort keys are full expressions over the binding row, evaluated pre-projection. In v1 this was a lowering rejection ('ORDER BY may only reference RETURN items'); the streaming Sort runs over binding rows before Project so a non-returned key works. Here RETURN is name only but ORDER BY n.age sorts ascending: C has no age (NONE sorts first under SurrealQL's total order, see exec_substrate NONE<number pin), then B(20), then A(30)."
+reason = "V2_DESIGN R7 / §8 flip: WITHOUT DISTINCT, ORDER BY may reference any binding expression, not only RETURN items — sort keys are full expressions over the binding row, evaluated pre-projection. The Sort runs over binding rows before Project, so a non-returned key works. Here RETURN is name only but ORDER BY n.age sorts ascending: C has no age (NONE sorts first under SurrealQL's total order, see exec_substrate NONE<number pin), then B(20), then A(30)."
 
 [[test.results]]
 value = "[{ name: 'C' }, { name: 'B' }, { name: 'A' }]"

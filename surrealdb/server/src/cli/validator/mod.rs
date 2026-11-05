@@ -2,12 +2,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use surrealdb_core::dbs::capabilities::{
-	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
-	RouteTarget, Targets,
+use surrealdb_rpc::capabilities::{
+	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, McpToolTarget,
+	MethodTarget, NetTarget, RouteTarget, Targets,
 };
-use surrealdb_core::kvs::export::{ExcludedTables, TableConfig};
-use surrealdb_types::Duration;
+use surrealdb_rpc::export::{ExcludedTables, TableConfig};
 
 pub(crate) mod parser;
 
@@ -49,11 +48,12 @@ pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 			},
 		}
 	}
-	// Validate the scheme
+	// Validate the scheme. The removed `rocksdb` and `indxdb` schemes, and the `tikv` scheme
+	// of the backend built from its own repository, stay valid at this layer so that
+	// connecting names what replaces them.
 	match split_endpoint(v).0 {
-		"http" | "https" | "ws" | "wss" | "mem" | "rocksdb" | "surrealkv" | "tikv" => {
-			Ok(v.to_string())
-		}
+		"http" | "https" | "ws" | "wss" | "grpc" | "grpcs" | "mem" | "surrealkv" | "tikv"
+		| "rocksdb" | "indxdb" => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database connection string")),
 	}
 }
@@ -68,7 +68,7 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 }
 
 pub(crate) fn duration(v: &str) -> Result<std::time::Duration, String> {
-	Duration::from_str(v).map(|d| d.into_inner()).map_err(|_| String::from("invalid duration"))
+	parse_common::duration(v).map_err(|e| format!("Invalid duration: {}", e.message))
 }
 
 pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {
@@ -79,6 +79,14 @@ pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {
 	let mut result = HashSet::new();
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
+		// `ml` named a route this build no longer serves. It is ignored with a warning,
+		// so a configuration written for an earlier release still starts.
+		if target == "ml" {
+			eprintln!(
+				"warning: the `ml` route target is retired and ignored: this build serves no ML routes"
+			);
+			continue;
+		}
 		result.insert(NetTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
@@ -157,6 +165,20 @@ pub(crate) fn method_targets(value: &str) -> Result<Targets<MethodTarget>, Strin
 	Ok(Targets::Some(result))
 }
 
+pub(crate) fn mcp_tool_targets(value: &str) -> Result<Targets<McpToolTarget>, String> {
+	if ["*", ""].contains(&value) {
+		return Ok(Targets::All);
+	}
+
+	let mut result = HashSet::new();
+
+	for target in value.split(',').filter(|s| !s.is_empty()) {
+		result.insert(McpToolTarget::from_str(target).map_err(|e| e.to_string())?);
+	}
+
+	Ok(Targets::Some(result))
+}
+
 pub(crate) fn route_targets(value: &str) -> Result<Targets<RouteTarget>, String> {
 	if ["*", ""].contains(&value) {
 		return Ok(Targets::All);
@@ -165,6 +187,14 @@ pub(crate) fn route_targets(value: &str) -> Result<Targets<RouteTarget>, String>
 	let mut result = HashSet::new();
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
+		// `ml` named a route this build no longer serves. It is ignored with a warning,
+		// so a configuration written for an earlier release still starts.
+		if target == "ml" {
+			eprintln!(
+				"warning: the `ml` route target is retired and ignored: this build serves no ML routes"
+			);
+			continue;
+		}
 		result.insert(RouteTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
@@ -200,9 +230,32 @@ pub(crate) fn export_tables_exclude(value: &str) -> Result<TableConfig, String> 
 	}))
 }
 
+/// Parse `--planner-strategy` / `SURREAL_PLANNER_STRATEGY`.
+///
+/// The option selects nothing: the engine has a single execution path. The
+/// three names it has ever accepted stay accepted so that an existing
+/// deployment's configuration keeps starting the server; any other value is
+/// refused.
+pub(crate) fn retired_planner_strategy(v: &str) -> Result<String, String> {
+	match v {
+		"best-effort" | "compute-only" | "all-read-only" => Ok(v.to_owned()),
+		_ => Err(format!(
+			"unknown planner strategy: '{v}' (expected 'best-effort', 'compute-only', or 'all-read-only')"
+		)),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn test_endpoint_valid_passes_removed_schemes_to_their_message() {
+		assert!(endpoint_valid("rocksdb:/data").is_ok());
+		assert!(endpoint_valid("indxdb://name").is_ok());
+		assert!(endpoint_valid("surrealkv://data").is_ok());
+		assert!(endpoint_valid("nothing://data").is_err());
+	}
 
 	#[test]
 	fn test_func_targets() {
@@ -264,12 +317,35 @@ mod tests {
 	}
 
 	#[test]
+	fn test_mcp_tool_targets() {
+		assert_eq!(mcp_tool_targets("*").unwrap(), Targets::<McpToolTarget>::All);
+		assert_eq!(mcp_tool_targets("").unwrap(), Targets::<McpToolTarget>::All);
+		assert_eq!(
+			mcp_tool_targets("graphql").unwrap(),
+			Targets::<McpToolTarget>::Some(vec!["graphql".parse().unwrap()].into_iter().collect())
+		);
+		assert!(mcp_tool_targets("not_a_tool").is_err());
+	}
+
+	#[test]
+	fn retired_ml_route_target_is_accepted_and_selects_nothing() {
+		assert_eq!(route_targets("ml").unwrap(), Targets::<RouteTarget>::Some(HashSet::new()));
+		assert_eq!(route_targets("ml,key").unwrap(), route_targets("key").unwrap());
+	}
+
+	#[test]
 	fn test_route_targets() {
 		assert_eq!(route_targets("*").unwrap(), Targets::<RouteTarget>::All);
 		assert_eq!(route_targets("").unwrap(), Targets::<RouteTarget>::All);
 		assert_eq!(
 			route_targets("key").unwrap(),
 			Targets::<RouteTarget>::Some(vec!["key".parse().unwrap()].into_iter().collect())
+		);
+		assert_eq!(
+			route_targets("postgres,mysql").unwrap(),
+			Targets::<RouteTarget>::Some(
+				vec![RouteTarget::Postgres, RouteTarget::MySql].into_iter().collect()
+			)
 		);
 		assert_eq!(
 			route_targets("key,sql").unwrap(),
@@ -328,5 +404,24 @@ mod tests {
 			)
 		);
 		assert!(eval_query_targets("nonsense").is_err());
+	}
+
+	#[test]
+	fn every_retired_strategy_name_is_still_accepted() {
+		for name in ["best-effort", "compute-only", "all-read-only"] {
+			assert_eq!(retired_planner_strategy(name).unwrap(), name);
+		}
+	}
+
+	#[test]
+	fn files_is_not_an_experimental_target() {
+		assert!(experimental_targets("files").is_err());
+		assert!(experimental_targets("surrealism,files").is_err());
+		assert!(experimental_targets("surrealism").is_ok());
+	}
+
+	#[test]
+	fn an_unknown_strategy_is_refused() {
+		assert!(retired_planner_strategy("nonsense").is_err());
 	}
 }

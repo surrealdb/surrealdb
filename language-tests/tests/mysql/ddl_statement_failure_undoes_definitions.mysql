@@ -1,0 +1,33 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A MySQL statement that defines several things either defines all of them or none: a CREATE TABLE that repeats a column leaves no table behind, a DROP TABLE that fails on its last table drops none, as in MySQL"
+
+[[test.results]]
+error = "The field 'a' already exists"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "The table 'ddl_undo_missing' does not exist"
+
+[[test.results]]
+value = "[{ id: 1, x: 10i32 }]"
+*/
+
+CREATE TABLE ddl_undo_repeated (a INT, a INT);
+
+CREATE TABLE ddl_undo_repeated (a INT);
+
+CREATE TABLE ddl_undo_kept (id INT PRIMARY KEY, x INT);
+
+DROP TABLE ddl_undo_kept, ddl_undo_missing;
+
+INSERT INTO ddl_undo_kept (id, x) VALUES (1, 10);

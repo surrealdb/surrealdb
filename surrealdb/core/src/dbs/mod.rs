@@ -5,41 +5,66 @@
 //! operations. This module also gives a `context` to the transaction.
 
 mod broker;
-mod distinct;
+mod capture;
 pub mod executor;
-mod group;
-mod iterator;
+pub(crate) mod live_recheck;
+mod observe_ctx;
 mod options;
-mod plan;
-mod processor;
-mod response;
-mod result;
 mod session;
+mod sort_error;
 mod statement;
 mod statement_counters;
-mod store;
-mod variables;
+mod stream;
+mod top_level;
 
-pub mod capabilities;
-pub mod node;
-
-pub(crate) use variables::{ParameterCapturePass, Variables};
+// A session outlives the process that attached it, so its stored form belongs to
+// the keyspace; the live session above converts in and out of it.
+pub(crate) use surrealdb_datastore::values::session::DurableSession;
+pub(crate) use surrealdb_rpc::{
+	QueryResult, QueryResultBuilder, QueryStreamItem, QueryType, capabilities, items_for_result,
+};
 
 pub use self::broker::{
 	BrokerRoutingContext, LocalMessageBroker, MessageBroker, NodeEndpointResolver,
 	RoutedNotification,
 };
-pub use self::capabilities::Capabilities;
+pub(crate) use self::broker::{DefaultBroker, OrderedBroker, SendKill};
+pub(crate) use self::capabilities::Capabilities;
+pub(crate) use self::capture::ParameterCapturePass;
 pub(crate) use self::executor::Executor;
-pub(crate) use self::iterator::{Iterable, Iterator, Operable, Processable};
-pub(crate) use self::options::{Force, Options};
-pub use self::response::{QueryResult, QueryResultBuilder, QueryType, Status};
-pub use self::session::{NewPlannerStrategy, Session};
-pub(crate) use self::statement::Statement;
+pub(crate) use self::options::{Force, NoWriteFrame, Options};
+pub use self::session::{
+	AuthPrincipalSnapshot, Session, SessionData, StoredRpcSession, complete_credential,
+};
+pub(crate) use self::session::{durable_session, restore_session};
+pub(crate) use self::sort_error::SortError;
+pub(crate) use self::statement::{
+	FOR_UPDATE_GROUP_ERROR, FOR_UPDATE_LIMIT_ERROR, FOR_UPDATE_TARGETS_ERROR,
+	FOR_UPDATE_VERSION_ERROR, validate_for_update,
+};
 pub(crate) use self::statement_counters::StatementCounters;
+pub use self::stream::{QueryItemStream, QueryStreamJob};
+pub(crate) use self::top_level::{Dispatch, TopLevelStatement};
+pub use crate::catalog::node;
+pub(crate) use crate::expr::variables::Variables;
 
-#[cfg(storage)]
-mod file;
-
+#[cfg(all(test, feature = "kv-mem"))]
+mod catalog_boundary_test;
+#[cfg(all(test, feature = "kv-mem"))]
+mod definer_rights_test;
+#[cfg(all(test, feature = "kv-mem"))]
+mod live_notification_test;
+#[cfg(all(test, feature = "kv-mem"))]
+mod nested_matches_parity_test;
+#[cfg(test)]
+mod read_only_test;
+#[cfg(all(test, feature = "kv-mem"))]
+mod request_test;
+#[cfg(all(test, feature = "kv-mem"))]
+mod stream_test;
 #[cfg(test)]
 pub(crate) mod test;
+#[cfg(test)]
+mod top_level_test;
+#[cfg(all(test, feature = "kv-mem"))]
+mod trace_test;

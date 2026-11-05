@@ -1,0 +1,50 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "LIKE over a pattern and a subject that are both literals: % and _ are wildcards, the backslash of \\% and \\_ stays in the literal so the LIKE finds the wildcard escaped, a backslash before any other character is resolved by the literal, a line break is a character, case is ignored under the default collation, and NULL gives NULL"
+
+[[test.results]]
+value = "[{ backslash_then_wildcard: true, literal_backslash: true, literal_percent: true, literal_underscore: true, other_escape: true, wild_percent: false, wild_underscore: false }]"
+
+[[test.results]]
+value = "[{ a_line_break_is_not_ignored: false, percent_spans_lines: true, underscore_spans_lines: true }]"
+
+[[test.results]]
+value = "[{ null_negated: NULL, null_pattern: NULL, null_subject: NULL }]"
+
+[[test.results]]
+value = "[{ ignores_case: true, negated: false }]"
+
+[[test.results]]
+value = "[{ trailing_backslash_is_itself: true, trailing_backslash_is_no_wildcard: false }]"
+
+[[test.results]]
+value = "[{ escaped_backslash: 'a\\\\%', percent: '50\\\\%', underscore: 'a\\\\_b' }]"
+*/
+
+SELECT
+	'50%' LIKE '50\%' AS literal_percent,
+	'500' LIKE '50\%' AS wild_percent,
+	'a_b' LIKE 'a\_b' AS literal_underscore,
+	'axb' LIKE 'a\_b' AS wild_underscore,
+	'a\\b' LIKE 'a\\\\b' AS literal_backslash,
+	'a\\xyz' LIKE 'a\\\\%' AS backslash_then_wildcard,
+	'axb' LIKE 'a\xb' AS other_escape;
+SELECT
+	'a\nb' LIKE 'a%b' AS percent_spans_lines,
+	'a\nb' LIKE 'a_b' AS underscore_spans_lines,
+	'a\n' LIKE 'a' AS a_line_break_is_not_ignored;
+SELECT
+	NULL LIKE 'a' AS null_subject,
+	'a' LIKE NULL AS null_pattern,
+	NULL NOT LIKE 'a' AS null_negated;
+SELECT
+	'abc' LIKE 'ABC' AS ignores_case,
+	'abc' NOT LIKE 'ABC' AS negated;
+SELECT
+	'a\\' LIKE 'a\\' AS trailing_backslash_is_itself,
+	'ab' LIKE 'a\\' AS trailing_backslash_is_no_wildcard;
+SELECT '50\%' AS percent, 'a\_b' AS underscore, 'a\\%' AS escaped_backslash;

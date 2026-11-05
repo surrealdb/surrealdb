@@ -39,36 +39,23 @@
 //! but its creator even though the server does not enforce ownership
 //! on it.
 //!
-//! [`Level`]: surrealdb_core::iam::Level
+//! [`Level`]: surrealdb_iam::Level
 //!
-//! # Multi-Node Deployments and Sticky Sessions
+//! # Multi-Node Deployments
 //!
-//! **Important:** When deploying SurrealDB in a multi-node cluster behind a load balancer,
-//! you must configure **sticky sessions** (session affinity) at the load balancer level.
+//! The server stores each attached HTTP session — its authentication state, selected namespace
+//! and database, and session variables — in its datastore, and every request loads it from
+//! there. Any node sharing that datastore therefore serves any session, so a load balancer in
+//! front of several nodes may route each request to any of them, and a session survives a
+//! server restart.
 //!
-//! The SDK performs DNS resolution at connection time and pins all requests to a single
-//! resolved IP address. However, if that IP address belongs to a load balancer, the load
-//! balancer may still distribute requests to different backend nodes unless sticky sessions
-//! are configured.
+//! Older servers keep an HTTP session in the memory of the node that attached it. Behind a load
+//! balancer they need sticky sessions (session affinity), or a [WebSocket
+//! connection](`super::ws`), which stays on one node; otherwise a request routed to another node
+//! fails with "session not found".
 //!
-//! ## Why Sticky Sessions Are Required
-//!
-//! SurrealDB maintains session state on the server, including:
-//! - Authentication state
-//! - Selected namespace and database
-//! - Session variables set via `LET`/`SET`
-//! - Transaction context
-//!
-//! If requests for a single SDK session are routed to different server nodes, those nodes
-//! will not have the session state, resulting in "session not found" errors.
-//!
-//! ## Recommendations
-//!
-//! - **Single-node deployments:** No special configuration needed.
-//! - **Multi-node with load balancer:** Configure sticky sessions/session affinity based on client
-//!   IP or a session cookie.
-//! - **Multi-node clusters:** Consider using [WebSocket connections](`super::ws`) instead, which
-//!   maintain a persistent connection to a single node naturally.
+//! The SDK resolves the server's address once, at connection time, and sends every request to
+//! that address.
 //!
 //! ## Example: Connecting via HTTP
 //!
@@ -78,14 +65,10 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> surrealdb::Result<()> {
-//! // Connect to a single server or load balancer with sticky sessions configured
 //! let db = Surreal::new::<Http>("localhost:8000").await?;
 //! # Ok(())
 //! # }
 //! ```
-//!
-//! For multi-node deployments without sticky session support at the infrastructure level,
-//! prefer WebSocket connections which maintain session affinity through persistent connections.
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -101,9 +84,7 @@ use futures::TryStreamExt;
 use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
-use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
-use surrealdb_core::iam::Token as CoreToken;
-use surrealdb_core::rpc::{self, DbResponse, DbResult};
+use surrealdb_rpc::{DbResponse, DbResult, QueryResult, QueryResultBuilder, Token as CoreToken};
 use surrealdb_types::{AuthError, NotAllowedError};
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_types::{ConnectionError, SerializationError};
@@ -121,7 +102,7 @@ use wasm_bindgen_futures::spawn_local;
 
 use crate::conn::{Command, RequestData};
 use crate::engine::SessionError;
-use crate::engine::remote::RouterRequest;
+use crate::engine::remote::{RemoteCommand, RouterRequest};
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
 use crate::opt::auth::{AccessToken, Token};
@@ -173,6 +154,10 @@ type SessionResult = std::result::Result<Arc<SessionState>, SessionError>;
 struct RouterState {
 	/// Per-session state (headers, auth for REST endpoints, replay commands)
 	sessions: HashMap<Uuid, SessionResult>,
+	/// Sessions whose setup failed and whose cleanup detach failed too, with
+	/// the headers and authentication to detach them with when they are
+	/// dropped.
+	undetached: HashMap<Uuid, (HeaderMap, Option<Auth>)>,
 	/// The shared HTTP client used to send requests.
 	/// On native platforms, this client is configured with a resolved address
 	/// via `reqwest::ClientBuilder::resolve()` to ensure all requests go to
@@ -187,16 +172,27 @@ impl RouterState {
 	fn new(client: reqwest::Client, base_url: Url) -> Self {
 		Self {
 			sessions: HashMap::new(),
+			undetached: HashMap::new(),
 			client,
 			base_url,
 		}
 	}
 
 	/// Replay all stored commands for a session (attach + any Use/Signin/etc.)
-	async fn replay_session(&self, session_id: Uuid, session_state: &SessionState) -> Result<()> {
-		// Clone headers and auth upfront to avoid holding the lock across network I/O
+	///
+	/// Each command is sent with the authentication the server session holds
+	/// at that point in the replay, the way the original session sent it: none
+	/// before the first sign-in, then whatever each successful sign-in, sign-up,
+	/// authenticate or invalidate left. Returns that authentication as it stands
+	/// after the commands that went through, alongside the first failure.
+	async fn replay_session(
+		&self,
+		session_id: Uuid,
+		session_state: &SessionState,
+	) -> (Option<Auth>, Result<()>) {
+		// Clone headers upfront to avoid holding the lock across network I/O
 		let headers = session_state.headers.read().await.clone();
-		let auth = session_state.auth.read().await.clone();
+		let mut auth = None;
 
 		for (_, command) in &session_state.replay {
 			let request = command
@@ -204,9 +200,12 @@ impl RouterState {
 				.into_router_request(None, Some(session_id))
 				.expect("replay command should convert to router request");
 
-			send_request(request, &self.base_url, &self.client, &headers, &auth).await?;
+			match send_request(request, &self.base_url, &self.client, &headers, &auth).await {
+				Ok(results) => auth = auth_after(command, &results, auth),
+				Err(error) => return (auth, Err(error)),
+			}
 		}
-		Ok(())
+		(auth, Ok(()))
 	}
 
 	/// Handle a new session being created.
@@ -218,7 +217,9 @@ impl RouterState {
 		let session_state = Arc::new(session_state);
 		self.sessions.insert(session_id, Ok(Arc::clone(&session_state)));
 
-		if let Err(error) = self.replay_session(session_id, &session_state).await {
+		if let (auth, Err(error)) = self.replay_session(session_id, &session_state).await {
+			// A failed response does not say whether the attach landed.
+			self.release_failed_setup(session_id, &session_state.headers, auth).await;
 			self.sessions.insert(session_id, Err(SessionError::Remote(error.to_string())));
 		}
 	}
@@ -237,8 +238,19 @@ impl RouterState {
 				let new_state = Arc::new(new_state);
 				self.sessions.insert(new, Ok(Arc::clone(&new_state)));
 
-				if let Err(error) = self.replay_session(new, &new_state).await {
-					self.sessions.insert(new, Err(SessionError::Remote(error.to_string())));
+				match self.replay_session(new, &new_state).await {
+					// The copied authentication belongs to the old session. A
+					// replayed sign-in may have issued the new one a different
+					// credential, which is the one its requests must carry.
+					(auth, Ok(())) => *new_state.auth.write().await = auth,
+					// The server may have accepted the attach before a later
+					// command failed. Nothing can use the session now, so it is
+					// detached here, as the principal the replay left it with,
+					// rather than when it is dropped.
+					(auth, Err(error)) => {
+						self.release_failed_setup(new, &new_state.headers, auth).await;
+						self.sessions.insert(new, Err(SessionError::Remote(error.to_string())));
+					}
 				}
 			}
 			Some(Err(error)) => {
@@ -250,16 +262,67 @@ impl RouterState {
 		}
 	}
 
-	/// Handle a session being dropped.
-	async fn handle_session_drop(&self, session_id: Uuid) {
-		if self.sessions.get(&session_id).is_some() {
-			let session_state = SessionState::default();
-			session_state.replay.push(Command::Detach {
-				session_id,
-			});
-			self.replay_session(session_id, &session_state).await.ok();
+	/// Detach a session on the server, reporting whether the server answered.
+	///
+	/// The server only lets a session's owner detach it, so `auth` must be the
+	/// authentication the server session holds. The request is awaited so that
+	/// a detach reaches the server before any lifecycle event queued after it,
+	/// such as an attach that needs the slot it frees.
+	async fn detach(&self, session_id: Uuid, headers: &HeaderMap, auth: &Option<Auth>) -> bool {
+		let request = Command::Detach {
+			session_id,
 		}
+		.into_router_request(None, Some(session_id))
+		.expect("detach command should convert to router request");
+		send_request(request, &self.base_url, &self.client, headers, auth).await.is_ok()
+	}
+
+	/// Detach a session whose setup failed.
+	///
+	/// A failed response does not say whether the server accepted the attach,
+	/// so the session is detached now. If that fails as well, the detach is
+	/// kept and sent again when the session is dropped.
+	async fn release_failed_setup(
+		&self,
+		session_id: Uuid,
+		headers: &RwLock<HeaderMap>,
+		auth: Option<Auth>,
+	) {
+		let headers = headers.read().await.clone();
+		if !self.detach(session_id, &headers, &auth).await {
+			self.undetached.insert(session_id, (headers, auth));
+		}
+	}
+
+	/// Handle a session being dropped.
+	///
+	/// The detach carries the session's own credentials: the server binds an
+	/// attached session to the principal that signed in on it and refuses any
+	/// other caller, a detach included.
+	async fn handle_session_drop(&self, session_id: Uuid) {
+		let found = self.sessions.get(&session_id);
 		self.sessions.remove(&session_id);
+		let undetached = self.undetached.get(&session_id);
+		self.undetached.remove(&session_id);
+		match found {
+			Some(Ok(state)) => {
+				let headers = state.headers.read().await.clone();
+				let auth = state.auth.read().await.clone();
+				self.detach(session_id, &headers, &auth).await;
+			}
+			_ => {
+				if let Some((headers, auth)) = undetached {
+					self.detach(session_id, &headers, &auth).await;
+				}
+			}
+		}
+	}
+
+	/// Detaches every session still attached, as the router exits.
+	async fn detach_all(&self) {
+		for (session_id, _) in self.sessions.to_vec() {
+			self.handle_session_drop(session_id).await;
+		}
 	}
 
 	/// Dispatch a session-lifecycle event to the appropriate handler.
@@ -282,9 +345,9 @@ impl RouterState {
 ///
 /// # Multi-Node Deployments
 ///
-/// When connecting to a load balancer in front of multiple SurrealDB nodes,
-/// ensure sticky sessions are configured. See the [module documentation](self)
-/// for details.
+/// Any node behind a load balancer can serve this client's session; older
+/// servers need sticky sessions. See the [module documentation](self) for
+/// details.
 ///
 /// # Example
 ///
@@ -308,9 +371,9 @@ pub struct Http;
 ///
 /// # Multi-Node Deployments
 ///
-/// When connecting to a load balancer in front of multiple SurrealDB nodes,
-/// ensure sticky sessions are configured. See the [module documentation](self)
-/// for details.
+/// Any node behind a load balancer can serve this client's session; older
+/// servers need sticky sessions. See the [module documentation](self) for
+/// details.
 ///
 /// # Example
 ///
@@ -330,14 +393,13 @@ pub struct Https;
 /// An HTTP client for communicating with the server via HTTP.
 ///
 /// This client maintains session state and supports all SurrealDB operations
-/// over HTTP. The client pins connections to a specific server IP address
-/// resolved at connection time to ensure session consistency.
+/// over HTTP. The client sends every request to the server address resolved at
+/// connection time.
 ///
-/// # Session Affinity
+/// # Multi-Node Deployments
 ///
-/// All requests from this client are routed to the same server node (determined
-/// by DNS resolution at connection time). However, if connecting through a load
-/// balancer, sticky sessions must be configured at the load balancer level.
+/// The server stores the client's session in its datastore, so any node behind
+/// a load balancer can serve each request; older servers need sticky sessions.
 /// See the [module documentation](self) for details.
 ///
 /// # Comparison with WebSocket
@@ -347,10 +409,10 @@ pub struct Https;
 /// | Live queries | ❌ Not supported | ✅ Supported |
 /// | Connection persistence | Per-request | Persistent |
 /// | Proxy compatibility | Excellent | May require configuration |
-/// | Multi-node clusters | Requires sticky sessions | Natural session affinity |
+/// | Multi-node clusters | Any node serves the session | Natural session affinity |
 ///
-/// For multi-node deployments or when live queries are needed, consider using
-/// [WebSocket connections](`super::ws::Client`) instead.
+/// When live queries are needed, use [WebSocket
+/// connections](`super::ws::Client`) instead.
 #[derive(Debug, Clone)]
 pub struct Client(());
 
@@ -387,11 +449,19 @@ impl Surreal<Client> {
 	}
 }
 
+/// Serialize a `Value` as a JSON string for a REST body.
+///
+/// Cannot fail: the conversion goes through `serde_json::Value`, whose string
+/// serialization is infallible.
+fn json_encode_str(value: Value) -> String {
+	serde_json::to_string(&value.into_json_value())
+		.expect("serialization to json string should not fail")
+}
+
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
-	headers.insert(ACCEPT, HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS));
-	headers
-		.insert(CONTENT_TYPE, HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS));
+	headers.insert(ACCEPT, HeaderValue::from_static(surrealdb_rpc::wire::ACCEPT));
+	headers.insert(CONTENT_TYPE, HeaderValue::from_static(surrealdb_rpc::wire::CONTENT_TYPE));
 	headers
 }
 
@@ -497,8 +567,16 @@ async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<()
 
 	let future = async move {
 		let mut response = response.bytes_stream();
-		while let Ok(Some(b)) = response.try_next().await {
-			if bytes.send(Ok(b.to_vec())).await.is_err() {
+		loop {
+			let item = match response.try_next().await {
+				Ok(Some(b)) => Ok(b.to_vec()),
+				Ok(None) => break,
+				// A stream that ends in an error is a truncated export, which
+				// the receiver must not mistake for a complete one.
+				Err(error) => Err(crate::std_error_to_types_error(error)),
+			};
+			let failed = item.is_err();
+			if bytes.send(item).await.is_err() || failed {
 				break;
 			}
 		}
@@ -523,58 +601,73 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	};
 
 	let res = request
-		.header(ACCEPT, surrealdb_core::api::format::FLATBUFFERS)
+		// `/import` answers in `cbor`, not `cbor.2`; the wire decoder reads both.
+		.header(ACCEPT, surrealdb_rpc::format::CBOR)
 		.body(file)
 		.send()
 		.await
 		.map_err(crate::std_error_to_types_error)?;
 
-	if res.error_for_status_ref().is_err() {
-		let res = res.text().await.map_err(crate::std_error_to_types_error)?;
+	let status = res.status();
+	let bytes = res.bytes().await.map_err(crate::std_error_to_types_error)?;
 
-		match res.parse::<serde_json::Value>() {
-			Ok(body) => {
-				let error_msg = format!(
-					"\n{}",
-					serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into())
-				);
-				return Err(Error::connection(
-					format!("HTTP error: {error_msg}"),
-					ConnectionError::ConnectionFailed,
-				));
+	// A dump that reached execution is answered with the array of statements
+	// that failed - empty when the whole dump applied - and the status says
+	// whether it applied in full. Read that array first, so that a caller whose
+	// import failed is told which statement failed rather than which status the
+	// transport carried. A request rejected before execution is answered with
+	// an error document instead, and is reported from that document.
+	match surrealdb_rpc::wire::decode(&bytes) {
+		Ok(Value::Array(arr)) => {
+			for val in arr.into_vec() {
+				let result = QueryResult::from_value(val)
+					.map_err(|e| Error::internal(format!("Failed to parse query result: {e}")))?;
+				result.result?;
 			}
-			Err(_) => {
-				return Err(Error::connection(
-					format!("HTTP error: {res}"),
-					ConnectionError::ConnectionFailed,
-				));
+			// The import applied in full only when the server also said so. A
+			// failure it reported without attributing it to a statement is
+			// still a failure, and must not be returned as success.
+			if status.is_success() {
+				Ok(())
+			} else {
+				Err(Error::internal(format!(
+					"The server reported a failed import with HTTP status {status}, and the import may have been partially applied"
+				)))
+			}
+		}
+		decoded => {
+			if !status.is_success() {
+				let body = String::from_utf8_lossy(&bytes);
+
+				return match body.parse::<serde_json::Value>() {
+					Ok(body) => {
+						let error_msg = format!(
+							"\n{}",
+							serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into())
+						);
+						Err(Error::connection(
+							format!("HTTP error: {error_msg}"),
+							ConnectionError::ConnectionFailed,
+						))
+					}
+					Err(_) => Err(Error::connection(
+						format!("HTTP error: {body}"),
+						ConnectionError::ConnectionFailed,
+					)),
+				};
+			}
+
+			match decoded {
+				Ok(_) => Err(Error::internal("Expected array response from import".to_string())),
+				Err(e) => Err(crate::Error::serialization(
+					format!(
+						"The server returned an unexpected response: Failed to deserialize CBOR payload: {e:?}"
+					),
+					SerializationError::Deserialization,
+				)),
 			}
 		}
 	}
-
-	let bytes = res.bytes().await.map_err(crate::std_error_to_types_error)?;
-
-	let value: Value = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
-		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x:?}"))
-		.map_err(|e| {
-			crate::Error::serialization(
-				format!("The server returned an unexpected response: {e}"),
-				SerializationError::Deserialization,
-			)
-		})?;
-
-	// Convert Value::Array to Vec<QueryResult>
-	let Value::Array(arr) = value else {
-		return Err(Error::internal("Expected array response from import".to_string()));
-	};
-
-	for val in arr.into_vec() {
-		let result = QueryResult::from_value(val)
-			.map_err(|e| Error::internal(format!("Failed to parse query result: {e}")))?;
-		result.result?;
-	}
-
-	Ok(())
 }
 
 pub(crate) async fn health(request: RequestBuilder) -> Result<()> {
@@ -585,6 +678,128 @@ pub(crate) async fn health(request: RequestBuilder) -> Result<()> {
 		.error_for_status()
 		.map_err(crate::std_error_to_types_error)?;
 	Ok(())
+}
+
+/// Record a command that succeeded on `session_state` in its replay log.
+///
+/// A refresh, a signup, and an authenticate the router refreshed on the way,
+/// leave the session holding an access token that no logged command produces
+/// without side effects. They are logged as an authenticate with the token the
+/// session holds afterwards, so a replay ends with the credential the session
+/// has now without re-executing `SIGNUP`.
+async fn record_replay(session_state: &SessionState, command: Command) {
+	if matches!(
+		command,
+		Command::Refresh { .. } | Command::Authenticate { .. } | Command::Signup { .. }
+	) && let Some(Auth::Bearer {
+		token,
+	}) = &*session_state.auth.read().await
+	{
+		session_state.replay.push(Command::Authenticate {
+			token: CoreToken::Access(token.as_insecure_token().to_owned()),
+		});
+	} else if command.replayable() {
+		session_state.replay.push(command);
+	}
+}
+
+/// The authentication a server session holds after `command` succeeded with
+/// `results`, given the authentication it held before.
+///
+/// This mirrors what [`router`] records for the same commands, so a replay
+/// reaches each command holding what the original session held there.
+fn auth_after(command: &Command, results: &[QueryResult], auth: Option<Auth>) -> Option<Auth> {
+	let Some(Ok(value)) = results.first().map(|result| result.clone().result) else {
+		return auth;
+	};
+	match command {
+		Command::Signin {
+			..
+		} => match Credentials::from_value(value.clone()) {
+			Ok(credentials) => Some(Auth::Basic {
+				user: credentials.user,
+				pass: credentials.pass,
+				ns: credentials.ns,
+				db: credentials.db,
+			}),
+			Err(_) => match Token::from_value(value) {
+				Ok(token) => Some(Auth::Bearer {
+					token: token.access,
+				}),
+				Err(_) => auth,
+			},
+		},
+		Command::Signup {
+			..
+		} => match Token::from_value(value) {
+			Ok(token) => Some(Auth::Bearer {
+				token: token.access,
+			}),
+			Err(_) => auth,
+		},
+		Command::Authenticate {
+			token,
+		} => match Token::from_value(token.clone().into_value()) {
+			Ok(token) => Some(Auth::Bearer {
+				token: token.access,
+			}),
+			Err(_) => auth,
+		},
+		Command::Invalidate => None,
+		Command::Use {
+			..
+		}
+		| Command::Refresh {
+			..
+		}
+		| Command::Begin {
+			..
+		}
+		| Command::Rollback {
+			..
+		}
+		| Command::Commit {
+			..
+		}
+		| Command::Revoke {
+			..
+		}
+		| Command::Query {
+			..
+		}
+		| Command::ExportFile {
+			..
+		}
+		| Command::ExportBytes {
+			..
+		}
+		| Command::ImportFile {
+			..
+		}
+		| Command::Health
+		| Command::Version
+		| Command::Set {
+			..
+		}
+		| Command::Unset {
+			..
+		}
+		| Command::SubscribeLive {
+			..
+		}
+		| Command::Kill {
+			..
+		}
+		| Command::Attach {
+			..
+		}
+		| Command::Detach {
+			..
+		}
+		| Command::Run {
+			..
+		} => auth,
+	}
 }
 
 /// Sends an RPC request to the SurrealDB server and returns the response.
@@ -607,8 +822,8 @@ async fn send_request(
 	let url = base_url.join(RPC_PATH).expect("valid RPC path");
 
 	let req_value = req.into_value();
-	let body = surrealdb_core::rpc::format::flatbuffers::encode(&req_value)
-		.map_err(|x| format!("Failed to serialize to flatbuffers: {x}"))
+	let body = surrealdb_rpc::wire::encode_body(req_value)
+		.map_err(|x| format!("Failed to serialize to CBOR: {x}"))
 		.map_err(|e| {
 			crate::Error::internal(format!(
 				"Tried to send a value which could not be serialized: {e}"
@@ -618,7 +833,9 @@ async fn send_request(
 	// Include auth header so the server can authenticate the request and maintain
 	// session state. This is essential for token-based auth flows where the server
 	// extracts namespace/database from JWT claims during authenticate().
-	let http_req = client.post(url).headers(headers.clone()).auth(auth).body(body);
+	let mut headers = headers.clone();
+	headers.insert(CONTENT_TYPE, HeaderValue::from_static(body.content_type));
+	let http_req = client.post(url).headers(headers).auth(auth).body(body.bytes);
 	let response = http_req
 		.send()
 		.await
@@ -627,14 +844,18 @@ async fn send_request(
 		.map_err(crate::std_error_to_types_error)?;
 	let bytes = response.bytes().await.map_err(crate::std_error_to_types_error)?;
 
-	let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
-		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
+	let response = surrealdb_rpc::wire::decode(&bytes)
+		.and_then(|v| Ok(DbResponse::from_value(v)?))
+		.map_err(|x| format!("Failed to deserialize CBOR payload: {x}"))
 		.map_err(|e| {
 			crate::Error::internal(format!("The server returned an unexpected response: {e}"))
 		})?;
 
 	match response.result? {
 		DbResult::Query(results) => Ok(results),
+		DbResult::Encoded(results) => {
+			Ok(results.into_iter().map(|result| result.into_query_result()).collect())
+		}
 		DbResult::Other(value) => {
 			Ok(vec![QueryResultBuilder::started_now().finish_with_result(Ok(value))])
 		}
@@ -756,11 +977,10 @@ async fn router(
 			.await?;
 
 			// Stash the signup-issued bearer token so subsequent HTTP
-			// requests carry the new credentials and pass the
-			// per-session ownership gate added in
-			// `Http::verify_caller_for_session`. Without this the next
-			// auth call would arrive anonymous against a session that
-			// the server has already bound to the new record principal.
+			// requests carry the new credentials and pass the server's
+			// per-session ownership gate. Without this the next auth call
+			// would arrive anonymous against a session that the server has
+			// already bound to the new record principal.
 			let value = match results.first() {
 				Some(result) => result.clone().result?,
 				None => {
@@ -927,7 +1147,7 @@ async fn router(
 			key,
 			value,
 		} => {
-			surrealdb_core::rpc::check_protected_param(&key)?;
+			surrealdb_rpc::check_protected_param(&key)?;
 			let req = Command::Set {
 				key,
 				value,
@@ -946,6 +1166,7 @@ async fn router(
 		Command::Unset {
 			key,
 		} => {
+			surrealdb_rpc::check_protected_param(&key)?;
 			let req = Command::Unset {
 				key,
 			}
@@ -964,13 +1185,7 @@ async fn router(
 		Command::ExportFile {
 			..
 		}
-		| Command::ExportMl {
-			..
-		}
 		| Command::ImportFile {
-			..
-		}
-		| Command::ImportMl {
 			..
 		} => Err(Error::internal(
 			"File-based export/import is not supported on this architecture. \
@@ -988,16 +1203,13 @@ async fn router(
 			let config_value: Value = config.into_value();
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
-			let request =
-				client
-					.post(req_path)
-					.body(rpc::format::json::encode_str(config_value).map_err(|e| {
-						Error::internal(format!("failed to serialize Value: {}", e))
-					})?)
-					.headers(headers.clone())
-					.auth(&auth)
-					.header(CONTENT_TYPE, "application/json")
-					.header(ACCEPT, "application/octet-stream");
+			let request = client
+				.post(req_path)
+				.body(json_encode_str(config_value))
+				.headers(headers.clone())
+				.auth(&auth)
+				.header(CONTENT_TYPE, "application/json")
+				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -1010,62 +1222,12 @@ async fn router(
 			let config_value = config.into_value();
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
-			let request =
-				client
-					.post(req_path)
-					.body(rpc::format::json::encode_str(config_value).map_err(|e| {
-						Error::internal(format!("failed to serialize Value: {}", e))
-					})?)
-					.headers(headers.clone())
-					.auth(&auth)
-					.header(CONTENT_TYPE, "application/json")
-					.header(ACCEPT, "application/octet-stream");
-			export_bytes(request, bytes).await?;
-			Ok(vec![QueryResultBuilder::instant_none()])
-		}
-		#[cfg(not(target_family = "wasm"))]
-		Command::ExportMl {
-			path,
-			config,
-		} => {
-			let req_path = base_url
-				.join("ml")
-				.map_err(crate::std_error_to_types_error)?
-				.join("export")
-				.map_err(crate::std_error_to_types_error)?
-				.join(&config.name)
-				.map_err(crate::std_error_to_types_error)?
-				.join(&config.version)
-				.map_err(crate::std_error_to_types_error)?;
-			let headers = session_state.headers.read().await;
-			let auth = session_state.auth.read().await;
 			let request = client
-				.get(req_path)
+				.post(req_path)
+				.body(json_encode_str(config_value))
 				.headers(headers.clone())
 				.auth(&auth)
-				.header(ACCEPT, "application/octet-stream");
-			export_file(request, path).await?;
-			Ok(vec![QueryResultBuilder::instant_none()])
-		}
-		Command::ExportBytesMl {
-			bytes,
-			config,
-		} => {
-			let req_path = base_url
-				.join("ml")
-				.map_err(crate::std_error_to_types_error)?
-				.join("export")
-				.map_err(crate::std_error_to_types_error)?
-				.join(&config.name)
-				.map_err(crate::std_error_to_types_error)?
-				.join(&config.version)
-				.map_err(crate::std_error_to_types_error)?;
-			let headers = session_state.headers.read().await;
-			let auth = session_state.auth.read().await;
-			let request = client
-				.get(req_path)
-				.headers(headers.clone())
-				.auth(&auth)
+				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
 			Ok(vec![QueryResultBuilder::instant_none()])
@@ -1075,25 +1237,6 @@ async fn router(
 			path,
 		} => {
 			let req_path = base_url.join("import").map_err(crate::std_error_to_types_error)?;
-			let headers = session_state.headers.read().await;
-			let auth = session_state.auth.read().await;
-			let request = client
-				.post(req_path)
-				.headers(headers.clone())
-				.auth(&auth)
-				.header(CONTENT_TYPE, "application/octet-stream");
-			import(request, path).await?;
-			Ok(vec![QueryResultBuilder::instant_none()])
-		}
-		#[cfg(not(target_family = "wasm"))]
-		Command::ImportMl {
-			path,
-		} => {
-			let req_path = base_url
-				.join("ml")
-				.map_err(crate::std_error_to_types_error)?
-				.join("import")
-				.map_err(crate::std_error_to_types_error)?;
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
 			let request = client
@@ -1145,5 +1288,301 @@ async fn router(
 			.await?;
 			Ok(res)
 		}
+	}
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+#[allow(clippy::unwrap_used)]
+mod tests {
+	use std::io::{Read, Write};
+	use std::net::TcpListener;
+	use std::thread::JoinHandle;
+
+	use super::*;
+
+	/// A request as the stub server received it: the lowercased head, and the
+	/// body.
+	struct Received {
+		head: String,
+		body: Vec<u8>,
+	}
+
+	/// An answer the stub server gives: a status, and a body.
+	type Answer = (u16, Vec<u8>);
+
+	/// An empty answer with `status`, which the client reads as a failure.
+	fn empty(status: u16) -> Answer {
+		(status, Vec::new())
+	}
+
+	/// A successful RPC answer.
+	fn ok() -> Answer {
+		let response = DbResponse::success(None, None, DbResult::Other(Value::None));
+		(200, surrealdb_rpc::wire::encode(response.into_value()).unwrap())
+	}
+
+	/// Answers one request per entry in `answers`, each on its own
+	/// connection, and returns what each request carried.
+	fn stub_server(answers: Vec<Answer>) -> (Url, JoinHandle<Vec<Received>>) {
+		let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+		let base_url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+		let server = std::thread::spawn(move || {
+			let mut received = Vec::new();
+			for (status, answer) in answers {
+				let (mut stream, _) = listener.accept().unwrap();
+				let mut data = Vec::new();
+				let mut buf = [0u8; 1024];
+				let head_end = loop {
+					if let Some(i) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+						break i + 4;
+					}
+					let n = stream.read(&mut buf).unwrap();
+					data.extend_from_slice(&buf[..n]);
+				};
+				let head = String::from_utf8_lossy(&data[..head_end]).to_lowercase();
+				let length = head
+					.lines()
+					.find_map(|line| line.strip_prefix("content-length: "))
+					.map_or(0, |n| n.trim().parse::<usize>().unwrap());
+				while data.len() < head_end + length {
+					let n = stream.read(&mut buf).unwrap();
+					data.extend_from_slice(&buf[..n]);
+				}
+				let body = data[head_end..head_end + length].to_vec();
+				let response = format!(
+					"HTTP/1.1 {status} X\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+					answer.len()
+				);
+				stream.write_all(response.as_bytes()).unwrap();
+				stream.write_all(&answer).unwrap();
+				received.push(Received {
+					head,
+					body,
+				});
+			}
+			received
+		});
+		(base_url, server)
+	}
+
+	fn authenticated_session() -> SessionState {
+		let session = SessionState::default();
+		*session.auth.try_write().unwrap() = Some(Auth::Basic {
+			user: "alice".to_owned(),
+			pass: "secret".to_owned(),
+			ns: None,
+			db: None,
+		});
+		session
+	}
+
+	fn is_detach(request: &Received) -> bool {
+		request.body.windows(6).any(|w| w == b"detach")
+	}
+
+	/// A request holding a regex, which plain `cbor` has no form for, is sent
+	/// as a `cbor.2` body under that content type; any other stays plain `cbor`.
+	#[tokio::test]
+	async fn a_regex_parameter_is_sent_as_a_cbor_2_body() {
+		let regex = Value::Regex("^a/b[0-9]+$".parse().unwrap());
+		let (base_url, server) = stub_server(vec![ok(), ok()]);
+		let client = reqwest::Client::new();
+		for value in [regex.clone(), Value::from_t("plain")] {
+			let request = Command::Set {
+				key: "r".to_owned(),
+				value,
+			}
+			.into_router_request(Some(1), None)
+			.unwrap();
+			send_request(request, &base_url, &client, &default_headers(), &None).await.unwrap();
+		}
+		let received = server.join().unwrap();
+		fn content_types(r: &Received) -> Vec<&str> {
+			r.head.lines().filter(|l| l.starts_with("content-type: ")).collect()
+		}
+		assert_eq!(content_types(&received[0]), ["content-type: application/cbor; v=2"]);
+		assert_eq!(content_types(&received[1]), ["content-type: application/cbor"]);
+		let sent = surrealdb_types::cbor::decode_v2(&received[0].body, 64, None).unwrap();
+		let Value::Object(sent) = sent else {
+			panic!("a request is an object");
+		};
+		assert_eq!(sent["params"], Value::from_t(vec![Value::from_t("r"), regex]));
+	}
+
+	/// The server only lets a session's owner detach it, so the detach sent
+	/// when a session is dropped must carry that session's authentication.
+	#[tokio::test]
+	async fn dropping_a_session_sends_its_authentication_with_the_detach() {
+		let (base_url, server) = stub_server(vec![empty(200)]);
+		let state = RouterState::new(reqwest::Client::new(), base_url);
+		let session_id = Uuid::new_v4();
+		state.sessions.insert(session_id, Ok(Arc::new(authenticated_session())));
+
+		state.handle_session_drop(session_id).await;
+
+		// The detach is awaited, so it has reached the server by now.
+		let received = server.join().unwrap();
+		assert!(is_detach(&received[0]), "the drop sent no detach");
+		assert!(received[0].head.contains("authorization: basic "), "the detach was anonymous");
+		assert!(state.sessions.get(&session_id).is_none(), "the session was not released");
+	}
+
+	/// A clone whose replay fails may still hold a server session it attached
+	/// before the failure, so the failure detaches it. A failed response tells
+	/// the client nothing about whether the attach landed, so the detach is
+	/// sent whichever request failed.
+	#[tokio::test]
+	async fn a_clone_whose_replay_fails_is_detached() {
+		// The replay fails on its first request, then the detach.
+		let (base_url, server) = stub_server(vec![empty(500), empty(200)]);
+		let state = RouterState::new(reqwest::Client::new(), base_url);
+		let old = Uuid::new_v4();
+		let new = Uuid::new_v4();
+		let session = SessionState::default();
+		session.replay.push(Command::Attach {
+			session_id: old,
+		});
+		state.sessions.insert(old, Ok(Arc::new(session)));
+
+		state.handle_session_clone(old, new).await;
+
+		let received = server.join().unwrap();
+		assert!(matches!(state.sessions.get(&new), Some(Err(_))), "the clone should have failed");
+		assert!(is_detach(&received[1]), "the failed clone was not detached");
+		// No sign-in was replayed, so a session the attach created is anonymous.
+		assert!(!received[1].head.contains("authorization:"), "the detach claimed a principal");
+	}
+
+	/// A replay sends each command as the principal the original session held
+	/// at that point, and a failed replay detaches as the principal it reached,
+	/// not as the one the copied state ends with.
+	#[tokio::test]
+	async fn a_failed_replay_detaches_as_the_principal_it_reached() {
+		// The attach and the first authenticate succeed, the second fails.
+		let (base_url, server) = stub_server(vec![ok(), ok(), empty(500), empty(200)]);
+		let state = RouterState::new(reqwest::Client::new(), base_url);
+		let old = Uuid::new_v4();
+		let new = Uuid::new_v4();
+		let session = SessionState::default();
+		session.replay.push(Command::Attach {
+			session_id: old,
+		});
+		session.replay.push(Command::Authenticate {
+			token: CoreToken::Access("first".to_owned()),
+		});
+		session.replay.push(Command::Authenticate {
+			token: CoreToken::Access("second".to_owned()),
+		});
+		*session.auth.try_write().unwrap() = Some(Auth::Bearer {
+			token: Token::from_value(CoreToken::Access("second".to_owned()).into_value())
+				.unwrap()
+				.access,
+		});
+		state.sessions.insert(old, Ok(Arc::new(session)));
+
+		state.handle_session_clone(old, new).await;
+
+		let received = server.join().unwrap();
+		let authorization = |i: usize| {
+			received[i]
+				.head
+				.lines()
+				.find(|line| line.starts_with("authorization:"))
+				.map(str::to_owned)
+		};
+		assert_eq!(authorization(0), None, "the attach is sent before any sign-in");
+		assert_eq!(authorization(1), None, "the first authenticate is sent before any sign-in");
+		assert_eq!(authorization(2).as_deref(), Some("authorization: bearer first"));
+		assert!(is_detach(&received[3]), "the failed clone was not detached");
+		assert_eq!(authorization(3).as_deref(), Some("authorization: bearer first"));
+	}
+
+	/// A clone carries the credential its own replay produced, not the one
+	/// copied from the session it was cloned from.
+	#[tokio::test]
+	async fn a_replayed_clone_keeps_the_credential_its_replay_produced() {
+		let (base_url, server) = stub_server(vec![ok(), ok()]);
+		let state = RouterState::new(reqwest::Client::new(), base_url);
+		let old = Uuid::new_v4();
+		let new = Uuid::new_v4();
+		let session = SessionState::default();
+		session.replay.push(Command::Attach {
+			session_id: old,
+		});
+		session.replay.push(Command::Authenticate {
+			token: CoreToken::Access("replayed".to_owned()),
+		});
+		*session.auth.try_write().unwrap() = Some(Auth::Bearer {
+			token: Token::from_value(CoreToken::Access("copied".to_owned()).into_value())
+				.unwrap()
+				.access,
+		});
+		state.sessions.insert(old, Ok(Arc::new(session)));
+
+		state.handle_session_clone(old, new).await;
+
+		server.join().unwrap();
+		let Some(Ok(clone)) = state.sessions.get(&new) else {
+			panic!("the clone should have succeeded");
+		};
+		let auth = clone.auth.read().await;
+		let Some(Auth::Bearer {
+			token,
+		}) = &*auth
+		else {
+			panic!("the clone should carry a bearer token");
+		};
+		assert_eq!(token.as_insecure_token(), "replayed");
+	}
+
+	/// A session whose setup failed and whose cleanup detach failed too is
+	/// detached again when it is dropped.
+	#[tokio::test]
+	async fn a_failed_cleanup_detach_is_sent_again_on_drop() {
+		// The attach fails, its cleanup detach fails, the drop's detach.
+		let (base_url, server) = stub_server(vec![empty(500), empty(500), ok()]);
+		let state = RouterState::new(reqwest::Client::new(), base_url);
+		let session_id = Uuid::new_v4();
+
+		state.handle_session_initial(session_id).await;
+		assert!(matches!(state.sessions.get(&session_id), Some(Err(_))), "setup should fail");
+		state.handle_session_drop(session_id).await;
+
+		let received = server.join().unwrap();
+		assert!(is_detach(&received[1]), "the failed setup was not detached");
+		assert!(is_detach(&received[2]), "the failed cleanup was not retried on drop");
+		assert!(state.undetached.get(&session_id).is_none(), "the retry was not forgotten");
+	}
+
+	/// A refresh leaves the session holding a token no logged command
+	/// produced, so it is logged as an authenticate with that token, and a
+	/// clone's replay ends with the refreshed credential.
+	#[tokio::test]
+	async fn a_refresh_is_replayed_as_the_token_it_left() {
+		let session = SessionState::default();
+		*session.auth.write().await = Some(Auth::Bearer {
+			token: Token::from_value(CoreToken::Access("refreshed".to_owned()).into_value())
+				.unwrap()
+				.access,
+		});
+
+		record_replay(
+			&session,
+			Command::Refresh {
+				token: CoreToken::Access("original".to_owned()),
+			},
+		)
+		.await;
+
+		let logged: Vec<_> = session.replay.iter().map(|(_, command)| command.clone()).collect();
+		assert!(
+			matches!(
+				logged.as_slice(),
+				[Command::Authenticate {
+					token: CoreToken::Access(token),
+				}] if token == "refreshed"
+			),
+			"logged {logged:?}"
+		);
 	}
 }

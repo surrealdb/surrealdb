@@ -1,31 +1,90 @@
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs)]
 #![allow(clippy::mutable_key_type)]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+#![deny(clippy::wildcard_enum_match_arm)]
 
+#[cfg(feature = "cbor")]
+pub mod cbor;
 mod error;
 mod flatbuffers;
 mod hashmap;
 mod kind;
 mod notification;
+#[cfg(feature = "proto")]
+mod proto;
+pub mod regex_engine;
+pub mod shaped;
 #[macro_use]
 mod sql;
 mod traits;
 pub(crate) mod utils;
+/// The escapers the public record id's SurrealQL rendering uses, for a
+/// server that renders a record id without building one.
+#[doc(hidden)]
+pub use utils::escape::{EscapeRecordKey, EscapeSqonIdent};
 mod value;
 mod variables;
 
+/// This crate's version, which a project depending on it names in its
+/// `Cargo.toml` (for example, the projects `surreal ext init` scaffolds).
+pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub use error::*;
 pub use flatbuffers::*;
+pub use half::f16;
 pub use hashmap::HashMap;
 pub use kind::*;
 pub use notification::*;
+/// The protobuf runtime the `proto` conversions are built on.
+///
+/// Re-exported so that a caller working with the generated messages -- sizing
+/// one against a transport's message limit, say -- reaches the same `prost`
+/// these conversions were built against, rather than pinning its own copy and
+/// risking two versions of the trait.
+#[cfg(feature = "proto")]
+pub use prost;
+#[cfg(feature = "proto")]
+pub use proto::{decode as decode_proto, encode as encode_proto};
 pub use sql::{SqlFormat, ToSql, fmt_non_finite_f64, write_sql};
 // Re-export the derive macro
-pub use surrealdb_types_derive::{SurrealValue, kind};
+pub use surrealdb_types_derive::SurrealValue;
+#[doc(hidden)]
+pub use surrealdb_types_derive::kind_in as __kind_in;
 pub use traits::*;
 pub use utils::either::*;
 pub use value::*;
 pub use variables::*;
+
+/// Builds a [`Kind`] from SurrealQL type syntax.
+///
+/// The expansion names `Kind` through `$crate`, so it resolves for a caller that
+/// reaches this macro through a re-export, such as `surrealdb::types::kind`,
+/// without a direct dependency on this crate.
+///
+/// Supported forms:
+/// - Basic types: `string`, `bool`, `int`, `datetime`, ...
+/// - Parameterized types: `array<string>`, `set<int, 5>`, `record<user | post>`
+/// - Union types: `string | bool | int`
+/// - Literal values: `true`, `42`, `"hello"`
+/// - Object literals: `{ status: string, "user-id": int }`
+/// - Array literals: `[string, int, bool]`
+/// - Escape hatch: `(expr)` for an arbitrary Rust expression
+/// - Prefixes: `Kind::String`, `Literal::Bool(true)`
+///
+/// ```
+/// use surrealdb_types::{Kind, kind};
+///
+/// assert_eq!(kind!(string), Kind::String);
+/// assert_eq!(kind!(array<int>), Kind::Array(Box::new(Kind::Int), None));
+/// ```
+#[macro_export]
+macro_rules! kind {
+	($($tokens:tt)*) => {
+		$crate::__kind_in!($crate; $($tokens)*)
+	};
+}
 
 /// Macro for creating a SurrealDB object.
 ///
@@ -195,7 +254,7 @@ mod tests {
 	fn test_object_macro() {
 		// Test empty object
 		let empty = object! {};
-		assert_eq!(empty.0.len(), 0);
+		assert_eq!(empty.len(), 0);
 
 		let _ = Value::None.is_bool();
 
@@ -204,16 +263,16 @@ mod tests {
 			name: "John".to_string(),
 			age: 30,
 		};
-		assert_eq!(obj1.0.get("name"), Some(&Value::String("John".to_string())));
-		assert_eq!(obj1.0.get("age"), Some(&Value::Number(30.into())));
+		assert_eq!(obj1.get("name"), Some(&Value::String("John".to_string())));
+		assert_eq!(obj1.get("age"), Some(&Value::Number(30.into())));
 
 		// Test with quoted field names
 		let obj2 = object! {
 			"first-name": "John".to_string(),
 			"last-name": "Doe".to_string(),
 		};
-		assert_eq!(obj2.0.get("first-name"), Some(&Value::String("John".to_string())));
-		assert_eq!(obj2.0.get("last-name"), Some(&Value::String("Doe".to_string())));
+		assert_eq!(obj2.get("first-name"), Some(&Value::String("John".to_string())));
+		assert_eq!(obj2.get("last-name"), Some(&Value::String("Doe".to_string())));
 
 		// Test mixed field names - this now works!
 		let obj3 = object! {
@@ -223,19 +282,19 @@ mod tests {
 			"user-id": 12345,
 			active: true,
 		};
-		assert_eq!(obj3.0.get("name"), Some(&Value::String("John".to_string())));
-		assert_eq!(obj3.0.get("last-name"), Some(&Value::String("Doe".to_string())));
-		assert_eq!(obj3.0.get("age"), Some(&Value::Number(30.into())));
-		assert_eq!(obj3.0.get("user-id"), Some(&Value::Number(12345.into())));
-		assert_eq!(obj3.0.get("active"), Some(&Value::Bool(true)));
+		assert_eq!(obj3.get("name"), Some(&Value::String("John".to_string())));
+		assert_eq!(obj3.get("last-name"), Some(&Value::String("Doe".to_string())));
+		assert_eq!(obj3.get("age"), Some(&Value::Number(30.into())));
+		assert_eq!(obj3.get("user-id"), Some(&Value::Number(12345.into())));
+		assert_eq!(obj3.get("active"), Some(&Value::Bool(true)));
 
 		// Test with trailing comma
 		let obj4 = object! {
 			name: "Alice".to_string(),
 			"last-name": "Smith".to_string(),
 		};
-		assert_eq!(obj4.0.get("name"), Some(&Value::String("Alice".to_string())));
-		assert_eq!(obj4.0.get("last-name"), Some(&Value::String("Smith".to_string())));
+		assert_eq!(obj4.get("name"), Some(&Value::String("Alice".to_string())));
+		assert_eq!(obj4.get("last-name"), Some(&Value::String("Smith".to_string())));
 	}
 
 	#[test]

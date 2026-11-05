@@ -1,0 +1,6 @@
+<!doctype html><meta charset=utf-8><title>drop</title><pre>see window.__drop</pre>
+<script type=module>
+const w = new Worker("./drop-worker.js", { type: "module" });
+w.onmessage = (e) => { window.__drop = e.data; };
+w.onerror = (e) => { window.__drop = { error: e.message }; };
+</script>

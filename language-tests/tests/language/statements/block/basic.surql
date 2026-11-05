@@ -34,7 +34,7 @@ value = "100"
 [[test.results]]
 value = "100"
 
-# 8: Block with RETURN (tests fallback to legacy compute)
+# 8: Block with RETURN
 [[test.results]]
 value = "42"
 
@@ -90,7 +90,7 @@ value = "11"
 	}
 };
 
-# 8: Block with RETURN (tests fallback to legacy compute)
+# 8: Block with RETURN
 {
 	RETURN 42
 };

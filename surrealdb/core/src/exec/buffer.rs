@@ -3,15 +3,16 @@
 //! Provides two buffering strategies for inter-operator pipelining:
 //!
 //! - **`SpawnedBufferedStream`** (parallel): Runs the inner stream in a separate tokio task with a
-//!   bounded channel, giving true pipeline parallelism. Used for read-only operator chains where no
-//!   mutation ordering constraints exist.
+//!   bounded channel, giving true pipeline parallelism. Used where neither the buffered stream nor
+//!   the operator draining it writes, so there is no mutation ordering to preserve.
 //!
 //! - **`PrefetchStream`** (cooperative): Eagerly polls the inner stream on the same task and caches
-//!   ready results. Used for read-write operator chains where mutation side-effects must stay
-//!   sequential.
+//!   ready results. Used where either of them writes and the side effects must stay sequential.
 //!
-//! The public entry point [`buffer_stream`] chooses between them based on
-//! the child operator's [`AccessMode`] and [`CardinalityHint`].
+//! The public entry point [`buffer_stream`] chooses between them from the
+//! [`AccessMode`] its caller passes — which covers the caller's own work as well
+//! as the buffered stream's, see [`buffer_stream`] — and the buffered stream's
+//! [`CardinalityHint`].
 
 #[cfg(not(target_family = "wasm"))]
 use std::collections::VecDeque;
@@ -31,26 +32,44 @@ use crate::exec::cardinality::CardinalityHint;
 #[cfg(not(target_family = "wasm"))]
 use crate::expr::FlowResult;
 
-/// Value-count threshold for the [`CardinalityHint::Bounded`] short-circuit.
-///
-/// When an operator declares `Bounded(n)` with `n` at or below this limit, the
-/// output fits in roughly one batch, so spawning a dedicated task cannot
-/// overlap meaningful work. Cooperative prefetch is used instead.
-///
-/// This matches the default scan batch size used by most operators (see
-/// [`super::operators::scan::common::DEFAULT_SCAN_BATCH_SIZE`]).
-#[cfg(not(target_family = "wasm"))]
-const SMALL_BOUNDED_THRESHOLD: usize = 1000;
-
 /// Buffer a child operator's stream using the appropriate strategy.
 ///
 /// Strategy selection:
 /// 1. `CardinalityHint::AtMostOne` — no buffering (overhead exceeds benefit)
-/// 2. `CardinalityHint::Bounded(n)` where `n` is small — cooperative prefetch (output fits in ~1
-///    batch; spawn overhead would dominate)
-/// 3. `ReadOnly` children — spawned-task buffer (true pipeline parallelism)
-/// 4. `ReadWrite` children — cooperative prefetch (preserves mutation ordering)
-/// 5. `buffer_size == 0` — disables buffering entirely
+/// 2. `ReadOnly` — spawned-task buffer (true pipeline parallelism)
+/// 3. `ReadWrite` — cooperative prefetch (preserves mutation ordering)
+/// 4. `buffer_size == 0` — disables buffering entirely
+///
+/// # The caller's obligation
+///
+/// `mode` describes everything that runs while this buffer is being drained,
+/// which is the buffering operator's own work as well as the buffered stream's.
+/// A caller therefore passes its own [`AccessMode`] combined with the buffered
+/// stream's, never the buffered stream's alone:
+///
+/// ```ignore
+/// buffer_stream(
+///     self.input.execute(ctx)?,
+///     self.access_mode().combine(self.input.access_mode()),
+///     cardinality,
+///     buffer_size,
+/// )
+/// ```
+///
+/// The combination is load-bearing rather than defensive. `ReadOnly` here moves
+/// the buffered stream onto its own task, where it runs ahead of its consumer
+/// and concurrently with whatever that consumer does between polls. A caller
+/// that writes in that window would interleave its writes with reads it no
+/// longer orders, and writes in a plan share one transaction whose
+/// savepoints are a stack with no handle, so a second writer entering before
+/// the first has left unwinds the wrong one. The combined mode keeps the read
+/// and the write on one task, in the order the plan states.
+///
+/// The caller that writes is frequently a read-side operator: one that owns a
+/// projection's mutation subquery holds the write for a whole `SELECT`, so
+/// the rule cannot be narrowed to the mutation operators. An operator whose
+/// own mode is `ReadOnly` passes its input's mode unchanged, which the
+/// combination does by construction.
 ///
 /// On WASM targets, returns the stream unchanged regardless of mode.
 #[cfg(not(target_family = "wasm"))]
@@ -67,15 +86,10 @@ pub(crate) fn buffer_stream(
 	// exceeds any possible parallelism benefit.
 	match cardinality {
 		CardinalityHint::AtMostOne => return stream,
-		CardinalityHint::Bounded(n) if n <= SMALL_BOUNDED_THRESHOLD => {
-			// n is a value count, buffer_size is a batch count — use the
-			// batch-denominated buffer_size for the prefetch capacity.
-			return prefetch_buffered(stream, buffer_size);
-		}
-		_ => {}
+		CardinalityHint::Unbounded => {}
 	}
 	match mode {
-		AccessMode::ReadOnly => spawn_buffered(stream, buffer_size),
+		AccessMode::ReadOnly => spawn_buffered(stream, mode, buffer_size),
 		AccessMode::ReadWrite => prefetch_buffered(stream, buffer_size),
 	}
 }
@@ -100,13 +114,29 @@ pub(crate) fn buffer_stream(
 /// The inner stream is moved into a separate tokio task that eagerly produces
 /// batches into a bounded channel. The returned stream reads from the channel.
 ///
+/// Only a [`ReadOnly`](AccessMode::ReadOnly) stream may be moved onto another
+/// task: a writing one running ahead of its consumer would order its writes by
+/// the scheduler. This is the operator-level counterpart of the row-level rule
+/// in [`crate::exec::fan_out`], and [`buffer_stream`] is what enforces it.
+///
+/// `mode` is the mode that selected this strategy, taken so that the rule is
+/// asserted where the task is spawned rather than trusted at the one caller.
+///
 /// Safe to use when the operator pipeline's `RootContext.ctx` is a snapshot
 /// (independent `Arc<Context>`) rather than a clone of the executor's Arc.
 #[cfg(not(target_family = "wasm"))]
-fn spawn_buffered(stream: ValueBatchStream, buffer_size: usize) -> ValueBatchStream {
+fn spawn_buffered(
+	mut stream: ValueBatchStream,
+	mode: AccessMode,
+	buffer_size: usize,
+) -> ValueBatchStream {
+	debug_assert_eq!(
+		mode,
+		AccessMode::ReadOnly,
+		"a ReadWrite stream must not be spawned onto its own task"
+	);
 	let (tx, rx) = async_channel::bounded(buffer_size);
 	let handle = tokio::spawn(async move {
-		futures::pin_mut!(stream);
 		while let Some(item) = futures::StreamExt::next(&mut stream).await {
 			if tx.send(item).await.is_err() {
 				break; // consumer dropped
@@ -154,7 +184,7 @@ impl Stream for SpawnedBufferedStream {
 /// Create a cooperative prefetch buffer for read-write pipelines.
 ///
 /// Eagerly polls the inner stream and caches ready results, reducing poll
-/// round-trips through the operator tree. No tasks are spawned, so mutation
+/// round-trips between operators. No tasks are spawned, so mutation
 /// ordering is preserved.
 #[cfg(not(target_family = "wasm"))]
 fn prefetch_buffered(stream: ValueBatchStream, buffer_size: usize) -> ValueBatchStream {
@@ -167,7 +197,7 @@ fn prefetch_buffered(stream: ValueBatchStream, buffer_size: usize) -> ValueBatch
 }
 
 /// A stream wrapper that eagerly polls its inner stream and buffers ready
-/// results, reducing poll round-trips through the operator tree.
+/// results, reducing poll round-trips between operators.
 ///
 /// On each poll:
 /// 1. Greedily drain all immediately-ready items from the inner stream into the buffer (up to

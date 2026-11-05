@@ -1,6 +1,7 @@
 use std::future::IntoFuture;
 
-use crate::conn::Command;
+use crate::conn::ctx;
+use crate::method::transaction::RollbackOnDrop;
 use crate::method::{BoxFuture, Transaction};
 use crate::{Connection, OnceLockExt, Result, Surreal};
 
@@ -11,6 +12,7 @@ use crate::{Connection, OnceLockExt, Result, Surreal};
 pub struct Commit<C: Connection> {
 	pub(crate) client: Surreal<C>,
 	pub(crate) txn: uuid::Uuid,
+	guard: RollbackOnDrop<C>,
 }
 
 impl<C> Commit<C>
@@ -21,6 +23,7 @@ where
 		Self {
 			client: transaction.client,
 			txn: transaction.id,
+			guard: transaction.guard,
 		}
 	}
 }
@@ -32,17 +35,19 @@ where
 	type Output = Result<Surreal<C>>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
-	fn into_future(self) -> Self::IntoFuture {
+	fn into_future(mut self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
-			let _: crate::types::Value = router
-				.execute(
-					self.client.session_id,
-					Command::Commit {
-						txn: self.txn,
-					},
-				)
-				.await?;
+			// The guard stays armed until the engine has answered, so a caller
+			// that cancels this future mid-call still leaves the transaction
+			// rolled back. Only a successful answer settles the transaction: an
+			// error may be a refusal before dispatch that leaves it open, and a
+			// rollback after an error is harmless.
+			let outcome = router.engine.commit(ctx(self.client.session_id), self.txn).await;
+			if outcome.is_ok() {
+				self.guard.disarm();
+			}
+			outcome?;
 			Ok(self.client)
 		})
 	}

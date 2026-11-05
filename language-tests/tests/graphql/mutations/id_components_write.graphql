@@ -1,0 +1,27 @@
+/**
+[env]
+imports = ["../id_components_import.surql"]
+
+[test]
+reason = "GraphQL create, update and upsert name the record of a table whose record id names its components by its id, and what they return carries the components as fields: they are not inputs, so the id is the only way to name them"
+
+[[test.results]]
+value = "{ created: { city: 'Rome', temp: 9, time: '2024-01-03T00:00:00+00:00' }, updated: { city: 'London', temp: 40, time: '2024-01-01T00:00:00+00:00' }, upserted: { city: 'Oslo', temp: 1, time: '2024-01-04T00:00:00+00:00' } }"
+*/
+mutation {
+	created: createReading(data: { id: "['Rome', d'2024-01-03T00:00:00Z']", temp: 9 }) {
+		city
+		time
+		temp
+	}
+	updated: updateReading(id: "['London', d'2024-01-01T00:00:00Z']", data: { temp: 40 }) {
+		city
+		time
+		temp
+	}
+	upserted: upsertReading(id: "['Oslo', d'2024-01-04T00:00:00Z']", data: { temp: 1 }) {
+		city
+		time
+		temp
+	}
+}

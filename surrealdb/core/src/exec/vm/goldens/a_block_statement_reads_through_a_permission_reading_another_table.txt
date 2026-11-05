@@ -1,0 +1,16 @@
+### SELECT id FROM item
+{ id: item:0 }
+{ id: item:1 }
+{ id: item:2 }
+### RETURN (SELECT id FROM item)
+[{ id: item:0 }, { id: item:1 }, { id: item:2 }]
+### RETURN SELECT id FROM item
+[{ id: item:0 }, { id: item:1 }, { id: item:2 }]
+### RETURN array::len((SELECT id FROM item))
+3
+### { LET $n = SELECT id FROM item; RETURN $n }
+[{ id: item:0 }, { id: item:1 }, { id: item:2 }]
+### IF true { SELECT id FROM item }
+[{ id: item:0 }, { id: item:1 }, { id: item:2 }]
+### FOR $i IN [1] { RETURN SELECT id FROM item }
+[{ id: item:0 }, { id: item:1 }, { id: item:2 }]

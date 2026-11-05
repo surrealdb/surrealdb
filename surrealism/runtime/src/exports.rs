@@ -26,10 +26,31 @@ pub struct FunctionExport {
 	pub args_text: Option<Vec<String>>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub returns_text: Option<String>,
-	/// Whether this function may perform writes. Opt-in via `#[surrealism(writeable)]`.
-	/// Defaults to `false` (read-only) for backward compatibility.
+	/// Whether this function may perform writes.
+	///
+	/// The guest declares this; how it is spelled is the guest language's
+	/// business. Read before invoking, to decide whether the call runs under a
+	/// no-write execution frame.
 	#[serde(default)]
 	pub writeable: bool,
+	/// Whether this function declared a transaction parameter at all.
+	///
+	/// A function that declared none is lent no handle, so it has no route to
+	/// the datastore whatever its body contains — the property the SDK
+	/// documents, made true by the host rather than by the generated dispatch
+	/// happening to drop the handle.
+	///
+	/// This manifest is user-supplied and is not evidence about the component
+	/// beside it. What makes the property hold is that the host lends the handle
+	/// on this field and on nothing else, so what a function is *shown* to
+	/// declare and what it is *granted* cannot diverge: a hand-written component
+	/// whose body calls `transaction.sql` must declare a transaction to be given
+	/// one, and a manifest that hides the parameter also withholds the handle.
+	///
+	/// Required, with no default: a manifest without it was built against a
+	/// different world and its component cannot instantiate against this host,
+	/// so failing here says why.
+	pub declares_transaction: bool,
 	/// Human-readable comment for this function, aligned with SurrealQL's `COMMENT`
 	/// clause. Sourced from Rust doc comments or `#[surrealism(comment = "...")]`.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
@@ -132,6 +153,7 @@ mod tests {
 					args_text: Some(vec!["value: int".to_string()]),
 					returns_text: Some("bool".to_string()),
 					writeable: false,
+					declares_transaction: false,
 					comment: Some("Checks whether a value is valid.".to_string()),
 				},
 				FunctionExport {
@@ -144,6 +166,7 @@ mod tests {
 					args_text: None,
 					returns_text: None,
 					writeable: true,
+					declares_transaction: true,
 					comment: None,
 				},
 			],
@@ -171,6 +194,46 @@ mod tests {
 		assert!(parsed.functions[1].comment.is_none());
 	}
 
+	/// A manifest without the field is refused, and says which field is
+	/// missing.
+	///
+	/// There is no reading of its silence that is safe to guess at: `true`
+	/// lends a handle to a function whose author may not have asked for one,
+	/// and `false` — what a missing bool would otherwise default to — withholds
+	/// it from one that did and turns every host call into a trap. Its
+	/// component cannot instantiate against this host's world either, so the
+	/// only thing to do is say so here, where the message names the problem.
+	#[test]
+	fn a_manifest_without_the_field_is_refused() {
+		// Built the normal way and then stripped of the key, rather than
+		// hand-written: the args and returns are hex-encoded kind blobs that a
+		// literal would have to keep in step with the encoder.
+		let manifest = ExportsManifest {
+			functions: vec![FunctionExport {
+				name: Some("legacy".to_string()),
+				args: vec![],
+				returns: Kind::Bool,
+				args_text: None,
+				returns_text: None,
+				writeable: false,
+				declares_transaction: false,
+				comment: None,
+			}],
+		};
+		let rendered = manifest.to_toml().unwrap();
+		assert!(rendered.contains("declares_transaction"), "the field is serialised");
+		let without: String = rendered
+			.lines()
+			.filter(|l| !l.starts_with("declares_transaction"))
+			.collect::<Vec<_>>()
+			.join("\n");
+		let err = ExportsManifest::parse(&without).expect_err("the field is required");
+		assert!(
+			format!("{err:#}").contains("declares_transaction"),
+			"the error must name the missing field, got: {err:#}"
+		);
+	}
+
 	#[test]
 	fn get_signature_default() {
 		let manifest = ExportsManifest {
@@ -181,6 +244,7 @@ mod tests {
 				args_text: None,
 				returns_text: None,
 				writeable: false,
+				declares_transaction: false,
 				comment: None,
 			}],
 		};

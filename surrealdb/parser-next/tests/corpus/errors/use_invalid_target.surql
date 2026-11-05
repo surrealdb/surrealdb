@@ -1,0 +1,1 @@
+USE TABLE foo;

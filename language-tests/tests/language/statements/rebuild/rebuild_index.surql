@@ -44,8 +44,10 @@ value = "NONE"
 [[test.results]]
 match = "'status' in $result.building"
 
+# `building.queued` and `building.active` follow the background compaction drain,
+# which a server runs and the in-process harness does not, so they are not pinned.
 [[test.results]]
-value = "{ building: { initial: 1, pending: 0, status: 'ready', updated: 0 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 1, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
 value = "{ events: {  }, fields: {  }, indexes: { ft_title: 'DEFINE INDEX ft_title ON book FIELDS title FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS', idx_author: 'DEFINE INDEX idx_author ON book FIELDS author', uniq_isbn: 'DEFINE INDEX uniq_isbn ON book FIELDS isbn UNIQUE' }, lives: {  }, tables: {  } }"

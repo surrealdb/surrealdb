@@ -1,0 +1,12 @@
+### FOR $i IN 0..4 { IF $i = 1 { DEFINE FIELD m ON t VALUE 9 }; CREATE t SET n = $i }
+NONE
+[{ m: NONE, n: 0 }, { m: 9, n: 1 }, { m: 9, n: 2 }, { m: 9, n: 3 }]
+### FOR $i IN 0..4 { CREATE t SET n = $i }
+NONE
+[{ m: NONE, n: 0 }, { m: 7, n: 1 }, { m: 7, n: 2 }, { m: 7, n: 3 }]
+### FOR $i IN 0..4 { CREATE type::record('t', $i) SET n = $i }
+error: Couldn't coerce value for field `n` of `t:2`: Expected `string` but found `2`
+[]
+### FOR $i IN 0..4 { CREATE t SET n = $i, secret = 's' RETURN secret }
+NONE
+[{ m: NONE, n: 0 }, { m: NONE, n: 1 }, { m: NONE, n: 2 }, { m: NONE, n: 3 }]

@@ -1,0 +1,27 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_intersect_except_perms.surql"]
+auth = { namespace = "test", database = "test", access = "ie_access", rid = "ie_user:alice" }
+
+[test]
+reason = "A record user compares only the rows its table permissions let it read, in the first query and in the second: a group it cannot read is not there to match, so it is not found by INTERSECT and not subtracted by EXCEPT"
+
+[[test.results]]
+value = "[{ g: 1 }, { g: 2 }]"
+
+[[test.results]]
+value = "[{ g: 3 }]"
+
+[[test.results]]
+value = "[{ gid: 1 }, { gid: 2 }]"
+
+[[test.results]]
+value = "[]"
+*/
+
+SELECT g FROM ie_member INTERSECT SELECT gid AS g FROM ie_group ORDER BY g;
+SELECT g FROM ie_member EXCEPT SELECT gid AS g FROM ie_group ORDER BY g;
+SELECT gid FROM ie_group INTERSECT SELECT g FROM ie_member ORDER BY gid;
+SELECT gid FROM ie_group EXCEPT SELECT g FROM ie_member ORDER BY gid;

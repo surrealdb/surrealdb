@@ -4,7 +4,18 @@ imports = ["reproductions/where_permissions_data_leak_import.surql"]
 auth = { namespace = "test", database = "test", access = "test", rid = "accounts:1" }
 
 [test]
-reason = "User-supplied expressions (WHERE, SET, MERGE, CONTENT) must not execute before table-level permission checks, preventing data exfiltration via THROW or side effects"
+reason = """
+User-supplied expressions (WHERE, SET, MERGE, CONTENT) must not execute before
+table-level permission checks, preventing data exfiltration via THROW or side
+effects.
+
+The guaranteed record an `UPSERT … WHERE` writes when it matched nothing is
+written only on a table the caller may create records on; on any other its data
+clause is never evaluated. Where it may, the record is new, so the clause reads
+an empty document and the failure it reports names no stored value, and the
+statement fails with it, since a guaranteed record that could not be written is
+a failed write.
+"""
 
 [[test.results]]
 value = "[]"
@@ -28,7 +39,7 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[]"
+error = "Cannot perform addition with 'string' and 'none'"
 
 [[test.results]]
 value = "[]"

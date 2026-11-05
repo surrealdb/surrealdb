@@ -2,9 +2,11 @@
 
 use anyhow::Result;
 
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
-use crate::exec::physical_expr::EvalContext;
+use crate::exec::EvalContext;
+use crate::exec::function::{ScalarFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
+use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
 use crate::val::Value;
 
@@ -18,6 +20,14 @@ pub struct SchemaTableExists;
 impl ScalarFunction for SchemaTableExists {
 	fn name(&self) -> &'static str {
 		"schema::table::exists"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "schema::table::exists", Fallibility::DATA)
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::READS_CATALOG
 	}
 
 	fn signature(&self) -> Signature {
@@ -50,6 +60,5 @@ impl ScalarFunction for SchemaTableExists {
 	}
 }
 
-pub fn register(registry: &mut FunctionRegistry) {
-	registry.register(SchemaTableExists);
-}
+/// The `schema::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[&SchemaTableExists];

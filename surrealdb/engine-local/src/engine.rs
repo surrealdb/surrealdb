@@ -1,0 +1,1085 @@
+//! The engine the SDK drives when it embeds the database.
+
+use std::borrow::Cow;
+#[cfg(not(target_family = "wasm"))]
+use std::pin::pin;
+use std::sync::Arc;
+#[cfg(not(target_family = "wasm"))]
+use std::task::{Poll, ready};
+#[cfg(not(target_family = "wasm"))]
+use std::{future::Future, path::PathBuf};
+
+use async_channel::{Receiver, Sender};
+#[cfg(not(target_family = "wasm"))]
+use futures::stream::poll_fn;
+use surrealdb_core::dbs::{AuthPrincipalSnapshot, Session};
+use surrealdb_core::iam;
+use surrealdb_core::kvs::{
+	Datastore, Isolation, QueryRequest, ReadOnlyOptions, snapshot_description,
+};
+use surrealdb_engine_api::{
+	EngineContext, EngineFuture, IsolationLevel, OpenedTransaction, ReadOnlyBegin, SurrealEngine,
+	single_result,
+};
+#[cfg(not(target_family = "wasm"))]
+use surrealdb_rpc::export::Config as DbExportConfig;
+use surrealdb_rpc::{QueryResult, QueryResultBuilder, QueryStreamItem, QueryType, Token};
+use surrealdb_types::{Array, Error, Notification, Object, ToSql, Value, Variables};
+#[cfg(not(target_family = "wasm"))]
+use tokio::{
+	fs::OpenOptions,
+	io::{self, AsyncReadExt, AsyncWriteExt},
+};
+#[cfg(not(target_family = "wasm"))]
+use tokio_util::bytes::BytesMut;
+use uuid::Uuid;
+
+use crate::session::{self, SessionRegistry, SessionState};
+use crate::std_error_to_types_error;
+
+/// A datastore this process owns, served through the SDK's engine interface.
+///
+/// Values cross this boundary as themselves: the SDK asked for a query result,
+/// and the datastore produced one, so there is no wire format in between and
+/// nothing to encode a result into purely for the SDK to take it apart again.
+pub struct LocalEngine {
+	pub(crate) kvs: Arc<Datastore>,
+	pub(crate) sessions: Arc<SessionRegistry>,
+	/// Answers once, with how shutting the datastore down went, after the
+	/// engine's tasks have released it.
+	pub(crate) stopped: Receiver<Result<(), Error>>,
+}
+
+impl std::fmt::Debug for LocalEngine {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("LocalEngine").finish_non_exhaustive()
+	}
+}
+
+impl LocalEngine {
+	/// The state the request's session owns, once that session is registered.
+	async fn state(&self, ctx: EngineContext) -> Result<Arc<SessionState>, Error> {
+		session::resolve(&self.sessions, ctx.session).await
+	}
+}
+
+/// The failure of naming a transaction the session does not hold.
+fn transaction_not_found() -> Error {
+	Error::not_found(
+		"Transaction not found".to_string(),
+		Some(surrealdb_types::NotFoundError::Transaction),
+	)
+}
+
+/// The failure of committing a transaction whose query was abandoned part-way.
+fn transaction_abandoned() -> Error {
+	Error::internal(
+		"The transaction was rolled back: a query running in it was abandoned before it finished"
+			.to_string(),
+	)
+}
+
+/// The parameter [`kill_live_query`] binds the subscription's id to.
+const KILL_ID_PARAM: &str = "__kill_id";
+
+/// Ends a live query by running the `KILL` statement for it.
+///
+/// The id is bound rather than written into the statement text: `KILL` accepts
+/// a UUID literal or a parameter, and a `Uuid`'s own rendering is neither --
+/// bare hex lexes as a number. Binding also leaves no escaping question behind.
+pub(crate) async fn kill_live_query(
+	kvs: &Datastore,
+	id: Uuid,
+	session: &Session,
+	mut vars: Variables,
+) -> Result<Vec<QueryResult>, Error> {
+	// The session's variables are the caller's to name, so the binding goes in
+	// last: this statement kills the id it was given.
+	vars.insert(KILL_ID_PARAM.to_string(), Value::Uuid(id.into()));
+
+	let results = kvs.execute(&format!("KILL ${KILL_ID_PARAM}"), session, Some(vars)).await?;
+	Ok(results)
+}
+
+/// Records the live queries a statement registered against the session it ran
+/// on.
+///
+/// A `LIVE SELECT` exists in the datastore the moment its statement succeeds,
+/// but its subscriber only arrives on the `subscribe_live` that follows. The
+/// session has to know about it from the earlier of the two, or a teardown
+/// between them -- an auth change, say -- would leave it running.
+fn record_live_queries(state: &SessionState, results: &[QueryResult]) {
+	for result in results.iter().filter(|result| result.query_type == QueryType::Live) {
+		if let Ok(Value::Uuid(id)) = &result.result {
+			// Subscribed already, in principle: keep whatever is there rather
+			// than dropping a subscriber that beat this.
+			let id = id.into_inner();
+			if state.live_queries.get(&id).is_none() {
+				state.live_queries.insert(id, None);
+			}
+		}
+	}
+}
+
+/// Ends this session's live queries when an auth operation changed the
+/// principal.
+///
+/// SECURITY: a subscription captures the principal that registered it, so one
+/// left running across a principal change keeps dispatching under the previous
+/// access controls (GHSA-2xrp-m9c6-75rj). See [`AuthPrincipalSnapshot`].
+///
+/// Deletion goes straight to the datastore rather than through a `KILL`
+/// statement, as the WebSocket transport does it: the session now belongs to
+/// the *new* principal, which may have no permission to kill what the previous
+/// one registered -- and a teardown that can be refused is not a teardown.
+async fn cleanup_lqs_on_principal_change(
+	kvs: &Datastore,
+	state: &SessionState,
+	before: &AuthPrincipalSnapshot,
+) {
+	if !before.differs_from(&*state.session.read().await) {
+		return;
+	}
+	let mut gc = Vec::new();
+	state.live_queries.retain(|id, _| {
+		gc.push(*id);
+		false
+	});
+	if gc.is_empty() {
+		return;
+	}
+	if let Err(error) = kvs.delete_queries(gc).await {
+		warn!("Failed to end live queries after the session's principal changed; {error}");
+	}
+}
+
+/// Rejects an operation that arrives on a session whose authentication has
+/// expired.
+///
+/// `Datastore::execute` refuses an expired session itself, so the query path is
+/// covered wherever it is reached from. This is for the operations that change
+/// session state without going through it.
+async fn ensure_session_active(state: &SessionState) -> Result<(), Error> {
+	if state.session.read().await.expired() {
+		return Err(surrealdb_rpc::error::session_expired());
+	}
+	Ok(())
+}
+
+#[cfg(not(target_family = "wasm"))]
+async fn export_file(
+	kvs: &Datastore,
+	sess: &Session,
+	chn: Sender<Vec<u8>>,
+	config: Option<DbExportConfig>,
+) -> Result<(), Error> {
+	// A pre-flight refusal from the export - an unsupported config option, or a
+	// principal whose reads are permission checked and so may not receive a dump
+	// read with the authority of root - is raised before any chunk is sent and is
+	// the caller's to correct. `anyhow_to_types_error` preserves its structured
+	// kind, so a denied principal reaches the SDK as a not-allowed error rather
+	// than an internal one that reads as a server fault. A failure from the export
+	// job itself, handled below, carries no such kind and stays internal.
+	let res = match config {
+		Some(config) => {
+			kvs.export_with_config(sess, chn, config)
+				.await
+				.map_err(surrealdb_core::err::anyhow_to_types_error)?
+				.await
+		}
+		None => {
+			kvs.export(sess, chn).await.map_err(surrealdb_core::err::anyhow_to_types_error)?.await
+		}
+	};
+
+	if let Err(error) = res {
+		// Check if this is a channel error by examining the error message
+		let error_str = error.to_string();
+		if error_str.contains("channel") || error_str.contains("Channel") {
+			// This is not really an error. Just logging it for improved visibility.
+			trace!("{error_str}");
+			return Ok(());
+		}
+
+		return Err(Error::internal(error.to_string()));
+	}
+	Ok(())
+}
+
+#[cfg(not(target_family = "wasm"))]
+async fn copy<'a, R, W>(path: PathBuf, reader: &'a mut R, writer: &'a mut W) -> Result<(), Error>
+where
+	R: tokio::io::AsyncRead + Unpin + ?Sized,
+	W: tokio::io::AsyncWrite + Unpin + ?Sized,
+{
+	io::copy(reader, writer)
+		.await
+		.map(|_| ())
+		.map_err(|error| Error::internal(format!("Failed to read `{}`: {}", path.display(), error)))
+}
+
+/// Forwards to `bytes` what `export` sends on the channel it is given.
+///
+/// Started on a task of its own and returns immediately: the caller reads
+/// `bytes`, and the export fills a bounded channel, so the two have to make
+/// progress against each other.
+#[cfg(not(target_family = "wasm"))]
+fn export_to_channel<F, Fut>(bytes: Sender<Result<Vec<u8>, Error>>, export: F)
+where
+	F: FnOnce(Sender<Vec<u8>>) -> Fut + Send + 'static,
+	Fut: Future<Output = Result<(), Error>> + Send,
+{
+	crate::spawn(async move {
+		let (tx, rx) = async_channel::bounded(1);
+		let produce = async {
+			if let Err(error) = export(tx).await {
+				bytes.send(Err(error)).await.ok();
+			}
+		};
+
+		let bridge = async {
+			while let Ok(chunk) = rx.recv().await {
+				if bytes.send(Ok(chunk)).await.is_err() {
+					// The caller stopped reading. Closing the export's channel
+					// is what ends it: the channel is bounded and this loop was
+					// the only thing draining it, so the next send would never
+					// complete and this task would never finish.
+					rx.close();
+					return;
+				}
+			}
+		};
+
+		tokio::join!(produce, bridge);
+	});
+}
+
+/// Writes to `path` what `export` sends on the channel it is given.
+///
+/// The export owns the sender, so the bridge ends when the export does.
+#[cfg(not(target_family = "wasm"))]
+async fn export_to_file<F, Fut>(path: PathBuf, export: F) -> Result<(), Error>
+where
+	F: FnOnce(Sender<Vec<u8>>) -> Fut,
+	Fut: Future<Output = Result<(), Error>>,
+{
+	let (tx, rx) = async_channel::bounded(1);
+	let (mut writer, mut reader) = io::duplex(10_240);
+
+	// Write to channel.
+	let export = export(tx);
+
+	// Read from channel and write to pipe.
+	let bridge = async move {
+		while let Ok(value) = rx.recv().await {
+			if writer.write_all(&value).await.is_err() {
+				// Broken pipe. Let either side's error be propagated.
+				break;
+			}
+		}
+		Ok(())
+	};
+
+	// Output to stdout or file.
+	let mut output =
+		match OpenOptions::new().write(true).create(true).truncate(true).open(&path).await {
+			Ok(file) => file,
+			Err(error) => {
+				return Err(Error::internal(format!(
+					"Failed to open `{}`: {}",
+					path.display(),
+					error
+				)));
+			}
+		};
+
+	// Copy from pipe to output.
+	let copy = copy(path, &mut reader, &mut output);
+
+	tokio::try_join!(export, bridge, copy)?;
+	Ok(())
+}
+
+/// Abandons the transaction a query is running in if the query is dropped
+/// before it finishes.
+///
+/// The execution runs on the caller's own task, so a caller that stops awaiting
+/// -- a `timeout`, a `select!` branch that lost -- aborts it part-way through
+/// the batch. What it wrote is still in the transaction and the caller still
+/// holds that transaction's id, so without this a later `commit` would commit a
+/// batch that only half ran.
+///
+/// Setting it aside is what makes that impossible: the `commit` that follows
+/// reports it instead of persisting it. It is set aside rather than dropped
+/// because some backends panic when a live transaction is dropped, so it has to
+/// be cancelled by something that can await -- which `Drop` cannot.
+struct AbandonOnCancel<'a> {
+	state: &'a SessionState,
+	txn: Uuid,
+	finished: bool,
+}
+
+impl<'a> AbandonOnCancel<'a> {
+	fn new(state: &'a SessionState, txn: Uuid) -> Self {
+		Self {
+			state,
+			txn,
+			finished: false,
+		}
+	}
+
+	/// The execution ran to its own conclusion, so the transaction is the
+	/// caller's again -- to commit or to roll back, whichever its result calls
+	/// for.
+	fn finished(mut self) {
+		self.finished = true;
+	}
+}
+
+impl Drop for AbandonOnCancel<'_> {
+	fn drop(&mut self) {
+		if !self.finished
+			&& let Some(tx) = self.state.transactions.take(&self.txn)
+		{
+			self.state.abandoned.insert(self.txn, tx);
+		}
+	}
+}
+
+impl SurrealEngine for LocalEngine {
+	fn query(
+		&self,
+		ctx: EngineContext,
+		query: Cow<'static, str>,
+		variables: Variables,
+	) -> EngineFuture<'_, Vec<QueryResult>> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			// Merge session vars with query vars
+			let mut vars = state.vars.read().await.clone();
+			vars.extend(variables);
+
+			let session = state.session.read().await;
+			let results = match ctx.transaction {
+				Some(txn) => match state.transactions.get(&txn) {
+					Some(tx) => {
+						let abandon = AbandonOnCancel::new(&state, txn);
+						let results = self
+							.kvs
+							.run(
+								QueryRequest::new(query.as_ref(), &session)
+									.with_variables(Some(vars))
+									.with_transaction(tx),
+							)
+							.await;
+						abandon.finished();
+						results
+					}
+					// Reported as the statement's own failure rather than the
+					// call's, so a caller reading a multi-statement response
+					// sees it where the statement was.
+					None => Ok(vec![
+						QueryResultBuilder::started_now()
+							.finish_with_result(Err(transaction_not_found())),
+					]),
+				},
+				None => self.kvs.execute(query.as_ref(), &session, Some(vars)).await,
+			};
+			if let Ok(results) = &results {
+				record_live_queries(&state, results);
+			}
+			results
+		})
+	}
+
+	fn query_stream(
+		&self,
+		ctx: EngineContext,
+		query: Cow<'static, str>,
+		variables: Variables,
+		items: Sender<QueryStreamItem>,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			// Merge session vars with query vars
+			let mut vars = state.vars.read().await.clone();
+			vars.extend(variables);
+
+			// Preparing the job is what can fail synchronously -- a parse error,
+			// an expired session -- so it happens while the session guard is
+			// held. The job itself owns everything it needs from here.
+			let job = {
+				let session = state.session.read().await;
+				let transaction = match ctx.transaction {
+					// The statement never runs, so there is no statement
+					// result to report this on; it belongs to the call.
+					Some(txn) => {
+						Some(state.transactions.get(&txn).ok_or_else(transaction_not_found)?)
+					}
+					None => None,
+				};
+				self.kvs.run_streaming(
+					QueryRequest::new(query.as_ref(), &session)
+						.with_variables(Some(vars))
+						.with_optional_transaction(transaction),
+					items,
+				)?
+			};
+
+			// The caller drains the item channel, so driving the execution here
+			// is what lets the two make progress against each other. The results
+			// come back only so the execution's own failures do; the rows have
+			// already gone to the caller.
+			job.run.await?;
+			Ok(())
+		})
+	}
+
+	fn run(
+		&self,
+		ctx: EngineContext,
+		name: String,
+		version: Option<String>,
+		args: Array,
+	) -> EngineFuture<'_, Value> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			// Format arguments as comma-separated SQL values
+			let formatted_args = args.iter().map(|v| v.to_sql()).collect::<Vec<_>>().join(", ");
+
+			// Build SQL query: name<version>(args) or name(args)
+			let sql = match version {
+				Some(v) => format!("{name}<{v}>({formatted_args})"),
+				None => format!("{name}({formatted_args})"),
+			};
+
+			let results = self
+				.kvs
+				.execute(&sql, &*state.session.read().await, Some(state.vars.read().await.clone()))
+				.await?;
+			single_result(results)
+		})
+	}
+
+	fn use_ns_db(
+		&self,
+		ctx: EngineContext,
+		namespace: Option<String>,
+		database: Option<String>,
+	) -> EngineFuture<'_, (Option<String>, Option<String>)> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			let mut session = state.session.write().await;
+			self.kvs.process_use(None, &mut session, namespace, database).await?;
+			Ok((session.ns.clone(), session.db.clone()))
+		})
+	}
+
+	fn set(&self, ctx: EngineContext, key: String, value: Value) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			// SECURITY: an expired session must not be able to change session
+			// state, the same as over the RPC transports. `SECURITY_GUIDE.md`
+			// section 3 requires expiry to be checked before any statement or
+			// method is processed; `Datastore::execute` covers the query path,
+			// so without this the session methods are the way past it.
+			ensure_session_active(&state).await?;
+			surrealdb_rpc::check_protected_param(&key)
+				.map_err(|e| Error::internal(e.to_string()))?;
+			// Need to compute because certain keys might not be allowed to be set and those
+			// should be rejected by an error.
+			if let Value::None = value {
+				state.vars.write().await.remove(&key);
+			} else {
+				state.vars.write().await.insert(key, value);
+			}
+			Ok(())
+		})
+	}
+
+	fn unset(&self, ctx: EngineContext, key: String) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			ensure_session_active(&state).await?;
+			surrealdb_rpc::check_protected_param(&key)
+				.map_err(|e| Error::internal(e.to_string()))?;
+			state.vars.write().await.remove(&key);
+			Ok(())
+		})
+	}
+
+	fn signup(&self, ctx: EngineContext, credentials: Object) -> EngineFuture<'_, Token> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			let before = AuthPrincipalSnapshot::capture(&*state.session.read().await);
+			let token = iam::signup::signup(
+				&self.kvs,
+				&mut *state.session.write().await,
+				credentials.into(),
+			)
+			.await
+			.map_err(surrealdb_core::err::anyhow_to_types_error);
+			cleanup_lqs_on_principal_change(&self.kvs, &state, &before).await;
+			token
+		})
+	}
+
+	fn signin(&self, ctx: EngineContext, credentials: Object) -> EngineFuture<'_, Token> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			let before = AuthPrincipalSnapshot::capture(&*state.session.read().await);
+			let token = iam::signin::signin(
+				&self.kvs,
+				&mut *state.session.write().await,
+				credentials.into(),
+			)
+			.await
+			.map_err(surrealdb_core::err::anyhow_to_types_error);
+			cleanup_lqs_on_principal_change(&self.kvs, &state, &before).await;
+			token
+		})
+	}
+
+	fn authenticate(&self, ctx: EngineContext, token: Token) -> EngineFuture<'_, Token> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			let before = AuthPrincipalSnapshot::capture(&*state.session.read().await);
+			// Extract the access token and check if this token supports refresh
+			let (access, with_refresh) = match &token {
+				Token::Access(access) => (access, false),
+				Token::WithRefresh {
+					access,
+					..
+				} => (access, true),
+			};
+			// One write guard covers both the verification and the automatic
+			// refresh, and the refresh borrows it rather than locking again:
+			// `RwLock` does not grant a second write lock to a task that holds
+			// one, and taking it twice in sequence would let another command
+			// change the session between the two steps. The guard is released
+			// before live queries are cleaned up, which reads the session.
+			let result = {
+				let mut session = state.session.write().await;
+				match iam::verify::token(&self.kvs, &mut session, access).await {
+					// Authentication successful - return the original token
+					Ok(_) => Ok(token),
+					// An expired access token paired with a refresh token is
+					// refreshed, and the new token pair is returned.
+					Err(error) if with_refresh && iam::is_expired_token_error(&error) => {
+						iam::token::refresh(token, &self.kvs, &mut session)
+							.await
+							.map_err(|error| Error::internal(error.to_string()))
+					}
+					Err(error) => Err(Error::internal(error.to_string())),
+				}
+			};
+			cleanup_lqs_on_principal_change(&self.kvs, &state, &before).await;
+			result
+		})
+	}
+
+	fn refresh(&self, ctx: EngineContext, token: Token) -> EngineFuture<'_, Token> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			let before = AuthPrincipalSnapshot::capture(&*state.session.read().await);
+			let result = iam::token::refresh(token, &self.kvs, &mut *state.session.write().await)
+				.await
+				.map_err(|error| Error::internal(error.to_string()));
+			cleanup_lqs_on_principal_change(&self.kvs, &state, &before).await;
+			result
+		})
+	}
+
+	fn revoke(&self, ctx: EngineContext, token: Token) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			// Revoking is about the token, not the session, but a request still
+			// belongs to one -- and resolving it is what reports a session the
+			// engine does not know.
+			self.state(ctx).await?;
+			iam::token::revoke_refresh_token(token, &self.kvs)
+				.await
+				.map_err(|error| Error::internal(error.to_string()))
+		})
+	}
+
+	fn invalidate(&self, ctx: EngineContext) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			let before = AuthPrincipalSnapshot::capture(&*state.session.read().await);
+			let result = iam::clear::clear(&mut *state.session.write().await)
+				.map_err(|error| Error::internal(error.to_string()));
+			cleanup_lqs_on_principal_change(&self.kvs, &state, &before).await;
+			result
+		})
+	}
+
+	fn begin(
+		&self,
+		ctx: EngineContext,
+		read_only: Option<ReadOnlyBegin>,
+		isolation: Option<IsolationLevel>,
+	) -> EngineFuture<'_, OpenedTransaction> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			let acknowledged = read_only.is_some() || isolation.is_some();
+			let isolation = isolation.map(|level| match level {
+				IsolationLevel::Snapshot => Isolation::Snapshot,
+				IsolationLevel::Serializable => Isolation::Serializable,
+			});
+			let read_only = read_only.map(|read_only| ReadOnlyOptions {
+				max_staleness: read_only.max_staleness,
+				strict: read_only.strict,
+			});
+			let (txn, info) = self
+				.kvs
+				.begin_transaction(isolation, read_only)
+				.await
+				.map_err(std_error_to_types_error)?;
+			let id = Uuid::now_v7();
+			state.transactions.insert(id, Arc::new(txn));
+			Ok(OpenedTransaction {
+				id,
+				snapshot: info.map(|info| snapshot_description(&info)),
+				options_acknowledged: acknowledged,
+			})
+		})
+	}
+
+	fn commit(&self, ctx: EngineContext, txn: Uuid) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			// A transaction whose query was abandoned is rolled back here, where
+			// there is something to await on, and the caller is told rather than
+			// having half a batch committed under it.
+			if let Some(tx) = state.abandoned.take(&txn) {
+				tx.cancel().await.map_err(std_error_to_types_error)?;
+				return Err(transaction_abandoned());
+			}
+			// Removing is what claims the transaction, so two concurrent calls
+			// naming the same one cannot both go on to finalise it.
+			let tx = state.transactions.take(&txn).ok_or_else(transaction_not_found)?;
+			// A read-only transaction has nothing to commit; committing releases it.
+			let finished = if tx.writeable() {
+				tx.commit().await
+			} else {
+				tx.cancel().await
+			};
+			finished.map_err(surrealdb_core::err::anyhow_to_types_error)?;
+			Ok(())
+		})
+	}
+
+	fn rollback(&self, ctx: EngineContext, txn: Uuid) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			// Rolling back what was abandoned is exactly what the caller asked
+			// for, so this is not an error on that path.
+			let tx = state
+				.abandoned
+				.take(&txn)
+				.or_else(|| state.transactions.take(&txn))
+				.ok_or_else(transaction_not_found)?;
+			tx.cancel().await.map_err(std_error_to_types_error)?;
+			Ok(())
+		})
+	}
+
+	fn health(&self, ctx: EngineContext) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			// The datastore is in this process, so there is no round trip to
+			// report on -- but a session the engine cannot resolve is exactly
+			// what a caller checking the connection needs to hear about.
+			self.state(ctx).await?;
+			Ok(())
+		})
+	}
+
+	fn version(&self, ctx: EngineContext) -> EngineFuture<'_, String> {
+		Box::pin(async move {
+			self.state(ctx).await?;
+			Ok(surrealdb_core::env::VERSION.to_string())
+		})
+	}
+
+	fn shutdown(&self) -> EngineFuture<'_, ()> {
+		// The session channel closing is what stops the engine (see
+		// `session::run`); this waits for it to have finished. The outcome is
+		// delivered to the first caller, later ones find it already settled.
+		Box::pin(async move { self.stopped.recv().await.unwrap_or(Ok(())) })
+	}
+
+	fn subscribe_live(
+		&self,
+		ctx: EngineContext,
+		uuid: Uuid,
+		notifications: Sender<Result<Notification, Error>>,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			state.live_queries.insert(uuid, Some(notifications));
+			Ok(())
+		})
+	}
+
+	fn kill(&self, ctx: EngineContext, uuid: Uuid) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			state.live_queries.remove(&uuid);
+			let results = kill_live_query(
+				&self.kvs,
+				uuid,
+				&*state.session.read().await,
+				state.vars.read().await.clone(),
+			)
+			.await?;
+			single_result(results)?;
+			Ok(())
+		})
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	fn export_file(
+		&self,
+		ctx: EngineContext,
+		path: PathBuf,
+		config: Option<DbExportConfig>,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			let session = state.session.read().await.clone();
+			export_to_file(path, |chn| export_file(&self.kvs, &session, chn, config)).await
+		})
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	fn export_bytes(
+		&self,
+		ctx: EngineContext,
+		bytes: Sender<Result<Vec<u8>, Error>>,
+		config: Option<DbExportConfig>,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			let kvs = Arc::clone(&self.kvs);
+			let session = state.session.read().await.clone();
+			export_to_channel(bytes, |chn| async move {
+				export_file(&kvs, &session, chn, config).await
+			});
+			Ok(())
+		})
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	fn import_file(&self, ctx: EngineContext, path: PathBuf) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let state = self.state(ctx).await?;
+			let file = match OpenOptions::new().read(true).open(&path).await {
+				Ok(file) => file,
+				Err(error) => {
+					return Err(Error::internal(format!(
+						"Failed to open `{}`: {}",
+						path.display(),
+						error
+					)));
+				}
+			};
+
+			let mut file = pin!(file);
+			let mut buffer = BytesMut::with_capacity(4096);
+
+			let stream = poll_fn(|ctx| {
+				// Doing it this way optimizes allocation.
+				// It is highly likely that the buffer we return from this stream will be
+				// dropped between calls to this function.
+				// If this is the case than instead of allocating new memory the call to reserve
+				// will instead reclaim the existing used memory.
+				if buffer.capacity() == 0 {
+					buffer.reserve(4096);
+				}
+
+				let future = pin!(file.read_buf(&mut buffer));
+				match ready!(future.poll(ctx)) {
+					Ok(0) => Poll::Ready(None),
+					Ok(_) => Poll::Ready(Some(Ok(buffer.split().freeze()))),
+					Err(e) => Poll::Ready(Some(Err(anyhow::anyhow!("{}", e)))),
+				}
+			});
+
+			let responses = self
+				.kvs
+				.execute_import(
+					&*state.session.read().await,
+					Some(state.vars.read().await.clone()),
+					stream,
+				)
+				.await
+				.map_err(std_error_to_types_error)?;
+
+			for response in responses {
+				response.result?;
+			}
+
+			Ok(())
+		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_rpc::QueryResultBuilder;
+	use surrealdb_types::Uuid as PublicUuid;
+
+	use super::*;
+
+	/// A live query belongs to the session from the moment its statement
+	/// succeeds, not from the `subscribe_live` that follows: an auth change
+	/// landing between the two tears down what it can see, and the datastore
+	/// already has this one.
+	#[test]
+	fn a_live_query_is_recorded_before_its_subscriber_arrives() {
+		let state = SessionState::new(Uuid::now_v7());
+		let live = Uuid::now_v7();
+
+		record_live_queries(
+			&state,
+			&[
+				QueryResultBuilder::started_now()
+					.with_query_type(QueryType::Live)
+					.finish_with_result(Ok(Value::Uuid(PublicUuid::from(live)))),
+				QueryResultBuilder::instant_none(),
+			],
+		);
+
+		assert!(
+			matches!(state.live_queries.get(&live), Some(None)),
+			"the live query is the session's, with no subscriber yet"
+		);
+		assert_eq!(state.live_queries.len(), 1, "only the live statement registers one");
+	}
+
+	/// Recording runs on every statement, so it must not displace a subscriber
+	/// that has already arrived for the same live query.
+	#[test]
+	fn recording_does_not_displace_an_existing_subscriber() {
+		let state = SessionState::new(Uuid::now_v7());
+		let live = Uuid::now_v7();
+		let (sender, _receiver) = async_channel::bounded(1);
+		state.live_queries.insert(live, Some(sender));
+
+		record_live_queries(
+			&state,
+			&[QueryResultBuilder::started_now()
+				.with_query_type(QueryType::Live)
+				.finish_with_result(Ok(Value::Uuid(PublicUuid::from(live))))],
+		);
+
+		assert!(
+			matches!(state.live_queries.get(&live), Some(Some(_))),
+			"the subscriber must survive a later recording pass"
+		);
+	}
+}
+
+/// Live-query teardown, against a datastore that can actually register one.
+///
+/// These run against the datastore rather than the session map because the two
+/// disagree exactly where the interesting failure is: `kill` empties the
+/// session map before it reaches the datastore, so a teardown that never
+/// removed the subscription looks, from the subscriber's end, the same as one
+/// that did.
+#[cfg(all(test, feature = "kv-mem"))]
+mod live_query_tests {
+	use std::time::Duration;
+
+	use async_channel::{Receiver, Sender};
+	use surrealdb_engine_api::SessionId;
+	use surrealdb_types::Action;
+	use tokio::time::timeout;
+
+	use super::*;
+
+	/// An engine over a fresh in-memory datastore, holding the datastore's own
+	/// notification channel rather than letting the engine's pump drain it.
+	struct Harness {
+		engine: Arc<LocalEngine>,
+		ctx: EngineContext,
+		notifications: Receiver<Notification>,
+		/// The engine shuts the datastore down when this closes, so the test
+		/// keeps it open for as long as it holds the engine.
+		_sessions: Sender<SessionId>,
+	}
+
+	impl Harness {
+		async fn new() -> Self {
+			let (notify_tx, notifications) = async_channel::bounded(100);
+			let kvs = Datastore::builder()
+				.with_auth(false)
+				.with_notify(notify_tx)
+				.build_with_path("memory")
+				.await
+				.expect("an in-memory datastore should open");
+
+			let (sessions_tx, sessions_rx) = async_channel::unbounded();
+			// No notification pump: this test reads the datastore's end of the
+			// channel itself.
+			let engine = crate::from_datastore(kvs, None, sessions_rx);
+
+			let session = Uuid::now_v7();
+			sessions_tx.send(SessionId::Initial(session)).await.expect("the engine is running");
+			let ctx = EngineContext::new(session);
+			engine
+				.use_ns_db(ctx, Some("test".to_string()), Some("test".to_string()))
+				.await
+				.expect("selecting a namespace and database should succeed");
+
+			let harness = Self {
+				engine,
+				ctx,
+				notifications,
+				_sessions: sessions_tx,
+			};
+			harness.query("DEFINE TABLE person").await;
+			harness
+		}
+
+		/// Runs a statement, failing the test if it does not succeed.
+		async fn query(&self, sql: &'static str) -> Value {
+			let mut results = self
+				.engine
+				.query(self.ctx, Cow::Borrowed(sql), Variables::new())
+				.await
+				.unwrap_or_else(|error| panic!("`{sql}` failed: {error}"));
+			results
+				.remove(0)
+				.result
+				.unwrap_or_else(|error| panic!("`{sql}` returned an error: {error}"))
+		}
+
+		/// The next notification the datastore emits.
+		async fn notification(&self, expected: &str) -> Notification {
+			timeout(Duration::from_secs(10), self.notifications.recv())
+				.await
+				.unwrap_or_else(|_| panic!("timed out waiting for {expected}"))
+				.expect("the notification channel is open")
+		}
+
+		/// Registers a live query on `person` and returns its id.
+		async fn live(&self) -> Uuid {
+			let res = self.query("LIVE SELECT * FROM person").await;
+			if let Value::Uuid(id) = res {
+				id.into_inner()
+			} else {
+				panic!("LIVE SELECT should return a uuid, got {res:?}")
+			}
+		}
+	}
+
+	/// `kill` has to end the subscription in the datastore, not merely return.
+	///
+	/// Nothing downstream of the call can tell the two apart: the session's own
+	/// entry is gone before the statement runs, and the only caller --
+	/// `Stream::drop`, in the SDK -- has nowhere to report a failure to. What a
+	/// surviving subscription costs is paid by the datastore on every later
+	/// write, so that is where the assertion belongs.
+	#[test_log::test(tokio::test)]
+	async fn kill_removes_the_subscription_from_the_datastore() {
+		let harness = Harness::new().await;
+		let live = harness.live().await;
+
+		// PROOF THE SUBSCRIPTION IS LIVE: without this, the absence of a
+		// notification after the kill would prove nothing.
+		harness.query("CREATE person:one").await;
+		let created = harness.notification("the change on the live subscription").await;
+		assert_eq!(created.id.into_inner(), live, "the notification belongs to this subscription");
+		assert_eq!(created.action, Action::Create);
+
+		harness.engine.kill(harness.ctx, live).await.expect("kill should end the subscription");
+
+		// The datastore queues this as the kill commits, so a `Killed`
+		// notification is the datastore's own account of having run it.
+		let killed = harness.notification("the killed notification").await;
+		assert_eq!(killed.id.into_inner(), live, "the kill names this subscription");
+		assert_eq!(killed.action, Action::Killed);
+		// Where this notification stops. The engine's pump routes by session,
+		// and `KILL` queues its notification without one, so this is as far as
+		// the end of a subscription travels: a subscriber is told by the end of
+		// its stream, never by a notification.
+		assert!(killed.session.is_none(), "the kill notification carries no session");
+
+		// THE POINT: a later change must no longer be captured for it.
+		harness.query("CREATE person:two").await;
+		let leaked = timeout(Duration::from_millis(500), harness.notifications.recv()).await;
+		assert!(
+			leaked.is_err(),
+			"the subscription outlived the kill and is still capturing changes: {:?}",
+			leaked.map(|notification| notification.map(|n| (n.id, n.action))),
+		);
+	}
+
+	/// The datastore's own record of the subscription has to be gone with it: a
+	/// `KILL` of a subscription the node no longer holds fails, so a second one
+	/// failing is what says the first one committed.
+	#[test_log::test(tokio::test)]
+	async fn a_killed_subscription_cannot_be_killed_again() {
+		let harness = Harness::new().await;
+		let live = harness.live().await;
+
+		harness.engine.kill(harness.ctx, live).await.expect("kill should end the subscription");
+		assert!(
+			harness.engine.kill(harness.ctx, live).await.is_err(),
+			"the datastore still holds a subscription the kill was supposed to remove"
+		);
+	}
+}
+
+/// The embedded engine's export path, against a datastore that applies the
+/// permission gate.
+///
+/// A pre-flight refusal is raised before any chunk is sent, and `export_file`
+/// hands the resulting `surrealdb_types::Error` straight to the embedded SDK. It
+/// must keep the structured kind the gate chose, so a denied principal surfaces
+/// as a not-allowed error rather than an internal one the caller would retry.
+#[cfg(all(test, feature = "kv-mem", not(target_family = "wasm")))]
+mod export_tests {
+	use surrealdb_iam::{Actor, Auth, Level};
+
+	use super::*;
+
+	/// A roleless (RL:[]) database-level token: it clears the transport's
+	/// level-only `View` check, but its reads are permission checked, so it must
+	/// not receive a dump read with the authority of root.
+	fn roleless_session() -> Session {
+		Session {
+			au: Arc::new(Auth::new(Actor::new(
+				"token".to_owned(),
+				vec![],
+				Level::Database("test".to_owned(), "test".to_owned()),
+			))),
+			ns: Some("test".to_owned()),
+			db: Some("test".to_owned()),
+			..Session::default()
+		}
+	}
+
+	/// The refusal must reach the SDK as not-allowed, not as an internal error.
+	#[tokio::test]
+	async fn export_refusal_reaches_the_sdk_as_not_allowed() {
+		let kvs = Datastore::builder()
+			.with_auth(true)
+			.build_with_path("memory")
+			.await
+			.expect("an in-memory datastore should open");
+		let session = roleless_session();
+		let (tx, _rx) = async_channel::bounded::<Vec<u8>>(16);
+
+		let err = export_file(&kvs, &session, tx, None)
+			.await
+			.expect_err("a roleless database-level token must not export");
+
+		assert!(
+			err.is_not_allowed(),
+			"the export refusal must reach the SDK as not-allowed, got {}",
+			err.kind_str(),
+		);
+	}
+}

@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![recursion_limit = "256"]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 mod common;
 
@@ -421,7 +423,7 @@ fn bench_vector_functions(c: &mut Criterion) {
 	bench!(group, vector_distance_hamming, &dbs, &ses, expected: |result| result.is_number(), "RETURN vector::distance::hamming([1, 2, 2], [1, 2, 3]);");
 	bench!(group, vector_distance_manhattan, &dbs, &ses, expected: |result| result.is_number(), "RETURN vector::distance::manhattan([10, 20, 15, 10, 5], [12, 24, 18, 8, 7]);");
 	bench!(group, vector_distance_minkowski, &dbs, &ses, expected: |result| result.is_number(), "RETURN vector::distance::minkowski([10, 20, 15, 10, 5], [12, 24, 18, 8, 7], 3);");
-	bench!(group, vector_divide, &dbs, &ses, expected: |result| result.is_array(), "RETURN vector::divide([10, -20, 30, 0], [0, -1, 2, -3]);");
+	bench!(group, vector_divide, &dbs, &ses, expected: |result| result.is_array(), "RETURN vector::divide([10, -20, 30, 0], [5, -1, 2, -3]);");
 	bench!(group, vector_dot, &dbs, &ses, expected: |result| result.is_number(), "RETURN vector::dot([1, 2, 3], [1, 2, 3]);");
 	bench!(group, vector_magnitude, &dbs, &ses, expected: |result| result.is_number(), "RETURN vector::magnitude([1, 2, 3, 3, 3, 4, 5]);");
 	bench!(group, vector_multiply, &dbs, &ses, expected: |result| result.is_array(), "RETURN vector::multiply([1, 2, 3], [1, 2, 3]);");

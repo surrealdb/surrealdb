@@ -1,7 +1,29 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.ctutils]]
+who = "Stuart Harris <stuart.harris@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.3 -> 0.4.4"
+notes = "RUSTSEC-2026-0385 fix."
+
+[[audits.wasm-bindgen-test]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.3.49 -> 0.3.58"
+notes = "Changes seem to mostly be a vendoring of the criterion crate for benchmarking."
+
+[[audits.wasm-bindgen-test-macro]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.3.49 -> 0.3.58"
+notes = "Small proc-macro crate only manipulating tokens."
+
+[[audits.wasm-bindgen-test-shared]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-run"
+version = "0.2.108"
+notes = "Tiny, single function crate that is no_std and does not include any unsafe."
 
 [[trusted.addr]]
 criteria = "safe-to-deploy"
@@ -62,6 +84,12 @@ criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2021-01-29"
 end = "2026-05-06"
+
+[[trusted.artmap]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2026-09-25"
+end = "2027-10-15"
 
 [[trusted.assert_fs]]
 criteria = "safe-to-deploy"
@@ -189,9 +217,15 @@ user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2021-01-11"
 end = "2027-05-01"
 
+[[trusted.byteslice]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2026-09-24"
+end = "2027-10-15"
+
 [[trusted.bzip2-sys]]
 criteria = "safe-to-deploy"
-user-id = 256011 # Folkert de Vries (folkertdev)
+user-id = 256011
 start = "2025-02-11"
 end = "2026-05-06"
 
@@ -296,6 +330,12 @@ criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2021-04-26"
 end = "2026-05-06"
+
+[[trusted.crossbeam-epoch]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2020-10-12"
+end = "2027-07-07"
 
 [[trusted.cxx]]
 criteria = "safe-to-deploy"
@@ -651,6 +691,12 @@ user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-09-09"
 end = "2025-08-06"
 
+[[trusted.minicov]]
+criteria = "safe-to-run"
+user-id = 2915 # Amanieu d'Antras (Amanieu)
+start = "2020-04-20"
+end = "2027-07-16"
+
 [[trusted.mio]]
 criteria = "safe-to-deploy"
 user-id = 10
@@ -837,12 +883,6 @@ user-id = 4556 # Dirkjan Ochtman (djc)
 start = "2024-03-28"
 end = "2027-05-01"
 
-[[trusted.reblessive]]
-criteria = "safe-to-deploy"
-user-id = 79445 # Mees Delzenne (DelSkayn)
-start = "2024-02-23"
-end = "2027-05-01"
-
 [[trusted.ref-cast]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
@@ -866,6 +906,12 @@ criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-02-25"
 end = "2026-11-06"
+
+[[trusted.regex-lite]]
+criteria = "safe-to-deploy"
+user-id = 189 # Andrew Gallant (BurntSushi)
+start = "2023-02-28"
+end = "2027-10-08"
 
 [[trusted.regex-syntax]]
 criteria = "safe-to-deploy"
@@ -1123,7 +1169,7 @@ end = "2026-11-20"
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-07-04"
-end = "2026-07-18"
+end = "2027-08-02"
 
 [[trusted.surrealdb-rocksdb]]
 criteria = "safe-to-deploy"
@@ -1136,18 +1182,6 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2024-01-30"
 end = "2026-02-13"
-
-[[trusted.surrealdb-tikv-client]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2025-11-15"
-end = "2027-05-01"
-
-[[trusted.surrealdb-tikv-client]]
-criteria = "safe-to-deploy"
-user-id = 217605
-start = "2023-06-19"
-end = "2025-07-08"
 
 [[trusted.surrealdb-types]]
 criteria = "safe-to-deploy"
@@ -1191,11 +1225,23 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2024-02-08"
 end = "2027-05-01"
 
-[[trusted.surrealml-core]]
+[[trusted.surrealkv-compat-indxdb]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2023-10-31"
-end = "2026-05-06"
+start = "2026-10-13"
+end = "2027-10-15"
+
+[[trusted.surrealkv-compat-rocksdb]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2026-10-13"
+end = "2027-10-15"
+
+[[trusted.surrealkv-compat-v1]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2026-10-13"
+end = "2027-10-15"
 
 [[trusted.surrealmx]]
 criteria = "safe-to-deploy"
@@ -1415,7 +1461,7 @@ end = "2027-05-01"
 
 [[trusted.uuid]]
 criteria = "safe-to-deploy"
-user-id = 3204 # Ashley Mannix (KodrAus)
+user-id = 3204
 start = "2019-10-18"
 end = "2026-07-18"
 
@@ -1472,6 +1518,18 @@ criteria = "safe-to-deploy"
 user-id = 1 # Alex Crichton (alexcrichton)
 start = "2019-03-04"
 end = "2026-10-30"
+
+[[trusted.wasm-bindgen-test]]
+criteria = "safe-to-run"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-07-16"
+
+[[trusted.wasm-bindgen-test-macro]]
+criteria = "safe-to-run"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-07-16"
 
 [[trusted.web-sys]]
 criteria = "safe-to-deploy"

@@ -17,6 +17,9 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[{ id: person:bob, role: 'user' }]"
 
 [[test.results]]
@@ -30,6 +33,7 @@ DEFINE ACCESS user ON DATABASE TYPE RECORD
     DURATION FOR TOKEN 1h, FOR SESSION 1h;
 
 DEFINE TABLE foo SCHEMALESS PERMISSIONS FULL;
+DEFINE FIELD outer ON foo TYPE object;
 
 -- Permission gates the *nested* path `outer.a`. The streaming runtime
 -- must evaluate this against each concrete-path expansion of the field.

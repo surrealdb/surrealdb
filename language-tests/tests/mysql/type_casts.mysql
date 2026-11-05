@@ -1,0 +1,13 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL explicit CAST expressions"
+
+[[test.results]]
+value = "[{ int_val: 42, str_val: 'hello' }]"
+*/
+
+SELECT CAST('42' AS SIGNED) AS int_val, CAST('hello' AS CHAR) AS str_val;

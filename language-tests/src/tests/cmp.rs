@@ -4,8 +4,8 @@ use std::sync::LazyLock;
 
 use rust_decimal::Decimal;
 use surrealdb_types::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Regex, Set, Uuid, Value,
+	Array, Bytes, Date, Datetime, Duration, File, Geometry, Interval, Number, Object, Range,
+	RecordId, RecordIdKey, RecordIdKeyRange, Regex, Set, Time, Timestamp, Uuid, Value,
 };
 
 #[derive(Debug, Clone)]
@@ -192,8 +192,12 @@ impl RoughlyEq for Uuid {
 	}
 }
 
-/// Tolerance for floating point comparisons.
+/// Tolerance for f64 comparisons.
 const EPSILON: f64 = 1e-15;
+/// Tolerance for f32 comparisons.
+const EPSILON_F32: f32 = 1e-6;
+/// Tolerance for f16 comparisons.
+const EPSILON_F16: f32 = 1e-3;
 /// Tolerance for decimal comparisons (1e-15).
 static EPSILON_DECIMAL: LazyLock<Decimal> = LazyLock::new(|| Decimal::try_new(1, 15).unwrap());
 
@@ -219,19 +223,48 @@ impl RoughlyEq for Decimal {
 
 impl RoughlyEq for Number {
 	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
+		let is_sized =
+			|n: &Number| !matches!(n, Number::Int(_) | Number::Float(_) | Number::Decimal(_));
+		if (is_sized(self) || is_sized(other)) && self.number_kind() != other.number_kind() {
+			return false;
+		}
 		if self.is_nan() && other.is_nan() {
 			return true;
 		}
 
 		match (self, other) {
 			(Number::Float(a), Number::Float(b)) => a.roughly_equal(b, config),
+			(Number::F32(a), Number::F32(b)) => {
+				if config.float {
+					(a - b).abs() < EPSILON_F32
+				} else {
+					a == b
+				}
+			}
+			(Number::F16(a), Number::F16(b)) => {
+				if config.float {
+					(a.to_f32() - b.to_f32()).abs() < EPSILON_F16
+				} else {
+					a == b
+				}
+			}
 			(Number::Decimal(a), Number::Decimal(b)) => a.roughly_equal(b, config),
 			(a, b) => a == b,
 		}
 	}
 }
 
-impl_roughly_eq_delegate!(i64, bool, String, Geometry, Bytes, Range, Regex, Duration, File);
+impl_roughly_eq_delegate!(
+	i64, bool, String, Geometry, Bytes, Range, Regex, Duration, File, Date, Time, Timestamp
+);
+
+/// An interval is equal to another only when its components are, so a test that expects
+/// `1 month` is not satisfied by `30 days`.
+impl RoughlyEq for Interval {
+	fn roughly_equal(&self, other: &Self, _: &RoughlyEqConfig) -> bool {
+		self.identical(other)
+	}
+}
 
 impl RoughlyEq for Array {
 	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
@@ -274,6 +307,10 @@ impl_roughly_eq_enum!(
 		String(s),
 		Duration(d),
 		Datetime(d),
+		Date(d),
+		Time(t),
+		Timestamp(t),
+		Interval(i),
 		Uuid(u),
 		Array(a),
 		Set(s),

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "ORDER BY alias Compute fields must not shadow selected source fields before projection"

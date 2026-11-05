@@ -2,19 +2,18 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use async_channel::Receiver;
 use futures::StreamExt;
 use surrealdb_types::{ConfigurationError, QueryError, SerializationError, ValidationError};
-#[cfg(not(target_family = "wasm"))]
-use tokio::spawn;
+#[cfg(not(browser))]
+pub(crate) use tokio::spawn;
 use uuid::Uuid;
-#[cfg(target_family = "wasm")]
-use wasm_bindgen_futures::spawn_local as spawn;
+#[cfg(browser)]
+pub(crate) use wasm_bindgen_futures::spawn_local as spawn;
 
-use crate::conn::{Command, Router};
+use crate::conn::{Router, ctx, ctx_txn};
 use crate::engine::any::Any;
 use crate::method::{BoxFuture, Live, OnceLockExt, Select};
 use crate::notification::Notification;
@@ -131,14 +130,7 @@ where
 
 		// Execute the LIVE SELECT query directly to get the UUID
 		let results = router
-			.execute_query(
-				client.session_id,
-				Command::Query {
-					query: Cow::Owned(query),
-					txn: None,
-					variables,
-				},
-			)
+			.query_results(ctx_txn(client.session_id, None), Cow::Owned(query), variables)
 			.await?;
 
 		// Get the first result which should be the UUID
@@ -146,17 +138,39 @@ where
 			Error::query("LIVE query returned no results".to_string(), QueryError::NotExecuted)
 		})?;
 
-		let id = match result.result? {
+		let value = result.result?;
+		let id = match value {
 			Value::Uuid(id) => *id,
-			Value::Array(mut arr) if arr.len() == 1 => match arr.pop() {
-				Some(Value::Uuid(id)) => *id,
-				_ => {
+			Value::Array(mut arr) if arr.len() == 1 => {
+				if let Some(Value::Uuid(id)) = arr.pop() {
+					*id
+				} else {
 					return Err(Error::internal(
 						"successful live query didn't return a uuid".to_string(),
 					));
 				}
-			},
-			other => {
+			}
+			other @ Value::None
+			| other @ Value::Null
+			| other @ Value::Bool(_)
+			| other @ Value::Number(_)
+			| other @ Value::String(_)
+			| other @ Value::Bytes(_)
+			| other @ Value::Duration(_)
+			| other @ Value::Datetime(_)
+			| other @ Value::Date(_)
+			| other @ Value::Time(_)
+			| other @ Value::Timestamp(_)
+			| other @ Value::Interval(_)
+			| other @ Value::Geometry(_)
+			| other @ Value::Table(_)
+			| other @ Value::RecordId(_)
+			| other @ Value::File(_)
+			| other @ Value::Range(_)
+			| other @ Value::Regex(_)
+			| other @ Value::Array(_)
+			| other @ Value::Object(_)
+			| other @ Value::Set(_) => {
 				return Err(Error::internal(format!(
 					"successful live query didn't return a uuid, got: {:?}",
 					other
@@ -165,7 +179,7 @@ where
 		};
 
 		let rx = register(router, id, client.session_id).await?;
-		Ok(Stream::new(Arc::clone(&client.inner).into(), id, Some(rx)))
+		Ok(Stream::new(client.share_session(), id, Some(rx)))
 	})
 }
 
@@ -175,15 +189,7 @@ pub(crate) async fn register(
 	session_id: Uuid,
 ) -> Result<Receiver<Result<CoreNotification>>> {
 	let (tx, rx) = async_channel::unbounded();
-	router
-		.execute_unit(
-			session_id,
-			Command::SubscribeLive {
-				uuid: id,
-				notification_sender: tx,
-			},
-		)
-		.await?;
+	router.engine.subscribe_live(ctx(session_id), id, tx).await?;
 	Ok(rx)
 }
 
@@ -260,8 +266,21 @@ macro_rules! poll_next {
 			let Some(ref mut rx) = self.as_mut().rx else {
 				return Poll::Ready(None);
 			};
-			match rx.poll_next_unpin(cx) {
-				Poll::Ready(Some($result)) => $body,
+			let polled = rx.poll_next_unpin(cx);
+			match polled {
+				Poll::Ready(Some($result)) => {
+					// `Killed` is the subscription's own end: the datastore has
+					// removed it, so the stream has nothing left to receive and
+					// nothing left to tear down. Dropping the receiver here is
+					// what tells `Drop` that, which would otherwise ask for a
+					// subscription that is already gone to be killed.
+					if let Ok(notification) = &$result
+						&& matches!(notification.action, Action::Killed)
+					{
+						self.as_mut().rx = None;
+					}
+					$body
+				}
 				Poll::Ready(None) => Poll::Ready(None),
 				Poll::Pending => Poll::Pending,
 			}
@@ -277,7 +296,10 @@ impl futures::Stream for Stream<Value> {
 			Ok(notification) => {
 				match notification.action {
 					Action::Killed => Poll::Ready(None),
-					action => Poll::Ready(Some(Ok(Notification {
+					action @ (Action::Create
+					| Action::Update
+					| Action::Delete
+					| Action::Error) => Poll::Ready(Some(Ok(Notification {
 						query_id: notification.id,
 						action,
 						data: notification.result,
@@ -337,22 +359,23 @@ where
 	poll_next_and_convert! {}
 }
 
+/// Ends the live query behind a [`Stream`], on the way out of its `Drop`.
+///
+/// A dropped stream is gone whether or not the engine could end its
+/// subscription, so the failure is reported rather than returned: there is no
+/// caller left to return it to, and a subscription that outlives its stream
+/// goes on being registered -- and, on the engines that capture events per
+/// table, goes on costing every later write.
 pub(crate) fn kill<Client>(client: &Surreal<Client>, uuid: Uuid)
 where
 	Client: Connection,
 {
-	let client = client.clone();
+	let client: Surreal<Client> = client.share_session();
 	spawn(async move {
-		if let Ok(router) = client.inner.router.extract() {
-			router
-				.execute_unit(
-					client.session_id,
-					Command::Kill {
-						uuid,
-					},
-				)
-				.await
-				.ok();
+		if let Ok(router) = client.inner.router.extract()
+			&& let Err(error) = router.engine.kill(ctx(client.session_id), uuid).await
+		{
+			tracing::warn!("Failed to kill live query '{uuid}'; {error}");
 		}
 	});
 }
@@ -376,16 +399,55 @@ where
 	let action = notification.action;
 	match action {
 		Action::Killed => None,
-		action => match R::from_value(notification.result) {
-			Ok(data) => Some(Ok(Notification {
-				query_id,
-				data,
-				action,
-			})),
-			Err(error) => Some(Err(Error::serialization(
-				error.to_string(),
-				SerializationError::Deserialization,
-			))),
-		},
+		action @ (Action::Create | Action::Update | Action::Delete | Action::Error) => {
+			match R::from_value(notification.result) {
+				Ok(data) => Some(Ok(Notification {
+					query_id,
+					data,
+					action,
+				})),
+				Err(error) => Some(Err(Error::serialization(
+					error.to_string(),
+					SerializationError::Deserialization,
+				))),
+			}
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use futures::StreamExt;
+
+	use super::*;
+
+	/// A notification for `id`, as the engine delivers one.
+	fn notification(id: Uuid, action: Action) -> CoreNotification {
+		CoreNotification::new(id.into(), None, action, Value::None, Value::None)
+	}
+
+	/// A `Killed` notification ends the stream *and* everything behind it.
+	///
+	/// The subscription is gone from the datastore by the time this arrives --
+	/// it is what the removal queues -- so a stream that has seen one must not
+	/// ask for it to be killed again on the way out of `Drop`: there is nothing
+	/// left to kill, and the attempt fails.
+	#[tokio::test]
+	async fn a_killed_notification_leaves_nothing_to_tear_down() {
+		let id = Uuid::now_v7();
+		let (sender, receiver) = async_channel::unbounded();
+		let mut stream: Stream<Value> = Stream::new(Surreal::init(), id, Some(receiver));
+
+		sender.send(Ok(notification(id, Action::Create))).await.unwrap();
+		sender.send(Ok(notification(id, Action::Killed))).await.unwrap();
+
+		assert!(stream.next().await.is_some(), "the change is delivered");
+		assert!(stream.rx.is_some(), "the subscription is still this stream's to end");
+
+		assert!(stream.next().await.is_none(), "a killed subscription ends the stream");
+		assert!(
+			stream.rx.is_none(),
+			"a stream that has seen the subscription end has nothing left to tear down"
+		);
 	}
 }

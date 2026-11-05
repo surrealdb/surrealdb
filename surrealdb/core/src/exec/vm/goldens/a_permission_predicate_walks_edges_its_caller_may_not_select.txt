@@ -1,0 +1,16 @@
+### martin: SELECT * FROM task
+{ id: task:t1, journey: journey:j1 }
+### martin: SELECT VALUE id FROM task WHERE n = NONE
+task:t1
+### martin: UPDATE task SET n = 1
+{ id: task:t1, journey: journey:j1, n: 1 }
+### martin: UPDATE task:t1 SET n = 2 RETURN AFTER
+{ id: task:t1, journey: journey:j1, n: 2 }
+### other: SELECT * FROM task
+(no rows)
+### other: SELECT VALUE id FROM task WHERE n = NONE
+(no rows)
+### other: UPDATE task SET n = 1
+(no rows)
+### other: UPDATE task:t1 SET n = 2 RETURN AFTER
+(no rows)

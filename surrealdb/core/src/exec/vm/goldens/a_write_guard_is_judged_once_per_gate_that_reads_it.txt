@@ -1,0 +1,80 @@
+### UPDATE counted SET n += 1
+{ id: counted:1, n: 2 }
+records:
+open: { id: open:1, n: 1 }
+shut: { id: shut:1, n: 1 }
+cond: { id: cond:1, locked: false, n: 1, visible: true }
+cond: { id: cond:2, locked: true, n: 5, visible: false }
+comp: { blocked: false, id: comp:1, n: 1, twice: false }
+comp: { blocked: true, id: comp:2, n: 7, twice: true }
+selfref: { id: selfref:1, mirror: 1, n: 1 }
+selfref: { id: selfref:3, mirror: 3, n: 3 }
+counted: { id: counted:1, n: 2 }
+counted: { id: counted:2, n: 20 }
+stmt: { id: stmt:1, n: 1 }
+stmt: { id: stmt:2, n: 2 }
+log: { at: 1, id: log:generated }
+log: { at: 1, id: log:generated }
+log: { at: 1, id: log:generated }
+owned: { id: owned:1, owner: user:reader }
+owned: { id: owned:2, owner: user:other }
+nowhere: The table 'nowhere' does not exist
+### CREATE counted:5 SET n = 1
+{ id: counted:5, n: 1 }
+records:
+open: { id: open:1, n: 1 }
+shut: { id: shut:1, n: 1 }
+cond: { id: cond:1, locked: false, n: 1, visible: true }
+cond: { id: cond:2, locked: true, n: 5, visible: false }
+comp: { blocked: false, id: comp:1, n: 1, twice: false }
+comp: { blocked: true, id: comp:2, n: 7, twice: true }
+selfref: { id: selfref:1, mirror: 1, n: 1 }
+selfref: { id: selfref:3, mirror: 3, n: 3 }
+counted: { id: counted:1, n: 1 }
+counted: { id: counted:2, n: 20 }
+counted: { id: counted:5, n: 1 }
+stmt: { id: stmt:1, n: 1 }
+stmt: { id: stmt:2, n: 2 }
+log: { at: 1, id: log:generated }
+owned: { id: owned:1, owner: user:reader }
+owned: { id: owned:2, owner: user:other }
+nowhere: The table 'nowhere' does not exist
+### UPSERT counted:1 SET n = 3
+{ id: counted:1, n: 3 }
+records:
+open: { id: open:1, n: 1 }
+shut: { id: shut:1, n: 1 }
+cond: { id: cond:1, locked: false, n: 1, visible: true }
+cond: { id: cond:2, locked: true, n: 5, visible: false }
+comp: { blocked: false, id: comp:1, n: 1, twice: false }
+comp: { blocked: true, id: comp:2, n: 7, twice: true }
+selfref: { id: selfref:1, mirror: 1, n: 1 }
+selfref: { id: selfref:3, mirror: 3, n: 3 }
+counted: { id: counted:1, n: 3 }
+counted: { id: counted:2, n: 20 }
+stmt: { id: stmt:1, n: 1 }
+stmt: { id: stmt:2, n: 2 }
+log: { at: 1, id: log:generated }
+log: { at: 1, id: log:generated }
+owned: { id: owned:1, owner: user:reader }
+owned: { id: owned:2, owner: user:other }
+nowhere: The table 'nowhere' does not exist
+### DELETE counted
+(no rows)
+records:
+open: { id: open:1, n: 1 }
+shut: { id: shut:1, n: 1 }
+cond: { id: cond:1, locked: false, n: 1, visible: true }
+cond: { id: cond:2, locked: true, n: 5, visible: false }
+comp: { blocked: false, id: comp:1, n: 1, twice: false }
+comp: { blocked: true, id: comp:2, n: 7, twice: true }
+selfref: { id: selfref:1, mirror: 1, n: 1 }
+selfref: { id: selfref:3, mirror: 3, n: 3 }
+counted: { id: counted:2, n: 20 }
+stmt: { id: stmt:1, n: 1 }
+stmt: { id: stmt:2, n: 2 }
+log: { at: 1, id: log:generated }
+log: { at: 1, id: log:generated }
+owned: { id: owned:1, owner: user:reader }
+owned: { id: owned:2, owner: user:other }
+nowhere: The table 'nowhere' does not exist

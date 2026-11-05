@@ -48,7 +48,7 @@ auth = { level = "owner" }
 SELECT * FROM gated ORDER BY id;
 
 -- WHERE-filtered query: same compile path, but the outer scan now has a
--- predicate. The predicate's compilation also goes through `physical_expr`
+-- predicate. The predicate's compilation also goes through the planner,
 -- which inherits the cycle guard.
 SELECT * FROM gated WHERE tag = 'public' ORDER BY id;
 

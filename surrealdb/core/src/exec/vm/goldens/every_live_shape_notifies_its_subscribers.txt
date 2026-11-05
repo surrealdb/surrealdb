@@ -1,0 +1,1292 @@
+### owner: LIVE SELECT * FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### reader: LIVE SELECT * FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### owner: LIVE SELECT * FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### reader: LIVE SELECT * FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### owner: LIVE SELECT * FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT * FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT * FROM item | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT * FROM item | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT * FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT DIFF FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))}))]))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))}))]))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))}))]))
+### reader: LIVE SELECT DIFF FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))}))]))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))}))]))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))}))]))
+### owner: LIVE SELECT DIFF FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(4))})), Object(Object({"op": String("change"), "path": String("/meta/a/b"), "value": String("@@ -1,4 +1,7 @@\n-deep\n+shallow\n")})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(2))}))]))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(4))})), Object(Object({"op": String("change"), "path": String("/meta/a/b"), "value": String("@@ -1,4 +1,7 @@\n-deep\n+shallow\n")})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(2))}))]))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(4))})), Object(Object({"op": String("change"), "path": String("/meta/a/b"), "value": String("@@ -1,4 +1,7 @@\n-deep\n+shallow\n")})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(2))}))]))
+### reader: LIVE SELECT DIFF FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(4))})), Object(Object({"op": String("change"), "path": String("/meta/a/b"), "value": String("@@ -1,4 +1,7 @@\n-deep\n+shallow\n")})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(2))}))]))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(4))})), Object(Object({"op": String("change"), "path": String("/meta/a/b"), "value": String("@@ -1,4 +1,7 @@\n-deep\n+shallow\n")})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(2))}))]))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(4))})), Object(Object({"op": String("change"), "path": String("/meta/a/b"), "value": String("@@ -1,4 +1,7 @@\n-deep\n+shallow\n")})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(2))}))]))
+### owner: LIVE SELECT DIFF FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(2))})), Object(Object({"op": String("add"), "path": String("/meta"), "value": Object(Object({"a": Object(Object({"b": String("x")}))}))})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(1))}))]))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(2))})), Object(Object({"op": String("add"), "path": String("/meta"), "value": Object(Object({"a": Object(Object({"b": String("x")}))}))})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(1))}))]))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(2))})), Object(Object({"op": String("add"), "path": String("/meta"), "value": Object(Object({"a": Object(Object({"b": String("x")}))}))})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(1))}))]))
+### reader: LIVE SELECT DIFF FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(2))})), Object(Object({"op": String("add"), "path": String("/meta"), "value": Object(Object({"a": Object(Object({"b": String("x")}))}))})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(1))}))]))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(2))})), Object(Object({"op": String("add"), "path": String("/meta"), "value": Object(Object({"a": Object(Object({"b": String("x")}))}))})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(1))}))]))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String("/double"), "value": Number(Int(2))})), Object(Object({"op": String("add"), "path": String("/meta"), "value": Object(Object({"a": Object(Object({"b": String("x")}))}))})), Object(Object({"op": String("replace"), "path": String("/n"), "value": Number(Int(1))}))]))
+### owner: LIVE SELECT DIFF FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": None}))]))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": None}))]))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": None}))]))
+### reader: LIVE SELECT DIFF FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": None}))]))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": None}))]))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Array(Array([Object(Object({"op": String("replace"), "path": String(""), "value": None}))]))
+### owner: LIVE SELECT DIFF FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT DIFF FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT DIFF FROM item | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT DIFF FROM item | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT DIFF FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT DIFF FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT VALUE n FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Number(Int(3))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Number(Int(3))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Number(Int(3))
+### reader: LIVE SELECT VALUE n FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Number(Int(3))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Number(Int(3))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Number(Int(3))
+### owner: LIVE SELECT VALUE n FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Number(Int(2))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Number(Int(2))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Number(Int(2))
+### reader: LIVE SELECT VALUE n FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Number(Int(2))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Number(Int(2))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Number(Int(2))
+### owner: LIVE SELECT VALUE n FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(1))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(1))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(1))
+### reader: LIVE SELECT VALUE n FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(1))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(1))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(1))
+### owner: LIVE SELECT VALUE n FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(2))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(2))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(2))
+### reader: LIVE SELECT VALUE n FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(2))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(2))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Number(Int(2))
+### owner: LIVE SELECT VALUE n FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT VALUE n FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT VALUE n FROM item | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT VALUE n FROM item | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT VALUE n FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT VALUE n FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT n AS renamed, secret FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"renamed": Number(Int(3)), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"renamed": Number(Int(3)), "secret": None}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"renamed": Number(Int(3)), "secret": String("s9")}))
+### reader: LIVE SELECT n AS renamed, secret FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"renamed": Number(Int(3)), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"renamed": Number(Int(3)), "secret": None}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"renamed": Number(Int(3)), "secret": String("s9")}))
+### owner: LIVE SELECT n AS renamed, secret FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"renamed": Number(Int(2)), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"renamed": Number(Int(2)), "secret": None}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"renamed": Number(Int(2)), "secret": String("s1")}))
+### reader: LIVE SELECT n AS renamed, secret FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"renamed": Number(Int(2)), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"renamed": Number(Int(2)), "secret": None}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"renamed": Number(Int(2)), "secret": String("s1")}))
+### owner: LIVE SELECT n AS renamed, secret FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(1)), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(1)), "secret": None}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(1)), "secret": String("s2")}))
+### reader: LIVE SELECT n AS renamed, secret FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(1)), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(1)), "secret": None}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(1)), "secret": String("s2")}))
+### owner: LIVE SELECT n AS renamed, secret FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(2)), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(2)), "secret": None}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(2)), "secret": String("s2")}))
+### reader: LIVE SELECT n AS renamed, secret FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(2)), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(2)), "secret": None}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"renamed": Number(Int(2)), "secret": String("s2")}))
+### owner: LIVE SELECT n AS renamed, secret FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT n AS renamed, secret FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT n AS renamed, secret FROM item | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT n AS renamed, secret FROM item | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT n AS renamed, secret FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT n AS renamed, secret FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT meta.a.b AS deep, n FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"deep": None, "n": Number(Int(3))}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"deep": None, "n": Number(Int(3))}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"deep": None, "n": Number(Int(3))}))
+### reader: LIVE SELECT meta.a.b AS deep, n FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"deep": None, "n": Number(Int(3))}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"deep": None, "n": Number(Int(3))}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"deep": None, "n": Number(Int(3))}))
+### owner: LIVE SELECT meta.a.b AS deep, n FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"deep": String("shallow"), "n": Number(Int(2))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"deep": String("shallow"), "n": Number(Int(2))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"deep": String("shallow"), "n": Number(Int(2))}))
+### reader: LIVE SELECT meta.a.b AS deep, n FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"deep": String("shallow"), "n": Number(Int(2))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"deep": String("shallow"), "n": Number(Int(2))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"deep": String("shallow"), "n": Number(Int(2))}))
+### owner: LIVE SELECT meta.a.b AS deep, n FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": String("x"), "n": Number(Int(1))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": String("x"), "n": Number(Int(1))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": String("x"), "n": Number(Int(1))}))
+### reader: LIVE SELECT meta.a.b AS deep, n FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": String("x"), "n": Number(Int(1))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": String("x"), "n": Number(Int(1))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": String("x"), "n": Number(Int(1))}))
+### owner: LIVE SELECT meta.a.b AS deep, n FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": None, "n": Number(Int(2))}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": None, "n": Number(Int(2))}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": None, "n": Number(Int(2))}))
+### reader: LIVE SELECT meta.a.b AS deep, n FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": None, "n": Number(Int(2))}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": None, "n": Number(Int(2))}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"deep": None, "n": Number(Int(2))}))
+### owner: LIVE SELECT meta.a.b AS deep, n FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT meta.a.b AS deep, n FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT meta.a.b AS deep, n FROM item | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT meta.a.b AS deep, n FROM item | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT meta.a.b AS deep, n FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT meta.a.b AS deep, n FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"dbl": Number(Int(6)), "double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9"), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"dbl": Number(Int(6)), "double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"dbl": Number(Int(6)), "double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9"), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+### reader: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"dbl": Number(Int(6)), "double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9"), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"dbl": Number(Int(6)), "double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"dbl": Number(Int(6)), "double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9"), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+### owner: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1"), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1"), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+### reader: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1"), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1"), "who": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+### owner: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(2)), "double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(2)), "double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(2)), "double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+### reader: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(2)), "double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(2)), "double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(2)), "double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+### owner: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+### reader: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"dbl": Number(Int(4)), "double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "who": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+### owner: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT *, n * 2 AS dbl, owner.id AS who FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "ev": String("CREATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "me": None, "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9"), "vn": Number(Int(3))}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "ev": String("CREATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "me": RecordId(RecordId { table: Table("user"), key: String("reader") }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "vn": Number(Int(3))}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "ev": String("CREATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "me": RecordId(RecordId { table: Table("user"), key: String("x") }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9"), "vn": Number(Int(3))}))
+### reader: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "ev": String("CREATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "me": None, "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9"), "vn": Number(Int(3))}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "ev": String("CREATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "me": RecordId(RecordId { table: Table("user"), key: String("reader") }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "vn": Number(Int(3))}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "ev": String("CREATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "me": RecordId(RecordId { table: Table("user"), key: String("x") }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9"), "vn": Number(Int(3))}))
+### owner: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "me": None, "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1"), "vn": Number(Int(2))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "me": RecordId(RecordId { table: Table("user"), key: String("reader") }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "vn": Number(Int(2))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "me": RecordId(RecordId { table: Table("user"), key: String("x") }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1"), "vn": Number(Int(2))}))
+### reader: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "me": None, "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1"), "vn": Number(Int(2))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "me": RecordId(RecordId { table: Table("user"), key: String("reader") }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "vn": Number(Int(2))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "me": RecordId(RecordId { table: Table("user"), key: String("x") }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1"), "vn": Number(Int(2))}))
+### owner: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": None, "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "vn": Number(Int(1))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": RecordId(RecordId { table: Table("user"), key: String("reader") }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "vn": Number(Int(1))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": RecordId(RecordId { table: Table("user"), key: String("x") }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "vn": Number(Int(1))}))
+### reader: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": None, "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "vn": Number(Int(1))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": RecordId(RecordId { table: Table("user"), key: String("reader") }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "vn": Number(Int(1))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "ev": String("UPDATE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": RecordId(RecordId { table: Table("user"), key: String("x") }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "vn": Number(Int(1))}))
+### owner: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "ev": String("DELETE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": None, "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "vn": None}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "ev": String("DELETE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": RecordId(RecordId { table: Table("user"), key: String("reader") }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "vn": None}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "ev": String("DELETE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": RecordId(RecordId { table: Table("user"), key: String("x") }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "vn": None}))
+### reader: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "ev": String("DELETE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": None, "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "vn": None}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "ev": String("DELETE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": RecordId(RecordId { table: Table("user"), key: String("reader") }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "vn": None}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "ev": String("DELETE"), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "me": RecordId(RecordId { table: Table("user"), key: String("x") }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2"), "vn": None}))
+### owner: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT *, $event AS ev, $value.n AS vn, $auth.id AS me FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE $before.n != $after.n | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### reader: LIVE SELECT * FROM item WHERE $before.n != $after.n | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### owner: LIVE SELECT * FROM item WHERE $before.n != $after.n | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### reader: LIVE SELECT * FROM item WHERE $before.n != $after.n | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### owner: LIVE SELECT * FROM item WHERE $before.n != $after.n | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item WHERE $before.n != $after.n | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item WHERE $before.n != $after.n | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item WHERE $before.n != $after.n | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item WHERE $before.n != $after.n | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE $before.n != $after.n | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE $before.n != $after.n | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE $before.n != $after.n | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item WHERE $before.n != $after.n | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE $before.n != $after.n | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE $auth.id = user:x | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### reader: LIVE SELECT * FROM item WHERE $auth.id = user:x | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### owner: LIVE SELECT * FROM item WHERE $auth.id = user:x | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### reader: LIVE SELECT * FROM item WHERE $auth.id = user:x | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### owner: LIVE SELECT * FROM item WHERE $auth.id = user:x | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item WHERE $auth.id = user:x | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item WHERE $auth.id = user:x | DELETE item:2
+(no rows)
+notified:
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item WHERE $auth.id = user:x | DELETE item:2
+(no rows)
+notified:
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item WHERE $auth.id = user:x | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE $auth.id = user:x | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE $auth.id = user:x | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE $auth.id = user:x | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item WHERE $auth.id = user:x | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE $auth.id = user:x | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### reader: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### owner: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### reader: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### owner: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | DELETE item:2
+(no rows)
+notified:
+### reader: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | DELETE item:2
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE n IN (SELECT VALUE n FROM item) | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### reader: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### owner: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### reader: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### owner: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE string::len(<string> n) > 0 | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE fn::big(n) | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### reader: LIVE SELECT * FROM item WHERE fn::big(n) | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### owner: LIVE SELECT * FROM item WHERE fn::big(n) | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+### reader: LIVE SELECT * FROM item WHERE fn::big(n) | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+### owner: LIVE SELECT * FROM item WHERE fn::big(n) | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+### reader: LIVE SELECT * FROM item WHERE fn::big(n) | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item WHERE fn::big(n) | DELETE item:2
+(no rows)
+notified:
+### reader: LIVE SELECT * FROM item WHERE fn::big(n) | DELETE item:2
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item WHERE fn::big(n) | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE fn::big(n) | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE fn::big(n) | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE fn::big(n) | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item WHERE fn::big(n) | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE fn::big(n) | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT ->link->item.n AS friends FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"friends": Array(Array([]))}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"friends": Array(Array([]))}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"friends": Array(Array([]))}))
+### reader: LIVE SELECT ->link->item.n AS friends FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"friends": Array(Array([]))}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"friends": Array(Array([]))}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"friends": Array(Array([]))}))
+### owner: LIVE SELECT ->link->item.n AS friends FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"friends": Array(Array([Number(Int(2))]))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"friends": Array(Array([Number(Int(2))]))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"friends": Array(Array([Number(Int(2))]))}))
+### reader: LIVE SELECT ->link->item.n AS friends FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"friends": Array(Array([Number(Int(2))]))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"friends": Array(Array([Number(Int(2))]))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"friends": Array(Array([Number(Int(2))]))}))
+### owner: LIVE SELECT ->link->item.n AS friends FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+### reader: LIVE SELECT ->link->item.n AS friends FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+### owner: LIVE SELECT ->link->item.n AS friends FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+### reader: LIVE SELECT ->link->item.n AS friends FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"friends": Array(Array([]))}))
+### owner: LIVE SELECT ->link->item.n AS friends FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT ->link->item.n AS friends FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT ->link->item.n AS friends FROM item | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT ->link->item.n AS friends FROM item | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT ->link->item.n AS friends FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT ->link->item.n AS friends FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT * FROM item FETCH owner | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })}))}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s9")}))
+### reader: LIVE SELECT * FROM item FETCH owner | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })}))}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s9")}))
+### owner: LIVE SELECT * FROM item FETCH owner | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })}))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s1")}))
+### reader: LIVE SELECT * FROM item FETCH owner | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })}))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s1")}))
+### owner: LIVE SELECT * FROM item FETCH owner | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })}))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item FETCH owner | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })}))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item FETCH owner | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })}))}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item FETCH owner | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })}))}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item FETCH owner | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT * FROM item FETCH owner | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT * FROM item FETCH owner | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT * FROM item FETCH owner | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item FETCH owner | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT * FROM item FETCH owner | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT * FROM item FETCH owner, secret | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })}))}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s9")}))
+### reader: LIVE SELECT * FROM item FETCH owner, secret | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })}))}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s9")}))
+### owner: LIVE SELECT * FROM item FETCH owner, secret | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })}))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s1")}))
+### reader: LIVE SELECT * FROM item FETCH owner, secret | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })}))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("reader") })})), "secret": String("s1")}))
+### owner: LIVE SELECT * FROM item FETCH owner, secret | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })}))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item FETCH owner, secret | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })}))}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item FETCH owner, secret | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })}))}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item FETCH owner, secret | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })}))}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": Object(Object({"id": RecordId(RecordId { table: Table("user"), key: String("x") })})), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item FETCH owner, secret | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT * FROM item FETCH owner, secret | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT * FROM item FETCH owner, secret | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT * FROM item FETCH owner, secret | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item FETCH owner, secret | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT * FROM item FETCH owner, secret | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT id, double FROM item WHERE double > 2 | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) })}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) })}))
+### reader: LIVE SELECT id, double FROM item WHERE double > 2 | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) })}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) })}))
+### owner: LIVE SELECT id, double FROM item WHERE double > 2 | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) })}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) })}))
+### reader: LIVE SELECT id, double FROM item WHERE double > 2 | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) })}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) })}))
+### owner: LIVE SELECT id, double FROM item WHERE double > 2 | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+### reader: LIVE SELECT id, double FROM item WHERE double > 2 | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+### owner: LIVE SELECT id, double FROM item WHERE double > 2 | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+### reader: LIVE SELECT id, double FROM item WHERE double > 2 | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+### owner: LIVE SELECT id, double FROM item WHERE double > 2 | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT id, double FROM item WHERE double > 2 | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT id, double FROM item WHERE double > 2 | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT id, double FROM item WHERE double > 2 | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT id, double FROM item WHERE double > 2 | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT id, double FROM item WHERE double > 2 | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT secret, meta FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"meta": None, "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"meta": None, "secret": None}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"meta": None, "secret": String("s9")}))
+### reader: LIVE SELECT secret, meta FROM item | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"meta": None, "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"meta": None, "secret": None}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"meta": None, "secret": String("s9")}))
+### owner: LIVE SELECT secret, meta FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "secret": None}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "secret": String("s1")}))
+### reader: LIVE SELECT secret, meta FROM item | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "secret": None}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "secret": String("s1")}))
+### owner: LIVE SELECT secret, meta FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "secret": None}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "secret": String("s2")}))
+### reader: LIVE SELECT secret, meta FROM item | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "secret": None}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "secret": String("s2")}))
+### owner: LIVE SELECT secret, meta FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": None, "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": None, "secret": None}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": None, "secret": String("s2")}))
+### reader: LIVE SELECT secret, meta FROM item | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": None, "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": None, "secret": None}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"meta": None, "secret": String("s2")}))
+### owner: LIVE SELECT secret, meta FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT secret, meta FROM item | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT secret, meta FROM item | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT secret, meta FROM item | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT secret, meta FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT secret, meta FROM item | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### reader: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+  1: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Create RecordId(RecordId { table: Table("item"), key: Number(9) }) Object(Object({"double": Number(Int(6)), "id": RecordId(RecordId { table: Table("item"), key: Number(9) }), "n": Number(Int(3)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s9")}))
+### owner: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### reader: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(1) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(1) }), "meta": Object(Object({"a": Object(Object({"b": String("shallow")}))})), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("reader") }), "secret": String("s1")}))
+### owner: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Update RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(2)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "meta": Object(Object({"a": Object(Object({"b": String("x")}))})), "n": Number(Int(1)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### reader: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+  1: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") })}))
+  2: Delete RecordId(RecordId { table: Table("item"), key: Number(2) }) Object(Object({"double": Number(Int(4)), "id": RecordId(RecordId { table: Table("item"), key: Number(2) }), "n": Number(Int(2)), "owner": RecordId(RecordId { table: Table("user"), key: String("x") }), "secret": String("s2")}))
+### owner: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT * FROM item WHERE (SELECT VALUE n FROM ONLY item:1) >= 0 | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT * FROM gated | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+### reader: LIVE SELECT * FROM gated | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+### owner: LIVE SELECT * FROM gated | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+### reader: LIVE SELECT * FROM gated | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+### owner: LIVE SELECT * FROM gated | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+### reader: LIVE SELECT * FROM gated | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM gated | DELETE item:2
+(no rows)
+notified:
+### reader: LIVE SELECT * FROM gated | DELETE item:2
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM gated | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+  0: Update RecordId(RecordId { table: Table("gated"), key: Number(1) }) Object(Object({"id": RecordId(RecordId { table: Table("gated"), key: Number(1) }), "n": Number(Int(3))}))
+  1: Update RecordId(RecordId { table: Table("gated"), key: Number(1) }) Object(Object({"id": RecordId(RecordId { table: Table("gated"), key: Number(1) }), "n": Number(Int(3))}))
+  2: Update RecordId(RecordId { table: Table("gated"), key: Number(1) }) Object(Object({"id": RecordId(RecordId { table: Table("gated"), key: Number(1) }), "n": Number(Int(3))}))
+### reader: LIVE SELECT * FROM gated | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+  0: Update RecordId(RecordId { table: Table("gated"), key: Number(1) }) Object(Object({"id": RecordId(RecordId { table: Table("gated"), key: Number(1) }), "n": Number(Int(3))}))
+  1: Update RecordId(RecordId { table: Table("gated"), key: Number(1) }) Object(Object({"id": RecordId(RecordId { table: Table("gated"), key: Number(1) }), "n": Number(Int(3))}))
+  2: Update RecordId(RecordId { table: Table("gated"), key: Number(1) }) Object(Object({"id": RecordId(RecordId { table: Table("gated"), key: Number(1) }), "n": Number(Int(3))}))
+### owner: LIVE SELECT * FROM gated | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+  0: Create RecordId(RecordId { table: Table("gated"), key: Number(2) }) Object(Object({"id": RecordId(RecordId { table: Table("gated"), key: Number(2) }), "n": Number(Int(0))}))
+### reader: LIVE SELECT * FROM gated | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+  0: Create RecordId(RecordId { table: Table("gated"), key: Number(2) }) Object(Object({"id": RecordId(RecordId { table: Table("gated"), key: Number(2) }), "n": Number(Int(0))}))
+### owner: LIVE SELECT * FROM gated | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT * FROM gated | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT * FROM item_count | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+  0: Update RecordId(RecordId { table: Table("item_count"), key: Array(Array([])) }) Object(Object({"c": Number(Int(4)), "top": Number(Int(3))}))
+### reader: LIVE SELECT * FROM item_count | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+  0: Update RecordId(RecordId { table: Table("item_count"), key: Array(Array([])) }) Object(Object({"c": Number(Int(4)), "top": Number(Int(3))}))
+### owner: LIVE SELECT * FROM item_count | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+### reader: LIVE SELECT * FROM item_count | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+### owner: LIVE SELECT * FROM item_count | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+### reader: LIVE SELECT * FROM item_count | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item_count | DELETE item:2
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item_count"), key: Array(Array([])) }) Object(Object({"c": Number(Int(2)), "top": Number(Int(3))}))
+### reader: LIVE SELECT * FROM item_count | DELETE item:2
+(no rows)
+notified:
+  0: Update RecordId(RecordId { table: Table("item_count"), key: Array(Array([])) }) Object(Object({"c": Number(Int(2)), "top": Number(Int(3))}))
+### owner: LIVE SELECT * FROM item_count | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT * FROM item_count | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT * FROM item_count | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT * FROM item_count | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM item_count | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### reader: LIVE SELECT * FROM item_count | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+### owner: LIVE SELECT * FROM link | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader, secret: 's9' }
+notified:
+### reader: LIVE SELECT * FROM link | CREATE item:9 SET n = 3, secret = 's9', owner = user:reader
+{ double: 6, id: item:9, n: 3, owner: user:reader }
+notified:
+### owner: LIVE SELECT * FROM link | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader, secret: 's1' }
+notified:
+### reader: LIVE SELECT * FROM link | UPDATE item:1 SET n += 1, meta.a.b = 'shallow'
+{ double: 4, id: item:1, meta: { a: { b: 'shallow' } }, n: 2, owner: user:reader }
+notified:
+### owner: LIVE SELECT * FROM link | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+### reader: LIVE SELECT * FROM link | UPDATE item:2 SET n = 1, meta = { a: { b: 'x' } } RETURN NONE
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM link | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(1) }), "out": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+  1: Delete RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(1) }), "out": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+  2: Delete RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(1) }), "out": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+### reader: LIVE SELECT * FROM link | DELETE item:2
+(no rows)
+notified:
+  0: Delete RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(1) }), "out": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+  1: Delete RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(1) }), "out": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+  2: Delete RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(1) }), "out": RecordId(RecordId { table: Table("item"), key: Number(2) })}))
+### owner: LIVE SELECT * FROM link | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### reader: LIVE SELECT * FROM link | UPDATE gated:1 SET n = 3
+{ id: gated:1, n: 3 }
+notified:
+### owner: LIVE SELECT * FROM link | CREATE gated:2 SET n = 0
+{ id: gated:2, n: 0 }
+notified:
+### reader: LIVE SELECT * FROM link | CREATE gated:2 SET n = 0
+(no rows)
+notified:
+### owner: LIVE SELECT * FROM link | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+  0: Create RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(2) }), "out": RecordId(RecordId { table: Table("item"), key: Number(3) }), "w": Number(Int(1))}))
+  1: Create RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(2) }), "out": RecordId(RecordId { table: Table("item"), key: Number(3) }), "w": Number(Int(1))}))
+  2: Create RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(2) }), "out": RecordId(RecordId { table: Table("item"), key: Number(3) }), "w": Number(Int(1))}))
+### reader: LIVE SELECT * FROM link | RELATE item:2->link->item:3 SET w = 1
+{ id: link:generated, in: item:2, out: item:3, w: 1 }
+notified:
+  0: Create RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(2) }), "out": RecordId(RecordId { table: Table("item"), key: Number(3) }), "w": Number(Int(1))}))
+  1: Create RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(2) }), "out": RecordId(RecordId { table: Table("item"), key: Number(3) }), "w": Number(Int(1))}))
+  2: Create RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }) Object(Object({"id": RecordId(RecordId { table: Table("link"), key: String("xxxxxxxxxxxxxxxxxxxx") }), "in": RecordId(RecordId { table: Table("item"), key: Number(2) }), "out": RecordId(RecordId { table: Table("item"), key: Number(3) }), "w": Number(Int(1))}))

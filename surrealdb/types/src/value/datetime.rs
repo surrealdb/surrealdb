@@ -30,6 +30,12 @@ impl Datetime {
 	/// The maximum UTC datetime
 	pub const MAX_UTC: Self = Datetime(DateTime::<Utc>::MAX_UTC);
 
+	/// Whether this datetime is the greatest (`infinity`) or least (`-infinity`) value of the
+	/// kind. PostgreSQL's `timestamptz` spells them so.
+	pub fn is_infinite(&self) -> bool {
+		*self == Self::MAX_UTC || *self == Self::MIN_UTC
+	}
+
 	/// Returns the current UTC datetime
 	pub fn now() -> Self {
 		Self(Utc::now())
@@ -53,7 +59,18 @@ impl Datetime {
 impl FromStr for Datetime {
 	type Err = anyhow::Error;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Ok(Self(DateTime::parse_from_rfc3339(s)?.to_utc()))
+		let v = s.trim();
+		if let Some(positive) = super::temporal::parse_infinity(v) {
+			return Ok(if positive {
+				Self::MAX_UTC
+			} else {
+				Self::MIN_UTC
+			});
+		}
+		if v.eq_ignore_ascii_case("epoch") {
+			return Ok(Self(DateTime::UNIX_EPOCH));
+		}
+		parse_common::datetime(s).map(Self).map_err(|e| anyhow::Error::msg(e.message))
 	}
 }
 
@@ -71,7 +88,7 @@ impl From<Datetime> for DateTime<Utc> {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true).fmt(f)
+		fmt_datetime_sql(self.0).fmt(f)
 	}
 }
 
@@ -82,19 +99,26 @@ impl ToSql for Datetime {
 	}
 }
 
+/// Format a [`DateTime<Utc>`] using the SurrealQL datetime rendering (RFC 3339,
+/// `Z`-suffixed, with automatic fractional-second precision).
+///
+/// This is the exact rendering [`Datetime`]'s [`Display`]/[`ToSql`] implementation
+/// uses; it is exposed so layers holding a raw `DateTime<Utc>` can print the same
+/// text without wrapping.
+pub fn fmt_datetime_sql(datetime: DateTime<Utc>) -> String {
+	datetime.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+}
+
 impl TryFrom<(i64, u32)> for Datetime {
 	type Error = anyhow::Error;
 
 	fn try_from(v: (i64, u32)) -> Result<Self, Self::Error> {
 		match Utc.timestamp_opt(v.0, v.1) {
 			LocalResult::Single(v) => Ok(Self(v)),
-			err => match err {
-				LocalResult::Single(v) => Ok(Self(v)),
-				LocalResult::Ambiguous(_, _) => {
-					Err(anyhow::anyhow!("Ambiguous timestamp: {}, {}", v.0, v.1))
-				}
-				LocalResult::None => Err(anyhow::anyhow!("Invalid timestamp: {}, {}", v.0, v.1)),
-			},
+			LocalResult::Ambiguous(_, _) => {
+				Err(anyhow::anyhow!("Ambiguous timestamp: {}, {}", v.0, v.1))
+			}
+			LocalResult::None => Err(anyhow::anyhow!("Invalid timestamp: {}, {}", v.0, v.1)),
 		}
 	}
 }

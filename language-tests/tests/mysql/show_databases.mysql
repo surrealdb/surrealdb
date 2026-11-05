@@ -1,0 +1,26 @@
+/**
+[env]
+namespace = true
+database = "shop"
+imports = ["mysql/_show_databases.surql"]
+
+[test]
+reason = "SHOW DATABASES lists the databases of the session's namespace, filtered by LIKE"
+
+[[test.results]]
+value = "[{ Database: 'shop' }, { Database: 'show_archive' }]"
+
+[[test.results]]
+value = "[{ Database: 'shop' }, { Database: 'show_archive' }]"
+
+[[test.results]]
+value = "[{ Database: 'shop' }, { Database: 'show_archive' }]"
+
+[[test.results]]
+value = "[]"
+*/
+
+SHOW DATABASES;
+SHOW SCHEMAS;
+SHOW DATABASES LIKE 'sho%';
+SHOW DATABASES LIKE 'nomatch';

@@ -15,71 +15,217 @@ license-file.workspace = true
 
 [features]
 # Public features
-default = ["kv-mem", "graphql", "gql"]
+default = [
+    "kv-mem",
+    "collate",
+    "geo",
+    "scram",
+    "text-diff",
+    "url",
+    "maintenance-tasks",
+    "api",
+    "files",
+    "search",
+    "encoding",
+    "regex-unicode",
+    "graphql",
+    "gql",
+    "postgres",
+    "mysql",
+    "crypto-digest",
+    "crypto-password",
+    "html-sanitize",
+    "cjk-tokenizer",
+    "observability",
+    "vector-index",
+    "fulltext",
+    "egraph",
+    "shaped",
+]
+# The shaped-frames result format (`application/vnd.surrealdb.shaped`): its row encoders, the
+# copy plans of packed rows, and the seed shapes statements are compiled with. Without it the
+# format is not offered, and a request for it is answered as for any unsupported format.
+shaped = []
 kv-mem = [
-    "dep:surrealmx",
+    "surrealdb-kvs-any/kv-mem",
     "tokio/time",
     "dep:tempfile",
     "dep:ext-sort",
-    "dep:affinitypool",
 ]
-kv-indxdb = ["dep:indxdb"]
-kv-rocksdb = [
-    "dep:rocksdb",
-    "tokio/time",
-    "dep:tempfile",
-    "dep:ext-sort",
-    "dep:affinitypool",
-]
-kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = [
-    "dep:surrealkv",
+    "surrealdb-kvs-any/kv-surrealkv",
     "tokio/time",
     "dep:tempfile",
     "dep:ext-sort",
-    "dep:affinitypool",
 ]
-scripting = ["dep:js"]
-http = ["dep:reqwest"]
-ml = ["dep:surrealml-core"]
-jwks = ["dep:reqwest"]
-surrealism = ["dep:surrealism-runtime", "dep:async-trait"]
-allocator = ["dep:jemallocator", "dep:mimalloc"]
+scripting = ["dep:js", "surrealdb-expr/scripting"]
+# Bake the CJK segmentation dictionaries into the binary, so
+# `TOKENIZERS SEGMENT(...)` works with no files on disk. Adds roughly 150 MB
+# and makes the dictionary crates download their data at build time, so it is
+# off unless a shipment opts in.
+cjk = ["cjk-tokenizer", "surrealdb-idx/cjk-embed-all"]
+# Function families that can be left out of a build that does not need them.
+# Without one, its functions still parse and resolve, and a call fails with an
+# error naming the missing feature.
+#
+# `crypto::md5`, `crypto::sha1`, `crypto::sha256`, `crypto::sha512` and
+# `crypto::blake3`. The digests the engine itself relies on are not affected.
+crypto-digest = ["surrealdb-runtime/crypto-digest"]
+# `crypto::{argon2,bcrypt,pbkdf2,scrypt}::{compare,generate}`. System-user
+# authentication verifies its own Argon2 hashes and is not affected.
+crypto-password = ["surrealdb-runtime/crypto-password"]
+# `string::html::sanitize`.
+html-sanitize = ["surrealdb-runtime/html-sanitize"]
+# The `SEGMENT(<language>)` tokenizer. Without it `SEGMENT` still parses, and
+# defining or loading an analyzer that uses it fails.
+cjk-tokenizer = ["surrealdb-idx/cjk-tokenizer"]
+# The HNSW vector index. Without it `HNSW` index definitions still parse and
+# stored HNSW state still decodes, and defining, building, loading or searching
+# an HNSW index fails with an error naming this feature. Brute-force KNN and the
+# `vector::` functions are not affected.
+vector-index = ["surrealdb-idx/vector-index"]
+# Analyzers and the full-text index, with their stemmers. Without it analyzer
+# and full-text index definitions still parse and stored state still decodes,
+# and `DEFINE ANALYZER`, `DEFINE INDEX … FULLTEXT`, `MATCHES`, `search::*` and
+# writes to a table with a full-text index fail with an error naming this
+# feature.
+fulltext = ["surrealdb-idx/fulltext"]
+# The e-graph optimiser (`exec::ir::egraph`, built on the `egg` crate), which
+# rewrites a statement's plan by equality saturation before it is lowered.
+# Without it every statement is lowered from the plan the binder and the loop
+# passes leave, which answers the same rows, and the build carries none of
+# `egg`: for an edge build that has no use for the extra planning time or code.
+egraph = ["dep:egg"]
+# Tracing spans on the engine's functions (`#[instrument]`), here and in the
+# datastore, key-value, parser and in-memory storage crates. Without it those
+# functions run with no span wrapper; log events are not affected. A build that
+# also wants the events gone sets tracing's own `max_level_off`.
+observability = [
+    "surrealdb-datastore/observability",
+    "surrealdb-idx/observability",
+    "surrealdb-kvs/observability",
+    "surrealdb-kvs-any/observability",
+]
+# `ORDER BY … COLLATE`, `array::sort_lexical`, `array::sort_natural_lexical`
+# and `string::slug`, which transliterate to ASCII with a table of roughly
+# 475 KB. Without it those functions fail with an error naming this feature,
+# and so does planning a collated `ORDER BY`; `ORDER BY … NUMERIC` and
+# `array::sort_natural` are not affected.
+collate = ["surrealdb-expr/collate", "surrealdb-runtime/collate"]
+# Geometry operations: `geo::area`, `geo::bearing`, `geo::centroid`,
+# `geo::distance`, and `CONTAINS`, `INSIDE`, `INTERSECTS`, `OUTSIDE` and their
+# `ALL`/`ANY`/`NONE` forms where a geometry is tested against a geometry.
+# Without it geometry values still parse, encode and decode, `geo::hash::*`
+# and `geo::is_valid` still work, and the rest fail with an error naming this
+# feature.
+geo = ["surrealdb-expr/geo", "surrealdb-runtime/geo"]
+# The background maintenance tasks: index compaction, tombstone reclaim,
+# changefeed collection, index-build recovery, async events and the cluster
+# heartbeat. Without it a datastore starts none (a request for them logs an
+# error naming this feature), and its host drives that work.
+maintenance-tasks = []
+# SCRAM verifiers for user passwords (see `surrealdb-expr`'s feature). Without
+# it a user defined with a password stores no verifier and cannot authenticate
+# over SCRAM, which a host that owns the wire does not need.
+scram = ["surrealdb-expr/scram"]
+# Text patches in diffs and patches (see `surrealdb-expr`'s feature). Without
+# it a diff replaces a changed string whole, and applying a text patch fails
+# with an error naming this feature.
+text-diff = ["surrealdb-expr/text-diff"]
+# `api::*` and the `DEFINE API` request pipeline. Without it API definitions
+# still parse and store, `api::*` fails each call with an error naming this
+# feature, and so does invoking a defined API.
+api = ["url"]
+# `parse::url::*` and `string::is_url`, with the URL, IDNA and Unicode
+# normalisation tables they parse with. Without it each call fails with an
+# error naming this feature. `api` and `http` turn it on.
+url = []
+# `file::*` and the bucket stores behind them. Without it `file::*` fails each
+# call with an error naming this feature.
+files = []
+# `search::*`. Without it each call fails with an error naming this feature.
+search = []
+# `encoding::*`. Without it each call fails with an error naming this feature.
+encoding = []
+# Regex values and the regex builtins match with full Unicode support. Without
+# it they use a lighter engine with ASCII-only `\d`, `\w`, `\s`, `\b` and case
+# folding, and a pattern that would match differently there (one using
+# `\p{..}`, those classes, or case-insensitive non-ASCII letters) fails to
+# compile with an error naming this feature, including a stored one when it is
+# decoded. `string::is::latitude` and `string::is::longitude` accept only ASCII
+# digits.
+regex-unicode = ["surrealdb-types/regex-unicode"]
+http = ["dep:reqwest", "url"]
+jwks = ["dep:reqwest", "surrealdb-datastore/jwks"]
+surrealism = ["dep:surrealism-runtime", "dep:surrealism-verify", "dep:async-trait"]
+allocator = ["dep:jemallocator", "dep:jemalloc-sys", "dep:mimalloc", "dep:mimalloc-sys"]
 arbitrary = [
-    "dep:arbitrary",
-    "dep:regex-syntax",
-    "regex-syntax/arbitrary",
+    "surrealdb-expr/arbitrary",
+    "surrealdb-catalog/arbitrary",
+    "chrono/arbitrary",
     "rust_decimal/rust-fuzz",
     "geo-types/arbitrary",
     "uuid/arbitrary",
     "surrealdb-types/arbitrary",
+    "common/arbitrary",
     "surrealdb-strand/arbitrary",
+    "surrealdb-iam/arbitrary",
+    "surrealdb-rpc/arbitrary",
 ]
 allocation-tracking = []
+# Per-phase compile timers. The compile path emits `surrealdb::compile::phase`,
+# `::request`, `::catalog_reads` and `::egraph` tracing events at `DEBUG`, which the `compile`
+# bench collects. Without it the compile path holds no event and reads no clock,
+# and no default build enables it.
+compile-timers = []
+# Reserved for the equivalence lane's access to the internal fragment path.
+# Nothing is gated on it and no default build enables it.
+internal-fragments = []
 
 # GraphQL support
-graphql = ["dep:async-graphql"]
+graphql = ["dep:async-graphql", "surrealdb-catalog/graphql"]
 
 # GQL support
-gql = []
+gql = ["dep:surrealdb-gql"]
+
+# PostgreSQL support
+postgres = ["dep:surrealdb-pgsql", "dep:surrealdb-sqlplan"]
+
+# MySQL support
+mysql = ["dep:surrealdb-mysql", "dep:surrealdb-sqlplan"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
-features = ["kv-mem", "kv-rocksdb", "http", "scripting", "graphql", "gql"]
+# docs.rs builds with the latest nightly, whose trait solver rejects the `diskann`
+# crate (`Arc<B>: Batch` not satisfied); `-Znext-solver=no` keeps it compiling there.
+rustc-args = ["-Znext-solver=no"]
+features = ["kv-mem", "kv-surrealkv", "http", "scripting", "graphql", "gql", "postgres", "mysql"]
 targets = []
 
 [dependencies]
+surrealdb-catalog = { workspace = true }
+surrealdb-datastore = { workspace = true }
+surrealdb-expr = { workspace = true }
+surrealdb-gql = { workspace = true, optional = true }
+surrealdb-pgsql = { workspace = true, optional = true }
+surrealdb-mysql = { workspace = true, optional = true }
+surrealdb-sqlplan = { workspace = true, optional = true }
 surrealdb-strand = { workspace = true }
+parse-common.workspace = true
+surrealdb-cnf = { workspace = true }
+surrealdb-rpc = { workspace = true }
+surrealdb-runtime = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-idx = { workspace = true }
+surrealdb-observe = { workspace = true }
+surrealdb-kvs = { workspace = true }
+common = { workspace = true }
 
 # External surreal crates
-surrealmx = { workspace = true, optional = true }
-surrealkv = { workspace = true, optional = true }
-surrealml-core = { workspace = true, optional = true }
+surrealdb-kvs-any = { workspace = true }
 
-affinitypool = { workspace = true, optional = true }
+arc-swap.workspace = true
 async-trait = { workspace = true, optional = true }
-dmp.workspace = true
-indxdb = { workspace = true, optional = true }
 js = { workspace = true, features = [
     "array-buffer",
     "bindgen",
@@ -91,87 +237,60 @@ js = { workspace = true, features = [
     "properties",
     "rust-alloc",
 ], optional = true }
-lexicmp.workspace = true
-reblessive = { workspace = true, features = ["tree"] }
 revision = { workspace = true }
 storekey.workspace = true
-surrealdb-types = { workspace = true }
-surrealdb-collections = { workspace = true }
-vart.workspace = true
-
-# External KV stores
-rocksdb = { workspace = true, optional = true }
-tikv = { workspace = true, optional = true }
+surrealdb-types = { workspace = true, features = ["cbor"] }
+surrealdb-collections = { workspace = true, features = ["revision", "storekey"] }
 
 # Other crates
-addr.workspace = true
-ahash.workspace = true
-ammonia.workspace = true
 anyhow.workspace = true
 argon2.workspace = true
 async-channel.workspace = true
-async-stream.workspace = true
 async-graphql = { workspace = true, default-features = false, features = [
     "dynamic-schema",
 ], optional = true }
 base64.workspace = true
-bcrypt.workspace = true
-blake3.workspace = true
 bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true
-deunicode.workspace = true
-fastnum.workspace = true
-fst.workspace = true
+egg = { workspace = true, optional = true }
 futures.workspace = true
-fuzzy-matcher.workspace = true
-geo = { workspace = true, features = ["use-serde"] }
 geo-types = { workspace = true }
 http.workspace = true
 hex.workspace = true
-humantime.workspace = true
+hmac.workspace = true
 ipnet.workspace = true
-md-5.workspace = true
 memchr.workspace = true
-ndarray.workspace = true
-ndarray-stats.workspace = true
 num_cpus.workspace = true
-num-traits.workspace = true
 object_store.workspace = true
+percent-encoding.workspace = true
 parking_lot.workspace = true
 path-clean.workspace = true
-pbkdf2 = { workspace = true, features = ["simple"] }
-phf = { workspace = true, features = ["macros", "unicase"] }
-pin-project-lite.workspace = true
 quick_cache.workspace = true
 rand.workspace = true
 rand_core.workspace = true
 rayon.workspace = true
-regex.workspace = true
 roaring = { workspace = true, features = ["serde"] }
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
-rust-stemmers.workspace = true
-scrypt.workspace = true
 semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
-strsim.workspace = true
+slotmap.workspace = true
+# The `union` layout keeps `SmallVec` a word smaller, which the size bound of the IR's `OpData`
+# (`exec::ir::iface::bounds`) is set against.
+smallvec = { workspace = true, features = ["union"] }
 subtle.workspace = true
 sysinfo.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 web-time.workspace = true
-ulid = { workspace = true, features = ["serde"] }
-unicase.workspace = true
 url.workspace = true
 
 # Other optional crates
-arbitrary = { workspace = true, features = ["derive"], optional = true }
 ext-sort = { workspace = true, optional = true }
-regex-syntax = { workspace = true, optional = true }
 reqwest = { workspace = true, default-features = false, features = [
     "http2",
     "json",
@@ -179,42 +298,38 @@ reqwest = { workspace = true, default-features = false, features = [
     "multipart",
 ], optional = true }
 tempfile = { workspace = true, optional = true }
-headers = "0.4.1"
-half.workspace = true
-mime = "0.3.17"
+headers.workspace = true
+mime.workspace = true
 
 # WASM DEPENDENCY CONFIGURATION
+# Every wasm target: no threads, no filesystem, no native crypto backend.
 [target.'cfg(target_family = "wasm")'.dependencies]
-getrandom = { workspace = true, features = ["wasm_js"] }
 jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
-ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
-surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers"] }
 tokio = { workspace = true, default-features = false, features = [
     "rt",
     "sync",
 ] }
 tokio-util.workspace = true
-uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
-wasm-bindgen-futures.workspace = true
-wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
-# DISKANN DEPENDENCY CONFIGURATION
-# DiskANN (Microsoft's `diskann` crate) is 64-bit-only by design: its `IntoUsize`
-# trait is implemented only for `target_pointer_width = "64"` and panics on other
-# widths. Restrict the dependency to non-WASM 64-bit targets so `surrealdb-core` still
-# compiles on 32-bit targets (i686, armv7, …); HNSW remains the portable vector index
-# there. The matching source gate is the `diskann` cfg set in build.rs.
-[target.'cfg(all(not(target_family = "wasm"), target_pointer_width = "64"))'.dependencies]
-diskann.workspace = true
-diskann-utils.workspace = true
-diskann-vector.workspace = true
+# Browser wasm only: entropy and UUIDs come from JavaScript.
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
+uuid = { workspace = true, features = ["js"] }
 
 # NON-WASM DEPENDENCY CONFIGURATION
 # Note: surrealism-runtime is only available on non-WASM targets
 # The surrealism feature will be enabled by default for non-WASM in the parent workspace
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
-surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
+# Cloud object-storage bucket backends (S3, GCS, Azure). Enabled only off-wasm,
+# since these pull an HTTP/TLS stack (reqwest on rustls with aws-lc-rs). Their
+# clients are built through `obs::connector::BundledRootsConnector`, which
+# trusts the `webpki-root-certs` Mozilla roots alongside the system trust store,
+# so they connect from an image that ships no CA bundle.
+object_store = { workspace = true, features = ["aws", "gcp", "azure"] }
+webpki-root-certs.workspace = true
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
@@ -228,34 +343,39 @@ tokio-tungstenite = { workspace = true, optional = true }
 tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 surrealism-runtime = { workspace = true, optional = true }
+surrealism-verify = { workspace = true, optional = true }
 
 # OS-SPECIFIC ALLOCATOR DEPENDENCIES
 [target.'cfg(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))'.dependencies]
 jemallocator = { workspace = true, optional = true }
+jemalloc-sys = { workspace = true, optional = true }
 
 [target.'cfg(all(any(unix, windows), not(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))))'.dependencies]
 mimalloc = { workspace = true, optional = true }
+mimalloc-sys = { workspace = true, optional = true }
 
 # DEVELOPMENT DEPENDENCIES
 [dev-dependencies]
+regex.workspace = true
+surrealdb-datastore = { workspace = true, features = ["test-hooks"] }
+fst.workspace = true
+surrealdb-kvs = { workspace = true, features = ["test-inc-timestamp", "test-utils"] }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
 paste.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 rstest.workspace = true
 serial_test.workspace = true
 temp-dir.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 time = { workspace = true, features = ["serde"] }
-tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
+# `test-util` gives the maintenance-scheduler tests a paused clock, so they
+# assert dispatch order rather than sleeping through real intervals.
+tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread", "test-util"] }
 tokio-util.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
-
-[package.metadata.cargo-machete]
-# md-5 crate is imported as md5::, regex-syntax is optional (tied to arbitrary feature)
-ignored = ["md-5", "regex-syntax"]
+zstd = { workspace = true, features = ["default"] }
 
 [lints]
 workspace = true
@@ -272,6 +392,10 @@ name = "executor"
 harness = false
 
 [[bench]]
+name = "compile"
+harness = false
+
+[[bench]]
 name = "statements"
 harness = false
 
@@ -280,10 +404,37 @@ name = "functions"
 harness = false
 
 [[bench]]
-name = "rocksdb_cursor"
+name = "parser"
 harness = false
-required-features = ["kv-rocksdb"]
+
+[[bench]]
+name = "processor"
+harness = false
+
+[[bench]]
+name = "live_query_scaling"
+harness = false
+
+[[bench]]
+name = "hash_btree"
+harness = false
+
+[[bench]]
+name = "index_ann"
+harness = false
+
+[[bench]]
+name = "hashset_vs_vector"
+harness = false
 
 [[bench]]
 name = "import_load"
+harness = false
+
+[[bench]]
+name = "import_ablation"
+harness = false
+
+[[bench]]
+name = "fan_out"
 harness = false

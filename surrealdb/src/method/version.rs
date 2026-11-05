@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
-use crate::conn::Command;
+use crate::conn::ctx;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::{Connection, Error, Result, Surreal};
 
@@ -35,8 +35,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
-			let version = router.execute_value(self.client.session_id, Command::Version).await?;
-			let version = version.into_string().map_err(|e| Error::internal(e.to_string()))?;
+			let version = router.engine.version(ctx(self.client.session_id)).await?;
 			let semantic = version.trim_start_matches("surrealdb-");
 			semantic
 				.parse()

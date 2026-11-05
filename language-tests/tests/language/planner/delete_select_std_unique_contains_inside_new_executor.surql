@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -11,7 +10,8 @@ value = "NONE"
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]
+value = '''
+"SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com', pre_decode_filter: yes]
 "'''
 
@@ -19,7 +19,8 @@ value = '''"SelectProject [ctx: Db] [projections: *]
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]
+value = '''
+"SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: test, direction: Forward, predicate: 'domain.com' INSIDE email, pre_decode_filter: yes]
 "'''
 
@@ -27,7 +28,8 @@ value = '''"SelectProject [ctx: Db] [projections: *]
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]
+value = '''
+"SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com', pre_decode_filter: yes]
 "'''
 
@@ -35,7 +37,7 @@ value = '''"SelectProject [ctx: Db] [projections: *]
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "{ attributes: { form: 'DELETE' }, children: [{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', table: 'test' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', operator: 'WriteOperator' }"
 
 [[test.results]]
 value = "[]"

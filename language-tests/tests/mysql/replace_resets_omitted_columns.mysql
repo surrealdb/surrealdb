@@ -1,0 +1,39 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_omitted_column.surql"]
+
+[test]
+reason = "A REPLACE that hits an existing row writes it as a new row: each column it leaves out is NULL, or its DEFAULT, where INSERT ... ON DUPLICATE KEY UPDATE keeps the columns it does not assign"
+
+[[test.results]]
+value = "[{ a: 10, b: 'x', d: 9, id: 1 }]"
+
+[[test.results]]
+value = "[{ a: 11, b: NULL, d: 7, id: 1 }]"
+
+[[test.results]]
+value = "[{ a: 11, b: NULL, d: 7, id: 1 }]"
+
+[[test.results]]
+value = "[{ a: 20, b: 'y', d: 9, id: 2 }]"
+
+[[test.results]]
+value = "[{ a: 22, b: 'y', d: 9, id: 2 }]"
+
+[[test.results]]
+value = "[{ a: 22, b: 'y', d: 9, id: 2 }]"
+*/
+
+INSERT INTO omit_t (id, a, b, d) VALUES (1, 10, 'x', 9);
+
+REPLACE INTO omit_t (id, a) VALUES (1, 11);
+
+SELECT id, a, b, d FROM omit_t ORDER BY id;
+
+INSERT INTO omit_t (id, a, b, d) VALUES (2, 20, 'y', 9);
+
+INSERT INTO omit_t (id, a) VALUES (2, 21) ON DUPLICATE KEY UPDATE a = 22;
+
+SELECT id, a, b, d FROM omit_t WHERE id = 2;

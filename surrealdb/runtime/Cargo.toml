@@ -1,0 +1,74 @@
+[package]
+name = "surrealdb-runtime"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-runtime/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = ["collate", "crypto-digest", "crypto-password", "geo", "html-sanitize"]
+# `array::sort_lexical`, `array::sort_natural_lexical` and `string::slug`,
+# which transliterate to ASCII.
+collate = ["dep:deunicode", "surrealdb-expr/collate"]
+# `geo::area`, `geo::bearing`, `geo::centroid`, `geo::distance`, and the
+# spatial `CONTAINS`, `INSIDE`, `INTERSECTS` and `OUTSIDE` family on
+# geometries. `geo::hash::*` and `geo::is_valid` do not need it.
+geo = ["dep:geo", "surrealdb-expr/geo"]
+# `crypto::md5`, `crypto::sha1`, `crypto::sha256`, `crypto::sha512` and
+# `crypto::blake3`.
+crypto-digest = ["dep:blake3", "dep:md-5", "dep:sha1", "dep:sha2"]
+# `crypto::{argon2,bcrypt,pbkdf2,scrypt}::{compare,generate}`.
+crypto-password = ["dep:argon2", "dep:bcrypt", "dep:pbkdf2", "dep:scrypt", "dep:rand_core"]
+# `string::html::sanitize`. `string::html::encode` does not need it.
+html-sanitize = ["dep:ammonia"]
+
+[dependencies]
+anyhow.workspace = true
+common.workspace = true
+surrealdb-cnf.workspace = true
+surrealdb-expr.workspace = true
+surrealdb-strand.workspace = true
+rand_core = { workspace = true, optional = true }
+surrealdb-types.workspace = true
+
+addr.workspace = true
+ammonia = { workspace = true, optional = true }
+argon2 = { workspace = true, optional = true }
+blake3 = { workspace = true, optional = true }
+bcrypt = { workspace = true, optional = true }
+chrono = { workspace = true, features = ["clock", "std"] }
+deunicode = { workspace = true, optional = true }
+fuzzy-matcher.workspace = true
+geo = { workspace = true, optional = true }
+geo-types = { workspace = true }
+md-5 = { workspace = true, optional = true }
+pbkdf2 = { workspace = true, features = ["simple"], optional = true }
+rand.workspace = true
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+scrypt = { workspace = true, optional = true }
+semver = { workspace = true, features = ["serde"] }
+sha1 = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+strsim.workspace = true
+ulid = { workspace = true, features = ["serde"] }
+url.workspace = true
+uuid = { workspace = true }
+
+[dev-dependencies]
+# Tests run against the Unicode regex engine whatever the build selects.
+surrealdb-types = { workspace = true, features = ["regex-unicode"] }
+
+[package.metadata.cargo-machete]
+# md-5 is imported as md5::
+ignored = ["md-5"]
+
+[lints]
+workspace = true

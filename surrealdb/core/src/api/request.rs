@@ -4,8 +4,8 @@ use http::HeaderMap;
 use surrealdb_types::SurrealValue;
 
 use crate::catalog::ApiMethod;
-use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::{PublicObject, PublicValue};
+use crate::val::convert_public::convert_public_value_to_internal;
 use crate::val::{Value, convert_value_to_public_value};
 
 #[derive(Clone, Default, SurrealValue)]

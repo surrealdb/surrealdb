@@ -1,202 +1,6 @@
-//! Recursion parts -- `{min..max}`, `{..}`, and `@` (RepeatRecurse).
+//! Recursion helpers shared by the recursion strategies of `{min..max}`, `{..}` and `@`.
 
-use std::sync::Arc;
-
-use futures::StreamExt;
-use surrealdb_types::{SqlFormat, ToSql};
-
-// Re-export evaluation functions from the operator module so that
-// RepeatRecursePart (and any other callers) can still reach them.
-pub(crate) use crate::exec::operators::recursion::evaluate_repeat_recurse;
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, BoxFut, ContextLevel, ExecOperator};
-use crate::expr::FlowResult;
 use crate::val::Value;
-
-// ============================================================================
-// PhysicalRecurseInstruction -- shared enum
-// ============================================================================
-
-/// Instruction for how to handle recursion results.
-#[derive(Debug, Clone)]
-pub enum PhysicalRecurseInstruction {
-	/// Default: return the final values after recursion
-	Default,
-
-	/// Collect all unique nodes encountered during traversal
-	Collect,
-
-	/// Return all paths as arrays of arrays
-	Path,
-
-	/// Find shortest path to a target node
-	Shortest {
-		/// Expression that evaluates to the target RecordId
-		target: Arc<dyn PhysicalExpr>,
-	},
-}
-
-// ============================================================================
-// RecursePart
-// ============================================================================
-
-/// Recursive graph traversal - `{min..max}`.
-///
-/// Wraps a `RecursionOp` ExecOperator that holds the body operator chain
-/// and implements the recursion iteration loop. The operator is exposed
-/// via `embedded_operators()` for EXPLAIN display.
-#[derive(Debug, Clone)]
-pub struct RecursePart {
-	/// The pre-planned recursion operator tree.
-	pub op: Arc<dyn ExecOperator>,
-}
-impl PhysicalExpr for RecursePart {
-	fn name(&self) -> &'static str {
-		"Recurse"
-	}
-
-	fn as_any(&self) -> &dyn std::any::Any {
-		self
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		self.op.required_context()
-	}
-
-	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
-		Box::pin(async move {
-			let value = ctx.current_value.cloned().unwrap_or(Value::None);
-
-			// Create a new execution context with the current value set.
-			// The RecursionOp reads this to seed the recursion.
-			let bound_ctx = ctx.exec_ctx.with_current_value(value);
-			let bound_ctx = if ctx.skip_fetch_perms {
-				bound_ctx.with_skip_fetch_perms(true)
-			} else {
-				bound_ctx
-			};
-
-			// Execute the recursion operator
-			let stream = self.op.execute(&bound_ctx).map_err(|e| match e {
-				crate::expr::ControlFlow::Err(e) => crate::expr::ControlFlow::Err(e),
-				other => other,
-			})?;
-
-			// Collect results from the stream
-			futures::pin_mut!(stream);
-			let mut result = Value::None;
-			while let Some(batch_result) = stream.next().await {
-				let batch = batch_result?;
-				// RecursionOp yields a single batch with the recursion result
-				if let Some(v) = batch.values.into_iter().next() {
-					result = v;
-				}
-			}
-
-			Ok(result)
-		})
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		self.op.access_mode()
-	}
-
-	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
-		vec![("recurse", &self.op)]
-	}
-}
-
-impl ToSql for RecursePart {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		// Delegate to the operator's attrs for SQL formatting
-		let attrs = self.op.attrs();
-		f.push_str(".{");
-
-		// Extract depth from attrs
-		for (k, v) in &attrs {
-			if k == "depth" {
-				// Parse depth to build SQL
-				if v.contains("..") {
-					let parts: Vec<&str> = v.split("..").collect();
-					if parts.len() == 2 {
-						let min = parts[0];
-						let max = parts[1];
-						if min != "1" {
-							f.push_str(min);
-						}
-						f.push_str("..");
-						f.push_str(max);
-					}
-				} else {
-					// Single value: exact depth (e.g., "3" → ".{3}" meaning min=3, max=3).
-					// Do NOT prefix with ".." -- that would produce ".{..3}" meaning min=1, max=3.
-					f.push_str(v);
-				}
-			}
-		}
-
-		// Extract instruction
-		for (k, v) in &attrs {
-			if k == "instruction" {
-				match v.as_str() {
-					"default" => {}
-					"collect" => f.push_str("+collect"),
-					"path" => f.push_str("+path"),
-					"shortest" => f.push_str("+shortest=..."),
-					_ => {}
-				}
-			}
-		}
-
-		f.push('}');
-	}
-}
-
-// ============================================================================
-// RepeatRecursePart -- `@`
-// ============================================================================
-
-/// RepeatRecurse marker - `@`.
-///
-/// When encountered during path evaluation inside a recursion context,
-/// this part re-invokes the recursion evaluator on the current value
-/// with incremented depth.
-#[derive(Debug, Clone)]
-pub struct RepeatRecursePart;
-impl PhysicalExpr for RepeatRecursePart {
-	fn name(&self) -> &'static str {
-		"RepeatRecurse"
-	}
-
-	fn as_any(&self) -> &dyn std::any::Any {
-		self
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Root
-	}
-
-	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
-		Box::pin(async move {
-			let value = ctx.current_value.unwrap_or(&Value::NONE);
-			evaluate_repeat_recurse(value, ctx).await
-		})
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
-	}
-}
-
-impl ToSql for RepeatRecursePart {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		f.push('@');
-	}
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
 
 /// Helper function to create a hash for value deduplication in graph traversal.
 ///
@@ -254,11 +58,168 @@ pub(crate) fn value_hash(value: &Value) -> u64 {
 				value_hash(v).hash(&mut hasher);
 			}
 		}
-		_ => {
+		Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => {
 			255u8.hash(&mut hasher);
 			format!("{:?}", value).hash(&mut hasher);
 		}
 	}
 
 	hasher.finish()
+}
+
+#[cfg(test)]
+mod tests {
+
+	use rust_decimal::Decimal;
+
+	use super::*;
+	use crate::val::{Number, Object, RecordId, RecordIdKey};
+
+	fn rid(table: &str, key: i64) -> Value {
+		Value::RecordId(RecordId {
+			table: table.into(),
+			key: RecordIdKey::Number(key),
+		})
+	}
+
+	fn arr(values: Vec<Value>) -> Value {
+		Value::from(values)
+	}
+
+	// =========================================================================
+	// value_hash -- the identity used for per-level dedup and the assembly cache
+	// =========================================================================
+
+	#[test]
+	fn value_hash_separates_the_three_falsey_variants() {
+		// Cycle detection keys on this hash, so NONE, NULL and `false` must not
+		// be conflated: each variant carries its own discriminant byte.
+		let none = value_hash(&Value::None);
+		let null = value_hash(&Value::Null);
+		let no = value_hash(&Value::Bool(false));
+		assert_ne!(none, null);
+		assert_ne!(none, no);
+		assert_ne!(null, no);
+	}
+
+	#[test]
+	fn value_hash_treats_a_record_id_key_type_as_part_of_its_identity() {
+		// RecordId hashes through its own `Hash` impl, so the table and the key
+		// (including the key's type) all take part.
+		let numeric = rid("person", 1);
+		let string_key = Value::RecordId(RecordId {
+			table: "person".into(),
+			key: RecordIdKey::String("1".into()),
+		});
+		let other_table = rid("company", 1);
+
+		assert_eq!(value_hash(&numeric), value_hash(&rid("person", 1)));
+		assert_ne!(value_hash(&numeric), value_hash(&string_key));
+		assert_ne!(value_hash(&numeric), value_hash(&other_table));
+	}
+
+	#[test]
+	fn value_hash_of_a_number_is_its_decimal_rendering_not_its_representation() {
+		// Numbers are hashed via `to_string()`, so an integer, a float and a
+		// decimal that all render as "1" share one hash. This is what makes
+		// `1` and `1f` a single node during traversal.
+		let int = Value::Number(Number::Int(1));
+		let float = Value::Number(Number::Float(1.0));
+		let decimal = Value::Number(Number::Decimal(Decimal::from(1)));
+
+		assert_eq!(value_hash(&int), value_hash(&float));
+		assert_eq!(value_hash(&int), value_hash(&decimal));
+	}
+
+	#[test]
+	fn value_hash_splits_numerically_equal_numbers_that_render_differently() {
+		// The rendering is not canonicalised, so trailing decimal scale and a
+		// negative zero produce different hashes from the numerically equal
+		// plain integer. Two values that compare equal therefore hash apart,
+		// and the traversal treats them as distinct nodes.
+		let one = Value::Number(Number::Int(1));
+		let one_scaled = Value::Number(Number::Decimal("1.0".parse().expect("decimal literal")));
+		assert_eq!(one, one_scaled, "these compare equal");
+		assert_ne!(value_hash(&one), value_hash(&one_scaled), "but they do not hash equal");
+
+		let zero = Value::Number(Number::Int(0));
+		let negative_zero = Value::Number(Number::Float(-0.0));
+		assert_eq!(zero, negative_zero, "these compare equal");
+		assert_ne!(value_hash(&zero), value_hash(&negative_zero), "but they do not hash equal");
+	}
+
+	#[test]
+	fn value_hash_of_an_array_covers_its_length_and_only_the_first_eight_items() {
+		let short = arr(vec![Value::from(1), Value::from(2)]);
+		let longer = arr(vec![Value::from(1), Value::from(2), Value::from(3)]);
+		assert_ne!(value_hash(&short), value_hash(&longer), "length takes part in the hash");
+
+		// Element hashing stops after index 7. Two nine-element arrays that
+		// share their first eight elements collide, so a traversal that
+		// deduplicated on such values would treat them as the same node.
+		let mut a: Vec<Value> = (0..9).map(Value::from).collect();
+		let mut b = a.clone();
+		a[8] = Value::from(100);
+		b[8] = Value::from(200);
+		assert_eq!(value_hash(&arr(a)), value_hash(&arr(b)));
+	}
+
+	#[test]
+	fn value_hash_of_an_object_covers_its_size_and_only_the_first_eight_entries() {
+		let small = Value::Object(Object::from_iter([("a".to_string(), Value::from(1))]));
+		let bigger = Value::Object(Object::from_iter([
+			("a".to_string(), Value::from(1)),
+			("b".to_string(), Value::from(2)),
+		]));
+		assert_ne!(value_hash(&small), value_hash(&bigger), "entry count takes part in the hash");
+
+		// Entries are visited in key order and hashing stops after the eighth,
+		// so two nine-entry objects differing only in the last key collide.
+		let entries = |last: Value| {
+			let mut e: Vec<(String, Value)> =
+				(0..8).map(|i| (format!("k{i}"), Value::from(i))).collect();
+			e.push(("k8".to_string(), last));
+			Value::Object(Object::from_iter(e))
+		};
+		assert_eq!(value_hash(&entries(Value::from(100))), value_hash(&entries(Value::from(200))));
+	}
+
+	// =========================================================================
+	// RepeatRecursePart -- the two-phase discovery / assembly protocol
+	// =========================================================================
+
+	// =========================================================================
+	// RecursePart -- draining the recursion operator
+	// =========================================================================
+
+	// =========================================================================
+	// RecursePart -- SQL rendering of the depth range
+	// =========================================================================
+
+	// =========================================================================
+	// End-to-end: the two phases over real record links
+	// =========================================================================
+
+	#[test]
+	fn test_value_hash_consistency() {
+		let v1 = Value::Number(Number::Int(42));
+		let v2 = Value::Number(Number::Int(42));
+		let v3 = Value::Number(Number::Int(43));
+
+		assert_eq!(value_hash(&v1), value_hash(&v2));
+		assert_ne!(value_hash(&v1), value_hash(&v3));
+	}
 }

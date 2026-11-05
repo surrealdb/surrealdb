@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -17,8 +16,9 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: name] {rows: 2}
-    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2}
+value = '''
+'SelectProject [ctx: Db] [projections: name] {rows: 2}
+    Sort [ctx: Db] [sort_keys: name ASC] {rows: 2}
         TableScan [ctx: Db] [table: person, direction: Forward] {rows: 2}
 
 Total rows: 2''''

@@ -4,7 +4,7 @@ imports = ["reproductions/graph_edge_field_select_perm_leak_import.surql"]
 auth = { level = "owner" }
 
 [test]
-reason = "Companion to graph_edge_field_select_perm_leak.surql: a privileged (owner) session has permission checks disabled, so field-level SELECT permissions must NOT filter anything — but read-time COMPUTED fields must still be evaluated when a graph/reference traversal materialises full records. Guards against a regression where computed-field evaluation in `resolve_record_batch` is mistakenly gated behind `check_perms`. All planner strategies must agree with the legacy compute engine."
+reason = "Companion to graph_edge_field_select_perm_leak.surql: a privileged (owner) session has permission checks disabled, so field-level SELECT permissions must NOT filter anything — but read-time COMPUTED fields must still be evaluated when a graph/reference traversal materialises full records. Guards against a regression where computed-field evaluation in `resolve_record_batch` is mistakenly gated behind `check_perms`."
 
 # Owner sees every field (no permission filtering), and the computed `label`
 # is still evaluated -- both for the direct SELECT and the graph traversal.

@@ -1,0 +1,6 @@
+### missing
+["The table 'fresh' does not exist"]
+### defined
+[{ id: fresh:2, label: 'fresh 2', n: 2 }, { id: fresh:3, label: 'fresh 3', n: 3 }]
+### redefined
+[{ id: fresh:2, label: 'renewed 2', n: 2 }, { id: fresh:3, label: 'renewed 3', n: 3 }]

@@ -1,0 +1,26 @@
+[package]
+name = "surrealdb-parser-size-probe"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+version.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+# Builds one parser alone as a wasm module, so the module's size is that
+# parser's size. Exactly one feature is enabled per build:
+#
+#   cargo rustc --locked -p surrealdb-parser-size-probe --lib --crate-type cdylib \
+#     --target wasm32-unknown-unknown --profile wasm-release --features next
+[features]
+next = ["dep:surrealdb-parser-next"]
+
+[dependencies]
+surrealdb-parser-next = { workspace = true, optional = true }
+
+[lints]
+workspace = true

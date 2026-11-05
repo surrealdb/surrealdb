@@ -1,8 +1,12 @@
 /**
 [env]
+remote-exclusive = true
 clean = true
 
 [test]
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -20,13 +24,16 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''{ accesses: {  }, databases: { "": 'DEFINE DATABASE ``' }, users: {  } }'''
+value = "NONE"
 
 [[test.results]]
-value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { "": 'DEFINE TABLE `` TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' }, users: {  } }'''
+value = '''{ accesses: {  }, buckets: {  }, databases: { "": 'DEFINE DATABASE `` COMPATIBILITY 3' }, users: {  } }'''
 
 [[test.results]]
-value = '''{ events: {  }, fields: { "``.``": 'DEFINE FIELD ``.`` ON `` TYPE number PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }'''
+value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 3, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { "": 'DEFINE TABLE `` TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' }, types: {  }, users: {  } }'''
+
+[[test.results]]
+value = '''{ events: {  }, fields: { "``": 'DEFINE FIELD `` ON `` TYPE object PERMISSIONS FULL', "``.``": 'DEFINE FIELD ``.`` ON `` TYPE number PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }'''
 
 [[test.results]]
 value = "[{ ``: { ``: 1 }, id: ``:1 }]"
@@ -42,6 +49,11 @@ value = "[{ ``: { ``: 1 }, id: ``:1 }, { ``: { ``: 2 }, id: ``:2 }, { ``: { ``: 
 
 */
 
+-- The database of namespace `` is created implicitly, at the store's
+-- default level. At level 4 `INFO FOR TABLE` on the SCHEMAFULL table also
+-- shows its migrations.
+ALTER SYSTEM COMPATIBILITY 3;
+
 DEFINE NAMESPACE ``;
 DEFINE DATABASE ``;
 
@@ -49,6 +61,7 @@ USE NS `` DB ``;
 
 DEFINE TABLE `` SCHEMAFULL;
 
+DEFINE FIELD `` ON `` TYPE object;
 DEFINE FIELD ``.`` ON `` TYPE number;
 
 INFO FOR NAMESPACE;

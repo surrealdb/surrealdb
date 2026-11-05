@@ -131,6 +131,18 @@ error = "The root access method 'invalid' does not exist"
 
 [[test.results]]
 error = "The root access method 'invalid' does not exist"
+
+[[test.results]]
+error = "The root access method 'invalid' does not exist"
+
+[[test.results]]
+error = "The root access method 'invalid' does not exist"
+
+[[test.results]]
+error = "The root access method 'invalid' does not exist"
+
+[[test.results]]
+error = "The root access method 'invalid' does not exist"
 */
 
 
@@ -152,3 +164,7 @@ ACCESS api ON ROOT GRANT FOR USER invalid;
 ACCESS api GRANT FOR USER invalid;
 ACCESS invalid ON ROOT SHOW ALL;
 ACCESS invalid SHOW ALL;
+ACCESS invalid ON ROOT REVOKE ALL;
+ACCESS invalid REVOKE ALL;
+ACCESS invalid ON ROOT PURGE EXPIRED;
+ACCESS invalid PURGE EXPIRED;

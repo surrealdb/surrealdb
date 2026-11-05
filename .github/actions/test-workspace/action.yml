@@ -2,6 +2,10 @@ name: 'Test workspace'
 description: 'Run workspace tests'
 
 inputs:
+  toolchain:
+    description: 'Rust toolchain (build-nightly enables the pinned parallel frontend)'
+    required: false
+    default: stable
   save-cache:
     description: 'Whether to save the cargo cache'
     required: false
@@ -10,6 +14,22 @@ inputs:
     description: 'Whether to free disk space before building (needed on standard GitHub-hosted runners)'
     required: false
     default: 'false'
+  kache-bucket:
+    description: 'S3 bucket backing the shared compile cache (see setup-environment)'
+    required: false
+    default: ''
+  kache-access-key-id:
+    description: 'Static access key for the cache bucket'
+    required: false
+    default: ''
+  kache-secret-access-key:
+    description: 'Secret half of kache-access-key-id'
+    required: false
+    default: ''
+  task:
+    description: 'cargo-make task to run'
+    required: false
+    default: 'ci-workspace-test'
 
 runs:
   using: 'composite'
@@ -17,7 +37,11 @@ runs:
     - name: Setup environment
       uses: ./.github/actions/setup-environment
       with:
+        toolchain: ${{ inputs.toolchain }}
         save-cache: ${{ inputs.save-cache }}
+        kache-bucket: ${{ inputs.kache-bucket }}
+        kache-access-key-id: ${{ inputs.kache-access-key-id }}
+        kache-secret-access-key: ${{ inputs.kache-secret-access-key }}
         targets: wasm32-wasip2
         free-disk-space: ${{ inputs.free-disk-space }}
 
@@ -32,4 +56,4 @@ runs:
 
     - name: Test workspace
       shell: bash
-      run: cargo make ci-workspace-test
+      run: cargo make ${{ inputs.task }}

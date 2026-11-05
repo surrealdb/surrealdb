@@ -85,7 +85,16 @@ def runCmd(uid,gid,user, cmd):
         env = os.environ.copy()
         env['HOME'] = f"/home/{user}"
         proc = subprocess.run(cmd,env=env)
-        sys.exit(proc.returncode)
+        # `os._exit`, not `sys.exit`: the fork happened inside the three
+        # quieting context managers, and each ends in a `finally` that returns
+        # early for a non-root caller. A `return` in a `finally` swallows the
+        # exception propagating through it, so `sys.exit` here loses its
+        # SystemExit and the child falls through to exit 0 — reporting a
+        # benchmark that crashed as a benchmark that passed. `os._exit` skips
+        # unwinding entirely, which is what a forked child should do anyway:
+        # the parent owns that cleanup, and the child must not re-flush stdio
+        # it inherited.
+        os._exit(proc.returncode)
     else:
         while True:
             pid,status = os.wait()

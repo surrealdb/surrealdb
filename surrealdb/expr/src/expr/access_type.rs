@@ -1,0 +1,267 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
+use common::fmt::Fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::expr::statements::DefineAccessStatement;
+use crate::expr::{Algorithm, CoverStmts, Expr, Literal};
+
+/// The type of access methods available
+
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+pub enum AccessType {
+	Record(Box<RecordAccess>),
+	Jwt(JwtAccess),
+	Bearer(BearerAccess),
+}
+
+impl Default for AccessType {
+	fn default() -> Self {
+		// Access type defaults to the most specific
+		Self::Record(Box::new(RecordAccess {
+			..Default::default()
+		}))
+	}
+}
+
+impl AccessType {
+	/// Returns whether or not the access method can issue non-token grants
+	/// In this context, token refers exclusively to JWT
+	#[allow(dead_code)]
+	pub fn can_issue_grants(&self) -> bool {
+		match self {
+			// The JWT access method cannot issue stateful grants.
+			AccessType::Jwt(_) => false,
+			// The record access method can be used to issue grants if defined with bearer AKA
+			// refresh.
+			AccessType::Record(ac) => ac.bearer.is_some(),
+			AccessType::Bearer(_) => true,
+		}
+	}
+	/// Returns whether or not the access method can issue tokens
+	/// In this context, tokens refers exclusively to JWT
+	#[allow(dead_code)]
+	pub fn can_issue_tokens(&self) -> bool {
+		match self {
+			// The JWT access method can only issue tokens if an issuer is set
+			AccessType::Jwt(jwt) => jwt.issue.is_some(),
+			AccessType::Record(_) | AccessType::Bearer(_) => true,
+		}
+	}
+}
+
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+pub struct JwtAccess {
+	// Verify is required
+	pub verify: JwtAccessVerify,
+	// Issue is optional
+	// It is possible to only verify externally issued tokens
+	pub issue: Option<JwtAccessIssue>,
+	/// Accepted values for the token `aud` claim. When set, verification
+	/// requires the claim to be present and to intersect this list.
+	pub audience: Option<Vec<Expr>>,
+}
+
+impl Default for JwtAccess {
+	fn default() -> Self {
+		// Defaults to HS512 with a randomly generated key
+		let alg = Algorithm::Hs512;
+		let key = DefineAccessStatement::random_key();
+		// By default the access method can verify and issue tokens
+		Self {
+			verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+				alg,
+				key: Expr::Literal(Literal::String(key.clone().into())),
+			}),
+			issue: Some(JwtAccessIssue {
+				alg,
+				key: Expr::Literal(Literal::String(key.into())),
+			}),
+			audience: None,
+		}
+	}
+}
+
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+pub struct JwtAccessIssue {
+	pub alg: Algorithm,
+	pub key: Expr,
+}
+
+impl Default for JwtAccessIssue {
+	fn default() -> Self {
+		Self {
+			// Defaults to HS512
+			alg: Algorithm::Hs512,
+			// Avoid defaulting to empty key
+			key: Expr::Literal(Literal::String(DefineAccessStatement::random_key().into())),
+		}
+	}
+}
+
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+pub enum JwtAccessVerify {
+	Key(JwtAccessVerifyKey),
+	Jwks(JwtAccessVerifyJwks),
+}
+
+impl Default for JwtAccessVerify {
+	fn default() -> Self {
+		Self::Key(JwtAccessVerifyKey {
+			..Default::default()
+		})
+	}
+}
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+pub struct JwtAccessVerifyKey {
+	pub alg: Algorithm,
+	pub key: Expr,
+}
+
+impl Default for JwtAccessVerifyKey {
+	fn default() -> Self {
+		Self {
+			// Defaults to HS512
+			alg: Algorithm::Hs512,
+			// Avoid defaulting to empty key
+			key: Expr::Literal(Literal::String(DefineAccessStatement::random_key().into())),
+		}
+	}
+}
+
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+pub struct JwtAccessVerifyJwks {
+	pub url: Expr,
+}
+
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+pub struct RecordAccess {
+	pub signup: Option<Expr>,
+	pub signin: Option<Expr>,
+	pub jwt: JwtAccess,
+	pub bearer: Option<BearerAccess>,
+}
+
+impl Default for RecordAccess {
+	fn default() -> Self {
+		Self {
+			signup: None,
+			signin: None,
+			jwt: JwtAccess {
+				..Default::default()
+			},
+			bearer: None,
+		}
+	}
+}
+
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+pub struct BearerAccess {
+	pub kind: BearerAccessType,
+	pub subject: BearerAccessSubject,
+	pub jwt: JwtAccess,
+}
+
+impl Default for BearerAccess {
+	fn default() -> Self {
+		Self {
+			kind: BearerAccessType::Bearer,
+			subject: BearerAccessSubject::User,
+			jwt: JwtAccess {
+				..Default::default()
+			},
+		}
+	}
+}
+
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+pub enum BearerAccessType {
+	Bearer,
+	Refresh,
+}
+
+impl BearerAccessType {
+	/// The grant-key prefix for this access type.
+	pub fn prefix(&self) -> &'static str {
+		match self {
+			Self::Bearer => "surreal-bearer",
+			Self::Refresh => "surreal-refresh",
+		}
+	}
+}
+
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+pub enum BearerAccessSubject {
+	Record,
+	User,
+}
+
+impl ToSql for JwtAccess {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match &self.verify {
+			JwtAccessVerify::Key(v) => {
+				write_sql!(f, sql_fmt, "ALGORITHM {} KEY {}", v.alg, CoverStmts(&v.key));
+			}
+			JwtAccessVerify::Jwks(v) => {
+				write_sql!(f, sql_fmt, "URL {}", CoverStmts(&v.url));
+			}
+		}
+		if let Some(aud) = &self.audience {
+			write_sql!(
+				f,
+				sql_fmt,
+				" AUDIENCE {}",
+				Fmt::comma_separated(aud.iter().map(CoverStmts))
+			);
+		}
+		if let Some(iss) = &self.issue {
+			write_sql!(f, sql_fmt, " WITH ISSUER KEY {}", CoverStmts(&iss.key));
+		}
+	}
+}
+
+impl ToSql for AccessType {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match self {
+			AccessType::Jwt(ac) => {
+				write_sql!(f, sql_fmt, "JWT {}", ac);
+			}
+			AccessType::Record(ac) => {
+				write_sql!(f, sql_fmt, "RECORD");
+				if let Some(ref v) = ac.signup {
+					write_sql!(f, sql_fmt, " SIGNUP {}", CoverStmts(v));
+				}
+				if let Some(ref v) = ac.signin {
+					write_sql!(f, sql_fmt, " SIGNIN {}", CoverStmts(v));
+				}
+				if ac.bearer.is_some() {
+					write_sql!(f, sql_fmt, " WITH REFRESH")
+				}
+				write_sql!(f, sql_fmt, " WITH JWT {}", ac.jwt);
+			}
+			AccessType::Bearer(ac) => {
+				write_sql!(f, sql_fmt, "BEARER");
+				match ac.subject {
+					BearerAccessSubject::User => write_sql!(f, sql_fmt, " FOR USER"),
+					BearerAccessSubject::Record => write_sql!(f, sql_fmt, " FOR RECORD"),
+				}
+				// `ac.jwt` is deliberately not rendered, which makes this the
+				// one access type whose text does not round-trip: reparsing it
+				// mints a fresh key rather than restoring this one.
+				//
+				// SECURITY: the alternative is worse. Every surface that
+				// renders an access redacts its symmetric keys first
+				// (`DefineAccessStatement::redact`), export included, so
+				// rendering the clause emits executable SurrealQL that names
+				// `[REDACTED]` as the signing secret — and a database restored
+				// from that dump verifies tokens anyone can forge. A random key
+				// is unusable; a published one is worse than unusable. The same
+				// render reaches the tracing span, the slow log and observers,
+				// where a real key does not belong either.
+				//
+				// Rendering this clause is correct only once redaction and
+				// restorability stop being the same code path.
+			}
+		}
+	}
+}

@@ -13,7 +13,7 @@ pub(super) use read::*;
 
 fn rand_id() -> String {
 	let mut rng = rand::rng();
-	(0..20).map(|_| *surrealdb_core::cnf::ID_CHARS[..].choose(&mut rng).unwrap_or(&'0')).collect()
+	(0..20).map(|_| *surrealdb_cnf::ID_CHARS[..].choose(&mut rng).unwrap_or(&'0')).collect()
 }
 
 /// Routine trait for the benchmark routines.

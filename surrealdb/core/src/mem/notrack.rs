@@ -19,7 +19,19 @@ impl<A> NotrackAlloc<A> {
 }
 
 impl<A: GlobalAlloc> NotrackAlloc<A> {
-	/// Returns the current total allocated bytes.
+	/// Always `0`: this allocator does not track allocations.
+	pub fn memory_requested(&self) -> usize {
+		0
+	}
+
+	/// Always `0`: this allocator does not track allocations.
+	pub fn memory_reserved(&self) -> usize {
+		0
+	}
+
+	/// Always `0`: this allocator does not track allocations, so the memory
+	/// threshold cannot be enforced and [`Self::is_beyond_threshold`] is
+	/// always `false` regardless of how `SURREAL_MEMORY_THRESHOLD` is set.
 	pub fn memory_allocated(&self) -> usize {
 		0
 	}
@@ -29,9 +41,15 @@ impl<A: GlobalAlloc> NotrackAlloc<A> {
 		// Does nothing
 	}
 
-	/// Checks if the current usage exceeds a configured threshold.
+	/// Always `false`: without allocation tracking there is nothing to compare
+	/// against a threshold, so no query is ever refused for memory.
 	pub fn is_beyond_threshold(&self) -> bool {
 		false
+	}
+
+	/// Always `None`: see [`Self::is_beyond_threshold`].
+	pub fn beyond_threshold_by(&self) -> Option<(usize, usize)> {
+		None
 	}
 }
 

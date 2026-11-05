@@ -1,13 +1,13 @@
 //! Query builder prompt template.
 
-use rmcp::model::{GetPromptResult, PromptMessage, PromptMessageRole};
+use rmcp::model::{GetPromptResult, PromptMessage, Role};
 
 pub fn get_prompt(arguments: &serde_json::Value) -> GetPromptResult {
 	let description =
 		arguments.get("description").and_then(|v| v.as_str()).unwrap_or("retrieve data");
 
 	GetPromptResult::new(vec![PromptMessage::new_text(
-		PromptMessageRole::User,
+		Role::User,
 		format!(
 			r#"I need help building a SurrealQL query to: {description}
 

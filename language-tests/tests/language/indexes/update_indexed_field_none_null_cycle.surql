@@ -41,10 +41,10 @@ value = "[{ k: 'a', v: 15 }, { k: 'b', v: 20 }, { k: 'c', v: 30 }]"
 
 {
 	DEFINE TABLE OVERWRITE t SCHEMALESS;
+	DEFINE INDEX OVERWRITE t_v ON t FIELDS v UNIQUE;
 	CREATE t:a SET v = 10, k = 'a';
 	CREATE t:b SET v = 20, k = 'b';
 	CREATE t:c SET v = 30, k = 'c';
-	DEFINE INDEX OVERWRITE t_v ON t FIELDS v UNIQUE;
 	RETURN "OK";
 };
 

@@ -129,6 +129,18 @@ error = "The access method 'invalid' does not exist in the namespace 'test'"
 
 [[test.results]]
 error = "The access method 'invalid' does not exist in the namespace 'test'"
+
+[[test.results]]
+error = "The access method 'invalid' does not exist in the namespace 'test'"
+
+[[test.results]]
+error = "The access method 'invalid' does not exist in the namespace 'test'"
+
+[[test.results]]
+error = "The access method 'invalid' does not exist in the namespace 'test'"
+
+[[test.results]]
+error = "The access method 'invalid' does not exist in the namespace 'test'"
 */
 
 
@@ -150,3 +162,7 @@ ACCESS api ON NAMESPACE GRANT FOR USER invalid;
 ACCESS api GRANT FOR USER invalid;
 ACCESS invalid ON NAMESPACE SHOW ALL;
 ACCESS invalid SHOW ALL;
+ACCESS invalid ON NAMESPACE REVOKE ALL;
+ACCESS invalid REVOKE ALL;
+ACCESS invalid ON NAMESPACE PURGE EXPIRED;
+ACCESS invalid PURGE EXPIRED;

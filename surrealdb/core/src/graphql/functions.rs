@@ -8,19 +8,24 @@
 //! Functions without a return type annotation are skipped since GraphQL requires
 //! a known output type for every field.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, Type};
+use surrealdb_expr::parser::TopLevelExpr;
 
 use super::GraphqlError;
-use super::schema::{graphql_to_sql_kind_with_scope, sql_value_to_graphql_value_with_kind};
-use super::utils::execute_plan;
+use super::schema::{
+	ExposedTables, graphql_to_sql_kind_with_scope, sanitize_kind_for_exposed_tables,
+	sql_value_to_graphql_value_with_kind,
+};
+use super::utils::execute_statement;
 use crate::catalog::FunctionDefinition;
 use crate::dbs::Session;
-use crate::expr::{Expr, FunctionCall, Kind, LogicalPlan, TopLevelExpr};
+use crate::expr::{Expr, Function, FunctionCall, Kind};
 use crate::graphql::schema::kind_to_type_with_enum_prefix;
 use crate::kvs::Datastore;
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 /// Process all exposed functions and add them as Query root fields.
 ///
@@ -28,19 +33,28 @@ use crate::val::Value;
 /// `fn_<name>` on the Query object with:
 /// - Typed arguments matching the function's parameter list
 /// - A return type derived from the function's `RETURNS` clause
-/// - A resolver that converts GraphQL arguments to SurrealQL values, invokes the function via a
-///   `LogicalPlan`, and converts the result back
+/// - A resolver that converts GraphQL arguments to SurrealQL values, invokes the function as a
+///   surface statement, and converts the result back
 pub async fn process_fns(
 	fns: Arc<[FunctionDefinition]>,
 	mut query: Object,
 	types: &mut Vec<Type>,
 	datastore: &Arc<Datastore>,
+	exposed_table_names: &HashSet<TableName>,
 ) -> Result<Object, GraphqlError> {
 	for fnd in fns.iter() {
-		let Some(kind) = &fnd.returns else {
-			// Skip functions without a declared return type
+		// Skip functions without a declared return type
+		let Some(return_kind) = fnd.returns.clone() else {
 			continue;
 		};
+		let return_kind = sanitize_kind_for_exposed_tables(return_kind, exposed_table_names);
+		let arg_kinds: Vec<(String, Kind)> = fnd
+			.args
+			.iter()
+			.map(|(name, kind)| {
+				(name.clone(), sanitize_kind_for_exposed_tables(kind.clone(), exposed_table_names))
+			})
+			.collect();
 
 		// SECURITY: do NOT close over the schema-generation-time session. The
 		// schema is cached per (ns, db, graphql-config), so a session captured here
@@ -50,6 +64,8 @@ pub async fn process_fns(
 		// resolvers in this crate.
 		let kvs1 = Arc::clone(datastore);
 		let fnd1 = fnd.clone();
+		let return_kind1 = return_kind.clone();
+		let arg_kinds1 = arg_kinds.clone();
 
 		// Honour an explicit `GRAPHQL <ident>` alias when valid; otherwise fall
 		// back to the auto-derived `fn_<name>` form. See GitHub issue #4537.
@@ -62,7 +78,7 @@ pub async fn process_fns(
 		let mut field = Field::new(
 			field_name,
 			kind_to_type_with_enum_prefix(
-				kind.clone(),
+				return_kind.clone(),
 				types,
 				false,
 				Some(&format!("fn_{}_return", fnd.name)),
@@ -70,13 +86,15 @@ pub async fn process_fns(
 			move |ctx| {
 				let kvs1 = Arc::clone(&kvs1);
 				let fnd1 = fnd1.clone();
+				let return_kind1 = return_kind1.clone();
+				let arg_kinds1 = arg_kinds1.clone();
 				FieldFuture::new(async move {
 					let sess1 = ctx.data::<Arc<Session>>()?;
 					let graphql_args = ctx.args.as_index_map();
 					let mut args = Vec::new();
 
 					// Convert each GraphQL argument to its SurrealQL equivalent
-					for (arg_name, arg_kind) in fnd1.args.iter() {
+					for (arg_name, arg_kind) in arg_kinds1.iter() {
 						if let Some(arg_val) = graphql_args.get(arg_name.as_str()) {
 							let scope = format!("fn_{}_{}", fnd1.name, arg_name);
 							let arg_val = graphql_to_sql_kind_with_scope(
@@ -91,36 +109,48 @@ pub async fn process_fns(
 						}
 					}
 
-					// Execute the function call via a LogicalPlan
+					// Execute the function call as a surface statement
 					let func_call = Expr::FunctionCall(Box::new(FunctionCall {
-						receiver: crate::expr::Function::Custom(fnd1.name.to_string()),
+						receiver: Function::Custom(fnd1.name.to_string()),
 						arguments: args,
 					}));
-					let plan = LogicalPlan {
-						expressions: vec![TopLevelExpr::Expr(func_call)],
-					};
-					let res = execute_plan(&kvs1, sess1.as_ref(), plan).await?;
+					let res =
+						execute_statement(&kvs1, sess1.as_ref(), TopLevelExpr::Expr(func_call))
+							.await?;
 
 					// Convert the SurrealQL result to a GraphQL value
-					let graphql_res = match res {
-						Value::RecordId(rid) => {
-							let field_val = FieldValue::owned_any(rid.clone());
-							// Untyped record returns need `.with_type()` for
-							// interface resolution; typed `record<T>` do not.
-							let field_val = match &fnd1.returns {
-								Some(Kind::Record(ts)) if ts.is_empty() => {
-									field_val.with_type(rid.table)
-								}
-								_ => field_val,
+					let graphql_res = if let Value::None = res {
+						None
+					} else if let Value::RecordId(rid) = res {
+						if ctx
+							.data_opt::<ExposedTables>()
+							.is_some_and(|et| !et.0.contains(&rid.table))
+						{
+							None
+						} else {
+							let mut field_val = FieldValue::owned_any(rid.clone());
+							// Untyped or union record returns need `.with_type()` for
+							// interface/union resolution; single-table `record<T>` do not.
+							let needs_type = if let Kind::Record(ts) = &return_kind1 {
+								ts.is_empty() || ts.len() > 1
+							} else if let Kind::Either(ks) = &return_kind1 {
+								ks.iter().any(
+									|k| matches!(k, Kind::Record(ts) if ts.is_empty() || ts.len() > 1),
+								)
+							} else {
+								false
 							};
+							if needs_type {
+								field_val = field_val.with_type(rid.table);
+							}
 							Some(field_val)
 						}
-						Value::None => None,
-						_ => Some(FieldValue::value(sql_value_to_graphql_value_with_kind(
+					} else {
+						Some(FieldValue::value(sql_value_to_graphql_value_with_kind(
 							res,
-							fnd1.returns.as_ref(),
+							Some(&return_kind1),
 							Some(&format!("fn_{}_return", fnd1.name)),
-						)?)),
+						)?))
 					};
 
 					Ok(graphql_res)
@@ -139,7 +169,7 @@ pub async fn process_fns(
 		}
 
 		// Register each function argument as a GraphQL input value
-		for (arg_name, arg_kind) in fnd.args.iter() {
+		for (arg_name, arg_kind) in arg_kinds.iter() {
 			let arg_ty = kind_to_type_with_enum_prefix(
 				arg_kind.clone(),
 				types,

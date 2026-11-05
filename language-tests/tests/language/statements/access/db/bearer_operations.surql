@@ -126,6 +126,18 @@ error = "The access method 'invalid' does not exist in the database 'test'"
 
 [[test.results]]
 error = "The access method 'invalid' does not exist in the database 'test'"
+
+[[test.results]]
+error = "The access method 'invalid' does not exist in the database 'test'"
+
+[[test.results]]
+error = "The access method 'invalid' does not exist in the database 'test'"
+
+[[test.results]]
+error = "The access method 'invalid' does not exist in the database 'test'"
+
+[[test.results]]
+error = "The access method 'invalid' does not exist in the database 'test'"
 */
 
 
@@ -147,3 +159,7 @@ ACCESS api ON DATABASE GRANT FOR USER invalid;
 ACCESS api GRANT FOR USER invalid;
 ACCESS invalid ON DATABASE SHOW ALL;
 ACCESS invalid SHOW ALL;
+ACCESS invalid ON DATABASE REVOKE ALL;
+ACCESS invalid REVOKE ALL;
+ACCESS invalid ON DATABASE PURGE EXPIRED;
+ACCESS invalid PURGE EXPIRED;

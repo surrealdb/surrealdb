@@ -1,0 +1,1698 @@
+### fn::missing(1)
+error: Function 'fn::missing' not found: The function 'fn::missing' does not exist
+### SELECT * FROM person ORDER BY RAND()
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+{ id: person:4, name: 'dan' }
+### SELECT type::field('age') AS a FROM person ORDER BY a
+{ a: NONE }
+{ a: 17 }
+{ a: 30 }
+{ a: 30 }
+{ a: 45 }
+### SELECT *, type::field('name') FROM person
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM link FETCH to
+{ geo: (1, 2), id: link:1, many: [person:1, person:2, 5], obj: { k: { v: 1 } }, to: { age: 30, city: 'x', id: person:3, name: 'cat' } }
+### SELECT * FROM link FETCH many
+{ geo: (1, 2), id: link:1, many: [{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }, { age: 17, id: person:2, name: 'Bob', tags: ['b'] }, 5], obj: { k: { v: 1 } }, to: person:3 }
+### SELECT to, many FROM link FETCH to, many
+{ many: [{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }, { age: 17, id: person:2, name: 'Bob', tags: ['b'] }, 5], to: { age: 30, city: 'x', id: person:3, name: 'cat' } }
+### SELECT * FROM link FETCH nothing
+{ geo: (1, 2), id: link:1, many: [person:1, person:2, 5], obj: { k: { v: 1 } }, to: person:3 }
+### SELECT * FROM person FETCH nested
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM link ORDER BY id LIMIT 1 FETCH to
+{ geo: (1, 2), id: link:1, many: [person:1, person:2, 5], obj: { k: { v: 1 } }, to: { age: 30, city: 'x', id: person:3, name: 'cat' } }
+### SELECT VALUE to FROM link FETCH to
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+### SELECT to AS t FROM link FETCH t
+{ t: { age: 30, city: 'x', id: person:3, name: 'cat' } }
+### SELECT * FROM link FETCH type::field('to')
+{ geo: (1, 2), id: link:1, many: [person:1, person:2, 5], obj: { k: { v: 1 } }, to: { age: 30, city: 'x', id: person:3, name: 'cat' } }
+### SELECT * FROM link FETCH many[0]
+{ geo: (1, 2), id: link:1, many: [{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }, person:2, 5], obj: { k: { v: 1 } }, to: person:3 }
+### SELECT * FROM link FETCH many.*
+{ geo: (1, 2), id: link:1, many: [{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }, { age: 17, id: person:2, name: 'Bob', tags: ['b'] }, 5], obj: { k: { v: 1 } }, to: person:3 }
+### SELECT * FROM link SPLIT many FETCH many
+{ geo: (1, 2), id: link:1, many: { age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }, obj: { k: { v: 1 } }, to: person:3 }
+{ geo: (1, 2), id: link:1, many: { age: 17, id: person:2, name: 'Bob', tags: ['b'] }, obj: { k: { v: 1 } }, to: person:3 }
+{ geo: (1, 2), id: link:1, many: 5, obj: { k: { v: 1 } }, to: person:3 }
+### SELECT count() AS n, to FROM link GROUP BY to FETCH to
+{ n: 1, to: { age: 30, city: 'x', id: person:3, name: 'cat' } }
+### SELECT { RETURN age } AS r, name FROM person ORDER BY r DESC
+{ name: 'Eve', r: 45 }
+{ name: 'ann', r: 30 }
+{ name: 'cat', r: 30 }
+{ name: 'Bob', r: 17 }
+{ name: 'dan', r: NONE }
+### SELECT to.name AS n FROM link ORDER BY n
+{ n: 'cat' }
+### SELECT * FROM person SPLIT tags
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: 'a' }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: 'b' }
+{ age: 17, id: person:2, name: 'Bob', tags: 'b' }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT VALUE tags FROM person SPLIT tags
+[{ tags: NONE }, { tags: NONE }]
+[{ tags: NONE }, { tags: NONE }]
+[{ tags: NONE }]
+NONE
+NONE
+NONE
+### SELECT name AS n, tags AS t FROM person SPLIT t
+{ n: 'ann', t: 'a' }
+{ n: 'ann', t: 'b' }
+{ n: 'Bob', t: 'b' }
+{ n: 'cat', t: NONE }
+{ n: 'dan', t: NONE }
+{ n: 'Eve', t: NONE }
+### SELECT tags AS a, tags FROM person SPLIT tags ORDER BY a
+{ a: NONE, tags: NONE }
+{ a: NONE, tags: NONE }
+{ a: NONE, tags: NONE }
+{ a: ['a', 'b'], tags: 'a' }
+{ a: ['a', 'b'], tags: 'b' }
+{ a: ['b'], tags: 'b' }
+### SELECT to.name AS x, many FROM link SPLIT many
+{ many: person:1, x: 'cat' }
+{ many: person:2, x: 'cat' }
+{ many: 5, x: 'cat' }
+### SELECT *, age AS a OMIT nested FROM person SPLIT tags
+{ a: 30, age: 30, id: person:1, name: 'ann', tags: 'a' }
+{ a: 30, age: 30, id: person:1, name: 'ann', tags: 'b' }
+{ a: 17, age: 17, id: person:2, name: 'Bob', tags: 'b' }
+{ a: 30, age: 30, city: 'x', id: person:3, name: 'cat' }
+{ a: NONE, id: person:4, name: 'dan' }
+{ a: 45, age: 45, id: person:5, name: 'Eve' }
+### SELECT name, tags FROM person SPLIT tags
+{ name: 'ann', tags: 'a' }
+{ name: 'ann', tags: 'b' }
+{ name: 'Bob', tags: 'b' }
+{ name: 'cat', tags: NONE }
+{ name: 'dan', tags: NONE }
+{ name: 'Eve', tags: NONE }
+### SELECT * FROM person WHERE age > 18 SPLIT tags
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: 'a' }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: 'b' }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person SPLIT tags, nested
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: 'a' }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: 'b' }
+{ age: 17, id: person:2, name: 'Bob', tags: 'b' }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT tags FROM person SPLIT tags ORDER BY tags
+{ tags: NONE }
+{ tags: NONE }
+{ tags: NONE }
+{ tags: 'a' }
+{ tags: 'b' }
+{ tags: 'b' }
+### SELECT tags FROM person SPLIT tags ORDER BY tags DESC LIMIT 2
+{ tags: 'b' }
+{ tags: 'b' }
+### SELECT * FROM person SPLIT tags LIMIT 2
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: 'a' }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: 'b' }
+### SELECT * FROM person SPLIT tags LIMIT 0
+(no rows)
+### SELECT * FROM person SPLIT tags START 1 LIMIT 1
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: 'b' }
+### SELECT * FROM person SPLIT tags[0]
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person SPLIT tags[*]
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'a'] }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['b', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM big SPLIT n LIMIT 3
+{ i: 1, id: big:1, n: 1 }
+{ i: 2, id: big:2, n: 2 }
+{ i: 3, id: big:3, n: 3 }
+### SELECT * FROM [{ a: [1, 2] }, { a: 3 }] SPLIT a
+{ a: 1 }
+{ a: 2 }
+{ a: 3 }
+### SELECT * FROM person:1 SPLIT tags
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: 'a' }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: 'b' }
+### SELECT * FROM person, link SPLIT many
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+{ geo: (1, 2), id: link:1, many: person:1, obj: { k: { v: 1 } }, to: person:3 }
+{ geo: (1, 2), id: link:1, many: person:2, obj: { k: { v: 1 } }, to: person:3 }
+{ geo: (1, 2), id: link:1, many: 5, obj: { k: { v: 1 } }, to: person:3 }
+### SELECT * FROM link SPLIT many
+{ geo: (1, 2), id: link:1, many: person:1, obj: { k: { v: 1 } }, to: person:3 }
+{ geo: (1, 2), id: link:1, many: person:2, obj: { k: { v: 1 } }, to: person:3 }
+{ geo: (1, 2), id: link:1, many: 5, obj: { k: { v: 1 } }, to: person:3 }
+### SELECT * FROM person
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person WHERE age > 18
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person WHERE age > 18 AND name = 'cat'
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+### SELECT * FROM person WHERE age > 18 OR !city
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person WHERE NOT (age > 18 AND city = 'x')
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person WHERE age IN [17, 45]
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person WHERE tags CONTAINS 'b'
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+### SELECT * FROM person WHERE string::len(name) > 2
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person WHERE nested.x = 2
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person WHERE age
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT name, age AS a, age + 1 AS b FROM person WHERE age >= 1 LIMIT 3 START 1
+{ a: 17, b: 18, name: 'Bob' }
+{ a: 30, b: 31, name: 'cat' }
+{ a: 45, b: 46, name: 'Eve' }
+### SELECT name, nested.x FROM person
+{ name: 'ann', nested: { x: 1 } }
+{ name: 'Bob', nested: { x: NONE } }
+{ name: 'cat', nested: { x: NONE } }
+{ name: 'dan', nested: { x: NONE } }
+{ name: 'Eve', nested: { x: 2 } }
+### SELECT nested.x AS nx, missing FROM person
+{ missing: NONE, nx: 1 }
+{ missing: NONE, nx: NONE }
+{ missing: NONE, nx: NONE }
+{ missing: NONE, nx: NONE }
+{ missing: NONE, nx: 2 }
+### SELECT VALUE name FROM person
+'ann'
+'Bob'
+'cat'
+'dan'
+'Eve'
+### SELECT VALUE age > 18 FROM person
+true
+false
+true
+false
+true
+### SELECT * FROM person ORDER BY age DESC, name
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ id: person:4, name: 'dan' }
+### SELECT * FROM person ORDER BY name COLLATE LIMIT 2 START 1
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+### SELECT * FROM person ORDER BY name NUMERIC
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+### SELECT * FROM person ORDER BY age LIMIT 0
+(no rows)
+### SELECT * FROM person LIMIT 0
+(no rows)
+### SELECT * FROM person START 10
+(no rows)
+### SELECT * FROM person LIMIT 2 + 1
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+### SELECT * FROM big WHERE n = 3 ORDER BY i DESC LIMIT 5
+{ i: 2999, id: big:2999, n: 3 }
+{ i: 2992, id: big:2992, n: 3 }
+{ i: 2985, id: big:2985, n: 3 }
+{ i: 2978, id: big:2978, n: 3 }
+{ i: 2971, id: big:2971, n: 3 }
+### SELECT VALUE i FROM big WHERE n > 2
+3
+4
+5
+6
+10
+11
+... 1714 rows, digest 8017e3f51968b5d7 ...
+2992
+2993
+2994
+2995
+2999
+3000
+### SELECT * FROM big WHERE n = 3 LIMIT 700 START 20
+{ i: 143, id: big:143, n: 3 }
+{ i: 150, id: big:150, n: 3 }
+{ i: 157, id: big:157, n: 3 }
+{ i: 164, id: big:164, n: 3 }
+{ i: 171, id: big:171, n: 3 }
+{ i: 178, id: big:178, n: 3 }
+... 409 rows, digest 008e92ba4813c71a ...
+{ i: 2964, id: big:2964, n: 3 }
+{ i: 2971, id: big:2971, n: 3 }
+{ i: 2978, id: big:2978, n: 3 }
+{ i: 2985, id: big:2985, n: 3 }
+{ i: 2992, id: big:2992, n: 3 }
+{ i: 2999, id: big:2999, n: 3 }
+### SELECT * FROM big ORDER BY n, i DESC LIMIT 100 START 950
+{ i: 2347, id: big:2347, n: 2 }
+{ i: 2340, id: big:2340, n: 2 }
+{ i: 2333, id: big:2333, n: 2 }
+{ i: 2326, id: big:2326, n: 2 }
+{ i: 2319, id: big:2319, n: 2 }
+{ i: 2312, id: big:2312, n: 2 }
+... 100 rows, digest 77bc770c50a29021 ...
+{ i: 1689, id: big:1689, n: 2 }
+{ i: 1682, id: big:1682, n: 2 }
+{ i: 1675, id: big:1675, n: 2 }
+{ i: 1668, id: big:1668, n: 2 }
+{ i: 1661, id: big:1661, n: 2 }
+{ i: 1654, id: big:1654, n: 2 }
+### SELECT * FROM indexed
+{ age: 1, id: indexed:1, kind: 1, name: 'n1' }
+{ age: 2, id: indexed:2, kind: 2, name: 'n2' }
+{ age: 3, id: indexed:3, kind: 0, name: 'n3' }
+{ age: 4, id: indexed:4, kind: 1, name: 'n4' }
+{ age: 5, id: indexed:5, kind: 2, name: 'n5' }
+{ age: 6, id: indexed:6, kind: 0, name: 'n6' }
+... 62 rows, digest a1ed3abd70f5099c ...
+{ age: 3, id: indexed:57, kind: 0, name: 'n57' }
+{ age: 4, id: indexed:58, kind: 1, name: 'n58' }
+{ age: 5, id: indexed:59, kind: 2, name: 'n59' }
+{ age: 6, id: indexed:60, kind: 0, name: 'n60' }
+{ id: indexed:none, kind: 1 }
+{ age: [3, 4], id: indexed:tags, name: 'tags' }
+### SELECT * FROM person LIMIT 'x'
+error: Found x but the LIMIT clause must evaluate to a positive integer
+### SELECT * FROM person LIMIT $limit - 28 START [1, 0][$]
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+### SELECT * FROM person LIMIT [2, 3][$this ?? 0] START [1, 0][$this ?? 0]
+error: Found NONE but the LIMIT clause must evaluate to a positive integer
+### SELECT * FROM person LIMIT (SELECT VALUE age FROM person ORDER BY age LIMIT 1)[0] - 17
+error: Cannot perform subtraction with 'none' and 'int'
+### SELECT name FROM person ORDER BY age LIMIT [2, 3][$this ?? 0] TIMEOUT [5s, 6s][$this ?? 0]
+error: Found NONE but the LIMIT clause must evaluate to a positive integer
+### SELECT * FROM person LIMIT <int> 'x'
+error: Could not cast into `int` using input `'x'`
+### SELECT * FROM type::record('person', $limit - 29)
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+### SELECT VALUE { RETURN age } FROM person
+30
+17
+30
+NONE
+45
+### SELECT { RETURN name } AS n, age FROM person
+{ age: 30, n: 'ann' }
+{ age: 17, n: 'Bob' }
+{ age: 30, n: 'cat' }
+{ age: NONE, n: 'dan' }
+{ age: 45, n: 'Eve' }
+### SELECT ({ RETURN 1 }) = 1 AS a FROM person
+{ a: true }
+{ a: true }
+{ a: true }
+{ a: true }
+{ a: true }
+### SELECT * FROM person WHERE <int> name = 1
+error: Could not cast into `int` using input `'ann'`
+### SELECT *, name AS n FROM person
+{ age: 30, id: person:1, n: 'ann', name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, n: 'Bob', name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, n: 'cat', name: 'cat' }
+{ id: person:4, n: 'dan', name: 'dan' }
+{ age: 45, id: person:5, n: 'Eve', name: 'Eve', nested: { x: 2 } }
+### SELECT * OMIT name FROM person
+{ age: 30, id: person:1, nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, tags: ['b'] }
+{ age: 30, city: 'x', id: person:3 }
+{ id: person:4 }
+{ age: 45, id: person:5, nested: { x: 2 } }
+### SELECT * OMIT name, tags FROM person WHERE age
+{ age: 30, id: person:1, nested: { x: 1 } }
+{ age: 17, id: person:2 }
+{ age: 30, city: 'x', id: person:3 }
+{ age: 45, id: person:5, nested: { x: 2 } }
+### SELECT *, age + 1 AS age FROM person
+error: Cannot perform addition with 'none' and 'int'
+### SELECT *, nested.x AS nested FROM person ORDER BY age
+{ id: person:4, name: 'dan', nested: NONE }
+{ age: 17, id: person:2, name: 'Bob', nested: NONE, tags: ['b'] }
+{ age: 30, id: person:1, name: 'ann', nested: 1, tags: ['a', 'b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat', nested: NONE }
+{ age: 45, id: person:5, name: 'Eve', nested: 2 }
+### SELECT *, { RETURN 1 } AS r OMIT id FROM person
+{ age: 30, name: 'ann', nested: { x: 1 }, r: 1, tags: ['a', 'b'] }
+{ age: 17, name: 'Bob', r: 1, tags: ['b'] }
+{ age: 30, city: 'x', name: 'cat', r: 1 }
+{ name: 'dan', r: 1 }
+{ age: 45, name: 'Eve', nested: { x: 2 }, r: 1 }
+### SELECT * FROM person TIMEOUT 1s
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT name FROM person WHERE age > 18 LIMIT 1 TIMEOUT 5s
+{ name: 'ann' }
+### SELECT * FROM ONLY person LIMIT 1
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+### SELECT * FROM ONLY person WHERE age > 40
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM ONLY person
+error: Expected a single result output when using the ONLY keyword
+### SELECT * FROM ONLY person WHERE age > 1000
+NONE
+### SELECT VALUE name FROM ONLY person WHERE age = 45 LIMIT 1
+'Eve'
+### SELECT count() FROM person GROUP ALL TIMEOUT 5s
+{ count: 5 }
+### SELECT * FROM person:1
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+### SELECT * FROM person:99
+(no rows)
+### SELECT * FROM ONLY person:1
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+### SELECT * FROM ONLY person:99
+NONE
+### SELECT name FROM person:1..4
+{ name: 'ann' }
+{ name: 'Bob' }
+{ name: 'cat' }
+### SELECT * FROM person:2.. WHERE age > 18
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person:1..=3 LIMIT 1 START 1
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+### SELECT * FROM big:10..40 WHERE n = 3
+{ i: 10, id: big:10, n: 3 }
+{ i: 17, id: big:17, n: 3 }
+{ i: 24, id: big:24, n: 3 }
+{ i: 31, id: big:31, n: 3 }
+{ i: 38, id: big:38, n: 3 }
+### SELECT count() AS c, math::sum(i) AS s FROM big:1..100 GROUP ALL
+{ c: 99, s: 4950 }
+### SELECT * FROM big:1..=5 ORDER BY i DESC
+{ i: 5, id: big:5, n: 5 }
+{ i: 4, id: big:4, n: 4 }
+{ i: 3, id: big:3, n: 3 }
+{ i: 2, id: big:2, n: 2 }
+{ i: 1, id: big:1, n: 1 }
+### SELECT * FROM indexed:1
+{ age: 1, id: indexed:1, kind: 1, name: 'n1' }
+### SELECT * FROM person:1 WHERE age > 40
+(no rows)
+### SELECT * FROM person, big WHERE n = 3
+{ i: 3, id: big:3, n: 3 }
+{ i: 10, id: big:10, n: 3 }
+{ i: 17, id: big:17, n: 3 }
+{ i: 24, id: big:24, n: 3 }
+{ i: 31, id: big:31, n: 3 }
+{ i: 38, id: big:38, n: 3 }
+... 429 rows, digest 5d0e33d095ac3118 ...
+{ i: 2964, id: big:2964, n: 3 }
+{ i: 2971, id: big:2971, n: 3 }
+{ i: 2978, id: big:2978, n: 3 }
+{ i: 2985, id: big:2985, n: 3 }
+{ i: 2992, id: big:2992, n: 3 }
+{ i: 2999, id: big:2999, n: 3 }
+### SELECT * FROM person:1, person:2
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+### SELECT * FROM person:3, person:1, person:99
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+### SELECT * FROM big:1..3, person:1..3
+{ i: 1, id: big:1, n: 1 }
+{ i: 2, id: big:2, n: 2 }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+### SELECT name FROM person, typed LIMIT 3
+{ name: 'ann' }
+{ name: 'Bob' }
+{ name: 'cat' }
+### SELECT * FROM person, big LIMIT 7
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+{ i: 1, id: big:1, n: 1 }
+{ i: 2, id: big:2, n: 2 }
+### SELECT * FROM person, mixed WHERE n = 3 LIMIT 2 START 1
+{ id: mixed:2, n: 3f }
+{ id: mixed:5, n: 3dec }
+### SELECT * FROM person, big ORDER BY age, i LIMIT 4
+{ id: person:4, name: 'dan' }
+{ i: 1, id: big:1, n: 1 }
+{ i: 2, id: big:2, n: 2 }
+{ i: 3, id: big:3, n: 3 }
+### SELECT count() FROM person, big GROUP ALL
+{ count: 3005 }
+### SELECT * FROM person, indexed
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+{ age: 1, id: indexed:1, kind: 1, name: 'n1' }
+... 67 rows, digest 774d11b4bb504655 ...
+{ age: 3, id: indexed:57, kind: 0, name: 'n57' }
+{ age: 4, id: indexed:58, kind: 1, name: 'n58' }
+{ age: 5, id: indexed:59, kind: 2, name: 'n59' }
+{ age: 6, id: indexed:60, kind: 0, name: 'n60' }
+{ id: indexed:none, kind: 1 }
+{ age: [3, 4], id: indexed:tags, name: 'tags' }
+### SELECT * FROM [1, 2, 3] WHERE $this > 1
+2
+3
+### SELECT * FROM [person:1, person:2]
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+### SELECT * FROM [person:1, person:99, 5]
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+5
+### SELECT * FROM $nothing
+(no rows)
+### SELECT * FROM |person:1..3|
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+### SELECT name FROM (SELECT * FROM person WHERE age > 18) LIMIT 1
+{ name: 'ann' }
+### SELECT * FROM (SELECT VALUE name FROM person)
+'ann'
+'Bob'
+'cat'
+'dan'
+'Eve'
+### SELECT * FROM array::range(1, 3)
+1
+2
+### SELECT * FROM { a: 1 }
+{ a: 1 }
+### SELECT a FROM [{ a: 1 }, { a: 2 }, 3] WHERE a > 1
+{ a: 2 }
+### SELECT * FROM [1, 2, 3, 4] LIMIT 2 START 1
+2
+3
+### SELECT * FROM [{ bad: 'x' }] WHERE <int> bad = 1 LIMIT 0
+error: Could not cast into `int` using input `'x'`
+### SELECT * FROM [{ bad: 1 }, { bad: 'x' }] WHERE <int> bad = 1 LIMIT 0
+error: Could not cast into `int` using input `'x'`
+### SELECT type::field('a') FROM [{ a: 1 }]
+{ a: 1 }
+### SELECT VALUE $this * 2 FROM [1, 2, 3]
+2
+4
+6
+### SELECT type::field('name') FROM person
+{ name: 'ann' }
+{ name: 'Bob' }
+{ name: 'cat' }
+{ name: 'dan' }
+{ name: 'Eve' }
+### SELECT type::field('name') AS n, age FROM person
+{ age: 30, n: 'ann' }
+{ age: 17, n: 'Bob' }
+{ age: 30, n: 'cat' }
+{ age: NONE, n: 'dan' }
+{ age: 45, n: 'Eve' }
+### SELECT type::fields(['name', 'age']) FROM person WHERE age
+{ age: 30, name: 'ann' }
+{ age: 17, name: 'Bob' }
+{ age: 30, name: 'cat' }
+{ age: 45, name: 'Eve' }
+### SELECT type::fields(['name', 'age']) AS f FROM person
+{ f: ['ann', 30] }
+{ f: ['Bob', 17] }
+{ f: ['cat', 30] }
+{ f: ['dan', NONE] }
+{ f: ['Eve', 45] }
+### SELECT VALUE type::field('name') FROM person
+'ann'
+'Bob'
+'cat'
+'dan'
+'Eve'
+### SELECT VALUE type::fields(['name', 'age']) FROM person
+['ann', 30]
+['Bob', 17]
+['cat', 30]
+['dan', NONE]
+['Eve', 45]
+### SELECT *, type::field('name') AS again FROM person
+{ again: 'ann', age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ again: 'Bob', age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ again: 'cat', age: 30, city: 'x', id: person:3, name: 'cat' }
+{ again: 'dan', id: person:4, name: 'dan' }
+{ again: 'Eve', age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT VALUE {age, 1, age} FROM person
+{1, 30}
+{1, 17}
+{1, 30}
+{NONE, 1}
+{1, 45}
+### 'abc' @@ 'zzz'
+false
+### [1.0, 2.0] <|1, EUCLIDEAN|> [1.0, 2.0]
+false
+### SELECT VALUE name FROM person ORDER BY age
+'dan'
+'Bob'
+'ann'
+'cat'
+'Eve'
+### SELECT name, age FROM person ORDER BY age DESC, name
+{ age: 45, name: 'Eve' }
+{ age: 30, name: 'ann' }
+{ age: 30, name: 'cat' }
+{ age: 17, name: 'Bob' }
+{ age: NONE, name: 'dan' }
+### SELECT name FROM person ORDER BY age
+{ name: 'dan' }
+{ name: 'Bob' }
+{ name: 'ann' }
+{ name: 'cat' }
+{ name: 'Eve' }
+### SELECT age AS a, name FROM person ORDER BY a
+{ a: NONE, name: 'dan' }
+{ a: 17, name: 'Bob' }
+{ a: 30, name: 'ann' }
+{ a: 30, name: 'cat' }
+{ a: 45, name: 'Eve' }
+### SELECT name AS age FROM person ORDER BY age
+{ age: 'Bob' }
+{ age: 'Eve' }
+{ age: 'ann' }
+{ age: 'cat' }
+{ age: 'dan' }
+### SELECT VALUE age FROM person ORDER BY age LIMIT 2 START 1
+17
+30
+### SELECT name, age + 1 AS b FROM person WHERE age ORDER BY age LIMIT 3
+{ b: 18, name: 'Bob' }
+{ b: 31, name: 'ann' }
+{ b: 31, name: 'cat' }
+### SELECT i FROM big WHERE n = 3 ORDER BY i DESC LIMIT 5
+{ i: 2999 }
+{ i: 2992 }
+{ i: 2985 }
+{ i: 2978 }
+{ i: 2971 }
+### SELECT * FROM person ORDER BY nested.x
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT name FROM person ORDER BY nested.x DESC, name
+{ name: 'Eve' }
+{ name: 'ann' }
+{ name: 'Bob' }
+{ name: 'cat' }
+{ name: 'dan' }
+### SELECT age + 1 AS a FROM person ORDER BY a
+error: Cannot perform addition with 'none' and 'int'
+### SELECT age * 2 AS d, name FROM person ORDER BY d DESC LIMIT 2
+error: Cannot perform multiplication with 'none' and 'int'
+### SELECT string::len(name) AS l, name FROM person ORDER BY l, name
+{ l: 3, name: 'Bob' }
+{ l: 3, name: 'Eve' }
+{ l: 3, name: 'ann' }
+{ l: 3, name: 'cat' }
+{ l: 3, name: 'dan' }
+### SELECT VALUE name FROM person ORDER BY missing, name
+'Bob'
+'Eve'
+'ann'
+'cat'
+'dan'
+### SELECT i % 5 AS m, i FROM big WHERE n = 3 ORDER BY m, i LIMIT 7
+{ i: 10, m: 0 }
+{ i: 45, m: 0 }
+{ i: 80, m: 0 }
+{ i: 115, m: 0 }
+{ i: 150, m: 0 }
+{ i: 185, m: 0 }
+{ i: 220, m: 0 }
+### SELECT count() FROM person GROUP ALL
+{ count: 5 }
+### SELECT name, count() FROM person GROUP ALL
+{ count: 5, name: ['ann', 'Bob', 'cat', 'dan', 'Eve'] }
+### SELECT count() AS c FROM person WHERE age > 18 GROUP ALL
+{ c: 3 }
+### SELECT count(age) AS c, math::sum(age) AS s, math::min(age) AS lo, math::max(age) AS hi, math::mean(age) AS m FROM person GROUP ALL
+{ c: 4, hi: 45, lo: 17, m: 30.5f, s: 122 }
+### SELECT count() FROM person WHERE age > 1000 GROUP ALL
+{ count: 0 }
+### SELECT math::sum(age) AS s FROM person WHERE age > 1000 GROUP ALL
+{ s: 0 }
+### SELECT VALUE count() FROM person GROUP ALL
+5
+### SELECT count() * 2 AS twice, 'k' AS label FROM person GROUP ALL
+{ label: 'k', twice: 10 }
+### SELECT array::group(tags) AS g FROM person GROUP ALL
+{ g: ['a', 'b', NONE] }
+### SELECT array::join(name, ', ') AS names FROM person GROUP ALL
+{ names: 'ann, Bob, cat, dan, Eve' }
+### SELECT math::sum(n) AS t FROM mixed GROUP ALL
+{ t: -9223372036854775795dec }
+### SELECT math::sum(n) AS t FROM mixed WHERE n = 'x' GROUP ALL
+{ t: 0 }
+### SELECT math::min(n) AS lo, math::max(n) AS hi FROM mixed GROUP ALL
+{ hi: 4, lo: -9223372036854775808 }
+### SELECT math::sum(i) AS s, count() AS c FROM big WHERE n = 3 GROUP ALL
+{ c: 429, s: 643929 }
+### SELECT city, count() FROM person GROUP BY city
+{ city: NONE, count: 4 }
+{ city: 'x', count: 1 }
+### SELECT age, count() AS c, array::group(name) AS names FROM person GROUP BY age
+{ age: NONE, c: 1, names: ['dan'] }
+{ age: 17, c: 1, names: ['Bob'] }
+{ age: 30, c: 2, names: ['ann', 'cat'] }
+{ age: 45, c: 1, names: ['Eve'] }
+### SELECT city, age, count() FROM person GROUP BY city, age
+{ age: NONE, city: NONE, count: 1 }
+{ age: 17, city: NONE, count: 1 }
+{ age: 30, city: NONE, count: 1 }
+{ age: 45, city: NONE, count: 1 }
+{ age: 30, city: 'x', count: 1 }
+### SELECT age AS a, count() FROM person GROUP BY a
+{ a: NONE, count: 1 }
+{ a: 17, count: 1 }
+{ a: 30, count: 2 }
+{ a: 45, count: 1 }
+### SELECT age, count() FROM person WHERE age > 1000 GROUP BY age
+(no rows)
+### SELECT VALUE city FROM person GROUP BY city
+NONE
+'x'
+### SELECT city, math::sum(age) AS s, math::max(age) AS hi FROM person WHERE age GROUP BY city
+{ city: NONE, hi: 45, s: 92 }
+{ city: 'x', hi: 30, s: 30 }
+### SELECT n, count() FROM mixed GROUP BY n
+{ count: 1, n: NONE }
+{ count: 1, n: NULL }
+{ count: 1, n: -9223372036854775808 }
+{ count: 3, n: 3 }
+{ count: 1, n: 4 }
+{ count: 1, n: '3' }
+### SELECT n, count() AS c, math::sum(i) AS s FROM big GROUP BY n
+{ c: 428, n: 0, s: 642642 }
+{ c: 429, n: 1, s: 643071 }
+{ c: 429, n: 2, s: 643500 }
+{ c: 429, n: 3, s: 643929 }
+{ c: 429, n: 4, s: 644358 }
+{ c: 428, n: 5, s: 641786 }
+{ c: 428, n: 6, s: 642214 }
+### SELECT name, count() FROM person GROUP BY name
+{ count: 1, name: 'Bob' }
+{ count: 1, name: 'Eve' }
+{ count: 1, name: 'ann' }
+{ count: 1, name: 'cat' }
+{ count: 1, name: 'dan' }
+### SELECT * FROM mixed WHERE n = 3
+{ id: mixed:1, n: 3 }
+{ id: mixed:2, n: 3f }
+{ id: mixed:5, n: 3dec }
+### SELECT * FROM mixed WHERE n == 3
+{ id: mixed:1, n: 3 }
+{ id: mixed:2, n: 3f }
+{ id: mixed:5, n: 3dec }
+### SELECT * FROM mixed WHERE n != 3
+{ id: mixed:3, n: '3' }
+{ id: mixed:4 }
+{ id: mixed:6, n: 4 }
+{ id: mixed:7, n: NULL }
+{ id: mixed:8, n: -9223372036854775808 }
+### SELECT * FROM mixed WHERE n > 2
+{ id: mixed:1, n: 3 }
+{ id: mixed:2, n: 3f }
+{ id: mixed:3, n: '3' }
+{ id: mixed:5, n: 3dec }
+{ id: mixed:6, n: 4 }
+### SELECT * FROM mixed WHERE n <= 3
+{ id: mixed:1, n: 3 }
+{ id: mixed:2, n: 3f }
+{ id: mixed:4 }
+{ id: mixed:5, n: 3dec }
+{ id: mixed:7, n: NULL }
+{ id: mixed:8, n: -9223372036854775808 }
+### SELECT * FROM mixed WHERE 3 < n
+{ id: mixed:3, n: '3' }
+{ id: mixed:6, n: 4 }
+### SELECT * FROM mixed WHERE 3 >= n
+{ id: mixed:1, n: 3 }
+{ id: mixed:2, n: 3f }
+{ id: mixed:4 }
+{ id: mixed:5, n: 3dec }
+{ id: mixed:7, n: NULL }
+{ id: mixed:8, n: -9223372036854775808 }
+### SELECT * FROM mixed WHERE n < -9223372036854775807
+{ id: mixed:4 }
+{ id: mixed:7, n: NULL }
+{ id: mixed:8, n: -9223372036854775808 }
+### SELECT VALUE id FROM mixed WHERE n = 3 OR n = 4
+mixed:1
+mixed:2
+mixed:5
+mixed:6
+### SELECT * FROM typed WHERE s = 3
+(no rows)
+### SELECT * FROM person WHERE id = person:1
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+### SELECT * FROM person WHERE id > person:2 AND age != NONE
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person WHERE age = 30.0f OR age = 45dec
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * FROM person WHERE name > 'b' AND name < 'd'
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+### SELECT * FROM person WHERE nested = { x: 1 }
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+### SELECT * FROM person WHERE tags *= 'b' OR tags ?= 'a'
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+### SELECT VALUE nested FROM person WHERE city
+NONE
+### SELECT * FROM big WHERE n = 3 AND i > 2990
+{ i: 2992, id: big:2992, n: 3 }
+{ i: 2999, id: big:2999, n: 3 }
+### SELECT * FROM computed
+{ age: 2, id: computed:1, twice: 4 }
+### SELECT twice FROM computed WHERE twice > 3
+{ twice: 4 }
+### SELECT * FROM indexed WHERE age = 3
+{ age: 3, id: indexed:3, kind: 0, name: 'n3' }
+{ age: 3, id: indexed:12, kind: 0, name: 'n12' }
+{ age: 3, id: indexed:21, kind: 0, name: 'n21' }
+{ age: 3, id: indexed:30, kind: 0, name: 'n30' }
+{ age: 3, id: indexed:39, kind: 0, name: 'n39' }
+{ age: 3, id: indexed:48, kind: 0, name: 'n48' }
+{ age: 3, id: indexed:57, kind: 0, name: 'n57' }
+### SELECT * FROM indexed WHERE age > 6
+{ age: 7, id: indexed:7, kind: 1, name: 'n7' }
+{ age: 8, id: indexed:8, kind: 2, name: 'n8' }
+{ age: 7, id: indexed:16, kind: 1, name: 'n16' }
+{ age: 8, id: indexed:17, kind: 2, name: 'n17' }
+{ age: 7, id: indexed:25, kind: 1, name: 'n25' }
+{ age: 8, id: indexed:26, kind: 2, name: 'n26' }
+{ age: 7, id: indexed:34, kind: 1, name: 'n34' }
+{ age: 8, id: indexed:35, kind: 2, name: 'n35' }
+{ age: 7, id: indexed:43, kind: 1, name: 'n43' }
+{ age: 8, id: indexed:44, kind: 2, name: 'n44' }
+{ age: 7, id: indexed:52, kind: 1, name: 'n52' }
+{ age: 8, id: indexed:53, kind: 2, name: 'n53' }
+{ age: [3, 4], id: indexed:tags, name: 'tags' }
+### SELECT * FROM indexed WHERE age >= 2 AND age < 4 AND kind = 1
+(no rows)
+### SELECT id FROM indexed WHERE name = 'n7'
+{ id: indexed:7 }
+### SELECT * FROM indexed WHERE name > 'n5'
+{ age: 5, id: indexed:50, kind: 2, name: 'n50' }
+{ age: 6, id: indexed:51, kind: 0, name: 'n51' }
+{ age: 7, id: indexed:52, kind: 1, name: 'n52' }
+{ age: 8, id: indexed:53, kind: 2, name: 'n53' }
+{ age: 0, id: indexed:54, kind: 0, name: 'n54' }
+{ age: 1, id: indexed:55, kind: 1, name: 'n55' }
+{ age: 2, id: indexed:56, kind: 2, name: 'n56' }
+{ age: 3, id: indexed:57, kind: 0, name: 'n57' }
+{ age: 4, id: indexed:58, kind: 1, name: 'n58' }
+{ age: 5, id: indexed:59, kind: 2, name: 'n59' }
+{ age: 6, id: indexed:6, kind: 0, name: 'n6' }
+{ age: 6, id: indexed:60, kind: 0, name: 'n60' }
+{ age: 7, id: indexed:7, kind: 1, name: 'n7' }
+{ age: 8, id: indexed:8, kind: 2, name: 'n8' }
+{ age: 0, id: indexed:9, kind: 0, name: 'n9' }
+{ age: [3, 4], id: indexed:tags, name: 'tags' }
+### SELECT * FROM indexed WHERE kind = 2 AND age > 4
+{ age: 5, id: indexed:5, kind: 2, name: 'n5' }
+{ age: 5, id: indexed:14, kind: 2, name: 'n14' }
+{ age: 5, id: indexed:23, kind: 2, name: 'n23' }
+{ age: 5, id: indexed:32, kind: 2, name: 'n32' }
+{ age: 5, id: indexed:41, kind: 2, name: 'n41' }
+{ age: 5, id: indexed:50, kind: 2, name: 'n50' }
+{ age: 5, id: indexed:59, kind: 2, name: 'n59' }
+{ age: 8, id: indexed:8, kind: 2, name: 'n8' }
+{ age: 8, id: indexed:17, kind: 2, name: 'n17' }
+{ age: 8, id: indexed:26, kind: 2, name: 'n26' }
+{ age: 8, id: indexed:35, kind: 2, name: 'n35' }
+{ age: 8, id: indexed:44, kind: 2, name: 'n44' }
+{ age: 8, id: indexed:53, kind: 2, name: 'n53' }
+### SELECT id, age FROM indexed ORDER BY age
+{ age: NONE, id: indexed:none }
+{ age: 0, id: indexed:9 }
+{ age: 0, id: indexed:18 }
+{ age: 0, id: indexed:27 }
+{ age: 0, id: indexed:36 }
+{ age: 0, id: indexed:45 }
+... 62 rows, digest ff249cd244ca4c90 ...
+{ age: 8, id: indexed:17 }
+{ age: 8, id: indexed:26 }
+{ age: 8, id: indexed:35 }
+{ age: 8, id: indexed:44 }
+{ age: 8, id: indexed:53 }
+{ age: [3, 4], id: indexed:tags }
+### SELECT kind AS age, id FROM indexed ORDER BY age, id
+{ age: NONE, id: indexed:tags }
+{ age: 0, id: indexed:3 }
+{ age: 0, id: indexed:6 }
+{ age: 0, id: indexed:9 }
+{ age: 0, id: indexed:12 }
+{ age: 0, id: indexed:15 }
+... 62 rows, digest aafcdec4c516702b ...
+{ age: 2, id: indexed:44 }
+{ age: 2, id: indexed:47 }
+{ age: 2, id: indexed:50 }
+{ age: 2, id: indexed:53 }
+{ age: 2, id: indexed:56 }
+{ age: 2, id: indexed:59 }
+### SELECT age AS age, id FROM indexed ORDER BY age DESC
+{ age: [3, 4], id: indexed:tags }
+{ age: 8, id: indexed:8 }
+{ age: 8, id: indexed:17 }
+{ age: 8, id: indexed:26 }
+{ age: 8, id: indexed:35 }
+{ age: 8, id: indexed:44 }
+... 62 rows, digest 5f80f16fcad4ab8e ...
+{ age: 0, id: indexed:18 }
+{ age: 0, id: indexed:27 }
+{ age: 0, id: indexed:36 }
+{ age: 0, id: indexed:45 }
+{ age: 0, id: indexed:54 }
+{ age: NONE, id: indexed:none }
+### SELECT id, age FROM indexed ORDER BY age DESC LIMIT 7
+{ age: [3, 4], id: indexed:tags }
+{ age: 8, id: indexed:8 }
+{ age: 8, id: indexed:17 }
+{ age: 8, id: indexed:26 }
+{ age: 8, id: indexed:35 }
+{ age: 8, id: indexed:44 }
+{ age: 8, id: indexed:53 }
+### SELECT id, age FROM indexed WHERE age > 2 ORDER BY age DESC LIMIT 5 START 2
+{ age: 8, id: indexed:17 }
+{ age: 8, id: indexed:26 }
+{ age: 8, id: indexed:35 }
+{ age: 8, id: indexed:44 }
+{ age: 8, id: indexed:53 }
+### SELECT id FROM indexed WHERE kind = 1 ORDER BY age DESC
+{ id: indexed:52 }
+{ id: indexed:43 }
+{ id: indexed:34 }
+{ id: indexed:25 }
+{ id: indexed:16 }
+{ id: indexed:7 }
+{ id: indexed:58 }
+{ id: indexed:49 }
+{ id: indexed:40 }
+{ id: indexed:31 }
+{ id: indexed:22 }
+{ id: indexed:13 }
+{ id: indexed:4 }
+{ id: indexed:55 }
+{ id: indexed:46 }
+{ id: indexed:37 }
+{ id: indexed:28 }
+{ id: indexed:19 }
+{ id: indexed:10 }
+{ id: indexed:1 }
+{ id: indexed:none }
+### SELECT id FROM indexed WHERE age = 4 LIMIT 3
+{ id: indexed:4 }
+{ id: indexed:13 }
+{ id: indexed:22 }
+### SELECT * FROM indexed WHERE age = 3 AND name != 'n3'
+{ age: 3, id: indexed:12, kind: 0, name: 'n12' }
+{ age: 3, id: indexed:21, kind: 0, name: 'n21' }
+{ age: 3, id: indexed:30, kind: 0, name: 'n30' }
+{ age: 3, id: indexed:39, kind: 0, name: 'n39' }
+{ age: 3, id: indexed:48, kind: 0, name: 'n48' }
+{ age: 3, id: indexed:57, kind: 0, name: 'n57' }
+### SELECT VALUE name FROM indexed WHERE age = NONE
+NONE
+### SELECT count() FROM indexed WHERE age = 3 GROUP ALL
+{ count: 7 }
+### SELECT math::sum(age) AS s FROM indexed WHERE age > 5 GROUP ALL
+{ s: 132 }
+### SELECT kind, count() FROM indexed WHERE age > 5 GROUP BY kind
+{ count: 1, kind: NONE }
+{ count: 7, kind: 0 }
+{ count: 6, kind: 1 }
+{ count: 6, kind: 2 }
+### SELECT * FROM indexed WITH NOINDEX WHERE age = 3
+{ age: 3, id: indexed:3, kind: 0, name: 'n3' }
+{ age: 3, id: indexed:12, kind: 0, name: 'n12' }
+{ age: 3, id: indexed:21, kind: 0, name: 'n21' }
+{ age: 3, id: indexed:30, kind: 0, name: 'n30' }
+{ age: 3, id: indexed:39, kind: 0, name: 'n39' }
+{ age: 3, id: indexed:48, kind: 0, name: 'n48' }
+{ age: 3, id: indexed:57, kind: 0, name: 'n57' }
+### SELECT * FROM indexed WITH INDEX by_pair WHERE kind = 1 AND age = 4
+{ age: 4, id: indexed:4, kind: 1, name: 'n4' }
+{ age: 4, id: indexed:13, kind: 1, name: 'n13' }
+{ age: 4, id: indexed:22, kind: 1, name: 'n22' }
+{ age: 4, id: indexed:31, kind: 1, name: 'n31' }
+{ age: 4, id: indexed:40, kind: 1, name: 'n40' }
+{ age: 4, id: indexed:49, kind: 1, name: 'n49' }
+{ age: 4, id: indexed:58, kind: 1, name: 'n58' }
+### SELECT * FROM indexed WHERE id = indexed:5 AND age = 5
+{ age: 5, id: indexed:5, kind: 2, name: 'n5' }
+### SELECT * FROM person, indexed WHERE age = 3
+{ age: 3, id: indexed:3, kind: 0, name: 'n3' }
+{ age: 3, id: indexed:12, kind: 0, name: 'n12' }
+{ age: 3, id: indexed:21, kind: 0, name: 'n21' }
+{ age: 3, id: indexed:30, kind: 0, name: 'n30' }
+{ age: 3, id: indexed:39, kind: 0, name: 'n39' }
+{ age: 3, id: indexed:48, kind: 0, name: 'n48' }
+{ age: 3, id: indexed:57, kind: 0, name: 'n57' }
+### SELECT * FROM indexed WHERE age = 3 OR age = 4
+{ age: 3, id: indexed:3, kind: 0, name: 'n3' }
+{ age: 3, id: indexed:12, kind: 0, name: 'n12' }
+{ age: 3, id: indexed:21, kind: 0, name: 'n21' }
+{ age: 3, id: indexed:30, kind: 0, name: 'n30' }
+{ age: 3, id: indexed:39, kind: 0, name: 'n39' }
+{ age: 3, id: indexed:48, kind: 0, name: 'n48' }
+{ age: 3, id: indexed:57, kind: 0, name: 'n57' }
+{ age: 4, id: indexed:4, kind: 1, name: 'n4' }
+{ age: 4, id: indexed:13, kind: 1, name: 'n13' }
+{ age: 4, id: indexed:22, kind: 1, name: 'n22' }
+{ age: 4, id: indexed:31, kind: 1, name: 'n31' }
+{ age: 4, id: indexed:40, kind: 1, name: 'n40' }
+{ age: 4, id: indexed:49, kind: 1, name: 'n49' }
+{ age: 4, id: indexed:58, kind: 1, name: 'n58' }
+### SELECT * FROM indexed WHERE age IN [3, 4]
+{ age: 3, id: indexed:3, kind: 0, name: 'n3' }
+{ age: 3, id: indexed:12, kind: 0, name: 'n12' }
+{ age: 3, id: indexed:21, kind: 0, name: 'n21' }
+{ age: 3, id: indexed:30, kind: 0, name: 'n30' }
+{ age: 3, id: indexed:39, kind: 0, name: 'n39' }
+{ age: 3, id: indexed:48, kind: 0, name: 'n48' }
+{ age: 3, id: indexed:57, kind: 0, name: 'n57' }
+{ age: 4, id: indexed:4, kind: 1, name: 'n4' }
+{ age: 4, id: indexed:13, kind: 1, name: 'n13' }
+{ age: 4, id: indexed:22, kind: 1, name: 'n22' }
+{ age: 4, id: indexed:31, kind: 1, name: 'n31' }
+{ age: 4, id: indexed:40, kind: 1, name: 'n40' }
+{ age: 4, id: indexed:49, kind: 1, name: 'n49' }
+{ age: 4, id: indexed:58, kind: 1, name: 'n58' }
+### SELECT id FROM indexed WHERE age IN [3, 4] AND name != 'n12'
+{ id: indexed:3 }
+{ id: indexed:21 }
+{ id: indexed:30 }
+{ id: indexed:39 }
+{ id: indexed:48 }
+{ id: indexed:57 }
+{ id: indexed:4 }
+{ id: indexed:13 }
+{ id: indexed:22 }
+{ id: indexed:31 }
+{ id: indexed:40 }
+{ id: indexed:49 }
+{ id: indexed:58 }
+### SELECT id FROM indexed WHERE age = 3 OR age = 5 ORDER BY id DESC
+{ id: indexed:59 }
+{ id: indexed:57 }
+{ id: indexed:50 }
+{ id: indexed:48 }
+{ id: indexed:41 }
+{ id: indexed:39 }
+{ id: indexed:32 }
+{ id: indexed:30 }
+{ id: indexed:23 }
+{ id: indexed:21 }
+{ id: indexed:14 }
+{ id: indexed:12 }
+{ id: indexed:5 }
+{ id: indexed:3 }
+### SELECT id FROM indexed WHERE age = 3 OR age = 5 ORDER BY id LIMIT 4
+{ id: indexed:3 }
+{ id: indexed:5 }
+{ id: indexed:12 }
+{ id: indexed:14 }
+### SELECT id, age FROM indexed WHERE kind IN [1, 2] ORDER BY age
+{ age: NONE, id: indexed:none }
+{ age: 1, id: indexed:1 }
+{ age: 1, id: indexed:10 }
+{ age: 1, id: indexed:19 }
+{ age: 1, id: indexed:28 }
+{ age: 1, id: indexed:37 }
+... 41 rows, digest 94d08b1201e59f60 ...
+{ age: 8, id: indexed:8 }
+{ age: 8, id: indexed:17 }
+{ age: 8, id: indexed:26 }
+{ age: 8, id: indexed:35 }
+{ age: 8, id: indexed:44 }
+{ age: 8, id: indexed:53 }
+### SELECT id, age FROM indexed WHERE kind IN [1, 2] ORDER BY age DESC LIMIT 5
+{ age: 8, id: indexed:53 }
+{ age: 8, id: indexed:44 }
+{ age: 8, id: indexed:35 }
+{ age: 8, id: indexed:26 }
+{ age: 8, id: indexed:17 }
+### SELECT id FROM indexed WHERE age CONTAINSANY [3, 4]
+{ id: indexed:tags }
+### SELECT id, age FROM indexed WHERE age CONTAINSANY [3, 4] ORDER BY age
+{ age: [3, 4], id: indexed:tags }
+### SELECT count() FROM indexed WHERE age = 3 OR age = 4 GROUP ALL
+{ count: 14 }
+### SELECT * FROM indexed WHERE kind = 2 AND age = 5
+{ age: 5, id: indexed:5, kind: 2, name: 'n5' }
+{ age: 5, id: indexed:14, kind: 2, name: 'n14' }
+{ age: 5, id: indexed:23, kind: 2, name: 'n23' }
+{ age: 5, id: indexed:32, kind: 2, name: 'n32' }
+{ age: 5, id: indexed:41, kind: 2, name: 'n41' }
+{ age: 5, id: indexed:50, kind: 2, name: 'n50' }
+{ age: 5, id: indexed:59, kind: 2, name: 'n59' }
+### SELECT id FROM indexed WHERE age = 3 OR name = 'n4' OR age = 5
+{ id: indexed:3 }
+{ id: indexed:4 }
+{ id: indexed:5 }
+{ id: indexed:12 }
+{ id: indexed:14 }
+{ id: indexed:21 }
+{ id: indexed:23 }
+{ id: indexed:30 }
+{ id: indexed:32 }
+{ id: indexed:39 }
+{ id: indexed:41 }
+{ id: indexed:48 }
+{ id: indexed:50 }
+{ id: indexed:57 }
+{ id: indexed:59 }
+### SELECT id FROM indexed WHERE age > 2 AND kind = 1 AND name != 'n4'
+{ id: indexed:13 }
+{ id: indexed:22 }
+{ id: indexed:31 }
+{ id: indexed:40 }
+{ id: indexed:49 }
+{ id: indexed:58 }
+{ id: indexed:7 }
+{ id: indexed:16 }
+{ id: indexed:25 }
+{ id: indexed:34 }
+{ id: indexed:43 }
+{ id: indexed:52 }
+### SELECT id FROM indexed WHERE age = 3 AND !(kind = 0)
+(no rows)
+### SELECT id, name FROM indexed WHERE age = 4 OR name = 'n9' ORDER BY name LIMIT 3
+{ id: indexed:13, name: 'n13' }
+{ id: indexed:22, name: 'n22' }
+{ id: indexed:31, name: 'n31' }
+### SELECT count() FROM indexed WHERE kind = 2 AND age = 5 GROUP ALL
+{ count: 7 }
+### SELECT id, kind, age FROM pairs WHERE kind IN [1, 2] ORDER BY age
+{ age: 0, id: pairs:33, kind: 1 }
+{ age: 0, id: pairs:22, kind: 2 }
+{ age: 1, id: pairs:30, kind: 2 }
+{ age: 2, id: pairs:5, kind: 1 }
+{ age: 2, id: pairs:38, kind: 2 }
+{ age: 3, id: pairs:13, kind: 1 }
+{ age: 3, id: pairs:2, kind: 2 }
+{ age: 4, id: pairs:21, kind: 1 }
+{ age: 4, id: pairs:10, kind: 2 }
+{ age: 5, id: pairs:29, kind: 1 }
+{ age: 5, id: pairs:18, kind: 2 }
+{ age: 6, id: pairs:37, kind: 1 }
+{ age: 6, id: pairs:26, kind: 2 }
+{ age: 7, id: pairs:1, kind: 1 }
+{ age: 7, id: pairs:34, kind: 2 }
+{ age: 8, id: pairs:9, kind: 1 }
+{ age: 9, id: pairs:17, kind: 1 }
+{ age: 9, id: pairs:6, kind: 2 }
+{ age: 10, id: pairs:25, kind: 1 }
+{ age: 10, id: pairs:14, kind: 2 }
+### SELECT count() FROM person GROUP ALL LIMIT 1
+{ count: 5 }
+### SELECT count() FROM person GROUP ALL LIMIT 1 START 1
+(no rows)
+### SELECT VALUE count() FROM person GROUP ALL #2
+5
+### SELECT count() AS c, count() AS d FROM big GROUP ALL
+{ c: 3000, d: 3000 }
+### SELECT count() FROM big:10..20 GROUP ALL
+{ count: 10 }
+### SELECT count() FROM person:1 GROUP ALL
+{ count: 1 }
+### SELECT count() FROM counted GROUP ALL
+{ count: 30 }
+### SELECT count() FROM counted WHERE n < 5 GROUP ALL
+{ count: 15 }
+### SELECT count() FROM counted WHERE n = 3 GROUP ALL
+{ count: 3 }
+### SELECT count() FROM counted WHERE n > 6 GROUP ALL
+{ count: 9 }
+### SELECT count() FROM counted WHERE n = 3 AND m = 1 GROUP ALL
+{ count: 1 }
+### SELECT count() FROM counted WITH NOINDEX WHERE n = 3 GROUP ALL
+{ count: 3 }
+### SELECT count() FROM indexed WHERE name != 'x' GROUP ALL
+{ count: 62 }
+### SELECT n, count() AS c FROM big GROUP BY n ORDER BY c DESC LIMIT 2
+{ c: 429, n: 1 }
+{ c: 429, n: 2 }
+### SELECT n, count() AS c FROM big GROUP BY n ORDER BY n DESC
+{ c: 428, n: 6 }
+{ c: 428, n: 5 }
+{ c: 429, n: 4 }
+{ c: 429, n: 3 }
+{ c: 429, n: 2 }
+{ c: 429, n: 1 }
+{ c: 428, n: 0 }
+### SELECT n, count() AS c FROM big GROUP BY n LIMIT 3 START 1
+{ c: 429, n: 1 }
+{ c: 429, n: 2 }
+{ c: 429, n: 3 }
+### SELECT n, count() AS c OMIT c FROM big GROUP BY n
+{ n: 0 }
+{ n: 1 }
+{ n: 2 }
+{ n: 3 }
+{ n: 4 }
+{ n: 5 }
+{ n: 6 }
+### SELECT n, math::sum(i) AS s FROM big WHERE i > 100 GROUP BY n ORDER BY s LIMIT 3
+{ n: 5, s: 641079 }
+{ n: 6, s: 641493 }
+{ n: 0, s: 641907 }
+### SELECT city, count() AS c FROM person GROUP BY city ORDER BY c
+{ c: 1, city: 'x' }
+{ c: 4, city: NONE }
+### SELECT n, count() AS c FROM big GROUP BY n ORDER BY c DESC, n DESC LIMIT 4
+{ c: 429, n: 4 }
+{ c: 429, n: 3 }
+{ c: 429, n: 2 }
+{ c: 429, n: 1 }
+### SELECT count() AS c FROM big GROUP ALL LIMIT 0
+(no rows)
+### SELECT city, 'x' AS label, count() FROM person GROUP BY city
+{ city: NONE, count: 4, label: 'x' }
+{ city: 'x', count: 1, label: 'x' }
+### SELECT count(age > 18) AS c FROM person GROUP ALL
+{ c: 3 }
+### SELECT math::sum(i * 2) AS s, count(n = 3) AS t FROM big GROUP ALL
+{ s: 9003000, t: 429 }
+### SELECT n, math::max(i % 100) AS m FROM big GROUP BY n
+{ m: 99, n: 0 }
+{ m: 99, n: 1 }
+{ m: 99, n: 2 }
+{ m: 99, n: 3 }
+{ m: 99, n: 4 }
+{ m: 99, n: 5 }
+{ m: 99, n: 6 }
+### SELECT city, name FROM person GROUP BY city
+{ city: NONE, name: ['ann', 'Bob', 'dan', 'Eve'] }
+{ city: 'x', name: ['cat'] }
+### SELECT n, i FROM big GROUP BY n
+{ i: [7, 14, 21, 28, 35, 42, 49, 56, 63, 70, 77, 84, 91, 98, 105, 112, 119, 126, 133, 140, 147, 154, 161, 168, 175, 182, 189, 196, 203, 210, 217, 224, 231, 238, 245, 252, 259, 266, 273, 280, 287, 294, 301, 308, 315, 322, 329, 336, 343, 350, 357, 364, 371, 378, 385, 392, 399, 406, 413, 420, 427, 434, 441, 448, 455, 462, 469, 476, 483, 490, 497, 504, 511, 518, 525, 532, 539, 546, 553, 560, 567, 574, 581, 588, 595, 602, 609, 616, 623, 630, 637, 644, 651, 658, 665, 672, 679, 686, 693, 700, 707, 714, 721, 728, 735, 742, 749, 756, 763, 770, 777, 784, 791, 798, 805, 812, 819, 826, 833, 840, 847, 854, 861, 868, 875, 882, 889, 896, 903, 910, 917, 924, 931, 938, 945, 952, 959, 966, 973, 980, 987, 994, 1001, 1008, 1015, 1022, 1029, 1036, 1043, 1050, 1057, 1064, 1071, 1078, 1085, 1092, 1099, 1106, 1113, 1120, 1127, 1134, 1141, 1148, 1155, 1162, 1169, 1176, 1183, 1190, 1197, 1204, 1211, 1218, 1225, 1232, 1239, 1246, 1253, 1260, 1267, 1274, 1281, 1288, 1295, 1302, 1309, 1316, 1323, 1330, 1337, 1344, 1351, 1358, 1365, 1372, 1379, 1386, 1393, 1400, 1407, 1414, 1421, 1428, 1435, 1442, 1449, 1456, 1463, 1470, 1477, 1484, 1491, 1498, 1505, 1512, 1519, 1526, 1533, 1540, 1547, 1554, 1561, 1568, 1575, 1582, 1589, 1596, 1603, 1610, 1617, 1624, 1631, 1638, 1645, 1652, 1659, 1666, 1673, 1680, 1687, 1694, 1701, 1708, 1715, 1722, 1729, 1736, 1743, 1750, 1757, 1764, 1771, 1778, 1785, 1792, 1799, 1806, 1813, 1820, 1827, 1834, 1841, 1848, 1855, 1862, 1869, 1876, 1883, 1890, 1897, 1904, 1911, 1918, 1925, 1932, 1939, 1946, 1953, 1960, 1967, 1974, 1981, 1988, 1995, 2002, 2009, 2016, 2023, 2030, 2037, 2044, 2051, 2058, 2065, 2072, 2079, 2086, 2093, 2100, 2107, 2114, 2121, 2128, 2135, 2142, 2149, 2156, 2163, 2170, 2177, 2184, 2191, 2198, 2205, 2212, 2219, 2226, 2233, 2240, 2247, 2254, 2261, 2268, 2275, 2282, 2289, 2296, 2303, 2310, 2317, 2324, 2331, 2338, 2345, 2352, 2359, 2366, 2373, 2380, 2387, 2394, 2401, 2408, 2415, 2422, 2429, 2436, 2443, 2450, 2457, 2464, 2471, 2478, 2485, 2492, 2499, 2506, 2513, 2520, 2527, 2534, 2541, 2548, 2555, 2562, 2569, 2576, 2583, 2590, 2597, 2604, 2611, 2618, 2625, 2632, 2639, 2646, 2653, 2660, 2667, 2674, 2681, 2688, 2695, 2702, 2709, 2716, 2723, 2730, 2737, 2744, 2751, 2758, 2765, 2772, 2779, 2786, 2793, 2800, 2807, 2814, 2821, 2828, 2835, 2842, 2849, 2856, 2863, 2870, 2877, 2884, 2891, 2898, 2905, 2912, 2919, 2926, 2933, 2940, 2947, 2954, 2961, 2968, 2975, 2982, 2989, 2996], n: 0 }
+{ i: [1, 8, 15, 22, 29, 36, 43, 50, 57, 64, 71, 78, 85, 92, 99, 106, 113, 120, 127, 134, 141, 148, 155, 162, 169, 176, 183, 190, 197, 204, 211, 218, 225, 232, 239, 246, 253, 260, 267, 274, 281, 288, 295, 302, 309, 316, 323, 330, 337, 344, 351, 358, 365, 372, 379, 386, 393, 400, 407, 414, 421, 428, 435, 442, 449, 456, 463, 470, 477, 484, 491, 498, 505, 512, 519, 526, 533, 540, 547, 554, 561, 568, 575, 582, 589, 596, 603, 610, 617, 624, 631, 638, 645, 652, 659, 666, 673, 680, 687, 694, 701, 708, 715, 722, 729, 736, 743, 750, 757, 764, 771, 778, 785, 792, 799, 806, 813, 820, 827, 834, 841, 848, 855, 862, 869, 876, 883, 890, 897, 904, 911, 918, 925, 932, 939, 946, 953, 960, 967, 974, 981, 988, 995, 1002, 1009, 1016, 1023, 1030, 1037, 1044, 1051, 1058, 1065, 1072, 1079, 1086, 1093, 1100, 1107, 1114, 1121, 1128, 1135, 1142, 1149, 1156, 1163, 1170, 1177, 1184, 1191, 1198, 1205, 1212, 1219, 1226, 1233, 1240, 1247, 1254, 1261, 1268, 1275, 1282, 1289, 1296, 1303, 1310, 1317, 1324, 1331, 1338, 1345, 1352, 1359, 1366, 1373, 1380, 1387, 1394, 1401, 1408, 1415, 1422, 1429, 1436, 1443, 1450, 1457, 1464, 1471, 1478, 1485, 1492, 1499, 1506, 1513, 1520, 1527, 1534, 1541, 1548, 1555, 1562, 1569, 1576, 1583, 1590, 1597, 1604, 1611, 1618, 1625, 1632, 1639, 1646, 1653, 1660, 1667, 1674, 1681, 1688, 1695, 1702, 1709, 1716, 1723, 1730, 1737, 1744, 1751, 1758, 1765, 1772, 1779, 1786, 1793, 1800, 1807, 1814, 1821, 1828, 1835, 1842, 1849, 1856, 1863, 1870, 1877, 1884, 1891, 1898, 1905, 1912, 1919, 1926, 1933, 1940, 1947, 1954, 1961, 1968, 1975, 1982, 1989, 1996, 2003, 2010, 2017, 2024, 2031, 2038, 2045, 2052, 2059, 2066, 2073, 2080, 2087, 2094, 2101, 2108, 2115, 2122, 2129, 2136, 2143, 2150, 2157, 2164, 2171, 2178, 2185, 2192, 2199, 2206, 2213, 2220, 2227, 2234, 2241, 2248, 2255, 2262, 2269, 2276, 2283, 2290, 2297, 2304, 2311, 2318, 2325, 2332, 2339, 2346, 2353, 2360, 2367, 2374, 2381, 2388, 2395, 2402, 2409, 2416, 2423, 2430, 2437, 2444, 2451, 2458, 2465, 2472, 2479, 2486, 2493, 2500, 2507, 2514, 2521, 2528, 2535, 2542, 2549, 2556, 2563, 2570, 2577, 2584, 2591, 2598, 2605, 2612, 2619, 2626, 2633, 2640, 2647, 2654, 2661, 2668, 2675, 2682, 2689, 2696, 2703, 2710, 2717, 2724, 2731, 2738, 2745, 2752, 2759, 2766, 2773, 2780, 2787, 2794, 2801, 2808, 2815, 2822, 2829, 2836, 2843, 2850, 2857, 2864, 2871, 2878, 2885, 2892, 2899, 2906, 2913, 2920, 2927, 2934, 2941, 2948, 2955, 2962, 2969, 2976, 2983, 2990, 2997], n: 1 }
+{ i: [2, 9, 16, 23, 30, 37, 44, 51, 58, 65, 72, 79, 86, 93, 100, 107, 114, 121, 128, 135, 142, 149, 156, 163, 170, 177, 184, 191, 198, 205, 212, 219, 226, 233, 240, 247, 254, 261, 268, 275, 282, 289, 296, 303, 310, 317, 324, 331, 338, 345, 352, 359, 366, 373, 380, 387, 394, 401, 408, 415, 422, 429, 436, 443, 450, 457, 464, 471, 478, 485, 492, 499, 506, 513, 520, 527, 534, 541, 548, 555, 562, 569, 576, 583, 590, 597, 604, 611, 618, 625, 632, 639, 646, 653, 660, 667, 674, 681, 688, 695, 702, 709, 716, 723, 730, 737, 744, 751, 758, 765, 772, 779, 786, 793, 800, 807, 814, 821, 828, 835, 842, 849, 856, 863, 870, 877, 884, 891, 898, 905, 912, 919, 926, 933, 940, 947, 954, 961, 968, 975, 982, 989, 996, 1003, 1010, 1017, 1024, 1031, 1038, 1045, 1052, 1059, 1066, 1073, 1080, 1087, 1094, 1101, 1108, 1115, 1122, 1129, 1136, 1143, 1150, 1157, 1164, 1171, 1178, 1185, 1192, 1199, 1206, 1213, 1220, 1227, 1234, 1241, 1248, 1255, 1262, 1269, 1276, 1283, 1290, 1297, 1304, 1311, 1318, 1325, 1332, 1339, 1346, 1353, 1360, 1367, 1374, 1381, 1388, 1395, 1402, 1409, 1416, 1423, 1430, 1437, 1444, 1451, 1458, 1465, 1472, 1479, 1486, 1493, 1500, 1507, 1514, 1521, 1528, 1535, 1542, 1549, 1556, 1563, 1570, 1577, 1584, 1591, 1598, 1605, 1612, 1619, 1626, 1633, 1640, 1647, 1654, 1661, 1668, 1675, 1682, 1689, 1696, 1703, 1710, 1717, 1724, 1731, 1738, 1745, 1752, 1759, 1766, 1773, 1780, 1787, 1794, 1801, 1808, 1815, 1822, 1829, 1836, 1843, 1850, 1857, 1864, 1871, 1878, 1885, 1892, 1899, 1906, 1913, 1920, 1927, 1934, 1941, 1948, 1955, 1962, 1969, 1976, 1983, 1990, 1997, 2004, 2011, 2018, 2025, 2032, 2039, 2046, 2053, 2060, 2067, 2074, 2081, 2088, 2095, 2102, 2109, 2116, 2123, 2130, 2137, 2144, 2151, 2158, 2165, 2172, 2179, 2186, 2193, 2200, 2207, 2214, 2221, 2228, 2235, 2242, 2249, 2256, 2263, 2270, 2277, 2284, 2291, 2298, 2305, 2312, 2319, 2326, 2333, 2340, 2347, 2354, 2361, 2368, 2375, 2382, 2389, 2396, 2403, 2410, 2417, 2424, 2431, 2438, 2445, 2452, 2459, 2466, 2473, 2480, 2487, 2494, 2501, 2508, 2515, 2522, 2529, 2536, 2543, 2550, 2557, 2564, 2571, 2578, 2585, 2592, 2599, 2606, 2613, 2620, 2627, 2634, 2641, 2648, 2655, 2662, 2669, 2676, 2683, 2690, 2697, 2704, 2711, 2718, 2725, 2732, 2739, 2746, 2753, 2760, 2767, 2774, 2781, 2788, 2795, 2802, 2809, 2816, 2823, 2830, 2837, 2844, 2851, 2858, 2865, 2872, 2879, 2886, 2893, 2900, 2907, 2914, 2921, 2928, 2935, 2942, 2949, 2956, 2963, 2970, 2977, 2984, 2991, 2998], n: 2 }
+{ i: [3, 10, 17, 24, 31, 38, 45, 52, 59, 66, 73, 80, 87, 94, 101, 108, 115, 122, 129, 136, 143, 150, 157, 164, 171, 178, 185, 192, 199, 206, 213, 220, 227, 234, 241, 248, 255, 262, 269, 276, 283, 290, 297, 304, 311, 318, 325, 332, 339, 346, 353, 360, 367, 374, 381, 388, 395, 402, 409, 416, 423, 430, 437, 444, 451, 458, 465, 472, 479, 486, 493, 500, 507, 514, 521, 528, 535, 542, 549, 556, 563, 570, 577, 584, 591, 598, 605, 612, 619, 626, 633, 640, 647, 654, 661, 668, 675, 682, 689, 696, 703, 710, 717, 724, 731, 738, 745, 752, 759, 766, 773, 780, 787, 794, 801, 808, 815, 822, 829, 836, 843, 850, 857, 864, 871, 878, 885, 892, 899, 906, 913, 920, 927, 934, 941, 948, 955, 962, 969, 976, 983, 990, 997, 1004, 1011, 1018, 1025, 1032, 1039, 1046, 1053, 1060, 1067, 1074, 1081, 1088, 1095, 1102, 1109, 1116, 1123, 1130, 1137, 1144, 1151, 1158, 1165, 1172, 1179, 1186, 1193, 1200, 1207, 1214, 1221, 1228, 1235, 1242, 1249, 1256, 1263, 1270, 1277, 1284, 1291, 1298, 1305, 1312, 1319, 1326, 1333, 1340, 1347, 1354, 1361, 1368, 1375, 1382, 1389, 1396, 1403, 1410, 1417, 1424, 1431, 1438, 1445, 1452, 1459, 1466, 1473, 1480, 1487, 1494, 1501, 1508, 1515, 1522, 1529, 1536, 1543, 1550, 1557, 1564, 1571, 1578, 1585, 1592, 1599, 1606, 1613, 1620, 1627, 1634, 1641, 1648, 1655, 1662, 1669, 1676, 1683, 1690, 1697, 1704, 1711, 1718, 1725, 1732, 1739, 1746, 1753, 1760, 1767, 1774, 1781, 1788, 1795, 1802, 1809, 1816, 1823, 1830, 1837, 1844, 1851, 1858, 1865, 1872, 1879, 1886, 1893, 1900, 1907, 1914, 1921, 1928, 1935, 1942, 1949, 1956, 1963, 1970, 1977, 1984, 1991, 1998, 2005, 2012, 2019, 2026, 2033, 2040, 2047, 2054, 2061, 2068, 2075, 2082, 2089, 2096, 2103, 2110, 2117, 2124, 2131, 2138, 2145, 2152, 2159, 2166, 2173, 2180, 2187, 2194, 2201, 2208, 2215, 2222, 2229, 2236, 2243, 2250, 2257, 2264, 2271, 2278, 2285, 2292, 2299, 2306, 2313, 2320, 2327, 2334, 2341, 2348, 2355, 2362, 2369, 2376, 2383, 2390, 2397, 2404, 2411, 2418, 2425, 2432, 2439, 2446, 2453, 2460, 2467, 2474, 2481, 2488, 2495, 2502, 2509, 2516, 2523, 2530, 2537, 2544, 2551, 2558, 2565, 2572, 2579, 2586, 2593, 2600, 2607, 2614, 2621, 2628, 2635, 2642, 2649, 2656, 2663, 2670, 2677, 2684, 2691, 2698, 2705, 2712, 2719, 2726, 2733, 2740, 2747, 2754, 2761, 2768, 2775, 2782, 2789, 2796, 2803, 2810, 2817, 2824, 2831, 2838, 2845, 2852, 2859, 2866, 2873, 2880, 2887, 2894, 2901, 2908, 2915, 2922, 2929, 2936, 2943, 2950, 2957, 2964, 2971, 2978, 2985, 2992, 2999], n: 3 }
+{ i: [4, 11, 18, 25, 32, 39, 46, 53, 60, 67, 74, 81, 88, 95, 102, 109, 116, 123, 130, 137, 144, 151, 158, 165, 172, 179, 186, 193, 200, 207, 214, 221, 228, 235, 242, 249, 256, 263, 270, 277, 284, 291, 298, 305, 312, 319, 326, 333, 340, 347, 354, 361, 368, 375, 382, 389, 396, 403, 410, 417, 424, 431, 438, 445, 452, 459, 466, 473, 480, 487, 494, 501, 508, 515, 522, 529, 536, 543, 550, 557, 564, 571, 578, 585, 592, 599, 606, 613, 620, 627, 634, 641, 648, 655, 662, 669, 676, 683, 690, 697, 704, 711, 718, 725, 732, 739, 746, 753, 760, 767, 774, 781, 788, 795, 802, 809, 816, 823, 830, 837, 844, 851, 858, 865, 872, 879, 886, 893, 900, 907, 914, 921, 928, 935, 942, 949, 956, 963, 970, 977, 984, 991, 998, 1005, 1012, 1019, 1026, 1033, 1040, 1047, 1054, 1061, 1068, 1075, 1082, 1089, 1096, 1103, 1110, 1117, 1124, 1131, 1138, 1145, 1152, 1159, 1166, 1173, 1180, 1187, 1194, 1201, 1208, 1215, 1222, 1229, 1236, 1243, 1250, 1257, 1264, 1271, 1278, 1285, 1292, 1299, 1306, 1313, 1320, 1327, 1334, 1341, 1348, 1355, 1362, 1369, 1376, 1383, 1390, 1397, 1404, 1411, 1418, 1425, 1432, 1439, 1446, 1453, 1460, 1467, 1474, 1481, 1488, 1495, 1502, 1509, 1516, 1523, 1530, 1537, 1544, 1551, 1558, 1565, 1572, 1579, 1586, 1593, 1600, 1607, 1614, 1621, 1628, 1635, 1642, 1649, 1656, 1663, 1670, 1677, 1684, 1691, 1698, 1705, 1712, 1719, 1726, 1733, 1740, 1747, 1754, 1761, 1768, 1775, 1782, 1789, 1796, 1803, 1810, 1817, 1824, 1831, 1838, 1845, 1852, 1859, 1866, 1873, 1880, 1887, 1894, 1901, 1908, 1915, 1922, 1929, 1936, 1943, 1950, 1957, 1964, 1971, 1978, 1985, 1992, 1999, 2006, 2013, 2020, 2027, 2034, 2041, 2048, 2055, 2062, 2069, 2076, 2083, 2090, 2097, 2104, 2111, 2118, 2125, 2132, 2139, 2146, 2153, 2160, 2167, 2174, 2181, 2188, 2195, 2202, 2209, 2216, 2223, 2230, 2237, 2244, 2251, 2258, 2265, 2272, 2279, 2286, 2293, 2300, 2307, 2314, 2321, 2328, 2335, 2342, 2349, 2356, 2363, 2370, 2377, 2384, 2391, 2398, 2405, 2412, 2419, 2426, 2433, 2440, 2447, 2454, 2461, 2468, 2475, 2482, 2489, 2496, 2503, 2510, 2517, 2524, 2531, 2538, 2545, 2552, 2559, 2566, 2573, 2580, 2587, 2594, 2601, 2608, 2615, 2622, 2629, 2636, 2643, 2650, 2657, 2664, 2671, 2678, 2685, 2692, 2699, 2706, 2713, 2720, 2727, 2734, 2741, 2748, 2755, 2762, 2769, 2776, 2783, 2790, 2797, 2804, 2811, 2818, 2825, 2832, 2839, 2846, 2853, 2860, 2867, 2874, 2881, 2888, 2895, 2902, 2909, 2916, 2923, 2930, 2937, 2944, 2951, 2958, 2965, 2972, 2979, 2986, 2993, 3000], n: 4 }
+{ i: [5, 12, 19, 26, 33, 40, 47, 54, 61, 68, 75, 82, 89, 96, 103, 110, 117, 124, 131, 138, 145, 152, 159, 166, 173, 180, 187, 194, 201, 208, 215, 222, 229, 236, 243, 250, 257, 264, 271, 278, 285, 292, 299, 306, 313, 320, 327, 334, 341, 348, 355, 362, 369, 376, 383, 390, 397, 404, 411, 418, 425, 432, 439, 446, 453, 460, 467, 474, 481, 488, 495, 502, 509, 516, 523, 530, 537, 544, 551, 558, 565, 572, 579, 586, 593, 600, 607, 614, 621, 628, 635, 642, 649, 656, 663, 670, 677, 684, 691, 698, 705, 712, 719, 726, 733, 740, 747, 754, 761, 768, 775, 782, 789, 796, 803, 810, 817, 824, 831, 838, 845, 852, 859, 866, 873, 880, 887, 894, 901, 908, 915, 922, 929, 936, 943, 950, 957, 964, 971, 978, 985, 992, 999, 1006, 1013, 1020, 1027, 1034, 1041, 1048, 1055, 1062, 1069, 1076, 1083, 1090, 1097, 1104, 1111, 1118, 1125, 1132, 1139, 1146, 1153, 1160, 1167, 1174, 1181, 1188, 1195, 1202, 1209, 1216, 1223, 1230, 1237, 1244, 1251, 1258, 1265, 1272, 1279, 1286, 1293, 1300, 1307, 1314, 1321, 1328, 1335, 1342, 1349, 1356, 1363, 1370, 1377, 1384, 1391, 1398, 1405, 1412, 1419, 1426, 1433, 1440, 1447, 1454, 1461, 1468, 1475, 1482, 1489, 1496, 1503, 1510, 1517, 1524, 1531, 1538, 1545, 1552, 1559, 1566, 1573, 1580, 1587, 1594, 1601, 1608, 1615, 1622, 1629, 1636, 1643, 1650, 1657, 1664, 1671, 1678, 1685, 1692, 1699, 1706, 1713, 1720, 1727, 1734, 1741, 1748, 1755, 1762, 1769, 1776, 1783, 1790, 1797, 1804, 1811, 1818, 1825, 1832, 1839, 1846, 1853, 1860, 1867, 1874, 1881, 1888, 1895, 1902, 1909, 1916, 1923, 1930, 1937, 1944, 1951, 1958, 1965, 1972, 1979, 1986, 1993, 2000, 2007, 2014, 2021, 2028, 2035, 2042, 2049, 2056, 2063, 2070, 2077, 2084, 2091, 2098, 2105, 2112, 2119, 2126, 2133, 2140, 2147, 2154, 2161, 2168, 2175, 2182, 2189, 2196, 2203, 2210, 2217, 2224, 2231, 2238, 2245, 2252, 2259, 2266, 2273, 2280, 2287, 2294, 2301, 2308, 2315, 2322, 2329, 2336, 2343, 2350, 2357, 2364, 2371, 2378, 2385, 2392, 2399, 2406, 2413, 2420, 2427, 2434, 2441, 2448, 2455, 2462, 2469, 2476, 2483, 2490, 2497, 2504, 2511, 2518, 2525, 2532, 2539, 2546, 2553, 2560, 2567, 2574, 2581, 2588, 2595, 2602, 2609, 2616, 2623, 2630, 2637, 2644, 2651, 2658, 2665, 2672, 2679, 2686, 2693, 2700, 2707, 2714, 2721, 2728, 2735, 2742, 2749, 2756, 2763, 2770, 2777, 2784, 2791, 2798, 2805, 2812, 2819, 2826, 2833, 2840, 2847, 2854, 2861, 2868, 2875, 2882, 2889, 2896, 2903, 2910, 2917, 2924, 2931, 2938, 2945, 2952, 2959, 2966, 2973, 2980, 2987, 2994], n: 5 }
+{ i: [6, 13, 20, 27, 34, 41, 48, 55, 62, 69, 76, 83, 90, 97, 104, 111, 118, 125, 132, 139, 146, 153, 160, 167, 174, 181, 188, 195, 202, 209, 216, 223, 230, 237, 244, 251, 258, 265, 272, 279, 286, 293, 300, 307, 314, 321, 328, 335, 342, 349, 356, 363, 370, 377, 384, 391, 398, 405, 412, 419, 426, 433, 440, 447, 454, 461, 468, 475, 482, 489, 496, 503, 510, 517, 524, 531, 538, 545, 552, 559, 566, 573, 580, 587, 594, 601, 608, 615, 622, 629, 636, 643, 650, 657, 664, 671, 678, 685, 692, 699, 706, 713, 720, 727, 734, 741, 748, 755, 762, 769, 776, 783, 790, 797, 804, 811, 818, 825, 832, 839, 846, 853, 860, 867, 874, 881, 888, 895, 902, 909, 916, 923, 930, 937, 944, 951, 958, 965, 972, 979, 986, 993, 1000, 1007, 1014, 1021, 1028, 1035, 1042, 1049, 1056, 1063, 1070, 1077, 1084, 1091, 1098, 1105, 1112, 1119, 1126, 1133, 1140, 1147, 1154, 1161, 1168, 1175, 1182, 1189, 1196, 1203, 1210, 1217, 1224, 1231, 1238, 1245, 1252, 1259, 1266, 1273, 1280, 1287, 1294, 1301, 1308, 1315, 1322, 1329, 1336, 1343, 1350, 1357, 1364, 1371, 1378, 1385, 1392, 1399, 1406, 1413, 1420, 1427, 1434, 1441, 1448, 1455, 1462, 1469, 1476, 1483, 1490, 1497, 1504, 1511, 1518, 1525, 1532, 1539, 1546, 1553, 1560, 1567, 1574, 1581, 1588, 1595, 1602, 1609, 1616, 1623, 1630, 1637, 1644, 1651, 1658, 1665, 1672, 1679, 1686, 1693, 1700, 1707, 1714, 1721, 1728, 1735, 1742, 1749, 1756, 1763, 1770, 1777, 1784, 1791, 1798, 1805, 1812, 1819, 1826, 1833, 1840, 1847, 1854, 1861, 1868, 1875, 1882, 1889, 1896, 1903, 1910, 1917, 1924, 1931, 1938, 1945, 1952, 1959, 1966, 1973, 1980, 1987, 1994, 2001, 2008, 2015, 2022, 2029, 2036, 2043, 2050, 2057, 2064, 2071, 2078, 2085, 2092, 2099, 2106, 2113, 2120, 2127, 2134, 2141, 2148, 2155, 2162, 2169, 2176, 2183, 2190, 2197, 2204, 2211, 2218, 2225, 2232, 2239, 2246, 2253, 2260, 2267, 2274, 2281, 2288, 2295, 2302, 2309, 2316, 2323, 2330, 2337, 2344, 2351, 2358, 2365, 2372, 2379, 2386, 2393, 2400, 2407, 2414, 2421, 2428, 2435, 2442, 2449, 2456, 2463, 2470, 2477, 2484, 2491, 2498, 2505, 2512, 2519, 2526, 2533, 2540, 2547, 2554, 2561, 2568, 2575, 2582, 2589, 2596, 2603, 2610, 2617, 2624, 2631, 2638, 2645, 2652, 2659, 2666, 2673, 2680, 2687, 2694, 2701, 2708, 2715, 2722, 2729, 2736, 2743, 2750, 2757, 2764, 2771, 2778, 2785, 2792, 2799, 2806, 2813, 2820, 2827, 2834, 2841, 2848, 2855, 2862, 2869, 2876, 2883, 2890, 2897, 2904, 2911, 2918, 2925, 2932, 2939, 2946, 2953, 2960, 2967, 2974, 2981, 2988, 2995], n: 6 }
+### SELECT name, count() AS c FROM person GROUP ALL
+{ c: 5, name: ['ann', 'Bob', 'cat', 'dan', 'Eve'] }
+### SELECT count(<int> name) AS c, math::sum(<int> age) AS s FROM person GROUP ALL
+error: Could not cast into `int` using input `'ann'`
+### SELECT count() AS c FROM [1, 2, 3, 'x'] GROUP ALL
+{ c: 4 }
+### SELECT math::sum($value) AS s FROM [1, 2, 3] GROUP ALL
+{ s: 0 }
+### SELECT v, count() AS c FROM [{ v: 1 }, { v: 2 }, { v: 1 }] GROUP BY v
+{ c: 2, v: 1 }
+{ c: 1, v: 2 }
+### SELECT count() AS c FROM (SELECT * FROM person WHERE age > 18) GROUP ALL
+{ c: 3 }
+### SELECT age, count() AS c FROM (SELECT age FROM person) GROUP BY age ORDER BY c DESC
+{ age: 30, c: 2 }
+{ age: NONE, c: 1 }
+{ age: 17, c: 1 }
+{ age: 45, c: 1 }
+### SELECT id, kind, age FROM pairs WHERE kind IN [1, 3] ORDER BY age DESC LIMIT 6
+{ age: 10, id: pairs:25, kind: 1 }
+{ age: 10, id: pairs:3, kind: 3 }
+{ age: 9, id: pairs:17, kind: 1 }
+{ age: 9, id: pairs:39, kind: 3 }
+{ age: 8, id: pairs:9, kind: 1 }
+{ age: 8, id: pairs:31, kind: 3 }
+### SELECT id FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age LIMIT 3 START 2
+{ id: pairs:30 }
+{ id: pairs:5 }
+{ id: pairs:38 }
+### 1 + 1
+2
+### [1, 2, 3]
+[1, 2, 3]
+### IF true { 1 } ELSE { 2 }
+1
+### math::sum([1, 2])
+3
+### (SELECT name FROM person WHERE age > 18)
+{ name: 'ann' }
+{ name: 'cat' }
+{ name: 'Eve' }
+### person:1.name
+'ann'
+### 7 % 0
+error: Cannot perform remainder with '7' and '0'
+### SELECT age + 1 AS next, age * 2 - 1 AS odd, age / 7 AS div, -age AS neg FROM person
+error: Cannot perform addition with 'none' and 'int'
+### SELECT age AND name AS both, age OR name AS either, age ?? 'none' AS aged, age ?: 0 AS any FROM person
+{ aged: 30, any: 30, both: 'ann', either: 30 }
+{ aged: 17, any: 17, both: 'Bob', either: 17 }
+{ aged: 30, any: 30, both: 'cat', either: 30 }
+{ aged: 'none', any: 0, both: NONE, either: 'dan' }
+{ aged: 45, any: 45, both: 'Eve', either: 45 }
+### SELECT [age, name, 1] AS row, { a: age, b: [name] } AS obj FROM person
+{ obj: { a: 30, b: ['ann'] }, row: [30, 'ann', 1] }
+{ obj: { a: 17, b: ['Bob'] }, row: [17, 'Bob', 1] }
+{ obj: { a: 30, b: ['cat'] }, row: [30, 'cat', 1] }
+{ obj: { a: NONE, b: ['dan'] }, row: [NONE, 'dan', 1] }
+{ obj: { a: 45, b: ['Eve'] }, row: [45, 'Eve', 1] }
+### SELECT <string> age AS text, !age AS missing, age..45 AS span, ..=age AS upto FROM person
+{ missing: false, span: 30..45, text: '30', upto: ..=30 }
+{ missing: false, span: 17..45, text: '17', upto: ..=17 }
+{ missing: false, span: 30..45, text: '30', upto: ..=30 }
+{ missing: true, span: NONE..45, text: 'NONE', upto: ..=NONE }
+{ missing: false, span: 45..45, text: '45', upto: ..=45 }
+### SELECT * FROM person WHERE age + 1 > 31
+error: Cannot perform addition with 'none' and 'int'
+### SELECT * FROM person WHERE (age ?? 0) < 20
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ id: person:4, name: 'dan' }
+### SELECT * FROM person WHERE age > $limit
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT age > $limit AS over, $limit AS limit FROM person
+{ limit: 30, over: false }
+{ limit: 30, over: false }
+{ limit: 30, over: false }
+{ limit: 30, over: false }
+{ limit: 30, over: true }
+### SELECT n + 1 AS next FROM mixed
+error: Cannot perform addition with 'string' and 'int'
+### SELECT n * 2 AS twice FROM mixed WHERE n != NONE
+error: Cannot perform multiplication with 'string' and 'int'
+### SELECT n - 1 AS prev FROM mixed WHERE n = -9223372036854775808
+error: Cannot perform subtraction with '-9223372036854775808' and '1'
+### SELECT age % 0 AS rem FROM person WHERE age = 30
+error: Cannot perform remainder with '30' and '0'
+### SELECT age / 0 AS div FROM person
+{ div: NaN }
+{ div: NaN }
+{ div: NaN }
+{ div: NaN }
+{ div: NaN }
+### SELECT 1 + 1.5 AS f, 1 + 1dec AS d, 7 / 2 AS t, 2 ** 10 AS p FROM person:1
+{ d: 2dec, f: 2.5f, p: 1024, t: 3 }
+### SELECT (false AND <int> 'x') AS lazy, (NULL AND 1) AS n, ('' OR 'b') AS o FROM person:1
+{ lazy: false, n: NULL, o: 'b' }
+### SELECT <int> name AS bad FROM person
+error: Could not cast into `int` using input `'ann'`
+### SELECT age > 18 AND name = 'cat' AS flag FROM person
+{ flag: false }
+{ flag: false }
+{ flag: true }
+{ flag: false }
+{ flag: false }
+### SELECT age.. AS from, age>..50 AS skip FROM person
+{ from: 30.., skip: 30>..50 }
+{ from: 17.., skip: 17>..50 }
+{ from: 30.., skip: 30>..50 }
+{ from: NONE.., skip: NONE>..50 }
+{ from: 45.., skip: 45>..50 }
+### SELECT string::len(name) AS l, math::max([age, 1]) AS m, type::is_string(name) AS s FROM person
+error: Incorrect arguments for function math::max(). Argument 1 was the wrong type. Expected `number` but found `NONE` when coercing element at index 0 of `array<number>`
+### SELECT * FROM person WHERE string::lowercase(name) = 'bob'
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+### SELECT math::sqrt(name) AS bad FROM person
+error: Incorrect arguments for function math::sqrt(). Argument 1 was the wrong type. Expected `number` but found `'ann'`
+### SELECT array::len(tags ?? []) + 1 AS n, string::concat(name, '-', <string> age) AS tag FROM person
+{ n: 3, tag: 'ann-30' }
+{ n: 2, tag: 'Bob-17' }
+{ n: 1, tag: 'cat-30' }
+{ n: 1, tag: 'dan-NONE' }
+{ n: 1, tag: 'Eve-45' }
+### SELECT type::table('person') AS t, string::uppercase($limit ?? 'x') AS p FROM person:1
+error: Incorrect arguments for function string::uppercase(). Argument 1 was the wrong type. Expected `string` but found `30`
+### string::len('abc') * 2
+6
+### SELECT obj.k.v AS v, to.name AS n, many.name AS ns, geo.type AS gt, to.missing.deep AS none FROM link
+{ gt: 'Point', n: 'cat', none: NONE, ns: ['ann', 'Bob', NONE], v: 1 }
+### SELECT * FROM link WHERE to.age = 30 AND obj.k.v = 1
+{ geo: (1, 2), id: link:1, many: [person:1, person:2, 5], obj: { k: { v: 1 } }, to: person:3 }
+### SELECT nested.x + 1 AS x, (nested ?? {}).x AS y FROM person
+error: Cannot perform addition with 'none' and 'int'
+### SELECT tags[0] AS first, tags[$] AS last, tags[1] AS second, tags[age % 2] AS picked FROM person
+error: Cannot perform remainder with 'none' and 'int'
+### SELECT many[0].name AS first, [[1, 2], [3]]… AS flat, obj['k'] AS keyed, 5[0] AS scalar FROM link
+{ first: 'ann', flat: [1, 2, 3], keyed: { v: 1 }, scalar: NONE }
+### SELECT tags['x'] AS bad FROM person
+{ bad: NONE }
+{ bad: NONE }
+{ bad: NONE }
+{ bad: NONE }
+{ bad: NONE }
+### SELECT name.len() AS l, tags.len() AS t, name.uppercase() AS u, obj.keys() AS k FROM person
+error: There was a problem running the keys() function. no such method found for the none type
+### SELECT tags.slice(0, age % 2) AS s, name.to_string() AS n FROM person
+error: There was a problem running the slice() function. no such method found for the none type
+### SELECT * FROM person WHERE name.len() > 3
+(no rows)
+### SELECT age.uppercase() AS u FROM person
+error: There was a problem running the uppercase() function. no such method found for the int type
+### SELECT tags.slice('x') AS bad FROM person
+error: Incorrect arguments for method slice(). Argument 1 was the wrong type. Expected `int` but found `'x'`
+### 'abc'.len() + $limit
+33
+### [1, 2][age] ?? 'abc'.slice(age)
+error: Incorrect arguments for method slice(). Argument 1 was the wrong type. Expected `int` but found `NONE`
+### SELECT VALUE [stats.items.slice(0, count), stats.items[count], stats.items[$this.count]] FROM [{ stats: { items: [1, 2, 3], count: 9 }, count: 2 }, { stats: [{ items: [4, 5], count: 0 }, { items: [6], count: 0 }], count: 1 }]
+[[1, 2], 3, 3]
+[[[4], [6]], [5, NONE], [5, NONE]]
+### [{ a: [1, 2], i: 1 }, { a: [3], i: 0 }].a[i]
+[NONE, NONE]
+### [[3, 2, 1], [1, 2, 3]].*[0..1].min()
+[3, 1]
+### [person:1, person:2, 5, { a: 1 }, [person:3]].*.name
+['ann', 'Bob', NONE, NONE, ['cat']]
+### SELECT VALUE many.*.name FROM link
+['ann', 'Bob', NONE]
+### [{ age: 30 }, { age: 31 }].age.expect(|$a| $a > 5)
+[30, 31]
+### [{ age: 30 }, { age: 3 }].age.expect(|$a| $a > 5)
+error: An error occurred: value::expect assertion failed
+### SELECT VALUE [nested].x.map(|$x| $x * 2) FROM person
+error: There was a problem running the map() function. no such method found for the int type
+### [{ a: 'x-y', sep: '-' }].a.split(sep)
+error: Incorrect arguments for method split(). Argument 2 was the wrong type. Expected `string` but found `NONE`
+### SELECT VALUE (SELECT VALUE 1 FROM $this.text.split($this.sep)) FROM [{ text: 'a-b', sep: '-' }, { text: 'c/d/e', sep: '/' }]
+[1, 1]
+[1, 1, 1]
+### SELECT VALUE (SELECT VALUE $this FROM $this.text[$this.sep]) FROM [{ text: { '-': [7, 8] }, sep: '-' }]
+[7, 8]
+### SELECT person:[name, age + 1] AS a, person:{ n: name, t: tags[0] } AS o FROM person
+error: Cannot perform addition with 'none' and 'int'
+### SELECT * FROM person WHERE id = type::record('person', age % 3 + 1) OR person:[age] = person:[45]
+error: Cannot perform remainder with 'none' and 'int'
+### person:[$limit, 'x']
+person:[30, 'x']
+### person:[$limit]..=[$limit + 1]
+person:[30]..=[31]
+### person:..[$limit]
+person:..[30]
+### person:{ a: $limit, b: NONE }
+person:{ a: 30, b: NONE }
+### <string> person:[1 / 0]
+'person:[NaN]'
+### person:[<int> 'x']
+error: Could not cast into `int` using input `'x'`
+### person:[BREAK]
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### person:{ a: 1, b: CONTINUE }
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### FOR $i IN [1, 2] { person:[$i, BREAK] }
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### person:[IF true { BREAK } ELSE { 1 }]
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### FOR $i IN [1, 2] { person:[IF $i > 1 { CONTINUE } ELSE { $i }] }
+error: Invalid control flow statement, break or continue statement found outside of loop.
+### SELECT person:[({ RETURN age }), name] AS k, person:{ a: ({ RETURN 1 }) + 1 } AS o FROM person
+{ k: person:[30, 'ann'], o: person:{ a: 2 } }
+{ k: person:[17, 'Bob'], o: person:{ a: 2 } }
+{ k: person:[30, 'cat'], o: person:{ a: 2 } }
+{ k: person:[NONE, 'dan'], o: person:{ a: 2 } }
+{ k: person:[45, 'Eve'], o: person:{ a: 2 } }
+### SELECT IF age > 40 THEN 'old' ELSE IF age > 20 THEN name.uppercase() END AS a FROM person
+{ a: 'ANN' }
+{ a: NONE }
+{ a: 'CAT' }
+{ a: NONE }
+{ a: 'old' }
+### SELECT IF tags THEN tags[0] ELSE 'none' END AS t FROM person WHERE IF age > 20 { true } ELSE { false }
+{ t: 'a' }
+{ t: 'none' }
+{ t: 'none' }
+### IF $limit > 3 THEN 1 ELSE <int> 'x' END
+1
+### IF $limit < 3 THEN 1 ELSE <int> 'x' END
+error: Could not cast into `int` using input `'x'`
+### IF $limit < 3 THEN 1 END
+NONE
+### SELECT name, (SELECT VALUE name FROM person WHERE age > $parent.age ORDER BY name) AS older FROM person
+{ name: 'ann', older: ['Eve'] }
+{ name: 'Bob', older: ['Eve', 'ann', 'cat'] }
+{ name: 'cat', older: ['Eve'] }
+{ name: 'dan', older: ['Bob', 'Eve', 'ann', 'cat'] }
+{ name: 'Eve', older: [] }
+### SELECT (SELECT * FROM ONLY person:1).name AS n, (SELECT VALUE age FROM person:2)[0] + 1 AS a FROM person
+{ a: 18, n: 'ann' }
+{ a: 18, n: 'ann' }
+{ a: 18, n: 'ann' }
+{ a: 18, n: 'ann' }
+{ a: 18, n: 'ann' }
+### SELECT * FROM person WHERE (SELECT VALUE count() FROM person WHERE age < $parent.age GROUP ALL)[0] > 0
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT ({ RETURN age }) + 1 AS a, IF age > 20 THEN ({ RETURN 'r' }) ELSE 0 END AS b FROM person
+error: Cannot perform addition with 'none' and 'int'
+### SELECT ({ age + 1 }) AS a, ($this.name) AS n FROM person
+error: Cannot perform addition with 'none' and 'int'
+### (SELECT VALUE name FROM person ORDER BY name)[0]
+'Bob'
+### (SELECT VALUE name FROM person WHERE <int> 'x')
+error: Could not cast into `int` using input `'x'`
+### ({ RETURN 5 }) * 2
+10
+### SELECT fn::inc(age) AS a, fn::named($this) AS n FROM person
+error: Incorrect arguments for function fn::inc(). Failed to coerce argument `$x`: Expected `int` but found `NONE`
+### SELECT * FROM person WHERE fn::inc(age) > 20 ORDER BY age
+error: Incorrect arguments for function fn::inc(). Failed to coerce argument `$x`: Expected `int` but found `NONE`
+### fn::fact(6) + fn::inc($limit)
+751
+### fn::oldest()
+'Eve'
+### fn::inc('x')
+error: Incorrect arguments for function fn::inc(). Failed to coerce argument `$x`: Expected `int` but found `'x'`
+### fn::inc(1, 2)
+error: Incorrect arguments for function fn::inc(). The function expects 1 argument.
+### fn::inc(({ RETURN 3 }))
+4
+### SELECT fn::inc(({ RETURN age })) AS a FROM person
+error: Incorrect arguments for function fn::inc(). Failed to coerce argument `$x`: Expected `int` but found `NONE`
+### SELECT fn::mix(age, 3) AS m, fn::pick(age) AS p, fn::as_text(name) AS t FROM person
+error: Incorrect arguments for function fn::mix(). Failed to coerce argument `$a`: Expected `int` but found `NONE`
+### fn::mix(2)
+error: Incorrect arguments for function fn::mix(). The function expects 2 arguments.
+### fn::mix('a', 1)
+error: Incorrect arguments for function fn::mix(). Failed to coerce argument `$a`: Expected `int` but found `'a'`
+### fn::as_text(1)
+error: Couldn't coerce return value from function `fn::as_text`: Expected `string` but found `1`
+### fn::inc(fn::mix(2, 3))
+8
+### SELECT array::map(tags, |$t| string::uppercase($t)) AS u, array::map([1, 2, 3], |$v, $i| $v * $i) AS m FROM person
+error: Incorrect arguments for function array::map(). Argument 1 was the wrong type. Expected `array` but found `NONE`
+### array::filter([1, 2, 3, 4], |$v| $v % 2 = 0)
+[2, 4]
+### array::filter_index([1, 2, 3, 4], |$v| $v > 2)
+[2, 3]
+### [array::find([1, 2, 3], |$v| $v > 1), array::find([1], |$v| $v > 1)]
+[2, NONE]
+### [array::find_index([1, 2, 3], |$v| $v > 1), array::index_of([1], |$v| $v > 5)]
+[1, NONE]
+### [array::any([1, 2], |$v| $v > 1), array::some([1], |$v| $v > 1), array::includes([], |$v| $v)]
+[true, false, false]
+### [array::all([1, 2], |$v| $v > 0), array::every([1, 0], |$v| $v > 0), array::all([], |$v| $v)]
+[true, false, true]
+### array::any([1, 'a'], |$v: int| $v > 0)
+true
+### array::all([0, 'a'], |$v: int| $v > 0)
+false
+### array::map([1, 'a'], |$v: int| $v)
+error: Incorrect arguments for function ANONYMOUS(). Expected a value of type 'int' for argument $v
+### array::map('x', |$v| $v)
+error: Incorrect arguments for function array::map(). Argument 1 was the wrong type. Expected `array` but found `'x'`
+### array::map([1, 2], |$v| -> string { $v })
+error: Couldn't coerce return value from function `ANONYMOUS`: Expected `string` but found `1`
+### array::map([1, 2], |$v| -> int { $v + 1 })
+[2, 3]
+### array::map([], |$v| $v)
+[]
+### array::map([1, 2], || 5)
+[5, 5]
+### array::map([1, 2], |$v: int| -> string { RETURN $v * 2 })
+error: Couldn't coerce return value from function `ANONYMOUS`: Expected `string` but found `2`
+### SELECT array::map(tags, |$t| name) AS n FROM person
+error: Incorrect arguments for function array::map(). Argument 1 was the wrong type. Expected `array` but found `NONE`
+### SELECT * OMIT nested.x FROM person
+{ age: 30, id: person:1, name: 'ann', nested: {  }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: {  } }
+### SELECT name OMIT age FROM person
+{ name: 'ann' }
+{ name: 'Bob' }
+{ name: 'cat' }
+{ name: 'dan' }
+{ name: 'Eve' }
+### SELECT * OMIT nested.{ x } FROM person
+{ age: 30, id: person:1, name: 'ann', nested: {  }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: {  } }
+### SELECT * OMIT obj.k.{ v } FROM link
+{ geo: (1, 2), id: link:1, many: [person:1, person:2, 5], obj: { k: {  } }, to: person:3 }
+### SELECT * OMIT obj.{ k.{ v } } FROM link
+{ geo: (1, 2), id: link:1, many: [person:1, person:2, 5], obj: { k: {  } }, to: person:3 }
+### SELECT * OMIT obj.{ k }.v FROM link
+{ geo: (1, 2), id: link:1, many: [person:1, person:2, 5], obj: { k: {  } }, to: person:3 }
+### SELECT obj OMIT obj.k.{ v } FROM link
+{ obj: { k: {  } } }
+### SELECT * OMIT ->knows FROM person
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * OMIT obj.{ k.* } FROM link
+{ geo: (1, 2), id: link:1, many: [person:1, person:2, 5], obj: { k: {  } }, to: person:3 }
+### SELECT * OMIT obj.{ a: k } FROM link
+error: An aliased destructuring method is not supported here
+### SELECT * OMIT obj.{ k, ... } FROM link
+error: A rest destructuring method is not supported here
+### SELECT * OMIT tags[WHERE $this > 1] FROM person
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: [] }
+{ age: 17, id: person:2, name: 'Bob', tags: [] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * OMIT tags[WHERE true] FROM person
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: [] }
+{ age: 17, id: person:2, name: 'Bob', tags: [] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### { LET $i = 0; SELECT * OMIT tags[$i] FROM person }
+[{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['b'] }, { age: 17, id: person:2, name: 'Bob', tags: [] }, { age: 30, city: 'x', id: person:3, name: 'cat' }, { id: person:4, name: 'dan' }, { age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }]
+### SELECT * OMIT tags[0], tags[$] FROM person
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: [] }
+{ age: 17, id: person:2, name: 'Bob', tags: [] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * OMIT nested.* FROM person
+{ age: 30, id: person:1, name: 'ann', nested: {  }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: {  } }
+### SELECT * OMIT tags.len() FROM person
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+{ age: 30, city: 'x', id: person:3, name: 'cat' }
+{ id: person:4, name: 'dan' }
+{ age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
+### SELECT * OMIT type::field('age'), type::fields(['name', 'tags']) FROM person
+{ id: person:1, nested: { x: 1 } }
+{ id: person:2 }
+{ city: 'x', id: person:3 }
+{ id: person:4 }
+{ id: person:5, nested: { x: 2 } }
+### SELECT name, age OMIT age FROM person
+{ name: 'ann' }
+{ name: 'Bob' }
+{ name: 'cat' }
+{ name: 'dan' }
+{ name: 'Eve' }
+### SELECT * OMIT tags[WHERE $this > 1] FROM [{ tags: [1, 2, 3] }]
+{ tags: [1] }
+### SELECT * OMIT a.{ b }.x FROM [{ a: { b: { x: 1, y: 2 } } }]
+{ a: { b: { y: 2 } } }
+### SELECT VALUE name OMIT name FROM person
+NONE
+NONE
+NONE
+NONE
+NONE
+### SELECT VALUE age OMIT name FROM person ORDER BY name DESC
+NONE
+30
+30
+45
+17
+### SELECT VALUE nested OMIT nested.x FROM person
+{  }
+NONE
+NONE
+NONE
+{  }
+### SELECT VALUE tags OMIT tags[WHERE $this > 1] FROM person
+[]
+[]
+NONE
+NONE
+NONE
+### SELECT VALUE id OMIT name FROM person:1
+person:1
+### SELECT VALUE a OMIT a.b FROM [{ a: { b: 1, c: 2 } }]
+{ c: 2 }
+### SELECT VALUE name OMIT name FROM [1, { name: 'x' }]
+NONE
+NONE
+### SELECT * FROM person EXPLAIN
+{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', table: 'person' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }
+### SELECT * FROM missing
+error: The table 'missing' does not exist
+### SELECT * FROM person WHERE (CREATE log:1)
+error: Invalid statement: Cannot run CREATE on a read only transaction

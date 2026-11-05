@@ -1,0 +1,24 @@
+/**
+[env]
+imports = ["../id_components_import.surql"]
+
+[test]
+reason = "The components a record id names are fields of the table's output type, after the id and before the stored fields, typed from the kind each component is declared with"
+
+[[test.results]]
+value = "{ __type: { fields: [{ name: 'id', type: { kind: 'NON_NULL', ofType: { name: 'ID' } } }, { name: 'city', type: { kind: 'NON_NULL', ofType: { name: 'String' } } }, { name: 'time', type: { kind: 'NON_NULL', ofType: { name: 'datetime' } } }, { name: 'temp', type: { kind: 'NON_NULL', ofType: { name: 'Int' } } }], kind: 'OBJECT' } }"
+*/
+query {
+	__type(name: "reading") {
+		kind
+		fields {
+			name
+			type {
+				kind
+				ofType {
+					name
+				}
+			}
+		}
+	}
+}

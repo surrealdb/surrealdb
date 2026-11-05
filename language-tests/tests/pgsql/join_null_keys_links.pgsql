@@ -1,0 +1,29 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_join_null_keys_links.surql"]
+
+[test]
+reason = "A link column that is missing on both sides of a join matches nothing, and a link column that is missing joins no user"
+
+[[test.results]]
+value = "[{ note: 'n1', title: 'p1' }]"
+
+[[test.results]]
+value = "[{ note: 'n1', title: 'p1' }, { note: NONE, title: 'p2' }, { note: NONE, title: 'p3' }, { note: NONE, title: 'p4' }]"
+
+[[test.results]]
+value = "[{ note: 'n1', title: 'p1' }]"
+
+[[test.results]]
+value = "[{ author: 'ann', title: 'p1' }, { author: 'bob', title: 'p2' }, { author: NONE, title: 'p3' }, { author: NONE, title: 'p4' }]"
+*/
+
+SELECT p.title AS title, v.note AS note FROM joinnull_post p JOIN joinnull_review v ON p.owner = v.owner ORDER BY p.id, v.id;
+
+SELECT p.title AS title, v.note AS note FROM joinnull_post p LEFT JOIN joinnull_review v ON p.owner = v.owner ORDER BY p.id, v.id;
+
+SELECT p.title AS title, v.note AS note FROM joinnull_post p JOIN joinnull_review v USING (owner) ORDER BY p.id, v.id;
+
+SELECT p.title AS title, u.name AS author FROM joinnull_post p LEFT JOIN joinnull_user u ON p.owner = u.id ORDER BY p.id;

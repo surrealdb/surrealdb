@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
-use crate::conn::Command;
+use crate::conn::ctx;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::auth::Token;
 use crate::types::Value;
@@ -44,16 +44,10 @@ where
 		} = self;
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
-			router
-				.execute(
-					client.session_id,
-					Command::Signup {
-						credentials: credentials
-							.into_object()
-							.map_err(|e| crate::Error::internal(e.to_string()))?,
-					},
-				)
-				.await
+			let credentials =
+				credentials.into_object().map_err(|e| crate::Error::internal(e.to_string()))?;
+			let token = router.engine.signup(ctx(client.session_id), credentials).await?;
+			Ok(token.into())
 		})
 	}
 }

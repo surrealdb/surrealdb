@@ -1,0 +1,43 @@
+{
+	"name": "@surrealdb/node-native",
+	"version": "0.0.0",
+	"type": "module",
+	"license": "Apache-2.0",
+	"description": "Native NAPI bindings to an embedded SurrealDB engine, for Node.js, Bun, and Deno",
+	"homepage": "https://github.com/surrealdb/surrealdb",
+	"keywords": ["surrealdb", "nodejs", "bun", "deno", "embedded", "napi"],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/surrealdb/surrealdb.git",
+		"directory": "surrealdb/node"
+	},
+	"scripts": {
+		"build": "bun run build.ts",
+		"release": "bun run publish.ts"
+	},
+	"devDependencies": {
+		"@napi-rs/cli": "^3.1.5",
+		"@surrealdb/cbor": "2.0.0-alpha.4",
+		"dedent": "^1.7.0"
+	},
+	"exports": {
+		".": {
+			"import": "./dist/index.js",
+			"types": "./dist/index.d.ts"
+		}
+	},
+	"files": ["dist"],
+	"napi": {
+		"binaryName": "surrealdb-node",
+		"targets": [
+			"x86_64-apple-darwin",
+			"aarch64-apple-darwin",
+			"x86_64-pc-windows-msvc",
+			"aarch64-pc-windows-msvc",
+			"x86_64-unknown-linux-gnu",
+			"x86_64-unknown-linux-musl",
+			"aarch64-unknown-linux-gnu",
+			"aarch64-unknown-linux-musl"
+		]
+	}
+}

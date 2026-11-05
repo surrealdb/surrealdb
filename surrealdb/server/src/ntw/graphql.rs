@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_graphql::Data;
 use async_graphql::http::{ALL_WEBSOCKET_PROTOCOLS, WebSocketProtocols, WsMessage};
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use axum::extract::{State, WebSocketUpgrade};
+use axum::extract::{DefaultBodyLimit, State, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::http::header::SEC_WEBSOCKET_PROTOCOL;
 use axum::response::IntoResponse;
@@ -12,16 +12,24 @@ use axum::routing::get;
 use axum::{Extension, Router};
 use futures_util::{SinkExt, StreamExt, future};
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_rpc::capabilities::RouteTarget;
+use tower_http::limit::RequestBodyLimitLayer;
 use tracing::instrument;
 
+use crate::cnf::{
+	HTTP_MAX_GRAPHQL_BODY_SIZE, WEBSOCKET_MAX_MESSAGE_SIZE, WEBSOCKET_MAX_WRITE_BUFFER_SIZE,
+	WEBSOCKET_READ_BUFFER_SIZE, WEBSOCKET_WRITE_BUFFER_SIZE,
+};
 use crate::graphql::GraphQLService;
 use crate::ntw::AppState;
 use crate::ntw::error::Error as NetError;
 use crate::rpc::RpcState;
 
 pub fn router() -> Router<Arc<RpcState>> {
-	Router::new().route("/graphql", get(ws_handler).post_service(GraphQLService::new()))
+	Router::new()
+		.route("/graphql", get(ws_handler).post_service(GraphQLService::new()))
+		.route_layer(DefaultBodyLimit::disable())
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_GRAPHQL_BODY_SIZE))
 }
 
 #[instrument(skip_all)]
@@ -39,6 +47,10 @@ async fn ws_handler(
 			"Capabilities denied HTTP route request attempt, target: '{}'",
 			&RouteTarget::GraphQL
 		);
+		return NetError::ForbiddenRoute(RouteTarget::GraphQL.to_string()).into_response();
+	}
+
+	if !datastore.allows_query_by_subject(session.au.as_ref()) {
 		return NetError::ForbiddenRoute(RouteTarget::GraphQL.to_string()).into_response();
 	}
 
@@ -66,9 +78,21 @@ async fn ws_handler(
 
 	let protocol = select_ws_protocol(&headers);
 
-	ws.protocols(ALL_WEBSOCKET_PROTOCOLS).on_upgrade(move |socket| async move {
-		serve_graphql_ws(socket, schema, protocol, data).await;
-	})
+	// Bind the same frame and buffer limits the /sql and /rpc WebSocket
+	// handlers apply, so a GraphQL subscription socket cannot exhaust memory
+	// with oversized frames or an unbounded write buffer.
+	ws.protocols(ALL_WEBSOCKET_PROTOCOLS)
+		.max_frame_size(*WEBSOCKET_MAX_MESSAGE_SIZE)
+		.max_message_size(*WEBSOCKET_MAX_MESSAGE_SIZE)
+		.read_buffer_size(*WEBSOCKET_READ_BUFFER_SIZE)
+		.write_buffer_size(*WEBSOCKET_WRITE_BUFFER_SIZE)
+		.max_write_buffer_size(*WEBSOCKET_MAX_WRITE_BUFFER_SIZE)
+		.on_failed_upgrade(|err| {
+			warn!("Failed to upgrade GraphQL WebSocket connection: {err}");
+		})
+		.on_upgrade(move |socket| async move {
+			serve_graphql_ws(socket, schema, protocol, data).await;
+		})
 }
 
 fn select_ws_protocol(headers: &HeaderMap) -> WebSocketProtocols {

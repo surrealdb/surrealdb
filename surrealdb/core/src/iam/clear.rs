@@ -10,5 +10,8 @@ pub fn clear(session: &mut Session) -> Result<()> {
 	session.tk = None;
 	session.ac = None;
 	session.rd = None;
+	// SECURITY: the CONTEXT payload is an authorisation grant, so invalidating
+	// the session's authentication must drop it with everything else.
+	session.data = None;
 	Ok(())
 }

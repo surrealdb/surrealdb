@@ -1,0 +1,114 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_join_null_keys.surql"]
+
+[test]
+reason = "A NULL or missing join key matches nothing, as in MySQL: inner, LEFT and RIGHT joins over ON and USING, a composite key with one part NULL, an expression key, a NULL literal, a chained join whose key comes from the null-extended side, aggregates over the join, and the null-safe comparison that still matches NULL with NULL"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnone' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnone' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: 'l2', rn: NONE }, { ln: 'lnull', rn: NONE }, { ln: 'lnone', rn: NONE }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnone' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: 'l2', rn: NONE }, { ln: 'lnull', rn: NONE }, { ln: 'lnone', rn: NONE }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnone' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: NONE, rn: 'rnull' }, { ln: NONE, rn: 'rnone' }, { ln: NONE, rn: 'rnull2' }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnone' }, { ln: NONE, rn: 'runmatched' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: NONE, rn: 'rnull' }, { ln: NONE, rn: 'rnone' }, { ln: NONE, rn: 'rnull2' }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnone' }, { ln: NONE, rn: 'runmatched' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: 'l2', rn: NONE }, { ln: 'lnull', rn: NONE }, { ln: 'lnone', rn: NONE }, { ln: 'lpartnull', rn: NONE }, { ln: 'lpartnone', rn: NONE }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnone' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: 'l2', rn: NONE }, { ln: 'lnull', rn: NONE }, { ln: 'lnone', rn: NONE }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnone' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnone' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ ln: 'l1', r2n: 'r1', rn: 'r1' }, { ln: 'l2', r2n: NONE, rn: NONE }, { ln: 'lnull', r2n: NONE, rn: NONE }, { ln: 'lnone', r2n: NONE, rn: NONE }, { ln: 'lpartnull', r2n: NONE, rn: NONE }, { ln: 'lpartnone', r2n: NONE, rn: NONE }]"
+
+[[test.results]]
+value = "[{ ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnone' }]"
+
+[[test.results]]
+value = "[{ n: 5 }]"
+
+[[test.results]]
+value = "[{ n: 8 }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', n: 1 }, { ln: 'l2', n: 0 }, { ln: 'lnull', n: 0 }, { ln: 'lnone', n: 0 }, { ln: 'lpartnull', n: 2 }, { ln: 'lpartnone', n: 2 }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnone' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: 'lnull', rn: 'rnull' }, { ln: 'lnull', rn: 'rnone' }, { ln: 'lnull', rn: 'rnull2' }, { ln: 'lnone', rn: 'rnull' }, { ln: 'lnone', rn: 'rnone' }, { ln: 'lnone', rn: 'rnull2' }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnone' }]"
+
+[[test.results]]
+value = "[{ ln: 'l1', rn: 'r1' }, { ln: 'l2', rn: NONE }, { ln: 'lnull', rn: 'rnull' }, { ln: 'lnull', rn: 'rnone' }, { ln: 'lnull', rn: 'rnull2' }, { ln: 'lnone', rn: 'rnull' }, { ln: 'lnone', rn: 'rnone' }, { ln: 'lnone', rn: 'rnull2' }, { ln: 'lpartnull', rn: 'rpartnull' }, { ln: 'lpartnull', rn: 'rpartnone' }, { ln: 'lpartnone', rn: 'rpartnull' }, { ln: 'lpartnone', rn: 'rpartnone' }]"
+*/
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l JOIN joinnull_r r ON l.k = r.k ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l JOIN joinnull_r r USING (k) ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l LEFT JOIN joinnull_r r ON l.k = r.k ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l LEFT JOIN joinnull_r r USING (k) ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l RIGHT JOIN joinnull_r r ON l.k = r.k ORDER BY r.id, l.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l RIGHT JOIN joinnull_r r USING (k) ORDER BY r.id, l.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l JOIN joinnull_r r ON l.k = r.k AND l.k2 = r.k2 ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l LEFT JOIN joinnull_r r ON l.k = r.k AND l.k2 = r.k2 ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l JOIN joinnull_r r USING (k, k2) ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l JOIN joinnull_r r ON l.k + 1 = r.k + 1 ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l LEFT JOIN joinnull_r r ON l.k + 1 = r.k + 1 ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l JOIN joinnull_r r ON r.k = l.k ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l JOIN joinnull_r r ON l.k = NULL ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn, r2.name AS r2n FROM joinnull_l l LEFT JOIN joinnull_r r ON l.k = r.k AND r.id = 1 LEFT JOIN joinnull_r r2 ON r.k = r2.k ORDER BY l.id, r.id, r2.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l JOIN joinnull_r r ON l.k = r.k WHERE l.id <> 1 ORDER BY l.id, r.id;
+
+SELECT count(*) AS n FROM joinnull_l l JOIN joinnull_r r ON l.k = r.k;
+
+SELECT count(*) AS n FROM joinnull_l l LEFT JOIN joinnull_r r ON l.k = r.k;
+
+SELECT l.name AS ln, count(r.id) AS n FROM joinnull_l l LEFT JOIN joinnull_r r ON l.k = r.k GROUP BY l.id, l.name ORDER BY l.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l, joinnull_r r WHERE l.k = r.k ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l JOIN joinnull_r r ON l.k <=> r.k ORDER BY l.id, r.id;
+
+SELECT l.name AS ln, r.name AS rn FROM joinnull_l l LEFT JOIN joinnull_r r ON l.k <=> r.k ORDER BY l.id, r.id;

@@ -1,0 +1,32 @@
+[package]
+name = "surrealdb-mysql"
+readme = "README.md"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description = "MySQL language front end for SurrealDB"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+fuzzing = []
+conformance-tests = []
+
+[dependencies]
+surrealdb-sqlfront-derive = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+surrealdb-sqlfront-spec = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = [
+    "surrealdb-sqlfront-derive",
+    "thiserror",
+]
+
+[lints]
+workspace = true

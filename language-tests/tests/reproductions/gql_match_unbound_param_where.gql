@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["gql/_schema.surql"]
+
+[test]
+reason = "A GQL MATCH whose WHERE compares a node's field with a parameter the request does not bind. The parameter is NONE, which the lowering's guard on it refuses, so no row matches. The guard shares the parameter's read with the comparison, so it is judged per row beside it."
+
+[[test.results]]
+value = "[]"
+*/
+
+MATCH (p:person) WHERE p.age > $min RETURN p.name AS name ORDER BY name

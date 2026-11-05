@@ -1,0 +1,5 @@
+### SELECT VALUE id FROM mine WHERE emb <|4, 40|> [1.0, 0.0, 0.0] ORDER BY id
+mine:2
+mine:4
+mine:6
+mine:8

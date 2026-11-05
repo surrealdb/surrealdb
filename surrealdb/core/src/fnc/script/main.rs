@@ -1,8 +1,8 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use anyhow::Result;
 use js::prelude::*;
-use js::{CatchResultExt, Ctx, Function, Module, Promise, async_with};
+use js::{CatchResultExt, Ctx, Function, Module, Promise};
 use web_time::Instant;
 
 use super::modules::surrealdb::query::QueryContext;
@@ -34,6 +34,8 @@ pub unsafe fn create_query_data<'a>(
 			opt,
 			doc,
 			pending: RefCell::new(None),
+			started: Cell::new(0),
+			writing: tokio::sync::RwLock::new(()),
 		})
 		.expect("userdata shouldn't be in use");
 
@@ -57,15 +59,15 @@ pub async fn run(
 	let opt = opt.dive(4)?;
 
 	let instant_start = Instant::now();
-	let time_limit = context.config.scripting_max_time_limit;
+	let time_limit = context.config.script.scripting_max_time_limit;
 
 	// Create a JavaScript context
 	let run = js::AsyncRuntime::new()
 		.map_err(|e| anyhow::anyhow!("Failed to create JavaScript runtime: {}", e))?;
 	// Explicitly set max stack size to 256 KiB
-	run.set_max_stack_size(context.config.scripting_max_stack_size).await;
+	run.set_max_stack_size(context.config.script.scripting_max_stack_size).await;
 	// Explicitly set max memory size to 2 MB
-	run.set_memory_limit(context.config.scripting_max_memory_limit).await;
+	run.set_memory_limit(context.config.script.scripting_max_memory_limit).await;
 	// Ensure scripts are cancelled with context
 	let cancellation = context.cancellation();
 	let handler = Box::new(move || cancellation.is_done() || instant_start.elapsed() > time_limit);
@@ -81,28 +83,27 @@ pub async fn run(
 		"export default async function() {{ try {{ {src} }} catch(e) {{ return (e instanceof Error) ? e : new Error(e); }} }}"
 	);
 	// Attempt to execute the script
-	async_with!(ctx => |ctx| {
+	ctx.async_with(async |ctx| {
 		let res = async {
 			// Get the context global object
 			let global = ctx.globals();
 			// SAFETY: This is safe because the runtime only lives for the duration of this
 			// function. For the entire duration of which context, opt, txn and doc are valid.
-			unsafe{ create_query_data(context, &opt, doc, &ctx) }?;
+			unsafe { create_query_data(context, &opt, doc, &ctx) }?;
 			// Register the fetch module as a global function
 			fetch::register(&ctx)?;
 			// Register the surrealdb module as a global object
-			let (module, promise) = Module::evaluate_def::<modules::surrealdb::Package, _>(ctx.clone(), "surrealdb")?;
+			let (module, promise) =
+				Module::evaluate_def::<modules::surrealdb::Package, _>(ctx.clone(), "surrealdb")?;
 			promise.finish::<()>()?;
-			global.set("surrealdb",
-				module.get::<_, js::Value>("default")?,
-			)?;
+			global.set("surrealdb", module.get::<_, js::Value>("default")?)?;
 			// Register the console module as a global object
 			let console = globals::console::console(&ctx)?;
 			global.set("console", console)?;
 			// Register the special SurrealDB types as classes
 			classes::init(&ctx)?;
 			// Load the script as a module and evaluate it
-			let (module, promise) = Module::declare(ctx.clone(),"script", src)?.eval()?;
+			let (module, promise) = Module::declare(ctx.clone(), "script", src)?.eval()?;
 			promise.into_future::<()>().await?;
 			// Attempt to fetch the main export
 			let fnc = module.get::<_, Function>("default")?;
@@ -111,9 +112,11 @@ pub async fn run(
 			// Execute the main function
 			let promise = fnc.call::<_, Promise>((This(doc), Rest(arg)))?.into_future::<Value>();
 			promise.await
-		}.await;
+		}
+		.await;
 		// Catch and convert any errors
 		res.catch(&ctx).map_err(Error::from)
 	})
-	.await.map_err(anyhow::Error::new)
+	.await
+	.map_err(anyhow::Error::new)
 }

@@ -28,9 +28,13 @@ fn append_blob_part<'js>(
 			return Ok(());
 		}
 		if let Some(x) = ArrayBuffer::from_object(object.clone()) {
-			data.extend_from_slice(x.as_bytes().ok_or_else(|| {
+			// SAFETY: the slice aliases memory owned by the JS engine and is copied
+			// into `data` before any JavaScript can run, so it cannot be detached or
+			// reallocated while it is borrowed.
+			let bytes = unsafe { x.as_bytes() }.ok_or_else(|| {
 				Exception::throw_type(ctx, "Tried to construct blob with detached buffer")
-			})?);
+			})?;
+			data.extend_from_slice(bytes);
 			return Ok(());
 		}
 	}
@@ -164,21 +168,25 @@ impl Blob {
 	}
 
 	pub fn slice(&self, start: Opt<isize>, end: Opt<isize>, content_type: Opt<String>) -> Blob {
-		// see https://w3c.github.io/FileAPI/#slice-blob
-		let start = start.into_inner().unwrap_or_default();
-		let start = if start < 0 {
-			(self.data.len() as isize + start).max(0) as usize
-		} else {
-			start as usize
+		// Clamp `start` and `end` into `0..=size` with `end >= start` per the
+		// W3C File API `slice` algorithm (https://w3c.github.io/FileAPI/#slice-blob).
+		let len = self.data.len();
+		let start = match start.into_inner() {
+			Some(s) if s < 0 => (len as isize).saturating_add(s).max(0) as usize,
+			Some(s) => (s as usize).min(len),
+			None => 0,
 		};
-		let end = end.into_inner().unwrap_or_default();
-		let end = if end < 0 {
-			(self.data.len() as isize + end).max(0) as usize
-		} else {
-			end as usize
+		let end = match end.into_inner() {
+			Some(e) if e < 0 => (len as isize).saturating_add(e).max(0) as usize,
+			Some(e) => (e as usize).min(len),
+			None => len,
 		};
+		let end = end.max(start);
 		let data = self.data.slice(start..end);
-		let content_type = content_type.into_inner().map(normalize_type).unwrap_or_default();
+		let content_type = match content_type.into_inner() {
+			Some(ct) => normalize_type(ct),
+			None => String::new(),
+		};
 		Blob {
 			mime: content_type,
 			data,
@@ -232,6 +240,11 @@ mod test {
 				assert.eq(blob.type,"some-text");
 				assert.eq(await blob.text(),"text");
 				assert.eq(await blob.slice(2,4).text(),"xt");
+				assert.eq(await blob.slice(1).text(),"ext");
+				assert.eq(await blob.slice(3,1).text(),"");
+				assert.eq(await blob.slice(10).text(),"");
+				assert.eq(await blob.slice(1,100).text(),"ext");
+				assert.eq(await blob.slice(-2).text(),"xt");
 
 				blob = new Blob(["\n\r\n \n\r"],{endings: "transparent"});
 				assert.eq(blob.size,6)

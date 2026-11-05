@@ -1,0 +1,51 @@
+name: 'Determine release configuration'
+description: >-
+  Decide what this run releases: channel, publish flag and requested ref,
+  from the trigger (schedule vs dispatch).
+  Extracted verbatim from release.yml. The interface is the ENV VARS set
+  on the calling step (they propagate into this composite step's process
+  environment); see the call site in release.yml for the exact set.
+
+outputs:
+  nightly-release:
+    description: 'nightly-release (see step body)'
+    value: ${{ steps.config.outputs.nightly-release }}
+  publish:
+    description: 'publish (see step body)'
+    value: ${{ steps.config.outputs.publish }}
+  release-channel:
+    description: 'release-channel (see step body)'
+    value: ${{ steps.config.outputs.release-channel }}
+  requested-ref:
+    description: 'requested-ref (see step body)'
+    value: ${{ steps.config.outputs.requested-ref }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine release configuration
+      id: config
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${EVENT}" == "schedule" ]]; then
+          # Scheduled nightly: resolve the SHA from main history in the locate
+          # step (the newest commit that actually has a rolling build), so we
+          # never race a still-running rolling build for the current HEAD.
+          requested_ref="${GITHUB_REF_NAME}"
+          channel=nightly
+          publish=true
+        else
+          requested_ref="${INPUT_GIT_SHA}"
+          publish="${INPUT_PUBLISH}"
+          channel="${INPUT_RELEASE_TYPE}"
+        fi
+        # nightly is the only channel that does not publish crates.
+        if [[ "$channel" == "nightly" ]]; then nightly=true; else nightly=false; fi
+
+        {
+          echo "requested-ref=${requested_ref}"
+          echo "release-channel=${channel}"
+          echo "nightly-release=${nightly}"
+          echo "publish=${publish}"
+        } >> "$GITHUB_OUTPUT"

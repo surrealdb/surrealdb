@@ -1,0 +1,4 @@
+### SELECT * FROM node ORDER BY id
+Ok(Array(Array([Object(Object({"id": RecordId(RecordId { table: Table("node"), key: String("a") }), "label": String("alpha"), "next": RecordId(RecordId { table: Table("node"), key: String("b") })})), Object(Object({"id": RecordId(RecordId { table: Table("node"), key: String("b") }), "label": String("beta"), "next": RecordId(RecordId { table: Table("node"), key: String("c") })})), Object(Object({"id": RecordId(RecordId { table: Table("node"), key: String("c") }), "label": String("gamma"), "next": RecordId(RecordId { table: Table("node"), key: String("a") })}))])))
+### SELECT * FROM node:b
+Ok(Array(Array([Object(Object({"id": RecordId(RecordId { table: Table("node"), key: String("b") }), "label": String("beta"), "next": RecordId(RecordId { table: Table("node"), key: String("c") })}))])))

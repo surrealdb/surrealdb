@@ -1,0 +1,6 @@
+### answers
+[]
+[]
+'Cannot delete `author:3` as it is referenced by `shelf:1` with an ON DELETE REJECT clause'
+[{ id: book:1, writer: NONE }, { id: book:3, writer: author:3 }]
+[author:3]

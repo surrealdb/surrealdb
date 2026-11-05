@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 imports = ["language/statements/select/group/count_range_permissions_import.surql"]
 auth = { namespace = "test", database = "test", access = "test", rid = "table_full:me" }
@@ -9,7 +8,7 @@ auth = { namespace = "test", database = "test", access = "test", rid = "table_fu
 reason = "Test COUNT() with range and different table permission levels"
 
 [[test.results]]
-value = "[]"
+value = "[{ count: 0 }]"
 
 [[test.results]]
 value = "[]"
@@ -34,7 +33,9 @@ value = "[{ count: 1 }]"
 
 */
 
--- NONE permissions: query returns empty
+-- NONE permissions: no record is visible, so the count is of nothing —
+-- GROUP ALL reports that as a row, as it does for every other way of
+-- reaching no rows, and the ungrouped form has no row to return.
 SELECT COUNT() FROM table_none:a..z GROUP ALL;
 SELECT COUNT() FROM table_none:a..z;
 
@@ -42,7 +43,8 @@ SELECT COUNT() FROM table_none:a..z;
 SELECT COUNT() FROM table_full:a..z GROUP ALL;
 SELECT COUNT() FROM table_full:a..z;
 
--- WHERE FALSE permissions: GROUP ALL returns {count: 0}, non-grouped returns empty
+-- WHERE FALSE permissions: the same answers, reached by a per-record
+-- predicate rather than by a table-level denial.
 SELECT COUNT() FROM table_where_false:a..z GROUP ALL;
 SELECT COUNT() FROM table_where_false:a..z;
 

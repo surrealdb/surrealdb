@@ -1,0 +1,94 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_scalar_rows.surql"]
+
+[test]
+reason = "A subquery used as a value answers its one row, nothing when it has no row, and is an error when it has more than one, rather than answering the first of them: a LIMIT and OFFSET of its own, a correlated, grouped or ordered subquery and a set operation are read the same way, and IN, ANY, ALL and EXISTS over the same rows are not affected"
+
+[[test.results]]
+value = "[{ one: 1 }]"
+
+[[test.results]]
+value = "[{ nothing: NONE }]"
+
+[[test.results]]
+value = "[{ name: 'bob' }]"
+
+[[test.results]]
+error = "An error occurred: Subquery returns more than 1 row"
+
+[[test.results]]
+error = "An error occurred: Subquery returns more than 1 row"
+
+[[test.results]]
+value = "[{ label: 'eve' }]"
+
+[[test.results]]
+value = "[{ first_of_many: 1 }]"
+
+[[test.results]]
+error = "An error occurred: Subquery returns more than 1 row"
+
+[[test.results]]
+value = "[{ second: 2 }]"
+
+[[test.results]]
+error = "An error occurred: Subquery returns more than 1 row"
+
+[[test.results]]
+value = "[{ l: NONE, name: 'ada' }, { l: 'bob', name: 'bob' }]"
+
+[[test.results]]
+value = "[{ name: 'bob' }]"
+
+[[test.results]]
+value = "[{ name: 'ada' }]"
+
+[[test.results]]
+value = "[{ name: 'bob' }]"
+
+[[test.results]]
+value = "[{ name: 'ada' }, { name: 'bob' }]"
+
+[[test.results]]
+error = "An error occurred: Subquery returns more than 1 row"
+
+[[test.results]]
+value = "[{ g: 5 }]"
+
+[[test.results]]
+error = "An error occurred: Subquery returns more than 1 row"
+
+[[test.results]]
+error = "An error occurred: Subquery returns more than 1 row"
+
+[[test.results]]
+value = "[{ u: 1 }]"
+
+[[test.results]]
+value = "[{ c: 0 }]"
+*/
+
+SELECT (SELECT k FROM sr_a WHERE k = 1) AS one;
+SELECT (SELECT k FROM sr_a WHERE k > 100) AS nothing;
+SELECT name FROM sr_a WHERE k = (SELECT k FROM sr_a WHERE name = 'bob');
+SELECT (SELECT k FROM sr_a) AS many;
+SELECT name FROM sr_a WHERE k = (SELECT k2 FROM sr_b WHERE k2 < 3);
+SELECT label FROM sr_b WHERE k2 = (SELECT k2 FROM sr_b WHERE label = 'eve');
+SELECT (SELECT k FROM sr_a ORDER BY k LIMIT 1) AS first_of_many;
+SELECT (SELECT k2 FROM sr_b ORDER BY k2 LIMIT 5) AS many;
+SELECT (SELECT k FROM sr_a ORDER BY k LIMIT 1 OFFSET 1) AS second;
+SELECT name, (SELECT label FROM sr_b WHERE k2 = sr_a.k) AS l FROM sr_a ORDER BY k;
+SELECT name, (SELECT label FROM sr_b WHERE k2 = sr_a.k AND label = 'bob') AS l FROM sr_a ORDER BY k;
+SELECT name FROM sr_a WHERE k IN (SELECT k2 FROM sr_b) ORDER BY name;
+SELECT name FROM sr_a WHERE k < ALL (SELECT k2 FROM sr_b) ORDER BY name;
+SELECT name FROM sr_a WHERE k = ANY (SELECT k2 FROM sr_b) ORDER BY name;
+SELECT name FROM sr_a WHERE EXISTS (SELECT k2 FROM sr_b) ORDER BY name;
+SELECT (SELECT max(k2) FROM sr_b GROUP BY k2) AS g;
+SELECT (SELECT max(k2) FROM sr_b GROUP BY k2 HAVING max(k2) > 3) AS g;
+SELECT name FROM sr_a ORDER BY (SELECT k2 FROM sr_b WHERE k2 < 3);
+SELECT (SELECT 1 UNION ALL SELECT 2) AS u;
+SELECT (SELECT 1 UNION ALL SELECT 2 LIMIT 1) AS u;
+SELECT coalesce((SELECT k FROM sr_a WHERE k > 100), 0) AS c;

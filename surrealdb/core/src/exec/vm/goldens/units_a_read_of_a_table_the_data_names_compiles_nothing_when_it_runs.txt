@@ -1,0 +1,78 @@
+### owner: DEFINE FUNCTION fn::rd($t: string) { RETURN SELECT VALUE id FROM type::table($t) } PERMISSIONS FULL; RETURN fn::rd('item');
+NONE
+[item:1, item:2, item:3]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: DEFINE FUNCTION fn::rd($t: string) { RETURN SELECT VALUE id FROM type::table($t) } PERMISSIONS FULL; DEFINE TABLE pr PERMISSIONS FOR select WHERE fn::rd('item') != []; CREATE pr:1; RETURN SELECT * FROM pr;
+NONE
+NONE
+[{ id: pr:1 }]
+[{ id: pr:1 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { LET $t = 'item'; RETURN SELECT VALUE id FROM type::table(rand::enum($t)) }
+[item:1, item:2, item:3]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: RETURN (SELECT VALUE (SELECT VALUE id FROM type::table('it' + rand::enum('em'))) FROM t);
+[[item:1, item:2, item:3]]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { CREATE t:9 SET a = 1; RETURN SELECT VALUE id FROM type::table(rand::enum('t')) }
+[t:1, t:9]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }, { a: 1, id: t:9 }]
+### owner: { CREATE fresh:9 SET a = 1; RETURN SELECT VALUE id FROM type::table(rand::enum('fresh')) }
+[fresh:9]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { DEFINE FIELD c ON t COMPUTED 7; RETURN SELECT c FROM type::table(rand::enum('t')) }
+[{ c: 7 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, c: 7, id: t:1 }]
+### record user: DEFINE FUNCTION fn::rd($t: string) { RETURN SELECT VALUE id FROM type::table($t) } PERMISSIONS FULL; RETURN fn::rd('item');
+error: IAM error: Not enough permissions to perform this action
+error: Function 'fn::rd' not found: The function 'fn::rd' does not exist
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: DEFINE FUNCTION fn::rd($t: string) { RETURN SELECT VALUE id FROM type::table($t) } PERMISSIONS FULL; DEFINE TABLE pr PERMISSIONS FOR select WHERE fn::rd('item') != []; CREATE pr:1; RETURN SELECT * FROM pr;
+error: IAM error: Not enough permissions to perform this action
+error: IAM error: Not enough permissions to perform this action
+[]
+[]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { LET $t = 'item'; RETURN SELECT VALUE id FROM type::table(rand::enum($t)) }
+[item:1, item:2]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: RETURN (SELECT VALUE (SELECT VALUE id FROM type::table('it' + rand::enum('em'))) FROM t);
+[[item:1, item:2]]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { CREATE t:9 SET a = 1; RETURN SELECT VALUE id FROM type::table(rand::enum('t')) }
+[t:1, t:9]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }, { a: 1, id: t:9 }]
+### record user: { CREATE fresh:9 SET a = 1; RETURN SELECT VALUE id FROM type::table(rand::enum('fresh')) }
+[]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { DEFINE FIELD c ON t COMPUTED 7; RETURN SELECT c FROM type::table(rand::enum('t')) }
+error: IAM error: Not enough permissions to perform this action
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]

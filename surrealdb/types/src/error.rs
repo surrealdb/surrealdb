@@ -19,6 +19,7 @@ mod code {
 	pub const LIVE_QUERY_NOT_SUPPORTED: i64 = -32604;
 	pub const BAD_LIVE_QUERY_CONFIG: i64 = -32605;
 	pub const BAD_GRAPHQL_CONFIG: i64 = -32606;
+	pub const DIALECT_NOT_SUPPORTED: i64 = -32607;
 	pub const INTERNAL_ERROR: i64 = -32000;
 	pub const CLIENT_SIDE_ERROR: i64 = -32001;
 	pub const INVALID_AUTH: i64 = -32002;
@@ -156,6 +157,7 @@ impl Error {
 				ConfigurationError::LiveQueryNotSupported => code::LIVE_QUERY_NOT_SUPPORTED,
 				ConfigurationError::BadLiveQueryConfig => code::BAD_LIVE_QUERY_CONFIG,
 				ConfigurationError::BadGraphqlConfig => code::BAD_GRAPHQL_CONFIG,
+				ConfigurationError::DialectNotSupported => code::DIALECT_NOT_SUPPORTED,
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
@@ -229,7 +231,22 @@ impl Error {
 				NotFoundError::Method {
 					..
 				} => Some(code::METHOD_NOT_FOUND),
-				_ => None,
+				NotFoundError::Session {
+					..
+				}
+				| NotFoundError::Table {
+					..
+				}
+				| NotFoundError::Record {
+					..
+				}
+				| NotFoundError::Namespace {
+					..
+				}
+				| NotFoundError::Database {
+					..
+				}
+				| NotFoundError::Transaction => None,
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
@@ -331,6 +348,39 @@ impl Error {
 		}
 	}
 
+	/// As [`from_parts`](Self::from_parts), but assigning the legacy numeric
+	/// code that the kind-specific constructors assign.
+	///
+	/// [`from_parts`](Self::from_parts) is for wire shapes that carry no code
+	/// and want the catch-all. A transport that rebuilds an error from its kind
+	/// and details wants the code matching what it rebuilt, so a consumer still
+	/// reading the backwards-compatible numeric field -- a proxy forwarding the
+	/// error, say -- sees the same value it would on any other transport.
+	///
+	/// Dispatching through the constructors rather than mapping the code here
+	/// is what keeps the two from drifting: there is one place a kind's code is
+	/// decided, and this is not it.
+	#[doc(hidden)]
+	pub fn from_wire(message: String, kind: Option<&str>, details: Option<Value>) -> Self {
+		let parsed = Self::from_parts(message, kind, details);
+		let message = parsed.message;
+		match parsed.details {
+			ErrorDetails::Validation(details) => Self::validation(message, details),
+			ErrorDetails::Configuration(details) => Self::configuration(message, details),
+			ErrorDetails::Query(details) => Self::query(message, details),
+			ErrorDetails::Serialization(details) => Self::serialization(message, details),
+			ErrorDetails::NotAllowed(details) => Self::not_allowed(message, details),
+			ErrorDetails::NotFound(details) => Self::not_found(message, details),
+			ErrorDetails::AlreadyExists(details) => Self::already_exists(message, details),
+			ErrorDetails::Connection(details) => Self::connection(message, details),
+			ErrorDetails::Thrown => Self::thrown(message),
+			ErrorDetails::Context => Self::context(message),
+			// `Internal`, and any kind a newer peer introduces, which the
+			// taxonomy already degrades to it.
+			ErrorDetails::Internal => Self::internal(message),
+		}
+	}
+
 	/// Returns the optional underlying cause for error chaining.
 	pub fn cause(&self) -> Option<&Error> {
 		self.cause.as_deref()
@@ -427,68 +477,76 @@ impl Error {
 
 	/// Returns structured validation error details, if this is a validation error with specifics.
 	pub fn validation_details(&self) -> Option<&ValidationError> {
-		match &self.details {
-			ErrorDetails::Validation(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::Validation(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured not-allowed error details, if this is a not-allowed error with specifics.
 	pub fn not_allowed_details(&self) -> Option<&NotAllowedError> {
-		match &self.details {
-			ErrorDetails::NotAllowed(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::NotAllowed(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured configuration error details, if this is a configuration error with
 	/// specifics.
 	pub fn configuration_details(&self) -> Option<&ConfigurationError> {
-		match &self.details {
-			ErrorDetails::Configuration(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::Configuration(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured serialization error details, if this is a serialization error with
 	/// specifics.
 	pub fn serialization_details(&self) -> Option<&SerializationError> {
-		match &self.details {
-			ErrorDetails::Serialization(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::Serialization(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured not-found error details, if this is a not-found error with specifics.
 	pub fn not_found_details(&self) -> Option<&NotFoundError> {
-		match &self.details {
-			ErrorDetails::NotFound(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::NotFound(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured query error details, if this is a query error with specifics.
 	pub fn query_details(&self) -> Option<&QueryError> {
-		match &self.details {
-			ErrorDetails::Query(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::Query(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured already-exists error details, if this is an already-exists error with
 	/// specifics.
 	pub fn already_exists_details(&self) -> Option<&AlreadyExistsError> {
-		match &self.details {
-			ErrorDetails::AlreadyExists(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::AlreadyExists(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured connection error details, if this is a connection error with specifics.
 	pub fn connection_details(&self) -> Option<&ConnectionError> {
-		match &self.details {
-			ErrorDetails::Connection(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::Connection(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 }
@@ -806,6 +864,12 @@ pub enum ConfigurationError {
 	BadLiveQueryConfig,
 	/// Bad GraphQL config.
 	BadGraphqlConfig,
+	/// A query named a dialect this build cannot parse.
+	///
+	/// The dialect is chosen from what a client sent, so it is a runtime value
+	/// on every path that produces one; a build without the front end for it
+	/// reports that rather than failing to name it.
+	DialectNotSupported,
 }
 
 /// Serialisation failure reason for [`ErrorKind::Serialization`] errors.
@@ -1020,34 +1084,48 @@ impl From<std::io::Error> for Error {
 	fn from(error: std::io::Error) -> Self {
 		use std::io::ErrorKind;
 		let msg = error.to_string();
-		match error.kind() {
-			ErrorKind::NotFound => Error::not_found(msg, None),
-			ErrorKind::AlreadyExists => Error::already_exists(msg, None),
+		let kind = error.kind();
+		if kind == ErrorKind::NotFound {
+			Error::not_found(msg, None)
+		} else if kind == ErrorKind::AlreadyExists {
+			Error::already_exists(msg, None)
+		} else if matches!(
+			kind,
 			ErrorKind::PermissionDenied
-			| ErrorKind::ReadOnlyFilesystem
-			| ErrorKind::ResourceBusy
-			| ErrorKind::ExecutableFileBusy => Error::not_allowed(msg, None),
+				| ErrorKind::ReadOnlyFilesystem
+				| ErrorKind::ResourceBusy
+				| ErrorKind::ExecutableFileBusy
+		) {
+			Error::not_allowed(msg, None)
+		} else if matches!(
+			kind,
 			ErrorKind::ConnectionRefused
-			| ErrorKind::ConnectionReset
-			| ErrorKind::ConnectionAborted
-			| ErrorKind::NotConnected
-			| ErrorKind::HostUnreachable
-			| ErrorKind::NetworkUnreachable
-			| ErrorKind::NetworkDown
-			| ErrorKind::TimedOut
-			| ErrorKind::BrokenPipe
-			| ErrorKind::AddrInUse
-			| ErrorKind::AddrNotAvailable
-			| ErrorKind::StaleNetworkFileHandle => Error::connection(msg, ConnectionError::ConnectionFailed),
-			ErrorKind::InvalidData | ErrorKind::UnexpectedEof => {
-				Error::serialization(msg, SerializationError::Deserialization)
-			}
+				| ErrorKind::ConnectionReset
+				| ErrorKind::ConnectionAborted
+				| ErrorKind::NotConnected
+				| ErrorKind::HostUnreachable
+				| ErrorKind::NetworkUnreachable
+				| ErrorKind::NetworkDown
+				| ErrorKind::TimedOut
+				| ErrorKind::BrokenPipe
+				| ErrorKind::AddrInUse
+				| ErrorKind::AddrNotAvailable
+				| ErrorKind::StaleNetworkFileHandle
+		) {
+			Error::connection(msg, ConnectionError::ConnectionFailed)
+		} else if matches!(kind, ErrorKind::InvalidData | ErrorKind::UnexpectedEof) {
+			Error::serialization(msg, SerializationError::Deserialization)
+		} else if matches!(
+			kind,
 			ErrorKind::InvalidInput
-			| ErrorKind::InvalidFilename
-			| ErrorKind::NotADirectory
-			| ErrorKind::IsADirectory
-			| ErrorKind::DirectoryNotEmpty => Error::validation(msg, None),
-			_ => Error::internal(msg),
+				| ErrorKind::InvalidFilename
+				| ErrorKind::NotADirectory
+				| ErrorKind::IsADirectory
+				| ErrorKind::DirectoryNotEmpty
+		) {
+			Error::validation(msg, None)
+		} else {
+			Error::internal(msg)
 		}
 	}
 }
@@ -1288,4 +1366,42 @@ pub fn union_conversion_error(expected: Kind, value: impl Into<Value>) -> Error 
 	ConversionError::from_value(expected, &value)
 		.with_context("Value does not match any variant in union type")
 		.into()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{Error, QueryError, Value, code};
+	use crate::Object;
+
+	/// The legacy numeric code is what a consumer predating the structured
+	/// model still reads, so an error rebuilt from its kind and details has to
+	/// carry the code that kind assigns. `from_parts` deliberately does not --
+	/// it is for wire shapes that carry no code at all -- which is the
+	/// difference these two spell out.
+	#[test]
+	fn from_wire_assigns_the_code_its_kind_would() {
+		let thrown = Error::from_wire("boom".to_string(), Some("Thrown"), None);
+		assert_eq!(thrown.code, code::THROWN);
+		assert_eq!(
+			Error::from_parts("boom".to_string(), Some("Thrown"), None).code,
+			code::INTERNAL_ERROR
+		);
+
+		// A reason carries its own code, which is finer than the kind's.
+		let mut conflict = Object::new();
+		conflict.insert("kind", Value::String("TransactionConflict".to_string()));
+		let error =
+			Error::from_wire("conflict".to_string(), Some("Query"), Some(Value::Object(conflict)));
+		assert_eq!(error.code, code::QUERY_TRANSACTION_CONFLICT);
+		assert_eq!(error.query_details(), Some(&QueryError::TransactionConflict));
+	}
+
+	/// A kind this build does not recognise still has to behave, and takes the
+	/// catch-all code with the catch-all kind.
+	#[test]
+	fn from_wire_degrades_an_unknown_kind_to_internal() {
+		let error = Error::from_wire("from the future".to_string(), Some("Telepathic"), None);
+		assert!(error.is_internal());
+		assert_eq!(error.code, code::INTERNAL_ERROR);
+	}
 }

@@ -1,0 +1,2 @@
+### SELECT * FROM ONLY t
+error: Expected a single result output when using the ONLY keyword

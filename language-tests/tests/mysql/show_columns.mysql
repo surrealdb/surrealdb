@@ -1,0 +1,62 @@
+/**
+[env]
+namespace = true
+database = "shop"
+imports = ["mysql/_show_shop.surql"]
+
+[test]
+reason = "SHOW COLUMNS, SHOW FIELDS and DESCRIBE answer with a row per field in MySQL's column layout, and refuse a missing table or another database"
+
+[[test.results]]
+value = "[{ Default: '0', Extra: '', Field: 'balance', Key: '', Null: 'NO', Type: 'decimal(65,30)' }, { Default: NULL, Extra: '', Field: 'email', Key: 'UNI', Null: 'NO', Type: 'text' }, { Default: NULL, Extra: '', Field: 'id', Key: 'PRI', Null: 'NO', Type: 'bigint' }, { Default: NULL, Extra: '', Field: 'note', Key: 'MUL', Null: 'YES', Type: 'text' }]"
+
+[[test.results]]
+value = "[{ Default: '0', Extra: '', Field: 'balance', Key: '', Null: 'NO', Type: 'decimal(65,30)' }, { Default: NULL, Extra: '', Field: 'email', Key: 'UNI', Null: 'NO', Type: 'text' }, { Default: NULL, Extra: '', Field: 'id', Key: 'PRI', Null: 'NO', Type: 'bigint' }, { Default: NULL, Extra: '', Field: 'note', Key: 'MUL', Null: 'YES', Type: 'text' }]"
+
+[[test.results]]
+value = "[{ Default: '0', Extra: '', Field: 'balance', Key: '', Null: 'NO', Type: 'decimal(65,30)' }, { Default: NULL, Extra: '', Field: 'email', Key: 'UNI', Null: 'NO', Type: 'text' }, { Default: NULL, Extra: '', Field: 'id', Key: 'PRI', Null: 'NO', Type: 'bigint' }, { Default: NULL, Extra: '', Field: 'note', Key: 'MUL', Null: 'YES', Type: 'text' }]"
+
+[[test.results]]
+value = "[{ Default: '0', Extra: '', Field: 'balance', Key: '', Null: 'NO', Type: 'decimal(65,30)' }, { Default: NULL, Extra: '', Field: 'email', Key: 'UNI', Null: 'NO', Type: 'text' }, { Default: NULL, Extra: '', Field: 'id', Key: 'PRI', Null: 'NO', Type: 'bigint' }, { Default: NULL, Extra: '', Field: 'note', Key: 'MUL', Null: 'YES', Type: 'text' }]"
+
+[[test.results]]
+value = "[{ Default: '0', Extra: '', Field: 'balance', Key: '', Null: 'NO', Type: 'decimal(65,30)' }, { Default: NULL, Extra: '', Field: 'email', Key: 'UNI', Null: 'NO', Type: 'text' }, { Default: NULL, Extra: '', Field: 'id', Key: 'PRI', Null: 'NO', Type: 'bigint' }, { Default: NULL, Extra: '', Field: 'note', Key: 'MUL', Null: 'YES', Type: 'text' }]"
+
+[[test.results]]
+value = "[{ Default: NULL, Extra: '', Field: 'email', Key: 'UNI', Null: 'NO', Type: 'text' }]"
+
+[[test.results]]
+value = "[{ Default: NULL, Extra: '', Field: 'email', Key: 'UNI', Null: 'NO', Type: 'text' }]"
+
+[[test.results]]
+value = "[{ Collation: NULL, Comment: '', Default: NULL, Extra: '', Field: 'amount', Key: '', Null: 'NO', Privileges: 'select,insert,update,references', Type: 'bigint' }, { Collation: NULL, Comment: '', Default: NULL, Extra: '', Field: 'n', Key: '', Null: 'NO', Privileges: 'select,insert,update,references', Type: 'bigint' }]"
+
+[[test.results]]
+value = "[{ Default: NULL, Extra: '', Field: 'amount', Key: '', Null: 'NO', Type: 'bigint' }, { Default: NULL, Extra: '', Field: 'n', Key: '', Null: 'NO', Type: 'bigint' }]"
+
+[[test.results]]
+value = "[{ Default: NULL, Extra: '', Field: 'amount', Key: '', Null: 'NO', Type: 'bigint' }, { Default: NULL, Extra: '', Field: 'n', Key: '', Null: 'NO', Type: 'bigint' }]"
+
+[[test.results]]
+error = "An error occurred: Table 'show_nosuch' doesn't exist"
+
+[[test.results]]
+error = "An error occurred: cross-database queries not supported: elsewhere.show_ledger"
+
+[[test.results]]
+error = "An error occurred: cross-database queries not supported: elsewhere.show_ledger"
+*/
+
+SHOW COLUMNS FROM show_accounts;
+SHOW FIELDS FROM show_accounts;
+DESCRIBE show_accounts;
+DESC show_accounts;
+EXPLAIN show_accounts;
+SHOW COLUMNS FROM show_accounts LIKE 'E%';
+DESCRIBE show_accounts email;
+SHOW FULL COLUMNS FROM show_ledger;
+SHOW COLUMNS FROM show_ledger FROM shop;
+SHOW COLUMNS FROM shop.show_ledger;
+SHOW COLUMNS FROM show_nosuch;
+SHOW COLUMNS FROM elsewhere.show_ledger;
+SHOW COLUMNS FROM show_ledger FROM elsewhere;

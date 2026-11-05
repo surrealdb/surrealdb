@@ -3,7 +3,7 @@
 
 [test.results]
 parsing-error = """
-Unexpected token `;`, expected `COMPACT`, `DROP` or `QUERY_TIMEOUT`
+Unexpected token `;`, expected `COMPACT`, `COMPATIBILITY`, `DROP` or `QUERY_TIMEOUT`
   --> [14:13]
    |
 14 | ALTER SYSTEM;

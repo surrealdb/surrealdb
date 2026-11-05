@@ -27,6 +27,20 @@ impl CustomFilter {
 		EnvFilter::builder().parse(self.env.to_string()).unwrap_or_default()
 	}
 
+	/// The most verbose level [`Self::env`] admits, when it can say.
+	///
+	/// A filter layered over `env` admits only what `env` admits, so this is its
+	/// hint too. Each layer's outermost filter must report it: a layer whose
+	/// outermost filter has no hint gives the whole subscriber none, and
+	/// `log`'s max level is then `TRACE`, so every `log` record of every
+	/// dependency reaches the filters before they drop it.
+	pub fn max_level_hint(&self) -> Option<LevelFilter> {
+		self.env.max_level_hint()
+	}
+
+	/// Narrows [`Self::env`] by the `[span]=level` directives: an event in a
+	/// named span is admitted up to that span's level. Its hint is
+	/// [`Self::max_level_hint`].
 	pub fn span_filter<S>(
 		self,
 	) -> DynFilterFn<
@@ -36,7 +50,8 @@ impl CustomFilter {
 	where
 		S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 	{
-		tracing_subscriber::filter::dynamic_filter_fn(move |meta, cx| {
+		let hint = self.max_level_hint();
+		let filter = tracing_subscriber::filter::dynamic_filter_fn(move |meta, cx| {
 			if let Some(level) = self.spans.get(meta.name()) {
 				return *meta.level() <= *level;
 			}
@@ -48,7 +63,11 @@ impl CustomFilter {
 				current = span.parent();
 			}
 			true
-		})
+		});
+		match hint {
+			Some(hint) => filter.with_max_level_hint(hint),
+			None => filter,
+		}
 	}
 }
 

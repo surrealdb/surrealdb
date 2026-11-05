@@ -1,10 +1,9 @@
 //! Dynamic support for any engine
 //!
 //! SurrealDB supports various ways of storing and accessing your data. For
-//! storing data we support a number of key value stores. These are SurrealKV,
-//! RocksDB, TiKV and an in-memory store. We call these local engines. SurrealKV
-//! and RocksDB are file-based, single node key value stores. TiKV is a
-//! distributed store that can scale horizontally across multiple nodes. The
+//! storing data we support a number of key value stores. These are SurrealKV
+//! and an in-memory store. We call these local engines. SurrealKV is a
+//! file-based, single node key value store. The
 //! in-memory store does not persist your data, it only stores it in memory. All
 //! these can be embedded in your application, so you don't need to spin up a
 //! SurrealDB server first in order to use them. We also support spinning up a
@@ -36,17 +35,11 @@
 //! Cargo features you enable when compiling. This enables some cool workflows.
 //!
 //! One of the common use cases we see is using SurrealDB as an embedded
-//! database using RocksDB as the local engine. This is a nice way to boost the
-//! performance of your application when all you need is a single node. The
-//! downside of this approach is that RocksDB is not written in Rust so you will
-//! need to install some external dependencies on your development machine in
-//! order to successfully compile it. Some of our users have reported that
-//! this is not exactly straight-forward on Windows. Another issue is that
-//! RocksDB is very resource intensive to compile and it takes a long time. Both
-//! of these issues can be easily avoided by using `Surreal<Any>`. You can
-//! develop using an in-memory engine but deploy using RocksDB. If you develop
-//! on Windows but deploy to Linux then you completely avoid having to build
-//! RocksDB on Windows at all.
+//! database using SurrealKV as the local engine. This is a nice way to boost
+//! the performance of your application when all you need is a single node.
+//! SurrealKV is written in pure Rust so it needs no external dependencies, but
+//! `Surreal<Any>` still lets you develop using an in-memory engine and deploy
+//! using SurrealKV without changing your code.
 //!
 //! # Getting Started
 //!
@@ -78,7 +71,7 @@
 //!
 //! # Examples
 //!
-//! ```rust
+//! ```no_run
 //! use std::env;
 //! use surrealdb::engine::any;
 //! use surrealdb::engine::any::Any;
@@ -114,30 +107,24 @@
 //! By doing something like this, you can use an in-memory database on your
 //! development machine and you can just run `cargo run` without having to
 //! specify the environment variable first or spinning up an external server
-//! remotely to avoid RocksDB's compilation cost. You also don't need to install
-//! any `C` or `C++` dependencies on your Windows machine. For the production
-//! binary you simply need to build it using something like
+//! remotely. For the production binary you simply need to build it using
+//! something like
 //!
 //! ```bash
-//! cargo build --features surrealdb/kv-rocksdb --release
+//! cargo build --features surrealdb/kv-surrealkv --release
 //! ```
 //!
 //! and export the `SURREALDB_ENDPOINT` environment variable when starting it.
 //!
 //! ```bash
-//! export SURREALDB_ENDPOINT="rocksdb:/path/to/database/folder"
+//! export SURREALDB_ENDPOINT="surrealkv:/path/to/database/folder"
 //! /path/to/binary
 //! ```
 //!
-//! The example above shows how you can avoid compiling RocksDB on your
-//! development machine, thereby avoiding dependency hell and paying the
-//! compilation cost during development. This is not the only benefit you can
-//! derive from using `Surreal<Any>` though. It's still useful even when your
-//! engine isn't expensive to compile. For example, the remote engines use pure
-//! Rust dependencies but you can still benefit from using `Surreal<Any>` by
-//! using the in-memory engine for development and deploy using a remote engine
-//! like the WebSocket engine. This way you avoid having to spin up a SurrealDB
-//! server first when developing and testing your application.
+//! The example above shows one benefit of using `Surreal<Any>`: the engine is
+//! chosen at runtime. For example, you can use the in-memory engine for
+//! development and deploy using a remote engine like the WebSocket engine. This way you avoid
+//! having to spin up a SurrealDB server first when developing and testing your application.
 //!
 //! For some applications where you allow users to determine the engine they
 //! want to use, you can enable multiple engines for them when building, or even
@@ -145,12 +132,11 @@
 //! features.
 //!
 //! ```bash
-//! cargo build --features surrealdb/protocol-ws,surrealdb/kv-rocksdb,surrealdb/kv-tikv --release
+//! cargo build --features surrealdb/protocol-ws,surrealdb/kv-surrealkv --release
 //! ```
 //!
 //! In this case, the binary you build will have support for accessing an
-//! external server via WebSockets, embedding the database using RocksDB or
-//! using a distributed TiKV cluster.
+//! external server via WebSockets or embedding the database using SurrealKV.
 
 use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
@@ -191,6 +177,49 @@ fn split_url(url: &str) -> (&str, &str) {
 	}
 }
 
+/// Percent-decodes the path of a local endpoint URL.
+///
+/// Every `%XX` escape with two hex digits is replaced by its byte; a `%` that
+/// does not start such an escape is kept literally. Fails if the decoded bytes
+/// are not UTF-8, if they contain a `?`, which the datastore would read as the
+/// start of the query string, or if they contain a NUL byte, which storage
+/// engines and filesystem APIs cannot accept in a path.
+fn percent_decode_path(path: &str) -> Result<String> {
+	let bytes = path.as_bytes();
+	let mut decoded = Vec::with_capacity(bytes.len());
+	let mut i = 0;
+	while i < bytes.len() {
+		if bytes[i] == b'%'
+			&& let Some(byte) = bytes
+				.get(i + 1..i + 3)
+				.and_then(|hex| std::str::from_utf8(hex).ok())
+				.and_then(|hex| u8::from_str_radix(hex, 16).ok())
+		{
+			decoded.push(byte);
+			i += 3;
+		} else {
+			decoded.push(bytes[i]);
+			i += 1;
+		}
+	}
+	let decoded = String::from_utf8(decoded).map_err(|_| {
+		Error::configuration(format!("Endpoint path `{path}` decodes to invalid UTF-8"), None)
+	})?;
+	if decoded.contains('?') {
+		return Err(Error::configuration(
+			format!("Endpoint path `{path}` decodes to a `?`, which is not supported"),
+			None,
+		));
+	}
+	if decoded.contains('\0') {
+		return Err(Error::configuration(
+			format!("Endpoint path `{path}` decodes to a NUL byte, which is not supported"),
+			None,
+		));
+	}
+	Ok(decoded)
+}
+
 impl IntoEndpoint for &str {}
 impl into_endpoint::Sealed for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
@@ -209,14 +238,27 @@ impl into_endpoint::Sealed for &str {
 				let query = &url["mem://?".len()..];
 				(Url::parse("mem://").expect("valid memory url"), format!("mem://?{query}"))
 			}
-			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => (
-				Url::parse(url).map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
-				String::new(),
-			),
+			url if url.starts_with("ws")
+				| url.starts_with("http")
+				| url.starts_with("grpc")
+				| url.starts_with("tikv") =>
+			{
+				(
+					Url::parse(url)
+						.map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
+					String::new(),
+				)
+			}
 
 			_ => {
-				let (scheme, path) = split_url(self);
+				let (scheme, rest) = split_url(self);
 				let protocol = format!("{scheme}://");
+				// Only the path is decoded; the query string is passed through
+				// as written.
+				let path = match rest.split_once('?') {
+					Some((path, query)) => format!("{}?{query}", percent_decode_path(path)?),
+					None => percent_decode_path(rest)?,
+				};
 				(
 					Url::parse(&protocol)
 						.map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
@@ -318,17 +360,9 @@ impl Surreal<Any> {
 /// // In-memory with persistence to disk (e.g. mem:///tmp/data?versioned=true)
 /// let db = connect("mem:///tmp/data").await?;
 ///
-/// // Instantiate a RocksDB-backed instance
-/// let db = connect("rocksdb://path/to/database-folder").await?;
-///
 /// // Instantiate a SurrealKV-backed instance
 /// let db = connect("surrealkv://path/to/database-folder").await?;
 ///
-/// // Instantiate an IndxDB-backed instance
-/// let db = connect("indxdb://DatabaseName").await?;
-///
-/// // Instantiate a TiKV-backed instance
-/// let db = connect("tikv://localhost:2379").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -338,6 +372,84 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 		address: address.into_endpoint(),
 		capacity: 0,
 		response_type: PhantomData,
+	}
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod endpoint_tests {
+
+	use super::*;
+
+	/// A remote scheme keeps its authority in the URL and leaves the path
+	/// empty; a local scheme keeps only its scheme in the URL and carries the
+	/// rest in the path, which is where a file-backed engine reads it from.
+	#[test]
+	fn remote_schemes_keep_their_authority() {
+		for url in ["ws://127.0.0.1:8000", "http://127.0.0.1:8000", "grpc://127.0.0.1:8000"] {
+			let endpoint = __into_endpoint(url).unwrap();
+			assert_eq!(endpoint.url.host_str(), Some("127.0.0.1"), "{url} lost its host");
+			assert_eq!(endpoint.url.port(), Some(8000), "{url} lost its port");
+			assert!(endpoint.path.is_empty(), "{url} was treated as a local engine");
+		}
+	}
+
+	/// The schemes of earlier storage engines are deprecated spellings of
+	/// `surrealkv` and open the same path with it.
+	#[test]
+	fn deprecated_schemes_open_with_surrealkv() {
+		for url in ["rocksdb://some/folder", "indxdb://name"] {
+			let endpoint = __into_endpoint(url).unwrap();
+			assert!(
+				matches!(
+					crate::opt::endpoint::EndpointKind::from(endpoint.url.scheme()),
+					crate::opt::endpoint::EndpointKind::SurrealKv
+				),
+				"{url} is not opened with surrealkv"
+			);
+			assert_eq!(endpoint.path, url);
+		}
+	}
+
+	#[test]
+	fn local_schemes_carry_a_path() {
+		let endpoint = __into_endpoint("surrealkv://some/folder").unwrap();
+		assert_eq!(endpoint.url.scheme(), "surrealkv");
+		assert_eq!(endpoint.url.host_str(), None);
+		assert_eq!(endpoint.path, "surrealkv://some/folder");
+	}
+
+	/// A local endpoint string is a URL, so its path is percent-decoded before
+	/// it reaches the filesystem. A `%` that does not start a valid escape is
+	/// kept literally, and the query string is passed through untouched.
+	#[test]
+	fn local_scheme_path_is_percent_decoded() {
+		let cases = [
+			(
+				"surrealkv:///tmp/surrealdb%20path%20test/db",
+				"surrealkv:///tmp/surrealdb path test/db",
+			),
+			("rocksdb://some%2Ffolder/db", "rocksdb://some/folder/db"),
+			("surrealkv:///tmp/100%/db", "surrealkv:///tmp/100%/db"),
+			("surrealkv:///tmp/50%zz/db", "surrealkv:///tmp/50%zz/db"),
+			("surrealkv:///tmp/a%2/db", "surrealkv:///tmp/a%2/db"),
+			("surrealkv:///tmp/caf%C3%A9", "surrealkv:///tmp/café"),
+			("mem:///tmp/my%20data?versioned=true", "mem:///tmp/my data?versioned=true"),
+			("surrealkv:///tmp/db?sync=a%20b", "surrealkv:///tmp/db?sync=a%20b"),
+		];
+		for (input, expected) in cases {
+			let endpoint = __into_endpoint(input).unwrap();
+			assert_eq!(endpoint.path, expected, "failed to decode `{input}`");
+		}
+	}
+
+	#[test]
+	fn local_scheme_path_rejects_undecodable_escapes() {
+		for input in
+			["surrealkv:///tmp/%FF/db", "surrealkv:///tmp/a%3Fb/db", "surrealkv:///tmp/a%00b/db"]
+		{
+			assert!(__into_endpoint(input).is_err(), "`{input}` should be rejected");
+		}
 	}
 }
 

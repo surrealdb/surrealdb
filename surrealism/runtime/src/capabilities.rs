@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-/// Module-level capabilities declared in `surrealism.toml`.
+/// What a package asks for, declared in `package.toml`.
 ///
-/// These are validated against the server-level capabilities when the module is
-/// loaded. The server can further restrict what a module is allowed to do, but
-/// a module cannot exceed the server's limits.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+/// A request only: the server never reads it. What an extension may do comes
+/// from its definition's `CAPABILITIES`, which an installer can derive from
+/// this.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SurrealismCapabilities {
 	/// Whether the module requires the scripting capability.
 	#[serde(default)]
@@ -14,6 +14,10 @@ pub struct SurrealismCapabilities {
 	/// the `sql()` host function. Checked at runtime, not at load time.
 	#[serde(default)]
 	pub allow_arbitrary_queries: bool,
+	/// Whether the module's functions that are marked as writing need to
+	/// write: the request behind a definition's `CAPABILITIES { write: true }`.
+	#[serde(default)]
+	pub allow_write: bool,
 	/// Which SurrealDB functions the module is allowed to call via `run()`.
 	///
 	/// - Omitted / empty array: **deny all** function calls (default).
@@ -34,15 +38,11 @@ pub struct SurrealismCapabilities {
 	/// Maximum wall-clock execution time per invocation. `None` means unlimited.
 	#[serde(default, with = "optional_duration")]
 	pub max_execution_time: Option<std::time::Duration>,
-	/// Maximum number of controllers to pool per module. `None` uses server default.
+	/// Accepted so existing manifests still parse, and ignored: every
+	/// invocation runs on a fresh instance, and concurrency is bounded server
+	/// wide by `SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS`.
 	#[serde(default)]
 	pub max_pool_size: Option<usize>,
-	/// Maximum number of entries in the per-module KV store. `None` means unlimited.
-	#[serde(default)]
-	pub max_kv_entries: Option<usize>,
-	/// Maximum size in bytes for a single KV value. `None` means unlimited.
-	#[serde(default)]
-	pub max_kv_value_bytes: Option<usize>,
 	/// Whether to enforce execution timeouts via epoch-based interruption.
 	///
 	/// When `true` (default), WASM is compiled with epoch checks at every loop
@@ -76,13 +76,12 @@ impl Default for SurrealismCapabilities {
 		Self {
 			allow_scripting: false,
 			allow_arbitrary_queries: false,
+			allow_write: false,
 			allow_functions: FunctionTargets::default(),
 			allow_net: Vec::new(),
 			max_memory_bytes: None,
 			max_execution_time: None,
 			max_pool_size: None,
-			max_kv_entries: None,
-			max_kv_value_bytes: None,
 			strict_timeout: true,
 		}
 	}
@@ -92,7 +91,7 @@ impl Default for SurrealismCapabilities {
 ///
 /// Default is `None` (deny all). Aligns with SurrealDB's `FuncTarget` pattern
 /// matching so that `"http::*"` matches any function in the `http` family.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum FunctionTargets {
 	/// Deny all function calls (default when omitted or empty).
 	#[default]
@@ -121,18 +120,27 @@ impl FunctionTargets {
 /// Mirrors SurrealDB's `FuncTarget::matches` logic:
 /// - `"family::name"` requires exact match on both family and name.
 /// - `"family::*"` or `"family"` (no `::name`) matches any function in that family.
+///
+/// `ext` and its alias `mod` are one family, as the server's capability check
+/// treats them: a pattern written in either matches a call written in either.
 fn func_pattern_matches(pattern: &str, fnc: &str) -> bool {
-	if let Some(family) = pattern.strip_suffix("::*") {
-		let f = fnc.split_once("::").map(|(f, _)| f).unwrap_or(fnc);
-		f == family
+	fn family(f: &str) -> &str {
+		if f == "mod" {
+			"ext"
+		} else {
+			f
+		}
+	}
+	let fnc_family = || family(fnc.split_once("::").map(|(f, _)| f).unwrap_or(fnc));
+	if let Some(pfam) = pattern.strip_suffix("::*") {
+		fnc_family() == family(pfam)
 	} else if let Some((pfam, pname)) = pattern.split_once("::") {
 		let Some((ffam, fname)) = fnc.split_once("::") else {
 			return false;
 		};
-		pfam == ffam && pname == fname
+		family(pfam) == family(ffam) && pname == fname
 	} else {
-		let f = fnc.split_once("::").map(|(f, _)| f).unwrap_or(fnc);
-		f == pattern
+		fnc_family() == family(pattern)
 	}
 }
 
@@ -172,7 +180,8 @@ mod optional_duration {
 
 	pub fn serialize<S: Serializer>(val: &Option<Duration>, s: S) -> Result<S::Ok, S::Error> {
 		match val {
-			Some(d) => d.as_millis().serialize(s),
+			// TOML integers are 64-bit.
+			Some(d) => u64::try_from(d.as_millis()).unwrap_or(u64::MAX).serialize(s),
 			None => s.serialize_none(),
 		}
 	}
@@ -221,6 +230,19 @@ mod tests {
 		let targets = FunctionTargets::None;
 		assert!(!targets.allows("http::get"));
 		assert!(!targets.allows("fn::anything"));
+	}
+
+	#[test]
+	fn function_targets_read_ext_and_mod_as_one_family() {
+		let t = |p: &[&str]| FunctionTargets::Some(p.iter().map(|s| s.to_string()).collect());
+		assert!(t(&["mod::*"]).allows("ext::helpers::f"));
+		assert!(t(&["ext::*"]).allows("mod::helpers::f"));
+		assert!(t(&["mod"]).allows("ext::helpers::f"));
+		assert!(t(&["ext::helpers::f"]).allows("mod::helpers::f"));
+		assert!(t(&["mod::helpers::f"]).allows("ext::helpers::f"));
+		assert!(!t(&["ext::helpers::g"]).allows("mod::helpers::f"));
+		assert!(!t(&["ext::*"]).allows("fn::helpers"));
+		assert!(!t(&["fn::*"]).allows("ext::helpers::f"));
 	}
 
 	#[test]
@@ -314,22 +336,6 @@ allow_scripting = false
 		assert!(deserialized.targets.allows("http::get"));
 		assert!(deserialized.targets.allows("fn::check"));
 		assert!(!deserialized.targets.allows("string::len"));
-	}
-
-	#[test]
-	fn kv_limits_parse() {
-		let toml_str = r#"
-[capabilities]
-max_kv_entries = 1000
-max_kv_value_bytes = 65536
-"#;
-		#[derive(Deserialize)]
-		struct Wrapper {
-			capabilities: SurrealismCapabilities,
-		}
-		let w: Wrapper = toml::from_str(toml_str).unwrap();
-		assert_eq!(w.capabilities.max_kv_entries, Some(1000));
-		assert_eq!(w.capabilities.max_kv_value_bytes, Some(65536));
 	}
 
 	#[test]

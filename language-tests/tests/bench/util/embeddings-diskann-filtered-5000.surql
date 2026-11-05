@@ -6,17 +6,27 @@
 # committed-graph record prefetch (the bench harness compacts pending updates
 # before measuring).
 #
+# The rows are created in one statement and the index is defined in the next.
+# They must stay separate statements: `DEFINE INDEX` backfills the index by
+# reading the table through its own transaction, so rows written by the *same*
+# transaction are invisible to it and the index would be built empty.
+#
 # Vectors and categories are DETERMINISTIC (derived from the record index, no
-# `rand`). DiskANN graph construction is deterministic (no RNG), so the built
-# graph is identical across runs and a before/after wall-clock comparison is not
-# confounded by graph variance — no build seed is needed (unlike HNSW).
-# `run = false`.
+# `rand`), and repeat with period 1000, so the 5000 rows carry 1000 distinct
+# vectors — the graph holds one element per distinct vector, each mapping to the
+# 5 documents that share it. DiskANN graph construction is deterministic (no
+# RNG), so the built graph is identical across runs and a before/after
+# wall-clock comparison is not confounded by graph variance — no build seed is
+# needed (unlike HNSW). `run = false`.
 
 [test]
 run = false
 
 [[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 */
 
 {
@@ -27,6 +37,7 @@ value = "'OK'"
 			category = $i % 50
 		RETURN NONE;
 	};
-	DEFINE INDEX emb_diskann ON embeddings FIELDS vec DISKANN DIMENSION 8 DIST EUCLIDEAN TYPE F32;
 	RETURN 'OK';
-}
+};
+
+DEFINE INDEX emb_diskann ON embeddings FIELDS vec DISKANN DIMENSION 8 DIST EUCLIDEAN TYPE F32;

@@ -1,0 +1,43 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL date parts, lpad, rpad, strcmp, isnull, find_in_set, sha, timestampdiff, json_length and sysdate"
+
+[[test.results]]
+value = "[{ d: 15, dm: 15, dow: 6, doy: 75, h: 10, m: 3, mi: 20, n: NULL, s: 30, y: 2024 }]"
+
+[[test.results]]
+value = "[{ a: true, b: true, c: true }]"
+
+[[test.results]]
+value = "[{ a: 'xyxhi', b: 'hel', c: NULL, d: NULL, e: 'hixyx', f: 'hi  ' }]"
+
+[[test.results]]
+value = "[{ a: -1, b: 1, c: 0, d: 1, e: 0, f: 2, g: 0, h: 2, i: 'a9993e364706816aba3e25717850c26c9cd0d89d', j: NULL }]"
+
+[[test.results]]
+value = "[{ a: 5, b: 3, c: -30 }]"
+
+[[test.results]]
+value = "[{ a: 3, b: 2, c: 1, d: 2, e: true }]"
+
+[[test.results]]
+value = "[{ a: 1f, b: 1f }]"
+*/
+
+SELECT year('2024-03-15 10:20:30') AS y, month('2024-03-15') AS m, day('2024-03-15') AS d, dayofmonth('2024-03-15') AS dm, hour('2024-03-15 10:20:30') AS h, minute('2024-03-15 10:20:30') AS mi, second('2024-03-15 10:20:30') AS s, dayofweek('2024-03-15') AS dow, dayofyear('2024-03-15') AS doy, year(NULL) AS n;
+
+SELECT date('2024-03-15 10:20:30') = CAST('2024-03-15T00:00:00Z' AS datetime) AS a, last_day('2024-02-10') = CAST('2024-02-29T00:00:00Z' AS datetime) AS b, last_day('2023-12-31') = CAST('2023-12-31T00:00:00Z' AS datetime) AS c;
+
+SELECT lpad('hi', 5, 'xy') AS a, lpad('hello', 3, ' ') AS b, lpad('hi', 5, '') AS c, lpad('hi', -1, 'x') AS d, rpad('hi', 5, 'xy') AS e, rpad('hi', 4, ' ') AS f;
+
+SELECT strcmp('a', 'b') AS a, strcmp('b', 'a') AS b, strcmp('a', 'A') AS c, isnull(NULL) AS d, isnull(1) AS e, find_in_set('b', 'a,b,c') AS f, find_in_set('x', 'a,b,c') AS g, find_in_set('B', 'a,b,c') AS h, sha('abc') AS i, sha(NULL) AS j;
+
+SELECT timestampdiff(DAY, '2024-03-10', '2024-03-15') AS a, timestampdiff(HOUR, '2024-03-15 10:00:00', '2024-03-15 13:30:00') AS b, timestampdiff(MINUTE, '2024-03-15 10:00:00', '2024-03-15 09:30:00') AS c;
+
+SELECT json_length('[1, 2, 3]') AS a, json_length('{"a": 1, "b": 2}') AS b, json_length('1') AS c, json_length('{"a": [1, 2]}', '$.a') AS d, sysdate() IS NOT NULL AS e;
+
+SELECT stddev_samp(n) AS a, var_samp(n) AS b FROM (SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3) AS t;

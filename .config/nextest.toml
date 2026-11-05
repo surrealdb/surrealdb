@@ -1,24 +1,69 @@
 # Nextest configuration for SurrealDB
 # https://nexte.st/book/configuration.html
 
+# Setup scripts are experimental in nextest and must be enabled explicitly.
+experimental = ["setup-scripts"]
+
+# Builds the surrealism demo module once per run; see the script for the
+# contract. `tests/surrealism_integration.rs` reads `SURREALISM_DEMO_SURLI`.
+[scripts.setup.surrealism-demo-module]
+command = '.config/scripts/build-demo-module.sh'
+slow-timeout = { period = "10m", terminate-after = 3 }
+
 [profile.default]
 retries = 2
 fail-fast = false
 slow-timeout = "15s"
-global-timeout = "30m"
+global-timeout = "40m"
 
+# The slices of the layout oracle (`layout_oracle_00` …) each judge a share of its scenarios over
+# in-memory datastores. A slice runs four worker threads, so it holds four of the runner's slots.
+# The slices start ahead of the short tests so none of them is still running when the shard's
+# other tests are done.
 [[profile.default.overrides]]
-filter = 'test(kvs::tests::)'
-test-group = 'serial-kvs'
+filter = 'test(/kvs::tests::layout_oracle_test::layout_oracle_[0-9]+$/)'
+test-group = '@global'
+threads-required = 4
+slow-timeout = "300s"
+priority = 100
 
 [[profile.default.overrides]]
 filter = 'test(idx::trees::hnsw::tests::)'
 threads-required = 2
 
+# The DiskANN recall harness has to build a several-thousand-vector graph before
+# it can measure anything, and a debug build pays full price for every distance
+# computation. Expected to be slow rather than stuck.
+[[profile.default.overrides]]
+filter = 'test(trees::diskann::index::tests::diskann_recall_)'
+threads-required = 2
+slow-timeout = "120s"
+
+# Each slice of a corpus test runs its share of the language-test files through the planner across
+# worker threads. Expected to be slow rather than stuck. The slices start ahead of the short
+# tests so none of them is still running when the shard's other tests are done.
+[[profile.default.overrides]]
+filter = 'test(/(egraph::tests::kv::(seed_equals_skip_path|forced_on_answers_equal)|dbs::read_only_test::vm::access_mode_read_write_implies_not_read_only)_[0-9]+$/)'
+threads-required = 8
+slow-timeout = "300s"
+priority = 100
+
+# Corpus-wide write-target gating and scalar-builtin fallibility suites fan out across worker
+# threads and start at the front of their shard.
+[[profile.default.overrides]]
+filter = 'test(/exec::(vm::tests_write_targets::a_table_beside_a_subquery_is_gated_as_each_alone|function::fallibility_probes::scalar_builtins_match_their_declared_fallibility)$/)'
+threads-required = 8
+slow-timeout = "300s"
+priority = 100
+
 [[profile.default.overrides]]
 filter = 'test(syn::test::test_excessive_size)'
 threads-required = 4
 slow-timeout = "60s"
+
+[[profile.default.scripts]]
+filter = 'binary(surrealism_integration)'
+setup = 'surrealism-demo-module'
 
 [[profile.default.overrides]]
 filter = 'test(surrealism_integration::)'
@@ -28,6 +73,8 @@ slow-timeout = "120s"
 filter = 'test(access_bearer_purge)'
 slow-timeout = "60s"
 
-[test-groups]
-# Ensure all KVS tests run serially
-serial-kvs = { max-threads = 1 }
+# SQL front end tests are deterministic; retries only mask genuine failures.
+[[profile.default.overrides]]
+filter = 'package(surrealdb-mysql) | package(surrealdb-pgsql) | package(surrealdb-sqlfront-derive) | package(surrealdb-sqlfront-spec)'
+retries = 0
+

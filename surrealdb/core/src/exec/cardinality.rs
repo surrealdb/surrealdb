@@ -5,8 +5,6 @@
 //! [`super::buffer::buffer_stream`] to choose an appropriate buffering strategy:
 //!
 //! - **`AtMostOne`**: No buffering — spawning a task + channel for a single value is pure overhead.
-//! - **`Bounded(n)`** where `n` is small: cooperative prefetch only — a spawned task cannot overlap
-//!   enough work to justify the cost.
 //! - **`Unbounded`**: full buffering according to [`super::access_mode::AccessMode`].
 
 /// Cardinality hint for an execution operator's output stream.
@@ -19,10 +17,8 @@
 /// so only operators with known small cardinality need to override.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CardinalityHint {
-	/// At most one row (point lookups, scalar expressions, CurrentValueSource).
+	/// At most one row (point lookups, scalar expressions).
 	AtMostOne,
-	/// Known upper bound on row count (e.g. KNN top-K, TopK sorts).
-	Bounded(usize),
 	/// Unknown or potentially large.
 	Unbounded,
 }

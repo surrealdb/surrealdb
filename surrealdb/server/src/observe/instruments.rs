@@ -65,19 +65,29 @@ pub mod scope {
 	pub static SLOW_QUERY: &str = "surrealdb.slow_query";
 	/// Storage-backend manifest gauges.
 	pub static STORAGE: &str = "surrealdb.storage";
+	/// Object-storage bucket traffic (`file::*`: bytes in/out, operation counts).
+	pub static BUCKET: &str = "surrealdb.bucket";
 	/// GraphQL operation lifecycle counters / histograms.
 	pub static GRAPHQL: &str = "surrealdb.graphql";
 	/// MCP (Model Context Protocol) tool invocation counters / histograms.
 	pub static MCP: &str = "surrealdb.mcp";
+	/// Background maintenance job passes: throughput, duration, queue lag,
+	/// lease standing.
+	pub static TASK: &str = "surrealdb.task";
+	/// Index compaction passes, plan execution, retries, HNSW cache discards,
+	/// and read-time pending-delta backlog.
+	pub static INDEX: &str = "surrealdb.index";
 
 	/// Every scope known to the unified provider. Tests assert this list
 	/// matches what observers actually register.
 	pub static ALL: &[&str] = &[
 		AUDIT,
 		AUTH,
+		BUCKET,
 		DS,
 		GRAPHQL,
 		HTTP,
+		INDEX,
 		LIVE_QUERY,
 		MCP,
 		NETWORK,
@@ -88,6 +98,7 @@ pub mod scope {
 		SLOW_QUERY,
 		STATEMENT,
 		STORAGE,
+		TASK,
 		TENANT,
 		TRANSACTION,
 	];
@@ -107,6 +118,12 @@ pub mod names {
 	pub static BUILD_INFO: &str = "surrealdb.build.info";
 	pub static PROCESS_UPTIME: &str = "surrealdb.process.uptime";
 	pub static PROCESS_MEMORY: &str = "surrealdb.process.memory";
+	pub static PROCESS_MEMORY_ALLOCATED: &str = "surrealdb.process.memory_allocated";
+	pub static PROCESS_MEMORY_REQUESTED: &str = "surrealdb.process.memory_requested";
+	pub static PROCESS_MEMORY_RESERVED: &str = "surrealdb.process.memory_reserved";
+	pub static PROCESS_MEMORY_THRESHOLD: &str = "surrealdb.process.memory_threshold";
+	pub static PROCESS_MEMORY_REFUSALS: &str = "surrealdb.process.memory_refusals";
+	pub static PROCESS_MEMORY_GUARD_ENGAGED: &str = "surrealdb.process.memory_guard_engaged";
 	pub static PROCESS_CPU_PERCENT: &str = "surrealdb.process.cpu_percent";
 
 	// --- Statement (scope: STATEMENT) ----------------------------------
@@ -161,6 +178,12 @@ pub mod names {
 	pub static NETWORK_RECEIVED: &str = "surrealdb.network.received";
 	pub static NETWORK_SENT: &str = "surrealdb.network.sent";
 
+	// --- Bucket (scope: BUCKET) ----------------------------------------
+
+	pub static BUCKET_SENT_BYTES: &str = "surrealdb.bucket.sent_bytes";
+	pub static BUCKET_RECEIVED_BYTES: &str = "surrealdb.bucket.received_bytes";
+	pub static BUCKET_OPERATIONS: &str = "surrealdb.bucket.operations";
+
 	// --- HTTP (scope: HTTP) --------------------------------------------
 
 	pub static HTTP_REQUEST_TOTAL: &str = "surrealdb.http.request";
@@ -191,27 +214,81 @@ pub mod names {
 	pub static MCP_TOOL_INVOCATION: &str = "surrealdb.mcp.tool.invocation";
 	pub static MCP_TOOL_DURATION: &str = "surrealdb.mcp.tool.duration";
 	pub static MCP_SESSION_ACTIVE: &str = "surrealdb.mcp.session.active";
+
+	// --- Background tasks (scope: TASK) --------------------------------
+
+	/// Cumulative count of background job passes, labelled by job, outcome
+	/// and lease standing. A pass under `lease="elsewhere"` did no work.
+	pub static TASK_PASS: &str = "surrealdb.task.pass";
+	/// Distribution of pass duration, labelled by job.
+	pub static TASK_PASS_DURATION: &str = "surrealdb.task.pass.duration";
+	/// Cumulative count of queue entries or work units handled, by job.
+	pub static TASK_ITEMS: &str = "surrealdb.task.items";
+	/// Distribution of the age of the oldest queued entry at the start of a
+	/// pass, by job: how long the head of the queue had waited. Recorded only
+	/// for passes that found their queue non-empty.
+	pub static TASK_QUEUE_AGE: &str = "surrealdb.task.queue.age";
+	/// Cumulative count of passes that stopped at their budget with work
+	/// still pending, by job. A sustained rate means the job is not keeping
+	/// up with its queue.
+	pub static TASK_BACKLOG: &str = "surrealdb.task.backlog";
+
+	// --- Index compaction & backlog (scope: INDEX) ---------------------
+
+	/// Cumulative count of per-index compaction passes, labelled by index
+	/// kind, trigger (`queue` / `after_commit`), and outcome.
+	pub static INDEX_COMPACTION_PASS: &str = "surrealdb.index.compaction.pass";
+	/// Distribution of per-index compaction pass duration, labelled by index
+	/// kind, trigger, and outcome.
+	pub static INDEX_COMPACTION_PASS_DURATION: &str = "surrealdb.index.compaction.pass.duration";
+	/// Cumulative count of committed `MaterialisePlan`s that folded at least
+	/// one pending key, labelled by index kind and plan mode (`folded` /
+	/// `staged` / `in_place`).
+	pub static INDEX_COMPACTION_PLANS: &str = "surrealdb.index.compaction.plans";
+	/// Distribution of the duration of the plans counted by
+	/// [`INDEX_COMPACTION_PLANS`], labelled by index kind and plan mode.
+	pub static INDEX_COMPACTION_PLAN_DURATION: &str = "surrealdb.index.compaction.plan.duration";
+	/// Cumulative count of pending delta keys folded into compacted index
+	/// structures, labelled by index kind and plan mode.
+	pub static INDEX_COMPACTION_PENDING_KEYS_FOLDED: &str =
+		"surrealdb.index.compaction.pending_keys_folded";
+	/// Cumulative count of index compaction batch retries, labelled by index
+	/// kind and retry reason (`txn_conflict` / `lost_race`).
+	pub static INDEX_COMPACTION_RETRIES: &str = "surrealdb.index.compaction.retries";
+	/// Cumulative count of compaction passes that owed their index a fresh
+	/// `!ic` compaction request and failed to queue it, labelled by index kind
+	/// and trigger.
+	pub static INDEX_COMPACTION_UNQUEUED: &str = "surrealdb.index.compaction.unqueued";
+	/// Cumulative count of in-memory HNSW graph caches discarded because a
+	/// compaction write transaction failed after mutating the graph in place.
+	pub static INDEX_HNSW_CACHE_DISCARDS: &str = "surrealdb.index.hnsw.cache_discards";
+	/// Distribution of uncompacted pending delta keys merged per query-time
+	/// pending-delta read that merged any, labelled by index kind.
+	pub static INDEX_PENDING_KEYS_READ: &str = "surrealdb.index.pending_keys_read";
 }
 
 /// Attribute keys recorded on labelled instruments. Centralised here so
 /// observers, tests, and the `safe` security audit all reference the same
 /// strings.
 pub mod attrs {
-	/// `success` / `error` / `cancelled` (from [`surrealdb_core::observe::Outcome::as_label`]).
+	/// `success` / `error` / `cancelled` (from [`surrealdb_observe::Outcome::as_label`]).
 	pub static OUTCOME: &str = "outcome";
 	/// Bounded statement classification (from
-	/// [`surrealdb_core::observe::StatementType::as_label`]).
+	/// [`surrealdb_observe::StatementType::as_label`]).
 	pub static STATEMENT_TYPE: &str = "statement_type";
 	/// Resolved namespace identifier (sentinel `"-"` when unset).
 	pub static NAMESPACE: &str = "namespace";
 	/// Resolved database identifier (sentinel `"-"` when unset).
 	pub static DATABASE: &str = "database";
 	/// Resolved user / actor identifier (sentinel `"-"` when unset, `<record>` for
-	/// record-access principals — see
-	/// [`surrealdb_core::observe::TenantIdentity::from_session`]).
+	/// record-access principals — see the `From<&Session>` impl for
+	/// [`surrealdb_observe::TenantIdentity`]).
 	pub static USER: &str = "user";
 	/// Bounded session protocol identifier (`websocket` / `http`).
 	pub static PROTOCOL: &str = "protocol";
+	/// Where the memory guard refused work (`websocket` / `http` / `query`,
+	/// from [`surrealdb_core::mem::RefusalSite::as_label`]).
+	pub static MEMORY_REFUSAL_SITE: &str = "site";
 	/// Lifecycle action on a session event (`connect` / `disconnect`).
 	pub static SESSION_ACTION: &str = "session_action";
 	/// Service name supplied by the client on session connect (sentinel `"-"` when unset).
@@ -220,7 +297,7 @@ pub mod attrs {
 	pub static WRITE: &str = "write";
 	/// KV operation classification (`get` / `scan` / `put` / `set` / `del`).
 	pub static KV_OP: &str = "op";
-	/// Bounded RPC method identifier (from [`surrealdb_core::rpc::Method::to_str`]).
+	/// Bounded RPC method identifier (from [`surrealdb_rpc::Method::to_str`]).
 	pub static RPC_METHOD: &str = "rpc.method";
 	/// Auth attempt type (`signin` / `signup` / `authenticate` / …).
 	pub static AUTH_ACTION: &str = "auth_action";
@@ -234,6 +311,15 @@ pub mod attrs {
 	pub static HTTP_STATUS_CODE: &str = "http.response.status_code";
 	/// Inbound / outbound (`received` / `sent`) on network byte counters.
 	pub static NETWORK_DIRECTION: &str = "direction";
+	/// Bucket storage backend label (`s3` / `gcs` / `azure` / `file` / `memory`).
+	pub static BACKEND: &str = "backend";
+	/// Bucket object-store operation (`put` / `get` / `list` / …).
+	pub static BUCKET_OP: &str = "op";
+	/// Background job name (from the engine's fixed job set).
+	pub static JOB: &str = "job";
+	/// Lease standing of a background pass (`none` / `held` / `elsewhere` /
+	/// `unknown`, from [`surrealdb_observe::TaskLeaseState::as_label`]).
+	pub static LEASE: &str = "lease";
 	/// Bounded error classification recorded only when `outcome="error"`. Sourced
 	/// from [`error_class`] constants so cardinality stays closed.
 	pub static ERROR_CLASS: &str = "error_class";
@@ -243,6 +329,15 @@ pub mod attrs {
 	pub static MCP_TOOL: &str = "tool";
 	/// MCP transport (`stdio` / `http`).
 	pub static MCP_TRANSPORT: &str = "transport";
+	/// Bounded index compaction kind (`count` / `fulltext` / `hnsw` / `diskann`,
+	/// or sentinel `"-"` when unresolved).
+	pub static INDEX_KIND: &str = "kind";
+	/// Index compaction pass trigger (`queue` / `after_commit`).
+	pub static COMPACTION_TRIGGER: &str = "trigger";
+	/// Index compaction plan mode (`folded` / `staged` / `in_place`).
+	pub static COMPACTION_MODE: &str = "mode";
+	/// Index compaction retry reason (`txn_conflict` / `lost_race`).
+	pub static RETRY_REASON: &str = "reason";
 }
 
 /// Re-export the core's bounded error-classification constants so server-side
@@ -251,9 +346,8 @@ pub mod attrs {
 /// classification, cancel/timeout paths), the kvs commit-failure path, and
 /// from the RPC dispatch shim. Server crates additionally use them via the
 /// shared classifier helpers ([`error_class::classify_types_error`],
-/// [`error_class::classify_anyhow_error`],
 /// [`error_class::classify_http_status`]) at the HTTP / GraphQL / MCP layers.
-pub use surrealdb_core::observe::error_class;
+pub use surrealdb_observe::error_class;
 
 #[cfg(test)]
 mod tests {
@@ -271,6 +365,9 @@ mod tests {
 	fn every_instrument_name_starts_with_surrealdb_prefix() {
 		const NAMES: &[&str] = &[
 			names::AUTH_TOTAL,
+			names::BUCKET_OPERATIONS,
+			names::BUCKET_RECEIVED_BYTES,
+			names::BUCKET_SENT_BYTES,
 			names::BUILD_INFO,
 			names::GRAPHQL_OPERATION_DURATION,
 			names::GRAPHQL_OPERATION_TOTAL,
@@ -279,8 +376,18 @@ mod tests {
 			names::HTTP_REQUEST_SIZE,
 			names::HTTP_REQUEST_TOTAL,
 			names::HTTP_RESPONSE_SIZE,
+			names::INDEX_COMPACTION_PASS,
+			names::INDEX_COMPACTION_PASS_DURATION,
+			names::INDEX_COMPACTION_PENDING_KEYS_FOLDED,
+			names::INDEX_COMPACTION_PLANS,
+			names::INDEX_COMPACTION_PLAN_DURATION,
+			names::INDEX_COMPACTION_RETRIES,
+			names::INDEX_COMPACTION_UNQUEUED,
+			names::INDEX_HNSW_CACHE_DISCARDS,
+			names::INDEX_PENDING_KEYS_READ,
 			names::LIVE_QUERY_ACTIVE,
 			names::LIVE_QUERY_NOTIFICATIONS,
+			names::LIVE_QUERY_ORPHANED,
 			names::MCP_SESSION_ACTIVE,
 			names::MCP_TOOL_DURATION,
 			names::MCP_TOOL_INVOCATION,
@@ -288,6 +395,12 @@ mod tests {
 			names::NETWORK_SENT,
 			names::PROCESS_CPU_PERCENT,
 			names::PROCESS_MEMORY,
+			names::PROCESS_MEMORY_ALLOCATED,
+			names::PROCESS_MEMORY_GUARD_ENGAGED,
+			names::PROCESS_MEMORY_REFUSALS,
+			names::PROCESS_MEMORY_REQUESTED,
+			names::PROCESS_MEMORY_RESERVED,
+			names::PROCESS_MEMORY_THRESHOLD,
 			names::PROCESS_UPTIME,
 			names::QUERY_DURATION,
 			names::QUERY_TOTAL,
@@ -300,6 +413,11 @@ mod tests {
 			names::STATEMENT_DURATION,
 			names::STATEMENT_ROWS,
 			names::STATEMENT_TOTAL,
+			names::TASK_BACKLOG,
+			names::TASK_ITEMS,
+			names::TASK_PASS,
+			names::TASK_PASS_DURATION,
+			names::TASK_QUEUE_AGE,
 			names::TRANSACTION_CONFLICTS,
 			names::TRANSACTION_DURATION,
 			names::TRANSACTION_KEYS_READ,

@@ -14,17 +14,25 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-default = []
+default = ["regex-unicode"]
+# Regex values and regex builtins match with full Unicode support (the `regex`
+# crate). Without it they use `regex-lite`, and a pattern whose matches depend
+# on Unicode tables (`\p{..}`, Unicode-aware `\d`, `\w`, `\s`, `\b`, or
+# case-insensitive matching of non-ASCII letters) fails to compile with an
+# error naming this feature. See `regex_engine`.
+regex-unicode = ["dep:regex"]
 convert = ["dep:async-channel", "dep:url", "dep:semver"]
-# Enables From<reqwest::Error>; use with protocol-http or similar
 reqwest = ["dep:reqwest"]
-js = ["dep:js"]
+# Value <-> surrealdb_protocol::proto::v1::Value conversions, for gRPC engines.
+proto = ["dep:prost", "surrealdb-protocol/proto"]
+# Value <-> CBOR, the `cbor` and `cbor.2` wire formats.
+cbor = ["dep:ciborium"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
     "regex-syntax/arbitrary",
+    "surrealdb-collections/arbitrary",
     "rust_decimal/rust-fuzz",
-    "dep:geo-types",
     "geo-types/arbitrary",
     "uuid/arbitrary",
     "chrono/arbitrary",
@@ -40,40 +48,73 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 bytes.workspace = true
 castaway.workspace = true
 papaya.workspace = true
-chrono = { workspace = true, features = ["serde"] }
+# `now`/`wasmbind`: `Datetime::now()` reads the system clock natively and the
+# wasm32 JS Date API under wasm-bindgen.
+chrono = { workspace = true, features = ["serde", "now", "wasmbind"] }
 flatbuffers.workspace = true
-geo = { workspace = true, features = ["use-serde"] }
-geo-types = { workspace = true, optional = true }
+geo-types = { workspace = true, features = ["serde"] }
+half.workspace = true
 hex.workspace = true
 http.workspace = true
-js = { workspace = true, optional = true }
-regex.workspace = true
+regex = { workspace = true, optional = true }
+regex-lite.workspace = true
 # Used for generating random regexes for fuzzing with arbitrary
 regex-syntax = { workspace = true, optional = true }
+num-bigint.workspace = true
+num-traits.workspace = true
 rust_decimal.workspace = true
 serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
 serde_json.workspace = true
+surrealdb-collections = { workspace = true, features = ["serde"] }
 surrealdb-protocol = { workspace = true, features = ["flatbuffers"] }
 surrealdb-types-derive.workspace = true
+parse-common.workspace = true
 tracing.workspace = true
 ulid.workspace = true
 rand.workspace = true
+prost = { workspace = true, optional = true }
+ciborium = { workspace = true, optional = true }
 
 # WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]
-uuid = { workspace = true, features = ["serde", "v4", "v7", "js"] }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+
+# Browser wasm only.
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+uuid = { workspace = true, features = ["js"] }
+# Two majors of getrandom, because two majors of `rand` are in the graph and
+# neither getrandom builds for wasm*-unknown-unknown without being told which
+# backend to use:
+#
+#   0.2  <- rand_core 0.6 <- rand 0.8 <- geo
+#   0.3  <- rand_core 0.9 <- rand 0.9 <- ulid, and this crate directly
+#
+# So they cannot be deduplicated from here: it needs `geo` (which `revision`
+# brings in for its geometry encodings) to move to rand 0.9, which is upstream. These two lines are not the duplication — they are the
+# wasm fix for a duplication that exists either way, and they collapse to one
+# the moment `geo` upgrades.
+#
+# 0.2 selects the backend with a feature; 0.3 needs that feature AND the
+# `getrandom_backend` cfg (see `.cargo/config.toml`, and note the precedence
+# caveat there). Declared in this crate because every engine crate depends on
+# it, so every wasm consumer inherits the fix rather than rediscovering it.
+getrandom = { workspace = true, features = ["wasm_js"] }
+getrandom_02 = { workspace = true, features = ["js"] }
 
 # NON-WASM DEPENDENCY CONFIGURATION
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]
+regex.workspace = true
 rstest.workspace = true
 serde_json = { workspace = true }
 
 [package.metadata.cargo-machete]
-# geo-types and js are optional dependencies tied to features
-ignored = ["geo-types", "js"]
+# getrandom and getrandom_02 are browser-only backend selections with no code
+# reference
+ignored = ["getrandom", "getrandom_02"]
 
 [lints]
 workspace = true

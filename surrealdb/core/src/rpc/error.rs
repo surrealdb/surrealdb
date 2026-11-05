@@ -1,145 +1,75 @@
-//! RPC layer error constructors using the public wire error type.
+//! RPC layer error constructors that depend on core-internal types.
 //!
-//! All RPC failures are represented as [`surrealdb_types::Error`]. This module provides
-//! constructor functions for the same cases that were previously [`RpcError`] variants.
-//! Wire codes are set by the [`surrealdb_types::Error`] constructors.
+//! The pure constructors (using only [`surrealdb_types`]) live in
+//! [`surrealdb_rpc::error`]. The two constructors below stay in core because
+//! they reach into core-only types (`crate::val::Duration`, `crate::err`).
 
-use surrealdb_types::{
-	AlreadyExistsError, AuthError, ConfigurationError, Error as TypesError, NotAllowedError,
-	NotFoundError, SerializationError, ValidationError,
-};
-use uuid::Uuid;
+use surrealdb_types::Error as TypesError;
 
-use crate::api::err::ApiError;
-use crate::err;
-use crate::err::into_types_error;
-
-/// Parse error (invalid message format).
-pub fn parse_error() -> TypesError {
-	TypesError::validation("Parse error".to_string(), ValidationError::Parse)
-}
-
-/// Invalid request structure.
-pub fn invalid_request() -> TypesError {
-	TypesError::validation("Invalid request".to_string(), ValidationError::InvalidRequest)
-}
-
-/// Method not found.
-pub fn method_not_found(name: String) -> TypesError {
-	TypesError::not_found(
-		"Method not found".to_string(),
-		NotFoundError::Method {
-			name,
+/// Build the error returned when a call trips the wall-clock query-timeout
+/// guard. Mirrors the deadline-based query timeout (`err::Error::QueryTimedout`)
+/// in both message and structured [`surrealdb_types::QueryError::TimedOut`]
+/// detail, so a timeout surfaces identically regardless of which guard
+/// (deadline or wall-clock) fired or which transport (RPC / HTTP) reported it.
+///
+/// Shared by the RPC dispatch guard and the HTTP transport helpers so the two
+/// never drift apart.
+pub fn query_timeout_error(duration: std::time::Duration) -> TypesError {
+	TypesError::query(
+		format!(
+			"The query was not executed because it exceeded the timeout: {}",
+			crate::val::Duration::from(duration)
+		),
+		surrealdb_types::QueryError::TimedOut {
+			duration,
 		},
 	)
-}
-
-/// Method not allowed.
-pub fn method_not_allowed(name: String) -> TypesError {
-	TypesError::not_allowed(
-		"Method not allowed".to_string(),
-		NotAllowedError::Method {
-			name,
-		},
-	)
-}
-
-/// Invalid params with a custom message.
-pub fn invalid_params(msg: impl Into<String>) -> TypesError {
-	TypesError::validation(msg.into(), ValidationError::InvalidParams)
-}
-
-/// Internal error (wraps anyhow).
-#[allow(clippy::needless_pass_by_value)] // Public API: callers pass owned `anyhow::Error`.
-pub fn internal_error(err: anyhow::Error) -> TypesError {
-	TypesError::from_anyhow_with_chain(err)
-}
-
-/// Live query not supported.
-pub fn lq_not_supported() -> TypesError {
-	TypesError::configuration(
-		"Live query not supported".to_string(),
-		ConfigurationError::LiveQueryNotSupported,
-	)
-}
-
-/// Bad live query config.
-pub fn bad_lq_config() -> TypesError {
-	TypesError::configuration(
-		"Bad live query config".to_string(),
-		ConfigurationError::BadLiveQueryConfig,
-	)
-}
-
-/// Bad GraphQL config.
-pub fn bad_gql_config() -> TypesError {
-	TypesError::configuration(
-		"Bad GraphQL config".to_string(),
-		ConfigurationError::BadGraphqlConfig,
-	)
-}
-
-/// User-thrown / database-thrown error.
-pub fn thrown(msg: impl Into<String>) -> TypesError {
-	TypesError::thrown(msg.into())
-}
-
-/// Serialization error.
-pub fn serialize(msg: impl Into<String>) -> TypesError {
-	TypesError::serialization(msg.into(), SerializationError::Serialization)
-}
-
-/// Deserialization error.
-pub fn deserialize(msg: impl Into<String>) -> TypesError {
-	TypesError::serialization(msg.into(), SerializationError::Deserialization)
-}
-
-/// Session not found.
-pub fn session_not_found(id: Uuid) -> TypesError {
-	TypesError::not_found(
-		format!("Session not found: {id:?}"),
-		NotFoundError::Session {
-			id: Some(id.to_string()),
-		},
-	)
-}
-
-/// Session already exists.
-pub fn session_exists(id: Uuid) -> TypesError {
-	TypesError::already_exists(
-		format!("Session already exists: {id}"),
-		AlreadyExistsError::Session {
-			id: id.to_string(),
-		},
-	)
-}
-
-/// Session has expired (auth detail).
-pub fn session_expired() -> TypesError {
-	TypesError::not_allowed("The session has expired".to_string(), AuthError::SessionExpired)
 }
 
 /// Convert an anyhow error to a wire error, downcasting to preserve structured
 /// error information where possible.
 ///
 /// Tries, in order:
-/// 1. `TypesError` — already a wire error, return as-is.
-/// 2. `ApiError` — convert via `to_types_error()`.
-/// 3. `err::Error` (core database error) — convert via `into_types_error()`.
-/// 4. Fallback — convert with chain-preserving internal error details.
+/// Delegates to [`crate::err::anyhow_to_types_error`], which owns the list of
+/// SurrealDB error types that can appear inside an `anyhow::Error`.
 pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
-	// If the error is already a TypesError, return it directly (preserves kind/details/cause)
-	match error.downcast::<TypesError>() {
-		Ok(types_error) => types_error,
-		Err(error) => {
-			if let Some(api_error) = error.downcast_ref::<ApiError>() {
-				return api_error.to_types_error();
-			}
-			// Try to downcast to database Error
-			error
-				.downcast::<err::Error>()
-				.map(into_types_error)
-				.unwrap_or_else(TypesError::from_anyhow_with_chain)
-		}
+	crate::err::anyhow_to_types_error(error)
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_types::{Error as TypesError, QueryError};
+
+	use super::types_error_from_anyhow;
+	use crate::err;
+	use crate::kvs::Error as KvsError;
+
+	#[test]
+	fn bare_kvs_conflict_maps_to_transaction_conflict() {
+		// A transaction conflict bailed directly from the transactor is a
+		// bare `kvs::Error` inside anyhow (not wrapped in `err::Error::Kvs`).
+		// It must still surface the structured TransactionConflict kind so
+		// SDK `.retry()` fires, rather than collapsing to a generic error.
+		let err = anyhow::Error::new(KvsError::TransactionConflict("write conflict".into()));
+		let te = types_error_from_anyhow(err);
+		assert_eq!(te.query_details(), Some(&QueryError::TransactionConflict));
+	}
+
+	#[test]
+	fn wrapped_kvs_conflict_still_maps_to_transaction_conflict() {
+		// Regression: the already-wrapped form must keep working.
+		let err = anyhow::Error::new(err::Error::Kvs(KvsError::TransactionConflict(
+			"write conflict".into(),
+		)));
+		let te = types_error_from_anyhow(err);
+		assert_eq!(te.query_details(), Some(&QueryError::TransactionConflict));
+	}
+
+	#[test]
+	fn existing_types_error_is_returned_verbatim() {
+		// A ready-made TypesError passes through unchanged (kind preserved).
+		let original = TypesError::query("boom".to_string(), QueryError::NotExecuted);
+		let te = types_error_from_anyhow(anyhow::Error::new(original));
+		assert_eq!(te.query_details(), Some(&QueryError::NotExecuted));
 	}
 }

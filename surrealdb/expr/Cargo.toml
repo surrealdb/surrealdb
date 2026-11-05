@@ -1,0 +1,106 @@
+[package]
+name = "surrealdb-expr"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-expr/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = ["collate", "geo", "scram", "text-diff"]
+# SCRAM verifiers for passwords, so users can authenticate over the PostgreSQL
+# wire protocol. Without it a password stores no verifier (see `scram::derive`).
+scram = []
+# Text patches: a diff of two strings is a `change` operation carrying a
+# diff-match-patch text patch, and a patch applies one. Without it a diff
+# replaces a changed string whole (which applies to the same value), and
+# applying a `change` operation fails with an error naming this feature.
+text-diff = ["dep:dmp"]
+# Spatial predicates on geometries (`Geometry::contains` and
+# `Geometry::intersects`). Without them geometry values still parse, encode and
+# decode, and the operators that would test them fail first.
+geo = ["dep:geo"]
+# `COLLATE` comparisons: case-insensitive ordering of strings by their ASCII
+# transliteration, which carries the transliteration table. Without it
+# `Value::lexical_cmp` and `Value::natural_lexical_cmp` are absent, and a
+# collated `Value::compare` orders as an uncollated one; the engine rejects a
+# collated `ORDER BY` before it sorts.
+collate = []
+scripting = ["dep:js"]
+arbitrary = [
+    "dep:arbitrary",
+    "surrealdb-types/arbitrary",
+    "surrealdb-strand/arbitrary",
+    "common/arbitrary",
+]
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+dmp = { workspace = true, optional = true }
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+chrono = { workspace = true, features = ["serde"] }
+common = { workspace = true }
+geo = { workspace = true, optional = true }
+geo-types = { workspace = true, features = ["serde"] }
+half.workspace = true
+hex.workspace = true
+js = { workspace = true, features = [
+    "array-buffer",
+    "bindgen",
+    "classes",
+    "futures",
+    "loader",
+    "macro",
+    "parallel",
+    "properties",
+    "rust-alloc",
+], optional = true }
+lexicmp.workspace = true
+http.workspace = true
+quick_cache.workspace = true
+rand.workspace = true
+revision = { workspace = true }
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json.workspace = true
+storekey.workspace = true
+surrealdb-cnf = { workspace = true }
+surrealdb-collections = { workspace = true, features = ["revision", "storekey"] }
+surrealdb-iam = { workspace = true }
+surrealdb-kvs = { workspace = true }
+surrealdb-stored-derive = { workspace = true }
+surrealdb-strand = { workspace = true }
+surrealdb-parser-next.workspace = true
+parse-common.workspace = true
+phf = { workspace = true, features = ["macros", "unicase"] }
+unicase.workspace = true
+surrealdb-types = { workspace = true }
+thiserror.workspace = true
+tracing.workspace = true
+ulid = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+
+[dev-dependencies]
+surrealdb-types = { workspace = true, features = ["regex-unicode"] }
+web-time.workspace = true
+ahash.workspace = true
+rstest.workspace = true
+serial_test.workspace = true
+tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
+
+[lints]
+workspace = true

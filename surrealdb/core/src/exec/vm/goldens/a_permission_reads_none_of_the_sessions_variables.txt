@@ -1,0 +1,6 @@
+### flag true
+[]
+### flag false
+[]
+### parameter true
+[{ id: gated:1, n: 1 }]

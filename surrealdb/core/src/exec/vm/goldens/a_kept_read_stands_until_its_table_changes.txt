@@ -1,0 +1,4 @@
+### before the change
+[{ id: open:1, label: 'row 1', link: { id: mine:1, n: 1, owner: user:alice }, n: 1 }, { id: open:2, label: 'row 2', link: NONE, n: 2 }]
+### after the change
+[{ id: open:1, label: 'row 1', link: { id: mine:1, n: 1, owner: user:alice, shown: 10 }, n: 1 }, { id: open:2, label: 'row 2', link: NONE, n: 2 }]

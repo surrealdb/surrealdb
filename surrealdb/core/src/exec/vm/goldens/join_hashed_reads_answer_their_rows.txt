@@ -1,0 +1,484 @@
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [30, 40] }
+{ id: a:3, xs: [50] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [70] }
+{ id: a:6, xs: [80] }
+{ id: a:7, xs: [90, 100] }
+{ id: a:8, xs: [110] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [130] }
+{ id: a:11, xs: [] }
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE $parent.k = k) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [30, 40] }
+{ id: a:3, xs: [50] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [70] }
+{ id: a:6, xs: [80] }
+{ id: a:7, xs: [90, 100] }
+{ id: a:8, xs: [110] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [130] }
+{ id: a:11, xs: [] }
+### owner: SELECT id, (SELECT VALUE id FROM b WHERE k = $parent.k AND x > 10) AS xs FROM a
+{ id: a:1, xs: [b:2] }
+{ id: a:2, xs: [b:3, b:4] }
+{ id: a:3, xs: [b:5] }
+{ id: a:4, xs: [b:6] }
+{ id: a:5, xs: [b:7] }
+{ id: a:6, xs: [b:8] }
+{ id: a:7, xs: [b:9, b:10] }
+{ id: a:8, xs: [b:11] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [b:13] }
+{ id: a:11, xs: [] }
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k ORDER BY x DESC LIMIT 1) AS top FROM a
+{ id: a:1, top: [20] }
+{ id: a:2, top: [40] }
+{ id: a:3, top: [50] }
+{ id: a:4, top: [60] }
+{ id: a:5, top: [70] }
+{ id: a:6, top: [80] }
+{ id: a:7, top: [100] }
+{ id: a:8, top: [110] }
+{ id: a:9, top: [] }
+{ id: a:10, top: [130] }
+{ id: a:11, top: [] }
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k LIMIT 1 START 1) AS second FROM a
+{ id: a:1, second: [20] }
+{ id: a:2, second: [40] }
+{ id: a:3, second: [] }
+{ id: a:4, second: [] }
+{ id: a:5, second: [] }
+{ id: a:6, second: [] }
+{ id: a:7, second: [100] }
+{ id: a:8, second: [] }
+{ id: a:9, second: [] }
+{ id: a:10, second: [] }
+{ id: a:11, second: [] }
+### owner: SELECT id, (SELECT count() AS c, k FROM b WHERE k = $parent.k GROUP BY k) AS g FROM a
+{ g: [{ c: 3, k: 1 }], id: a:1 }
+{ g: [{ c: 2, k: 2 }], id: a:2 }
+{ g: [{ c: 1, k: 'one' }], id: a:3 }
+{ g: [{ c: 1, k: NONE }], id: a:4 }
+{ g: [{ c: 1, k: NULL }], id: a:5 }
+{ g: [{ c: 1, k: 3f }], id: a:6 }
+{ g: [{ c: 2, k: [1, 'x'] }], id: a:7 }
+{ g: [{ c: 1, k: /b/ }], id: a:8 }
+{ g: [], id: a:9 }
+{ g: [{ c: 1, k: 0 }], id: a:10 }
+{ g: [], id: a:11 }
+### owner: SELECT id, (SELECT VALUE x FROM ONLY b WHERE k = $parent.k LIMIT 1) AS one FROM a
+{ id: a:1, one: 10 }
+{ id: a:2, one: 30 }
+{ id: a:3, one: 50 }
+{ id: a:4, one: 60 }
+{ id: a:5, one: 70 }
+{ id: a:6, one: 80 }
+{ id: a:7, one: 90 }
+{ id: a:8, one: 110 }
+{ id: a:9, one: NONE }
+{ id: a:10, one: 130 }
+{ id: a:11, one: NONE }
+### owner: SELECT VALUE id FROM a WHERE (SELECT VALUE x FROM b WHERE k = $parent.k) != []
+a:1
+a:2
+a:3
+a:4
+a:5
+a:6
+a:7
+a:8
+a:10
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.ref.k) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [30, 40] }
+{ id: a:3, xs: [60] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [60] }
+{ id: a:6, xs: [60] }
+{ id: a:7, xs: [60] }
+{ id: a:8, xs: [60] }
+{ id: a:9, xs: [60] }
+{ id: a:10, xs: [60] }
+{ id: a:11, xs: [60] }
+### owner: SELECT VALUE (SELECT VALUE x FROM b WHERE k = $parent.k) FROM (SELECT VALUE id FROM a)
+[10, 20, 5]
+[30, 40]
+[50]
+[60]
+[70]
+[80]
+[90, 100]
+[110]
+[]
+[130]
+[]
+### owner: SELECT id, (SELECT VALUE twice FROM b WHERE k = $parent.k) AS t FROM a
+{ id: a:1, t: [20, 40, 10] }
+{ id: a:2, t: [60, 80] }
+{ id: a:3, t: [100] }
+{ id: a:4, t: [120] }
+{ id: a:5, t: [140] }
+{ id: a:6, t: [160] }
+{ id: a:7, t: [180, 200] }
+{ id: a:8, t: [220] }
+{ id: a:9, t: [] }
+{ id: a:10, t: [260] }
+{ id: a:11, t: [] }
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE twice = $parent.k) AS t FROM a
+{ id: a:1, t: [] }
+{ id: a:2, t: [] }
+{ id: a:3, t: [] }
+{ id: a:4, t: [] }
+{ id: a:5, t: [] }
+{ id: a:6, t: [] }
+{ id: a:7, t: [] }
+{ id: a:8, t: [] }
+{ id: a:9, t: [] }
+{ id: a:10, t: [] }
+{ id: a:11, t: [] }
+### owner: SELECT id, (SELECT * FROM b WHERE k = $parent.k) AS rows FROM a
+{ id: a:1, rows: [{ guarded: 'g1', id: b:1, k: 1, s: '1', twice: 20, x: 10 }, { id: b:2, k: 1f, s: 'two', twice: 40, x: 20 }, { id: b:14, k: 1, s: 'fourteen', twice: 10, x: 5 }] }
+{ id: a:2, rows: [{ id: b:3, k: 2, s: '3', twice: 60, x: 30 }, { hidden: true, id: b:4, k: 2dec, s: '4', twice: 80, x: 40 }] }
+{ id: a:3, rows: [{ id: b:5, k: 'one', s: '5', twice: 100, x: 50 }] }
+{ id: a:4, rows: [{ id: b:6, s: '6', twice: 120, x: 60 }] }
+{ id: a:5, rows: [{ id: b:7, k: NULL, s: '7', twice: 140, x: 70 }] }
+{ id: a:6, rows: [{ id: b:8, k: 3f, s: '8', twice: 160, x: 80 }] }
+{ id: a:7, rows: [{ id: b:9, k: [1, 'x'], s: '9', twice: 180, x: 90 }, { id: b:10, k: [1f, 'x'], s: '10', twice: 200, x: 100 }] }
+{ id: a:8, rows: [{ id: b:11, k: /b/, s: '11', twice: 220, x: 110 }] }
+{ id: a:9, rows: [] }
+{ id: a:10, rows: [{ id: b:13, k: 0, s: '13', twice: 260, x: 130 }] }
+{ id: a:11, rows: [] }
+### owner: SELECT id, (SELECT VALUE x FROM empty WHERE k = $parent.k) AS xs FROM a
+{ id: a:1, xs: [] }
+{ id: a:2, xs: [] }
+{ id: a:3, xs: [] }
+{ id: a:4, xs: [] }
+{ id: a:5, xs: [] }
+{ id: a:6, xs: [] }
+{ id: a:7, xs: [] }
+{ id: a:8, xs: [] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [] }
+{ id: a:11, xs: [] }
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k LIMIT 0) AS xs FROM a
+{ id: a:1, xs: [] }
+{ id: a:2, xs: [] }
+{ id: a:3, xs: [] }
+{ id: a:4, xs: [] }
+{ id: a:5, xs: [] }
+{ id: a:6, xs: [] }
+{ id: a:7, xs: [] }
+{ id: a:8, xs: [] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [] }
+{ id: a:11, xs: [] }
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k) AS xs FROM a ORDER BY id LIMIT 3
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [30, 40] }
+{ id: a:3, xs: [50] }
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE x > 10 AND k = $parent.k) AS xs FROM a
+{ id: a:1, xs: [20] }
+{ id: a:2, xs: [30, 40] }
+{ id: a:3, xs: [50] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [70] }
+{ id: a:6, xs: [80] }
+{ id: a:7, xs: [90, 100] }
+{ id: a:8, xs: [110] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [130] }
+{ id: a:11, xs: [] }
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k OR x = 10) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [10, 30, 40] }
+{ id: a:3, xs: [10, 50] }
+{ id: a:4, xs: [10, 60] }
+{ id: a:5, xs: [10, 70] }
+{ id: a:6, xs: [10, 80] }
+{ id: a:7, xs: [10, 90, 100] }
+{ id: a:8, xs: [10, 110] }
+{ id: a:9, xs: [10] }
+{ id: a:10, xs: [10, 130] }
+{ id: a:11, xs: [10] }
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k AND x != $parent.k) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [30, 40] }
+{ id: a:3, xs: [50] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [70] }
+{ id: a:6, xs: [80] }
+{ id: a:7, xs: [90, 100] }
+{ id: a:8, xs: [110] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [130] }
+{ id: a:11, xs: [] }
+### owner: SELECT id, (SELECT VALUE [x, $parent.id] FROM b WHERE k = $parent.k) AS xs FROM a
+{ id: a:1, xs: [[10, a:1], [20, a:1], [5, a:1]] }
+{ id: a:2, xs: [[30, a:2], [40, a:2]] }
+{ id: a:3, xs: [[50, a:3]] }
+{ id: a:4, xs: [[60, a:4]] }
+{ id: a:5, xs: [[70, a:5]] }
+{ id: a:6, xs: [[80, a:6]] }
+{ id: a:7, xs: [[90, a:7], [100, a:7]] }
+{ id: a:8, xs: [[110, a:8]] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [[130, a:10]] }
+{ id: a:11, xs: [] }
+### owner: SELECT id, (SELECT VALUE x FROM b WHERE k == $parent.k) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [30, 40] }
+{ id: a:3, xs: [50] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [70] }
+{ id: a:6, xs: [80] }
+{ id: a:7, xs: [90, 100] }
+{ id: a:8, xs: [] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [130] }
+{ id: a:11, xs: [] }
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [30] }
+{ id: a:3, xs: [50] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [70] }
+{ id: a:6, xs: [80] }
+{ id: a:7, xs: [90, 100] }
+{ id: a:8, xs: [110] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [130] }
+{ id: a:11, xs: [] }
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE $parent.k = k) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [30] }
+{ id: a:3, xs: [50] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [70] }
+{ id: a:6, xs: [80] }
+{ id: a:7, xs: [90, 100] }
+{ id: a:8, xs: [110] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [130] }
+{ id: a:11, xs: [] }
+### record user: SELECT id, (SELECT VALUE id FROM b WHERE k = $parent.k AND x > 10) AS xs FROM a
+{ id: a:1, xs: [b:2] }
+{ id: a:2, xs: [b:3] }
+{ id: a:3, xs: [b:5] }
+{ id: a:4, xs: [b:6] }
+{ id: a:5, xs: [b:7] }
+{ id: a:6, xs: [b:8] }
+{ id: a:7, xs: [b:9, b:10] }
+{ id: a:8, xs: [b:11] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [b:13] }
+{ id: a:11, xs: [] }
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k ORDER BY x DESC LIMIT 1) AS top FROM a
+{ id: a:1, top: [20] }
+{ id: a:2, top: [30] }
+{ id: a:3, top: [50] }
+{ id: a:4, top: [60] }
+{ id: a:5, top: [70] }
+{ id: a:6, top: [80] }
+{ id: a:7, top: [100] }
+{ id: a:8, top: [110] }
+{ id: a:9, top: [] }
+{ id: a:10, top: [130] }
+{ id: a:11, top: [] }
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k LIMIT 1 START 1) AS second FROM a
+{ id: a:1, second: [20] }
+{ id: a:2, second: [] }
+{ id: a:3, second: [] }
+{ id: a:4, second: [] }
+{ id: a:5, second: [] }
+{ id: a:6, second: [] }
+{ id: a:7, second: [100] }
+{ id: a:8, second: [] }
+{ id: a:9, second: [] }
+{ id: a:10, second: [] }
+{ id: a:11, second: [] }
+### record user: SELECT id, (SELECT count() AS c, k FROM b WHERE k = $parent.k GROUP BY k) AS g FROM a
+{ g: [{ c: 3, k: 1 }], id: a:1 }
+{ g: [{ c: 1, k: 2 }], id: a:2 }
+{ g: [{ c: 1, k: 'one' }], id: a:3 }
+{ g: [{ c: 1, k: NONE }], id: a:4 }
+{ g: [{ c: 1, k: NULL }], id: a:5 }
+{ g: [{ c: 1, k: 3f }], id: a:6 }
+{ g: [{ c: 2, k: [1, 'x'] }], id: a:7 }
+{ g: [{ c: 1, k: /b/ }], id: a:8 }
+{ g: [], id: a:9 }
+{ g: [{ c: 1, k: 0 }], id: a:10 }
+{ g: [], id: a:11 }
+### record user: SELECT id, (SELECT VALUE x FROM ONLY b WHERE k = $parent.k LIMIT 1) AS one FROM a
+{ id: a:1, one: 10 }
+{ id: a:2, one: 30 }
+{ id: a:3, one: 50 }
+{ id: a:4, one: 60 }
+{ id: a:5, one: 70 }
+{ id: a:6, one: 80 }
+{ id: a:7, one: 90 }
+{ id: a:8, one: 110 }
+{ id: a:9, one: NONE }
+{ id: a:10, one: 130 }
+{ id: a:11, one: NONE }
+### record user: SELECT VALUE id FROM a WHERE (SELECT VALUE x FROM b WHERE k = $parent.k) != []
+a:1
+a:2
+a:3
+a:4
+a:5
+a:6
+a:7
+a:8
+a:10
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.ref.k) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [60] }
+{ id: a:3, xs: [60] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [60] }
+{ id: a:6, xs: [60] }
+{ id: a:7, xs: [60] }
+{ id: a:8, xs: [60] }
+{ id: a:9, xs: [60] }
+{ id: a:10, xs: [60] }
+{ id: a:11, xs: [60] }
+### record user: SELECT VALUE (SELECT VALUE x FROM b WHERE k = $parent.k) FROM (SELECT VALUE id FROM a)
+[10, 20, 5]
+[30]
+[50]
+[60]
+[70]
+[80]
+[90, 100]
+[110]
+[]
+[130]
+[]
+### record user: SELECT id, (SELECT VALUE twice FROM b WHERE k = $parent.k) AS t FROM a
+{ id: a:1, t: [20, 40, 10] }
+{ id: a:2, t: [60] }
+{ id: a:3, t: [100] }
+{ id: a:4, t: [120] }
+{ id: a:5, t: [140] }
+{ id: a:6, t: [160] }
+{ id: a:7, t: [180, 200] }
+{ id: a:8, t: [220] }
+{ id: a:9, t: [] }
+{ id: a:10, t: [260] }
+{ id: a:11, t: [] }
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE twice = $parent.k) AS t FROM a
+{ id: a:1, t: [] }
+{ id: a:2, t: [] }
+{ id: a:3, t: [] }
+{ id: a:4, t: [] }
+{ id: a:5, t: [] }
+{ id: a:6, t: [] }
+{ id: a:7, t: [] }
+{ id: a:8, t: [] }
+{ id: a:9, t: [] }
+{ id: a:10, t: [] }
+{ id: a:11, t: [] }
+### record user: SELECT id, (SELECT * FROM b WHERE k = $parent.k) AS rows FROM a
+{ id: a:1, rows: [{ id: b:1, k: 1, s: '1', twice: 20, x: 10 }, { id: b:2, k: 1f, s: 'two', twice: 40, x: 20 }, { id: b:14, k: 1, s: 'fourteen', twice: 10, x: 5 }] }
+{ id: a:2, rows: [{ id: b:3, k: 2, s: '3', twice: 60, x: 30 }] }
+{ id: a:3, rows: [{ id: b:5, k: 'one', s: '5', twice: 100, x: 50 }] }
+{ id: a:4, rows: [{ id: b:6, s: '6', twice: 120, x: 60 }] }
+{ id: a:5, rows: [{ id: b:7, k: NULL, s: '7', twice: 140, x: 70 }] }
+{ id: a:6, rows: [{ id: b:8, k: 3f, s: '8', twice: 160, x: 80 }] }
+{ id: a:7, rows: [{ id: b:9, k: [1, 'x'], s: '9', twice: 180, x: 90 }, { id: b:10, k: [1f, 'x'], s: '10', twice: 200, x: 100 }] }
+{ id: a:8, rows: [{ id: b:11, k: /b/, s: '11', twice: 220, x: 110 }] }
+{ id: a:9, rows: [] }
+{ id: a:10, rows: [{ id: b:13, k: 0, s: '13', twice: 260, x: 130 }] }
+{ id: a:11, rows: [] }
+### record user: SELECT id, (SELECT VALUE x FROM empty WHERE k = $parent.k) AS xs FROM a
+{ id: a:1, xs: [] }
+{ id: a:2, xs: [] }
+{ id: a:3, xs: [] }
+{ id: a:4, xs: [] }
+{ id: a:5, xs: [] }
+{ id: a:6, xs: [] }
+{ id: a:7, xs: [] }
+{ id: a:8, xs: [] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [] }
+{ id: a:11, xs: [] }
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k LIMIT 0) AS xs FROM a
+{ id: a:1, xs: [] }
+{ id: a:2, xs: [] }
+{ id: a:3, xs: [] }
+{ id: a:4, xs: [] }
+{ id: a:5, xs: [] }
+{ id: a:6, xs: [] }
+{ id: a:7, xs: [] }
+{ id: a:8, xs: [] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [] }
+{ id: a:11, xs: [] }
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k) AS xs FROM a ORDER BY id LIMIT 3
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [30] }
+{ id: a:3, xs: [50] }
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE x > 10 AND k = $parent.k) AS xs FROM a
+{ id: a:1, xs: [20] }
+{ id: a:2, xs: [30] }
+{ id: a:3, xs: [50] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [70] }
+{ id: a:6, xs: [80] }
+{ id: a:7, xs: [90, 100] }
+{ id: a:8, xs: [110] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [130] }
+{ id: a:11, xs: [] }
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k OR x = 10) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [10, 30] }
+{ id: a:3, xs: [10, 50] }
+{ id: a:4, xs: [10, 60] }
+{ id: a:5, xs: [10, 70] }
+{ id: a:6, xs: [10, 80] }
+{ id: a:7, xs: [10, 90, 100] }
+{ id: a:8, xs: [10, 110] }
+{ id: a:9, xs: [10] }
+{ id: a:10, xs: [10, 130] }
+{ id: a:11, xs: [10] }
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k AND x != $parent.k) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [30] }
+{ id: a:3, xs: [50] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [70] }
+{ id: a:6, xs: [80] }
+{ id: a:7, xs: [90, 100] }
+{ id: a:8, xs: [110] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [130] }
+{ id: a:11, xs: [] }
+### record user: SELECT id, (SELECT VALUE [x, $parent.id] FROM b WHERE k = $parent.k) AS xs FROM a
+{ id: a:1, xs: [[10, a:1], [20, a:1], [5, a:1]] }
+{ id: a:2, xs: [[30, a:2]] }
+{ id: a:3, xs: [[50, a:3]] }
+{ id: a:4, xs: [[60, a:4]] }
+{ id: a:5, xs: [[70, a:5]] }
+{ id: a:6, xs: [[80, a:6]] }
+{ id: a:7, xs: [[90, a:7], [100, a:7]] }
+{ id: a:8, xs: [[110, a:8]] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [[130, a:10]] }
+{ id: a:11, xs: [] }
+### record user: SELECT id, (SELECT VALUE x FROM b WHERE k == $parent.k) AS xs FROM a
+{ id: a:1, xs: [10, 20, 5] }
+{ id: a:2, xs: [30] }
+{ id: a:3, xs: [50] }
+{ id: a:4, xs: [60] }
+{ id: a:5, xs: [70] }
+{ id: a:6, xs: [80] }
+{ id: a:7, xs: [90, 100] }
+{ id: a:8, xs: [] }
+{ id: a:9, xs: [] }
+{ id: a:10, xs: [130] }
+{ id: a:11, xs: [] }

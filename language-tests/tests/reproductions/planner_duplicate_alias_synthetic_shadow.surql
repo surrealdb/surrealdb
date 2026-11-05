@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Duplicate computed aliases must not synthesize a name that shadows a selected source field"

@@ -1,0 +1,66 @@
+/**
+[env]
+# The body asserts an `EXPLAIN` plan, and the ordinary language-test runner
+# replays it as well as the upgrade axis.
+imports = ["upgrade/define/3.00.00_index_compound_fanout_import.surql"]
+
+[test]
+upgrade = true
+introduced = "3.0.0"
+version = ">=3.4.0-a"
+reason = """
+An index that silently stops being used falls back to a table scan and returns
+the same rows, so the read assertions in 3.00.00_index_compound_fanout.surql
+cannot tell a working index from a missing one. This asserts the plan, and then
+writes, so the new binary has to extend the entry set the old one built.
+
+Both live here rather than in the sibling because neither can span the 3.x
+line: `EXPLAIN` output is not stable across it, and the write cannot go in a
+body that a `[[test.repair]]` would run twice. Gating the upgrade target to the
+current checkout costs no coverage that matters, because the seed axis sends
+every released version straight to it.
+
+Every assertion here has to hold whichever binary wrote the import, because
+the ordinary language-test runner replays this file too and then the import is
+written by this checkout. So the entry set of a record the OLD writer produced
+is deliberately not asserted: it recorded m + n - 1 of a record's m * n element
+combinations rather than the product, which leaves a combination it skipped
+unindexed. A seek pinning both fanning columns misses the record there, and a
+second record can claim that combination under UNIQUE. The read is asserted,
+with its declared repair, in 3.00.00_index_compound_fanout.surql; the stolen
+claim is a write, which that body cannot carry. Anyone relying on an index
+whose columns both fan out needs `REBUILD INDEX tagged_pair ON tagged` after
+upgrading."""
+
+[[test.results]]
+match = '''string::contains($result, "IndexScan") AND string::contains($result, "tagged_pair")'''
+
+[[test.results]]
+value = "[{ id: tagged:fresh, nums: [7, 8], tags: ['m', 'n'] }]"
+
+[[test.results]]
+error = "Database index `tagged_pair` already contains ['n', 7], with record `tagged:fresh`"
+
+[[test.results]]
+error = "Database index `tagged_pair` already contains ['m', 8], with record `tagged:fresh`"
+
+[[test.results]]
+value = "[{ id: tagged:base }]"
+
+*/
+-- Each containment spells the flatten (`tags.*`): only then is a stored scalar
+-- ruled out, so only then may the element index answer it.
+
+-- The index is what serves the read, not a table scan.
+EXPLAIN SELECT id FROM tagged WHERE tags.* CONTAINS 'p';
+
+-- A record THIS binary writes owns every combination of its elements, so each
+-- of the four is claimed and a probe for any one of them collides. ['m', 8] is
+-- the combination a walk down one column and along the next would have
+-- skipped, so the pair of probes distinguishes the product from that walk.
+CREATE tagged:fresh SET tags = ['m', 'n'], nums = [7, 8];
+CREATE tagged:probe_n7 SET tags = ['n'], nums = [7];
+CREATE tagged:probe_m8 SET tags = ['m'], nums = [8];
+
+-- Reading across both writers' entries returns each record once.
+SELECT id FROM tagged WHERE tags.* CONTAINS 'p';

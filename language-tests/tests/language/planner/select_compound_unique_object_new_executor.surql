@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -14,8 +13,9 @@ value = "[{ id: t:{ id: 3, r: o:1 } }]"
 value = "[{ id: t:{ id: 3, r: o:1 } }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: [o:1, 2025], direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [table: t, index: idx, access: [o:1, 2025], direction: Forward]
 ''''
 
 [[test.results]]
@@ -25,8 +25,9 @@ value = "[{ id: t:{ id: 4, r: o:2 } }]"
 value = "[{ id: t:{ id: 4, r: o:2 } }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: [o:2] MoreThan 2022, direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [table: t, index: idx, access: [o:2] MoreThan 2022, direction: Forward]
 ''''
 
 */

@@ -3,7 +3,7 @@
 //! MCP tool responses emit both structured and unstructured content:
 //!
 //! - `CallToolResult.structured_content` carries the typed JSON the LLM can deserialize verbatim.
-//!   This is the 2025-06-18 spec "structured content" affordance.
+//!   This is the spec's "structured content" affordance.
 //! - `CallToolResult.content` carries a human-readable rendering of the same data. Tools that
 //!   predate structured content still work off this.
 //!
@@ -13,9 +13,9 @@
 //! in a multi-statement query keeps `is_error = false` so the caller can see
 //! which statements succeeded.
 
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 use serde_json::{Value as JsonValue, json};
-use surrealdb_core::dbs::QueryResult;
+use surrealdb_rpc::QueryResult;
 use surrealdb_types::Error as TypesError;
 
 /// If the serialised form of `value` exceeds the supplied cap, replace it
@@ -110,7 +110,7 @@ pub(crate) fn single_statement_result(
 				"truncated": truncated,
 				"time_ms": time_ms,
 			});
-			let mut r = CallToolResult::success(vec![Content::text(text)]);
+			let mut r = CallToolResult::success(vec![ContentBlock::text(text)]);
 			r.structured_content = Some(structured);
 			r
 		}
@@ -127,7 +127,7 @@ pub(crate) fn single_statement_result(
 				"kind": err.kind_str(),
 				"time_ms": time_ms,
 			});
-			let mut r = CallToolResult::error(vec![Content::text(format!(
+			let mut r = CallToolResult::error(vec![ContentBlock::text(format!(
 				"Error ({}): {}",
 				err.kind_str(),
 				err.message()
@@ -157,7 +157,8 @@ pub(crate) fn single_statement_result(
 /// successful statement) or a labelled list when there's more than one /
 /// any statement failed. `is_error` is only set when every statement failed —
 /// partial success stays `false` so the LLM sees what went through.
-/// `max_bytes` is forwarded to [`cap_value`] for each per-statement payload.
+/// `max_bytes` bounds the total serialized payload size across all statements
+/// in the batch.
 pub(crate) fn multi_statement_result(
 	results: Vec<QueryResult>,
 	max_bytes: Option<usize>,
@@ -170,6 +171,7 @@ pub(crate) fn multi_statement_result(
 	let mut text_blocks = Vec::with_capacity(results.len());
 	let mut ok_count = 0usize;
 	let mut err_count = 0usize;
+	let mut remaining_bytes = max_bytes;
 
 	for (i, response) in results.into_iter().enumerate() {
 		let time_ms = duration_to_millis(response.time);
@@ -177,7 +179,25 @@ pub(crate) fn multi_statement_result(
 			Ok(value) => {
 				ok_count += 1;
 				let raw = value.into_json_value();
-				let (json, truncated) = cap_value(raw, max_bytes);
+				let (json, truncated) = match (max_bytes, remaining_bytes.as_mut()) {
+					(Some(limit), Some(rem)) => {
+						let size = serde_json::to_string(&raw).map(|s| s.len()).unwrap_or(0);
+						if size <= *rem {
+							*rem -= size;
+							(raw, false)
+						} else {
+							*rem = 0;
+							tracing::warn!(
+								target: "surrealdb::mcp",
+								bytes = size,
+								limit = limit,
+								"truncating large MCP tool result"
+							);
+							(truncation_marker(size, limit), true)
+						}
+					}
+					_ => (raw, false),
+				};
 				let pretty = pretty_json(&json);
 				entries.push(json!({
 					"index": i,
@@ -221,9 +241,9 @@ pub(crate) fn multi_statement_result(
 	});
 	let text = text_blocks.join("\n\n");
 	let mut r = if is_error {
-		CallToolResult::error(vec![Content::text(text)])
+		CallToolResult::error(vec![ContentBlock::text(text)])
 	} else {
-		CallToolResult::success(vec![Content::text(text)])
+		CallToolResult::success(vec![ContentBlock::text(text)])
 	};
 	r.structured_content = Some(structured);
 	r
@@ -236,7 +256,7 @@ pub(crate) fn multi_statement_result(
 /// rendering of the payload.
 pub(crate) fn structured_success(structured: JsonValue) -> CallToolResult {
 	let text = pretty_json(&structured);
-	let mut r = CallToolResult::success(vec![Content::text(text)]);
+	let mut r = CallToolResult::success(vec![ContentBlock::text(text)]);
 	r.structured_content = Some(structured);
 	r
 }
@@ -246,7 +266,7 @@ pub(crate) fn structured_success(structured: JsonValue) -> CallToolResult {
 /// in-band error rather than a protocol-level JSON-RPC error.
 pub(crate) fn tool_error_from_surreal(err: &TypesError) -> CallToolResult {
 	let payload = error_payload(err);
-	let mut r = CallToolResult::error(vec![Content::text(format!(
+	let mut r = CallToolResult::error(vec![ContentBlock::text(format!(
 		"Error ({}): {}",
 		err.kind_str(),
 		err.message()
@@ -265,7 +285,8 @@ pub(crate) fn tool_error(kind: &'static str, message: impl Into<String>) -> Call
 		"error": message,
 		"kind": kind,
 	});
-	let mut r = CallToolResult::error(vec![Content::text(format!("Error ({kind}): {message}"))]);
+	let mut r =
+		CallToolResult::error(vec![ContentBlock::text(format!("Error ({kind}): {message}"))]);
 	r.structured_content = Some(structured);
 	r
 }
@@ -332,7 +353,7 @@ mod tests {
 	/// without digging into the nested value.
 	#[test]
 	fn single_statement_result_surfaces_truncation() {
-		use surrealdb_core::dbs::QueryResultBuilder;
+		use surrealdb_rpc::QueryResultBuilder;
 		let limit = McpConfig::default().max_result_bytes.expect("default cap must be active");
 		let oversized = "x".repeat(limit + 1024);
 		let result = QueryResultBuilder::started_now()
@@ -344,5 +365,26 @@ mod tests {
 		let value = structured.get("value").and_then(|v| v.as_object()).expect("marker object");
 		assert_eq!(value.get("$truncated").and_then(|v| v.as_bool()), Some(true));
 		assert!(value.get("truncated").is_none(), "marker must not shadow envelope flag");
+	}
+
+	/// `multi_statement_result` enforces `max_bytes` across the batch as a
+	/// whole rather than independently per statement.
+	#[test]
+	fn multi_statement_result_caps_total_bytes_across_statements() {
+		use surrealdb_rpc::QueryResultBuilder;
+		let limit = 100usize;
+		let first = QueryResultBuilder::started_now()
+			.finish_with_result(Ok(surrealdb_types::Value::String("a".repeat(60))));
+		let second = QueryResultBuilder::started_now()
+			.finish_with_result(Ok(surrealdb_types::Value::String("b".repeat(60))));
+		let call = multi_statement_result(vec![first, second], Some(limit));
+		let structured = call.structured_content.expect("structured content");
+		let results = structured.get("results").and_then(|v| v.as_array()).expect("results array");
+		assert_eq!(results.len(), 2);
+		assert_eq!(results[0].get("truncated").and_then(|v| v.as_bool()), Some(false));
+		assert_eq!(results[1].get("truncated").and_then(|v| v.as_bool()), Some(true));
+		let marker = results[1].get("value").and_then(|v| v.as_object()).expect("marker");
+		assert_eq!(marker.get("$truncated").and_then(|v| v.as_bool()), Some(true));
+		assert_eq!(marker.get("limit_bytes").and_then(|v| v.as_u64()), Some(limit as u64));
 	}
 }

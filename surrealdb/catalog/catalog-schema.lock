@@ -1,0 +1,768 @@
+# The frozen field numbers of the catalog's stored grammar. Numbers are allocated on main only; a backport
+# copies main's lines verbatim. Regenerate with
+# CATALOG_SCHEMA=OVERWRITE cargo test --locked -p surrealdb-catalog --test catalog_schema_lock
+# The format and the rules a change must keep are in surrealdb/catalog/src/stored/lock.rs.
+type AccessGrant struct since=4.0 reserved=[]
+  2 id string critical since=4.0 absent=required
+  4 ac string critical since=4.0 absent=required
+  6 creation datetime critical since=4.0 absent=required
+  8 expiration option<datetime> critical since=4.0 absent=none
+  10 revocation option<datetime> critical since=4.0 absent=none
+  12 subject Subject critical since=4.0 absent=required
+  14 grant Grant critical since=4.0 absent=required
+type AccessType enum since=4.0 reserved=[]
+  1 Record item:RecordAccess since=4.0
+  2 Jwt item:JwtAccess since=4.0
+  3 Bearer item:BearerAccess since=4.0
+type Actor struct since=4.0 reserved=[]
+  2 res Resource critical since=4.0 absent=required
+  4 roles list<Role> critical since=4.0 absent=required
+type Algorithm enum since=4.0 reserved=[]
+  1 EdDSA unit since=4.0
+  2 Es256 unit since=4.0
+  3 Es384 unit since=4.0
+  4 Es512 unit since=4.0
+  5 Hs256 unit since=4.0
+  6 Hs384 unit since=4.0
+  7 Hs512 unit since=4.0
+  8 Ps256 unit since=4.0
+  9 Ps384 unit since=4.0
+  10 Ps512 unit since=4.0
+  11 Rs256 unit since=4.0
+  12 Rs384 unit since=4.0
+  13 Rs512 unit since=4.0
+type AnalyzerDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 name string critical since=4.0 absent=required
+  4 function option<string> critical since=4.0 absent=none
+  6 tokenizers option<list<Tokenizer>> critical since=4.0 absent=none
+  8 filters option<list<Filter>> critical since=4.0 absent=none
+type ApiMethod enum since=4.0 reserved=[]
+  1 Delete unit since=4.0
+  2 Get unit since=4.0
+  3 Patch unit since=4.0
+  4 Post unit since=4.0
+  5 Put unit since=4.0
+  6 Trace unit since=4.0
+type ApiSecurity enum since=4.0 reserved=[]
+  1 Definer unit since=4.0
+  2 Invoker unit since=4.0
+type Auth struct since=4.0 reserved=[]
+  2 actor Actor critical since=4.0 absent=required
+type AuthLevel enum since=4.0 reserved=[]
+  1 No unit since=4.0
+  2 Root unit since=4.0
+  3 Namespace item:string since=4.0
+  4 Database positional:string;string since=4.0
+  5 Record positional:string;string;string since=4.0
+type AuthLimit struct since=4.0 reserved=[]
+  2 level AuthLevel critical since=4.0 absent=required
+  4 role option<string> critical since=4.0 absent=none
+type Base enum since=4.0 reserved=[]
+  1 Root unit since=4.0
+  2 Ns unit since=4.0
+  3 Db unit since=4.0
+type BearerAccess struct since=4.0 reserved=[]
+  2 kind BearerAccessType critical since=4.0 absent=required
+  4 subject BearerAccessSubject critical since=4.0 absent=required
+  6 jwt JwtAccess critical since=4.0 absent=required
+type BearerAccessSubject enum since=4.0 reserved=[]
+  1 Record unit since=4.0
+  2 User unit since=4.0
+type BearerAccessType enum since=4.0 reserved=[]
+  1 Bearer unit since=4.0
+  2 Refresh unit since=4.0
+type BucketId transparent:int:u32 since=4.0
+type CapabilityTargets enum since=4.0 reserved=[]
+  1 None unit since=4.0
+  2 All unit since=4.0
+  3 Some item:list<string> since=4.0
+type ChangeFeed struct since=4.0 reserved=[]
+  2 expiry duration critical since=4.0 absent=required
+  4 store_diff bool critical since=4.0 absent=required
+type Column struct since=4.0 reserved=[]
+  2 path list<string> critical since=4.0 absent=required
+  4 kind PhysicalKind critical since=4.0 absent=required
+  6 presence Presence critical since=4.0 absent=required
+  8 location Location critical since=4.0 absent=required
+  10 role ColumnRole critical since=4.0 absent=required
+  12 literals list<value> critical since=4.0 absent=default(Vec::new)
+  14 tables list<string> critical since=4.0 absent=default(Vec::new)
+type ColumnRole enum since=4.0 reserved=[]
+  1 Field unit since=4.0
+  2 Remainder unit since=4.0
+type CondText transparent:text:cond since=4.0
+type ConfigKind enum since=4.0 reserved=[]
+  1 GraphQL unit since=4.0
+  2 Api unit since=4.0
+  3 Default unit since=4.0
+type Conformance enum since=4.0 reserved=[]
+  1 Guaranteed unit since=4.0
+type DatabaseDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 namespace_id int:u32 critical since=4.0 absent=required
+  4 database_id int:u32 critical since=4.0 absent=required
+  6 name string critical since=4.0 absent=required
+  8 changefeed option<ChangeFeed> critical since=4.0 absent=none
+  10 strict bool critical since=4.0 absent=required
+  12 compatibility int:u8 critical since=4.0 absent=default(Default::default) unrevisioned
+type DefaultConfig struct since=4.0 reserved=[]
+  2 namespace option<string> critical since=4.0 absent=none
+  4 database option<string> critical since=4.0 absent=none
+type DiskAnnParams struct since=4.0 reserved=[]
+  2 dimension int:u16 critical since=4.0 absent=required
+  4 distance Distance critical since=4.0 absent=required
+  6 vector_type VectorType critical since=4.0 absent=required
+  8 degree int:u16 critical since=4.0 absent=required
+  10 l_build int:u16 critical since=4.0 absent=required
+  12 alpha number critical since=4.0 absent=required
+  14 use_hashed_vector bool critical since=4.0 absent=required
+type Distance enum since=4.0 reserved=[]
+  1 Chebyshev unit since=4.0
+  2 Cosine unit since=4.0
+  3 Euclidean unit since=4.0
+  4 Hamming unit since=4.0
+  5 Jaccard unit since=4.0
+  6 Manhattan unit since=4.0
+  7 Minkowski item:number since=4.0
+  8 Pearson unit since=4.0
+  9 CosineNormalized unit since=4.0
+  10 InnerProduct unit since=4.0
+type EnumId transparent:int:u32 since=4.0
+type EventKind enum since=4.0 reserved=[]
+  1 Sync unit since=4.0
+  2 Async fields since=4.0
+    2 retry int:u16 critical since=4.0 absent=required
+    4 max_depth int:u16 critical since=4.0 absent=required
+type ExtensionCapabilities struct since=4.0 reserved=[]
+  2 net CapabilityTargets critical since=4.0 absent=required
+  4 functions CapabilityTargets critical since=4.0 absent=required
+  6 queries bool critical since=4.0 absent=required
+  8 scripting bool critical since=4.0 absent=required
+  10 write bool critical since=4.0 absent=required
+  12 memory option<int:u64> critical since=4.0 absent=none
+  14 timeout option<duration> critical since=4.0 absent=none
+  16 strict_timeout bool critical since=4.0 absent=required
+type ExtensionSigner enum since=4.0 reserved=[]
+  1 Sigstore item:SigstoreSigner since=4.0
+  2 Key item:string since=4.0
+type FieldClaim struct since=4.0 reserved=[]
+  2 field string critical since=4.0 absent=required
+  4 definition int:i64 critical since=4.0 absent=required
+  6 conformance Conformance critical since=4.0 absent=required
+type Filter enum since=4.0 reserved=[]
+  1 Ascii unit since=4.0
+  2 EdgeNgram positional:int:u16;int:u16 since=4.0
+  3 Lowercase unit since=4.0
+  4 Ngram positional:int:u16;int:u16 since=4.0
+  5 Snowball item:Language since=4.0
+  6 Uppercase unit since=4.0
+  7 Mapper item:string since=4.0
+type FullTextParams struct since=4.0 reserved=[]
+  2 analyzer string critical since=4.0 absent=required
+  4 highlight bool critical since=4.0 absent=required
+  6 scoring Scoring critical since=4.0 absent=required
+type GenerationMark struct since=4.0 reserved=[] floor_fixed
+  2 head int:u16 critical since=4.0 absent=required
+type Grant enum since=4.0 reserved=[]
+  1 Jwt item:GrantJwt since=4.0
+  2 Record item:GrantRecord since=4.0
+  3 Bearer item:GrantBearer since=4.0
+type GrantBearer struct since=4.0 reserved=[]
+  2 id string critical since=4.0 absent=required
+  4 key string critical since=4.0 absent=required
+type GrantJwt struct since=4.0 reserved=[]
+  2 jti uuid critical since=4.0 absent=required
+  4 token option<string> critical since=4.0 absent=none
+type GrantRecord struct since=4.0 reserved=[]
+  2 rid uuid critical since=4.0 absent=required
+  4 jti uuid critical since=4.0 absent=required
+  6 token option<string> critical since=4.0 absent=none
+type GraphQLConfig struct since=4.0 reserved=[]
+  2 tables GraphQLTablesConfig critical since=4.0 absent=required
+  4 functions GraphQLFunctionsConfig critical since=4.0 absent=required
+  6 depth_limit option<int:u32> critical since=4.0 absent=none
+  8 complexity_limit option<int:u32> critical since=4.0 absent=none
+  10 introspection GraphQLIntrospectionConfig critical since=4.0 absent=required
+type GraphQLFunctionsConfig enum since=4.0 reserved=[]
+  1 None unit since=4.0
+  2 Auto unit since=4.0
+  3 Include item:list<string> since=4.0
+  4 Exclude item:list<string> since=4.0
+type GraphQLIntrospectionConfig enum since=4.0 reserved=[]
+  1 Auto unit since=4.0
+  2 None unit since=4.0
+type GraphQLTablesConfig enum since=4.0 reserved=[]
+  1 None unit since=4.0
+  2 Auto unit since=4.0
+  3 Include item:list<string> since=4.0
+  4 Exclude item:list<string> since=4.0
+type HnswParams struct since=4.0 reserved=[]
+  2 dimension int:u16 critical since=4.0 absent=required
+  4 distance Distance critical since=4.0 absent=required
+  6 vector_type VectorType critical since=4.0 absent=required
+  8 m int:u8 critical since=4.0 absent=required
+  10 m0 int:u8 critical since=4.0 absent=required
+  12 ml number critical since=4.0 absent=required
+  14 ef_construction int:u16 critical since=4.0 absent=required
+  16 extend_candidates bool critical since=4.0 absent=required
+  18 keep_pruned_connections bool critical since=4.0 absent=required
+  20 use_hashed_vector bool critical since=4.0 absent=required
+type Index enum since=4.0 reserved=[]
+  1 Idx unit since=4.0
+  2 Uniq unit since=4.0
+  3 Hnsw item:HnswParams since=4.0
+  4 FullText item:FullTextParams since=4.0
+  5 Count item:option<text:cond> since=4.0
+  6 DiskAnn item:DiskAnnParams since=4.0
+  7 Spatial unit since=4.0
+type JwtAccess struct since=4.0 reserved=[]
+  2 verify JwtAccessVerify critical since=4.0 absent=required
+  4 issue option<JwtAccessIssue> critical since=4.0 absent=none
+  6 audience option<list<string>> critical since=4.0 absent=none
+type JwtAccessIssue struct since=4.0 reserved=[]
+  2 alg Algorithm critical since=4.0 absent=required
+  4 key string critical since=4.0 absent=required
+type JwtAccessVerify enum since=4.0 reserved=[]
+  1 Key item:JwtAccessVerifyKey since=4.0
+  2 Jwks item:JwtAccessVerifyJwks since=4.0
+type JwtAccessVerifyJwks struct since=4.0 reserved=[]
+  2 url string critical since=4.0 absent=required
+type JwtAccessVerifyKey struct since=4.0 reserved=[]
+  2 alg Algorithm critical since=4.0 absent=required
+  4 key string critical since=4.0 absent=required
+type Language enum since=4.0 reserved=[]
+  1 Arabic unit since=4.0
+  2 Danish unit since=4.0
+  3 Dutch unit since=4.0
+  4 English unit since=4.0
+  5 Finnish unit since=4.0
+  6 French unit since=4.0
+  7 German unit since=4.0
+  8 Greek unit since=4.0
+  9 Hungarian unit since=4.0
+  10 Italian unit since=4.0
+  11 Norwegian unit since=4.0
+  12 Portuguese unit since=4.0
+  13 Romanian unit since=4.0
+  14 Russian unit since=4.0
+  15 Spanish unit since=4.0
+  16 Swedish unit since=4.0
+  17 Tamil unit since=4.0
+  18 Turkish unit since=4.0
+type LayoutDescriptor struct since=4.0 reserved=[]
+  2 table string critical since=4.0 absent=required
+  4 layout RowLayout critical since=4.0 absent=required
+  6 migration option<Migration> critical since=4.0 absent=none
+  8 migrated option<int:u16> critical since=4.0 absent=none
+  9 verified option<int:u32> ignorable since=4.0 absent=none independent="a build that skips it walks every row of the generation before an in-place read, which is what a generation with no verification gets"
+type Level enum since=4.0 reserved=[]
+  1 No unit since=4.0
+  2 Root unit since=4.0
+  3 Namespace item:string since=4.0
+  4 Database positional:string;string since=4.0
+  5 Record positional:string;string;string since=4.0
+type Location enum since=4.0 reserved=[]
+  1 Bit item:int:u32 since=4.0
+  2 Fixed item:int:u32 since=4.0
+  3 Var item:int:u32 since=4.0
+  4 None unit since=4.0
+type ManifestDigest enum since=4.0 reserved=[]
+  1 Sha256 item:bytes since=4.0
+type MiddlewareDefinition struct since=4.0 reserved=[]
+  2 name string critical since=4.0 absent=required
+  4 args list<value> critical since=4.0 absent=required
+type Migration struct since=4.0 reserved=[]
+  2 name string critical since=4.0 absent=required
+  4 step MigrationStep critical since=4.0 absent=required
+type MigrationRun struct since=4.0 reserved=[]
+  2 generation int:u16 critical since=4.0 absent=required
+  4 field option<string> critical since=4.0 absent=none
+type MigrationStep enum since=4.0 reserved=[]
+  1 Rewrite fields since=4.0
+    2 path text:idiom critical since=4.0 absent=required
+    4 using text:expr critical since=4.0 absent=required
+    6 fallback option<value> critical since=4.0 absent=none
+    8 test MigrationTest critical since=4.0 absent=required
+  2 Remove fields since=4.0
+    2 path text:idiom critical since=4.0 absent=required
+  3 RemoveUndeclared fields since=4.0
+    2 declared list<string> critical since=4.0 absent=required
+type MigrationTest struct since=4.0 reserved=[]
+  2 kind option<text:kind> critical since=4.0 absent=none
+  4 schemafull bool critical since=4.0 absent=required
+  6 flexible bool critical since=4.0 absent=required
+  8 assert option<text:expr> critical since=4.0 absent=none
+type ModuleExecutable enum since=4.0 reserved=[]
+  1 Surrealism item:SurrealismExecutable since=4.0
+  2 Silo item:SiloExecutable since=4.0
+type NamespaceDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 namespace_id int:u32 critical since=4.0 absent=required
+  4 name string critical since=4.0 absent=required
+type Node struct since=4.0 reserved=[] floor_fixed
+  2 id uuid critical since=4.0 absent=required
+  4 heartbeat Timestamp critical since=4.0 absent=required
+  6 gc bool critical since=4.0 absent=required
+  8 http_endpoint option<string> critical since=4.0 absent=none
+type NodeLiveQuery struct since=4.0 reserved=[] floor_fixed
+  2 ns int:u32 critical since=4.0 absent=required
+  4 db int:u32 critical since=4.0 absent=required
+  6 tb string critical since=4.0 absent=required
+type NodeRelease struct since=4.0 reserved=[] floor_fixed
+  2 release release critical since=4.0 absent=required
+  4 heartbeat Timestamp critical since=4.0 absent=required
+type PackedDescriptor struct since=4.0 reserved=[]
+  2 columns list<Column> critical since=4.0 absent=required
+  4 presence_bits int:u32 critical since=4.0 absent=required
+  6 bool_bits int:u32 critical since=4.0 absent=required
+  8 fixed_size int:u32 critical since=4.0 absent=required
+  10 var_count int:u32 critical since=4.0 absent=required
+type PhysicalKind enum since=4.0 reserved=[]
+  1 Bool unit since=4.0
+  2 I8 unit since=4.0
+  3 I16 unit since=4.0
+  4 I32 unit since=4.0
+  5 I64 unit since=4.0
+  6 U8 unit since=4.0
+  7 U16 unit since=4.0
+  8 U32 unit since=4.0
+  9 U64 unit since=4.0
+  10 F16 unit since=4.0
+  12 F32 unit since=4.0
+  13 F64 unit since=4.0
+  14 Decimal16 unit since=4.0
+  15 Fixed item:int:u32 since=4.0
+  16 Uuid unit since=4.0
+  17 Datetime unit since=4.0
+  18 DatetimeWide unit since=4.0
+  19 Duration unit since=4.0
+  21 Point unit since=4.0
+  22 LiteralCode item:int:u32 since=4.0
+  23 String unit since=4.0
+  24 Bytes unit since=4.0
+  25 RecordKey unit since=4.0
+  26 DecimalVar unit since=4.0
+  27 Value unit since=4.0
+  30 BigDecimal unit since=4.0
+  34 Object unit since=4.0
+type Presence enum since=4.0 reserved=[]
+  1 Required unit since=4.0
+  2 Optional fields since=4.0
+    2 bit int:u32 critical since=4.0 absent=required
+  3 Nullable fields since=4.0
+    2 bit int:u32 critical since=4.0 absent=required
+  4 OptionalNullable fields since=4.0
+    2 bit int:u32 critical since=4.0 absent=required
+type RecordAccess struct since=4.0 reserved=[]
+  2 signup option<text:expr> critical since=4.0 absent=none
+  4 signin option<text:expr> critical since=4.0 absent=none
+  6 jwt JwtAccess critical since=4.0 absent=required
+  8 bearer option<BearerAccess> critical since=4.0 absent=none
+type Relation struct since=4.0 reserved=[]
+  2 from list<string> critical since=4.0 absent=required
+  4 to list<string> critical since=4.0 absent=required
+  6 enforced bool critical since=4.0 absent=required
+  8 lightweight bool critical since=4.0 absent=required
+type Resource struct since=4.0 reserved=[]
+  2 id string critical since=4.0 absent=required
+  4 kind ResourceKind critical since=4.0 absent=required
+  6 level Level critical since=4.0 absent=required
+type ResourceKind enum since=4.0 reserved=[]
+  1 Any unit since=4.0
+  2 Namespace unit since=4.0
+  3 Database unit since=4.0
+  4 Record unit since=4.0
+  5 Table unit since=4.0
+  6 Document unit since=4.0
+  7 Option unit since=4.0
+  8 Function unit since=4.0
+  9 Module unit since=4.0
+  10 Analyzer unit since=4.0
+  11 Parameter unit since=4.0
+  12 Model unit since=4.0
+  13 Event unit since=4.0
+  14 Field unit since=4.0
+  15 Index unit since=4.0
+  16 Access unit since=4.0
+  17 Config item:ConfigKind since=4.0
+  18 Api unit since=4.0
+  19 Bucket unit since=4.0
+  20 Sequence unit since=4.0
+  21 Actor unit since=4.0
+type Role enum since=4.0 reserved=[]
+  1 Viewer unit since=4.0
+  2 Editor unit since=4.0
+  3 Owner unit since=4.0
+type RowLayout enum since=4.0 reserved=[]
+  1 Document unit since=4.0
+  2 Packed item:PackedDescriptor since=4.0
+type Scoring enum since=4.0 reserved=[]
+  1 Bm fields since=4.0
+    2 k1 float:f32 critical since=4.0 absent=required
+    4 b float:f32 critical since=4.0 absent=required
+  2 Vs unit since=4.0
+type ScramCredential struct since=4.0 reserved=[]
+  2 iterations int:u32 critical since=4.0 absent=required
+  4 salt bytes critical since=4.0 absent=required
+  6 stored_key bytes critical since=4.0 absent=required
+  8 server_key bytes critical since=4.0 absent=required
+type SegmentLanguage enum since=4.0 reserved=[]
+  1 Chinese unit since=4.0
+  2 Japanese unit since=4.0
+  3 Korean unit since=4.0
+type SequenceDefinition struct since=4.0 reserved=[]
+  2 name string critical since=4.0 absent=required
+  4 batch int:u32 critical since=4.0 absent=required
+  6 start int:i64 critical since=4.0 absent=required
+  8 timeout option<duration> critical since=4.0 absent=none
+type SigstoreSigner struct since=4.0 reserved=[]
+  2 ca list<string> critical since=4.0 absent=required
+  4 log string critical since=4.0 absent=required
+  6 tsa list<string> critical since=4.0 absent=required
+  8 issuer string critical since=4.0 absent=required
+  10 identity string critical since=4.0 absent=required
+  12 repository_id option<string> critical since=4.0 absent=none
+  14 owner_id option<string> critical since=4.0 absent=none
+type SiloExecutable struct since=4.0 reserved=[]
+  2 organisation string critical since=4.0 absent=required
+  4 package string critical since=4.0 absent=required
+  6 major int:u32 critical since=4.0 absent=required
+  8 minor int:u32 critical since=4.0 absent=required
+  10 patch int:u32 critical since=4.0 absent=required
+type StoredAccessDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 name string critical since=4.0 absent=required
+  4 access_type AccessType critical since=4.0 absent=required
+  6 base Base critical since=4.0 absent=required
+  8 authenticate option<text:expr> critical since=4.0 absent=none
+  10 context option<text:expr> critical since=4.0 absent=none
+  12 grant_duration option<duration> critical since=4.0 absent=none
+  14 token_duration option<duration> critical since=4.0 absent=none
+  16 session_duration option<duration> critical since=4.0 absent=none
+type StoredApiActionDefinition struct since=4.0 reserved=[]
+  2 methods list<ApiMethod> critical since=4.0 absent=required
+  4 action text:expr critical since=4.0 absent=required
+  6 config StoredApiConfigDefinition critical since=4.0 absent=required
+type StoredApiConfigDefinition struct since=4.0 reserved=[]
+  2 middleware list<MiddlewareDefinition> critical since=4.0 absent=required
+  4 permissions StoredPermission critical since=4.0 absent=required
+type StoredApiDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 path text:path critical since=4.0 absent=required
+  4 actions list<StoredApiActionDefinition> critical since=4.0 absent=required
+  6 fallback option<text:expr> critical since=4.0 absent=none
+  8 config StoredApiConfigDefinition critical since=4.0 absent=required
+  10 auth_limit AuthLimit critical since=4.0 absent=required
+  12 security ApiSecurity critical since=4.0 absent=default(ApiSecurity::default)
+type StoredBucketDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 id option<int:u32> critical since=4.0 absent=none
+  4 name string critical since=4.0 absent=required
+  6 backend option<string> critical since=4.0 absent=none
+  8 permissions StoredPermission critical since=4.0 absent=required
+  10 readonly bool critical since=4.0 absent=required
+  12 presign_nonce uuid critical since=4.0 absent=default(Uuid::nil)
+type StoredComposite struct since=4.0 reserved=[]
+  2 fields list<StoredCompositeField> critical since=4.0 absent=required
+type StoredCompositeField struct since=4.0 reserved=[]
+  2 name string critical since=4.0 absent=required
+  4 kind text:kind critical since=4.0 absent=required
+  6 sql_type string critical since=4.0 absent=required
+type StoredConfigDefinition enum since=4.0 reserved=[]
+  1 Default item:DefaultConfig since=4.0
+  2 GraphQL item:GraphQLConfig since=4.0
+  3 Api item:StoredApiConfigDefinition since=4.0
+type StoredDefineDefault enum since=4.0 reserved=[]
+  1 None unit since=4.0
+  2 Always item:text:expr since=4.0
+  3 Set item:text:expr since=4.0
+type StoredDomain struct since=4.0 reserved=[]
+  2 base text:kind critical since=4.0 absent=required
+  4 base_type string critical since=4.0 absent=required
+  6 not_null bool critical since=4.0 absent=required
+  8 default option<text:expr> critical since=4.0 absent=none
+  10 checks list<StoredDomainCheck> critical since=4.0 absent=required
+type StoredDomainCheck struct since=4.0 reserved=[]
+  2 name option<string> critical since=4.0 absent=none
+  4 check text:expr critical since=4.0 absent=required
+type StoredEnumDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 id int:u32 critical since=4.0 absent=required
+  4 name string critical since=4.0 absent=required
+  6 labels list<StoredEnumLabel> critical since=4.0 absent=required
+  8 permissions StoredPermission critical since=4.0 absent=required
+type StoredEnumLabel struct since=4.0 reserved=[]
+  2 label string critical since=4.0 absent=required
+  4 order int:u64 critical since=4.0 absent=required
+  6 ident int:u32 critical since=4.0 absent=required
+type StoredEventDefinition struct since=4.0 reserved=[] revision_embedded
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 name string critical since=4.0 absent=required
+  4 target_table string critical since=4.0 absent=required
+  6 when text:expr critical since=4.0 absent=required
+  8 then list<text:expr> critical since=4.0 absent=required
+  10 auth_limit AuthLimit critical since=4.0 absent=required
+  12 kind EventKind critical since=4.0 absent=required
+type StoredExtensionBinding struct since=4.0 reserved=[]
+  2 name string critical since=4.0 absent=required
+  4 value text:expr critical since=4.0 absent=required
+type StoredFeatureLevel struct since=4.0 reserved=[] floor_fixed
+  2 level release critical since=4.0 absent=required
+  4 in_use release critical since=4.0 absent=required
+type StoredFieldDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 name text:idiom critical since=4.0 absent=required
+  3 sql_type option<StoredSqlType> ignorable since=4.0 absent=none independent="a release without the clause keeps the field kind and its writes; it only stops enforcing and canonicalising the declared SQL type"
+  4 table string critical since=4.0 absent=required
+  6 field_kind option<text:kind> critical since=4.0 absent=none
+  8 flexible bool critical since=4.0 absent=required
+  10 readonly bool critical since=4.0 absent=required
+  12 value option<text:expr> critical since=4.0 absent=none
+  14 assert option<text:expr> critical since=4.0 absent=none
+  16 computed option<text:expr> critical since=4.0 absent=none
+  18 default StoredDefineDefault critical since=4.0 absent=required
+  20 select_permission StoredPermission critical since=4.0 absent=required
+  22 create_permission StoredPermission critical since=4.0 absent=required
+  24 update_permission StoredPermission critical since=4.0 absent=required
+  26 reference option<StoredReference> critical since=4.0 absent=none
+  28 auth_limit AuthLimit critical since=4.0 absent=required
+  30 graphql_alias option<string> critical since=4.0 absent=none
+  32 graphql_deprecated option<string> critical since=4.0 absent=none
+  34 inline bool critical since=4.0 absent=required
+type StoredFunctionDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 name string critical since=4.0 absent=required
+  4 args list<tuple<string,text:kind>> critical since=4.0 absent=required
+  6 block text:block critical since=4.0 absent=required
+  8 permissions StoredPermission critical since=4.0 absent=required
+  10 returns option<text:kind> critical since=4.0 absent=none
+  12 auth_limit AuthLimit critical since=4.0 absent=required
+  14 graphql_alias option<string> critical since=4.0 absent=none
+  16 graphql_deprecated option<string> critical since=4.0 absent=none
+type StoredIndexDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 index_id int:u32 critical since=4.0 absent=required
+  4 name string critical since=4.0 absent=required
+  6 table_name string critical since=4.0 absent=required
+  8 cols list<text:idiom> critical since=4.0 absent=required
+  10 index Index critical since=4.0 absent=required
+  12 prepare_remove bool critical since=4.0 absent=required
+  14 format_version int:u16 critical since=4.0 absent=required
+  16 nulls_not_distinct bool critical since=4.0 absent=default(bool::default)
+type StoredMaterialize struct since=4.0 reserved=[]
+  2 table string critical since=4.0 absent=required
+  4 field text:idiom critical since=4.0 absent=required
+  6 filter option<text:expr> critical since=4.0 absent=none
+type StoredMlModelDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 hash string critical since=4.0 absent=required
+  4 name string critical since=4.0 absent=required
+  6 version string critical since=4.0 absent=required
+  8 permissions StoredPermission critical since=4.0 absent=required
+type StoredModuleDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 name option<string> critical since=4.0 absent=none
+  4 permissions StoredPermission critical since=4.0 absent=required
+  6 executable ModuleExecutable critical since=4.0 absent=required
+  8 unsigned bool critical since=4.0 absent=required
+  10 digest option<ManifestDigest> critical since=4.0 absent=none
+  12 signer option<ExtensionSigner> critical since=4.0 absent=none
+  14 capabilities option<ExtensionCapabilities> critical since=4.0 absent=none
+  16 bindings list<StoredExtensionBinding> critical since=4.0 absent=default(Vec::new)
+  18 auth_limit AuthLimit critical since=4.0 absent=default(AuthLimit::default)
+type StoredParamDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 name string critical since=4.0 absent=required
+  4 value value critical since=4.0 absent=required
+  6 permissions StoredPermission critical since=4.0 absent=required
+type StoredPermission enum since=4.0 reserved=[]
+  1 None unit since=4.0
+  2 Full unit since=4.0
+  3 Specific item:text:expr since=4.0
+type StoredPermissions struct since=4.0 reserved=[]
+  2 select StoredPermission critical since=4.0 absent=required
+  4 create StoredPermission critical since=4.0 absent=required
+  6 update StoredPermission critical since=4.0 absent=required
+  8 delete StoredPermission critical since=4.0 absent=required
+type StoredReference struct since=4.0 reserved=[]
+  2 on_delete StoredReferenceDeleteStrategy critical since=4.0 absent=required
+  4 materialize option<StoredMaterialize> critical since=4.0 absent=none
+type StoredReferenceDeleteStrategy enum since=4.0 reserved=[]
+  1 Reject unit since=4.0
+  2 Ignore unit since=4.0
+  3 Cascade unit since=4.0
+  4 Unset unit since=4.0
+  5 Custom item:text:expr since=4.0
+type StoredSqlType struct since=4.0 reserved=[]
+  2 dialect StoredSqlTypeDialect critical since=4.0 absent=required
+  4 text string critical since=4.0 absent=required
+type StoredSqlTypeDialect enum since=4.0 reserved=[]
+  1 PostgreSql unit since=4.0
+  2 MySql unit since=4.0
+  3 DynamoDb unit since=4.0
+type StoredStat enum since=4.0 reserved=[]
+  1 Count fields since=4.0
+    2 count int:i64 critical since=4.0 absent=required
+  2 CountValue fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 count int:i64 critical since=4.0 absent=required
+  3 NumberMax fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 max number critical since=4.0 absent=required
+  4 NumberMin fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 min number critical since=4.0 absent=required
+  5 Sum fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 sum number critical since=4.0 absent=required
+  6 Mean fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 sum number critical since=4.0 absent=required
+    6 count int:i64 critical since=4.0 absent=required
+  7 StdDev fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 shift number critical since=4.0 absent=required
+    6 sum number critical since=4.0 absent=required
+    8 sum_of_squares number critical since=4.0 absent=required
+    10 count int:i64 critical since=4.0 absent=required
+  8 Variance fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 shift number critical since=4.0 absent=required
+    6 sum number critical since=4.0 absent=required
+    8 sum_of_squares number critical since=4.0 absent=required
+    10 count int:i64 critical since=4.0 absent=required
+  9 TimeMax fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 max datetime critical since=4.0 absent=required
+  10 TimeMin fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 min datetime critical since=4.0 absent=required
+  11 Accumulate fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 values list<value> critical since=4.0 absent=required
+  12 TemporalMax fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 max value critical since=4.0 absent=required
+  13 TemporalMin fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 min value critical since=4.0 absent=required
+type StoredSubscriptionDefinition struct since=4.0 reserved=[]
+  2 id uuid critical since=4.0 absent=required
+  4 node uuid critical since=4.0 absent=required
+  6 fields StoredSubscriptionFields critical since=4.0 absent=required
+  8 what text:expr critical since=4.0 absent=required
+  10 cond option<text:expr> critical since=4.0 absent=none
+  12 fetch option<list<text:expr>> critical since=4.0 absent=none
+  14 auth option<Auth> critical since=4.0 absent=none
+  16 session option<value> critical since=4.0 absent=none
+  18 vars object<value> critical since=4.0 absent=required
+  20 watermark int:u128 critical since=4.0 absent=default(u128::default)
+type StoredSubscriptionFields enum since=4.0 reserved=[]
+  1 Diff unit since=4.0
+  2 Select item:text:fields since=4.0
+type StoredTableDefinition struct since=4.0 reserved=[] revision_embedded
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 namespace_id int:u32 critical since=4.0 absent=required
+  4 database_id int:u32 critical since=4.0 absent=required
+  6 table_id int:u32 critical since=4.0 absent=required
+  8 name string critical since=4.0 absent=required
+  10 drop bool critical since=4.0 absent=required
+  12 schemafull bool critical since=4.0 absent=required
+  14 view option<StoredViewDefinition> critical since=4.0 absent=none
+  16 permissions StoredPermissions critical since=4.0 absent=required
+  18 changefeed option<ChangeFeed> critical since=4.0 absent=none
+  20 table_type TableType critical since=4.0 absent=required
+  22 cache_fields_ts uuid critical since=4.0 absent=required
+  24 cache_events_ts uuid critical since=4.0 absent=required
+  26 cache_tables_ts uuid critical since=4.0 absent=required
+  28 cache_indexes_ts uuid critical since=4.0 absent=required
+  30 cache_lives_ts uuid critical since=4.0 absent=required
+  32 graphql_alias option<string> critical since=4.0 absent=none
+  34 graphql_deprecated option<string> critical since=4.0 absent=none
+  36 graph_folded bool critical since=4.0 absent=required
+  38 graph_doc_ids bool critical since=4.0 absent=required
+  40 inline_edges_cap option<int:u32> critical since=4.0 absent=none
+  42 inline_refs_cap option<int:u32> critical since=4.0 absent=none
+  44 graph_inline_gen int:u32 critical since=4.0 absent=required
+type StoredTypeAssert struct since=4.0 reserved=[]
+  2 name option<string> critical since=4.0 absent=none
+  4 check text:expr critical since=4.0 absent=required
+type StoredTypeBody enum since=4.0 reserved=[]
+  1 Kind item:text:kind since=4.0
+  2 Union item:list<StoredEnumLabel> since=4.0
+type StoredTypeDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 id int:u32 critical since=4.0 absent=required
+  4 name string critical since=4.0 absent=required
+  6 body StoredTypeBody critical since=4.0 absent=required
+  8 asserts list<StoredTypeAssert> critical since=4.0 absent=required
+  10 default option<text:expr> critical since=4.0 absent=none
+  12 sql_type option<string> critical since=4.0 absent=none
+  14 permissions StoredPermission critical since=4.0 absent=required
+type StoredUserTypeBody enum since=4.0 reserved=[]
+  1 Domain item:StoredDomain since=4.0
+  2 Composite item:StoredComposite since=4.0
+type StoredUserTypeDefinition struct since=4.0 reserved=[]
+  2 id int:u32 critical since=4.0 absent=required
+  4 name string critical since=4.0 absent=required
+  6 body StoredUserTypeBody critical since=4.0 absent=required
+type StoredViewDefinition enum since=4.0 reserved=[]
+  - Aggregated legacy
+  - Materialized legacy
+  - Select legacy
+  1 Clauses fields since=4.0
+    2 fields text:fields critical since=4.0 absent=required
+    4 tables list<string> critical since=4.0 absent=required
+    6 condition option<text:expr> critical since=4.0 absent=none
+    8 groups option<list<text:idiom>> critical since=4.0 absent=none
+type Subject enum since=4.0 reserved=[]
+  1 Record item:record since=4.0
+  2 User item:string since=4.0
+type SurrealismExecutable struct since=4.0 reserved=[]
+  2 bucket string critical since=4.0 absent=required
+  4 key string critical since=4.0 absent=required
+type TableConformance struct since=4.0 reserved=[]
+  2 claims list<FieldClaim> critical since=4.0 absent=required
+type TableMigrations struct since=4.0 reserved=[] floor_fixed
+  2 floor int:u16 critical since=4.0 absent=required
+  4 base int:u16 critical since=4.0 absent=required
+  6 head int:u16 critical since=4.0 absent=required
+type TableType enum since=4.0 reserved=[]
+  1 Any unit since=4.0
+  2 Normal unit since=4.0
+  3 Relation item:Relation since=4.0
+type TaskLease struct since=4.0 reserved=[] floor_fixed
+  2 owner uuid critical since=4.0 absent=required
+  4 expiration datetime critical since=4.0 absent=required
+type Timestamp struct since=4.0 reserved=[] floor_fixed
+  2 value int:u64 critical since=4.0 absent=required
+type Tokenizer enum since=4.0 reserved=[]
+  1 Blank unit since=4.0
+  2 Camel unit since=4.0
+  3 Class unit since=4.0
+  4 Punct unit since=4.0
+  5 Segment item:SegmentLanguage since=4.0
+type TypeId transparent:int:u32 since=4.0
+type UserDefinition struct since=4.0 reserved=[]
+  1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
+  2 name string critical since=4.0 absent=required
+  4 hash string critical since=4.0 absent=required
+  6 code string critical since=4.0 absent=required
+  8 roles list<string> critical since=4.0 absent=required
+  10 token_duration option<duration> critical since=4.0 absent=none
+  12 session_duration option<duration> critical since=4.0 absent=none
+  14 base Base critical since=4.0 absent=required
+  16 scram option<ScramCredential> critical since=4.0 absent=none
+type UserTypeId transparent:int:u32 since=4.0
+type VectorType enum since=4.0 reserved=[]
+  1 F64 unit since=4.0
+  2 F32 unit since=4.0
+  3 I64 unit since=4.0
+  4 I32 unit since=4.0
+  5 I16 unit since=4.0
+  6 F16 unit since=4.0
+  7 I8 unit since=4.0
+  8 U8 unit since=4.0
+type ViewState struct since=4.0 reserved=[]
+  2 stats list<StoredStat> critical since=4.0 absent=required

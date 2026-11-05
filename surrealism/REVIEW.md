@@ -46,4 +46,4 @@ Use this checklist when reviewing Surrealism-related changes (host runtime, gues
 ## Protocol stability
 
 - [ ] **WIT changes require ABI version bump**: Modifying `surrealism.wit` or `sdk.wit` changes the component model ABI. Bump version strings and ensure host/guest compatibility.
-- [ ] **Backwards compatibility**: Avoid breaking changes to `.surli` layout (`surrealism/mod.wasm`, `surrealism/surrealism.toml`, `surrealism/exports.toml`, `surrealism/fs/`). If breaking, document migration and version clearly.
+- [ ] **Backwards compatibility**: Avoid breaking changes to `.surli` layout (`surrealism/mod.wasm`, `surrealism/package.toml` (or the legacy `surrealism/surrealism.toml`), `surrealism/exports.toml`, `surrealism/fs/`). If breaking, document migration and version clearly.

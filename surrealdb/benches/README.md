@@ -1,8 +1,9 @@
 # Benchmarks
 
 This directory contains some micro-benchmarks that can help objectively
-establish the performance implications of a change, and also benchmarks that
-test the performance of different datastores using both the library and the SDK
+establish the performance implications of a change, and the SDK half of the
+datastore benchmarks (the `sdk-*` targets). The matching `lib-*` targets, which
+drive the datastore directly, live in `surrealdb/engine-local/benches`.
 
 ## Manual usage
 
@@ -23,10 +24,10 @@ $ cargo make bench-lib-mem
 $ cargo make bench-sdk-mem
 ```
 
-* RocksDB datastore using the lib or the SDK
+* SurrealKV datastore using the lib or the SDK
 ```console
-$ cargo make bench-lib-rocksdb
-$ cargo make bench-sdk-rocksdb
+$ cargo make bench-lib-surrealkv
+$ cargo make bench-sdk-surrealkv
 ```
 
 * WebSocket remote server using the SDK
@@ -43,10 +44,10 @@ $ cargo make bench-sdk-rocksdb
 
 ## Profiling
 
-Some of the benchmarks support CPU profiling:
+For CPU profiling and flamegraphs, use the language-tests benchmark harness,
+which records profiles with `samply` (see `language-tests/README.md` >
+Benchmarking):
 
 ```console
-cargo make bench --profile-time=5
+cargo make bench -- <bench-filter> --profile
 ```
-
-Once complete, check the `target/criterion/**/profile/flamegraph.svg` files.

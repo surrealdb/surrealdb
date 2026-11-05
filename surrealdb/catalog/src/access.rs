@@ -1,0 +1,148 @@
+use md5::Digest;
+use revision::revisioned;
+use sha2::Sha256;
+use surrealdb_types::ToSql;
+use uuid::Uuid;
+
+use crate::impl_kv_value_catalog;
+use crate::stored::Stored;
+use crate::val::{Datetime, RecordId};
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub enum Subject {
+	#[stored(n = 1)]
+	Record(RecordId),
+	#[stored(n = 2)]
+	User(String),
+}
+
+impl Subject {
+	// Returns the main identifier of a subject as a string.
+	pub fn id(&self) -> String {
+		match self {
+			Subject::Record(id) => id.to_sql(),
+			Subject::User(n) => n.clone(),
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub enum Grant {
+	#[stored(n = 1)]
+	Jwt(GrantJwt),
+	#[stored(n = 2)]
+	Record(GrantRecord),
+	#[stored(n = 3)]
+	Bearer(GrantBearer),
+}
+
+impl Grant {
+	// Returns the type of the grant as a string.
+	pub fn variant(&self) -> &str {
+		match self {
+			Grant::Jwt(_) => "jwt",
+			Grant::Record(_) => "record",
+			Grant::Bearer(_) => "bearer",
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub struct GrantJwt {
+	#[stored(n = 2)]
+	pub jti: Uuid, // JWT ID
+	#[stored(n = 4)]
+	pub token: Option<String>, // JWT. Will not be stored after being returned.
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub struct GrantRecord {
+	#[stored(n = 2)]
+	pub rid: Uuid, // Record ID
+	#[stored(n = 4)]
+	pub jti: Uuid, // JWT ID
+	#[stored(n = 6)]
+	pub token: Option<String>, // JWT. Will not be stored after being returned.
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub struct GrantBearer {
+	#[stored(n = 2)]
+	pub id: String, // Key ID
+	// Key. Will not be stored and be returned as redacted.
+	// Immediately after generation, it will contain the plaintext key.
+	// Will be hashed before storage so that the plaintext key is not stored.
+	#[stored(n = 4)]
+	pub key: String,
+}
+
+impl GrantBearer {
+	pub fn hashed(self) -> Self {
+		let mut hasher = Sha256::new();
+		hasher.update(self.key.as_str());
+		let hash = hasher.finalize();
+		let hash_hex = format!("{hash:x}");
+
+		Self {
+			key: hash_hex,
+			..self
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub struct AccessGrant {
+	#[stored(n = 2)]
+	pub id: String, // Unique grant identifier.
+	#[stored(n = 4)]
+	pub ac: String, // Access method used to create the grant.
+	#[stored(n = 6)]
+	pub creation: Datetime, // Grant creation time.
+	#[stored(n = 8)]
+	pub expiration: Option<Datetime>, // Grant expiration time, if any.
+	#[stored(n = 10)]
+	pub revocation: Option<Datetime>, // Grant revocation time, if any.
+	#[stored(n = 12)]
+	pub subject: Subject, // Subject of the grant.
+	#[stored(n = 14)]
+	pub grant: Grant, // Grant data.
+}
+impl_kv_value_catalog!(AccessGrant);
+
+impl AccessGrant {
+	/// Returns a version of the statement where potential secrets are redacted.
+	/// This function should be used when displaying the statement to datastore users.
+	/// This function should NOT be used when displaying the statement for export purposes.
+	pub fn redacted(mut self) -> AccessGrant {
+		self.grant = match self.grant {
+			Grant::Jwt(mut gr) => {
+				// Token should not even be stored. We clear it just as a precaution.
+				gr.token = None;
+				Grant::Jwt(gr)
+			}
+			Grant::Record(mut gr) => {
+				// Token should not even be stored. We clear it just as a precaution.
+				gr.token = None;
+				Grant::Record(gr)
+			}
+			Grant::Bearer(mut gr) => {
+				// Key is stored, but should not usually be displayed.
+				gr.key = "[REDACTED]".into();
+				Grant::Bearer(gr)
+			}
+		};
+		self
+	}
+}

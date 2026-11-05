@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use futures::{SinkExt, StreamExt};
-use surrealdb_core::rpc::{DbResponse, DbResult};
+use semver::Version;
+use surrealdb_rpc::{DbResponse, DbResult};
 use surrealdb_types::{Error as TypesError, Value};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
@@ -24,6 +25,27 @@ use super::protocol::{ProxyObject, ProxyValue};
 use crate::cli::{DsVersion, UpgradeBackend};
 use crate::tests::report::TestTaskResult;
 
+/// The WebSocket subprotocol that every connection to a spawned binary asks for.
+///
+/// What the harness assumes, and why it names the subprotocol:
+///
+/// - [`SurrealConnection`] encodes each request and decodes each response as flatbuffers, so every
+///   binary it starts, the releases the suite upgrades from and the checkout under test alike, has
+///   to answer in flatbuffers.
+/// - A server chooses the response format from the subprotocol the client offers, by name. A
+///   release asked for `cbor` answers in CBOR, which the flatbuffers decoder rejects ("Failed to
+///   decode fb value"). The harness therefore assumes that every release it starts accepts
+///   `flatbuffers` by name, and that the checkout does too (checked by a unit test below).
+/// - It offers the name, not a position in `PROTOCOLS`. The list is a detail of the checkout and
+///   its order changes whenever a format is added, so a position does not name a format.
+///
+/// The Rust SDK makes the same choice by name (`surrealdb/src/engine/remote/ws`).
+/// Clients that speak CBOR, such as the JavaScript SDK, offer `cbor` or `cbor.2`
+/// and are covered by the server's CBOR end-to-end tests, not by this harness.
+/// This is the short name, not the `application/vnd.surrealdb.flatbuffers` media
+/// type.
+const FLATBUFFERS_SUBPROTOCOL: &str = "flatbuffers";
+
 pub struct ProcessOutput {
 	pub stdout: String,
 	pub stderr: String,
@@ -35,6 +57,21 @@ impl fmt::Display for ProcessOutput {
 	}
 }
 
+/// The last release whose server knows the `files` experimental target.
+/// Buckets and file values need it up to here; every later version, release or
+/// checkout, has them unconditionally and refuses the name at startup.
+const LAST_FILES_TARGET_RELEASE: &str = "4.0.0-beta.1";
+
+/// Whether a binary of `version` knows the `files` experimental target.
+///
+/// Compared by SemVer precedence, which ignores build metadata: a checkout at
+/// `4.0.0-beta.1+local` is beta.1, and `Version`'s own ordering would put it
+/// after.
+fn accepts_files_target(version: &Version) -> bool {
+	let last = Version::parse(LAST_FILES_TARGET_RELEASE).expect("a valid version");
+	version.cmp_precedence(&last).is_le()
+}
+
 pub struct SurrealProcess {
 	process: Child,
 	port: u16,
@@ -44,8 +81,11 @@ impl SurrealProcess {
 	pub async fn new(
 		config: &Config,
 		version: &DsVersion,
+		resolved: &Version,
 		tmp_dir: &str,
 		port: u16,
+		experimental: &[String],
+		module_dir: Option<&Path>,
 	) -> Result<SurrealProcess, anyhow::Error> {
 		let mut command = match version {
 			DsVersion::Path(x) => {
@@ -58,10 +98,19 @@ impl SurrealProcess {
 			}
 		};
 
-		let endpoint = match config.backend {
-			UpgradeBackend::RocksDb => format!("rocksdb://{tmp_dir}/ds"),
-			UpgradeBackend::SurrealKv => format!("surrealkv://{tmp_dir}/ds"),
+		// A released binary writes RocksDB on the migration backend and the
+		// checkout under test opens it as SurrealKV, so every hop but the last
+		// of a chain runs on RocksDB.
+		let scheme = match (config.backend, version) {
+			(UpgradeBackend::RocksDbMigration, DsVersion::Version(_)) => "rocksdb",
+			_ => "surrealkv",
 		};
+		let query = if config.versioned {
+			"?versioned=true"
+		} else {
+			""
+		};
+		let endpoint = format!("{scheme}://{tmp_dir}/ds{query}");
 
 		let bind = format!("127.0.0.1:{port}");
 		let common_args =
@@ -71,10 +120,47 @@ impl SurrealProcess {
 			.args(common_args)
 			// Set the worker threads to 1 so the different processes interver less with eachother
 			.env("SURREAL_RUNTIME_WORKER_THREADS", "1")
+			// Lets the current checkout mint presigned URLs. A release that
+			// predates presigning ignores the variable.
+			.env("SURREAL_BUCKET_PRESIGN_SECRET", "language-tests-presign-secret-0000")
+			// A 4.x checkout refuses to open a store a 3.x release wrote unless
+			// the operator opts in, and every hop onto it is such an upgrade. A
+			// release that predates the opt-in ignores the variable.
+			.env("SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X", "true")
 			.stdin(Stdio::null())
 			.stdout(Stdio::piped())
 			.stderr(Stdio::piped())
 			.kill_on_drop(true);
+
+		// Experimental capabilities have no `surreal start` flag, but the server
+		// reads them from this variable on every release the chain spans, so a
+		// test needing one (a Surrealism extension) can be spawned for. A target
+		// a binary does not recognise makes it exit during startup, which
+		// surfaces as a failure to open the connection.
+		//
+		// A binary that still gates buckets and file values behind the `files`
+		// target is started with it, so it accepts the bucket definitions and
+		// file values a later one accepts unconditionally. A later one refuses
+		// the name, so it never gets it.
+		let mut experimental = experimental.to_vec();
+		if accepts_files_target(resolved) && !experimental.iter().any(|t| t == "files") {
+			experimental.push("files".to_owned());
+		}
+		if !experimental.is_empty() {
+			command.env("SURREAL_CAPS_ALLOW_EXPERIMENTAL", experimental.join(","));
+		}
+
+		// A Surrealism module is loaded out of a file-backed bucket, so the
+		// directory holding it has to be allowlisted, and the demo package
+		// declares a loopback network capability the server must grant before it
+		// will load the package at all. Passed per case rather than per run: a
+		// binary spawned for a test that never asked for a module must not get
+		// network access or an allowlisted path, or a test covering the denial
+		// of either would pass for the wrong reason.
+		if let Some(dir) = module_dir {
+			command.env("SURREAL_BUCKET_FOLDER_ALLOWLIST", dir);
+			command.env("SURREAL_CAPS_ALLOW_NET", "127.0.0.1");
+		}
 
 		let process = command.spawn().context("Failed to spawn process")?;
 
@@ -164,8 +250,7 @@ impl SurrealProcess {
 		self.assert_running_while(async {
 			let request = tokio_tungstenite::tungstenite::handshake::client::Request::builder()
 				.uri(format!("ws://127.0.0.1:{}/rpc", port))
-				// Subprotocol short name (not the `api::format::FLATBUFFERS` MIME).
-				.header(SEC_WEBSOCKET_PROTOCOL, surrealdb_core::rpc::format::PROTOCOLS[2])
+				.header(SEC_WEBSOCKET_PROTOCOL, FLATBUFFERS_SUBPROTOCOL)
 				.header("Upgrade", "websocket")
 				.header(SEC_WEBSOCKET_VERSION, "13")
 				.header(SEC_WEBSOCKET_KEY, generate_key())
@@ -237,7 +322,7 @@ impl SurrealConnection {
 		// Convert ProxyObject to Value
 		let value = object.into_value();
 
-		let message = surrealdb_core::rpc::format::flatbuffers::encode(&value)
+		let message = surrealdb_types::encode(&value)
 			.map_err(|e| TypesError::serialization(e.to_string(), None))?;
 		self.socket
 			.send(Message::Binary(message.into()))
@@ -276,10 +361,9 @@ impl SurrealConnection {
 				}
 			};
 
-			let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&data)
-				.map_err(|e| {
-					TypesError::serialization(format!("Failed to deserialize response: {e}"), None)
-				})?;
+			let response: DbResponse = surrealdb_types::decode(&data).map_err(|e| {
+				TypesError::serialization(format!("Failed to deserialize response: {e}"), None)
+			})?;
 
 			if response.result.is_err() {
 				let Err(e) = response.result else {
@@ -321,11 +405,43 @@ impl SurrealConnection {
 
 				Ok(TestTaskResult::Results {
 					did_timeout: false,
-					res: results,
+					res: results, trace: None,
 				})
 			}
 			Ok(_) => bail!("Got invalid response type"),
 			Err(e) => Ok(TestTaskResult::RunningError(anyhow::Error::msg(e.message().to_string()))),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_core::rpc::format::{Format, PROTOCOLS};
+
+	#[test]
+	fn the_files_target_is_given_to_the_releases_that_know_it() {
+		use super::{Version, accepts_files_target};
+		let accepts = |v: &str| accepts_files_target(&Version::parse(v).unwrap());
+		for known in ["3.0.0", "3.3.5", "4.0.0-alpha.1", "4.0.0-beta.1", "4.0.0-beta.1+local"] {
+			assert!(accepts(known), "{known}");
+		}
+		for stable in ["4.0.0-beta.2", "4.0.0-nightly", "4.0.0-rc.1", "4.0.0", "4.1.0"] {
+			assert!(!accepts(stable), "{stable}");
+		}
+	}
+
+	use super::FLATBUFFERS_SUBPROTOCOL;
+
+	/// The subprotocol the harness asks for must be one the checkout serves, and the
+	/// format it selects must be the one the harness encodes and decodes. A server
+	/// that picks any other format answers in bytes the flatbuffers decoder rejects,
+	/// which fails every case of an upgrade run before a test statement is sent.
+	#[test]
+	fn requested_subprotocol_selects_flatbuffers() {
+		assert!(
+			PROTOCOLS.contains(&FLATBUFFERS_SUBPROTOCOL),
+			"the checkout does not serve the `{FLATBUFFERS_SUBPROTOCOL}` subprotocol"
+		);
+		assert_eq!(Format::from(FLATBUFFERS_SUBPROTOCOL), Format::Flatbuffers);
 	}
 }

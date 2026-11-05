@@ -1,0 +1,127 @@
+name: 'Open Homebrew bump PR'
+description: >-
+  Open a PR on the Homebrew tap bumping the `surreal-db` formula, the database
+  alone, to the released version. The interface is the ENV VARS set on the
+  calling step (they propagate into this composite step's process environment);
+  see the call site in release.yml for the exact set.
+
+  `surreal` is the Surreal CLI launcher's formula, bumped by the launcher's own
+  release (surrealdb/cli); this action never touches it. It runs
+  `release.sh db <version>`, which writes only Formula/surreal-db.rb, and
+  refuses a tap that cannot: one without templates/surreal-db.rb.tmpl, whose
+  older release.sh writes the database into Formula/surreal.rb, or a run that
+  changes any other file.
+
+outputs:
+  pr-url:
+    description: 'pr-url (see step body)'
+    value: ${{ steps.open-pr.outputs.pr-url }}
+  merged:
+    description: 'true when the PR was squash-merged in-run; false when left for auto-merge or manual merge'
+    value: ${{ steps.open-pr.outputs.merged }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Open Homebrew bump PR
+      id: open-pr
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # The caller checks the tap out beside the workspace root and names the
+        # directory via TAP_DIR (a `uses:` step cannot set working-directory).
+        cd "${TAP_DIR}"
+
+        # The database's formula is `surreal-db`; `surreal` is the launcher's.
+        # A tap without the `surreal-db` template still has the older
+        # release.sh, which writes the database into Formula/surreal.rb and
+        # would read `db` below as a version. Stop rather than bump the wrong
+        # formula, on a dry-run too, so a rehearsal shows the problem.
+        if [[ ! -f templates/surreal-db.rb.tmpl ]]; then
+          echo "::error title=Update Homebrew tap::the tap has no surreal-db formula template (templates/surreal-db.rb.tmpl); merge the tap change that adds surreal-db before releasing, then bump it with: release.sh db ${VERSION}"
+          exit 1
+        fi
+
+        # The tap owns the formula generation; regenerate without committing,
+        # pinning the exact released database version rather than the "latest"
+        # pointer.
+        SKIP_GIT=1 bash release.sh db "${VERSION}"
+
+        # Only the database's formula may change: never the launcher's
+        # `surreal`, or anything else in the tap.
+        changed="$(git status --porcelain --untracked-files=all | awk '{print $NF}')"
+        if [[ -z "${changed}" ]]; then
+          echo "Homebrew formula already up to date for ${VERSION}."
+          exit 0
+        fi
+        if [[ "${changed}" != "Formula/surreal-db.rb" ]]; then
+          echo "::error title=Update Homebrew tap::release.sh db ${VERSION} changed more than Formula/surreal-db.rb:"
+          echo "${changed}"
+          exit 1
+        fi
+
+        branch="auto/upgrade-surreal-db-${VERSION}"
+        git config user.name "surrealdb-release-bot"
+        git config user.email "release-bot@surrealdb.com"
+        git checkout -B "${branch}"
+        git add --all
+        git commit -m "Upgrade surreal-db to ${VERSION}"
+
+        # Dry-run: the formula is regenerated and committed to a LOCAL branch in
+        # this throwaway checkout (safe), but the branch is never pushed and no PR
+        # is opened or merged. Show the formula change so the bump is reviewable
+        # at release time rather than surprising us on a real release.
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+          echo "::group::[dry-run] Homebrew formula change for ${VERSION}"
+          git --no-pager show --stat --patch HEAD
+          echo "::endgroup::"
+          echo "[dry-run] would push branch '${branch}' to the tap, open/update the \"Upgrade surreal-db to ${VERSION}\" PR, and squash-merge it."
+          exit 0
+        fi
+
+        git push --force-with-lease -u origin "${branch}"
+
+        if gh pr view "${branch}" >/dev/null 2>&1; then
+          pr_url="$(gh pr view "${branch}" --json url --jq '.url')"
+          echo "PR already exists; updated its branch: ${pr_url}"
+        else
+          pr_url="$(gh pr create \
+            --base main \
+            --head "${branch}" \
+            --title "Upgrade surreal-db to ${VERSION}" \
+            --body "Auto-generated on promotion of SurrealDB ${VERSION}. Bumps the \`surreal-db\` formula (the database alone) to ${VERSION}. Merged automatically on release - nothing to review.")"
+        fi
+
+        # Homebrew formula bumps are mechanical with nothing to review, so land
+        # them without waiting. `gh pr merge --squash` refuses CLIENT-SIDE the
+        # instant it sees the PR as not-yet-mergeable - a protection rule, or just
+        # mergeability still being computed right after creation - and never calls
+        # the merge endpoint, so neither the App's bypass nor an unprotected tap
+        # ever gets to apply. Hit the merge API directly instead, retrying while
+        # mergeability is still computing, and surface the real error if it never
+        # lands. Fall back to enabling GitHub auto-merge, then a warning. Non-fatal
+        # end to end: a PR that cannot merge is left open, not failed.
+        repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+        pr_number="${pr_url##*/}"
+        merged=false
+        merge_err=""
+        for attempt in 1 2 3 4; do
+          if merge_err="$(gh api -X PUT "repos/${repo}/pulls/${pr_number}/merge" -f merge_method=squash 2>&1)"; then
+            merged=true
+            break
+          fi
+          [ "${attempt}" -lt 4 ] && sleep 3
+        done
+        if [ "${merged}" = "true" ]; then
+          echo "Merged ${pr_url} (squash)."
+        else
+          echo "Direct merge did not succeed (last error: ${merge_err}); enabling auto-merge instead."
+          gh pr merge --auto --squash "${pr_url}" \
+            || echo "::warning title=Update Homebrew tap::could not merge ${pr_url}; merge it manually"
+        fi
+
+        {
+          echo "pr-url=${pr_url}"
+          echo "merged=${merged}"
+        } >> "$GITHUB_OUTPUT"

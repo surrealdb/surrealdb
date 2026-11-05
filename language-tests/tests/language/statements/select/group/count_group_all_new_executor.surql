@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -8,21 +7,22 @@ planner-strategy = ["all-ro"]
 value = "'OK'"
 
 [[test.results]]
-value = ''''CountScan [ctx: Db] [source: `table`]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: table]
 ''''
 
 [[test.results]]
 value = "[{ count: 3 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: count]
-    Compute [ctx: Db] [fields: count = count(...)]
-        TableScan [ctx: Db] [table: table, direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: count]
+    TableScan [ctx: Db] [table: table, direction: Forward]
 ''''
 
 [[test.results]]
 value = "[{ count: 1 }, { count: 1 }, { count: 1 }]"
-
 */
 {
     CREATE table:1 CONTENT { bar: "hello", foo: "Man"};

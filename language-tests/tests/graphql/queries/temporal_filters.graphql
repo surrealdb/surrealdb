@@ -1,0 +1,28 @@
+/**
+[env]
+imports = ["../_temporal_schema.surql"]
+
+[test]
+reason = "Date, time and timestamp fields filter chronologically with gt, gte, lt and lte, taking the text form of the kind"
+
+[[test.results]]
+value = "{ afterDay: [{ label: 'late' }], atOrBefore: [{ label: 'early' }], exact: [{ label: 'late' }], fromDay: [{ label: 'early' }, { label: 'late' }], startsBefore: [{ label: 'early' }] }"
+
+*/
+query {
+	afterDay: shifts(filter: {day: {gt: "2026-10-26"}}) {
+		label
+	}
+	fromDay: shifts(filter: {day: {gte: "2026-10-26"}}, order: {asc: label}) {
+		label
+	}
+	startsBefore: shifts(filter: {starts: {lt: "07:00:00"}}) {
+		label
+	}
+	atOrBefore: shifts(filter: {at: {lte: "2026-10-26T06:30:00"}}) {
+		label
+	}
+	exact: shifts(filter: {day: {eq: "2026-10-28"}}) {
+		label
+	}
+}

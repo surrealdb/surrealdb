@@ -21,6 +21,9 @@ let
         (craneLib.fileset.commonCargoSources unfilteredRoot)
         # Also keep any markdown files
         (lib.fileset.fileFilter (file: file.hasExt "md") unfilteredRoot)
+        # Keep the checked-in keyspace map that the datastore key module embeds
+        # at compile time via `include_str!`; without it the crate fails to build.
+        (lib.fileset.fileFilter (file: file.hasExt "map") unfilteredRoot)
       ];
     };
     doCheck = false;

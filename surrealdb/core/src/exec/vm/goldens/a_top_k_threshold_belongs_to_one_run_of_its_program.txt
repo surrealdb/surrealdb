@@ -1,0 +1,40 @@
+### SELECT n FROM item ORDER BY n DESC LIMIT 3
+{ n: 100 }
+{ n: 99 }
+{ n: 98 }
+### SELECT n FROM item ORDER BY n LIMIT 3
+{ n: 0 }
+{ n: 1 }
+{ n: 2 }
+### SELECT n FROM item ORDER BY n DESC LIMIT 7 START 2
+{ n: 98 }
+{ n: 97 }
+{ n: 97 }
+{ n: 96 }
+{ n: 95 }
+{ n: 94 }
+{ n: 94 }
+### SELECT n, g FROM item WHERE g = 1 ORDER BY n DESC LIMIT 4
+{ g: 1, n: 97 }
+{ g: 1, n: 96 }
+{ g: 1, n: 95 }
+{ g: 1, n: 94 }
+### SELECT n, g FROM item ORDER BY n DESC, g LIMIT 6
+{ g: 0, n: 100 }
+{ g: 0, n: 99 }
+{ g: 0, n: 98 }
+{ g: 0, n: 97 }
+{ g: 1, n: 97 }
+{ g: 1, n: 96 }
+### SELECT id, (SELECT VALUE n FROM item WHERE g = $parent.g ORDER BY n DESC LIMIT 2) AS top FROM grp ORDER BY id
+{ id: grp:0, top: [100, 99] }
+{ id: grp:1, top: [97, 96] }
+{ id: grp:2, top: [94, 93] }
+### SELECT id, (SELECT VALUE n FROM item ORDER BY n LIMIT 3) AS low FROM grp ORDER BY id
+{ id: grp:0, low: [0, 1, 2] }
+{ id: grp:1, low: [0, 1, 2] }
+{ id: grp:2, low: [0, 1, 2] }
+### fn::top(3)
+[100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97]
+### [fn::top(1), fn::top(2)]
+[[100, 99, 98, 97, 97, 100, 99, 98, 97, 97], [100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97]]

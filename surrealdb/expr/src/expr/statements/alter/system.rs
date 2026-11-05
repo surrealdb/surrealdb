@@ -1,0 +1,44 @@
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::expr::Expr;
+use crate::expr::statements::alter::AlterKind;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+/// Alters system-wide settings and maintenance operations.
+///
+/// Supported operations:
+/// - `query_timeout`: set/drop a global query timeout which is enforced across queries. The value
+///   is evaluated as a `Duration` expression at runtime.
+/// - `compact`: runs a storage compaction across the entire datastore.
+/// - `compatibility`: sets the compatibility level a database created without one takes. Databases
+///   that already exist keep theirs.
+pub struct AlterSystemStatement {
+	/// Global query timeout alteration. `Set` evaluates an expression to a
+	/// `Duration`; `Drop` clears the timeout; `None` leaves it unchanged.
+	pub query_timeout: AlterKind<Expr>,
+	/// When true, triggers a datastore-wide compaction.
+	pub compact: bool,
+	/// The store's default compatibility level for new databases.
+	pub compatibility: Option<u8>,
+}
+
+impl ToSql for AlterSystemStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "ALTER SYSTEM");
+		match &self.query_timeout {
+			AlterKind::None => {}
+			AlterKind::Set(duration) => {
+				write_sql!(f, fmt, " QUERY_TIMEOUT {}", duration);
+			}
+			AlterKind::Drop => {
+				write_sql!(f, fmt, " DROP QUERY_TIMEOUT");
+			}
+		}
+		if self.compact {
+			write_sql!(f, fmt, " COMPACT");
+		}
+		if let Some(level) = self.compatibility {
+			write_sql!(f, fmt, " COMPATIBILITY {level}");
+		}
+	}
+}

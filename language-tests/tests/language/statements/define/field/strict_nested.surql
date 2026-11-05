@@ -27,6 +27,9 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[{ any: 'foo', id: test1:1 }]"
 
 [[test.results]]
@@ -92,6 +95,7 @@ DEFINE FIELD obj_any ON test2 TYPE object FLEXIBLE;
 
 -- This should not allow setting `a`, `b` or `c` explicitly
 -- OR setting `obj_limited` to an object with (`a` and `b`) and optionally `c`.
+DEFINE FIELD obj_limited ON test3 TYPE object;
 DEFINE FIELD obj_limited.a ON test3 TYPE string;
 DEFINE FIELD obj_limited.b ON test3 TYPE number;
 DEFINE FIELD obj_limited.c ON test3 TYPE option<bool>;

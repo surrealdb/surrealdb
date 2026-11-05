@@ -1,6 +1,7 @@
 /**
 [env]
 ns = "test"
+remote-exclusive = true
 
 [test]
 

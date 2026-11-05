@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Compound index scan with LIMIT/START must return the correct number of rows and use the expected plan"
@@ -9,16 +8,18 @@ reason = "Compound index scan with LIMIT/START must return the correct number of
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_cat_score, access: [1] MoreThan 20, direction: Forward, limit: 2]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [table: item, index: idx_cat_score, access: [1] MoreThan 20, direction: Forward, limit: 2]
 ''''
 
 [[test.results]]
 value = "[{ category: 1, id: item:3, score: 30 }, { category: 1, id: item:4, score: 40 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_cat_score, access: [1], direction: Forward, limit: 2, offset: 1]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [table: item, index: idx_cat_score, access: [1], direction: Forward, limit: 2, offset: 1]
 ''''
 
 [[test.results]]
@@ -31,16 +32,20 @@ value = "[{ category: 1, id: item:4, score: 40 }, { category: 1, id: item:5, sco
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_cat_score, access: [1] MoreThan 20, direction: Forward, limit: 2, offset: 1]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [table: item, index: idx_cat_score, access: [1] MoreThan 20, direction: Forward, limit: 2, offset: 1]
 ''''
 
 [[test.results]]
 value = "[{ category: 1, id: item:4, score: 40 }, { category: 1, id: item:5, score: 50 }]"
 */
 
--- Setup: compound index on (category, score) using numeric category
+-- Setup: compound index on (category, score) using numeric category, both
+-- declared scalar kinds so the index holds one entry per record
 {
+	DEFINE FIELD category ON TABLE item TYPE int;
+	DEFINE FIELD score ON TABLE item TYPE int;
 	DEFINE INDEX idx_cat_score ON TABLE item COLUMNS category, score;
 	CREATE item:1 SET category = 1, score = 10;
 	CREATE item:2 SET category = 1, score = 20;

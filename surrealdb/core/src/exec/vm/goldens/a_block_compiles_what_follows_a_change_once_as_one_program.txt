@@ -1,0 +1,12 @@
+### { DEFINE FIELD age ON person TYPE int; CREATE person:1 SET age = 1; CREATE person:2 SET age = 2; UPDATE person SET age += 1; SELECT * FROM person }
+[{ age: 2, id: person:1 }, { age: 3, id: person:2 }]
+[]
+[{ age: 2, id: person:1 }, { age: 3, id: person:2 }]
+### { DEFINE FIELD a ON t VALUE 1; CREATE t:1 SET n = 1; DEFINE FIELD b ON t VALUE 2; CREATE t:2 SET n = 2; DEFINE FIELD c ON t VALUE 3; CREATE t:3 SET n = 3 }
+[{ a: 1, b: 2, c: 3, id: t:3, n: 3 }]
+[{ a: 1, id: t:1, n: 1 }, { a: 1, b: 2, id: t:2, n: 2 }, { a: 1, b: 2, c: 3, id: t:3, n: 3 }]
+[]
+### FOR $i IN 0..20 { CREATE fresh SET n = $i }
+NONE
+[]
+[]

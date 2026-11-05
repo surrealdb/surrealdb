@@ -1,4 +1,0 @@
-/* ===== result =====
-Query
-    .exprs: None
-*/

@@ -1,9 +1,8 @@
 /**
 [test]
-reason = "LET with a declared type inside a block coerces the RHS via the streaming LetPlan. Mismatched types raise SetCoerce; matching types bind unchanged."
+reason = "LET with a declared type inside a block coerces the RHS via LetPlan. Mismatched types raise SetCoerce; matching types bind unchanged."
 
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [[test.results]]
 value = "42"

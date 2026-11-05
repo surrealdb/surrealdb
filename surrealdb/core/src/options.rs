@@ -14,6 +14,17 @@ pub struct EngineOptions {
 	pub node_membership_cleanup_interval: Duration,
 	/// Interval for garbage collecting expired changefeed data
 	pub changefeed_gc_interval: Duration,
+	/// Interval for garbage collecting live-query events older than the
+	/// datastore's `live_query_retention` from the dedicated event keyspace
+	/// the Router engine captures into.
+	///
+	/// Scheduled independently of `changefeed_gc_interval`, so the retention
+	/// window holds whether or not changefeed collection runs. The job runs
+	/// whichever live-query engine is configured, so events captured before a
+	/// switch of engine still age out. Zero disables the job.
+	///
+	/// Default: 30 seconds
+	pub live_query_gc_interval: Duration,
 	/// Interval for running the index compaction process
 	///
 	/// The index compaction thread runs at this interval to process indexes
@@ -40,6 +51,19 @@ pub struct EngineOptions {
 	///
 	/// Default: 5 seconds
 	pub event_processing_interval: Duration,
+	/// Interval between graph adjacency fold passes, which pack queued
+	/// (vertex, direction) scopes' per-edge keys into adjacency blocks.
+	///
+	/// Default: 5 seconds
+	pub graph_fold_interval: Duration,
+	/// Interval between table migration passes, which rewrite rows stamped
+	/// below a table's newest migration step and verify fields queued for
+	/// verification. A commit that queues work wakes the job sooner. Zero
+	/// disables the job: reads still apply the steps, and no field is
+	/// promoted by verification.
+	///
+	/// Default: 10 seconds
+	pub table_migration_interval: Duration,
 	/// Interval at which the per-node live-query router tails the dedicated
 	/// `lqe` keyspace and delivers notifications off the write path.
 	///
@@ -64,47 +88,79 @@ pub struct EngineOptions {
 	/// data is physically reclaimed.
 	///
 	/// This is a snapshot-safety grace period, not a convenience delay. The
-	/// reclaim task destroys data out-of-band — on TiKV via `unsafe_destroy_range`,
-	/// which bypasses MVCC — so a read transaction whose snapshot predates the
-	/// `REMOVE` must be given time to finish before its data is physically
-	/// removed. A removal is only reclaimed once it is older than this window,
-	/// which is equivalent to requiring its commit timestamp to fall behind the
-	/// MVCC GC safepoint.
+	/// reclaim task destroys data out-of-band, and on a backend offering
+	/// out-of-transaction range destruction that destruction bypasses MVCC — so
+	/// a read transaction whose snapshot predates the `REMOVE` must be given
+	/// time to finish before its data is physically removed. A removal is only
+	/// reclaimed once it is older than this window, which is equivalent to
+	/// requiring its commit timestamp to fall behind the MVCC GC safepoint.
 	///
-	/// This MUST be `>= tikv_gc_lifetime` (the safepoint lag): a removal older
+	/// This MUST be `>= mvcc_gc_lifetime` (the safepoint lag): a removal older
 	/// than the grace is also older than the safepoint, so any transaction that
 	/// could still read it has already expired. The background-task scheduler
-	/// enforces this by using `max(reclaim_grace, tikv_gc_lifetime)`, so raising
-	/// `tikv_gc_lifetime` alone can never make reclaim unsafe.
+	/// enforces this by using `max(reclaim_grace, mvcc_gc_lifetime)`, so raising
+	/// `mvcc_gc_lifetime` alone can never make reclaim unsafe.
 	///
-	/// Default: 10 minutes (matches the default `tikv_gc_lifetime`)
+	/// Default: 10 minutes (matches the default `mvcc_gc_lifetime`)
 	pub reclaim_grace: Duration,
-	/// Interval between TiKV MVCC garbage-collection passes.
+	/// Interval between backend MVCC garbage-collection passes.
 	///
-	/// Each pass calls `cleanup_locks` followed by `update_safepoint`,
-	/// allowing TiKV to reclaim space taken by superseded MVCC versions.
-	/// Mirrors TiDB's default of 10 minutes. Set to `Duration::ZERO` to
-	/// disable scheduling (the value is also gated by
-	/// `SURREAL_TIKV_GC_ENABLED`).
+	/// Each pass asks the backend's [`Maintenance`](surrealdb_kvs::Maintenance)
+	/// capability to advance its safepoint, allowing it to reclaim space taken
+	/// by superseded MVCC versions. Set to `Duration::ZERO` to disable
+	/// scheduling.
 	///
-	/// Only the TiKV backend acts on this interval; other backends ignore
-	/// the task entirely.
-	///
-	/// Default: 10 minutes
-	pub tikv_gc_interval: Duration,
-	/// How far behind the current TSO a TiKV GC safepoint is allowed to
-	/// sit. The actual safepoint passed to `gc()` is
-	/// `current_timestamp - lifetime`.
+	/// Only backends publishing the capability act on this interval; other
+	/// backends ignore the task entirely.
 	///
 	/// Default: 10 minutes
-	pub tikv_gc_lifetime: Duration,
-	/// Interval between standalone TiKV lock-cleanup passes.
+	pub mvcc_gc_interval: Duration,
+	/// How far behind the current time a backend's GC safepoint is allowed to
+	/// sit: the safepoint is `now - lifetime`.
+	///
+	/// Default: 10 minutes
+	pub mvcc_gc_lifetime: Duration,
+	/// Interval between standalone backend lock-cleanup passes.
 	///
 	/// Faster cadence than the full GC pass because stale locks block
 	/// readers immediately, while version GC can wait.
 	///
 	/// Default: 60 seconds
-	pub tikv_lock_cleanup_interval: Duration,
+	pub lock_cleanup_interval: Duration,
+	/// Interval for purging expired durable RPC sessions.
+	///
+	/// Client-attached RPC sessions are stored in the KV store with an
+	/// absolute expiry, and an expired one is refused and dropped when it is
+	/// next loaded. This task sweeps the whole session keyspace so entries
+	/// that are never loaded again do not accumulate; it reclaims storage
+	/// only, so it can run far less often than sessions expire. Set to
+	/// `Duration::ZERO` to disable the sweep.
+	///
+	/// Default: 1 hour
+	pub rpc_session_gc_interval: Duration,
+	/// Interval for refreshing the cached process/system utilisation metrics.
+	///
+	/// Both `INFO FOR ROOT` and the `surrealdb.process.*` gauges read a cached
+	/// snapshot rather than sampling on demand, so a periodic refresh is what
+	/// keeps them current. Exactly one refresher runs per process, whatever the
+	/// number of datastores: `sysinfo` derives CPU percentage as a delta since
+	/// the previous refresh of one process-wide handle, so a second concurrent
+	/// refresher would shorten that window unpredictably and skew the reading.
+	/// Every datastore schedules the job on this interval; the claim in
+	/// [`observe::process`](crate::observe::process) settles which one performs
+	/// it, and hands it on when that datastore goes away. Construction warms the
+	/// cache once per process on top of that, so the first query never reads the
+	/// zeroed default.
+	///
+	/// Default: 30 seconds
+	pub system_metrics_refresh_interval: Duration,
+	/// How often this node releases the writer leases it no longer
+	/// writes under (`Datastore::release_idle_writer_leases`). A lease
+	/// is only ever held on a store this datastore is not the sole writer of, so
+	/// elsewhere the job finds nothing to do. Zero disables the job.
+	///
+	/// Default: 5 seconds
+	pub diskann_writer_lease_release_interval: Duration,
 }
 
 impl Default for EngineOptions {
@@ -114,15 +170,21 @@ impl Default for EngineOptions {
 			node_membership_check_interval: Duration::from_secs(15),
 			node_membership_cleanup_interval: Duration::from_secs(300),
 			changefeed_gc_interval: Duration::from_secs(30),
+			live_query_gc_interval: Duration::from_secs(30),
 			index_compaction_interval: Duration::from_secs(5),
 			index_build_resume_interval: Duration::from_secs(30),
 			event_processing_interval: Duration::from_secs(5),
+			graph_fold_interval: Duration::from_secs(5),
+			table_migration_interval: Duration::from_secs(10),
 			live_query_router_interval: Duration::from_millis(100),
 			reclaim_interval: Duration::from_secs(60),
 			reclaim_grace: Duration::from_secs(600),
-			tikv_gc_interval: Duration::from_secs(600),
-			tikv_gc_lifetime: Duration::from_secs(600),
-			tikv_lock_cleanup_interval: Duration::from_secs(60),
+			mvcc_gc_interval: Duration::from_secs(600),
+			mvcc_gc_lifetime: Duration::from_secs(600),
+			lock_cleanup_interval: Duration::from_secs(60),
+			rpc_session_gc_interval: Duration::from_secs(60 * 60),
+			system_metrics_refresh_interval: Duration::from_secs(30),
+			diskann_writer_lease_release_interval: Duration::from_secs(5),
 		}
 	}
 }
@@ -145,6 +207,12 @@ impl EngineOptions {
 		self
 	}
 
+	/// Set the live-query event garbage collection interval
+	pub fn with_live_query_gc_interval(mut self, interval: Duration) -> Self {
+		self.live_query_gc_interval = interval;
+		self
+	}
+
 	pub fn with_index_compaction_interval(mut self, interval: Duration) -> Self {
 		self.index_compaction_interval = interval;
 		self
@@ -152,6 +220,18 @@ impl EngineOptions {
 
 	pub fn with_index_build_resume_interval(mut self, interval: Duration) -> Self {
 		self.index_build_resume_interval = interval;
+		self
+	}
+
+	/// Set the table migration interval
+	pub fn with_table_migration_interval(mut self, interval: Duration) -> Self {
+		self.table_migration_interval = interval;
+		self
+	}
+
+	/// Set the graph adjacency fold interval
+	pub fn with_graph_fold_interval(mut self, interval: Duration) -> Self {
+		self.graph_fold_interval = interval;
 		self
 	}
 
@@ -175,18 +255,33 @@ impl EngineOptions {
 		self
 	}
 
-	pub fn with_tikv_gc_interval(mut self, interval: Duration) -> Self {
-		self.tikv_gc_interval = interval;
+	pub fn with_mvcc_gc_interval(mut self, interval: Duration) -> Self {
+		self.mvcc_gc_interval = interval;
 		self
 	}
 
-	pub fn with_tikv_gc_lifetime(mut self, lifetime: Duration) -> Self {
-		self.tikv_gc_lifetime = lifetime;
+	pub fn with_mvcc_gc_lifetime(mut self, lifetime: Duration) -> Self {
+		self.mvcc_gc_lifetime = lifetime;
 		self
 	}
 
-	pub fn with_tikv_lock_cleanup_interval(mut self, interval: Duration) -> Self {
-		self.tikv_lock_cleanup_interval = interval;
+	pub fn with_lock_cleanup_interval(mut self, interval: Duration) -> Self {
+		self.lock_cleanup_interval = interval;
+		self
+	}
+
+	pub fn with_rpc_session_gc_interval(mut self, interval: Duration) -> Self {
+		self.rpc_session_gc_interval = interval;
+		self
+	}
+
+	pub fn with_system_metrics_refresh_interval(mut self, interval: Duration) -> Self {
+		self.system_metrics_refresh_interval = interval;
+		self
+	}
+
+	pub fn with_diskann_writer_lease_release_interval(mut self, interval: Duration) -> Self {
+		self.diskann_writer_lease_release_interval = interval;
 		self
 	}
 }

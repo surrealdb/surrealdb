@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test EXPLAIN with ORDER BY, LIMIT, and START clauses"
@@ -9,31 +8,36 @@ reason = "Test EXPLAIN with ORDER BY, LIMIT, and START clauses"
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: val ASC]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Sort [ctx: Db] [sort_keys: val ASC]
         TableScan [ctx: Db] [table: record, direction: Forward]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: val DESC]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Sort [ctx: Db] [sort_keys: val DESC]
         TableScan [ctx: Db] [table: record, direction: Forward]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: record, direction: Forward, limit: 5]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: record, direction: Forward, limit: 3, offset: 2]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 2, offset: 1]
-        SortTopKByKey [ctx: Db] [sort_keys: val DESC, limit: 3]
+        Sort [ctx: Db] [sort_keys: val DESC, keep: 3]
             TableScan [ctx: Db] [table: record, direction: Forward, topk_pushdown: yes]
 ''''
 */

@@ -11,7 +11,7 @@ reason = "Self-referential via bracket access $self[\"a\"]: a -> a"
 value = "NONE"
 
 [[test.results]]
-error = "Cyclic dependency detected among computed fields: a -> a"
+error = "Cyclic dependency detected among field clauses: a -> a"
 
 */
 

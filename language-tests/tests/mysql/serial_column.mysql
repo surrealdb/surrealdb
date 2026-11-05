@@ -1,0 +1,25 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "SERIAL is BIGINT UNSIGNED NOT NULL AUTO_INCREMENT UNIQUE: the key is generated from 1 and read back as the integer key of the record id"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, note: 'a' }, { id: 2, note: 'b' }]"
+
+[[test.results]]
+value = "[{ id: 1, note: 'a' }, { id: 2, note: 'b' }]"
+
+[[test.results]]
+value = "[{ id: 1 }]"
+*/
+
+CREATE TABLE serial_t (id SERIAL, note TEXT);
+INSERT INTO serial_t (note) VALUES ('a'), ('b');
+SELECT id, note FROM serial_t ORDER BY id;
+SELECT id FROM serial_t WHERE note = 'a';

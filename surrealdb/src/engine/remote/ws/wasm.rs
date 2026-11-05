@@ -20,7 +20,7 @@ use crate::engine::{IntervalStream, SessionError};
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
 use crate::types::HashMap;
-use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal};
+use crate::{Error, ExtraFeatures, Result, SessionClone, Surreal};
 
 type MessageStream = SplitStream<WebSocketStream>;
 type MessageSink = SplitSink<WebSocketStream, Message>;
@@ -36,9 +36,10 @@ impl WsMessage for Message {
 	}
 
 	fn as_binary(&self) -> Option<&[u8]> {
-		match self {
-			Message::Binary(data) => Some(data),
-			_ => None,
+		if let Message::Binary(data) = self {
+			Some(data)
+		} else {
+			None
 		}
 	}
 
@@ -75,7 +76,7 @@ impl conn::Sealed for super::Client {
 			let config = address.config.clone();
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			spawn_local(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
+			spawn_local(run_router(address, conn_tx, route_rx, session_clone.router_receiver()));
 
 			conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 
@@ -83,11 +84,7 @@ impl conn::Sealed for super::Client {
 			features.insert(ExtraFeatures::LiveQueries);
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})
@@ -128,17 +125,19 @@ async fn router_reconnect(state: &RouterState, endpoint: &Endpoint) {
 	loop {
 		trace!("Reconnecting...");
 
-		// Build WebSocket URL with flatbuffers protocol negotiation
+		// Build WebSocket URL with CBOR protocol negotiation
 		let ws_url = endpoint.url.as_str();
 
-		match connect_with_protocols(ws_url, &["flatbuffers"]).await {
+		match connect_with_protocols(ws_url, &surrealdb_rpc::wire::PROTOCOLS).await {
 			Ok(socket) => {
 				let (new_sink, new_stream) = socket.split();
 				state.update_connection(new_sink, new_stream).await;
 
 				// Replay state for ALL sessions
 				for (session_id, session_result) in state.sessions.to_vec() {
-					if let Ok(session_state) = session_result {
+					if let Ok(session_state) = session_result
+						&& !session_state.unattached.load(std::sync::atomic::Ordering::SeqCst)
+					{
 						replay_session::<Message, _, _>(session_id, &session_state, &state.sink)
 							.await
 							.ok();
@@ -159,11 +158,11 @@ pub(crate) async fn run_router(
 	endpoint: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
-	session_rx: Receiver<SessionId>,
+	session_rx: crate::RouterSessions,
 ) {
-	// Connect to the WebSocket server with flatbuffers protocol negotiation
+	// Connect to the WebSocket server with CBOR protocol negotiation
 	let ws_url = endpoint.url.as_str();
-	let socket = match connect_with_protocols(ws_url, &["flatbuffers"]).await {
+	let socket = match connect_with_protocols(ws_url, &surrealdb_rpc::wire::PROTOCOLS).await {
 		Ok(socket) => socket,
 		Err(error) => {
 			conn_tx
@@ -185,6 +184,10 @@ pub(crate) async fn run_router(
 	}
 
 	let (socket_sink, socket_stream) = socket.split();
+	// The wasm socket halves are neither `Send` nor `Sync`, so this `Arc` buys no
+	// cross-thread sharing over an `Rc`. It mirrors the native router's shape,
+	// which shares the same state across genuinely concurrent tasks.
+	#[allow(clippy::arc_with_non_send_sync)]
 	let state = Arc::new(RouterState::new(socket_sink, socket_stream));
 
 	'router: loop {
@@ -233,7 +236,7 @@ pub(crate) async fn run_router(
 					match result {
 						Some(Ok(message)) => {
 							match handle_response::<Message, _, _>(
-								&message, &state.sessions, &state.sink
+								&message, None, &state.sessions, &state.sink
 							).await {
 								HandleResult::Ok => continue,
 								HandleResult::Disconnected => {

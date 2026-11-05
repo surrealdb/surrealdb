@@ -1,0 +1,33 @@
+### UPDATE person SET city = (SELECT VALUE name FROM company)
+root[0] serial
+root/0[0] serial in place
+### UPDATE person SET city = (SELECT VALUE name FROM company WHERE name = $this)
+root[0] serial
+root/0[0] serial
+### UPDATE person SET city = (SELECT VALUE name FROM company) #2
+root[0] serial
+root/0[0] serial in place
+### UPDATE l SET xs = (SELECT VALUE x FROM r WHERE k = $parent.k)
+root[0] serial
+root/0[0] serial
+### SELECT * FROM l JOIN u ON l.k = u.k
+root[0] serial in place, group 0
+root[1] serial
+root[2] serial
+### SELECT * FROM l LEFT JOIN r ON l.k = r.k
+root[0] serial in place, group 0
+root[1] serial in place, group 1
+root[2] serial
+root[3] serial
+### SELECT id, (SELECT VALUE x FROM u WHERE k = $parent.k) AS xs FROM l
+root[0] serial in place, group 1
+root[1] serial, group 0
+root[2] serial
+### SELECT id, (SELECT VALUE x FROM r WHERE k = $parent.k) AS xs FROM l
+root[0] serial, group 0
+root[1] serial in place, group 2
+root[2] serial, group 1
+root[3] serial
+### SELECT *, (SELECT VALUE name FROM company) AS c FROM person LIMIT rand::int(1, 5)
+root[0] serial in place, group 0
+root[1] serial

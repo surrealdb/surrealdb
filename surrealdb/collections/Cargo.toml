@@ -13,12 +13,23 @@ categories.workspace = true
 readme = "README.md"
 documentation = "https://docs.rs/surrealdb-collections/"
 
+[features]
+# `revision` and `storekey` encodings of `VecMap` and `VecSet`, and the bounded `revision` reads.
+revision = ["dep:revision"]
+storekey = ["dep:storekey"]
+# `serde` for `VecMap`, as a map.
+serde = ["dep:serde"]
+arbitrary = ["dep:arbitrary"]
+
 [dependencies]
-revision.workspace = true
-storekey.workspace = true
+arbitrary = { workspace = true, optional = true }
+revision = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+storekey = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
@@ -26,3 +37,4 @@ workspace = true
 [[bench]]
 name = "collections"
 harness = false
+required-features = ["revision", "storekey"]

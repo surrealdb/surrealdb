@@ -1,0 +1,2060 @@
+//! `DEFINE` statements.
+//!
+//! Each definition is a [`Tag::Define`] node over a fixed record (name, `ON`
+//! target, kind-specific slots) and a list of [`Tag::Clause`] nodes in source
+//! order. Which clauses a definition accepts, and in what combination, is
+//! fixed by the established grammar; what a clause means, including the checks
+//! on combinations of clauses, is left to lowering, which replays them in order.
+
+use crate::ast::{Cl, DefineKind, define, ext, jwt, vector};
+use crate::parse::*;
+
+impl<'a, 's> Parser<'a, 's> {
+	/// A clause node over everything appended since node `first`.
+	pub(crate) fn clause(&mut self, cl: Cl, a: u32, b: u32, start: u32, first: usize) -> R<NodeId> {
+		self.stmt_node(Tag::Clause, cl as u8, a, b, start, first)
+	}
+
+	/// Appends a clause to the value stack.
+	pub(crate) fn push_clause(
+		&mut self,
+		cl: Cl,
+		a: u32,
+		b: u32,
+		start: u32,
+		first: usize,
+	) -> R<()> {
+		let c = self.clause(cl, a, b, start, first)?;
+		self.vals.push(c);
+		Ok(())
+	}
+
+	/// Parses `KEYWORD expr` clauses: consumes the keyword and the expression.
+	pub(crate) fn expr_clause(&mut self, cl: Cl) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		let e = self.expr(true)?;
+		self.push_clause(cl, e, 0, t.start, first)
+	}
+
+	pub(crate) fn flag_clause(&mut self, cl: Cl) -> R<()> {
+		let t = self.bump();
+		self.push_clause(cl, 0, 0, t.start, self.ast.nodes.len())
+	}
+
+	pub(crate) fn string_clause(&mut self, cl: Cl) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		let s = self.string_lit()?;
+		self.push_clause(cl, s, 0, t.start, first)
+	}
+
+	pub(crate) fn uint_clause(&mut self, cl: Cl) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		let n = self.uint_lit()?;
+		self.push_clause(cl, n, 0, t.start, first)
+	}
+
+	/// `MIGRATE EXISTING ROWS AS name …`: on a field (`table` false)
+	/// `USING expr [FALLBACK expr]`, as a [`Cl::Migrate`] clause; on a table
+	/// `REMOVE UNDECLARED FIELDS`, as a [`Cl::MigrateRemoveUndeclared`] one.
+	pub(crate) fn migrate_clause(&mut self, table: bool) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		self.expect_kw(Kw::Existing, "EXISTING")?;
+		self.expect_kw(Kw::Rows, "ROWS")?;
+		self.expect_kw(Kw::As, "AS")?;
+		let name = self.name()?;
+		if table {
+			self.expect_kw(Kw::Remove, "REMOVE")?;
+			self.expect_kw(Kw::Undeclared, "UNDECLARED")?;
+			self.expect_kw(Kw::Fields, "FIELDS")?;
+			return self.push_clause(Cl::MigrateRemoveUndeclared, name, 0, t.start, first);
+		}
+		self.expect_kw(Kw::Using, "USING")?;
+		let using = self.expr(true)?;
+		let fallback = if self.eat_kw(Kw::Fallback) {
+			self.expr(true)?
+		} else {
+			NONE
+		};
+		let idx = self.record(&[using, fallback]);
+		self.push_clause(Cl::Migrate, name, idx, t.start, first)
+	}
+
+	/// Whether `t` is the bare identifier `word`, in any case. The words of
+	/// `SQL TYPE` are not keywords, so each is matched by its text, as `DISKANN`
+	/// is, and stays an identifier everywhere else.
+	pub(crate) fn is_word(&self, t: Tok, word: &str) -> bool {
+		t.kind == T::Ident && t.kw == Kw::None && self.text_of(t).eq_ignore_ascii_case(word)
+	}
+
+	/// `SQL TYPE dialect 'text'`, as a [`Cl::SqlType`] clause: the dialect is one
+	/// of `POSTGRESQL`, `MYSQL` or `DYNAMODB`, and the text is a string literal.
+	pub(crate) fn sql_type_clause(&mut self) -> R<()> {
+		let t = self.bump();
+		self.expect_kw(Kw::Type, "TYPE")?;
+		let dialect = if self.is_word(self.tok, "POSTGRESQL") {
+			0
+		} else if self.is_word(self.tok, "MYSQL") {
+			1
+		} else if self.is_word(self.tok, "DYNAMODB") {
+			2
+		} else {
+			return Err(self.unexpected("`POSTGRESQL`, `MYSQL`, or `DYNAMODB`"));
+		};
+		self.bump();
+		let first = self.ast.nodes.len();
+		let text = self.string_lit()?;
+		self.push_clause(Cl::SqlType, dialect, text, t.start, first)
+	}
+
+	/// `MATERIALIZE INTO table.field [WHERE cond]` after `REFERENCE`, as a
+	/// [`Cl::Materialize`] clause.
+	pub(crate) fn materialize_clause(&mut self) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		self.expect_kw(Kw::Into, "INTO")?;
+		let table = self.name()?;
+		self.expect(T::Dot, ".")?;
+		let field = self.name()?;
+		let cond = if self.eat_kw(Kw::Where) {
+			self.expr(true)?
+		} else {
+			NONE
+		};
+		let idx = self.record(&[table, field, cond]);
+		self.push_clause(Cl::Materialize, idx, 0, t.start, first)
+	}
+
+	/// `DEFINE …` after `DEFINE`.
+	pub(crate) fn define(&mut self, start: u32) -> R<NodeId> {
+		let first = self.ast.nodes.len();
+		let t = self.tok;
+		let kind = if t.kind != T::Ident {
+			return Err(self.unexpected("a define statement keyword"));
+		} else if t.kw == Kw::Namespace {
+			DefineKind::Namespace
+		} else if t.kw == Kw::Database {
+			DefineKind::Database
+		} else if t.kw == Kw::Function {
+			DefineKind::Function
+		} else if t.kw == Kw::User {
+			DefineKind::User
+		} else if t.kw == Kw::Param {
+			DefineKind::Param
+		} else if t.kw == Kw::Table || t.kw == Kw::Tb {
+			DefineKind::Table
+		} else if t.kw == Kw::Api {
+			DefineKind::Api
+		} else if t.kw == Kw::Event {
+			DefineKind::Event
+		} else if t.kw == Kw::Field {
+			DefineKind::Field
+		} else if t.kw == Kw::Index {
+			DefineKind::Index
+		} else if t.kw == Kw::Analyzer {
+			DefineKind::Analyzer
+		} else if t.kw == Kw::Access {
+			DefineKind::Access
+		} else if t.kw == Kw::Config {
+			DefineKind::Config
+		} else if t.kw == Kw::Bucket {
+			DefineKind::Bucket
+		} else if t.kw == Kw::Sequence {
+			DefineKind::Sequence
+		} else if t.kw == Kw::Extension || t.kw == Kw::Module {
+			DefineKind::Module
+		} else if t.kw == Kw::Type {
+			DefineKind::Type
+		} else {
+			return Err(self.unexpected("a define statement keyword"));
+		};
+		self.bump();
+		let mut deprecated = 0;
+		if kind == DefineKind::Module {
+			if t.kw == Kw::Module {
+				deprecated |= ext::MODULE_KEYWORD;
+			}
+			if self.limits.no_surrealism {
+				let label = if t.kw == Kw::Module {
+					"Use of `DEFINE MODULE` requires Surrealism extensions"
+				} else {
+					"Use of `DEFINE EXTENSION` requires Surrealism extensions"
+				};
+				return Err(self.surrealism_off(t, label));
+			}
+		}
+		let mut rec = [NONE; define::LEN];
+		rec[define::EXIST] = if self.eat_kw(Kw::If) {
+			self.expect_kw(Kw::Not, "NOT")?;
+			self.expect_kw(Kw::Exists, "EXISTS")?;
+			1
+		} else if self.eat_kw(Kw::Overwrite) {
+			2
+		} else {
+			0
+		};
+		let mark = self.vals.len() as u32;
+		match kind {
+			DefineKind::Namespace => {
+				rec[define::NAME] = self.expr(true)?;
+				while self.at_kw(Kw::Comment) {
+					self.expr_clause(Cl::Comment)?;
+				}
+			}
+			DefineKind::Database => {
+				rec[define::NAME] = self.expr(true)?;
+				loop {
+					if self.tok.kw == Kw::Comment {
+						self.expr_clause(Cl::Comment)?;
+					} else if self.tok.kw == Kw::ChangeFeed {
+						self.changefeed()?;
+					} else if self.tok.kw == Kw::Strict {
+						self.flag_clause(Cl::Strict)?;
+					} else if self.tok.kw == Kw::Compatibility {
+						self.uint_clause(Cl::Compatibility)?;
+					} else {
+						break;
+					}
+				}
+			}
+			DefineKind::Function => self.define_function(&mut rec)?,
+			DefineKind::User => {
+				rec[define::NAME] = self.expr(true)?;
+				self.expect_kw(Kw::On, "ON")?;
+				rec[define::ON] = self.base()?;
+				self.user_clauses()?;
+			}
+			DefineKind::Access => {
+				rec[define::NAME] = self.expr(true)?;
+				self.expect_kw(Kw::On, "ON")?;
+				let base_tok = self.tok;
+				rec[define::ON] = self.base()?;
+				self.access_clauses(rec[define::ON], base_tok)?;
+			}
+			DefineKind::Param => {
+				let p = self.expect(T::Param, "a parameter")?;
+				rec[define::NAME] = self.leaf(Tag::Param, 0, p);
+				loop {
+					if self.tok.kw == Kw::Value {
+						self.expr_clause(Cl::Value)?;
+					} else if self.tok.kw == Kw::Comment {
+						self.expr_clause(Cl::Comment)?;
+					} else if self.tok.kw == Kw::Permissions {
+						self.perm_value_clause()?;
+					} else {
+						break;
+					}
+				}
+			}
+			DefineKind::Table => {
+				rec[define::NAME] = self.expr(false)?;
+				self.table_clauses()?;
+			}
+			DefineKind::Api => {
+				rec[define::NAME] = self.expr(true)?;
+				self.api_clauses()?;
+			}
+			DefineKind::Event => {
+				rec[define::NAME] = self.expr(true)?;
+				self.expect_kw(Kw::On, "ON")?;
+				self.eat_kw(Kw::Table);
+				rec[define::ON] = self.expr(false)?;
+				self.event_clauses()?;
+			}
+			DefineKind::Field => {
+				rec[define::NAME] = self.expr(true)?;
+				let field_is_id = self.is_bare_id(rec[define::NAME]);
+				self.expect_kw(Kw::On, "ON")?;
+				self.eat_kw(Kw::Table);
+				rec[define::ON] = self.expr(false)?;
+				self.field_clauses(field_is_id)?;
+			}
+			DefineKind::Index => {
+				rec[define::NAME] = self.expr(true)?;
+				self.expect_kw(Kw::On, "ON")?;
+				self.eat_kw(Kw::Table);
+				rec[define::ON] = self.expr(false)?;
+				self.index_clauses()?;
+			}
+			DefineKind::Analyzer => {
+				rec[define::NAME] = self.expr(true)?;
+				self.analyzer_clauses()?;
+			}
+			DefineKind::Config => {
+				let c = self.tok;
+				if c.kind == T::Ident && c.kw == Kw::Api {
+					self.bump();
+					rec[define::ON] = 0;
+					let cfg = self.api_config()?;
+					self.vals.push(cfg);
+				} else if c.kind == T::Ident && c.kw == Kw::Graphql {
+					self.bump();
+					rec[define::ON] = 1;
+					self.graphql_config()?;
+				} else if c.kind == T::Ident && c.kw == Kw::Default {
+					self.bump();
+					rec[define::ON] = 2;
+					if !(self.at_kw(Kw::Namespace) || self.at_kw(Kw::Database)) {
+						return Err(self.unexpected("a namespace or database name"));
+					}
+					loop {
+						if self.tok.kw == Kw::Namespace {
+							self.expr_clause(Cl::DefaultNs)?;
+						} else if self.tok.kw == Kw::Database {
+							self.expr_clause(Cl::DefaultDb)?;
+						} else {
+							break;
+						}
+					}
+				} else {
+					return Err(self.unexpected("a type of config"));
+				}
+			}
+			DefineKind::Bucket => {
+				rec[define::NAME] = self.expr(true)?;
+				if self.eat_kw(Kw::On) {
+					rec[define::ON] = self.base()?;
+				}
+				loop {
+					if self.tok.kw == Kw::Backend {
+						self.expr_clause(Cl::Backend)?;
+					} else if self.tok.kw == Kw::Permissions {
+						self.perm_value_clause()?;
+					} else if self.tok.kw == Kw::Readonly {
+						self.flag_clause(Cl::Readonly)?;
+					} else if self.tok.kw == Kw::Comment {
+						self.expr_clause(Cl::Comment)?;
+					} else {
+						break;
+					}
+				}
+			}
+			DefineKind::Sequence => {
+				rec[define::NAME] = self.expr(true)?;
+				if self.at_kw(Kw::Batch) {
+					self.expr_clause(Cl::Batch)?;
+				}
+				if self.at_kw(Kw::Start) {
+					self.expr_clause(Cl::Start)?;
+				}
+				if self.at_kw(Kw::Timeout) {
+					self.expr_clause(Cl::Timeout)?;
+				}
+			}
+			DefineKind::Module => deprecated |= self.define_module(&mut rec)?,
+			DefineKind::Type => {
+				rec[define::NAME] = self.name()?;
+				self.type_clauses()?;
+			}
+		}
+		rec[define::CLAUSES] = self.list_from(mark).0;
+		let idx = self.record(&rec);
+		self.stmt_node(Tag::Define, kind as u8, idx, deprecated, start, first)
+	}
+
+	/// `CHANGEFEED duration [INCLUDE ORIGINAL]`.
+	pub(crate) fn changefeed(&mut self) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		let d = self.duration_lit()?;
+		let original = if self.eat_kw(Kw::Include) {
+			self.expect_kw(Kw::Original, "ORIGINAL")?;
+			1
+		} else {
+			0
+		};
+		self.push_clause(Cl::Changefeed, d, original, t.start, first)
+	}
+
+	/// `NONE`, `FULL` or `WHERE expr`, as a [`Cl::Perm`] clause.
+	pub(crate) fn perm_value(&mut self) -> R<NodeId> {
+		let t = self.tok;
+		let first = self.ast.nodes.len();
+		let (a, b) = if t.kind != T::Ident {
+			return Err(self.unexpected("'NONE', 'FULL', or 'WHERE'"));
+		} else if t.kw == Kw::None_ {
+			self.bump();
+			(0, NONE)
+		} else if t.kw == Kw::Full {
+			self.bump();
+			(1, NONE)
+		} else if t.kw == Kw::Where {
+			self.bump();
+			(2, self.expr(true)?)
+		} else {
+			return Err(self.unexpected("'NONE', 'FULL', or 'WHERE'"));
+		};
+		self.clause(Cl::Perm, a, b, t.start, first)
+	}
+
+	/// `PERMISSIONS value`.
+	pub(crate) fn perm_value_clause(&mut self) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		let p = self.perm_value()?;
+		self.push_clause(Cl::PermValue, p, 0, t.start, first)
+	}
+
+	/// Table (`field` false) or field `PERMISSIONS`.
+	pub(crate) fn permissions(&mut self, field: bool) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		let mark = self.vals.len() as u32;
+		let n = self.tok;
+		if n.kind == T::Ident && (n.kw == Kw::None_ || n.kw == Kw::Full) {
+			let f = self.ast.nodes.len();
+			let p = self.perm_value()?;
+			let c = self.clause(Cl::PermFor, 15, p, n.start, f)?;
+			self.vals.push(c);
+		} else if n.kind == T::Ident && n.kw == Kw::For {
+			self.bump();
+			loop {
+				let s = self.tok.start;
+				let f = self.ast.nodes.len();
+				let mut actions = 0;
+				loop {
+					let a = self.tok;
+					let bit = if a.kind != T::Ident {
+						0
+					} else if a.kw == Kw::Select {
+						1
+					} else if a.kw == Kw::Create {
+						2
+					} else if a.kw == Kw::Update {
+						4
+					} else if a.kw == Kw::Delete {
+						8
+					} else {
+						0
+					};
+					if bit == 8 && field {
+						return Err(self.error(
+							a.start,
+							a.end,
+							"Can't define permission DELETE for fields",
+						));
+					}
+					if bit == 0 {
+						return Err(self.unexpected(if field {
+							"'SELECT', 'CREATE' or 'UPDATE'"
+						} else {
+							"'SELECT', 'CREATE', 'UPDATE' or 'DELETE'"
+						}));
+					}
+					actions |= bit;
+					self.bump();
+					if !self.eat(T::Comma) {
+						break;
+					}
+				}
+				let p = self.perm_value()?;
+				let c = self.clause(Cl::PermFor, actions, p, s, f)?;
+				self.vals.push(c);
+				self.eat(T::Comma);
+				if !self.eat_kw(Kw::For) {
+					break;
+				}
+			}
+		} else {
+			return Err(self.unexpected("'NONE', 'FULL' or 'FOR'"));
+		}
+		let list = self.list_from(mark).0;
+		self.push_clause(Cl::Permissions, list, field as u32, t.start, first)
+	}
+
+	/// `fn::a::b` as a `Name` spanning the path after `fn::`.
+	pub(crate) fn custom_function_name(&mut self) -> R<NodeId> {
+		self.expect_kw(Kw::Fn, "fn")?;
+		self.expect(T::PathSep, "::")?;
+		let first = self.ident()?;
+		let mut end = first.end;
+		while self.eat(T::PathSep) {
+			end = self.ident()?.end;
+		}
+		Ok(self.leaf_span(Tag::Name, 1, 0, 0, first.start, end))
+	}
+
+	pub(crate) fn define_function(&mut self, rec: &mut [u32]) -> R<()> {
+		rec[define::NAME] = self.custom_function_name()?;
+		let open = self.expect(T::LParen, "(")?;
+		let mark = self.vals.len() as u32;
+		loop {
+			if self.eat(T::RParen) {
+				break;
+			}
+			let p = self.expect(T::Param, "a parameter")?;
+			let p = self.leaf(Tag::Param, 0, p);
+			self.vals.push(p);
+			self.expect(T::Colon, ":")?;
+			let k = self.kind()?;
+			self.vals.push(k);
+			if !self.eat(T::Comma) {
+				self.close(T::RParen, open.start)?;
+				break;
+			}
+		}
+		rec[define::X1] = self.list_from(mark).0;
+		if self.eat(T::Arrow) {
+			rec[define::X2] = self.kind()?;
+		}
+		rec[define::X3] = self.block()?;
+		loop {
+			if self.tok.kw == Kw::Comment {
+				self.expr_clause(Cl::Comment)?;
+			} else if self.tok.kw == Kw::Permissions {
+				self.perm_value_clause()?;
+			} else if self.tok.kw == Kw::GraphqlAlias {
+				self.string_clause(Cl::GraphqlAlias)?;
+			} else if self.tok.kw == Kw::GraphqlDeprecated {
+				self.string_clause(Cl::GraphqlDeprecated)?;
+			} else {
+				break;
+			}
+		}
+		Ok(())
+	}
+
+	pub(crate) fn user_clauses(&mut self) -> R<()> {
+		loop {
+			if self.tok.kw == Kw::Comment {
+				self.expr_clause(Cl::Comment)?;
+			} else if self.tok.kw == Kw::Password {
+				self.string_clause(Cl::Password)?;
+			} else if self.tok.kw == Kw::Passhash {
+				self.string_clause(Cl::Passhash)?;
+			} else if self.tok.kw == Kw::Passscram {
+				self.string_clause(Cl::Passscram)?;
+			} else if self.tok.kw == Kw::Roles {
+				let t = self.bump();
+				let first = self.ast.nodes.len();
+				let mark = self.vals.len() as u32;
+				loop {
+					let r = self.tok;
+					let n = self.name()?;
+					if !["viewer", "editor", "owner"].iter().any(|w| self.ident_is(r, w, true)) {
+						return Err(self.unexpected_at(r, "an existent role"));
+					}
+					self.vals.push(n);
+					if !self.eat(T::Comma) {
+						break;
+					}
+				}
+				let list = self.list_from(mark).0;
+				self.push_clause(Cl::Roles, list, 0, t.start, first)?;
+			} else if self.tok.kw == Kw::Duration {
+				self.bump();
+				self.expect_kw(Kw::For, "FOR")?;
+				loop {
+					if self.tok.kind == T::Ident && self.tok.kw == Kw::Token {
+						self.expr_clause(Cl::DurToken)?;
+					} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Session {
+						self.expr_clause(Cl::DurSession)?;
+					} else {
+						return Err(self.unexpected("`TOKEN` or `SESSION`"));
+					}
+					self.eat(T::Comma);
+					if !self.eat_kw(Kw::For) {
+						break;
+					}
+				}
+			} else {
+				return Ok(());
+			}
+		}
+	}
+
+	/// The clauses of `DEFINE ACCESS` on `base`, written as the token
+	/// `base_tok`. Only a database takes the default `TYPE RECORD`, so
+	/// elsewhere a missing type is an error at the base, reported once the
+	/// clauses end.
+	pub(crate) fn access_clauses(&mut self, base: u32, base_tok: Tok) -> R<()> {
+		let mut typed = false;
+		'clauses: loop {
+			if self.tok.kw == Kw::Comment {
+				self.expr_clause(Cl::Comment)?;
+			} else if self.tok.kw == Kw::Type {
+				let t = self.bump();
+				let first = self.ast.nodes.len();
+				if self.tok.kind == T::Ident && self.tok.kw == Kw::Jwt {
+					self.bump();
+					let j = self.jwt()?;
+					self.push_clause(Cl::AccessJwt, j, 0, t.start, first)?;
+					typed = true;
+				} else if self.tok.kind == T::Ident
+					&& self.tok.kw == Kw::Record
+					&& base != crate::ast::BASE_DB
+				{
+					return Err(self.unexpected("a valid access type at this level"));
+				} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Record {
+					self.bump();
+					let mark = self.vals.len() as u32;
+					loop {
+						if self.tok.kw == Kw::Signup {
+							self.expr_clause(Cl::Signup)?;
+						} else if self.tok.kw == Kw::Signin {
+							self.expr_clause(Cl::Signin)?;
+						} else {
+							break;
+						}
+					}
+					while self.eat_kw(Kw::With) {
+						let w = self.tok;
+						if w.kind == T::Ident && w.kw == Kw::Jwt {
+							self.bump();
+							let f = self.ast.nodes.len();
+							let j = self.jwt()?;
+							self.push_clause(Cl::WithJwt, j, 0, w.start, f)?;
+						} else if w.kind == T::Ident && w.kw == Kw::Refresh {
+							self.flag_clause(Cl::WithRefresh)?;
+						} else {
+							return Err(self.unexpected("JWT or REFRESH"));
+						}
+						self.eat(T::Comma);
+					}
+					let list = self.list_from(mark).0;
+					self.push_clause(Cl::AccessRecord, list, 0, t.start, first)?;
+					typed = true;
+				} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Bearer {
+					self.bump();
+					self.expect_kw(Kw::For, "FOR")?;
+					let on_db = base == crate::ast::BASE_DB;
+					let subject = if self.tok.kind == T::Ident && self.tok.kw == Kw::User {
+						0
+					} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Record && on_db {
+						1
+					} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Record {
+						let t = self.tok;
+						return Err(self.diag(Diag {
+							start: t.start,
+							end: t.end,
+							kind: DiagKind::Unexpected,
+							msg: "USER",
+							label: "`RECORD` bearer can only be defined on a database",
+							extra: None,
+						}));
+					} else if on_db {
+						return Err(self.unexpected("USER or RECORD"));
+					} else {
+						return Err(self.unexpected("USER"));
+					};
+					self.bump();
+					let j = if self.eat_kw(Kw::With) {
+						self.expect_kw(Kw::Jwt, "JWT")?;
+						self.jwt()?
+					} else {
+						NONE
+					};
+					self.push_clause(Cl::AccessBearer, subject, j, t.start, first)?;
+					typed = true;
+				} else {
+					// The clause list ends here with `TYPE` consumed.
+					break 'clauses;
+				}
+			} else if self.tok.kw == Kw::Authenticate {
+				self.expr_clause(Cl::Authenticate)?;
+			} else if self.tok.kw == Kw::Context {
+				self.expr_clause(Cl::Context)?;
+			} else if self.tok.kw == Kw::Duration {
+				self.bump();
+				while self.eat_kw(Kw::For) {
+					if self.tok.kind == T::Ident && self.tok.kw == Kw::Grant {
+						self.expr_clause(Cl::DurGrant)?;
+					} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Token {
+						self.expr_clause(Cl::DurToken)?;
+					} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Session {
+						self.expr_clause(Cl::DurSession)?;
+					} else {
+						return Err(self.unexpected("GRANT, TOKEN or SESSIONS"));
+					}
+					self.eat(T::Comma);
+				}
+			} else {
+				break;
+			}
+		}
+		if !typed && base != crate::ast::BASE_DB {
+			return Err(self.diag(
+				Diag::message(base_tok.start, base_tok.end, "Missing access type")
+					.with_label("An access defined at this level must specify a TYPE"),
+			));
+		}
+		Ok(())
+	}
+
+	/// An algorithm name: `HS256`, `EDDSA`, …
+	pub(crate) fn algorithm(&mut self) -> R<NodeId> {
+		let t = self.tok;
+		if t.kind == T::Ident && is_algorithm(self.text_of(t)) {
+			self.bump();
+			return Ok(self.leaf(Tag::Name, 0, t));
+		}
+		Err(self.unexpected("a valid algorithm"))
+	}
+
+	/// A JWT definition, as a [`Cl::Jwt`] clause.
+	pub(crate) fn jwt(&mut self) -> R<NodeId> {
+		let start = self.tok.start;
+		let first = self.ast.nodes.len();
+		let mut rec = [NONE; jwt::LEN];
+		if self.tok.kind == T::Ident && self.tok.kw == Kw::Algorithm {
+			self.bump();
+			rec[jwt::ALG] = self.algorithm()?;
+			self.expect_kw(Kw::Key, "a key")?;
+			rec[jwt::KEY] = self.expr(true)?;
+		} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Url {
+			self.bump();
+			rec[jwt::KEY] = self.expr(true)?;
+		} else {
+			return Err(self.unexpected("`ALGORITHM`, or `URL`"));
+		}
+		if self.eat_kw(Kw::Audience) {
+			let mark = self.vals.len() as u32;
+			loop {
+				let e = self.expr(true)?;
+				self.vals.push(e);
+				if !self.eat(T::Comma) {
+					break;
+				}
+			}
+			rec[jwt::AUDIENCE] = self.list_from(mark).0;
+		}
+		if self.eat_kw(Kw::With) {
+			self.expect_kw(Kw::Issuer, "ISSUER")?;
+			rec[jwt::ISSUER] = 1;
+			loop {
+				if self.tok.kind == T::Ident && self.tok.kw == Kw::Algorithm {
+					self.bump();
+					rec[jwt::ISSUER_ALG] = self.algorithm()?;
+				} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Key {
+					self.bump();
+					rec[jwt::ISSUER_KEY] = self.expr(true)?;
+				} else {
+					break;
+				}
+			}
+		}
+		let idx = self.record(&rec);
+		self.clause(Cl::Jwt, idx, 0, start, first)
+	}
+
+	/// The clauses of a table definition. Each of `COMMENT`, `DROP`, `TYPE`, `PERMISSIONS`,
+	/// `CHANGEFEED`, `AS`, `INLINE EDGES`, `INLINE REFERENCES`, `GRAPHQL ALIAS` and
+	/// `GRAPHQL DEPRECATED` may appear once, and `SCHEMAFULL` and `SCHEMALESS` share one
+	/// slot, so a later clause never silently replaces an earlier one.
+	pub(crate) fn table_clauses(&mut self) -> R<()> {
+		let mut seen: [Option<Tok>; 11] = [None; 11];
+		loop {
+			let t = self.tok;
+			let slot = if t.kw == Kw::Comment {
+				Some(0)
+			} else if t.kw == Kw::Drop {
+				Some(1)
+			} else if t.kw == Kw::Type {
+				Some(2)
+			} else if t.kw == Kw::Schemaless || t.kw == Kw::Schemafull {
+				Some(3)
+			} else if t.kw == Kw::Permissions {
+				Some(4)
+			} else if t.kw == Kw::ChangeFeed {
+				Some(5)
+			} else if t.kw == Kw::As {
+				Some(6)
+			} else if t.kw == Kw::Inline && self.peek1().kw == Kw::Edges {
+				Some(7)
+			} else if t.kw == Kw::Inline && self.peek1().kw == Kw::References {
+				Some(8)
+			} else if t.kw == Kw::GraphqlAlias {
+				Some(9)
+			} else if t.kw == Kw::GraphqlDeprecated {
+				Some(10)
+			} else {
+				None
+			};
+			if let Some(slot) = slot
+				&& let Some(first) = seen[slot].replace(t)
+			{
+				return Err(self.repeated_table_clause(t, first));
+			}
+			if self.tok.kw == Kw::Comment {
+				self.expr_clause(Cl::Comment)?;
+			} else if self.tok.kw == Kw::Drop {
+				self.flag_clause(Cl::Drop)?;
+			} else if self.tok.kw == Kw::Type {
+				self.table_type_clause()?;
+			} else if self.tok.kw == Kw::Schemaless {
+				self.flag_clause(Cl::Schemaless)?;
+			} else if self.tok.kw == Kw::Schemafull {
+				self.flag_clause(Cl::Schemafull)?;
+			} else if self.tok.kw == Kw::Permissions {
+				self.permissions(false)?;
+			} else if self.tok.kw == Kw::ChangeFeed {
+				self.changefeed()?;
+			} else if self.tok.kw == Kw::As {
+				let t = self.bump();
+				let first = self.ast.nodes.len();
+				let v = if self.at(T::LParen) {
+					let open = self.bump();
+					let v = self.view()?;
+					self.close(T::RParen, open.start)?;
+					v
+				} else if self.at_kw(Kw::Select) {
+					self.view()?
+				} else {
+					return Err(self.unexpected("`SELECT`"));
+				};
+				self.push_clause(Cl::View, v, 0, t.start, first)?;
+			} else if self.tok.kw == Kw::Inline {
+				self.bump();
+				if self.tok.kind == T::Ident && self.tok.kw == Kw::Edges {
+					self.uint_clause(Cl::InlineEdges)?;
+				} else if self.tok.kind == T::Ident && self.tok.kw == Kw::References {
+					self.uint_clause(Cl::InlineRefs)?;
+				} else {
+					return Err(self.unexpected("`EDGES` or `REFERENCES`"));
+				}
+			} else if self.tok.kw == Kw::GraphqlAlias {
+				self.string_clause(Cl::GraphqlAlias)?;
+			} else if self.tok.kw == Kw::GraphqlDeprecated {
+				self.string_clause(Cl::GraphqlDeprecated)?;
+			} else {
+				return Ok(());
+			}
+		}
+	}
+
+	/// `[ON DELETE REJECT | CASCADE | IGNORE | UNSET | THEN expr]` after
+	/// `REFERENCE`, as a [`Cl::Reference`] payload.
+	pub(crate) fn reference_strategy(&mut self) -> R<(u32, u32)> {
+		if !self.eat_kw(Kw::On) {
+			return Ok((5, NONE));
+		}
+		self.expect_kw(Kw::Delete, "DELETE")?;
+		let n = self.tok;
+		let a = if n.kind != T::Ident {
+			9
+		} else if n.kw == Kw::Reject {
+			0
+		} else if n.kw == Kw::Cascade {
+			1
+		} else if n.kw == Kw::Ignore {
+			2
+		} else if n.kw == Kw::Unset {
+			3
+		} else if n.kw == Kw::Then {
+			self.bump();
+			return Ok((4, self.expr(true)?));
+		} else {
+			9
+		};
+		if a == 9 {
+			return Err(self.unexpected("`REJECT`, `CASCADE`, `IGNORE`, `UNSET` or `THEN`"));
+		}
+		self.bump();
+		Ok((a, NONE))
+	}
+
+	/// `TYPE NORMAL | ANY | RELATION …`.
+	pub(crate) fn table_type_clause(&mut self) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		if self.tok.kind == T::Ident && self.tok.kw == Kw::Normal {
+			self.bump();
+			self.push_clause(Cl::TypeNormal, 0, 0, t.start, first)
+		} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Any {
+			self.bump();
+			self.push_clause(Cl::TypeAny, 0, 0, t.start, first)
+		} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Relation {
+			self.bump();
+			let mut rel = [NONE, NONE, 0];
+			loop {
+				if self.tok.kw == Kw::From || self.tok.kw == Kw::In {
+					self.bump();
+					rel[0] = self.table_names()?;
+				} else if self.tok.kw == Kw::To || self.tok.kw == Kw::Out {
+					self.bump();
+					rel[1] = self.table_names()?;
+				} else if self.tok.kw == Kw::Enforced {
+					self.bump();
+					rel[2] |= 1;
+				} else if self.tok.kw == Kw::Lightweight {
+					self.bump();
+					rel[2] |= 2;
+				} else {
+					break;
+				}
+			}
+			let idx = self.record(&rel);
+			self.push_clause(Cl::TypeRelation, idx, 0, t.start, first)
+		} else {
+			Err(self.unexpected("`NORMAL`, `RELATION`, or `ANY`"))
+		}
+	}
+
+	/// `a | b | c` table names, as a list of `Name`s.
+	pub(crate) fn table_names(&mut self) -> R<u32> {
+		let mark = self.vals.len() as u32;
+		loop {
+			let n = self.name()?;
+			self.vals.push(n);
+			if !self.eat(T::Pipe) {
+				break;
+			}
+		}
+		Ok(self.list_from(mark).0)
+	}
+
+	/// A table view: `SELECT fields FROM tables [WHERE …] [GROUP …]`, as a
+	/// `Select` node whose `what` is a list of table `Name`s.
+	pub(crate) fn view(&mut self) -> R<NodeId> {
+		let t = self.expect_kw(Kw::Select, "SELECT")?;
+		let first = self.ast.nodes.len();
+		let mut rec = [NONE; crate::ast::select::LEN];
+		if self.eat_kw(Kw::Value) {
+			rec[crate::ast::select::VALUE] = self.value_selector()?;
+		} else {
+			rec[crate::ast::select::FIELDS] = self.fields()?;
+		}
+		self.expect_kw(Kw::From, "FROM")?;
+		let mark = self.vals.len() as u32;
+		loop {
+			let n = self.name()?;
+			self.vals.push(n);
+			if !self.eat(T::Comma) {
+				break;
+			}
+		}
+		rec[crate::ast::select::WHAT] = self.list_from(mark).0;
+		if self.eat_kw(Kw::Where) {
+			rec[crate::ast::select::COND] = self.expr(true)?;
+		}
+		let mut flags = 0;
+		self.group_clause(&mut rec, &mut flags)?;
+		rec[crate::ast::select::FLAGS] = flags;
+		let idx = self.record(&rec);
+		self.stmt_node(Tag::Select, 1, idx, 0, t.start, first)
+	}
+
+	pub(crate) fn api_clauses(&mut self) -> R<()> {
+		while self.at_kw(Kw::For) {
+			let t = self.bump();
+			let first = self.ast.nodes.len();
+			let m = self.tok;
+			if m.is_kw(Kw::Any) {
+				self.bump();
+				let cfg = self.api_config()?;
+				let fallback = if self.eat_kw(Kw::Then) {
+					self.expr(true)?
+				} else {
+					NONE
+				};
+				self.push_clause(Cl::ApiAny, cfg, fallback, t.start, first)?;
+				continue;
+			}
+			let mark = self.vals.len() as u32;
+			loop {
+				let t = self.tok;
+				let ok = t.kind == T::Ident
+					&& (t.kw == Kw::Delete
+						|| t.kw == Kw::Get || t.kw == Kw::Patch
+						|| t.kw == Kw::Post
+						|| t.kw == Kw::Put || t.kw == Kw::Trace);
+				if !ok {
+					return Err(self.unexpected_at(
+						m,
+						"one of `DELETE`, `GET`, `PATCH`, `POST`, `PUT` or `TRACE`",
+					));
+				}
+				self.bump();
+				let n = self.leaf(Tag::Name, 0, t);
+				self.vals.push(n);
+				if !self.eat(T::Comma) {
+					break;
+				}
+			}
+			let methods = self.list_from(mark).0;
+			let cfg = self.api_config()?;
+			self.expect_kw(Kw::Then, "THEN")?;
+			let action = self.expr(true)?;
+			let idx = self.record(&[methods, cfg, action]);
+			self.push_clause(Cl::ApiMethods, idx, 0, t.start, first)?;
+		}
+		let mut security = false;
+		let mut comment = false;
+		loop {
+			if self.tok.kind == T::Ident && self.tok.kw == Kw::Security && !security {
+				security = true;
+				self.api_security_clause()?;
+			} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Comment && !comment {
+				comment = true;
+				self.expr_clause(Cl::Comment)?;
+			} else {
+				break;
+			}
+		}
+		Ok(())
+	}
+
+	/// `SECURITY DEFINER | INVOKER`, as a [`Cl::ApiSecurity`] clause.
+	pub(crate) fn api_security_clause(&mut self) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		let invoker = if self.tok.kind == T::Ident && self.tok.kw == Kw::Definer {
+			false
+		} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Invoker {
+			true
+		} else {
+			return Err(self.unexpected("`DEFINER` or `INVOKER`"));
+		};
+		self.bump();
+		self.push_clause(Cl::ApiSecurity, u32::from(invoker), 0, t.start, first)
+	}
+
+	/// `[PERMISSIONS …] [MIDDLEWARE f(…), …]`, repeated, as a
+	/// [`Cl::ApiConfig`] clause.
+	pub(crate) fn api_config(&mut self) -> R<NodeId> {
+		let start = self.tok.start;
+		let first = self.ast.nodes.len();
+		let mark = self.vals.len() as u32;
+		loop {
+			if self.tok.kind == T::Ident && self.tok.kw == Kw::Permissions {
+				self.perm_value_clause()?;
+			} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Middleware {
+				let t = self.bump();
+				let f = self.ast.nodes.len();
+				let m = self.vals.len() as u32;
+				loop {
+					let c = self.middleware_call()?;
+					self.vals.push(c);
+					if !self.eat(T::Comma) {
+						break;
+					}
+				}
+				let list = self.list_from(m).0;
+				self.push_clause(Cl::Middleware, list, 0, t.start, f)?;
+			} else {
+				break;
+			}
+		}
+		let list = self.list_from(mark).0;
+		self.clause(Cl::ApiConfig, list, 0, start, first)
+	}
+
+	/// A middleware call: a function name and its arguments, with nothing
+	/// after the closing `)`.
+	pub(crate) fn middleware_call(&mut self) -> R<NodeId> {
+		let t = self.tok;
+		if !(t.kind == T::Ident || t.kind == T::EscIdent) {
+			return Err(self.unexpected("a function name"));
+		}
+		// The name is read, then `(` demanded.
+		let cp = self.checkpoint();
+		self.bump();
+		if t.kw == Kw::Fn && t.kind == T::Ident && !self.at(T::PathSep) {
+			return Err(self.unexpected("::"));
+		}
+		while self.at(T::PathSep) {
+			self.bump();
+			if !self.tok.is_ident() {
+				return Err(self.unexpected("an identifier"));
+			}
+			self.bump();
+		}
+		if !self.at(T::PathSep) && !self.at(T::LParen) {
+			return Err(self.unexpected("("));
+		}
+		self.restore(cp);
+		// Any name is taken here, builtin or not.
+		self.any_path = true;
+		let call = self.atom(true);
+		self.any_path = false;
+		let call = call?;
+		let n = self.ast.nodes[call as usize];
+		if n.tag != Tag::Call || n.depth & COVERED != 0 {
+			return Err(self.error(n.start, n.end, "expected a function call"));
+		}
+		Ok(call)
+	}
+
+	pub(crate) fn graphql_config(&mut self) -> R<()> {
+		loop {
+			let t = self.tok;
+			if t.kind != T::Ident {
+				return Ok(());
+			}
+			let first = self.ast.nodes.len();
+			if t.kw == Kw::None_ || t.kw == Kw::Auto {
+				self.bump();
+				self.push_clause(Cl::GqlBoth, (t.kw == Kw::Auto) as u32, 0, t.start, first)?;
+			} else if t.kw == Kw::Tables || t.kw == Kw::Functions {
+				self.bump();
+				let cl = if t.kw == Kw::Tables {
+					Cl::GqlTables
+				} else {
+					Cl::GqlFunctions
+				};
+				let n = self.tok;
+				let (mode, list) = if n.kind != T::Ident {
+					(9, NONE)
+				} else if n.kw == Kw::None_ {
+					self.bump();
+					(0, NONE)
+				} else if n.kw == Kw::Auto {
+					self.bump();
+					(1, NONE)
+				} else if n.kw == Kw::Include || n.kw == Kw::Exclude {
+					self.bump();
+					let mark = self.vals.len() as u32;
+					loop {
+						let name = if cl == Cl::GqlTables {
+							self.name()?
+						} else {
+							self.custom_function_name()?
+						};
+						self.vals.push(name);
+						if !self.eat(T::Comma) {
+							break;
+						}
+					}
+					(2 + (n.kw == Kw::Exclude) as u32, self.list_from(mark).0)
+				} else {
+					(9, NONE)
+				};
+				if mode == 9 {
+					return Err(self.unexpected("`NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`"));
+				}
+				self.push_clause(cl, mode, list, t.start, first)?;
+			} else if t.kw == Kw::None {
+				let text = self.text_of(t);
+				if text.eq_ignore_ascii_case("DEPTH") {
+					self.uint_clause(Cl::GqlDepth)?;
+				} else if text.eq_ignore_ascii_case("COMPLEXITY") {
+					self.uint_clause(Cl::GqlComplexity)?;
+				} else if text.eq_ignore_ascii_case("INTROSPECTION") {
+					self.bump();
+					let mode = if self.tok.kind == T::Ident && self.tok.kw == Kw::Auto {
+						1
+					} else if self.tok.kind == T::Ident && self.tok.kw == Kw::None_ {
+						0
+					} else {
+						return Err(self.unexpected("`AUTO` or `NONE`"));
+					};
+					self.bump();
+					self.push_clause(Cl::GqlIntrospection, mode, 0, t.start, first)?;
+				} else {
+					return Ok(());
+				}
+			} else {
+				return Ok(());
+			}
+		}
+	}
+
+	pub(crate) fn event_clauses(&mut self) -> R<()> {
+		let mut then = false;
+		let mut asynchronous = false;
+		loop {
+			if self.tok.kw == Kw::When {
+				self.expr_clause(Cl::When)?;
+			} else if self.tok.kw == Kw::Then {
+				let t = self.bump();
+				let first = self.ast.nodes.len();
+				let list = self.expr_list(true)?;
+				self.push_clause(Cl::Then, list, 0, t.start, first)?;
+				then = true;
+			} else if self.tok.kw == Kw::Comment {
+				self.expr_clause(Cl::Comment)?;
+			} else if self.tok.kw == Kw::Async {
+				self.flag_clause(Cl::Async)?;
+				asynchronous = true;
+			} else if (self.tok.kw == Kw::Retry || self.tok.kw == Kw::MaxDepth) && !asynchronous {
+				let t = self.tok;
+				let (msg, label) = if t.kw == Kw::Retry {
+					("Unexpected token `RETRY`", "RETRY must be set after ASYNC")
+				} else {
+					("Unexpected token `MAXDEPTH`", "MAXDEPTH must be set after ASYNC")
+				};
+				return Err(self.diag(Diag::message(t.start, t.end, msg).with_label(label)));
+			} else if self.tok.kw == Kw::Retry {
+				self.uint_clause(Cl::Retry)?;
+			} else if self.tok.kw == Kw::MaxDepth {
+				self.uint_clause(Cl::MaxDepth)?;
+			} else {
+				break;
+			}
+		}
+		if !then {
+			let d = Diag::message(
+				self.prev_start,
+				self.prev_end,
+				"Expected at least one `THEN` statement",
+			)
+			.with_label("`THEN` statement required");
+			return Err(self.diag(d));
+		}
+		Ok(())
+	}
+
+	/// The clauses of `DEFINE TYPE`: `AS kind` first, then in any order any number of
+	/// `[CONSTRAINT name] ASSERT expr`, kept in source order, and `DEFAULT expr`,
+	/// `SQL TYPE dialect 'text'`, `COMMENT expr` and `PERMISSIONS …`.
+	pub(crate) fn type_clauses(&mut self) -> R<()> {
+		let t = self.tok;
+		self.expect_kw(Kw::As, "AS")?;
+		let first = self.ast.nodes.len();
+		let k = self.kind()?;
+		self.push_clause(Cl::FieldType, k, 0, t.start, first)?;
+		loop {
+			let t = self.tok;
+			if self.tok.kw == Kw::Assert || self.is_word(t, "CONSTRAINT") {
+				self.bump();
+				let first = self.ast.nodes.len();
+				let name = if self.is_word(t, "CONSTRAINT") {
+					let name = self.name()?;
+					self.expect_kw(Kw::Assert, "ASSERT")?;
+					name
+				} else {
+					NONE
+				};
+				let e = self.expr(true)?;
+				self.push_clause(Cl::Check, e, name, t.start, first)?;
+			} else if self.tok.kw == Kw::Default {
+				self.expr_clause(Cl::Default)?;
+			} else if self.is_word(t, "SQL") {
+				self.sql_type_clause()?;
+			} else if self.tok.kw == Kw::Comment {
+				self.expr_clause(Cl::Comment)?;
+			} else if self.tok.kw == Kw::Permissions {
+				self.perm_value_clause()?;
+			} else {
+				return Ok(());
+			}
+		}
+	}
+
+	/// The clauses of `DEFINE FIELD`. `field_is_id` is whether the field is the
+	/// bare `id`, the only one whose `TYPE` may name the components of a tuple.
+	pub(crate) fn field_clauses(&mut self, field_is_id: bool) -> R<()> {
+		loop {
+			if self.tok.kw == Kw::Flexible {
+				let t = self.bump();
+				return Err(self.error(t.start, t.end, "FLEXIBLE must be specified after TYPE"));
+			} else if self.tok.kw == Kw::Type {
+				let t = self.bump();
+				let first = self.ast.nodes.len();
+				let k = if field_is_id {
+					self.id_kind()?
+				} else {
+					self.kind()?
+				};
+				let flexible = self.eat_kw(Kw::Flexible) as u32;
+				self.push_clause(Cl::FieldType, k, flexible, t.start, first)?;
+			} else if self.tok.kw == Kw::Readonly {
+				self.flag_clause(Cl::Readonly)?;
+			} else if self.tok.kw == Kw::Inline {
+				self.flag_clause(Cl::Inline)?;
+			} else if self.tok.kw == Kw::Value {
+				self.expr_clause(Cl::Value)?;
+			} else if self.tok.kw == Kw::Assert {
+				self.expr_clause(Cl::Assert)?;
+			} else if self.tok.kw == Kw::Default {
+				let t = self.bump();
+				let first = self.ast.nodes.len();
+				let always = self.eat_kw(Kw::Always) as u32;
+				let e = self.expr(true)?;
+				self.push_clause(Cl::Default, e, always, t.start, first)?;
+			} else if self.tok.kw == Kw::Permissions {
+				self.permissions(true)?;
+			} else if self.tok.kw == Kw::Comment {
+				self.expr_clause(Cl::Comment)?;
+			} else if self.tok.kw == Kw::Reference {
+				let t = self.bump();
+				let first = self.ast.nodes.len();
+				let (a, b) = self.reference_strategy()?;
+				self.push_clause(Cl::Reference, a, b, t.start, first)?;
+			} else if self.tok.kw == Kw::Materialize {
+				self.materialize_clause()?;
+			} else if self.tok.kw == Kw::Computed {
+				self.expr_clause(Cl::Computed)?;
+			} else if self.tok.kw == Kw::GraphqlAlias {
+				self.string_clause(Cl::GraphqlAlias)?;
+			} else if self.tok.kw == Kw::GraphqlDeprecated {
+				self.string_clause(Cl::GraphqlDeprecated)?;
+			} else if self.tok.kw == Kw::Migrate {
+				self.migrate_clause(false)?;
+			} else if self.is_word(self.tok, "SQL") {
+				self.sql_type_clause()?;
+			} else {
+				return Ok(());
+			}
+		}
+	}
+
+	/// The clauses of `DEFINE INDEX`. Without a `FIELDS` clause, an index
+	/// that needs columns is an error at the token after the clauses, as
+	/// earlier releases report it; a column count that does not fit the index is left
+	/// to the lowering, which knows the count. An index has at most one kind, so a
+	/// second `UNIQUE`, `COUNT`, `FULLTEXT`, `HNSW`, `DISKANN` or `SPATIAL` clause
+	/// is an error rather than a replacement of the first.
+	pub(crate) fn index_clauses(&mut self) -> R<()> {
+		// Whether the index kind in force needs exactly one column, and
+		// whether it needs any.
+		let mut one_column = false;
+		let mut needs_columns = true;
+		let mut fields = false;
+		// The index kind clause given so far, as its token and its row in
+		// `INDEX_KIND_CONFLICTS`.
+		let mut kind: Option<(Tok, usize)> = None;
+		loop {
+			let t = self.tok;
+			let this_kind = if t.kw == Kw::Unique {
+				Some(0)
+			} else if t.kw == Kw::Count {
+				Some(1)
+			} else if t.kw == Kw::Fulltext {
+				Some(2)
+			} else if t.kw == Kw::Hnsw {
+				Some(3)
+			} else if t.kw == Kw::None
+				&& t.kind == T::Ident
+				&& self.text_of(t).eq_ignore_ascii_case("DISKANN")
+			{
+				Some(4)
+			} else if t.kw == Kw::Spatial {
+				Some(5)
+			} else {
+				None
+			};
+			if let Some(k) = this_kind
+				&& let Some((first, f)) = kind.replace((t, k))
+			{
+				let d = Diag::message(t.start, t.end, INDEX_KIND_CONFLICTS[k][f])
+					.with_label(
+						"an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW, DISKANN or SPATIAL",
+					)
+					.with_extra(first.start, first.end, "First given here");
+				return Err(self.diag(d));
+			}
+			if t.kw == Kw::Fields {
+				self.bump();
+				let first = self.ast.nodes.len();
+				let list = self.expr_list(true)?;
+				self.push_clause(Cl::Fields, list, 0, t.start, first)?;
+				fields = true;
+			} else if t.kw == Kw::Unique {
+				self.bump();
+				let first = self.ast.nodes.len();
+				// `NULLS NOT DISTINCT`, whose words are not reserved: a NULL member of a
+				// tuple collides as any other value does.
+				let nulls_not_distinct = if self.ident_is(self.tok, "NULLS", true) {
+					self.bump();
+					self.expect_kw(Kw::Not, "NOT")?;
+					if !self.ident_is(self.tok, "DISTINCT", true) {
+						return Err(self.unexpected("DISTINCT"));
+					}
+					self.bump();
+					1
+				} else {
+					0
+				};
+				self.push_clause(Cl::Unique, nulls_not_distinct, 0, t.start, first)?;
+				(one_column, needs_columns) = (false, true);
+			} else if t.kw == Kw::Count {
+				(one_column, needs_columns) = (false, false);
+				self.bump();
+				let first = self.ast.nodes.len();
+				let cond = if self.eat_kw(Kw::Where) {
+					self.expr(true)?
+				} else {
+					NONE
+				};
+				self.push_clause(Cl::Count, cond, 0, t.start, first)?;
+			} else if t.kw == Kw::Fulltext {
+				self.bump();
+				let first = self.ast.nodes.len();
+				let mut analyzer = NONE;
+				let mut scoring = NONE;
+				let mut highlights = false;
+				loop {
+					if self.tok.kind == T::Ident && self.tok.kw == Kw::Analyzer {
+						self.bump();
+						analyzer = self.name()?;
+					} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Bm25 {
+						self.bump();
+						scoring = if self.eat(T::LParen) {
+							let k1 = self.float_lit()?;
+							self.expect(T::Comma, ",")?;
+							let b = self.float_lit()?;
+							self.expect(T::RParen, ")")?;
+							self.record(&[k1, b])
+						} else {
+							NONE - 1
+						};
+					} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Highlights {
+						self.bump();
+						highlights = true;
+					} else {
+						break;
+					}
+				}
+				self.push_clause(Cl::Fulltext, analyzer, scoring, t.start, first)?;
+				if highlights {
+					self.push_clause(Cl::Highlights, 0, 0, t.start, self.ast.nodes.len())?;
+				}
+				one_column = true;
+			} else if t.kw == Kw::Hnsw {
+				self.vector_index(Cl::Hnsw)?;
+				one_column = true;
+			} else if t.kw == Kw::Concurrently {
+				self.flag_clause(Cl::Concurrently)?;
+			} else if t.kw == Kw::Comment {
+				self.expr_clause(Cl::Comment)?;
+			} else if t.kw == Kw::None
+				&& t.kind == T::Ident
+				&& self.text_of(t).eq_ignore_ascii_case("DISKANN")
+			{
+				self.vector_index(Cl::Diskann)?;
+				one_column = true;
+			} else if t.kw == Kw::Spatial {
+				self.flag_clause(Cl::Spatial)?;
+				(one_column, needs_columns) = (false, true);
+			} else {
+				if fields {
+					return Ok(());
+				}
+				let end = self.syn_token_end(t);
+				if one_column {
+					return Err(self.error(t.start, end, "Expected one column, found none"));
+				}
+				if needs_columns {
+					return Err(self.error(
+						t.start,
+						end,
+						"Expected at least one column - Use FIELDS to define columns",
+					));
+				}
+				return Ok(());
+			}
+		}
+	}
+
+	/// `HNSW …` or `DISKANN …`.
+	pub(crate) fn vector_index(&mut self, cl: Cl) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		self.expect_kw(Kw::Dimension, "DIMENSION")?;
+		let mut rec = [NONE; vector::LEN];
+		rec[vector::DIMENSION] = self.uint_lit()?;
+		let mut flags = 0;
+		loop {
+			let n = self.tok;
+			if n.kind != T::Ident {
+				break;
+			}
+			if n.kw == Kw::Distance {
+				self.bump();
+				let d = self.tok;
+				if d.kind != T::Ident || !is_distance(self.text_of(d)) {
+					return Err(self.unexpected("a distance measure"));
+				}
+				self.bump();
+				rec[vector::DISTANCE] = self.leaf(Tag::Name, 0, d);
+				rec[vector::MINKOWSKI] = NONE;
+				if self.text_of(d).eq_ignore_ascii_case("MINKOWSKI") {
+					rec[vector::MINKOWSKI] = self.number_lit()?;
+				}
+			} else if n.kw == Kw::Type {
+				self.bump();
+				let v = self.tok;
+				if v.kind != T::Ident || !is_vector_type(self.text_of(v)) {
+					return Err(self.unexpected("a vector type"));
+				}
+				self.bump();
+				rec[vector::TYPE] = self.leaf(Tag::Name, 0, v);
+			} else if n.kw == Kw::HashedVector {
+				self.bump();
+				flags |= 4;
+			} else if n.kw == Kw::Lm && cl == Cl::Hnsw {
+				self.bump();
+				rec[vector::LM] = self.number_lit()?;
+			} else if n.kw == Kw::M0 && cl == Cl::Hnsw {
+				self.bump();
+				rec[vector::M0] = self.uint_lit()?;
+			} else if n.kw == Kw::M && cl == Cl::Hnsw {
+				self.bump();
+				rec[vector::M] = self.uint_lit()?;
+			} else if n.kw == Kw::Efc && cl == Cl::Hnsw {
+				self.bump();
+				rec[vector::EFC] = self.uint_lit()?;
+			} else if n.kw == Kw::ExtendCandidates && cl == Cl::Hnsw {
+				self.bump();
+				flags |= 1;
+			} else if n.kw == Kw::KeepPrunedConnections && cl == Cl::Hnsw {
+				self.bump();
+				flags |= 2;
+			} else if n.kw == Kw::None && cl == Cl::Diskann {
+				let text = self.text_of(n);
+				if text.eq_ignore_ascii_case("DEGREE") {
+					self.bump();
+					rec[vector::M] = self.uint_lit()?;
+				} else if text.eq_ignore_ascii_case("L_BUILD") {
+					self.bump();
+					rec[vector::M0] = self.uint_lit()?;
+				} else if text.eq_ignore_ascii_case("ALPHA") {
+					self.bump();
+					rec[vector::LM] = self.number_lit()?;
+				} else {
+					break;
+				}
+			} else {
+				break;
+			}
+		}
+		rec[vector::FLAGS] = flags;
+		let idx = self.record(&rec);
+		self.push_clause(cl, idx, 0, t.start, first)
+	}
+
+	pub(crate) fn analyzer_clauses(&mut self) -> R<()> {
+		loop {
+			if self.tok.kw == Kw::Filters {
+				self.filters_clause()?;
+			} else if self.tok.kw == Kw::Tokenizers {
+				self.tokenizers_clause()?;
+			} else if self.tok.kw == Kw::Function {
+				self.analyzer_function_clause()?;
+			} else if self.tok.kw == Kw::Comment {
+				self.expr_clause(Cl::Comment)?;
+			} else {
+				return Ok(());
+			}
+		}
+	}
+
+	/// `FILTERS filter, …`.
+	pub(crate) fn filters_clause(&mut self) -> R<()> {
+		let t = self.tok;
+		self.bump();
+		let first = self.ast.nodes.len();
+		let mark = self.vals.len() as u32;
+		loop {
+			let f = self.tok;
+			let ff = self.ast.nodes.len();
+			let code = if f.kind != T::Ident {
+				9
+			} else if f.kw == Kw::Ascii {
+				0
+			} else if f.kw == Kw::Lowercase {
+				1
+			} else if f.kw == Kw::Uppercase {
+				2
+			} else if f.kw == Kw::Edgengram {
+				3
+			} else if f.kw == Kw::Ngram {
+				4
+			} else if f.kw == Kw::Snowball {
+				5
+			} else if f.kw == Kw::Mapper {
+				6
+			} else {
+				9
+			};
+			if code == 9 {
+				return Err(self.unexpected("a filter"));
+			}
+			self.bump();
+			let b = match code {
+				3 | 4 => {
+					let open = self.expect(T::LParen, "(")?;
+					let x = self.uint_lit()?;
+					self.expect(T::Comma, ",")?;
+					let y = self.uint_lit()?;
+					self.close(T::RParen, open.start)?;
+					self.record(&[x, y])
+				}
+				5 => {
+					let open = self.expect(T::LParen, "(")?;
+					let l = self.tok;
+					if l.kind != T::Ident || !(is_language(self.text_of(l)) || l.kw == Kw::No) {
+						return Err(self.unexpected("a language"));
+					}
+					self.bump();
+					let n = self.leaf(Tag::Name, 0, l);
+					self.close(T::RParen, open.start)?;
+					n
+				}
+				6 => {
+					let open = self.expect(T::LParen, "(")?;
+					let p = self.string_lit()?;
+					self.close(T::RParen, open.start)?;
+					p
+				}
+				_ => NONE,
+			};
+			let c = self.clause(Cl::Filter, code, b, f.start, ff)?;
+			self.vals.push(c);
+			if !self.eat(T::Comma) {
+				break;
+			}
+		}
+		let list = self.list_from(mark).0;
+		self.push_clause(Cl::Filters, list, 0, t.start, first)?;
+		Ok(())
+	}
+
+	/// `TOKENIZERS tokenizer, …`.
+	pub(crate) fn tokenizers_clause(&mut self) -> R<()> {
+		let t = self.tok;
+		self.bump();
+		let first = self.ast.nodes.len();
+		let mark = self.vals.len() as u32;
+		loop {
+			let k = self.tok;
+			let ok = k.kind == T::Ident
+				&& (k.kw == Kw::Blank
+					|| k.kw == Kw::Camel
+					|| k.kw == Kw::Class
+					|| k.kw == Kw::Punct
+					|| k.kw == Kw::Segment);
+			if !ok {
+				return Err(self.unexpected("a tokenizer"));
+			}
+			self.bump();
+			let n = if k.kw == Kw::Segment {
+				self.expect(T::LParen, "(")?;
+				let l = self.tok;
+				if !(l.is_kw(Kw::Chinese) || l.is_kw(Kw::Japanese) || l.is_kw(Kw::Korean)) {
+					return Err(self.unexpected("`CHINESE`, `JAPANESE` or `KOREAN`"));
+				}
+				self.bump();
+				let lang = self.leaf(Tag::Name, 0, l);
+				self.expect(T::RParen, ")")?;
+				self.leaf_span(Tag::Name, 1, lang, 0, k.start, self.prev_end)
+			} else {
+				self.leaf(Tag::Name, 0, k)
+			};
+			self.vals.push(n);
+			if !self.eat(T::Comma) {
+				break;
+			}
+		}
+		let list = self.list_from(mark).0;
+		self.push_clause(Cl::Tokenizers, list, 0, t.start, first)?;
+		Ok(())
+	}
+
+	/// An analyzer's `FUNCTION fn::…` or `FUNCTION ext::…` (or its alias
+	/// `mod::…`).
+	pub(crate) fn analyzer_function_clause(&mut self) -> R<()> {
+		let t = self.tok;
+		self.bump();
+		let first = self.ast.nodes.len();
+		let f = self.tok;
+		let name = if f.kind == T::Ident && f.kw == Kw::Fn {
+			self.custom_function_name()?
+		} else if f.kind == T::Ident && (f.kw == Kw::Ext || f.kw == Kw::Mod) {
+			self.bump();
+			if self.limits.no_surrealism {
+				let label = if f.kw == Kw::Mod {
+					"Use of `mod::` requires Surrealism extensions"
+				} else {
+					"Use of `ext::` requires Surrealism extensions"
+				};
+				return Err(self.surrealism_off(f, label));
+			}
+			self.expect(T::PathSep, "::")?;
+			let s = self.ident()?;
+			let mut end = s.end;
+			while self.eat(T::PathSep) {
+				end = self.ident()?.end;
+			}
+			let deprecated = if f.kw == Kw::Mod {
+				ext::MOD_PREFIX
+			} else {
+				0
+			};
+			self.leaf_span(Tag::Name, 2, 0, deprecated, f.start, end)
+		} else if f.kind == T::Ident && f.kw == Kw::Ml {
+			let d = Diag::message(f.start, f.end, "Analyzers cannot use model functions")
+				.with_label("Model functions cannot be used in an analyzer `FUNCTION` clause");
+			return Err(self.diag(d));
+		} else if f.kind == T::Ident && f.kw == Kw::Silo {
+			let d = Diag::message(f.start, f.end, "Analyzers cannot use silo functions")
+				.with_label("Silo functions cannot be used in an analyzer `FUNCTION` clause");
+			return Err(self.diag(d));
+		} else {
+			return Err(self.unexpected("`fn::` or `ext::`"));
+		};
+		if self.at(T::LParen) {
+			let t = self.tok;
+			let d = Diag::message(
+				t.start,
+				t.end,
+				"Analyzer FUNCTION expects a function name, not a function call",
+			)
+			.with_label(
+				"Remove `()` from the analyzer FUNCTION clause (for example: `fn::some` or `ext::demo::some`)",
+			);
+			return Err(self.diag(d));
+		}
+		self.push_clause(Cl::Function, name, 0, t.start, first)?;
+		Ok(())
+	}
+
+	/// `ext::name FROM executable` and the clauses of `DEFINE EXTENSION`,
+	/// returning the [`ext`] bits of the deprecated spellings it read.
+	///
+	/// A definition names its extension. Under [`Limits::import`], the forms
+	/// an export or a 3.x dump writes are also read: the unnamed silo form
+	/// (`DEFINE EXTENSION silo::org::pkg<v>`), flagged [`ext::SILO_NAME`], and
+	/// `AS` in place of `FROM`.
+	///
+	/// `UNSIGNED` is optional in the grammar. Whether a definition without it
+	/// may be stored is the executor's decision.
+	pub(crate) fn define_module(&mut self, rec: &mut [u32]) -> R<u32> {
+		let n = self.tok;
+		let deprecated = if n.kind == T::Ident && n.kw == Kw::Ext {
+			0
+		} else if n.kind == T::Ident && n.kw == Kw::Mod {
+			ext::MOD_PREFIX
+		} else if n.kind == T::Ident && n.kw == Kw::Silo && self.limits.import {
+			ext::SILO_NAME
+		} else if n.kind == T::Ident && n.kw == Kw::Silo {
+			let d = Diag::message(n.start, n.end, "An extension needs a name").with_label(
+				"Name the package and call it through that name: `DEFINE EXTENSION ext::name FROM silo::…`, then `ext::name::fn()`",
+			);
+			return Err(self.diag(d));
+		} else {
+			return Err(self.unexpected("an extension name"));
+		};
+		if deprecated & ext::SILO_NAME == 0 {
+			self.bump();
+			self.expect(T::PathSep, "::")?;
+			rec[define::NAME] = self.name()?;
+			if !(self.limits.import && self.eat_kw(Kw::As)) {
+				self.expect_kw(Kw::From, "FROM")?;
+			}
+		}
+		let t = self.tok;
+		rec[define::X1] = if t.kind == T::Ident && t.kw == Kw::Silo {
+			self.bump();
+			self.expect(T::PathSep, "::")?;
+			let mark = self.vals.len() as u32;
+			let org = self.name()?;
+			self.vals.push(org);
+			self.expect(T::PathSep, "::")?;
+			let pkg = self.name()?;
+			self.vals.push(pkg);
+			self.silo_version()?;
+			rec[define::X2] = 1;
+			self.list_from(mark).0
+		} else if t.kind == T::Str && t.aux() == b'f' {
+			self.bump();
+			self.leaf(Tag::Str, b'f', t)
+		} else {
+			return Err(self.unexpected("an extension executable"));
+		};
+		// The token of the first `SIGNER` or `UNSIGNED`, and of the first
+		// `DIGEST`, `CAPABILITIES` and `BINDINGS`: each may appear once.
+		let mut trust: Option<Tok> = None;
+		let mut digest: Option<Tok> = None;
+		let mut capabilities: Option<Tok> = None;
+		let mut bindings: Option<Tok> = None;
+		loop {
+			let t = self.tok;
+			if t.kw == Kw::Unsigned || t.kw == Kw::Signer {
+				if let Some(first) = trust {
+					return Err(self.repeated_clause(
+						t,
+						first,
+						"Remove one of `SIGNER` and `UNSIGNED`",
+					));
+				}
+				trust = Some(t);
+				if t.kw == Kw::Unsigned {
+					self.flag_clause(Cl::Unsigned)?
+				} else {
+					self.expr_clause(Cl::Signer)?
+				}
+			} else if t.kw == Kw::Digest {
+				if let Some(first) = digest {
+					return Err(self.repeated_clause(
+						t,
+						first,
+						"An extension definition takes one `DIGEST`",
+					));
+				}
+				digest = Some(t);
+				self.string_clause(Cl::Digest)?
+			} else if t.kw == Kw::Capabilities {
+				if let Some(first) = capabilities {
+					return Err(self.repeated_clause(
+						t,
+						first,
+						"An extension definition takes one `CAPABILITIES` object",
+					));
+				}
+				capabilities = Some(t);
+				self.expr_clause(Cl::Capabilities)?
+			} else if t.kw == Kw::Bindings {
+				if let Some(first) = bindings {
+					return Err(self.repeated_clause(
+						t,
+						first,
+						"An extension definition takes one `BINDINGS` object",
+					));
+				}
+				bindings = Some(t);
+				self.expr_clause(Cl::Bindings)?
+			} else if t.kw == Kw::Comment {
+				self.expr_clause(Cl::Comment)?
+			} else if t.kw == Kw::Permissions {
+				self.perm_value_clause()?
+			} else {
+				break;
+			}
+		}
+		Ok(deprecated)
+	}
+
+	/// The name of an existing extension, after `ALTER` or `REMOVE
+	/// EXTENSION`: `ext::name`, its alias `mod::name`, or `silo::org::pkg::<v>`
+	/// for an unnamed silo definition an earlier release wrote. Returns the
+	/// name (the `Name` after `ext::`, or the list `[org, pkg, major, minor,
+	/// patch]`), whether it is a silo, and the [`ext`] bits of a deprecated
+	/// spelling.
+	pub(crate) fn extension_name(&mut self) -> R<(NodeId, bool, u32)> {
+		let m = self.tok;
+		if m.kind == T::Ident && (m.kw == Kw::Ext || m.kw == Kw::Mod) {
+			self.bump();
+			self.expect_adjacent(T::PathSep, "::")?;
+			let deprecated = if m.kw == Kw::Mod {
+				ext::MOD_PREFIX
+			} else {
+				0
+			};
+			Ok((self.name()?, false, deprecated))
+		} else if m.kind == T::Ident && m.kw == Kw::Silo {
+			self.bump();
+			self.expect(T::PathSep, "::")?;
+			let mark = self.vals.len() as u32;
+			let org = self.name()?;
+			self.vals.push(org);
+			self.expect(T::PathSep, "::")?;
+			let pkg = self.name()?;
+			self.vals.push(pkg);
+			self.silo_version()?;
+			Ok((self.list_from(mark).0, true, ext::SILO_NAME))
+		} else {
+			Err(self.unexpected("an extension name"))
+		}
+	}
+
+	/// The version of a silo package, `<major.minor.patch>` or
+	/// `::<major.minor.patch>`, directly after the package name. Both spell the
+	/// same version: a package path is never a value on its own, so a `<`
+	/// after it can only open one.
+	pub(crate) fn silo_version(&mut self) -> R<()> {
+		if self.at(T::PathSep) && !self.tok.ws() {
+			self.bump();
+		}
+		if !self.at(T::Lt) || self.tok.ws() {
+			return Err(self.unexpected("<"));
+		}
+		self.model_version()
+	}
+
+	/// The error for a table clause `t` that repeats, or contradicts, the clause `first`.
+	fn repeated_table_clause(&mut self, t: Tok, first: Tok) -> Stop {
+		let d = Diag::message(t.start, t.end, "Conflicting clause on this table definition")
+			.with_label("A table definition takes each clause once")
+			.with_extra(first.start, first.end, "First given here");
+		self.diag(d)
+	}
+
+	/// The error for an extension clause `t` that repeats, or contradicts, the
+	/// clause `first`.
+	fn repeated_clause(&mut self, t: Tok, first: Tok, label: &'static str) -> Stop {
+		let d = Diag::message(t.start, t.end, "Conflicting clause on this extension definition")
+			.with_label(label)
+			.with_extra(first.start, first.end, "First given here");
+		self.diag(d)
+	}
+
+	/// `<major.minor.patch>`, pushing the three numbers onto the value stack.
+	pub(crate) fn model_version(&mut self) -> R<()> {
+		self.expect(T::Lt, "<")?;
+		for i in 0..3 {
+			if i > 0 && (!self.at(T::Dot) || self.tok.ws()) {
+				return Err(self.unexpected("."));
+			}
+			if i > 0 {
+				self.bump();
+			}
+			let d = self.expect(T::Digits, "an integer")?;
+			let text = &self.src[d.start as usize..d.end as usize];
+			let v = if text.contains(&b'_') {
+				None
+			} else {
+				crate::lex::decode_uint(text).filter(|v| *v <= u32::MAX as u64)
+			};
+			let Some(v) = v else {
+				let msg = if text.contains(&b'_') {
+					"Failed to parse model version: invalid digit found in string"
+				} else {
+					"Failed to parse model version: number too large to fit in target type"
+				};
+				return Err(self.error(d.start, d.end, msg));
+			};
+			let n = self.leaf_span(Tag::Int, 0, v as u32, 0, d.start, d.end);
+			self.vals.push(n);
+		}
+		self.expect(T::Gt, ">")?;
+		Ok(())
+	}
+}
+
+/// The error for an index kind clause given after another, indexed by the
+/// later kind and then the earlier one, in the order `UNIQUE`, `COUNT`,
+/// `FULLTEXT`, `HNSW`, `DISKANN`, `SPATIAL`.
+const INDEX_KIND_CONFLICTS: [[&str; 6]; 6] = [
+	[
+		"UNIQUE is given twice",
+		"Cannot combine UNIQUE with COUNT",
+		"Cannot combine UNIQUE with FULLTEXT",
+		"Cannot combine UNIQUE with HNSW",
+		"Cannot combine UNIQUE with DISKANN",
+		"Cannot combine UNIQUE with SPATIAL",
+	],
+	[
+		"Cannot combine COUNT with UNIQUE",
+		"COUNT is given twice",
+		"Cannot combine COUNT with FULLTEXT",
+		"Cannot combine COUNT with HNSW",
+		"Cannot combine COUNT with DISKANN",
+		"Cannot combine COUNT with SPATIAL",
+	],
+	[
+		"Cannot combine FULLTEXT with UNIQUE",
+		"Cannot combine FULLTEXT with COUNT",
+		"FULLTEXT is given twice",
+		"Cannot combine FULLTEXT with HNSW",
+		"Cannot combine FULLTEXT with DISKANN",
+		"Cannot combine FULLTEXT with SPATIAL",
+	],
+	[
+		"Cannot combine HNSW with UNIQUE",
+		"Cannot combine HNSW with COUNT",
+		"Cannot combine HNSW with FULLTEXT",
+		"HNSW is given twice",
+		"Cannot combine HNSW with DISKANN",
+		"Cannot combine HNSW with SPATIAL",
+	],
+	[
+		"Cannot combine DISKANN with UNIQUE",
+		"Cannot combine DISKANN with COUNT",
+		"Cannot combine DISKANN with FULLTEXT",
+		"Cannot combine DISKANN with HNSW",
+		"DISKANN is given twice",
+		"Cannot combine DISKANN with SPATIAL",
+	],
+	[
+		"Cannot combine SPATIAL with UNIQUE",
+		"Cannot combine SPATIAL with COUNT",
+		"Cannot combine SPATIAL with FULLTEXT",
+		"Cannot combine SPATIAL with HNSW",
+		"Cannot combine SPATIAL with DISKANN",
+		"SPATIAL is given twice",
+	],
+];
+
+fn is_algorithm(text: &str) -> bool {
+	const ALGS: &[&str] = &[
+		"EDDSA", "ES256", "ES384", "ES512", "HS256", "HS384", "HS512", "PS256", "PS384", "PS512",
+		"RS256", "RS384", "RS512",
+	];
+	ALGS.iter().any(|a| a.eq_ignore_ascii_case(text))
+}
+
+pub(crate) fn is_distance(text: &str) -> bool {
+	const DIST: &[&str] = &[
+		"CHEBYSHEV",
+		"COSINE",
+		"COSINE_NORMALIZED",
+		"EUCLIDEAN",
+		"HAMMING",
+		"INNER_PRODUCT",
+		"JACCARD",
+		"MANHATTAN",
+		"MINKOWSKI",
+		"PEARSON",
+	];
+	DIST.iter().any(|a| a.eq_ignore_ascii_case(text))
+}
+
+fn is_vector_type(text: &str) -> bool {
+	const VT: &[&str] = &["F16", "F32", "F64", "I16", "I32", "I64", "I8", "U8"];
+	VT.iter().any(|a| a.eq_ignore_ascii_case(text))
+}
+
+/// The snowball languages and their abbreviations.
+pub(crate) fn is_language(text: &str) -> bool {
+	const LANG: &[&str] = &[
+		"AR",
+		"ARA",
+		"ARABIC",
+		"DA",
+		"DAN",
+		"DANISH",
+		"DE",
+		"DEU",
+		"DUTCH",
+		"EL",
+		"ELL",
+		"EN",
+		"ENG",
+		"ENGLISH",
+		"ES",
+		"FI",
+		"FIN",
+		"FINNISH",
+		"FR",
+		"FRA",
+		"FRENCH",
+		"GERMAN",
+		"GREEK",
+		"HU",
+		"HUN",
+		"HUNGARIAN",
+		"IT",
+		"ITA",
+		"ITALIAN",
+		"NL",
+		"NLD",
+		"NOR",
+		"NORWEGIAN",
+		"POR",
+		"PORTUGUESE",
+		"PT",
+		"RO",
+		"ROMANIAN",
+		"RON",
+		"RU",
+		"RUS",
+		"RUSSIAN",
+		"SPA",
+		"SPANISH",
+		"SV",
+		"SWE",
+		"SWEDISH",
+		"TA",
+		"TAM",
+		"TAMIL",
+		"TR",
+		"TUR",
+		"TURKISH",
+	];
+	LANG.iter().any(|a| a.eq_ignore_ascii_case(text))
+}

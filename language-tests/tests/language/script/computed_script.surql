@@ -8,10 +8,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+error = "The COMPUTED clause must not have effects: a script, module or silo function runs code whose effects cannot be known where the clause is defined"
 
 [[test.results]]
-value = "[{ display: [{ rating: 87f }], id: film:test, ratings: [{ rating: 6.3f }, { rating: 8.7f }] }]"
+value = "[{ id: film:test, ratings: [{ rating: 6.3f }, { rating: 8.7f }] }]"
 
 */
 

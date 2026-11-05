@@ -22,10 +22,30 @@ pub enum SurrealismError {
 		context_timeout: Option<Duration>,
 		module_limit: Option<Duration>,
 	},
-	#[error("Unsupported ABI version: expected {expected}, got {got}")]
+	#[error(
+		"No Surrealism invocation slot became free within {waited:?}; all {slots} are in use. \
+		 Raise SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS, or give the query a longer timeout."
+	)]
+	NoInvocationSlot {
+		waited: Duration,
+		slots: usize,
+	},
+	#[error(
+		"A nested Surrealism invocation found none of the {slots} invocation slots free. A call \
+		 made from inside an extension never waits for a slot, because the calls holding them may \
+		 be waiting on it."
+	)]
+	NestedInvocationNoSlot {
+		slots: usize,
+	},
+	#[error(
+		"Unsupported ABI version {got}: this server runs ABI {oldest} to {latest}. Rebuild the \
+		 extension with an SDK for one of them"
+	)]
 	UnsupportedAbi {
-		expected: u32,
 		got: u32,
+		oldest: u32,
+		latest: u32,
 	},
 	#[error("Integer conversion error: {0}")]
 	IntConversion(#[from] TryFromIntError),
@@ -34,42 +54,6 @@ pub enum SurrealismError {
 	Wasmtime(#[from] wasmtime::Error),
 	#[error("Other error: {0}")]
 	Other(#[from] anyhow::Error),
-}
-
-impl SurrealismError {
-	/// Whether this error represents a WASM trap — an unrecoverable fault
-	/// during execution that leaves the instance in an undefined state.
-	///
-	/// After a trap the controller must be dropped (not returned to the pool).
-	/// Non-trap errors (guest `Err` returns, host-side encoding failures, etc.)
-	/// go through normal control flow and leave the instance reusable.
-	pub fn is_trap(&self) -> bool {
-		match self {
-			// Epoch interrupt mid-execution — WASM state is undefined.
-			Self::Timeout {
-				..
-			} => true,
-			// Instantiation failure — no usable instance exists.
-			#[cfg(feature = "host")]
-			Self::Instantiation(_) => true,
-			// Wasmtime error from call_async (actual trap) or typed() (type
-			// mismatch). Conservative: treat all as traps since the instance
-			// may be in an unknown state.
-			#[cfg(feature = "host")]
-			Self::Wasmtime(_) => true,
-			// Compilation failure — no instance was ever created.
-			#[cfg(feature = "host")]
-			Self::Compilation(_) => false,
-			// Guest returned Err through normal control flow.
-			Self::FunctionCallError(_) => false,
-			// Host-side errors (encoding, decoding, config) — no WASM ran.
-			Self::UnsupportedAbi {
-				..
-			} => false,
-			Self::IntConversion(_) => false,
-			Self::Other(_) => false,
-		}
-	}
 }
 
 pub type SurrealismResult<T> = std::result::Result<T, SurrealismError>;
@@ -90,3 +74,42 @@ impl<T, E: Display> PrefixErr<T> for std::result::Result<T, E> {
 		self.map_err(|e| SurrealismError::Other(anyhow::anyhow!("{}: {}", f(), e)))
 	}
 }
+
+/// Why a host call made through a `transaction` handle failed.
+///
+/// Mirrors the `host-error` variant in the WIT. Classifying these lets the host
+/// count capability denials separately from a plugin's own errors, and lets a
+/// plugin match on the class instead of parsing a message.
+///
+/// A denied call never reaches the datastore, so this is an observability and
+/// ergonomics boundary rather than a security one.
+#[derive(thiserror::Error, Debug)]
+pub enum HostCallError {
+	/// The module's declared capabilities forbid this call.
+	#[error("permission denied: {0}")]
+	PermissionDenied(String),
+	/// The query or function name did not parse or resolve.
+	#[error("invalid request: {0}")]
+	InvalidRequest(String),
+	/// The datastore refused or failed the operation. A write attempted through
+	/// a read-only transaction arrives here.
+	#[error("datastore error: {0}")]
+	Datastore(String),
+	/// The host's deadline elapsed while serving this call.
+	#[error("deadline exceeded")]
+	DeadlineExceeded,
+	/// Anything else, including serialization failures.
+	#[error("{0}")]
+	Other(String),
+}
+
+/// Unclassified failures become [`HostCallError::Other`], so an implementation
+/// can keep using `?` on `anyhow` errors and classify only where it matters.
+impl From<anyhow::Error> for HostCallError {
+	fn from(e: anyhow::Error) -> Self {
+		Self::Other(e.to_string())
+	}
+}
+
+/// Convenience alias for a host call's result.
+pub type HostCallResult<T> = Result<T, HostCallError>;

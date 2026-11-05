@@ -1,0 +1,55 @@
+### SELECT * FROM t ORDER BY id TIMEOUT 1s
+{ id: t:1, n: 1 }
+{ id: t:2, n: 2 }
+{ id: t:3, n: 3 }
+### SELECT * FROM t ORDER BY id TIMEOUT NONE
+{ id: t:1, n: 1 }
+{ id: t:2, n: 2 }
+{ id: t:3, n: 3 }
+### SELECT * FROM t ORDER BY id TIMEOUT 'x'
+error: Could not cast into `duration` using input `'x'`
+### SELECT VALUE sleep(30ms) FROM t TIMEOUT 1ms
+error: The query was not executed because it exceeded the timeout: 1ms
+### SELECT * FROM t WHERE sleep(30ms) = NONE TIMEOUT 1ms
+error: The query was not executed because it exceeded the timeout: 1ms
+### SELECT * FROM ONLY t WHERE n = 99
+NONE
+### SELECT * FROM ONLY t WHERE n = 1
+{ id: t:1, n: 1 }
+### SELECT * FROM ONLY t
+error: Expected a single result output when using the ONLY keyword
+### SELECT * FROM ONLY t WHERE n = 1 TIMEOUT 1s
+{ id: t:1, n: 1 }
+### SELECT * FROM ONLY t TIMEOUT 1s
+error: Expected a single result output when using the ONLY keyword
+### SELECT * FROM t ORDER BY id TIMEOUT (RETURN 1s)
+1s
+### SELECT * FROM t ORDER BY id TIMEOUT (SELECT VALUE d FROM ONLY e:1)
+{ id: t:1, n: 1 }
+{ id: t:2, n: 2 }
+{ id: t:3, n: 3 }
+### SELECT * FROM t ORDER BY id TIMEOUT ({ LET $d = 1s; RETURN $d })
+1s
+### SELECT * FROM [{ n: 1 }, { n: 2 }] VERSION d'2999-01-01T00:00:00Z'
+{ n: 1 }
+{ n: 2 }
+### SELECT * FROM [{ n: 1 }] VERSION 'not a datetime'
+error: Could not cast into `datetime` using input `'not a datetime'`
+### SELECT * FROM [{ n: 1 }, { n: 2 }] VERSION (RETURN d'2999-01-01T00:00:00Z')
+d'2999-01-01T00:00:00Z'
+### SELECT n, (SELECT VALUE n FROM [1, 2]) AS m FROM [{ n: 1 }] VERSION (RETURN d'2999-01-01T00:00:00Z')
+d'2999-01-01T00:00:00Z'
+### SELECT VALUE n FROM ONLY [{ n: 1 }] VERSION (SELECT VALUE <datetime> '2999-01-01T00:00:00Z' FROM ONLY [1])
+1
+### RETURN (SELECT * FROM ONLY t WHERE n = 2)
+{ id: t:2, n: 2 }
+### RETURN (SELECT * FROM t ORDER BY id TIMEOUT 1s)
+[{ id: t:1, n: 1 }, { id: t:2, n: 2 }, { id: t:3, n: 3 }]
+### FOR $i IN [1, 2] { SELECT * FROM ONLY t WHERE n = $i }
+NONE
+### { FOR $i IN [1, 4] { SELECT * FROM ONLY t WHERE n = $i } }
+NONE
+### SELECT n, (SELECT * FROM ONLY t WHERE n = $parent.n) AS same FROM t ORDER BY id
+{ n: 1, same: { id: t:1, n: 1 } }
+{ n: 2, same: { id: t:2, n: 2 } }
+{ n: 3, same: { id: t:3, n: 3 } }

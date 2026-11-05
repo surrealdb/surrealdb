@@ -1,0 +1,127 @@
+### owner: { RETURN $gated; ALTER PARAM $gated PERMISSIONS NONE; RETURN $gated }
+'gated'
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { RETURN $gated; ALTER PARAM $gated PERMISSIONS FULL; RETURN $gated }
+'gated'
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { RETURN $gated; REMOVE PARAM $gated; RETURN $gated }
+'gated'
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { RETURN $shown; DEFINE PARAM OVERWRITE $shown VALUE 's' PERMISSIONS WHERE false; RETURN $shown }
+'shown'
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { DEFINE PARAM $fresh VALUE 'f' PERMISSIONS WHERE $auth.id = user:reader; RETURN $fresh }
+'f'
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { RETURN fn::guarded(); DEFINE FUNCTION OVERWRITE fn::guarded() { RETURN 'again' } PERMISSIONS NONE; RETURN fn::guarded() }
+'ok'
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { DEFINE FUNCTION fn::made($x: int) { RETURN $x + count(SELECT * FROM item) } PERMISSIONS WHERE $auth.id = user:reader; RETURN fn::made(1) }
+4
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { DEFINE FUNCTION fn::w() { RETURN 5 }; RETURN fn::w() }
+5
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { DEFINE FUNCTION OVERWRITE fn::v() { RETURN 2 }; RETURN fn::v() }
+2
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: { LET $f = || (SELECT * FROM t); DEFINE FIELD b ON t COMPUTED a + 1; RETURN $f() }
+[{ a: 1, b: 2, id: t:1 }]
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, b: 2, id: t:1 }]
+### owner: UPDATE item:1 SET gated = 1 RETURN gated
+[{ gated: 1 }]
+state:
+[{ gated: 1, id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### owner: BEGIN; DEFINE FUNCTION OVERWRITE fn::v() { RETURN 3 }; RETURN fn::v(); RETURN fn::nested(1); COMMIT;
+NONE
+NONE
+3
+NONE
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { RETURN $gated; ALTER PARAM $gated PERMISSIONS NONE; RETURN $gated }
+error: You don't have permission to view the $gated parameter
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { RETURN $gated; ALTER PARAM $gated PERMISSIONS FULL; RETURN $gated }
+error: You don't have permission to view the $gated parameter
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { RETURN $gated; REMOVE PARAM $gated; RETURN $gated }
+error: You don't have permission to view the $gated parameter
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { RETURN $shown; DEFINE PARAM OVERWRITE $shown VALUE 's' PERMISSIONS WHERE false; RETURN $shown }
+'shown'
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { DEFINE PARAM $fresh VALUE 'f' PERMISSIONS WHERE $auth.id = user:reader; RETURN $fresh }
+error: IAM error: Not enough permissions to perform this action
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { RETURN fn::guarded(); DEFINE FUNCTION OVERWRITE fn::guarded() { RETURN 'again' } PERMISSIONS NONE; RETURN fn::guarded() }
+error: You don't have permission to run the fn::guarded function
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { DEFINE FUNCTION fn::made($x: int) { RETURN $x + count(SELECT * FROM item) } PERMISSIONS WHERE $auth.id = user:reader; RETURN fn::made(1) }
+error: IAM error: Not enough permissions to perform this action
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { DEFINE FUNCTION fn::w() { RETURN 5 }; RETURN fn::w() }
+error: IAM error: Not enough permissions to perform this action
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { DEFINE FUNCTION OVERWRITE fn::v() { RETURN 2 }; RETURN fn::v() }
+error: IAM error: Not enough permissions to perform this action
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: { LET $f = || (SELECT * FROM t); DEFINE FIELD b ON t COMPUTED a + 1; RETURN $f() }
+error: IAM error: Not enough permissions to perform this action
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: UPDATE item:1 SET gated = 1 RETURN gated
+[{ gated: 1 }]
+state:
+[{ gated: 1, id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]
+### record user: BEGIN; DEFINE FUNCTION OVERWRITE fn::v() { RETURN 3 }; RETURN fn::v(); RETURN fn::nested(1); COMMIT;
+NONE
+error: IAM error: Not enough permissions to perform this action
+error: The query was not executed due to a cancelled transaction
+error: The query was not executed due to a cancelled transaction
+error: Cannot COMMIT: the transaction was aborted due to a prior error
+state:
+[{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
+[{ a: 1, id: t:1 }]

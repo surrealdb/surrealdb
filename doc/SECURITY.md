@@ -451,7 +451,13 @@ Flag when changes touch:
 - Path traversal sequences (`..`, `%2e%2e`, encoded slashes) must be rejected or
   normalized before routing.
 - API handlers must execute under an explicit authority context (definer or caller)
-  as specified in the API definition. Context must not drift.
+  as specified in the API definition. Context must not drift. `SECURITY DEFINER`
+  (the default) runs the handler with table and field permissions lifted, which is
+  why the namespace/database check precedes it; `SECURITY INVOKER` leaves the
+  caller's permission state in force. Both are bounded by the auth limit of the
+  identity that defined the API. The mode lives on the stored definition and must
+  survive `ALTER API`, `INFO`, export and import: a path that drops
+  `SECURITY INVOKER` silently widens the API to definer rights.
 - Request data ($request.body, $request.params, $request.query) must not be directly
   interpolated into query strings. Use parameterized queries.
 - API errors must be sanitized before response.
@@ -466,7 +472,8 @@ Flag when changes touch:
 Flag when changes touch:
 
 - `ntw/api.rs` routing, path matching, or parameter extraction
-- API handler execution context or authority model
+- API handler execution context or authority model, including the `ApiSecurity`
+  decision in `exec/api.rs` and its rendering in `DefineApiStatement`
 - API middleware chain composition or ordering
 - Request data binding into query parameters
 - API error response formatting

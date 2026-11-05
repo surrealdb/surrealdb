@@ -154,7 +154,7 @@ fn test_enum_tagged_variant_lowercase() {
 	assert!(EnumTaggedVariantLowercase::is_value(&Value::Object(
 		object! { foo: Value::Object(object! {}) }
 	)));
-	assert!(!EnumTaggedVariantLowercase::is_value(&Value::String("foo".to_string())));
+	assert!(EnumTaggedVariantLowercase::is_value(&Value::String("foo".to_string())));
 }
 
 ////////////////////////////////////////////////////
@@ -187,5 +187,23 @@ fn test_enum_tagged_variant_uppercase() {
 	assert!(EnumTaggedVariantUppercase::is_value(&Value::Object(
 		object! { FOO: Value::Object(object! {}) }
 	)));
-	assert!(!EnumTaggedVariantUppercase::is_value(&Value::String("FOO".to_string())));
+	assert!(EnumTaggedVariantUppercase::is_value(&Value::String("FOO".to_string())));
+}
+
+#[test]
+fn test_enum_tagged_variant_unit_from_bare_string() {
+	let value = Value::String("Foo".to_string());
+	assert!(EnumTaggedVariant::is_value(&value));
+	assert_eq!(EnumTaggedVariant::from_value(value).unwrap(), EnumTaggedVariant::Foo);
+
+	// Only unit variants read from a bare string, and only by exact name.
+	assert!(EnumTaggedVariant::from_value(Value::String("Bar".to_string())).is_err());
+	assert!(EnumTaggedVariant::from_value(Value::String("foo".to_string())).is_err());
+	assert!(!EnumTaggedVariant::is_value(&Value::String("Bar".to_string())));
+
+	// The written form is unchanged.
+	assert_eq!(
+		EnumTaggedVariant::Foo.into_value(),
+		Value::Object(object! { Foo: Value::Object(object! {}) })
+	);
 }

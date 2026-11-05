@@ -1,17 +1,27 @@
-//! InvocationContext trait and WIT host implementation.
+//! `InvocationContext` trait and WIT host implementation.
 //!
-//! Implementations supply `sql`/`run`/`kv`/stdio per call. Host functions
-//! decode FlatBuffers, call the context, and encode results.
+//! Implementations supply `sql`/`run` and the WASI stdio callbacks per call.
+//! Host functions decode FlatBuffers, call the context, and encode results.
+//!
+//! Host access is not ambient: `sql` and `run` are methods on a `transaction`
+//! resource that the host lends for the duration of one `invoke` call and
+//! revokes on return. The context therefore lives in the store's
+//! [`ResourceTable`](wasmtime::component::ResourceTable) rather than in a
+//! swappable field, and an export lent no handle has no path to the datastore.
+//!
+//! A guest may hold several calls through one handle in flight at once, which
+//! is what the async ABI is for. This module bounds how many; which of them may
+//! run at the same time is decided by the [`InvocationContext`], because it is
+//! a question about the statements they carry.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use anyhow::{Result, bail};
 use async_trait::async_trait;
-use surrealism_types::err::{PrefixErr, SurrealismResult};
-use wasmtime::StoreContextMut;
+use surrealism_types::err::{HostCallError, HostCallResult, PrefixErr, SurrealismResult};
+use wasmtime::component::{Accessor, Resource};
 
-use crate::config::SurrealismConfig;
-use crate::kv::KVStore;
+use crate::abi::Features;
 use crate::store::StoreData;
 
 // ============================================================================
@@ -19,41 +29,37 @@ use crate::store::StoreData;
 // ============================================================================
 
 /// Context provided for each WASM function invocation.
-/// Created per-call with borrowed execution context (stack, query context, etc).
+///
+/// What a call may do is the context's to decide: it carries the capabilities
+/// the invocation was granted, which can differ between two invocations of the
+/// same component.
+///
+/// Methods take `&self` because a guest may hold several host calls in flight
+/// at once: each one is a component-model subtask, and the store is handed back
+/// to the guest while any of them is pending. Implementations are shared as
+/// `Arc<dyn InvocationContext>` and must therefore be internally mutable where
+/// they need per-call scratch state.
 #[async_trait]
 pub trait InvocationContext: Send + Sync {
 	async fn sql(
-		&mut self,
-		config: &SurrealismConfig,
+		&self,
 		query: String,
 		vars: surrealdb_types::Object,
-	) -> Result<surrealdb_types::Value>;
+	) -> HostCallResult<surrealdb_types::Value>;
+
 	async fn run(
-		&mut self,
-		config: &SurrealismConfig,
+		&self,
 		fnc: String,
 		version: Option<String>,
 		args: Vec<surrealdb_types::Value>,
-	) -> Result<surrealdb_types::Value>;
-
-	fn kv(&mut self) -> Result<&dyn KVStore>;
-
-	fn stdout(&mut self, output: &str) -> Result<()> {
-		print!("{}", output);
-		Ok(())
-	}
-
-	fn stderr(&mut self, output: &str) -> Result<()> {
-		eprint!("{}", output);
-		Ok(())
-	}
+	) -> HostCallResult<surrealdb_types::Value>;
 
 	/// Returns a self-contained callback for forwarding WASI stdout output.
 	///
 	/// This is used by the WASI output stream to route guest `println!` / C `printf`
-	/// output through the same path as the WIT `stdout` import. Override this to
-	/// capture structured context (module name, namespace, database, etc.) inside
-	/// the closure so the callback can be invoked independently of `&mut self`.
+	/// output through a structured logging path. Override this to capture context
+	/// (module name, namespace, database, etc.) inside the closure so the callback
+	/// can be invoked independently of the context itself.
 	///
 	/// The returned `Arc` is cheap to clone and allows the WASI stream to
 	/// snapshot the callback without holding a lock during invocation.
@@ -68,204 +74,256 @@ pub trait InvocationContext: Send + Sync {
 }
 
 // ============================================================================
-// NullContext — placeholder for pooled controllers with no active invocation
+// Bindings
 // ============================================================================
 
-pub(crate) struct NullContext;
-
+/// The values a definition binds, answered by name for one invocation.
+///
+/// Held in the invocation's store, so a value never outlives the instance it
+/// was read in. `init` runs with none.
 #[async_trait]
-impl InvocationContext for NullContext {
-	async fn sql(
-		&mut self,
-		_config: &SurrealismConfig,
-		_query: String,
-		_vars: surrealdb_types::Object,
-	) -> Result<surrealdb_types::Value> {
-		bail!("no active invocation context")
-	}
+pub trait Bindings: Send + Sync {
+	/// The value bound to `name`, coerced to the kind the package declares for
+	/// it. `None` for an `option<…>` name the definition does not bind.
+	async fn get(&self, name: String) -> HostCallResult<Option<surrealdb_types::Value>>;
+}
 
-	async fn run(
-		&mut self,
-		_config: &SurrealismConfig,
-		_fnc: String,
-		_version: Option<String>,
-		_args: Vec<surrealdb_types::Value>,
-	) -> Result<surrealdb_types::Value> {
-		bail!("no active invocation context")
-	}
+// ============================================================================
+// Wire form of `host-error`
+// ============================================================================
 
-	fn kv(&mut self) -> Result<&dyn KVStore> {
-		bail!("no active invocation context")
+/// Lowers onto the WIT `host-error` variant.
+///
+/// Hand-derived rather than generated: the linker in this module is built by
+/// hand, so there is no bindgen output to borrow the type from. The case names
+/// must stay in step with `surrealism/wit/surrealism.wit`.
+#[derive(wasmtime::component::ComponentType, wasmtime::component::Lower)]
+#[component(variant)]
+enum HostErrorWire {
+	#[component(name = "permission-denied")]
+	PermissionDenied(String),
+	#[component(name = "invalid-request")]
+	InvalidRequest(String),
+	#[component(name = "datastore")]
+	Datastore(String),
+	#[component(name = "deadline-exceeded")]
+	DeadlineExceeded,
+	#[component(name = "other")]
+	Other(String),
+}
+
+// ============================================================================
+// The `transaction` resource
+// ============================================================================
+
+/// What a guest's `transaction` handle points at, host-side.
+///
+/// The host pushes one of these into the store's resource table before calling
+/// `invoke` and deletes it afterwards, so a handle retained past the end of an
+/// invocation refers to nothing and traps on use.
+pub(crate) struct Transaction {
+	pub(crate) context: Arc<dyn InvocationContext>,
+	/// Host calls admitted through this handle and not yet finished.
+	///
+	/// Each one is a component-model subtask the host holds open: a decoded
+	/// argument list, a datastore call and whatever that call allocates. The
+	/// guest can create them far faster than they retire, and nothing else
+	/// bounds that — `join_all` over a large range barely moves linear memory,
+	/// so `StoreLimits::memory_size` never bites, and the epoch deadline
+	/// interrupts guest execution rather than a pending host subtask. So the
+	/// count is kept and a call past [`MAX_IN_FLIGHT_HOST_CALLS`] is refused.
+	///
+	/// This bounds the fan-out; it does not order it. Whether two calls may run
+	/// at the same time is a question about the statements they carry, which
+	/// only the [`InvocationContext`] can read — see the write gate in
+	/// `surrealdb/core/src/surrealism/host.rs`.
+	pub(crate) in_flight: Arc<AtomicUsize>,
+}
+
+/// The most host calls one lent handle, or the `binding` reads of one
+/// invocation, may have in flight at once.
+///
+/// Far above what a module doing legitimate concurrent work holds — the point
+/// is to bound a guest that spawns subtasks faster than the host retires them,
+/// not to ration ordinary use.
+const MAX_IN_FLIGHT_HOST_CALLS: usize = 64;
+
+/// One admitted host call. Releases its place on drop, on every path.
+struct CallSlot(Arc<AtomicUsize>);
+
+impl Drop for CallSlot {
+	fn drop(&mut self) {
+		self.0.fetch_sub(1, Ordering::AcqRel);
 	}
+}
+
+/// Take a place among the calls in flight through one handle, or refuse.
+/// Take a place among the calls `counter` counts, which `through` names in the
+/// error refusing a call past the limit.
+fn admit(counter: &Arc<AtomicUsize>, through: &str) -> HostCallResult<CallSlot> {
+	let in_flight = counter.fetch_add(1, Ordering::AcqRel) + 1;
+	// Constructed before the check so the place is released whichever way this
+	// returns.
+	let slot = CallSlot(Arc::clone(counter));
+	if in_flight > MAX_IN_FLIGHT_HOST_CALLS {
+		return Err(HostCallError::InvalidRequest(format!(
+			"too many host calls in flight {through}: {in_flight}, limit {MAX_IN_FLIGHT_HOST_CALLS}"
+		)));
+	}
+	Ok(slot)
 }
 
 // ============================================================================
 // Helper
 // ============================================================================
 
-fn decode_range_bounds(
-	bytes: &[u8],
-) -> Result<(std::ops::Bound<String>, std::ops::Bound<String>), String> {
-	surrealdb_types::decode_string_range(bytes).map_err(|e| e.to_string())
-}
-
 fn stringify<E: std::fmt::Display>(e: E) -> String {
 	e.to_string()
+}
+
+/// Lower a classified host failure onto the wire.
+fn lower(e: HostCallError) -> HostErrorWire {
+	match e {
+		HostCallError::PermissionDenied(m) => HostErrorWire::PermissionDenied(m),
+		HostCallError::InvalidRequest(m) => HostErrorWire::InvalidRequest(m),
+		HostCallError::Datastore(m) => HostErrorWire::Datastore(m),
+		HostCallError::DeadlineExceeded => HostErrorWire::DeadlineExceeded,
+		HostCallError::Other(m) => HostErrorWire::Other(m),
+	}
+}
+
+/// Resolve a borrowed handle into the context it grants access to.
+///
+/// [`Accessor::with`] is synchronous and cannot span an await, so everything a
+/// method needs from the store is cloned out here, before the first one.
+fn resolve(accessor: &Accessor<StoreData>, this: &Resource<Transaction>) -> HostCallResult<Lent> {
+	accessor.with(|mut access| {
+		let data = access.get();
+		// A handle the host has already revoked lands here. It is the guest
+		// reaching outside the invocation it was lent to, not a datastore fault.
+		let tx = data.table.get(this).map_err(|e| HostCallError::PermissionDenied(stringify(e)))?;
+		let slot = admit(&tx.in_flight, "through one transaction handle")?;
+		Ok(Lent {
+			context: Arc::clone(&tx.context),
+			_slot: slot,
+		})
+	})
+}
+
+/// What one host call needs out of the store, taken before the first await.
+struct Lent {
+	context: Arc<dyn InvocationContext>,
+	/// Held for the rest of the call, so the place it took among the calls in
+	/// flight is released however the call ends.
+	_slot: CallSlot,
 }
 
 // ============================================================================
 // Component model host functions (FlatBuffers serialization)
 // ============================================================================
 
-/// Register a host function with the common `func_wrap_async` boilerplate.
-///
-/// All host functions follow the same pattern: receive args from the WASM
-/// component, run an async body that returns `Result<T, String>`, and wrap
-/// the result in `Ok((inner,))` for the component model.
-macro_rules! register_host_fn {
-	($host:ident, $name:literal,
-	 |$store:ident, ($($arg:ident : $ty:ty),* $(,)?)| -> Result<$ret:ty> $body:block
-	) => {
-		$host
-			.func_wrap_async(
-				$name,
-				|mut $store: StoreContextMut<'_, StoreData>,
-				 ($($arg,)*): ($($ty,)*)| {
-					Box::new(async move {
-						let inner: Result<$ret, String> = async $body.await;
-						Ok((inner,))
-					})
-				},
-			)
-			.prefix_err(|| concat!("failed to register ", $name))?;
-	};
-}
-
+/// Define the host instance for a guest whose ABI has `features`: every
+/// import those features give, and none they do not.
 pub fn implement_host_functions(
 	linker: &mut wasmtime::component::Linker<StoreData>,
+	features: Features,
 ) -> SurrealismResult<()> {
 	let mut root = linker.root();
 	let mut host =
-		root.instance("surrealism:plugin/host").prefix_err(|| "failed to define host instance")?;
+		root.instance(crate::abi::HOST_INSTANCE).prefix_err(|| "failed to define host instance")?;
 
-	register_host_fn!(host, "sql",
-		|store, (query: String, vars_bytes: Vec<u8>)| -> Result<Vec<u8>> {
-			let vars_vec = surrealdb_types::decode_string_key_values(&vars_bytes)
-				.map_err(stringify)?;
-			let vars = surrealdb_types::Object::from_iter(vars_vec.into_iter());
-			let config = Arc::clone(&store.data().config);
-			let val = store.data_mut().context.sql(&config, query, vars).await.map_err(stringify)?;
-			surrealdb_types::encode(&val).map_err(stringify)
-		}
-	);
+	// The guest only ever holds `borrow<transaction>`, which the canonical ABI
+	// revokes at return, so this destructor is not reached in practice. It is
+	// required to define the resource type, and deleting the table entry is the
+	// correct behaviour should the guest ever be given an owned handle.
+	host.resource(
+		"transaction",
+		wasmtime::component::ResourceType::host::<Transaction>(),
+		|mut store, rep| {
+			store.data_mut().table.delete(Resource::<Transaction>::new_own(rep))?;
+			Ok(())
+		},
+	)
+	.prefix_err(|| "failed to register transaction resource")?;
 
-	register_host_fn!(host, "run",
-		|store, (fnc: String, version: Option<String>, args_bytes: Vec<u8>)| -> Result<Vec<u8>> {
-			let args = surrealdb_types::decode_value_list(&args_bytes).map_err(stringify)?;
-			let config = Arc::clone(&store.data().config);
-			let val = store.data_mut().context.run(&config, fnc, version, args).await.map_err(stringify)?;
-			surrealdb_types::encode(&val).map_err(stringify)
-		}
-	);
+	host.func_wrap_concurrent(
+		"[method]transaction.sql",
+		|accessor: &Accessor<StoreData>,
+		 (this, query, vars_bytes): (Resource<Transaction>, String, Vec<u8>)| {
+			let resolved = resolve(accessor, &this);
+			Box::pin(async move {
+				let inner: HostCallResult<Vec<u8>> = async {
+					let lent = resolved?;
+					let vars_vec = surrealdb_types::decode_string_key_values(&vars_bytes)
+						.map_err(|e| HostCallError::InvalidRequest(stringify(e)))?;
+					let vars = surrealdb_types::Object::from_iter(vars_vec);
+					let val = lent.context.sql(query, vars).await?;
+					surrealdb_types::encode(&val).map_err(|e| HostCallError::Other(stringify(e)))
+				}
+				.await;
+				Ok((inner.map_err(lower),))
+			})
+		},
+	)
+	.prefix_err(|| "failed to register transaction.sql")?;
 
-	register_host_fn!(host, "kv-get",
-		|store, (key: String)| -> Result<Option<Vec<u8>>> {
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			match kv.get(key).await.map_err(stringify)? {
-				Some(v) => surrealdb_types::encode(&v).map(Some).map_err(stringify),
-				None => Ok(None),
-			}
-		}
-	);
+	host.func_wrap_concurrent(
+		"[method]transaction.run",
+		|accessor: &Accessor<StoreData>,
+		 (this, fnc, version, args_bytes): (
+			Resource<Transaction>,
+			String,
+			Option<String>,
+			Vec<u8>,
+		)| {
+			let resolved = resolve(accessor, &this);
+			Box::pin(async move {
+				let inner: HostCallResult<Vec<u8>> = async {
+					let lent = resolved?;
+					let args = surrealdb_types::decode_value_list(&args_bytes)
+						.map_err(|e| HostCallError::InvalidRequest(stringify(e)))?;
+					let val = lent.context.run(fnc, version, args).await?;
+					surrealdb_types::encode(&val).map_err(|e| HostCallError::Other(stringify(e)))
+				}
+				.await;
+				Ok((inner.map_err(lower),))
+			})
+		},
+	)
+	.prefix_err(|| "failed to register transaction.run")?;
 
-	register_host_fn!(host, "kv-set",
-		|store, (key: String, value_bytes: Vec<u8>)| -> Result<()> {
-			let value: surrealdb_types::Value =
-				surrealdb_types::decode(&value_bytes).map_err(stringify)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.set(key, value).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-del",
-		|store, (key: String)| -> Result<()> {
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.del(key).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-exists",
-		|store, (key: String)| -> Result<bool> {
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.exists(key).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-del-rng",
-		|store, (range_bytes: Vec<u8>)| -> Result<()> {
-			let (start, end) = decode_range_bounds(&range_bytes)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.del_rng(start, end).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-get-batch",
-		|store, (keys: Vec<String>)| -> Result<Vec<u8>> {
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			let vals = kv.get_batch(keys).await.map_err(stringify)?;
-			surrealdb_types::encode_optional_values(&vals).map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-set-batch",
-		|store, (entries_bytes: Vec<u8>)| -> Result<()> {
-			let entries = surrealdb_types::decode_string_key_values(&entries_bytes)
-				.map_err(stringify)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.set_batch(entries).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-del-batch",
-		|store, (keys: Vec<String>)| -> Result<()> {
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.del_batch(keys).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-keys",
-		|store, (range_bytes: Vec<u8>)| -> Result<Vec<String>> {
-			let (start, end) = decode_range_bounds(&range_bytes)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.keys(start, end).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-values",
-		|store, (range_bytes: Vec<u8>)| -> Result<Vec<u8>> {
-			let (start, end) = decode_range_bounds(&range_bytes)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			let vals = kv.values(start, end).await.map_err(stringify)?;
-			surrealdb_types::encode_value_list(&vals).map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-entries",
-		|store, (range_bytes: Vec<u8>)| -> Result<Vec<u8>> {
-			let (start, end) = decode_range_bounds(&range_bytes)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			let entries = kv.entries(start, end).await.map_err(stringify)?;
-			surrealdb_types::encode_string_key_values(&entries).map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-count",
-		|store, (range_bytes: Vec<u8>)| -> Result<u64> {
-			let (start, end) = decode_range_bounds(&range_bytes)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.count(start, end).await.map_err(stringify)
-		}
-	);
+	if features.contains(Features::BINDINGS) {
+		host.func_wrap_concurrent(
+			"binding",
+			|accessor: &Accessor<StoreData>, (name,): (String,)| {
+				// Admitted before the first await, as the `transaction` methods
+				// are, so a guest holds no more reads in flight than the limit.
+				let (bindings, slot) = accessor.with(|mut access| {
+					let data = access.get();
+					(data.bindings.clone(), admit(&data.binding_reads, "reading bindings"))
+				});
+				Box::pin(async move {
+					let inner: HostCallResult<Option<Vec<u8>>> = async {
+						let _slot = slot?;
+						let bindings = bindings.ok_or_else(|| {
+							HostCallError::InvalidRequest(
+								"this invocation has no bindings".to_owned(),
+							)
+						})?;
+						match bindings.get(name).await? {
+							Some(value) => surrealdb_types::encode(&value)
+								.map(Some)
+								.map_err(|e| HostCallError::Other(stringify(e))),
+							None => Ok(None),
+						}
+					}
+					.await;
+					Ok((inner.map_err(lower),))
+				})
+			},
+		)
+		.prefix_err(|| "failed to register binding")?;
+	}
 
 	Ok(())
 }

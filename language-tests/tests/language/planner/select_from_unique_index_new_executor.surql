@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -8,61 +7,61 @@ planner-strategy = ["all-ro"]
 value = "'OK'"
 
 [[test.results]]
-value = """
+value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 3}
-    IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward, limit: 3] {rows: 3}
+    IndexScan [ctx: Db] [table: session, index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward, limit: 3] {rows: 3}
 
-Total rows: 3""""
+Total rows: 3"'''
 
 [[test.results]]
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }]"
 
 [[test.results]]
-value = """
+value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 4}
-    IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward] {rows: 4}
+    IndexScan [ctx: Db] [table: session, index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward] {rows: 4}
 
-Total rows: 4""""
+Total rows: 4"'''
 
 [[test.results]]
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 3}
-    IndexScan [ctx: Db] [index: time, access: , direction: Forward, limit: 3] {rows: 3}
+    IndexScan [ctx: Db] [table: session, index: time, direction: Forward, limit: 3] {rows: 3}
 
-Total rows: 3'"""
+Total rows: 3''''
 
 [[test.results]]
 value = "[{ id: session:3, other: 'test' }, { id: session:4, time: NULL }, { id: session:2, time: d'2024-06-30T23:00:00Z' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 6}
-    IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 6}
+    IndexScan [ctx: Db] [table: session, index: time, direction: Forward] {rows: 6}
 
-Total rows: 6'"""
+Total rows: 6''''
 
 [[test.results]]
 value = "[{ id: session:3, other: 'test' }, { id: session:4, time: NULL }, { id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 3}
-    IndexScan [ctx: Db] [index: time, access: , direction: Backward, limit: 3] {rows: 3}
+    IndexScan [ctx: Db] [table: session, index: time, direction: Backward, limit: 3] {rows: 3}
 
-Total rows: 3'"""
+Total rows: 3''''
 
 [[test.results]]
 value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 6}
-    IndexScan [ctx: Db] [index: time, access: , direction: Backward] {rows: 6}
+    IndexScan [ctx: Db] [table: session, index: time, direction: Backward] {rows: 6}
 
-Total rows: 6'"""
+Total rows: 6''''
 
 [[test.results]]
 value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:4, time: NULL }, { id: session:3, other: 'test' }]"
@@ -77,6 +76,10 @@ value = "[{ id: session:4, time: NULL }]"
 
 {
     DEFINE INDEX time ON TABLE session COLUMNS time UNIQUE;
+    -- The indexed column is declared a scalar kind, so its index holds one
+    -- entry per record and a scan of it delivers its order: a plain column
+    -- that may hold an array is stored once per element and orders nothing.
+    DEFINE FIELD time ON session TYPE option<datetime | null>;
     CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
     CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
     CREATE session:3 SET other = 'test';

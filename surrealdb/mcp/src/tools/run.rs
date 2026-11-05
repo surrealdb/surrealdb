@@ -26,6 +26,11 @@ pub struct RunParams {
 	/// values via `{"$ql": "<expr>"}` -- e.g. pass a record id as
 	/// `{"$ql": "person:alice"}` or a decimal as `{"$ql": "9.99dec"}`.
 	pub args: Option<Vec<serde_json::Value>>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 /// Invoke a SurrealQL function with typed argument bindings. Works for built-in
@@ -55,7 +60,7 @@ pub async fn run(session: &McpSession, p: RunParams) -> Result<CallToolResult, E
 		)));
 	}
 
-	let core = session.datastore().config();
+	let core = session.datastore().parser_config();
 	let mut vars = Variables::new();
 	let mut placeholders = Vec::with_capacity(args.len());
 	for (i, v) in args.iter().enumerate() {
@@ -68,7 +73,7 @@ pub async fn run(session: &McpSession, p: RunParams) -> Result<CallToolResult, E
 	// `RETURN <fn>(...)` is always a single statement.
 	let result = results.pop().unwrap_or_else(|| {
 		tracing::warn!(target: "surrealdb::mcp", "run() returned no statements");
-		surrealdb_core::dbs::QueryResultBuilder::instant_none()
+		surrealdb_rpc::QueryResultBuilder::instant_none()
 	});
 	Ok(single_statement_result(result, mcp.max_result_bytes))
 }
@@ -138,21 +143,20 @@ mod tests {
 	/// we touch the datastore.
 	#[tokio::test]
 	async fn run_rejects_arg_array_over_cap() {
-		use std::sync::Arc;
-
 		use surrealdb_core::dbs::Session;
 		use surrealdb_core::kvs::Datastore;
 
 		use crate::cnf::McpConfig;
 		let cap = McpConfig::default().run_max_args;
 		let args: Vec<JsonValue> = (0..=cap).map(|i| JsonValue::from(i as i64)).collect();
-		let ds = Arc::new(Datastore::new("memory").await.expect("in-memory datastore"));
+		let ds = Datastore::new("memory").await.expect("in-memory datastore");
 		let session = crate::session::McpSession::new(ds, Session::default());
 		let err = run(
 			&session,
 			RunParams {
 				function: "math::sum".to_string(),
 				args: Some(args),
+				scope: Default::default(),
 			},
 		)
 		.await

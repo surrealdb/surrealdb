@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Field-permission predicates referencing $value must see the field's picked value, not an unbound NONE. Pre-fix, the streaming runtime never bound $value, so any predicate using it evaluated against NONE and either always-failed or always-passed depending on coercion."
+reason = "Field-permission predicates referencing $value must see the field's picked value, not an unbound NONE."
 
 [[test.results]]
 value = "'OK'"

@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_intersect_except_tables.surql"]
+
+[test]
+reason = "the ALL forms count the copies of a row on each side, which is not planned, so INTERSECT ALL is refused rather than answered as INTERSECT"
+
+[test.results]
+request-error = "PostgreSQL SELECT lowering error: unsupported expression: INTERSECT ALL is not supported; use INTERSECT to answer each row once"
+*/
+
+SELECT v FROM ie_left INTERSECT ALL SELECT v FROM ie_right;

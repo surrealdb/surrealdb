@@ -12,7 +12,17 @@ pub enum Output {
 	Text(String),
 	Json(Vec<u8>),
 	Cbor(Vec<u8>),
+	Cbor2(Vec<u8>),
 	Flatbuffers(Vec<u8>),
+	/// CBOR whose result rows are shaped blocks.
+	Shaped(Vec<u8>),
+	/// Raw bytes, for a request that negotiated `application/octet-stream`.
+	///
+	/// That content type carries no structure, so what goes in it has to be
+	/// decodable without a schema — UTF-8 text, in practice. It exists so a
+	/// handler answering such a request does not have to switch to another
+	/// content type to say anything at all.
+	OctetStream(Vec<u8>),
 }
 impl Output {
 	// All these methods should not be used.
@@ -49,7 +59,7 @@ impl Output {
 
 	#[deprecated]
 	pub fn flatbuffers(val: &Value) -> Output {
-		let val = surrealdb_core::rpc::format::flatbuffers::encode(val);
+		let val = surrealdb_types::encode(val);
 		match val {
 			Ok(v) => Output::Flatbuffers(v),
 			Err(_) => Output::Fail,
@@ -69,8 +79,18 @@ impl IntoResponse for Output {
 			Output::Cbor(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationCbor))], v).into_response()
 			}
+			Output::Cbor2(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationCbor2))], v).into_response()
+			}
+			Output::Shaped(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationShaped))], v).into_response()
+			}
 			Output::Flatbuffers(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationFlatbuffers))], v)
+					.into_response()
+			}
+			Output::OctetStream(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationOctetStream))], v)
 					.into_response()
 			}
 			Output::None => StatusCode::OK.into_response(),

@@ -7,6 +7,6 @@ dockerTools.buildLayeredImage {
   config = {
     Env = [ "SSL_CERT_FILE=${cacert}/etc/ssl/certs/ca-bundle.crt" ];
     WorkingDir = "/";
-    Entrypoint = "${package}/bin/${util.packageName}";
+    Entrypoint = "${package}/bin/${util.binaryName}";
   };
 }

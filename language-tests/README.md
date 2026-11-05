@@ -30,18 +30,167 @@ The `--backend` flag allows you to specify which storage engine to use for runni
 the tests. By default, tests run using the in-memory storage engine (`mem` or `memory`).
 Other supported backends include:
 - `memory` or `mem` (default): In-memory storage engine, fastest for testing
-- `rocksdb`: RocksDB embedded storage engine (requires `backend-rocksdb` feature)
 - `surrealkv`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
-- `tikv`: TiKV distributed storage engine (requires `backend-tikv` feature and a running TiKV cluster)
+- `tikv`: not built in. Run a server built from [surrealdb-tikv](https://github.com/surrealdb/surrealdb-tikv) and use `--endpoint`
 
 Note that some backends require the corresponding Cargo feature to be enabled when building:
 ```bash
-# Example: Running tests with RocksDB backend
-cargo run --features backend-rocksdb run --backend rocksdb
-
-# Example: Running tests with TiKV backend (requires running TiKV cluster at 127.0.0.1:2379)
-cargo run --features backend-tikv run --backend tikv
+# Example: Running tests with SurrealKV backend
+cargo run --features backend-surrealkv run --backend surrealkv
 ```
+
+The repeatable `--config KEY=VALUE` flag sets a datastore configuration key for
+every datastore the run opens, for example `--config memory_limit=8MiB` to run
+the suite under a small node memory limit. The runner prints the memory limits
+the first datastore holds, and stops if a `memory_limit`, `query_memory_max` or
+`memory_wait` given this way is not the one the datastore holds. The
+environment's `SURREAL_*` variables are not read: only the keys a run names
+reach its datastores. It is refused with `--endpoint`, whose datastores belong
+to the server and are configured where that was started.
+
+The `--unordered-rows` flag grades the rows of a `SELECT` of a table or a record
+range that has no `ORDER BY`, `LIMIT` or `START` as a multiset, for a run under
+settings that leave the order of such rows unspecified, such as
+`--config morsel_split_rows=1 --config morsel_split_pass_ppm=1000000` (the second cuts a range
+whatever share of its rows passes its `WHERE`; add `--config morsel_needs_view=false` on a backend
+that gives workers no read view, to cut ranges there as well). A row nested in a result, the rows of every
+other statement, and every error are still compared exactly: a test that must
+accept one of several errors states them with a `match` expression.
+
+## Running against a remote endpoint
+
+By default the suite runs against an embedded, in-process datastore. Build with
+the `remote` feature and pass `--endpoint` to instead run every test against a
+**running** SurrealDB instance over the API, exercising the full network and
+serialization path rather than just the engine:
+
+```bash
+# ws:// (or wss/http/https). Credentials default to root/root.
+cargo run --features remote run --endpoint ws://127.0.0.1:8000
+cargo run --features remote run --endpoint http://127.0.0.1:8000 --username root --password root
+```
+
+The run signs in as `--username` between tests, so that account must be one no
+test writes. The corpus names root users freely, and a test that removed or
+redefined the login account would lock the run out of the server partway
+through; a run whose `--username` collides with a scheduled test is refused
+before it starts, naming the tests. `root` is safe: the two tests that define
+it declare `[env] remote-skip`.
+
+`--backend` names the server's storage engine, since a test declaring `[env]
+backend` asserts how the engines it lists behave. Pass `--backend other` for an
+engine the flag has no name for: every test that names its backends is skipped
+there.
+
+Results are compared identically to embedded runs: SurrealQL goes through the
+SDK (flatbuffers, so types round-trip exactly), and GraphQL/GQL are POSTed
+to the server's `/graphql` and `/gql` routes.
+
+**The server must be started so its datastore matches the one the embedded
+harness builds** — otherwise tests that exercise scripting, file functions,
+GQL, `TEMPFILES` sorting, or `INFO` output fail spuriously:
+
+```bash
+SURREAL_FILE_ALLOWLIST="$(pwd)/tests" \
+surreal start --user root --pass root \
+  --allow-all --allow-experimental '*' \
+  --temporary-directory /tmp/surreal-lt --no-defaults \
+  memory
+```
+
+Each flag mirrors a setting in the harness's `Datastore::builder()`:
+
+| Server flag / env | Mirrors (embedded) | Why it's needed |
+|---|---|---|
+| `--allow-all` | `Capabilities::all()` | scripting, all functions, net, guests, arbitrary query |
+| `--allow-experimental '*'` | `.with_experimental(Targets::All)` | `surrealism`, `kvexport`. **Startup-only**, not implied by `--allow-all`. |
+| `--temporary-directory <dir>` | `.with_temporary_directory(..)` | `... ORDER BY .. TEMPFILES` routes through `ExternalSortByKey` |
+| `SURREAL_FILE_ALLOWLIST=<abs tests dir>` | `file_allowlist = "../tests"` | `DEFINE ANALYZER .. mapper('<path>')` and file functions reading under `tests/` |
+| `--no-defaults` | (core datastore has no default ns/db) | the embedded datastore has no `main` namespace, so `INFO FOR ROOT` matches |
+| `--user root --pass root` | `.with_auth(true)` | the harness provisions per-test auth users as root |
+
+`SURREAL_FILE_ALLOWLIST` must be an **absolute** path to this directory's
+`tests/` folder (the server's CWD differs from the harness's); paths are
+`:`-separated.
+
+Remote runs are **concurrent**, `--jobs` deep like an embedded run. Each test
+is given a namespace of its own named `lt_<run>_<n>` and dropped whole at
+cleanup, which is the whole of its isolation — so a test that reaches outside
+one declares `[env] remote-exclusive` and is run on its own, in the namespace its
+config names, with a snapshot-diff cleanup removing whatever it created at the
+root level. A test that needs that and does not declare it fails rather than
+races; see [`[env.remote-exclusive]`](#envremote-exclusive).
+
+Run a dedicated instance for the suite. It creates and drops namespaces freely
+and owns the root configs (`GRAPHQL`, `API`, `DEFAULT`), so anything else using
+that server will lose state.
+
+Two ways of destroying a namespace are caught rather than reported after the
+fact. An exclusive test keeps its configured namespace name — the corpus default
+is `test` — and drops that name before it starts; and a test's body may remove a
+namespace by name, which reaches names no config mentions (a test declaring
+`namespace = false` has no configured name at all, yet is exclusive precisely
+because it works at root). Either way a namespace the endpoint already held goes
+with every database under it, and the second is invisible afterwards as well as
+irreversible: the snapshots compare name sets, so a test that removes a name and
+defines it again leaves the set unchanged while the data under it is gone.
+
+A run against an endpoint holding such a namespace is refused before any test
+runs, naming the namespace and the tests claiming it:
+
+```
+ws://127.0.0.1:8000 already holds 1 namespace(s) that a test claims or removes,
+which the run would drop whole and could not restore: `test` (claimed by 1
+test(s): reproductions/903_use_ns_db_expression_argument.surql). Point the run
+at an instance that does not hold them, or remove them yourself first.
+```
+
+The end-of-run sweep reports such a loss too, but only once it has happened and
+with no way to undo it, so the check is worth making while the data is there.
+
+Some tests can't be faithfully reproduced over the API and are reported as
+**skipped** (with a reason and a count, never failing the run): tests requiring
+non-default capabilities, datastore configuration keys or a versioned datastore
+(all server-startup config), record-auth tests, and tests written in a wire dialect (`.pgsql`,
+`.mysql`), which the server accepts on its own protocol port rather than through
+the SurrealQL RPC this harness connects over. The embedded-only
+retained-key/tombstone leak check is also skipped (no raw KV access over the
+API).
+
+## Features a run can be without
+
+A test names the engine features it cannot pass without in `[test] requires`:
+
+```toml
+[test]
+requires = ["scripting"]
+```
+
+`--without <features>` (comma-separated, repeatable) reports every test that requires any
+of them as **skipped**, with the missing feature as the reason, on embedded and remote runs
+alike. A skipped test stays in the counts, so a run without a feature reads as partly
+unsupported rather than smaller. Imports count: a test importing a file that requires a
+feature requires it too, and a `.graphql` file requires `graphql` without saying so.
+
+```bash
+cargo run run --without graphql,scripting,diskann,changefeed,regex
+```
+
+| Feature | A test requires it when it uses |
+|---|---|
+| `scripting` | embedded JavaScript functions, Surrealism modules |
+| `graphql` | the GraphQL endpoint (`.graphql` files require it implicitly) |
+| `diskann` | `DEFINE INDEX .. DISKANN` |
+| `changefeed` | `CHANGEFEED` on a table or database, `SHOW CHANGES` |
+| `regex` | the regex value type, as a result, a parameter or a literal |
+
+The set is closed: an unknown name in a test or on the command line fails the load, so a
+typo cannot become a tag that matches nothing. Adding a feature means adding it to
+`Feature` in `src/tests/feature.rs` and to this table.
+
+Tag a test that depends on a feature even where the feature is available: the tag costs an
+embedded run nothing and is what lets a run against a server without it skip the test
+instead of failing it.
 
 ## GraphQL tests
 
@@ -99,6 +248,9 @@ cargo make bench -- scans/count --quick
 
 # write per-bench results + the comparison verdict to a JSON file
 cargo make bench -- scans/count --json results.json
+
+# set a datastore configuration key for every datastore the run builds (see "--config" below)
+cargo make bench -- scans/count --config morsel_split_rows=18446744073709551615 --json off.json
 ```
 
 Benches run **strictly serially** (never in parallel — that would corrupt
@@ -110,10 +262,20 @@ p-value).
 `--quick` overrides every bench's timing config with much smaller values (250ms
 warmup, 10 samples, 2s measurement, 10s cap) for a fast, low-power local pass: it
 reliably surfaces **large** regressions but is too coarse for few-percent drift.
+A bench whose single iteration, re-import included, outlasts that cap
+(`QUICK_MAX_TIME` in `src/cmd/bench/run.rs`) can never collect the two samples
+statistics need there, so it sets `quick = false` and quick runs skip it by
+name.
 
 `--json <path>` writes a machine-readable report — for each bench its median /
 mean times and, when a baseline was found, the baseline's median, percentage
 change, p-value and verdict. Used to render the PR-comparison comment.
+
+`--config KEY=VALUE` (repeatable) sets a datastore configuration key for every datastore the
+run builds, as `run --config` does: `--config morsel_split_rows=18446744073709551615` turns morsel
+splitting and hand-off off, to compare a bench with and without them. Stores built under different
+keys are never shared between benches, a key a bench sets itself cannot be overridden, and a run
+that sets one cannot be saved with `--save`, so it cannot replace the stored baseline.
 
 `--store-url <ws>` compares against (and, with `--save`, writes to) a remote
 SurrealDB bench datastore instead of the local one. The harness `fetch_latest`es
@@ -139,12 +301,13 @@ baseline is full-quality, measured on the same runner pool, and refreshes whenev
 nightly re-runs (or nightly is dispatched manually after a notable change). Remove
 the label to stop.
 
-By default benches run on the in-memory engine. `--backend surrealkv` (always
-available) or `--backend rocksdb` (build with `--features backend-rocksdb`) run
-them on the file-backed engines instead, in a temporary directory that's removed
+By default benches run on the in-memory engine. `--backend surrealkv` (build with
+`--features backend-surrealkv`) runs
+them on the file-backed engine instead, in a temporary directory that's removed
 afterwards. TiKV is unsupported (it needs an external cluster). Mutating
-(`rebuild = true`) benches only run on `mem` — on a file backend they'd re-import
-the dataset to disk every iteration — and are skipped (with a notice) otherwise:
+(`rebuild = true`) benches run on `mem` only — on a file backend they'd re-import
+the dataset to disk every iteration — and are skipped (with a notice) otherwise,
+unless the bench sets `rebuild-file-backend = true` (see below):
 
 ```bash
 cargo make bench -- scans/count --backend surrealkv
@@ -154,11 +317,13 @@ cargo make bench -- scans/count --backend surrealkv
 
 ```toml
 [bench]
-run = true               # include this file in `bench run`
-rebuild = false          # see below; defaults to false
-warmup = "2s"            # warmup duration
-sample-size = 50         # number of samples (note: kebab-case keys)
-measurement-time = "20s" # target total measurement window
+run = true                    # include this file in `bench run`
+rebuild = false               # see below; defaults to false
+rebuild-file-backend = false  # see below; defaults to false
+quick = true                  # include in `bench run --quick`; defaults to true
+warmup = "2s"                 # warmup duration
+sample-size = 50              # number of samples (note: kebab-case keys)
+measurement-time = "20s"      # target total measurement window
 ```
 
 `rebuild` controls datastore lifecycle:
@@ -172,6 +337,16 @@ measurement-time = "20s" # target total measurement window
   iteration. Required for **mutating** benches (CREATE / UPDATE / DELETE) which
   need a clean slate each time, otherwise state accumulates across iterations and
   the workload drifts.
+
+`rebuild-file-backend = true` lets a `rebuild = true` bench also run under
+`--backend surrealkv`, where rebuild benches are otherwise
+skipped. Set it when the bench's subject is the storage layer — an index build,
+say, whose cost is dominated by KV reads and which therefore measures the wrong
+thing on `mem`. Each iteration builds a fresh datastore in a directory of its
+own, and shuts it down and reclaims the directory once its statement has been
+timed, so a run holds one copy of the dataset on disk rather than one per sample.
+The re-import and the shutdown are paid every iteration, outside the timed
+region, so keep `sample-size` small on a large dataset.
 
 **Dataset sharing.** Read-only (`rebuild = false`) benches that resolve to the
 same dataset — same effective import chain, capabilities, backend, and target
@@ -214,7 +389,29 @@ util/                                # import-only datasets (never run on their 
   references-5000.surql              # 5k users (+ `friends` link array) + 15k comments whose `author` is a record REFERENCE
   records-100000-perms-full.surql    # imports records-100000 + RECORD access + table PERMISSIONS … FULL (baseline)
   records-100000-perms-where.surql   # imports records-100000 + RECORD access + row-level PERMISSIONS … WHERE
+  records-10000-perms-semijoin.surql # 10k + table PERMISSIONS … WHERE age IN (SELECT … FROM allow) (subquery policy)
+  records-10000-fieldperms-one.surql  # 10k + perms-full + ONE field-level SELECT permission (always satisfied)
+  records-10000-fieldperms-many.surql # 10k + perms-full + EIGHT field-level SELECT permissions (always satisfied)
+  records-10000-indexed-perms-full.surql      # 10k + indexes + perms-full (baseline for the indexed fast paths)
+  records-10000-indexed-fieldperms-one.surql  # …+ a field permission on the indexed `number` field
+  records-10000-computed.surql       # 10k + three read-time COMPUTED fields (owner)
+  records-10000-bucket-stored.surql  # 10k with `bucket` alone stored, equal to what records-10000-computed derives
+  records-10000-computed-stored.surql # 10k with all three of those fields stored (the whole stored twin)
+  records-10000-computed-chain.surql # 10k + a three-deep COMPUTED dependency chain (rank1 → rank2 → rank3)
+  records-10000-computed-flat.surql  # 10k + that whole chain inlined into a single COMPUTED `rank3`
+  records-10000-computed-perms.surql # imports records-10000-computed + perms-full, + a NONE-tolerant COMPUTED field
+  records-10000-computed-guarded-open.surql   # …+ a field permission that withholds nothing
+  records-10000-computed-guarded-cut.surql    # …+ one that withholds a field for half the rows (forces re-derivation)
+  records-10000-computed-deps-static.surql    # …+ a field permission whose dependencies are statically resolvable
+  records-10000-computed-deps-opaque.surql    # …+ one written with `$auth` (dependencies unresolvable)
+  records-10000-perms-where-computed.surql    # row-level table permission + COMPUTED fields on the same table
   events-timeseries-100000.surql     # 100k events with timestamps spread across one year (bounded, for bucketing)
+  readings-keyed-100000.surql        # 100k readings over 50 cities, record id `[city: string, time: datetime]` (named components, sub-second times)
+  readings-unkeyed-100000.surql      # the same rows under random ids with `city` / `time` stored in the body (no index)
+  readings-unkeyed-100000-indexed.surql # …+ a compound (city, time) index: the unkeyed answer to a per-city time window
+  readings-{keyed,unkeyed}-100000-time-indexed.surql # …+ an index on `time` (the derived component / the stored field), for retention deletes
+  readings-array-ids-100000.surql    # the rows under array ids `[city, time]` with no named components and equal `city` / `time` copies in the body
+  readings-{keyed,unkeyed,unkeyed-indexed}-empty.surql # empty tables, for the create-throughput matrix
   geo-points-100000.surql            # 100k places each with a `location` point spread across the globe
   recursion-functions.surql          # recursive user functions (fn::fib branching, fn::sum_to linear)
   recursion-items-dynamic-1000.surql  # imports recursion-functions + 1000 items with a recursive DYNAMIC (VALUE, write-time) field
@@ -236,9 +433,22 @@ vector/                              # KNN: HNSW vs DiskANN vs brute-force
 references/                          # record references: reverse (`<~`) traversal/count/filtered, FETCH single + array
 mutate/                              # UPDATE/DELETE … WHERE, batch UPSERT, explicit transaction
 crud/                                # batch create/read/update/delete (100, 1000)
-permissions/                         # per-record table permission cost as a RECORD user: SELECT + UPDATE,
-                                     #   each over a row-level `WHERE` vs. `FULL` permission matrix
+permissions/                         # per-record permission cost as a RECORD user: table-level SELECT +
+                                     #   UPDATE over a row-level `WHERE` vs. `FULL` matrix; a table policy
+                                     #   written as a subquery vs. a scalar predicate; and the field-level
+                                     #   guards that withhold the scan fast paths — full read, filter scan
+                                     #   (pre-decode filter), ORDER BY … LIMIT (TopK threshold probe),
+                                     #   indexed COUNT, and COUNT fallback
+computed/                            # read-time COMPUTED field materialisation: full read, selective
+                                     #   projection, dependency chain, filter / COUNT / ORDER BY … LIMIT
+                                     #   over a computed key, and the intersection with field permissions
+                                     #   (unreduced-record clone, re-derivation against the reduced record)
 timeseries/                          # temporal bucketing: GROUP BY time::group(…) by day / hour (± per-bucket stats)
+                                     #   plus named record-id components: a one-hour key-range window (one city, IN over
+                                     #   three), the latest ten rows of a city, a LET-cutoff retention delete over an index
+                                     #   on the derived `time`, create throughput, a full `SELECT *` (derived vs stored
+                                     #   components), and the define-time scan of 100k records. The matrix benches run the keyed
+                                     #   table against its unkeyed twin (`--dataset keyed` / `unkeyed` / `stored` / `unkeyed_indexed`)
 geo/                                 # FULL-SCAN geo functions (no spatial index yet, #219): geo::distance
                                      #   proximity & nearest-N, point-in-polygon containment (INSIDE)
 recursion/                           # recursive USER functions (fn::fib, per-row fn::sum_to) + recursive
@@ -290,6 +500,33 @@ allows every action with no predicate; the `where` variant attaches a row-level
 `WHERE` clause that is satisfied by every row, so both arms return the same data
 and the delta isolates the per-record predicate-evaluation cost.
 
+Field-level permissions are measured the same way, and every guard in these
+datasets is written so that it is **satisfied by every row** unless the bench is
+specifically about withholding: the arms then return identical documents and the
+delta is the enforcement machinery, not a different result set. Enforcing them
+costs more than the guard predicates, because it withdraws the scan-side fast
+paths that read a field straight from revision-encoded bytes — the pre-decode
+WHERE filter, the TopK threshold probe, and the indexed-COUNT paths all require
+every field they touch to carry an `Allow` SELECT permission. Read-time COMPUTED
+fields disqualify the same paths, which is why `computed/` and `permissions/`
+share a shape: each bench pairs the restricted or computed arm against an
+otherwise identical one whose field is plain and stored.
+
+Where the two features meet, a table pays more than the sum: a row carrying both
+computed fields and a restricted field is cloned per record so guards and
+re-derivation each have the view they must read, and withholding a stored field
+re-derives *every* computed field on the table. `computed/guarded_reread` measures
+the three tiers (no guard / guard satisfied / guard withholding), and
+`computed/select_projected` measures the projection pruning that a guard written
+with a parameter gives up.
+
+Not every combination costs anything, and one arm is there to pin that: the
+conditional-permission COUNT fallback judges the table permission against the
+decoded record without ever building field state, so computed fields on that
+table are free to it. `permissions/count_scan[where_computed]` is a control that
+should stay level with `where`; a count that genuinely needs a derived value —
+because its WHERE reads one — is `computed/count_filter`.
+
 ### Profiling & flamegraphs
 
 Add `--profile` to record a flamegraph of the measured statements with
@@ -338,6 +575,25 @@ same arguments, or drive the harness binary yourself:
 # run every bench (no filter), or one by path substring; flags are all optional
 cargo run --features bench -- bench run [--save] [--dataset NAME] [--backend mem] [--quick] [--json PATH] [<filter>]
 ```
+
+### Determinism
+
+Two process-wide sources of randomness would otherwise make a bench measure a
+different amount of work on each run; the harness pins both, so a local run and a
+CI run see the same data and the same index structures:
+
+- **Generated data.** Every dataset build reseeds the engine RNG, so `rand::*`
+  values and `|record:N|` ids are identical across runs and independent of
+  benchmark order. Override with `SURREAL_RAND_SEED=<u64>` to redraw the datasets
+  from a different, still fixed, seed.
+- **HNSW graph construction.** HNSW picks each element's layer at random, so an
+  unseeded build gives the same kNN query a different graph to traverse on every
+  run — worth far more than any regression the suite could catch. The harness
+  pins the seed; override with `SURREAL_HNSW_BUILD_SEED=<u64>`.
+
+Re-run a surprising ANN result with a different `SURREAL_HNSW_BUILD_SEED` on both
+sides before trusting it: a fixed seed removes the variance between runs, but it
+does not prove the change generalises beyond that one graph.
 
 `scripts/bench/optimise.workflow.js` is a workflow recipe driving an AI
 optimisation loop: baseline → inspect the profile → propose & apply one engine
@@ -420,6 +676,10 @@ in toml and contains the following sections:
     - `[login]` the login configuration into the dataset.
     - `[capabilities]` a configuration of database capabilities in which the
       test should run.
+    - `remote-skip` a reason string that excludes the test from remote
+      (`--endpoint`) runs.
+    - `remote-exclusive` the test reaches outside its own namespace, so a remote
+      (`--endpoint`) run gives it the endpoint to itself.
 
 All keys in the config are optional and have default values if not explicitly
 specified.
@@ -477,12 +737,34 @@ The field expects a string with a version requirement with the semantic
 versioning format. The same format that is used for specifying rust dependency
 versions in `Cargo.toml`.
 
+It also takes an array of such requirements, and then a version any one of
+them admits is accepted. That is for a set of releases that is not one range:
+a fix can reach an older line in a patch that ships after a newer line's early
+releases, which leaves the releases still carrying a defect on both sides of
+the ones that fixed it, as in `["<3.2.5", ">=3.3.0-beta.1, <3.3.0-beta.5"]`.
+
 This field is not that usefull for normal test as the importing datastore and
 the test running datastore are always the same. Instead this field is intended
 for upgrade tests where the upgrading datastore version can differ from the
 test running datastore.
 
 Defaults to `"*"`
+
+#### `[test.legacy-syntax]`
+
+Marks an upgrade helper written in the SurrealQL of the released binary that
+replays it, in a spelling the current parser no longer accepts. `DEFINE MODULE`
+is the standing example: the releases in the upgrade matrix spell the module
+source `AS f"bucket:/key"` and have no `UNSIGNED` keyword, so a script that
+writes one on those binaries cannot also be a document the current parser reads.
+
+The current parser's language-test corpus check reads this flag and leaves such
+a file alone, which is why it is a declared key and not a comment. Only a script
+replayed against a spawned release may set it — an `[env] imports` entry or a
+`[test.chain] setup`. A test body and a `[test.chain] mutate` run on the upgrade
+target, so the runner refuses the flag on either.
+
+Defaults to `false`
 
 #### `[test.results]`
 
@@ -643,6 +925,37 @@ $result.users.test = /DEFINE USER test ON ROOT PASSHASH '\\$argon2id\\$.*' ROLES
 error = false
 ```
 
+##### Traces
+
+A test that sets [`[env.trace]`](#envtrace) runs its query as a traced request,
+and each statement's trace is graded beside its value. A result written as a
+table states the trace under `trace`, in SurrealQL like `value`:
+
+```toml
+[[test.results]]
+value = "[place:cafe, place:lib]"
+trace = "{ relations: [[person:a, customer_of:a_cafe, place:cafe], [person:a, customer_of:a_lib, place:lib]] }"
+
+# A statement whose trace must be empty states none.
+[[test.results]]
+value = "[{ id: person:a }]"
+
+# A match expectation can carry a trace too.
+[[test.results]]
+match = "type::is_uuid($result)"
+trace = "{ subscriptions: [u'00000000-0000-0000-0000-000000000000'] }"
+```
+
+A result that states no `trace` expects the statement to send none, so a traced
+test fixes what every statement reports, the empty ones included. A failed
+statement sends no trace and is written as an error.
+
+Traces are compared after the entries of `relations`, `references`, `links` and
+`subscriptions` are sorted, because the engine orders them by when it walked
+them. Duplicates are kept, so an entry reported twice is a mismatch. Uuids are
+compared loosely, because a live query's id is new on each run.
+`--results accept` writes the `trace` of every statement that sent one.
+
 ### `[env]`
 
 The `[env]` table specifies the environment in which the test must be run.
@@ -692,6 +1005,26 @@ permission specific tests.
 
 Defaults to `[]`
 
+#### `[env.trace]`
+
+The trace kinds the test's query asks for, the names a `query` call's `trace`
+option takes: `"relations"`, `"references"`, `"links"`, `"variables"` and
+`"subscriptions"`. A test that names any runs as a traced request with those
+kinds, and its results state each statement's trace (see
+[Traces](#traces)). A test that names `"subscriptions"` runs on a session that
+may open live queries, and declares [`[env.clean]`](#envclean), because a live
+query stays registered on the node after the namespace is removed.
+
+Traced tests run only in-process; `run --endpoint` skips them.
+
+```toml
+[env]
+imports = ["language/trace/graph_import.surql"]
+trace = ["relations", "links"]
+```
+
+Defaults to `[]`
+
 #### `[env.backend]`
 
 Specifies which backends (storage engines) the test should run on. This is useful 
@@ -700,7 +1033,6 @@ backend-specific features like compaction.
 
 The value should be an array of strings with valid backend identifiers:
 - `"mem"`: In-memory storage engine
-- `"rocksdb"`: RocksDB embedded storage engine
 - `"surrealkv"`: SurrealKV file-based storage engine
 - `"tikv"`: TiKV distributed storage engine
 
@@ -712,15 +1044,15 @@ The value should be an array of strings with valid backend identifiers:
 **Examples:**
 
 ```toml
-# Test that only runs on RocksDB
+# Test that only runs on SurrealKV
 [env]
-backend = ["rocksdb"]
+backend = ["surrealkv"]
 ```
 
 ```toml
-# Test that runs on both memory and RocksDB backends
+# Test that runs on both memory and SurrealKV backends
 [env]
-backend = ["mem", "rocksdb"]
+backend = ["mem", "surrealkv"]
 ```
 
 ```toml
@@ -738,7 +1070,7 @@ namespace = "test"
 
 This feature is particularly useful for testing backend-specific operations. For 
 example, the `ALTER TABLE COMPACT` statement behaves differently on different 
-backends: it succeeds on RocksDB but returns an error on the memory backend.
+backends: it returns an error on both the memory and SurrealKV backends, which do not support compaction.
 
 Defaults to `[]` (runs on all backends)
 
@@ -751,22 +1083,45 @@ temporal queries using the `VERSION` clause.
 Tests with `versioned = true` always get a fresh datastore (they cannot reuse the
 shared datastore pool) since they require different datastore configuration.
 
+Versioning is available only on the `surrealkv` backend, which the
+runner opens with `?versioned=true`. `mem` and `tikv` are opened without it and
+reject a versioned statement, so versioned tests are skipped on those two and a
+test that does not name `surrealkv` runs nowhere.
+
 **Examples:**
 
 ```toml
-# Test that requires versioning on memory and SurrealKV backends
+# Test that requires versioning on the SurrealKV backend
 [env]
-backend = ["mem", "surrealkv"]
+backend = ["surrealkv"]
 versioned = true
 ```
 
 ```toml
-# Test with versioning on all backends that support it
+# Test with versioning on all backends that support it (mem and tikv are skipped)
 [env]
 versioned = true
 ```
 
 Defaults to `false`
+
+#### `[env.config]`
+
+Datastore configuration keys the test needs, as `--config KEY=VALUE` gives them to a run. Each
+takes the place of the same key given to the run, and the run's other keys stay. A test that names
+a key gets a datastore of its own. Values are strings, since a count can exceed what a TOML integer
+holds. A remote (`--endpoint`) run skips such a test, since the endpoint's datastore is configured
+where it started.
+
+A test that holds a property only when its scans do not split pins it this way under a run that
+forces morsels:
+
+```toml
+[env.config]
+morsel_split_rows = "18446744073709551615"
+```
+
+Defaults to no keys.
 
 #### `[env.timeout]`
 
@@ -776,7 +1131,7 @@ takes longer than the given duration it will be considered an error and it will
 cause a test run to fail. This key can also be set to `false` to disable the 
 timeout altogether or `true` to default to 5 seconds. Defaults to `5000` (5 seconds).
 
-#### `[env.timeout-tikv]`, `[env.timeout-rocksdb]`, `[env.timeout-surrealkv]`
+#### `[env.timeout-tikv]`, `[env.timeout-surrealkv]`
 
 Backend-specific timeout overrides in milliseconds. When running tests against a 
 specific backend, these values take precedence over the base `timeout`. This is 
@@ -788,7 +1143,7 @@ to network latency).
 [env]
 timeout = 5000           # Timeout for memory backend
 timeout-tikv = 10000     # TiKV needs 2x more time due to network latency
-timeout-rocksdb = 6000   # RocksDB may need slightly more time for disk I/O
+timeout-surrealkv = 6000 # SurrealKV may need slightly more time for disk I/O
 ```
 
 #### `[env.context_timeout]`
@@ -799,7 +1154,7 @@ query takes longer than the given duration, it will be terminated. This key can
 also be set to `false` to disable the context timeout altogether or `true` to 
 default to 5 seconds. Defaults to `5000` (5 seconds).
 
-#### `[env.context-timeout-tikv]`, `[env.context-timeout-rocksdb]`, `[env.context-timeout-surrealkv]`
+#### `[env.context-timeout-tikv]`, `[env.context-timeout-surrealkv]`
 
 Backend-specific context timeout overrides in milliseconds. Similar to the timeout 
 overrides, these allow setting different query execution limits per backend.
@@ -873,36 +1228,112 @@ database should be run. This can be used to disable functions, net targets,
 http routs and scripting just like with the SurrealDB binary/rust SDK. Defaults
 to all capabilities enabled.
 
-This field is not supported for upgrade tests.
+Upgrade tests accept exactly one key here, `allow-experimental`, which is
+passed to each spawned binary; every other key is rejected, and writing the
+table without that key is a load error. It must sit on the graded test case —
+on an import or a chain script it is inert.
 
-#### `[env.planner-strategy]`
+#### `[env.remote-skip]`
 
-Controls which planner strategies the test is executed under. The test runs
-once per listed strategy, each with its own clean datastore.
+Excludes the test from remote (`--endpoint`) runs, reporting the given string as
+the skip reason. Embedded runs ignore it entirely.
 
-Valid strategy values:
-- `"best-effort-ro"`: Try the new planner for read-only statements. If
-  the planner returns `Unimplemented`, silently fall back to the legacy compute
-  executor.
-- `"all-ro"`: Require the new planner for all read-only statements. If the new
-  planner cannot handle a non-DDL/DML statement, the test fails with an error
-  instead of silently falling back. DDL/DML statements (CREATE, UPDATE, DELETE,
-  DEFINE, etc.) always fall back regardless of this setting.
-- `"compute-only"`: Skip the new planner entirely and always use the legacy
-  compute executor for all statements.
+It is for the narrow case of a test whose expectation only holds against an
+embedded, in-process datastore, and which would therefore fail over the API for
+a reason that is not a defect — a connection-less `$session`, the absence of a
+bootstrap root user, or a path resolved against the harness's working directory.
+Everything the harness can decide for itself (non-default capabilities,
+datastore configuration keys, a versioned datastore, record auth, wire dialects, and GraphQL/GQL under non-owner
+auth) is skipped automatically and needs no key.
 
-Defaults to `["compute-only", "all-ro"]` when omitted, meaning the test runs
-twice: once under the legacy compute executor and once requiring the new planner.
-
-**Examples:**
-```toml
-# Run only under the new executor (narrow from the default two-strategy run)
-[env]
-planner-strategy = ["all-ro"]
-```
+The string is shown in the run summary, grouped by reason, so write it as the
+reason the test cannot be reproduced rather than as a label:
 
 ```toml
-# Run only under legacy compute (e.g. features not yet supported by the new planner)
 [env]
-planner-strategy = ["compute-only"]
+remote-skip = "asserts $session.id, which over the API is the per-connection id but is NONE for the embedded harness's connection-less session"
 ```
+
+Reach for it last. A test skipped here is coverage the remote run does not have,
+so prefer fixing the test to be transport-independent where that is possible.
+
+#### `[env.remote-exclusive]`
+
+Remote (`--endpoint`) runs execute tests concurrently against the one server,
+and what keeps them apart is a namespace each: a test is given one named
+`lt_<run>_<n>`, and everything it writes there goes away with it at cleanup.
+Embedded runs ignore this key — every test there already has a datastore of its
+own, so there is nothing to share.
+
+Set it when a test does not fit inside a namespace:
+
+- it creates a root user, root access method, or namespace, or changes a system
+  setting (`ALTER SYSTEM`, `CONFIG DEFAULT`);
+- it asserts on the literal name of the namespace it runs in — `USE DB other`
+  answers `{ database: 'other', namespace: 'test' }`, and `session::ns()`
+  returns the same;
+- it names a namespace in SurrealQL that the harness would otherwise rename
+  under it, e.g. `USE NS test DB test` in the body.
+
+Such a test then runs alone, in the namespace its `[env] namespace` names, with
+cleanup removing whatever root-level entities appeared while it ran. A test
+declaring `namespace = false` has nowhere but root to write and is exclusive
+automatically — it needs no key.
+
+```toml
+[env]
+remote-exclusive = true
+```
+
+**A test that needs this and does not declare it fails rather than races.**
+An `ALTER SYSTEM` is caught before the run starts, in the test's source and in
+its imports, and refuses to schedule the run at all — the setting it changes
+applies to every request the server is serving, so a test that restores it still
+imposes it on whatever ran beside it, and a check made afterwards would find
+nothing to report.
+
+Everything else is caught after cleanup: a concurrent test's root-level state is
+compared against a reading taken before the run began, and anything new fails the
+test by name:
+
+```
+> Test failed, it created root-level state but is not marked `[env] remote-exclusive`:
+  - NAMESPACE `test_namespace`
+  - USER `root_secret` ON ROOT
+```
+
+The endpoint is asked rather than the source read, so this holds however the
+state got there — the test's own body, one of its `imports`, or a function it
+calls. What it cannot see is the second and third cases above, which are
+ordinary expectation failures.
+
+The comparison also runs the other way. A test is as free to *remove* root state
+the endpoint already had as to add some, and that cannot be undone — a snapshot
+holds names, not definitions, and `INFO FOR ROOT` redacts a user's hash, so
+recreating one would invent an account rather than restore it. It is therefore
+reported rather than repaired. An exclusive test that removes a pre-existing root
+user, access or namespace fails by name, and the end-of-run sweep reports
+anything else that went missing and fails the run:
+
+```
+ ws://127.0.0.1:18283 was not left as this run found it; removed by this run and
+ not restorable: ACCESS `planted_ac` ON ROOT, USER `planted` ON ROOT
+```
+
+The per-test check for a concurrent test stays one-way on purpose: it puts the
+baseline back after reporting, so that one offender does not go on to fail every
+test after it, and a removal is the one thing it cannot put back. The sweep
+reports those once, for the run.
+
+Keep the declaration to tests that need it. Each one is a point where the run
+stops and waits for every job to drain, so it is the one part of the suite that
+does not get faster with `--jobs`.
+
+## Markdown tests.
+
+The language test suite is able to extract tests from markdown files when compiled
+with the `docs` feature. When this feature is enabled the language test suite will
+also search files with the extension `.md` and `.mdx`, looking for code blocks 
+marked with `surql` as it's language. The suite will run all tests in these files
+resulting in possibly multiple test per files. Codeblocks can be excluded from 
+running as a test by adding `notest` after the `surql` code block header.

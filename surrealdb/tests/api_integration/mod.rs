@@ -41,19 +41,34 @@ macro_rules! include_tests {
 	};
 }
 
+mod api;
 mod backup;
+// The versioned suites run only on backends that still support native
+// versioning; the memory backend dropped it in the surrealmx 0.23 upgrade.
+#[cfg(feature = "kv-surrealkv")]
 mod backup_version;
 mod basic;
 mod live;
 mod run;
 mod serialisation;
 mod session_isolation;
+#[cfg(feature = "kv-surrealkv")]
 mod version;
 
 const ROOT_USER: &str = "root";
 const ROOT_PASS: &str = "root";
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv",))]
+/// The `host:port` of the server the remote-engine tests connect to:
+/// `SURREAL_TEST_ADDRESS`, or `127.0.0.1:8000` when it is unset. Any `surreal`
+/// binary or container listening there serves, not only one built from this
+/// checkout; see `cargo make ci-api-integration-http` and the variables it
+/// reads.
+#[allow(dead_code)]
+fn server_address() -> String {
+	std::env::var("SURREAL_TEST_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8000".to_string())
+}
+
+#[cfg(feature = "kv-surrealkv")]
 static TEMP_DIR: std::sync::LazyLock<std::path::PathBuf> =
 	std::sync::LazyLock::new(|| temp_dir::TempDir::new().unwrap().child("sdb-test"));
 
@@ -126,7 +141,12 @@ mod any {
 
 	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Any>) {
 		let permit = PERMITS.acquire().await.unwrap();
-		let db = surrealdb::engine::any::connect(("http://127.0.0.1:8000", config)).await.unwrap();
+		let db = surrealdb::engine::any::connect((
+			format!("http://{}", super::server_address()),
+			config,
+		))
+		.await
+		.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -136,7 +156,7 @@ mod any {
 		(permit, db)
 	}
 
-	include_tests!(new_db => basic, serialisation, backup, session_isolation, run);
+	include_tests!(new_db => api, basic, serialisation, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -158,7 +178,7 @@ mod http {
 
 	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Client>) {
 		let permit = PERMITS.acquire().await.unwrap();
-		let db = Surreal::new::<Http>(("127.0.0.1:8000", config)).await.unwrap();
+		let db = Surreal::new::<Http>((super::server_address(), config)).await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -171,11 +191,13 @@ mod http {
 	#[test_log::test(tokio::test)]
 	async fn any_engine_can_connect() {
 		let permit = PERMITS.acquire().await.unwrap();
-		surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
+		surrealdb::engine::any::connect(format!("http://{}", super::server_address()))
+			.await
+			.unwrap();
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, backup, session_isolation, run);
+	include_tests!(new_db => api, basic, serialisation, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -202,7 +224,7 @@ mod ws {
 
 	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Client>) {
 		let permit = PERMITS.acquire().await.unwrap();
-		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
+		let db = Surreal::new::<Ws>((super::server_address(), config)).await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -215,7 +237,7 @@ mod ws {
 	#[test_log::test(tokio::test)]
 	async fn any_engine_can_connect() {
 		let permit = PERMITS.acquire().await.unwrap();
-		surrealdb::engine::any::connect("ws://127.0.0.1:8000").await.unwrap();
+		surrealdb::engine::any::connect(format!("ws://{}", super::server_address())).await.unwrap();
 		drop(permit);
 	}
 
@@ -236,7 +258,7 @@ mod ws {
 		// The connection event should fire and allow wait_for to return immediately
 		// when waiting for a connection. When waiting for a database to be selected,
 		// it should continue waiting.
-		db.connect::<Ws>("127.0.0.1:8000").await.unwrap();
+		db.connect::<Ws>(super::server_address()).await.unwrap();
 		assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Ready(()));
 		assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
 
@@ -311,7 +333,7 @@ mod ws {
 		// Configure WebSocket with custom size limits for testing
 		let ws_config = WebsocketConfig::default().max_message_size(max_size);
 		let config = Config::new().websocket(ws_config).unwrap();
-		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
+		let db = Surreal::new::<Ws>((super::server_address(), config)).await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -361,7 +383,7 @@ mod ws {
 
 		let permit = PERMITS.acquire().await.unwrap();
 		let config = Config::new();
-		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
+		let db = Surreal::new::<Ws>((super::server_address(), config)).await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -388,7 +410,7 @@ mod ws {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, live, session_isolation, run);
+	include_tests!(new_db => api, basic, serialisation, live, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -495,115 +517,157 @@ mod mem {
 		db.use_ns("test").use_db("test").await.unwrap();
 	}
 
+	/// `authenticate` redeems the refresh token by itself when the access token
+	/// it was given has expired.
+	///
+	/// Embedded only, deliberately: over the RPC transports `authenticate`
+	/// carries a bare token string and there is nowhere to put a refresh token,
+	/// so a caller there asks for the refresh explicitly. This is the implicit
+	/// path, and both trying the access token and redeeming the refresh token
+	/// need exclusive access to the session. An implementation that asks for
+	/// the session lock again while still holding it never completes the
+	/// command, and every later command on the session waits behind it; the
+	/// timeouts turn either into a failure rather than a hung test.
+	#[test_log::test(tokio::test)]
+	async fn authenticate_refreshes_an_expired_access_token() {
+		use surrealdb::opt::auth::Record as RecordAccess;
+		use ulid::Ulid;
+
+		use super::AuthParams;
+
+		let db = Surreal::new::<Mem>(()).await.unwrap();
+		let namespace = Ulid::new().to_string();
+		let database = Ulid::new().to_string();
+		db.use_ns(&namespace).use_db(&database).await.unwrap();
+		let access = Ulid::new();
+		let email = format!("{access}@example.com");
+		let pass = "password123";
+		// A token lifetime short enough to expire within the test.
+		db.query(format!(
+			"
+			DEFINE ACCESS `{access}` ON DATABASE TYPE RECORD
+			SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+			SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+			WITH REFRESH
+			DURATION FOR SESSION 1d FOR TOKEN 1s
+		"
+		))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
+
+		let token = db
+			.signup(RecordAccess {
+				namespace,
+				database,
+				access: access.to_string(),
+				params: AuthParams {
+					pass: pass.to_string(),
+					email,
+				},
+			})
+			.await
+			.unwrap();
+		assert!(token.refresh.is_some(), "the access grant is defined WITH REFRESH");
+		let expired = token.access.as_insecure_token().to_owned();
+
+		// Let the access token expire, leaving the refresh token as the only way in.
+		tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+		let bound = std::time::Duration::from_secs(10);
+		let token = tokio::time::timeout(bound, async { db.authenticate(token).await })
+			.await
+			.expect("authenticate with an expired access token must complete")
+			.unwrap();
+		assert_ne!(
+			expired,
+			token.access.as_insecure_token(),
+			"the session must be authenticated with a freshly issued access token"
+		);
+
+		let mut response = tokio::time::timeout(bound, async { db.query("RETURN 1").await })
+			.await
+			.expect("the session must stay usable after an automatic refresh")
+			.unwrap();
+		let value: Option<i64> = response.take(0).unwrap();
+		assert_eq!(value, Some(1));
+	}
+
 	#[test_log::test(tokio::test)]
 	async fn experimental_features() {
-		let surql = "
-		    USE NAMESPACE namespace DATABASE database;
-			DEFINE BUCKET test BACKEND \"memory\";
-		";
-		// Experimental features are rejected by default
+		let surql = "RETURN ext::nonexistent();";
+		// Experimental syntax is rejected by default, when the query is parsed
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 		db.query(surql).await.unwrap_err();
-		// Experimental features can be allowed
+		// Allowed, it parses, and only the statement fails: no such extension exists
 		let capabilities =
-			Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::Files);
+			Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::Surrealism);
 		let config = Config::new().capabilities(capabilities);
 		let db = Surreal::new::<Mem>(config).await.unwrap();
-		db.query(surql).await.unwrap().check().unwrap();
+		db.query(surql).await.unwrap().check().unwrap_err();
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
-}
+	/// A `DEFINE TABLE IF NOT EXISTS` that reports success leaves the table
+	/// defined for the session's next statement, even when many sessions
+	/// create the same fresh database and table at once.
+	///
+	/// A session may lose a race and see a retryable transaction conflict on
+	/// `USE` or `DEFINE`; that is an error the caller is told about. What must
+	/// never happen is a `DEFINE` that succeeds followed by a read that says
+	/// the table does not exist. That is what a lost write-write conflict
+	/// between two sessions' implicit creations of the database produces: the
+	/// later creation remaps the name to a fresh id, and the table defined
+	/// under the first id is no longer reachable. The storage contract behind
+	/// it is `concurrent_creators_of_absent_key_commit_once` in
+	/// `surrealdb-kvs-test`; this is the same failure as an application sees
+	/// it, through the embedded engine.
+	#[test_log::test(tokio::test(flavor = "multi_thread", worker_threads = 8))]
+	async fn define_table_if_not_exists_is_visible_under_concurrent_first_access() {
+		const ROUNDS: usize = 200;
+		const SESSIONS: usize = 32;
 
-#[cfg(feature = "kv-rocksdb")]
-mod rocksdb {
-	use surrealdb::Surreal;
-	use surrealdb::engine::local::{Db, RocksDb};
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-	use ulid::Ulid;
-
-	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let path = TEMP_DIR.join(Ulid::new().to_string());
-		let root = Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		};
-		let config = config.user(root.clone());
-		let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let db_dir = Ulid::new().to_string();
-		// Create a database directory using an absolute path
-		surrealdb::engine::any::connect(format!(
-			"rocksdb://{}",
-			TEMP_DIR.join("absolute").join(&db_dir).display()
-		))
-		.await
-		.unwrap();
-		// Switch to the temporary directory, if possible, to test relative paths
-		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
-			// Create a database directory using a relative path
-			surrealdb::engine::any::connect(format!("rocksdb://relative/{db_dir}")).await.unwrap();
+		let db = surrealdb::engine::any::connect("mem://").await.unwrap();
+		let mut reads = 0;
+		let mut invisible = Vec::new();
+		for round in 0..ROUNDS {
+			// A fresh database per round, so every round races its creation.
+			let database = format!("db{round}");
+			let mut tasks = tokio::task::JoinSet::new();
+			for _ in 0..SESSIONS {
+				// Each clone is a session of its own.
+				let db = db.clone();
+				let database = database.clone();
+				tasks.spawn(async move {
+					// A conflict here or on the definition is reported to the
+					// caller, and the session reads nothing.
+					db.use_ns("repro").use_db(&database).await.ok()?;
+					db.query("DEFINE TABLE IF NOT EXISTS t SCHEMALESS")
+						.await
+						.and_then(|r| r.check())
+						.ok()?;
+					let read: Result<Option<surrealdb::types::Value>, _> =
+						db.select(("t", "current")).await;
+					Some(read.err().map(|e| format!("round {round}: {e}")))
+				});
+			}
+			while let Some(read) = tasks.join_next().await {
+				if let Some(read) = read.unwrap() {
+					reads += 1;
+					invisible.extend(read);
+				}
+			}
 		}
+		// Most sessions win their race; a run in which none reads checks nothing.
+		assert!(reads >= ROUNDS, "only {reads} sessions reached the read");
+		assert!(
+			invisible.is_empty(),
+			"{} sessions saw DEFINE TABLE IF NOT EXISTS succeed and the table missing: {invisible:?}",
+			invisible.len()
+		);
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
-}
-
-#[cfg(feature = "kv-rocksdb")]
-mod rocksdb_versioned {
-	use surrealdb::Surreal;
-	use surrealdb::engine::local::{Db, RocksDb};
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-	use ulid::Ulid;
-
-	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let path = TEMP_DIR.join(Ulid::new().to_string());
-		let root = Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		};
-		let config = config.user(root.clone());
-		let db = Surreal::new::<RocksDb>((path, config)).versioned().await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let db_dir = Ulid::new().to_string();
-		surrealdb::engine::any::connect(format!(
-			"rocksdb://{}?versioned=true",
-			TEMP_DIR.join("absolute").join(&db_dir).display()
-		))
-		.await
-		.unwrap();
-		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
-			surrealdb::engine::any::connect(format!("rocksdb://relative/{db_dir}?versioned=true"))
-				.await
-				.unwrap();
-		}
-	}
-
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run, version, backup_version);
+	include_tests!(new_db => api, basic, serialisation, live, backup, session_isolation, run);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -651,79 +715,54 @@ mod surrealkv {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
-}
-
-#[cfg(feature = "kv-tikv")]
-mod tikv {
-	use surrealdb::Surreal;
-	use surrealdb::engine::local::{Db, TiKv};
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-
-	use super::{ROOT_PASS, ROOT_USER};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let root = Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		};
-		let config = config.user(root.clone());
-		let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
-
+	/// Dropping the last connection handle shuts the datastore down.
+	///
+	/// Nothing calls `shutdown()` explicitly -- the engine takes the handles
+	/// going away as the signal -- so without this an embedded connection would
+	/// hold its storage for the lifetime of the process. SurrealKV takes an
+	/// exclusive lock on its directory, so the same path can only be reopened
+	/// once the lock has been released.
 	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let permit = PERMITS.acquire().await.unwrap();
-		surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
-		drop(permit);
+	async fn dropping_the_last_handle_releases_the_datastore() {
+		let _permit = PERMITS.acquire().await.unwrap();
+		let endpoint = format!("surrealkv://{}", TEMP_DIR.join(Ulid::new().to_string()).display());
+
+		let db = surrealdb::engine::any::connect(&endpoint).await.unwrap();
+		// Establishes the premise the rest of the test rests on: while the
+		// datastore is open, its directory cannot be opened again.
+		surrealdb::engine::any::connect(&endpoint)
+			.await
+			.expect_err("an open SurrealKV datastore holds its directory");
+		drop(db);
+
+		// Shutdown runs on the engine's own task, so it has not necessarily
+		// finished by the time the handle is dropped.
+		let mut last = None;
+		for _ in 0..100 {
+			match surrealdb::engine::any::connect(&endpoint).await {
+				// Dropped here rather than left to the end of the test: the
+				// runtime stops with the test, and an engine still holding the
+				// directory when that happens never gets to release it.
+				Ok(reopened) => {
+					drop(reopened);
+					return;
+				}
+				Err(error) => last = Some(error),
+			}
+			tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+		}
+		panic!("the datastore was never released: {last:?}");
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
+	include_tests!(new_db => api, basic, serialisation, live, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
 // Versioned storage engine tests
 // --------------------------------------------------
 
-#[cfg(feature = "kv-mem")]
-mod mem_versioned {
-	use surrealdb::Surreal;
-	use surrealdb::engine::local::{Db, Mem};
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-
-	use super::{ROOT_PASS, ROOT_USER};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let root = Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		};
-		let config = config.user(root.clone());
-		let db = Surreal::new::<Mem>(config).versioned().await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		surrealdb::engine::any::connect("memory?versioned=true").await.unwrap();
-	}
-
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run, version, backup_version);
-}
-
+// The memory backend no longer supports versioning after the surrealmx 0.23
+// upgrade; versioned coverage runs on the surrealkv backend below.
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv_versioned {
 	use surrealdb::Surreal;
@@ -771,5 +810,5 @@ mod surrealkv_versioned {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run, version, backup_version);
+	include_tests!(new_db => api, basic, serialisation, live, backup, session_isolation, run, version, backup_version);
 }

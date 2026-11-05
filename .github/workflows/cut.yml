@@ -1,0 +1,118 @@
+# Cut a release line
+#
+# Source-mutating counterpart to the promote-only release workflow. A cut never
+# builds or promotes anything: it moves source (and lets the rolling build
+# produce the artifacts), then you promote the resulting commit with release.yml.
+#
+#   * minor: create `releases/X.Y` from main at `X.Y.0-beta.1` and open a PR
+#     moving main to `X.(Y+1).0-nightly`. main moves on immediately because the
+#     X.Y line is branched at the end of its development cycle (beta).
+#   * major: create `releases/(X+1).0` from main at `(X+1).0.0-alpha.1` and open a
+#     PR moving main to `(X+1).0.0-nightly`. The new major is branched at the
+#     start of its cycle (alpha), so main stays on `(X+1).0.0-nightly` and only
+#     advances to `(X+1).1.0-nightly` once `(X+1).0.0` ships stable (release.yml).
+#
+# See doc/RELEASING.md for the full model.
+
+name: Cut release
+
+run-name: "${{ !inputs.execute && '[dry-run] ' || '' }}Cut ${{ inputs.cut-type }} release"
+
+on:
+  workflow_dispatch:
+    inputs:
+      cut-type:
+        required: true
+        type: choice
+        description: "What to cut"
+        options:
+          - minor
+          - major
+      git-sha:
+        required: false
+        type: string
+        description: "Commit on main to cut from (defaults to main HEAD)"
+      execute:
+        required: false
+        type: boolean
+        default: false
+        description: "Create the branch/PR (false performs a dry-run)"
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  cut:
+    name: Cut ${{ inputs.cut-type }} release
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
+    runs-on: ubuntu-latest
+    # An executing cut binds release-deploy, the environment that holds the
+    # release-automation App's key. A dry-run binds nothing.
+    environment: ${{ inputs.execute && 'release-deploy' || '' }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      # The release-automation App's token checks out, pushes the release
+      # branch (the App bypasses the release-branch ruleset) and the PR branch,
+      # and opens the PR, so its checks run. An executing cut requires it; a
+      # dry-run uses GITHUB_TOKEN and pushes nothing.
+      - name: Generate a release-automation token
+        id: app-token
+        if: inputs.execute
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git-sha || 'main' }}
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      # CI tooling (scripts) comes from the WORKFLOW ref - the branch/tag this
+      # run was dispatched from - not from the (possibly older) commit being
+      # cut, so cut logic never needs to exist on that commit. Placed after the
+      # root checkout so the default clean cannot remove it. setup-environment
+      # below deliberately stays workspace-resolved: the toolchain must match
+      # the source being cut.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # A cut must come from main: the new version (and, for minor cuts, the new
+      # release branch) is derived from main's development version.
+      - name: Verify the commit is on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main >/dev/null 2>&1 || true
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$(git rev-parse HEAD) is not on main; cuts can only be made from main."
+            exit 1
+          fi
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Cut release
+        id: cut
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+        run: .ci/.github/scripts/cut-release.sh "${{ inputs.cut-type }}" "${{ inputs.execute }}"
+

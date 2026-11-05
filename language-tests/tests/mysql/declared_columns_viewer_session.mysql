@@ -1,0 +1,15 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_declared_columns_perms.surql"]
+auth = { level = "viewer" }
+
+[test]
+reason = "A system user that may view the definitions of tables is told the columns a table declares: a name it does not have is an error"
+
+[test.results]
+request-error = "MySQL SELECT lowering error: lowering error: column \"nosuch\" does not exist"
+*/
+
+SELECT name, nosuch FROM declcol_acct;

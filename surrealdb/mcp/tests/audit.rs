@@ -16,6 +16,8 @@
 #![cfg(feature = "server-http")]
 #![allow(clippy::unwrap_used)]
 #![recursion_limit = "256"]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 use std::sync::Arc;
 
@@ -105,7 +107,7 @@ fn owner_session() -> Session {
 /// A second authenticated session with a *different* identity than
 /// `owner_session()`. Used to drive the credential-mismatch path.
 fn db_user_session() -> Session {
-	use surrealdb_core::iam::{Auth, Role};
+	use surrealdb_iam::{Auth, Role};
 	Session {
 		au: std::sync::Arc::new(Auth::for_db(Role::Editor, "test", "test")),
 		ns: Some("test".into()),

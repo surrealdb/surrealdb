@@ -102,14 +102,14 @@ impl FromFlatbuffers for Object {
 		let mut map = BTreeMap::new();
 		let items = input.items().ok_or_else(|| anyhow::anyhow!("Missing items in Object"))?;
 		if items.is_empty() {
-			return Ok(Object(map));
+			return Ok(Object::new());
 		}
 		for entry in items {
 			let key = entry.key().context("Missing key in Object entry")?.to_string();
 			let value = entry.value().context("Missing value in Object entry")?;
 			map.insert(key, Value::from_fb(value)?);
 		}
-		Ok(Object(map))
+		Ok(Object::from(map))
 	}
 }
 

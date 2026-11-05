@@ -11,21 +11,26 @@ reason = "DEFINE FIELD duplicate-detection compares the resolved field name (aft
 [[test.results]]
 value = "NONE"
 
-# 1: DEFINE FIELD data[$idx] ON TABLE thing TYPE number
+# 1: DEFINE FIELD data ON TABLE thing TYPE array — the array the index is in
 [[test.results]]
 value = "NONE"
 
-# 2: DEFINE FIELD data[$idx] ON TABLE thing TYPE string — must reject (not silently overwrite)
+# 2: DEFINE FIELD data[$idx] ON TABLE thing TYPE number
+[[test.results]]
+value = "NONE"
+
+# 3: DEFINE FIELD data[$idx] ON TABLE thing TYPE string — must reject (not silently overwrite)
 [[test.results]]
 match = "$error = /already exists/"
 error = true
 
-# 3: INFO FOR TABLE thing — confirms the original TYPE number is intact
+# 4: INFO FOR TABLE thing — confirms the original TYPE number is intact
 [[test.results]]
 match = "$result.fields['data[0]'] = /DEFINE FIELD data\\[0\\].*TYPE number/"
 */
 
 LET $idx = 0;
+DEFINE FIELD data ON TABLE thing TYPE array;
 DEFINE FIELD data[$idx] ON TABLE thing TYPE number;
 DEFINE FIELD data[$idx] ON TABLE thing TYPE string;
 INFO FOR TABLE thing;

@@ -1,0 +1,42 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_unqualified_join_columns_links.surql"]
+
+[test]
+reason = "A column named without its table that is declared as a link to one table is a link wherever the table that holds it is in the join, so it is compared with a key, joined with the id of the table it links to and grouped by as it is when it is named with its table."
+
+[[test.results]]
+value = "[{ name: 'Eve', title: 'p1' }, { name: 'Eve', title: 'p2' }]"
+
+[[test.results]]
+value = "[{ name: 'Sam', title: 'p3' }]"
+
+[[test.results]]
+value = "[{ name: 'Eve', title: 'p1' }, { name: 'Eve', title: 'p2' }, { name: 'Sam', title: 'p3' }]"
+
+[[test.results]]
+value = "[{ name: 'Eve', title: 'p1' }, { name: 'Eve', title: 'p2' }]"
+
+[[test.results]]
+value = "[{ name: 'Ann', title: NONE }, { name: 'Eve', title: 'p1' }, { name: 'Eve', title: 'p2' }, { name: 'Sam', title: 'p3' }]"
+
+[[test.results]]
+value = "[{ count: 0, name: 'Ann' }, { count: 2, name: 'Eve' }, { count: 1, name: 'Sam' }]"
+
+[[test.results]]
+value = "[{ owner: ujc_user:2, title: 'p3' }]"
+
+[[test.results]]
+value = "[{ title: 'p3' }]"
+*/
+
+SELECT name, title FROM ujc_user JOIN ujc_post ON ujc_user.id = ujc_post.owner WHERE owner = 1 ORDER BY title;
+SELECT name, title FROM ujc_user JOIN ujc_post ON ujc_user.id = ujc_post.owner WHERE owner = 2;
+SELECT name, title FROM ujc_user JOIN ujc_post ON ujc_user.id = owner ORDER BY title;
+SELECT name, title FROM ujc_user JOIN ujc_post ON owner = ujc_user.id WHERE owner IN (1, 3) ORDER BY title;
+SELECT name, title FROM ujc_user LEFT JOIN ujc_post ON ujc_user.id = owner ORDER BY name, title;
+SELECT name, count(title) FROM ujc_user LEFT JOIN ujc_post ON ujc_user.id = owner GROUP BY name ORDER BY name;
+SELECT title, owner FROM ujc_user JOIN ujc_post ON ujc_user.id = ujc_post.owner WHERE name = 'Sam';
+SELECT title FROM ujc_user JOIN ujc_post ON ujc_user.id = ujc_post.owner WHERE owner > 1;

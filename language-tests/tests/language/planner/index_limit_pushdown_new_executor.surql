@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test limit pushdown to IndexScan when index covers ORDER BY"
@@ -9,23 +8,27 @@ reason = "Test limit pushdown to IndexScan when index covers ORDER BY"
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_number, access: , direction: Forward, limit: 3]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [table: record, index: idx_number, direction: Forward, limit: 3]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_number, access: >15, direction: Forward, limit: 2]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [table: record, index: idx_number, access: >15, direction: Forward, limit: 2]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: record, direction: Forward, limit: 3]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_number, access: , direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [table: record, index: idx_number, direction: Forward]
 ''''
 
 [[test.results]]
@@ -36,8 +39,10 @@ value = "[{ id: record:5, number: 20 }, { id: record:3, number: 30 }, { id: reco
 
 */
 
--- Setup: create table with an index on 'number'
+-- Setup: create table with an index on 'number', declared a scalar kind so
+-- the index holds one entry per record and a scan can stop at the limit
 {
+    DEFINE FIELD number ON TABLE record TYPE int;
     DEFINE INDEX idx_number ON TABLE record COLUMNS number;
     CREATE record:1 SET number = 50;
     CREATE record:2 SET number = 10;
@@ -55,8 +60,8 @@ EXPLAIN SELECT * FROM record ORDER BY number ASC LIMIT 3;
 -- Should: IndexScan with limit pushed
 EXPLAIN SELECT * FROM record WHERE number > 15 LIMIT 2;
 
--- Case 3: ORDER BY non-indexed field with LIMIT
--- Should: TableScan + SortTopKByKey (no limit push to scan)
+-- Case 3: ORDER BY id with LIMIT
+-- Should: TableScan in id order, no Sort, LIMIT above the scan
 EXPLAIN SELECT * FROM record ORDER BY id LIMIT 3;
 
 -- Case 4: ORDER BY indexed field, no LIMIT

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 namespace = "test"
 database = "test"
 
@@ -20,8 +19,9 @@ value = "NONE"
 value = "[{ id: test:1, num: 123 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: field_num, access: = 123, direction: Forward] {rows: 1}
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 1}
+    IndexScan [ctx: Db] [table: test, index: field_num, access: = 123, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 

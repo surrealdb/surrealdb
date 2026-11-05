@@ -1,0 +1,244 @@
+//! Recursion limit and pathological input tests: deeply nested expressions
+//! must hit the configurable depth limit (never the machine stack), linear
+//! constructs the limits do not charge must be parsed without recursion, and
+//! adversarial inputs must fail fast.
+//!
+//! Operator chains (binary spines, `NOT`/sign prefixes, `IS` postfixes) and
+//! property-access chains are bounded by `expr_recursion_limit` (default
+//! 128, matching the SurrealQL parser), because they lower one-to-one onto `LogicalExpr`
+//! nests whose downstream recursive walks (drop, compilation, planning) must
+//! stay within the machine stack. Label chains are *not* charged: labels
+//! never reach `LogicalExpr`, so their ASTs can be arbitrarily deep, and the
+//! manual iterative [`Drop`] of `LabelExpr` must release them without
+//! overflowing the machine stack. The `*_drop_safe`/`*_is_iterative` tests
+//! below use depths far beyond what recursive drop glue survives on a 2MiB
+//! test thread stack (which overflows somewhere between 20k and 40k levels).
+//!
+//! The 4GB input length guard in [`crate::gql::parse_with_settings`] is
+//! not tested here: exercising it requires allocating a `u32::MAX`-byte
+//! string.
+
+use rstest::rstest;
+
+use super::{parse, parse_err};
+use crate::gql::{GqlParserSettings, parse_with_settings};
+
+/// Each nesting construct counts one level against the default
+/// `object_recursion_limit` of 100, plus one level for the innermost
+/// primary: 99 levels of nesting parse, 100 do not.
+#[rstest]
+#[case::parens_within("(", "1", ")", 99, true)]
+#[case::parens_beyond("(", "1", ")", 100, false)]
+#[case::lists_within("[", "1", "]", 99, true)]
+#[case::lists_beyond("[", "1", "]", 100, false)]
+#[case::maps_within("{a: ", "1", "}", 99, true)]
+#[case::maps_beyond("{a: ", "1", "}", 100, false)]
+#[case::calls_within("f(", "1", ")", 99, true)]
+#[case::calls_beyond("f(", "1", ")", 100, false)]
+fn nesting_depth_limit(
+	#[case] open: &str,
+	#[case] inner: &str,
+	#[case] close: &str,
+	#[case] depth: usize,
+	#[case] ok: bool,
+) {
+	let source = format!("RETURN {}{}{}", open.repeat(depth), inner, close.repeat(depth));
+	if ok {
+		parse(&source);
+	} else {
+		let error = parse_err(&source);
+		assert!(error.contains("Exceeded query expression nesting depth limit"), "{error}");
+	}
+}
+
+#[test]
+fn label_expression_parens_count_against_the_limit() {
+	let source = format!("MATCH (a:{}L{}) RETURN 1", "(".repeat(150), ")".repeat(150));
+	let error = parse_err(&source);
+	assert!(error.contains("Exceeded query expression nesting depth limit"), "{error}");
+}
+
+#[rstest]
+#[case::at_limit("RETURN ((((1))))", true)]
+#[case::beyond_limit("RETURN (((((1)))))", false)]
+fn custom_recursion_limit(#[case] source: &str, #[case] ok: bool) {
+	// With a limit of 5: four parens plus the innermost primary consume
+	// exactly the budget; a fifth paren exceeds it.
+	let settings = GqlParserSettings {
+		object_recursion_limit: 5,
+		..Default::default()
+	};
+	let result = parse_with_settings(source, settings);
+	if ok {
+		result.expect("should parse within the limit");
+	} else {
+		let error = result.expect_err("should exceed the limit");
+		let rendered = format!("{:?}", error.render_on(source));
+		assert!(rendered.contains("Exceeded query expression nesting depth limit"), "{rendered}");
+	}
+}
+
+#[test]
+fn pathological_open_parens_fail_fast() {
+	// 100k unclosed parens: the depth limit trips after 100 of them; the
+	// parser must error without scanning further or overflowing the stack.
+	let source = format!("RETURN {}", "(".repeat(100_000));
+	let error = parse_err(&source);
+	assert!(error.contains("Exceeded query expression nesting depth limit"), "{error}");
+}
+
+#[test]
+fn pathological_open_brackets_fail_fast() {
+	let source = format!("RETURN {}", "[".repeat(100_000));
+	let error = parse_err(&source);
+	assert!(error.contains("Exceeded query expression nesting depth limit"), "{error}");
+}
+
+/// Flat operator spines and prefix chains are bounded by the expression
+/// depth budget: parsing must fail fast with a clean error (never build the
+/// tree, never touch the machine stack), exactly like the SurrealQL parser at
+/// its expression-depth limit. 200k-term inputs double as fail-fast checks.
+#[rstest]
+#[case::or_spine(format!("RETURN a{}", " OR a".repeat(200_000)))]
+#[case::and_spine(format!("RETURN a{}", " AND a".repeat(200_000)))]
+#[case::add_spine(format!("RETURN 1{}", " + 1".repeat(200_000)))]
+#[case::mul_spine(format!("RETURN 1{}", " * 1".repeat(200_000)))]
+#[case::concat_spine(format!("RETURN a{}", " || a".repeat(200_000)))]
+#[case::is_chain(format!("RETURN a{}", " IS NOT FALSE".repeat(200_000)))]
+#[case::not_chain(format!("RETURN {}1", "NOT ".repeat(200_000)))]
+// The minus signs need separating whitespace: `--` introduces a line comment.
+#[case::unary_minus_chain(format!("RETURN {}1", "- ".repeat(200_000)))]
+fn deep_operator_chains_hit_the_expression_depth_limit(#[case] source: String) {
+	let error = parse_err(&source);
+	assert!(error.contains("Exceeded expression recursion depth limit"), "{error}");
+}
+
+/// The budget is charged per operator with the default of 128: one level for
+/// the expression entry plus one per spine operator, so 126 operators fit
+/// and the cap stays comfortably above any realistic query.
+#[test]
+fn operator_spines_within_the_default_budget_parse() {
+	let source = format!("RETURN 1{}", " + 1".repeat(126));
+	parse(&source);
+}
+
+/// Sibling expressions must not be charged for one another: the budget is
+/// restored when each expression entry returns, so many parallel spines each
+/// near the limit all parse.
+#[test]
+fn sibling_expressions_do_not_accumulate_depth() {
+	let element = format!("1{}", " + 1".repeat(120));
+	let source = format!("RETURN [{}]", vec![element; 16].join(", "));
+	parse(&source);
+}
+
+/// Every operator family charges the same budget; with a tiny custom limit
+/// the boundary is exact (one entry level + N operators).
+#[rstest]
+#[case::add_at_limit("RETURN 1 + 1 + 1 + 1 + 1", true)]
+#[case::add_beyond_limit("RETURN 1 + 1 + 1 + 1 + 1 + 1", false)]
+#[case::or_beyond_limit("RETURN a OR a OR a OR a OR a OR a", false)]
+#[case::not_beyond_limit("RETURN NOT NOT NOT NOT NOT 1", false)]
+#[case::is_beyond_limit("RETURN a IS TRUE IS TRUE IS TRUE IS TRUE IS TRUE", false)]
+fn custom_expression_depth_limit(#[case] source: &str, #[case] ok: bool) {
+	let settings = GqlParserSettings {
+		expr_recursion_limit: 5,
+		..Default::default()
+	};
+	let result = parse_with_settings(source, settings);
+	if ok {
+		result.expect("should parse within the limit");
+	} else {
+		let error = result.expect_err("should exceed the limit");
+		let rendered = format!("{:?}", error.render_on(source));
+		assert!(rendered.contains("Exceeded expression recursion depth limit"), "{rendered}");
+	}
+}
+
+#[test]
+fn long_property_chain_hits_the_expression_depth_limit() {
+	// A property chain lowers to one `Access` node per property, so it is
+	// charged like an operator chain and a pathological run is rejected
+	// before any tree is built.
+	let source = format!("RETURN a{}", ".b".repeat(200_000));
+	let error = parse_err(&source);
+	assert!(error.contains("Exceeded expression recursion depth limit"), "{error}");
+}
+
+#[test]
+fn property_chains_within_the_budget_parse() {
+	let source = format!("RETURN a{} IS NOT NULL", ".b".repeat(100));
+	parse(&source);
+}
+
+#[test]
+fn deep_label_negation_chain_is_parse_and_drop_safe() {
+	let source = format!("MATCH (a:{}L) RETURN 1", "!".repeat(200_000));
+	parse(&source);
+}
+
+#[test]
+fn long_label_operator_chain_is_parse_and_drop_safe() {
+	// `&`/`|` label chains are parsed iteratively but the AST is left-deep.
+	let source = format!("MATCH (a:L{}) RETURN 1", "&L|L".repeat(100_000));
+	parse(&source);
+}
+
+#[test]
+fn long_function_argument_and_list_trees_are_drop_safe() {
+	// Wide-and-deep mixes: every list element is itself a chain near the
+	// budget, and siblings are not charged for one another.
+	let element = format!("a{}", ".b".repeat(100));
+	let source = format!("RETURN [{}]", vec![element; 20].join(", "));
+	parse(&source);
+	// Operator chains inside argument positions are charged like any other
+	// expression entry.
+	let source = format!("RETURN f({}1)", "NOT ".repeat(200_000));
+	let error = parse_err(&source);
+	assert!(error.contains("Exceeded expression recursion depth limit"), "{error}");
+}
+
+#[test]
+fn long_comment_runs_are_iterative() {
+	// Consecutive hidden tokens are skipped iteratively in the lexer.
+	let source = format!("{}RETURN 1", "//x\n".repeat(100_000));
+	parse(&source);
+	let source = format!("{}RETURN 1", "--x\n".repeat(100_000));
+	parse(&source);
+}
+
+/// Parsing and lowering recurse on the call stack, so the default budgets are
+/// the only thing between nested query text and a stack overflow. Each nesting
+/// construct, nested far past its budget, must be rejected with the budget's
+/// error on a 2 MiB thread — the conservative worker-thread size — in an
+/// unoptimised build, which is where frames are largest.
+#[test]
+fn every_nesting_construct_is_rejected_within_a_small_stack() {
+	std::thread::Builder::new()
+		.stack_size(2 * 1024 * 1024)
+		.spawn(|| {
+			const DEPTH: usize = 10_000;
+			let cases = [
+				("RETURN ", "(", "1", ")"),
+				("RETURN ", "[", "1", "]"),
+				("RETURN ", "{a: ", "1", "}"),
+				("RETURN ", "f(", "1", ")"),
+				("RETURN ", "NOT ", "true", ""),
+				("RETURN ", "- ", "1", ""),
+				("RETURN ", "1 + ", "1", ""),
+				("RETURN a", ".p", "", ""),
+				("MATCH (a:", "(", "L", ")) RETURN 1"),
+				("MATCH (a) ", "OPTIONAL { ", "MATCH (b)", " }"),
+				("MATCH (a) WHERE ", "(", "a.x", ") RETURN a"),
+			];
+			for (prefix, open, inner, close) in cases {
+				let source =
+					format!("{prefix}{}{inner}{}", open.repeat(DEPTH), close.repeat(DEPTH));
+				let error = parse_err(&source);
+				assert!(error.contains("depth limit"), "{prefix}{open}…: {error}");
+			}
+		})
+		.expect("spawning the small-stack thread")
+		.join()
+		.expect("small-stack thread panicked");
+}

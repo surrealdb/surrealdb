@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use crate::conn::Command;
+use crate::conn::ctx;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::auth::Token;
 use crate::types::{SurrealValue, Value};
@@ -42,7 +42,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
-			router.execute_unit(self.client.session_id, Command::Invalidate).await
+			router.engine.invalidate(ctx(self.client.session_id)).await
 		})
 	}
 }
@@ -94,12 +94,11 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			router
-				.execute_unit(
-					self.client.session_id,
-					Command::Revoke {
-						token: SurrealValue::from_value(self.token)
-							.map_err(|e| crate::Error::internal(e.to_string()))?,
-					},
+				.engine
+				.revoke(
+					ctx(self.client.session_id),
+					SurrealValue::from_value(self.token)
+						.map_err(|e| crate::Error::internal(e.to_string()))?,
 				)
 				.await
 		})

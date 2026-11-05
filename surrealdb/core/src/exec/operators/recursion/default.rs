@@ -31,19 +31,18 @@
 //!
 //! 1. **Initial:** `current = planet:earth`, `depth = 0`.
 //!
-//! 2. **Iteration 1:** `next = evaluate_physical_path(current, path)` → e.g. `[country:us,
-//!    country:canada]`.
+//! 2. **Iteration 1:** `next = step(current, path)` → e.g. `[country:us, country:canada]`.
 //!    - `depth` becomes 1.
 //!    - `clean_iteration(next)` leaves an array (not a dead end).
 //!    - Not final, not a cycle, and contains valid RecordIds, so we do not return.
 //!    - `current = next` → `current` is now the countries array.
 //!
-//! 3. **Iteration 2:** `next = evaluate_physical_path(current, path)` → e.g. `[state:california,
-//!    state:texas, province:ontario, province:bc]`.
+//! 3. **Iteration 2:** `next = step(current, path)` → e.g. `[state:california, state:texas,
+//!    province:ontario, province:bc]`.
 //!    - `depth` becomes 2.
 //!    - Not final, not equal to current; `current = next` (states/provinces).
 //!
-//! 4. **Iteration 3:** `next = evaluate_physical_path(current, path)` → e.g. array of cities.
+//! 4. **Iteration 3:** `next = step(current, path)` → e.g. array of cities.
 //!    - `depth` becomes 3.
 //!    - Not final; `current = next` (cities).
 //!
@@ -55,14 +54,11 @@
 //! detect a cycle (`next == current`), we exit early: we return the previous `current` if
 //! `depth > min_depth`, otherwise the final value from the dead end.
 
-use std::sync::Arc;
-
 use surrealdb_types::ToSql;
 
-use super::common::is_recursion_target;
+use super::common::{DepthBody, RecursionBounds, is_recursion_target};
 use crate::exec::FlowResult;
-use crate::exec::parts::{clean_iteration, evaluate_physical_path, get_final, is_final};
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::parts::{clean_iteration, get_final, is_final};
 use crate::val::Value;
 
 /// Default recursion: keep following the path until bounds or dead end.
@@ -71,20 +67,18 @@ use crate::val::Value;
 /// or None if min_depth is not reached before termination.
 ///
 /// Fully iterative -- uses a while loop with no recursive calls.
-pub(crate) async fn evaluate_recurse_default(
+pub(crate) async fn evaluate_recurse_default_with(
 	start: &Value,
-	path: &[Arc<dyn PhysicalExpr>],
-	min_depth: u32,
-	max_depth: u32,
-	user_specified_max: bool,
-	ctx: EvalContext<'_>,
+	body: &impl DepthBody,
+	bounds: RecursionBounds,
 ) -> FlowResult<Value> {
-	let system_limit = ctx.exec_ctx.ctx().config.idiom_recursion_limit;
+	let min_depth = bounds.min;
+	let max_depth = bounds.cap();
 	let mut current = start.clone();
 	let mut depth = 0u32;
 
 	while depth < max_depth {
-		let next = evaluate_physical_path(&current, path, ctx.with_value(&current)).await?;
+		let next = body.eval(&current).await?;
 
 		depth += 1;
 
@@ -107,7 +101,7 @@ pub(crate) async fn evaluate_recurse_default(
 		// Non-RecordId values during recursion are an error --
 		// recursion is intended purely for record graph traversal.
 		if !is_recursion_target(&next) {
-			return Err(crate::err::Error::InvalidRecursionTarget {
+			return Err(crate::exec::Error::InvalidRecursionTarget {
 				value: next.to_sql(),
 			}
 			.into());
@@ -117,9 +111,9 @@ pub(crate) async fn evaluate_recurse_default(
 	}
 
 	// Exhausted depth limit without resolving
-	if !user_specified_max && depth >= system_limit {
-		return Err(crate::err::Error::IdiomRecursionLimitExceeded {
-			limit: system_limit,
+	if bounds.errors_on_limit() && depth >= bounds.system_limit {
+		return Err(crate::exec::Error::IdiomRecursionLimitExceeded {
+			limit: bounds.system_limit,
 		}
 		.into());
 	}

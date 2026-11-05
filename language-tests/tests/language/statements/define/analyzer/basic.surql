@@ -3,6 +3,7 @@
 # Extra timeout due to file reading.
 timeout = 8000
 context-timeout = 8000
+remote-skip = "uses mapper() with a relative file path resolved against the process working directory, which differs between the embedded harness and the remote server"
 
 [test]
 
@@ -22,7 +23,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: { autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE, EDGENGRAM(2,10)', english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE, SNOWBALL(ENGLISH)', englishLemmatizer: "DEFINE ANALYZER englishLemmatizer TOKENIZERS BLANK,CLASS FILTERS MAPPER('../tests/data/lemmatization-en.txt')", htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS' }, apis: {  }, buckets: {  }, configs: {  }, functions: { stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, '') } PERMISSIONS FULL" }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: { autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE, EDGENGRAM(2,10)', english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE, SNOWBALL(ENGLISH)', englishLemmatizer: "DEFINE ANALYZER englishLemmatizer TOKENIZERS BLANK,CLASS FILTERS MAPPER('../tests/data/lemmatization-en.txt')", htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS' }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: { stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, '') } PERMISSIONS FULL" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: {  }, users: {  } }"""
 
 */
 DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);

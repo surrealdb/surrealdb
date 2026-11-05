@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -13,14 +12,18 @@ value = "NONE"
 [[test.results]]
 value = "{ events: {  }, fields: {  }, indexes: { idx: 'DEFINE INDEX idx ON t COUNT' }, lives: {  }, tables: {  } }"
 
+# `building.queued` and `building.active` follow the background compaction drain,
+# which a server runs and the in-process harness does not, so they are not pinned.
 [[test.results]]
-value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 0, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
 value = "'OK'"
 
 [[test.results]]
-value = ''''CountScan [ctx: Db] [source: t] {rows: 1}
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 1}
+    CountScan [ctx: Db] [source: t] {rows: 1}
 
 Total rows: 1''''
 
@@ -37,7 +40,7 @@ value = "[{ count: 3 }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+match = "$result.building.{ armed_shards, compacting, initial, pending, status, updated } == { armed_shards: 0, compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
 value = "[{ count: 3 }]"

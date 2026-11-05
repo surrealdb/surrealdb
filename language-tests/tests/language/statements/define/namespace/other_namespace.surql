@@ -13,13 +13,13 @@ value = "NONE"
 value = "{ database: NONE, namespace: 'foo' }"
 
 [[test.results]]
-value = "{ accesses: {  }, databases: {  }, users: {  } }"
+value = "{ accesses: {  }, buckets: {  }, databases: {  }, users: {  } }"
 
 [[test.results]]
 value = "{ database: NONE, namespace: 'TEST' }"
 
 [[test.results]]
-value = "{ accesses: {  }, databases: {  }, users: {  } }"
+value = "{ accesses: {  }, buckets: {  }, databases: {  }, users: {  } }"
 */
 
 

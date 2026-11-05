@@ -1,20 +1,23 @@
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
-use surrealdb_core::dbs::Capabilities;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_types::{SurrealValue, Variables};
 
-use super::BenchMarkRun;
+use super::{Baseline, BenchMarkRun, baseline_meta};
 use crate::cli::Backend;
 use crate::cmd::bench::stats::MeasurementData;
 use crate::cmd::bench::store::BenchDataStore;
 
 pub struct LocalStore {
-	ds: Datastore,
+	ds: Arc<Datastore>,
 }
 
 impl LocalStore {
 	pub async fn new(path: &str) -> Result<Self> {
 		let ds = Datastore::builder()
+			.without_maintenance_tasks()
 			.with_capabilities(Capabilities::all())
 			.with_auth(false)
 			.build_with_path(&format!("surrealkv://{path}"))
@@ -60,9 +63,11 @@ impl BenchDataStore for LocalStore {
 		"#;
 
 		let mut vars = Variables::new();
-		vars.insert("value", run.measurement.into_value());
-		vars.insert("path", run.path.into_value());
-		vars.insert("backend", run.backend.into_value());
+		let path = run.path.clone();
+		let backend = run.backend;
+		vars.insert("value", run.into_content_value());
+		vars.insert("path", path.into_value());
+		vars.insert("backend", backend.into_value());
 		let session = surrealdb_core::dbs::Session::owner().with_ns("bench").with_db("bench");
 		self.ds
 			.execute(add_query, &session, Some(vars))
@@ -82,13 +87,15 @@ impl BenchDataStore for LocalStore {
 		&mut self,
 		path: &str,
 		backend: Backend,
-	) -> Result<Option<MeasurementData>> {
+		transport: &str,
+	) -> Result<Option<Baseline>> {
 		let add_query = r#"
-			fn::last_measurement($path,$backend)
+			fn::last_measurement($path,$backend,$transport)
 		"#;
 		let mut vars = Variables::new();
 		vars.insert("path", path.into_value());
 		vars.insert("backend", backend.into_value());
+		vars.insert("transport", transport.into_value());
 		let session = surrealdb_core::dbs::Session::owner().with_ns("bench").with_db("bench");
 		let mut res = self
 			.ds
@@ -100,8 +107,16 @@ impl BenchDataStore for LocalStore {
 
 		let res = res.pop().unwrap().result.context("Could not fetch last measurement")?;
 
-		Option::<MeasurementData>::from_value(res)
-			.context("Could not convert data to the right type")
+		let (commit, datetime, rows) = baseline_meta(&res);
+		let measurement = Option::<MeasurementData>::from_value(res)
+			.context("Could not convert data to the right type")?;
+
+		Ok(measurement.map(|measurement| Baseline {
+			measurement,
+			commit,
+			datetime,
+			rows,
+		}))
 	}
 
 	async fn close(&mut self) -> Result<()> {

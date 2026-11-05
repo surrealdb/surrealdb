@@ -1,0 +1,36 @@
+### SELECT * FROM type::table(rand::enum('open')) ORDER BY id
+{ id: open:1, label: 'row 1', link: mine:2, links: [open:1, locked:1, mine:2], n: 1, owner: user:bob, secret: 's1' }
+{ id: open:2, label: 'row 2', link: mine:3, links: [open:1, locked:1, mine:2], n: 2, owner: user:alice, secret: 's2' }
+{ id: open:3, label: 'row 3', link: mine:1, links: [open:1, locked:1, mine:2], n: 3, owner: user:bob, secret: 's3' }
+{ id: open:4, label: 'row 4', link: mine:2, links: [open:1, locked:1, mine:2], n: 4, owner: user:alice, secret: 's4' }
+{ id: open:5, label: 'row 5', link: mine:3, links: [open:1, locked:1, mine:2], n: 5, owner: user:bob, secret: 's5' }
+{ id: open:6, label: 'row 6', link: mine:1, links: [open:1, locked:1, mine:2], n: 6, owner: user:alice, secret: 's6' }
+### SELECT * FROM type::table(rand::enum('extra_7')) ORDER BY id
+{ id: extra_7:1, label: 'extra 7', n: 7 }
+### SELECT * FROM open ORDER BY id FETCH link
+{ id: open:1, label: 'row 1', link: { id: mine:2, label: 'row 2', link: mine:3, links: [open:1, locked:1, mine:2], n: 2, owner: user:alice, secret: 's2' }, links: [open:1, locked:1, mine:2], n: 1, owner: user:bob, secret: 's1' }
+{ id: open:2, label: 'row 2', link: { id: mine:3, label: 'row 3', link: mine:1, links: [open:1, locked:1, mine:2], n: 3, owner: user:bob, secret: 's3' }, links: [open:1, locked:1, mine:2], n: 2, owner: user:alice, secret: 's2' }
+{ id: open:3, label: 'row 3', link: { id: mine:1, label: 'row 1', link: mine:2, links: [open:1, locked:1, mine:2], n: 1, owner: user:bob, secret: 's1' }, links: [open:1, locked:1, mine:2], n: 3, owner: user:bob, secret: 's3' }
+{ id: open:4, label: 'row 4', link: { id: mine:2, label: 'row 2', link: mine:3, links: [open:1, locked:1, mine:2], n: 2, owner: user:alice, secret: 's2' }, links: [open:1, locked:1, mine:2], n: 4, owner: user:alice, secret: 's4' }
+{ id: open:5, label: 'row 5', link: { id: mine:3, label: 'row 3', link: mine:1, links: [open:1, locked:1, mine:2], n: 3, owner: user:bob, secret: 's3' }, links: [open:1, locked:1, mine:2], n: 5, owner: user:bob, secret: 's5' }
+{ id: open:6, label: 'row 6', link: { id: mine:1, label: 'row 1', link: mine:2, links: [open:1, locked:1, mine:2], n: 1, owner: user:bob, secret: 's1' }, links: [open:1, locked:1, mine:2], n: 6, owner: user:alice, secret: 's6' }
+### SELECT id, label FROM [open:1, mine:2] ORDER BY id
+{ id: mine:2, label: 'row 2' }
+{ id: open:1, label: 'row 1' }
+### UPDATE type::table('open') SET n = n + 1 RETURN AFTER
+{ id: open:1, label: 'row 2', link: mine:2, links: [open:1, locked:1, mine:2], n: 2, owner: user:bob, secret: 's1' }
+{ id: open:2, label: 'row 3', link: mine:3, links: [open:1, locked:1, mine:2], n: 3, owner: user:alice, secret: 's2' }
+{ id: open:3, label: 'row 4', link: mine:1, links: [open:1, locked:1, mine:2], n: 4, owner: user:bob, secret: 's3' }
+{ id: open:4, label: 'row 5', link: mine:2, links: [open:1, locked:1, mine:2], n: 5, owner: user:alice, secret: 's4' }
+{ id: open:5, label: 'row 6', link: mine:3, links: [open:1, locked:1, mine:2], n: 6, owner: user:bob, secret: 's5' }
+{ id: open:6, label: 'row 7', link: mine:1, links: [open:1, locked:1, mine:2], n: 7, owner: user:alice, secret: 's6' }
+### UPDATE type::table('extra_7') SET n = n + 1 RETURN AFTER
+{ id: extra_7:1, label: 'extra 8', n: 8 }
+### DELETE open:1 RETURN BEFORE
+{ id: open:1, label: 'row 1', link: mine:2, links: [open:1, locked:1, mine:2], n: 1, owner: user:bob, secret: 's1' }
+### DELETE type::record('extra_7', 1) RETURN BEFORE
+{ id: extra_7:1, label: 'extra 7', n: 7 }
+### { DELETE open:1; RETURN SELECT in, out FROM likes ORDER BY in }
+[{ in: mine:1, out: extra_7:1 }]
+### { DELETE type::record('extra_7', 1); RETURN SELECT in, out FROM likes }
+[{ in: open:1, out: mine:2 }]

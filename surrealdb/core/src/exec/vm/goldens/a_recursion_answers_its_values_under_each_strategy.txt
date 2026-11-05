@@ -1,0 +1,143 @@
+### owner: RETURN person:1.{1..3}.friend
+person:1
+### owner: RETURN person:1.{3}.friend
+person:1
+### owner: RETURN person:1.{2}(.friend).name
+'c'
+### owner: RETURN person:1.{5..9}.friend
+person:1
+### owner: RETURN person:1.{..}.friend
+error: Exceeded the idiom recursion limit of 256.
+### owner: RETURN person:1.{1..2}(.friend.friend)
+person:2
+### owner: RETURN person:1.{1..3}(.n)
+error: Expected a record ID during recursive traversal, but found `1`
+### owner: RETURN person:9.{1..3}.friend
+NONE
+### owner: RETURN person:4.{1..3}.friend
+NONE
+### owner: SELECT VALUE id.{1..3}.friend FROM person ORDER BY id
+person:1
+person:2
+person:3
+### owner: SELECT VALUE id.{1..2}(.friend).name FROM person ORDER BY id
+'c'
+'a'
+'b'
+### owner: RETURN person:1.{1..3+collect}.friend
+[person:2, person:3, person:1]
+### owner: RETURN person:1.{1..3+collect+inclusive}.friend
+[person:1, person:2, person:3]
+### owner: RETURN person:1.{2..3+collect}.friend
+[person:3, person:1]
+### owner: RETURN person:1.{..+collect}.friend
+[person:2, person:3, person:1]
+### owner: RETURN person:1.{1..3+collect}(.n)
+error: Expected a record ID during recursive traversal, but found `1`
+### owner: RETURN person:4.{1..3+collect}.friend
+[]
+### owner: SELECT VALUE id.{1..3+collect}.friend FROM person ORDER BY id
+[person:2, person:3, person:1]
+[person:3, person:1, person:2]
+[person:1, person:2, person:3]
+### owner: RETURN person:1.{1..3+path}.friend
+[[person:2, person:3, person:1]]
+### owner: RETURN person:1.{1..3+path+inclusive}.friend
+[[person:1, person:2, person:3, person:1]]
+### owner: RETURN person:1.{2..3+path}.friend
+[[person:2, person:3, person:1]]
+### owner: RETURN person:1.{..+path}.friend
+error: Exceeded the idiom recursion limit of 256.
+### owner: RETURN person:1.{1..3+path}(.n)
+error: Expected a record ID during recursive traversal, but found `1`
+### owner: SELECT VALUE id.{1..3+path}.friend FROM person ORDER BY id
+[[person:2, person:3, person:1]]
+[[person:3, person:1, person:2]]
+[[person:1, person:2, person:3]]
+### owner: RETURN person:1.{..+shortest=person:3}.friend
+[person:2, person:3]
+### owner: RETURN person:1.{..+shortest=person:3+inclusive}.friend
+[person:1, person:2, person:3]
+### owner: RETURN person:1.{1..2+shortest=person:3}.friend
+[person:2, person:3]
+### owner: RETURN person:1.{1..3+shortest=person:77}.friend
+NONE
+### owner: RETURN person:1.{..+shortest=person:3}(.n)
+error: Expected a record ID during recursive traversal, but found `1`
+### owner: RETURN person:1.{1..2}(.friend.{1..2}(.friend))
+NONE
+### owner: RETURN person:1.{1..2+collect}(.friend.{1..2+collect}(.friend))
+[person:3, person:1, person:2]
+### owner: SELECT VALUE id.{1..2}(.friend.{1..2}(.friend)) FROM person ORDER BY id
+NONE
+NONE
+NONE
+### record user: RETURN person:1.{1..3}.friend
+person:2
+### record user: RETURN person:1.{3}.friend
+NONE
+### record user: RETURN person:1.{2}(.friend).name
+NONE
+### record user: RETURN person:1.{5..9}.friend
+NONE
+### record user: RETURN person:1.{..}.friend
+person:2
+### record user: RETURN person:1.{1..2}(.friend.friend)
+NONE
+### record user: RETURN person:1.{1..3}(.n)
+error: Expected a record ID during recursive traversal, but found `1`
+### record user: RETURN person:9.{1..3}.friend
+NONE
+### record user: RETURN person:4.{1..3}.friend
+NONE
+### record user: SELECT VALUE id.{1..3}.friend FROM person ORDER BY id
+person:2
+person:2
+### record user: SELECT VALUE id.{1..2}(.friend).name FROM person ORDER BY id
+NONE
+NONE
+### record user: RETURN person:1.{1..3+collect}.friend
+[person:2]
+### record user: RETURN person:1.{1..3+collect+inclusive}.friend
+[person:1, person:2]
+### record user: RETURN person:1.{2..3+collect}.friend
+[]
+### record user: RETURN person:1.{..+collect}.friend
+[person:2]
+### record user: RETURN person:1.{1..3+collect}(.n)
+error: Expected a record ID during recursive traversal, but found `1`
+### record user: RETURN person:4.{1..3+collect}.friend
+[]
+### record user: SELECT VALUE id.{1..3+collect}.friend FROM person ORDER BY id
+[person:2]
+[person:1, person:2]
+### record user: RETURN person:1.{1..3+path}.friend
+[[person:2]]
+### record user: RETURN person:1.{1..3+path+inclusive}.friend
+[[person:1, person:2]]
+### record user: RETURN person:1.{2..3+path}.friend
+[]
+### record user: RETURN person:1.{..+path}.friend
+[[person:2]]
+### record user: RETURN person:1.{1..3+path}(.n)
+error: Expected a record ID during recursive traversal, but found `1`
+### record user: SELECT VALUE id.{1..3+path}.friend FROM person ORDER BY id
+[[person:2]]
+[[person:1, person:2]]
+### record user: RETURN person:1.{..+shortest=person:3}.friend
+NONE
+### record user: RETURN person:1.{..+shortest=person:3+inclusive}.friend
+NONE
+### record user: RETURN person:1.{1..2+shortest=person:3}.friend
+NONE
+### record user: RETURN person:1.{1..3+shortest=person:77}.friend
+NONE
+### record user: RETURN person:1.{..+shortest=person:3}(.n)
+error: Expected a record ID during recursive traversal, but found `1`
+### record user: RETURN person:1.{1..2}(.friend.{1..2}(.friend))
+NONE
+### record user: RETURN person:1.{1..2+collect}(.friend.{1..2+collect}(.friend))
+[]
+### record user: SELECT VALUE id.{1..2}(.friend.{1..2}(.friend)) FROM person ORDER BY id
+NONE
+person:2

@@ -1,26 +1,27 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test NOINDEX hint and unsupported unary operator fallback (new executor)"
+reason = "Test NOINDEX hint and unsupported unary operator fallback"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 0}
-    TableScan [ctx: Db] [table: table, direction: Forward, predicate: ! param.subparam, pre_decode_filter: no (unsupported predicate)] {rows: 0}
+    Filter [ctx: Db] [predicate: !param.subparam] {rows: 0}
+        TableScan [ctx: Db] [table: table, direction: Forward] {rows: 0}
 
-Total rows: 0'"""
+Total rows: 0''''
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 0}
-    TableScan [ctx: Db] [table: table, direction: Forward, predicate: ! param.subparam, pre_decode_filter: no (unsupported predicate)] {rows: 0}
+    Filter [ctx: Db] [predicate: !param.subparam] {rows: 0}
+        TableScan [ctx: Db] [table: table, direction: Forward] {rows: 0}
 
-Total rows: 0'"""
+Total rows: 0''''
 */
 
 DEFINE TABLE table;

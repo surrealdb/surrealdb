@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "EXPLAIN still reports pre_decode_filter: yes for streaming-eligible CONTAINS / CONTAINSANY (LeafStreaming is invisible to EXPLAIN)."
+reason = "EXPLAIN shows streaming-eligible CONTAINS / CONTAINSANY as a filter over the table scan."
 
 [[test.results]]
 value = "{ id: psft:1, s: 'hello', tags: ['x', 'y'] }"
@@ -17,12 +16,14 @@ value = "[]"
 value = "[{ id: psft:1, s: 'hello', tags: ['x', 'y'] }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]
+value = '''
+"SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: psft, direction: Forward, predicate: s CONTAINS 'needle', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]
+value = '''
+"SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: psft, direction: Forward, predicate: tags CONTAINSANY ['a', 'b'], pre_decode_filter: yes]
 "'''
 

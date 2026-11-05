@@ -1,0 +1,16 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["gql/_schema.surql", "gql/_mutate_write_paths_import.surql"]
+
+[test]
+reason = "A SET on a table with an event, then a second SET stage on another binding: the second write follows a write that runs stored code, so it meets the table definitions as they stand when it runs."
+
+[[test.results]]
+value = "[{ age: 31, c: 'London', n: 'A', seen: true }]"
+*/
+
+MATCH (n:person WHERE n.name = 'A') SET n.age = 31
+MATCH (c:city) SET c.seen = true
+RETURN n.name AS n, n.age AS age, c.name AS c, c.seen AS seen

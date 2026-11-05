@@ -1,8 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
+requires = ["diskann"]
 reason = "Public issue #7337: DiskANN held pending record updates in a single unsharded `!dr` range, so KNN lookups scanned the whole pending set on every query while a write backlog existed. Pending records are now stored under a shard-prefixed `!dw` key and lookup merges per-shard. This exercises the end-to-end pending path: records are inserted (landing in the pending set across several shards) and a KNN query must still return the correct nearest neighbours before background compaction folds them into the graph."
 issue = 7337
 
