@@ -55,12 +55,12 @@ use crate::kvs::sequences::Sequences;
 #[cfg(test)]
 use crate::kvs::testing::{
 	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
-	maybe_inject_retryable_conflict,
+	maybe_inject_retryable_conflict, note_cleanup_batch_committed,
 };
 use crate::kvs::{
-	DatastoreError, Direction, INDEXING_BATCH_MAX_BYTES, INDEXING_PROBE_BATCH_SIZE,
-	INDEXING_SCAN_BATCH_SIZE, Transaction, TransactionFactory, TransactionType,
-	is_retryable_transaction_conflict, is_shutdown_error,
+	DatastoreError, Direction, INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE,
+	INDEXING_PROBE_BATCH_SIZE, INDEXING_SCAN_BATCH_SIZE, Transaction, TransactionFactory,
+	TransactionType, is_retryable_transaction_conflict, is_shutdown_error,
 };
 /// How long to wait before retrying a conflicting index-build cleanup.
 /// Matches the reservation-release pause it runs beside.
@@ -4122,21 +4122,30 @@ impl Building {
 		Ok(())
 	}
 
-	/// Delete what the index holds, a page of [`WIPE_PAGE_KEYS`] keys to a transaction and each
-	/// page a batch of a bounded pass's budget ([`Self::spend_batch`]), so the wipe that starts a
-	/// restarted scan leaves only its last step to one transaction: the index's compaction
-	/// generations, which that step reads and writes back one above.
+	/// Delete what the index holds, a page of keys to a transaction and each page a batch of a
+	/// bounded pass's budget ([`Self::spend_batch`]), so the wipe that starts a restarted scan
+	/// leaves only its last step to one transaction: the index's compaction generations, which
+	/// that step reads and writes back one above.
 	///
-	/// A build no pass bounds wipes in that one transaction, as does a DiskANN index, whose wipe
-	/// also forgets the pending-state guards this datastore knows of. Pages need no record of
-	/// their own: a deleted key stays deleted, so a pass stopped anywhere resumes the wipe where
-	/// the index's keys begin. Nothing reads the index meanwhile: it is `Building`, which the
-	/// planner does not use, writers queue for, and compaction is fenced off. Answers `false`
-	/// when the build was aborted.
+	/// A bounded pass deletes [`WIPE_PAGE_KEYS`] keys a page. A build no pass bounds deletes
+	/// [`INDEXING_BATCH_SIZE`] keys a page: one delete of the prefix is a single transaction,
+	/// which TiKV rejects at the range cap, and an unbounded delete holds `cleaning` until the
+	/// process is killed. A DiskANN index is not paged. Its wipe also forgets the pending-state
+	/// guards this datastore knows of, which only the last step does, and that step has to see
+	/// the data it forgets them with. Pages need no record of their own: a deleted key stays
+	/// deleted, so a pass stopped anywhere resumes the wipe where the index's keys begin.
+	/// Nothing reads the index meanwhile: it is `Building`, which the planner does not use,
+	/// writers queue for, and compaction is fenced off. Answers `false` when the build was
+	/// aborted, or when a test stops it between pages.
 	async fn wipe_index_pages(&self, generation: BuildGeneration) -> Result<bool> {
-		if self.budget.is_none() || matches!(self.ix.index, crate::catalog::Index::DiskAnn(_)) {
+		if matches!(self.ix.index, crate::catalog::Index::DiskAnn(_)) {
 			return Ok(true);
 		}
+		let page = if self.budget.is_some() {
+			WIPE_PAGE_KEYS
+		} else {
+			INDEXING_BATCH_SIZE
+		};
 		loop {
 			if self.is_aborted().await {
 				return Ok(false);
@@ -4145,7 +4154,7 @@ impl Building {
 			let staged = async {
 				self.maintain_build_ownership(&tx, generation, &[IndexBuildPhase::Building])
 					.await?;
-				crate::idx::wipe_index_page(&tx, &self.ikb, WIPE_PAGE_KEYS).await
+				crate::idx::wipe_index_page(&tx, &self.ikb, page).await
 			}
 			.await;
 			let deleted = match staged {
@@ -4185,6 +4194,14 @@ impl Building {
 					continue;
 				}
 				return Err(err);
+			}
+			// A test stop stands in for a crash between pages. It is not an
+			// abort: the generation stays `Building`, so a later resume finishes
+			// the wipe. The caller treats `false` as "stop this run".
+			#[cfg(test)]
+			if note_cleanup_batch_committed(self.ctx.node_id(), deleted, (deleted as u32) >= page)
+			{
+				return Ok(false);
 			}
 		}
 	}

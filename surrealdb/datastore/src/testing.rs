@@ -328,6 +328,76 @@ impl Drop for NonRetryableErrorGuard {
 	}
 }
 
+struct CleanupWatch {
+	commits: usize,
+	/// Stop after this many committed full pages. Cleared once it fires, so a
+	/// later resume of the same node is not stopped again.
+	stop_after_full_batches: Option<usize>,
+}
+
+fn cleanup_watches() -> &'static Mutex<HashMap<Uuid, CleanupWatch>> {
+	static WATCHES: OnceLock<Mutex<HashMap<Uuid, CleanupWatch>>> = OnceLock::new();
+	WATCHES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Count committed index-clean pages for `node_id`, and stop the clean after
+/// `stop_after_full_batches` full pages.
+///
+/// The stop does not set the builder abort flag. Abort publishes phase
+/// `Error`, and the resume scan does not adopt that. This leaves `Building`
+/// in place, which is the state a crash between pages leaves behind.
+pub fn watch_cleanup_batches(node_id: Uuid, stop_after_full_batches: usize) -> CleanupWatchGuard {
+	assert!(stop_after_full_batches > 0);
+	cleanup_watches().lock().unwrap().insert(
+		node_id,
+		CleanupWatch {
+			commits: 0,
+			stop_after_full_batches: Some(stop_after_full_batches),
+		},
+	);
+	CleanupWatchGuard {
+		node_id,
+	}
+}
+
+/// Record one committed non-empty clean page.
+///
+/// Returns true only when a full page reaches the watch's stop threshold. The
+/// caller must leave the build in `Building` without marking it aborted.
+pub fn note_cleanup_batch_committed(node_id: Uuid, deleted: usize, full: bool) -> bool {
+	if deleted == 0 {
+		return false;
+	}
+	let mut watches = cleanup_watches().lock().unwrap();
+	let Some(slot) = watches.get_mut(&node_id) else {
+		return false;
+	};
+	slot.commits += 1;
+	if full && slot.stop_after_full_batches.is_some_and(|stop| slot.commits >= stop) {
+		slot.stop_after_full_batches = None;
+		return true;
+	}
+	false
+}
+
+/// Guard for [`watch_cleanup_batches`]. Dropping it removes the watch.
+pub struct CleanupWatchGuard {
+	node_id: Uuid,
+}
+
+impl CleanupWatchGuard {
+	/// How many non-empty clean pages have committed since the watch was armed.
+	pub fn commits(&self) -> usize {
+		cleanup_watches().lock().unwrap().get(&self.node_id).map(|slot| slot.commits).unwrap_or(0)
+	}
+}
+
+impl Drop for CleanupWatchGuard {
+	fn drop(&mut self) {
+		cleanup_watches().lock().unwrap().remove(&self.node_id);
+	}
+}
+
 /// Where a test can make a task panic, standing in for a bug in the code that
 /// runs there: the process survives, the task does not, and whatever the task
 /// was to settle is left as it was.
