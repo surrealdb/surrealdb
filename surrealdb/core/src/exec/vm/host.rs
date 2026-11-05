@@ -2143,16 +2143,21 @@ pub(super) async fn run_storage_source(
 		Source::Lookup {
 			table,
 			index,
-			outer,
+			key,
 		} => {
 			let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
 				.await
 				.map_err(ControlFlow::Err)?;
 			let def = descriptor.defined().map_err(ControlFlow::Err)?;
 			refuse_lightweight(table, def)?;
-			let key = match outer {
-				Some(outer) => super::nested::key_at(ctx.value("parent"), outer).cloned(),
-				None => state.lookup_key.clone(),
+			let key = match key {
+				super::program::LookupKey::Parent(outer) => {
+					super::nested::key_at(ctx.value("parent"), outer).cloned()
+				}
+				super::program::LookupKey::Join => state.lookup_key.clone(),
+				super::program::LookupKey::Scalar(scalar) => {
+					Some(host_scalar(program, scalar, ctx, None).await?)
+				}
 			};
 			let key = key.filter(|key| version.is_none() && lookup_key(key));
 			let Some(key) = key else {

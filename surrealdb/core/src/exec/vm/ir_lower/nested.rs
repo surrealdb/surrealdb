@@ -907,7 +907,7 @@ mod tests {
 	use crate::exec::vm::ir_lower::read::tests::{named, resolver};
 	use crate::exec::vm::ir_lower::tests::Builder;
 	use crate::exec::vm::ir_lower::units::{LowerCx, Needed};
-	use crate::exec::vm::program::{Program, Source, UnitId};
+	use crate::exec::vm::program::{LookupKey, Program, Source, UnitId};
 	use crate::expr::BinaryOperator;
 	use crate::expr::logical::EvalFrame;
 	use crate::val::Value;
@@ -1297,7 +1297,7 @@ mod tests {
 		assert!(matches!(
 			groups.pipelines[0].source,
 			Source::Lookup {
-				outer: Some(_),
+				key: LookupKey::Parent(_),
 				..
 			}
 		));

@@ -58,7 +58,7 @@ use super::super::payload::{BranchRead, IndexBranch};
 use super::super::plain::ValueData;
 use super::super::program::{
 	CountSource, CountVia, CountWalk, CountedValue, DeferredVector, HostScalar, KnnGate,
-	KnnPrefilterSpec, ScanRange, ScanSpec, Source, TopKScan, UnionTopK, UnitId,
+	KnnPrefilterSpec, LookupKey, ScanRange, ScanSpec, Source, TopKScan, UnionTopK, UnitId,
 };
 use super::dispatch::phys_refusal;
 use super::emit::Emitter;
@@ -256,19 +256,23 @@ pub(super) fn lower_source_under(
 			})
 		}
 		PhysOp::IndexLookup(attrs) => {
-			let outer = match attrs.key {
-				LookupKeyShape::Parent => {
-					let [key] = <[ValueId; 1]>::try_from(data.operands.as_slice())
-						.map_err(|_| invariant("an index lookup with other than one operand"))?;
-					Some(parent_path(ir, key)?)
+			let operand = || {
+				<[ValueId; 1]>::try_from(data.operands.as_slice())
+					.map(|[key]| key)
+					.map_err(|_| invariant("an index lookup with other than one operand"))
+			};
+			let key = match attrs.key {
+				LookupKeyShape::Parent => LookupKey::Parent(parent_path(ir, operand()?)?),
+				LookupKeyShape::Probe => LookupKey::Join,
+				LookupKeyShape::Operand => {
+					LookupKey::Scalar(host_scalar_of(em, cx, ir, operand()?, needs)?)
 				}
-				LookupKeyShape::Probe => None,
 			};
 			Ok(Leaf {
 				source: Source::Lookup {
 					table: attrs.table.clone(),
 					index: resolve(&attrs.index)?,
-					outer,
+					key,
 				},
 				table: Some(attrs.table.clone()),
 			})
@@ -1957,13 +1961,13 @@ pub(super) mod tests {
 		let leaf = lower_source(&mut LowerCx::detached().with_indexes(&resolver()), &b.ir, lookup)
 			.expect("a parent lookup lowers");
 		let Source::Lookup {
-			outer,
+			key: lookup_key,
 			..
 		} = leaf.source
 		else {
 			panic!("a lookup source");
 		};
-		assert_eq!(outer, Some(vec![Strand::from("owner"), Strand::from("id")]));
+		assert_eq!(lookup_key, LookupKey::Parent(vec![Strand::from("owner"), Strand::from("id")]));
 
 		let probe = rows_over(&mut b, PhysOp::IndexLookup(attrs(LookupKeyShape::Probe)), &[key]);
 		let leaf = lower_source(&mut LowerCx::detached().with_indexes(&resolver()), &b.ir, probe)
@@ -1971,7 +1975,7 @@ pub(super) mod tests {
 		assert!(matches!(
 			leaf.source,
 			Source::Lookup {
-				outer: None,
+				key: LookupKey::Join,
 				..
 			}
 		));
@@ -1990,7 +1994,7 @@ pub(super) mod tests {
 			lower_source(&mut LowerCx::detached().with_indexes(&resolver()), &b.ir, from_row)
 				.expect("a lookup of the row lowers");
 		assert!(
-			matches!(leaf.source, Source::Lookup { outer: Some(path), .. } if path == [Strand::from("city")])
+			matches!(leaf.source, Source::Lookup { key: LookupKey::Parent(path), .. } if path == [Strand::from("city")])
 		);
 
 		// A key that is not a path into the parent row cannot be read without evaluating it.

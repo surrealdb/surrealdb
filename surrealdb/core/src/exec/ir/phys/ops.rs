@@ -800,6 +800,9 @@ pub(crate) enum LookupKeyShape {
 	Parent,
 	/// The row the probe keeps.
 	Probe,
+	/// The lookup's one operand, a value that reads no row of the table: evaluated once each
+	/// time the lookup opens.
+	Operand,
 }
 
 /// The attributes of an index lookup.

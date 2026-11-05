@@ -52,8 +52,9 @@ use super::access_regions::{
 use super::offer::{Offer, offer_across, offer_of};
 use super::ops::{
 	BitmapAttrs, BranchReadShape, FullTextScanAttrs, IdBoundsShape, IndexBranchShape,
-	IndexScanAttrs, IndexUnionAttrs, KeyRangeScanAttrs, KnnFilterShape, KnnPermissionShape,
-	KnnScanAttrs, PhysOp, ReadClauses, RecordScanAttrs, ScanProbes, TableScanAttrs,
+	IndexLookupAttrs, IndexScanAttrs, IndexUnionAttrs, KeyRangeScanAttrs, KnnFilterShape,
+	KnnPermissionShape, KnnScanAttrs, LookupKeyShape, PhysOp, ReadClauses, RecordScanAttrs,
+	ScanProbes, TableScanAttrs,
 };
 use super::{keyed_record, knn};
 use crate::catalog::{FieldDefinition, Index, IndexDefinition, KeyStructure};
@@ -65,6 +66,7 @@ use crate::exec::index::access_path::{
 };
 use crate::exec::index::analysis::KnnQueryVectors;
 use crate::exec::index::id_range::plan_id_range;
+use crate::exec::index::key_range::deferrable;
 use crate::exec::index::probe::probe_set;
 use crate::exec::ir::build::phys::{
 	bitmap_shape, id_bounds_shape, index_ref, key_range_shape, knn_filter_shape,
@@ -105,10 +107,11 @@ use crate::exec::planner::{RestrictedPrefixes, decide_union_merge};
 use crate::exec::vm::payload::{CountSelect, KnnFilter, KnnPrefilter, Refusal, ValuesRead};
 use crate::exec::vm::plain::ValueData;
 use crate::expr::logical::{
-	LogicalExpr, LogicalLiteral, LogicalOrdering, LogicalRecordIdKey, Schema, effects_of,
+	LogicalExpr, LogicalLiteral, LogicalOrdering, LogicalRecordIdKey, ROW_PARAMS, Schema,
+	effects_of,
 };
 use crate::expr::with::With;
-use crate::expr::{BinaryOperator, Function};
+use crate::expr::{BinaryOperator, Function, Part};
 use crate::kvs::Direction;
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 
@@ -562,6 +565,9 @@ pub(crate) fn select_access(
 		cx,
 	)? {
 		Some((path, direction)) => {
+			// Only a scan the decision chose for want of an index may become a lookup: the scan an
+			// empty read keeps reads every row for the conjuncts before its `false`.
+			let scanned = matches!(path, AccessPath::TableScan);
 			let mut choice = map_decision(
 				Decision {
 					path,
@@ -575,6 +581,14 @@ pub(crate) fn select_access(
 				offered,
 				id_bounds.then_some(cx.registry),
 			)?;
+			if id_bounds
+				&& scanned && matches!(&choice.access, PhysOp::TableScan(scan) if scan.bounds.is_none())
+				&& let Some((lookup, key)) =
+					deferred_lookup(table, source.with.as_ref(), predicate, cx)?
+			{
+				choice.access = lookup;
+				choice.key_operands = vec![key];
+			}
 			if let PhysOp::TableScan(attrs) = &mut choice.access
 				&& !attrs.lightweight
 			{
@@ -611,6 +625,91 @@ fn scan_probes(
 		columns.analyzer(None, registry).with_key(table.key.clone()).with_clock(table.allows_clock);
 	let set = probe_set(&analyzer, &cond, &|conjunct| !prefixes.cond_touches(conjunct))?;
 	set.try_map(|index| Ok::<_, std::convert::Infallible>(index_ref(index))).ok()
+}
+
+/// A lookup through a B-tree index of `table` over one plain field, keyed by a parameter the
+/// predicate compares that field to with `=`, with the parameter as the lookup's operand; `None`
+/// where the predicate holds no such comparison or no index answers it.
+///
+/// This is the read a literal in the parameter's place is answered by, for a value the plan holds
+/// only once the statement runs: a `LET` of the block the statement is in, a loop variable, an
+/// argument of the function or closure whose body it is. The lookup evaluates the parameter once
+/// each time it opens, and reads the table whole where the value is not one the index lists every
+/// equal record under ([`crate::exec::vm::program::Source::Lookup`]). It is a superset of the
+/// rows the predicate admits: no conjunct is consumed, and the whole predicate is judged again
+/// over every row it yields. It claims no order, so a sort above it stays.
+///
+/// It is chosen only where the decision chose a table scan of a table whose rows it may read by
+/// key: one that declares no key structure and is no lightweight relation, read at the current
+/// version. A `WITH` hint is the allow-list it is for every other read: `WITH NOINDEX` keeps the
+/// scan, and `WITH INDEX` admits only the indexes it names. Under a table permission no parameter
+/// keys a lookup, since the lookup would evaluate it in the caller's frame, not the definer's.
+fn deferred_lookup(
+	table: &TableAnswers,
+	with: Option<&With>,
+	predicate: &Reconstructed,
+	cx: &DecisionCx<'_>,
+) -> Result<Option<(PhysOp, LogicalExpr)>, IrError> {
+	if table.key.is_some()
+		|| table.lightweight
+		|| table.version != ReadVersion::Current
+		|| table.permissioned
+	{
+		return Ok(None);
+	}
+	for (_, conjunct) in &predicate.conjuncts {
+		let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::Equal | BinaryOperator::ExactEqual,
+			right,
+		} = conjunct
+		else {
+			continue;
+		};
+		let (field, key) = match (left.as_ref(), right.as_ref()) {
+			(LogicalExpr::Field(field), key @ LogicalExpr::Param(_))
+			| (key @ LogicalExpr::Param(_), LogicalExpr::Field(field)) => (field, key),
+			_ => continue,
+		};
+		if field.as_str() == "id"
+			|| matches!(key, LogicalExpr::Param(name) if ROW_PARAMS.contains(&name.as_str()))
+			|| !deferrable(key, cx.registry)
+		{
+			continue;
+		}
+		// The value stands in for the parameter: the decision reads only the conjunct's shape.
+		let probe = LogicalExpr::Binary {
+			left: Box::new(LogicalExpr::Field(field.clone())),
+			op: BinaryOperator::Equal,
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+		};
+		let Some((
+			AccessPath::BTreeScan {
+				index_ref: index,
+				access: BTreeAccess::Equality(_),
+				..
+			},
+			_,
+		)) = decide(table, with, Some(&probe), None, false, cx)?
+		else {
+			continue;
+		};
+		let [column] = index.cols.as_slice() else {
+			continue;
+		};
+		if !matches!(column.0.as_slice(), [Part::Field(name)] if name == field) {
+			continue;
+		}
+		let lookup = PhysOp::IndexLookup(Box::new(IndexLookupAttrs {
+			table: table.table.clone(),
+			read: read_clauses(table, with),
+			index: index_ref(&index),
+			field: field.clone(),
+			key: LookupKeyShape::Operand,
+		}));
+		return Ok(Some((lookup, key.clone())));
+	}
+	Ok(None)
 }
 
 /// The record-id bounds a table scan of `table` takes from `predicate`, with the expressions of
@@ -2419,6 +2518,11 @@ fn apply_source(rw: &mut Rewriter<'_>, op: OpId, planned: Planned) -> Result<Con
 					operands.push(value_copy(rw, region, value, op)?);
 				}
 			}
+			(PhysOp::IndexLookup(attrs), _) if attrs.key == LookupKeyShape::Operand => {
+				for (region, value) in key_operands {
+					operands.push(value_copy(rw, region, value, op)?);
+				}
+			}
 			// A query vector known only when the statement runs is copied out of the stage that
 			// holds it. One computed by ops the conversion has yet to convert is copied once every
 			// op of the statement is ([`knn::attach_scan_vectors`]): until then the scan reads the
@@ -3217,6 +3321,98 @@ mod tests {
 		assert_eq!(tag(&choice), PhysTag::TableScan);
 		assert_eq!(choice.residual, vec![0]);
 		assert!(!format!("{choice:?}").contains("Datetime"));
+	}
+
+	#[test]
+	fn an_equality_to_a_parameter_reads_through_a_lookup_keyed_by_it() {
+		let table = answers(vec![idx(1, "ix", &["x"])]);
+		let choice = chosen(&table, "WHERE x = $p AND y = 1").expect("a choice");
+		let PhysOp::IndexLookup(attrs) = &choice.access else {
+			panic!("an index lookup: {:?}", choice.access);
+		};
+		assert_eq!(attrs.key, LookupKeyShape::Operand);
+		assert_eq!(attrs.field, Strand::from("x"));
+		assert_eq!(
+			choice.key_operands,
+			vec![LogicalExpr::Param(crate::expr::Param::from(String::from("p")))]
+		);
+		// The lookup is a superset: every conjunct stays above it.
+		assert_eq!(choice.residual, vec![0, 1]);
+		// The parameter written first reads the same.
+		let choice = chosen(&table, "WHERE $p = x").expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::IndexLookup);
+	}
+
+	#[test]
+	fn a_parameter_keys_no_lookup_it_cannot_answer_alone() {
+		let table = answers(vec![idx(1, "ix", &["x"]), idx(2, "pair", &["y", "z"])]);
+		for snippet in [
+			// No index over the field alone.
+			"WHERE y = $p",
+			// Not an equality.
+			"WHERE x > $p",
+			// A name bound per row.
+			"WHERE x = $this",
+			"WHERE x = $parent",
+			// The hint forbids every index.
+			"WITH NOINDEX WHERE x = $p",
+			// The hint names another index.
+			"WITH INDEX pair WHERE x = $p",
+		] {
+			let choice = chosen(&table, snippet).expect("a choice");
+			assert_eq!(tag(&choice), PhysTag::TableScan, "{snippet}");
+			assert!(choice.key_operands.is_empty(), "{snippet}");
+		}
+		let choice = chosen(&table, "WITH INDEX ix WHERE x = $p").expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::IndexLookup, "the hint admits the index");
+	}
+
+	#[test]
+	fn a_parameter_reads_the_access_a_literal_reads_beside_a_withheld_conjunct() {
+		let table = answers(vec![idx(1, "ix", &["x"])]);
+		let keyed = |right: LogicalExpr| Reconstructed {
+			conjuncts: vec![(
+				1,
+				LogicalExpr::Binary {
+					left: Box::new(LogicalExpr::Field(Strand::from("x"))),
+					op: BinaryOperator::Equal,
+					right: Box::new(right),
+				},
+			)],
+			withheld: vec![0],
+			..Reconstructed::default()
+		};
+		// The literal is read through the index whatever the withheld conjunct before it, and
+		// so is the parameter: the lookup skips the rows the index scan skips.
+		let literal = keyed(LogicalExpr::Literal(LogicalLiteral::Integer(1)));
+		let choice =
+			select_access(&table_source(), &table, &literal, None, &decision()).expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::IndexScan);
+		let param = keyed(LogicalExpr::Param(crate::expr::Param::from(String::from("p"))));
+		let choice =
+			select_access(&table_source(), &table, &param, None, &decision()).expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::IndexLookup);
+		assert_eq!(choice.residual, vec![0, 1]);
+		// A predicate settled `false` is an empty read, or the scan that reads every row for the
+		// withheld conjunct before it: never a lookup.
+		let settled = Reconstructed {
+			conjuncts: vec![(1, LogicalExpr::Literal(LogicalLiteral::Bool(false)))],
+			withheld: vec![0],
+			..Reconstructed::default()
+		};
+		let choice =
+			select_access(&table_source(), &table, &settled, None, &decision()).expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::TableScan);
+		assert!(choice.key_operands.is_empty());
+	}
+
+	#[test]
+	fn a_parameter_keys_no_lookup_under_a_table_permission() {
+		let mut table = answers(vec![idx(1, "ix", &["x"])]);
+		table.permissioned = true;
+		let choice = chosen(&table, "WHERE x = $p").expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::TableScan);
+		assert!(choice.key_operands.is_empty());
 	}
 
 	#[test]
