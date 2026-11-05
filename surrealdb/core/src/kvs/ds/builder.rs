@@ -69,9 +69,6 @@ pub struct Builder {
 	/// Whether a statement runs the index build it starts on a task of its own;
 	/// see [`Builder::without_index_build_tasks`]. `None` leaves them to passes.
 	index_build_tasks: Option<BuildTasks>,
-	/// The batches a blocking statement runs of a deferred build itself; see
-	/// [`Builder::with_inline_index_build_batches`].
-	inline_index_build_batches: usize,
 	/// The steps of a build that open transactions, or `None` for a build that
 	/// opens none; see [`Builder::without_startup_transactions`].
 	startup: Option<StartupFn>,
@@ -153,8 +150,9 @@ impl Builder {
 
 	/// A builder for a datastore whose host drives its background work: it
 	/// starts no maintenance task ([`Builder::without_maintenance_tasks`]) and
-	/// leaves the index builds statements start to passes the host runs
-	/// ([`Builder::without_index_build_tasks`]). It names neither the task
+	/// no index build task: a build no statement waits for is left to passes
+	/// the host runs, and one a statement waits for runs on that statement's
+	/// task ([`Builder::without_index_build_tasks`]). It names neither the task
 	/// runner nor the build task, so a build that constructs only such
 	/// datastores links neither.
 	pub fn host_driven() -> Self {
@@ -202,7 +200,6 @@ impl Builder {
 			// A build without `maintenance-tasks` leaves that work to its host.
 			maintenance: cfg!(feature = "maintenance-tasks"),
 			index_build_tasks,
-			inline_index_build_batches: 0,
 			startup: Some(start),
 			transaction_timeout: None,
 			query_timeout: None,
@@ -362,17 +359,28 @@ impl Builder {
 		self
 	}
 
-	/// Builds a datastore whose statements leave the index builds they start to
-	/// [`Datastore::run_index_builds`] instead of running them on a task.
+	/// Builds a datastore that starts no task for an index build: a build no
+	/// statement waits for is left to [`Datastore::run_index_builds`], and a
+	/// build a statement waits for runs on the statement's own task.
 	///
-	/// `DEFINE INDEX` (with or without `CONCURRENTLY`) and `REBUILD INDEX` then
-	/// record the build as pending and return without waiting for it: the
-	/// index reads as building until passes have run it to its end, and the
-	/// query planner does not use it until then. Writes made meanwhile queue
-	/// for the build as they do for any build. Once the statement's
-	/// transaction commits, the build is handed back for any pass to claim, and
+	/// `DEFINE INDEX … CONCURRENTLY` and `REBUILD INDEX … CONCURRENTLY` record
+	/// the build as pending and return without waiting for it: the index reads
+	/// as building until passes have run it to its end, and the query planner
+	/// does not use it until then. Writes made meanwhile queue for the build as
+	/// they do for any build. Once the statement's transaction commits, the
+	/// build is handed back for any pass to claim, and
 	/// [`CommitTriggers::index_build`](surrealdb_datastore::triggers::CommitTriggers::index_build)
 	/// on [`Datastore::commit_triggers`] is notified.
+	///
+	/// A `DEFINE INDEX` or `REBUILD INDEX` without `CONCURRENTLY` settles as it
+	/// does where builds run on tasks: it returns once its index is ready, and a
+	/// build that fails fails the statement, a new definition taken back with
+	/// it. The statement runs the build itself, to its end, where a task would
+	/// have run it — after its transaction commits, or inside that transaction
+	/// where the statement awaits its build there — and waits for, or takes
+	/// over, a build another node owns. A build the memory threshold stops is
+	/// handed back for passes, and fails the statement as it fails one whose
+	/// build runs on a task.
 	///
 	/// For a host that cannot keep a task running for the length of a build.
 	/// Independent of [`Builder::without_maintenance_tasks`], which leaves
@@ -382,29 +390,12 @@ impl Builder {
 		self
 	}
 
-	/// Where statements leave index builds to passes
-	/// ([`Builder::without_index_build_tasks`]), has a blocking `DEFINE INDEX`
-	/// or `REBUILD INDEX` run at most `batches` batches of its build itself once
-	/// its transaction has committed, on the calling task, before it returns.
-	///
-	/// A build that ends within them settles the statement as it does where
-	/// builds run on tasks: the statement returns once the index is ready, and
-	/// a build that fails fails the statement, a new definition taken back with
-	/// it. One that does not end is handed back for
-	/// [`Datastore::run_index_builds`], and the statement returns with the
-	/// index building, as a `CONCURRENTLY` one does. That is the one way such a
-	/// statement differs from one whose datastore runs builds on tasks, which
-	/// returns only once its index is ready or its build has failed: the
-	/// statements that follow it can write while the index is still building,
-	/// so a duplicate of a unique index's value commits and fails the build
-	/// rather than the write, and `INFO FOR INDEX` reports the index building
-	/// until passes finish it. Only a statement whose
-	/// transaction awaits work after its commit runs its build: a statement in
-	/// an explicit transaction, one replacing an index, or one defining an
-	/// index on a table it creates leaves the whole build to passes. Zero, the
-	/// default, leaves every build to passes.
-	pub fn with_inline_index_build_batches(mut self, batches: usize) -> Self {
-		self.inline_index_build_batches = batches;
+	/// Has no effect. A blocking `DEFINE INDEX` or `REBUILD INDEX` on a datastore built with
+	/// [`Builder::without_index_build_tasks`] runs its whole build on the statement's own task, so
+	/// no number of batches bounds it; `CONCURRENTLY` leaves a build to
+	/// [`Datastore::run_index_builds`]. Kept so that a host calling it still compiles.
+	#[deprecated(note = "a blocking index build runs to its end; this setting has no effect")]
+	pub fn with_inline_index_build_batches(self, _batches: usize) -> Self {
 		self
 	}
 
@@ -819,11 +810,7 @@ impl Builder {
 				config.idx.fulltext_cache_size,
 				config.idx.segment_dictionary_path.clone(),
 			),
-			index_builder: IndexBuilder::new(
-				tf.clone(),
-				self.index_build_tasks,
-				self.inline_index_build_batches,
-			),
+			index_builder: IndexBuilder::new(tf.clone(), self.index_build_tasks),
 			compaction_swept_at: parking_lot::Mutex::new(None),
 			table_migration_lap: parking_lot::Mutex::new(Default::default()),
 			removal_holds_seen: Default::default(),

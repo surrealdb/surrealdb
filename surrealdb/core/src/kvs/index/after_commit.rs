@@ -135,14 +135,13 @@ impl AwaitBuildAfterCommit {
 	async fn settle(&mut self, deadline: Option<AfterCommitDeadline>) -> Result<(), WaitEnded> {
 		loop {
 			if let Some(ended) = self.query_done() {
-				return self.fail_unless_online(ended);
+				return self.end(ended).await;
 			}
 			let mut slice = match deadline {
 				Some(deadline) => {
 					let left = deadline.at.saturating_duration_since(Instant::now());
 					if left.is_zero() {
-						return self
-							.fail_unless_online(WaitEnded::DeadlineTimedout(deadline.timeout));
+						return self.end(WaitEnded::DeadlineTimedout(deadline.timeout)).await;
 					}
 					left.min(AFTER_COMMIT_DONE_CHECK)
 				}
@@ -163,7 +162,7 @@ impl AwaitBuildAfterCommit {
 					}
 					return Err(WaitEnded::Failed(err));
 				}
-				if self.completion.is_online() || self.completion.handed_back() {
+				if self.completion.is_online() {
 					return Ok(());
 				}
 				// A build that ends without publishing its index was stopped:
@@ -181,6 +180,19 @@ impl AwaitBuildAfterCommit {
 					)
 				}));
 			}
+		}
+	}
+
+	/// End the wait with `ended` before the build has resolved, as
+	/// [`Self::fail_unless_online`] does, first stopping a build this wait runs
+	/// itself ([`BuildCompletion::stop`]) so it is handed back for passes rather
+	/// than dropped partway through a batch. A build that fails with an error of
+	/// its own before it stops ends the wait with that error instead: it has
+	/// ended, and does not go on in the background.
+	async fn end(&mut self, ended: WaitEnded) -> Result<(), WaitEnded> {
+		match self.completion.stop().await {
+			Err(err) if !self.completion.excused_once_online(&err) => Err(WaitEnded::Failed(err)),
+			_ => self.fail_unless_online(ended),
 		}
 	}
 

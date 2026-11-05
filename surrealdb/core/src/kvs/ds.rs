@@ -2045,7 +2045,6 @@ impl Datastore {
 			index_builder: IndexBuilder::new(
 				self.transaction_factory.clone(),
 				self.index_builder.spawner(),
-				self.index_builder.inline_batches(),
 			),
 			compaction_swept_at: parking_lot::Mutex::new(None),
 			table_migration_lap: parking_lot::Mutex::new(Default::default()),
@@ -2157,7 +2156,6 @@ impl Datastore {
 			index_builder: IndexBuilder::new(
 				transaction_factory.clone(),
 				self.index_builder.spawner(),
-				self.index_builder.inline_batches(),
 			),
 			compaction_swept_at: parking_lot::Mutex::new(None),
 			table_migration_lap: parking_lot::Mutex::new(Default::default()),
@@ -2209,11 +2207,8 @@ impl Datastore {
 		self.triggers.assume_shared_store();
 		let transaction_factory = self.transaction_factory.with_triggers(Arc::clone(&triggers));
 		let mut fork = self.fork_for_test_with_node_id(id);
-		fork.index_builder = IndexBuilder::new(
-			transaction_factory.clone(),
-			self.index_builder.spawner(),
-			self.index_builder.inline_batches(),
-		);
+		fork.index_builder =
+			IndexBuilder::new(transaction_factory.clone(), self.index_builder.spawner());
 		fork.sequences = Sequences::new(transaction_factory.clone(), id);
 		fork.transaction_factory = transaction_factory;
 		fork.triggers = triggers;

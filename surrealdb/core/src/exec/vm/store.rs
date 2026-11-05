@@ -2628,12 +2628,9 @@ async fn step_inner(
 					"No Index Builder",
 				)))
 			})?;
-			// A datastore that leaves builds to bounded passes waits for none.
-			// A deferred build its statement awaits after its commit runs there, on the
-			// statement's budget, where the datastore gives it one.
-			let awaits_inline =
-				*blocking && builder.defers_builds() && builder.inline_batches() > 0;
-			let blocking = *blocking && !builder.defers_builds();
+			// A blocking statement waits for its build wherever builds run: on a task of their own,
+			// or, on a datastore that leaves builds to bounded passes, on the statement's own task.
+			let blocking = *blocking;
 			if *fresh {
 				let txn = ctx.txn();
 				txn.on_rollback(crate::kvs::index::CleanUncommittedBuild::boxed(
@@ -2688,7 +2685,7 @@ async fn step_inner(
 			// engine's conflict window, and which a failed build rolls back with
 			// the definition.
 			let after_commit = match prior {
-				_ if !(blocking || awaits_inline) || !txn.accepts_after_commit_waits() => None,
+				_ if !blocking || !txn.accepts_after_commit_waits() => None,
 				None if !*fresh => Some(None),
 				Some((existing, prior_table))
 					if !read(regs, *existing).is_truthy()

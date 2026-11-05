@@ -340,7 +340,10 @@ pub(crate) fn while_running_task<'a, F: std::future::Future + Send + 'a>(
 //   and frame. This is the one kind of compile a running program causes;
 // - the closure links a run makes, and their checks that a held unit still stands;
 // - a nested query ([`nested_query`]): `eval::surql` and `eval::gql` text, and embedded
-//   JavaScript's `surrealdb.query()`, compiled as a query and program of its own.
+//   JavaScript's `surrealdb.query()`, compiled as a query and program of its own;
+// - an index build a blocking `DEFINE INDEX` or `REBUILD INDEX` runs on its own task where the
+//   datastore starts no build task (`IndexBuilder::run_awaited_inline`): the builder's work, which
+//   reads the catalog and plans as a build on a task of its own does.
 //
 // An entry boundary is not a seam: a request that arrives from outside a
 // running program — an HTTP request to an API route, a query — compiles its

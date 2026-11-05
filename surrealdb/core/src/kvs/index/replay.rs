@@ -325,6 +325,8 @@ impl Building {
 	/// During `Closing`, new admissions are rejected. This loop closes the gap
 	/// for writers that received a ticket before `Closing` but have not yet
 	/// committed the user transaction that writes the durable appending.
+	/// A statement running the build on its own task stops the wait
+	/// ([`Building::stop_for_statement`]).
 	pub(super) async fn wait_for_durable_reservations(
 		&self,
 		generation: BuildGeneration,
@@ -335,6 +337,7 @@ impl Building {
 			if self.is_aborted().await {
 				return Ok(());
 			}
+			self.stop_for_statement()?;
 			self.check_prepare_remove(last_prepare_remove_check).await?;
 			let keys = {
 				let tx = self.new_read_tx().await?;
@@ -431,7 +434,9 @@ impl Building {
 	/// after every surviving writer's commit — so the writer's main-table
 	/// writes are visible to the scan even though the `!bg(prior_gen, *)`
 	/// entries are about to be wiped. A live writer holding a transaction
-	/// open can block this (and the takeover) until it closes; the new
+	/// open can block this (and the takeover) until it closes, or until the
+	/// statement running the build on its own task stops it
+	/// ([`Building::stop_for_statement`]); the new
 	/// generation's owner heartbeat is not refreshed while waiting, so a
 	/// long-blocked takeover can itself be taken over after lease expiry —
 	/// ownership CAS fencing keeps that safe.
@@ -451,6 +456,7 @@ impl Building {
 			if self.is_aborted().await {
 				return Ok(());
 			}
+			self.stop_for_statement()?;
 			let keys = {
 				let tx = self.new_read_tx().await?;
 				let keys = catch!(tx, tx.keys(rng.clone(), INDEXING_BATCH_SIZE, 0, None).await);

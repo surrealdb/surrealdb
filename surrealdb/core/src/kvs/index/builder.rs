@@ -440,8 +440,9 @@ pub(crate) struct IndexBuilder {
 	/// `Closing` build, so a test can tell a writer has reached the wait.
 	#[cfg(test)]
 	pub(super) closing_waits: Arc<AtomicU64>,
-	/// Whether a statement leaves the build it starts to bounded passes
-	/// ([`Self::run_pass`]) instead of running it on a task of its own; see
+	/// Whether a build no statement waits for is left to bounded passes
+	/// ([`Self::run_pass`]) instead of run on a task of its own, and a build a
+	/// statement waits for runs on that statement's task; see
 	/// [`Builder::without_index_build_tasks`](crate::kvs::Builder::without_index_build_tasks).
 	/// It is whether `spawn` is `None`.
 	defers: bool,
@@ -449,11 +450,6 @@ pub(crate) struct IndexBuilder {
 	/// builds are not deferred. A deferring builder never spawns one, so a
 	/// build that constructs only deferring builders links none of it.
 	spawn: Option<BuildTasks>,
-	/// Where builds are deferred, the batches a blocking statement that awaits
-	/// its build after its commit runs of that build itself, before it leaves
-	/// the rest to passes; zero leaves all of it to them. See
-	/// [`Builder::with_inline_index_build_batches`](crate::kvs::Builder::with_inline_index_build_batches).
-	inline_batches: usize,
 }
 
 enum BuildStart {
@@ -462,8 +458,8 @@ enum BuildStart {
 	/// Acquired and left for bounded passes, which the statement does not wait
 	/// for ([`IndexBuilder::defers`]).
 	Deferred,
-	/// Acquired for the statement to run at most [`IndexBuilder::inline_batches`]
-	/// of once it has committed, leaving the rest to bounded passes.
+	/// Acquired for the statement that waits for it to run on its own task, to
+	/// its end, where builds are deferred ([`IndexBuilder::defers`]).
 	Inline(IndexBuilding, AcquiredBuild),
 }
 
@@ -564,11 +560,30 @@ impl BuildCompletion {
 		self.started_here
 	}
 
-	/// Whether the build was handed back unfinished for bounded passes to
-	/// carry on: the statement awaiting it ran its budget of batches
-	/// ([`IndexBuilder::inline_batches`]) and returns with the index building.
-	pub(crate) fn handed_back(&self) -> bool {
-		self.building.handed_back.load(Ordering::Acquire)
+	/// Stop a build the waiting statement runs itself on its own task
+	/// ([`BuildStart::Inline`]), or would take over, before its next batch, and
+	/// wait until it has stopped: handed back for passes, which are woken,
+	/// unless it ended first. A wait that ends without this drops the build
+	/// partway through a batch, owned and unheartbeated until its lease lapses.
+	/// Nothing for a build that runs on a task of its own.
+	///
+	/// Answers the build's own error when it failed before it stopped, which
+	/// the statement reports in place of its wait ending: such a build has
+	/// ended in `Error`, and nothing carries it on.
+	pub(crate) async fn stop(&mut self) -> Result<()> {
+		if self.building.statement.is_none() {
+			return Ok(());
+		}
+		self.building.stop_requested.store(true, Ordering::Release);
+		match (&mut *self).await {
+			Err(err)
+				if !err.is::<StatementEnded>()
+					&& !self.building.stopped_for_statement.load(Ordering::Acquire) =>
+			{
+				Err(err)
+			}
+			_ => Ok(()),
+		}
 	}
 
 	/// Whether this build's generation is known to be `Online`.
@@ -698,13 +713,10 @@ fn spawn_build<'a>(
 }
 
 impl IndexBuilder {
-	/// A builder that runs the builds statements start through `spawn`, or
-	/// leaves them to bounded passes where it is `None`.
-	pub(in crate::kvs) fn new(
-		tf: TransactionFactory,
-		spawn: Option<BuildTasks>,
-		inline_batches: usize,
-	) -> Self {
+	/// A builder that runs the builds statements start through `spawn`, or,
+	/// where it is `None`, leaves a build no statement waits for to bounded
+	/// passes and runs one a statement waits for on that statement's task.
+	pub(in crate::kvs) fn new(tf: TransactionFactory, spawn: Option<BuildTasks>) -> Self {
 		Self {
 			tf,
 			shutting_down: Default::default(),
@@ -719,7 +731,6 @@ impl IndexBuilder {
 			closing_waits: Default::default(),
 			defers: spawn.is_none(),
 			spawn,
-			inline_batches,
 		}
 	}
 
@@ -736,18 +747,6 @@ impl IndexBuilder {
 			return poll;
 		}
 		BUILD_CLOSING_SLEEP
-	}
-
-	/// The batches a blocking statement awaiting its build after its commit
-	/// runs of a deferred build itself ([`Self::inline_batches`]).
-	pub(crate) fn inline_batches(&self) -> usize {
-		self.inline_batches
-	}
-
-	/// Whether a statement leaves the build it starts to bounded passes
-	/// ([`Self::run_pass`]) rather than running it, and does not wait for it.
-	pub(crate) fn defers_builds(&self) -> bool {
-		self.defers
 	}
 
 	/// The process-local mutex the materialiser's passes over `ikb` take.
@@ -895,13 +894,14 @@ impl IndexBuilder {
 		if sdr.is_some() {
 			building.analyzer = building.statement_analyzer(ctx).await?;
 		}
-		// A deferred build its statement awaits after its commit runs there, on
-		// the statement's budget.
-		let inline = self.defers && self.inline_batches > 0 && sdr.is_some() && waits_for_statement;
+		// A deferred build a statement awaits runs on that statement's task, to
+		// its end, where a task would have run it: after the statement's commit,
+		// or inside its transaction.
+		let inline = self.defers && sdr.is_some();
 		building.to_passes = self.defers;
+		building.inline_run = inline;
 		if inline {
-			building.inline_run = true;
-			building.budget = Some(BatchBudget::new(self.inline_batches));
+			building.statement = Some(Arc::clone(ctx));
 		}
 		let building = Arc::new(building);
 		building.read_key_structure_in(ctx).await?;
@@ -1135,6 +1135,9 @@ impl IndexBuilder {
 			if let Some(reason) = query_ended(ctx) {
 				return Err(Error::from(reason).into());
 			}
+			if building.stop_requested.load(Ordering::Acquire) {
+				return Err(anyhow::Error::new(StatementEnded(None)));
+			}
 			let Some(state) = building.read_durable_build_state().await? else {
 				return Err(DatastoreError::IndexingBuildingCancelled {
 					reason: format!("Index {} build state no longer exists", building.ix.name),
@@ -1176,8 +1179,13 @@ impl IndexBuilder {
 							.takeover_expired_build_state(Some(joined), false, false)
 							.await?
 					{
-						let (s, r) = channel();
 						building.defer_ownership_release(ctx).await;
+						// Where no task runs a build, the waiting statement runs the build it
+						// took over itself, to its end, as it runs one it started.
+						if self.defers {
+							return self.run_awaited_inline(&building, acquired).await;
+						}
+						let (s, r) = channel();
 						// A waiter awaiting inside its statement's transaction
 						// would never see it close, and one awaiting after the
 						// commit has no open transaction left to wait for.
@@ -1292,15 +1300,13 @@ impl IndexBuilder {
 			BuildStart::Inline(building, acquired) => {
 				let builder = self.clone();
 				let run = Arc::clone(&building);
-				Ok(Some(BuildCompletion::new(building, true, async move {
-					let ran = builder.run_claimed(&run, acquired).await?;
-					if !ran.finished {
-						run.tf.triggers().index_build.notify_one();
-					}
-					ran.failure.map_or(Ok(()), Err)
-				})))
+				Ok(Some(
+					BuildCompletion::new(building, true, async move {
+						builder.run_awaited_inline(&run, acquired).await
+					})
+					.with_parked(parked),
+				))
 			}
-			BuildStart::RemoteOwner(_) if self.defers => Ok(None),
 			BuildStart::RemoteOwner(building) if blocking => {
 				let builder = self.clone();
 				let ctx = Arc::clone(ctx);
@@ -1430,8 +1436,9 @@ impl IndexBuilder {
 		blocking: bool,
 	) -> Result<Option<BuildCompletion>> {
 		crate::idx::check_index_kernel(&ix.index)?;
-		// The staged generation stands ownerless, which a bounded pass claims.
-		if self.defers {
+		// The staged generation stands ownerless, which a bounded pass claims
+		// where no statement waits for it.
+		if self.defers && !blocking {
 			self.tf.triggers().index_build.notify_one();
 			return Ok(None);
 		}
@@ -1456,6 +1463,12 @@ impl IndexBuilder {
 		let mut building = Building::with_places(ctx, self.tf.clone(), opt, tb, ix, key, carried)?
 			.signalling(&self.closing_settled);
 		building.awaited = blocking;
+		// Where no task runs a build, the statement runs it, and one it leaves
+		// unfinished goes back to passes.
+		building.to_passes = self.defers;
+		if self.defers {
+			building.statement = Some(Arc::clone(ctx));
+		}
 		let building = Arc::new(building);
 		let claimed = if claimable {
 			building.claim_staged_generation(generation).await?
@@ -1463,6 +1476,14 @@ impl IndexBuilder {
 			None
 		};
 		match claimed {
+			// Where no task runs a build, the statement that waits for it runs it.
+			Some(acquired) if self.defers => {
+				let builder = self.clone();
+				let run = Arc::clone(&building);
+				Ok(Some(BuildCompletion::new(building, true, async move {
+					builder.run_awaited_inline(&run, acquired).await
+				})))
+			}
 			Some(acquired) => {
 				let (rcv, sdr) = if blocking {
 					let (s, r) = channel();
@@ -1712,6 +1733,32 @@ impl IndexBuilder {
 		})
 	}
 
+	/// Run the build `building` has claimed for the statement that awaits it, on
+	/// that statement's task, to its end ([`BuildStart::Inline`]), and answer
+	/// what the statement reports: the build's own error, or none once it has
+	/// ended. A build the memory threshold stopped, or the statement's own
+	/// deadline or cancellation, is handed back for passes, which are woken,
+	/// and fails the statement with that error, as the wait for a build on a
+	/// task of its own does; passes carry it on from its last committed batch.
+	///
+	/// The statement may await it while its program runs, which is sealed off
+	/// the catalog and the planner; the build is a seam of that seal
+	/// ([`crate::exec::compiles::seam`]): its catalog reads and the plans it
+	/// builds are the builder's, not the program's, as they are on a task of
+	/// its own.
+	async fn run_awaited_inline(
+		&self,
+		building: &IndexBuilding,
+		acquired: AcquiredBuild,
+	) -> Result<()> {
+		let ran = crate::exec::compiles::seam(self.run_claimed(building, acquired)).await?;
+		if let Some(stopped) = ran.stopped {
+			building.tf.triggers().index_build.notify_one();
+			return Err(stopped);
+		}
+		ran.failure.map_or(Ok(()), Err)
+	}
+
 	/// Run the build `building` has claimed, on the calling task, until it ends
 	/// or spends its budget, and settle it as a spawned build is settled: an
 	/// error of its own ends the generation in `Error`, an abort in `aborted`,
@@ -1729,19 +1776,41 @@ impl IndexBuilder {
 		let guard = BuildingFinishGuard(Arc::clone(building));
 		let res = building.run_acquired(acquired).await;
 		let batches = building.budget.as_ref().map_or(0, BatchBudget::spent);
-		let (finished, failure) = match res {
+		let (finished, failure, stopped) = match res {
 			Ok(()) => {
 				if building.aborted.load(Ordering::Acquire) {
 					let _ = building.mark_durable_aborted(generation).await;
 				}
-				(true, None)
+				(true, None, None)
 			}
-			Err(err) if err.is::<BuildYielded>() || is_memory_threshold_error(&err) => {
+			Err(err) if err.is::<BuildYielded>() => {
 				building.hand_back(generation).await?;
-				building.handed_back.store(true, Ordering::Release);
-				(false, None)
+				(false, None, None)
+			}
+			Err(err) if is_memory_threshold_error(&err) => {
+				building.hand_back(generation).await?;
+				(false, None, Some(err))
 			}
 			Err(err) if is_shutdown_error(&err) => return Err(err),
+			// The statement running the build ended: the build itself did not fail. A
+			// retryable conflict it stopped retrying for that reason is no failure either.
+			Err(err)
+				if err.is::<StatementEnded>()
+					|| (is_retryable_transaction_conflict(&err)
+						&& building.statement_stopping()) =>
+			{
+				building.hand_back(generation).await?;
+				building.stopped_for_statement.store(true, Ordering::Release);
+				let stopped = match err.downcast::<StatementEnded>() {
+					Ok(StatementEnded(Some(reason))) => Error::from(reason).into(),
+					Ok(ended) => anyhow::Error::new(ended),
+					Err(_) => match building.statement_ended() {
+						Some(reason) => Error::from(reason).into(),
+						None => anyhow::Error::new(StatementEnded(None)),
+					},
+				};
+				(false, None, Some(stopped))
+			}
 			Err(err) => {
 				warn!(
 					index = %building.ix.name,
@@ -1750,7 +1819,7 @@ impl IndexBuilder {
 					"index build failed"
 				);
 				let _ = building.mark_durable_error(generation, err.to_string()).await;
-				(true, Some(err))
+				(true, Some(err), None)
 			}
 		};
 		drop(guard);
@@ -1758,6 +1827,7 @@ impl IndexBuilder {
 			batches,
 			finished,
 			failure,
+			stopped,
 		})
 	}
 }
@@ -1770,6 +1840,10 @@ struct ClaimedRun {
 	finished: bool,
 	/// The error the build failed with, if it did.
 	failure: Option<anyhow::Error>,
+	/// The error that stopped the build without failing it — the memory
+	/// threshold, or the end of the statement running it — which was handed
+	/// back rather than failed.
+	stopped: Option<anyhow::Error>,
 }
 
 /// The most keys one transaction of [`Building::delete_range_in_batches`]
@@ -2005,9 +2079,9 @@ pub(super) struct Building {
 	/// run by a task of its own: its ownership is handed back, not kept, when it is released
 	/// ([`Self::release_owned`]).
 	to_passes: bool,
-	/// Whether the statement that started this build runs its first batches itself, once it has
-	/// committed ([`BuildStart::Inline`]): a rollback then finds no task to run the build, and
-	/// arrives at the release gate in its place.
+	/// Whether the statement that started this build runs it itself, on its own task
+	/// ([`BuildStart::Inline`]): a rollback before the statement has run it finds no task to run
+	/// the build, and arrives at the release gate in its place.
 	inline_run: bool,
 	/// Whether this build builds a generation the statement that started it staged, and reads
 	/// only once that statement's transaction has closed. The statement's commit stamps the
@@ -2019,10 +2093,19 @@ pub(super) struct Building {
 	/// The batches this build may start, where a bounded pass runs it
 	/// ([`IndexBuilder::run_pass`]); `None` for a build that runs to its end.
 	budget: Option<BatchBudget>,
-	/// Set once a run bounded by [`Self::budget`] handed the build back unfinished
-	/// ([`Building::hand_back`]), for a statement awaiting it to return with the
-	/// index building.
-	handed_back: AtomicBool,
+	/// The context of the statement that runs this build on its own task
+	/// ([`BuildStart::Inline`]), whose deadline and cancellation stop the build
+	/// before its next batch, handed back for passes ([`Self::spend_batch`]);
+	/// `None` for a build no statement runs. [`Self::ctx`] is detached from
+	/// both.
+	statement: Option<FrozenContext>,
+	/// Set by the statement's wait for this build when the wait ends
+	/// ([`BuildCompletion::stop`]): the build stops before its next batch, as
+	/// it does once [`Self::statement`] has ended.
+	stop_requested: AtomicBool,
+	/// Set once a run of this build stopped for its statement handed it back
+	/// rather than ending it ([`IndexBuilder::run_claimed`]).
+	stopped_for_statement: AtomicBool,
 }
 
 /// The batches a bounded pass lets one build start ([`Building::spend_batch`]).
@@ -2059,6 +2142,23 @@ impl std::fmt::Display for BuildYielded {
 }
 
 impl std::error::Error for BuildYielded {}
+
+/// The error a build that a statement runs on its own task stops with before
+/// its next batch once that statement has ended: past its deadline or
+/// cancelled, with the reason, or its wait for the build ended, without one
+/// ([`Building::spend_batch`]). Every batch before it has committed and
+/// nothing of the next has begun, so the build is handed back for passes
+/// rather than failed.
+#[derive(Debug)]
+pub(super) struct StatementEnded(Option<Reason>);
+
+impl std::fmt::Display for StatementEnded {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("the statement running the index build ended before the build")
+	}
+}
+
+impl std::error::Error for StatementEnded {}
 
 /// The ticket of a build, through its life.
 ///
@@ -2151,7 +2251,9 @@ impl Building {
 			inline_run: false,
 			reads_after_its_stamp: AtomicBool::new(false),
 			budget: None,
-			handed_back: AtomicBool::new(false),
+			statement: None,
+			stop_requested: AtomicBool::new(false),
+			stopped_for_statement: AtomicBool::new(false),
 		})
 	}
 
@@ -2170,6 +2272,81 @@ impl Building {
 		self
 	}
 
+	/// Why the statement that runs this build on its own task has ended, if it
+	/// has: cancelled, or past its deadline ([`Self::statement`]).
+	fn statement_ended(&self) -> Option<Reason> {
+		self.statement.as_deref().and_then(query_ended)
+	}
+
+	/// Whether this build is run by a statement on its own task that has ended,
+	/// or whose wait for the build has ([`Self::statement`],
+	/// [`Self::stop_requested`]): the build stops at its next batch, at its
+	/// next retry of a conflict inside one, or at its next poll of a wait for
+	/// other transactions ([`Self::stop_for_statement`]), and is handed back.
+	fn statement_stopping(&self) -> bool {
+		self.statement.is_some()
+			&& (self.stop_requested.load(Ordering::Acquire) || self.statement_ended().is_some())
+	}
+
+	/// Fail with [`StatementEnded`] once the statement running this build on
+	/// its own task is stopping it ([`Self::statement_stopping`]), which
+	/// [`IndexBuilder::run_claimed`] hands back for passes rather than failing.
+	///
+	/// Polled by every wait inside the build that lasts as long as another
+	/// transaction stays open — the write barrier and the drains of writers'
+	/// reservations — so a client holding a write open cannot keep a stopped
+	/// build, and the statement waiting for it, past the statement's deadline
+	/// or cancellation.
+	pub(super) fn stop_for_statement(&self) -> Result<()> {
+		if self.statement_stopping() {
+			return Err(anyhow::Error::new(StatementEnded(self.statement_ended())));
+		}
+		Ok(())
+	}
+
+	/// The error to answer for `generation`, which [`Self::acquire_build_state`]
+	/// installed under this builder's ownership and then did not return because
+	/// `err` ended the acquisition.
+	///
+	/// No run exists yet to hand such a generation back
+	/// ([`IndexBuilder::run_claimed`]), so a stop by the statement running the
+	/// build ([`StatementEnded`]) hands it back here, and wakes passes: the next
+	/// pass claims it at once, rather than once this builder's lease lapses,
+	/// and repeats the drain and wipe its restarted scan begins with. Any other
+	/// error is answered as it is, the generation left to its lease.
+	///
+	/// The statement reports its timeout or cancellation, as any statement does that is stopped
+	/// before its transaction commits, even a `REBUILD INDEX` whose generation passes now carry on
+	/// in the background. It does not report a rebuild that goes on in the background, as the wait
+	/// for a build after the commit does ([`AwaitBuildAfterCommit`]), because the executor reports
+	/// a statement interrupted before its commit by the interruption alone. Running the statement
+	/// again is safe: the generation handed back has no live owner, so a later `REBUILD INDEX`
+	/// takes it over and resumes it rather than starting another.
+	async fn hand_back_unacquired(
+		&self,
+		generation: BuildGeneration,
+		err: anyhow::Error,
+	) -> anyhow::Error {
+		let stopped = match err.downcast::<StatementEnded>() {
+			Ok(stopped) => stopped,
+			Err(err) => return err,
+		};
+		match self.hand_back(generation).await {
+			Ok(_) => self.tf.triggers().index_build.notify_one(),
+			Err(err) => warn!(
+				index = %self.ix.name,
+				table = %self.ix.table_name,
+				error = %err,
+				"could not hand back a build generation its statement stopped acquiring; \
+				 it is left to its owner lease"
+			),
+		}
+		match stopped {
+			StatementEnded(Some(reason)) => Error::from(reason).into(),
+			ended => anyhow::Error::new(ended),
+		}
+	}
+
 	/// Spend one batch of a bounded pass's budget, before a batch that writes,
 	/// failing with [`BuildYielded`] once the budget is spent.
 	///
@@ -2185,7 +2362,13 @@ impl Building {
 	/// grows with the records written past the scan's end while it ran, and a
 	/// DiskANN index's post-scan pass and wipe, which no WebAssembly build has.
 	/// A build no pass bounds spends nothing.
+	///
+	/// A build a statement runs on its own task stops here with
+	/// [`StatementEnded`] once the statement's deadline has passed, it has been
+	/// cancelled ([`Self::statement`]), or its wait for the build has ended
+	/// ([`Self::stop_requested`]).
 	pub(super) fn spend_batch(&self) -> Result<()> {
+		self.stop_for_statement()?;
 		let Some(budget) = &self.budget else {
 			return Ok(());
 		};
@@ -2718,7 +2901,9 @@ impl Building {
 			// installing `!bs` and registering the local task, which a
 			// racing cancel-path cleanup uses to abort the build.
 			if generation > 1 {
-				self.wait_for_prior_generation_reservations(generation).await?;
+				if let Err(err) = self.wait_for_prior_generation_reservations(generation).await {
+					return Err(self.hand_back_unacquired(generation, err).await);
+				}
 				self.wipe_stale_build_queues(generation).await?;
 			}
 			return Ok(Some(AcquiredBuild {
@@ -4049,7 +4234,9 @@ impl Building {
 	/// Wait until every write transaction that opened before the call has ended on every live
 	/// node ([`crate::kvs::write_barrier::WriteBarrier`]), heartbeating ownership of `generation`
 	/// meanwhile, since a write transaction a client holds open can outlast the owner lease.
-	/// Answers `false` when the build was aborted while it waited.
+	/// Answers `false` when the build was aborted while it waited, and fails with
+	/// [`StatementEnded`] when the statement running the build on its own task stops it
+	/// ([`Building::stop_for_statement`]).
 	async fn wait_for_older_writes(&self, generation: BuildGeneration) -> Result<bool> {
 		let sequences = self.ctx.try_get_sequences()?.clone();
 		// Counted as this build's own before the wait begins, for a statement that set its
@@ -4078,6 +4265,7 @@ impl Building {
 			if self.is_aborted().await {
 				return Ok(false);
 			}
+			self.stop_for_statement()?;
 			if barrier.done(&self.tf, &sequences).await? {
 				self.record_barrier_proof(generation).await?;
 				return Ok(true);
@@ -4750,8 +4938,15 @@ impl Building {
 		self.conflict_streak.store(0, Ordering::Relaxed);
 	}
 
+	/// Whether `err` is a retryable conflict to retry, after the pause before
+	/// the retry. A build whose statement is stopping it
+	/// ([`Self::statement_stopping`]) retries nothing: the conflict ends its run,
+	/// which hands it back rather than failing it ([`IndexBuilder::run_claimed`]).
 	async fn retryable_conflict(&self, err: &anyhow::Error, action: &str) -> bool {
 		if is_retryable_transaction_conflict(err) {
+			if self.statement_stopping() {
+				return false;
+			}
 			debug!(
 				target: "surrealdb::core::kvs::index",
 				index = %self.ix.name,
@@ -5869,8 +6064,8 @@ impl RollbackAction for ReleaseBuildOwnership {
 					let _ = self.0.mark_durable_aborted(generation).await;
 				}
 			}
-			// The statement that was to run the build's first batches after its commit will
-			// not: no task is left to arrive in its place.
+			// The statement that was to run the build itself may not have run it to its end, and
+			// no task is left to arrive in its place; an arrival it made already counts once.
 			if self.0.inline_run {
 				self.0.arrive_at_release_gate(RELEASE_GATE_BUILDER);
 			}
