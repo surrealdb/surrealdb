@@ -1754,6 +1754,7 @@ fn plan_source_choice(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Plann
 	}
 	let key = source_key(ir, op, cx.effects.catalog, cx.physical)?
 		.ok_or(IrError::Stale("a value source that names no value"))?;
+	let mut known = true;
 	let answers = match cx.physical.table_answers(&key) {
 		CatalogAnswer::Found(answers) => answers,
 		CatalogAnswer::NotLoaded => {
@@ -1766,6 +1767,7 @@ fn plan_source_choice(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Plann
 		// runs, through the table's version-keyed unit. Any other compile plans the statement
 		// again late-bound when it is reached.
 		CatalogAnswer::Unknown if cx.physical.plans_unknown_reads() => {
+			known = false;
 			Arc::new(TableAnswers::unknown(key.0.clone(), key.2))
 		}
 		CatalogAnswer::Unknown => {
@@ -1786,7 +1788,7 @@ fn plan_source_choice(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Plann
 			Some(stages),
 			ReadVersion::Stamped(_) | ReadVersion::Deferred,
 			SourceRefShape::Table(_),
-		) => knn::exact_at_stamp(ir, stages, &answers.indexes)?,
+		) => knn::exact_at_stamp(ir, cx.effects.registry, stages, &answers.indexes)?,
 		// A current read of a table with a vector index that is not online yet (a concurrent
 		// build still running) ranks the operators of that index's field by brute force: the
 		// index cannot answer, and no search answering would admit no row.
@@ -1818,7 +1820,7 @@ fn plan_source_choice(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Plann
 						})
 						.cloned()
 						.collect();
-					knn::exact_at_stamp(ir, stages, &building)?
+					knn::exact_at_stamp(ir, cx.effects.registry, stages, &building)?
 				}
 				CatalogAnswer::NotLoaded => {
 					return Err(IrError::NotLoaded {
@@ -1836,6 +1838,59 @@ fn plan_source_choice(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Plann
 		}
 		_ => Vec::new(),
 	};
+	// An approximate `KNN` operator over a field no vector index serves is refused, where the plan
+	// holds the definitions the read will meet: for a current read every index the table defines,
+	// a concurrent build still running included, and for a versioned one those it had at the
+	// stamp. `WITH NOINDEX` keeps its contract.
+	let unindexed = match (&stages, answers.version) {
+		(Some(stages), version)
+			if known
+				&& !attrs.may_be_defined
+				&& !attrs.may_meet_change
+				&& !matches!(attrs.with, Some(With::NoIndex))
+				&& matches!(attrs.source_ref, SourceRefShape::Table(_)) =>
+		{
+			match version {
+				ReadVersion::Current => match cx.physical.indexes(&key.0) {
+					CatalogAnswer::Found(defined) => {
+						knn::unindexed_refusal(ir, cx.effects.registry, stages, &defined, &exact)?
+					}
+					CatalogAnswer::NotLoaded => {
+						return Err(IrError::NotLoaded {
+							what: "access::convert_source: the defined indexes of a table",
+						});
+					}
+					CatalogAnswer::Unknown if cx.physical.plans_unknown_reads() => None,
+					CatalogAnswer::Unknown => {
+						return Err(IrError::LateBind {
+							what: "access::convert_source: the defined indexes of a table",
+						});
+					}
+					CatalogAnswer::Absent => None,
+				},
+				ReadVersion::Stamped(_) | ReadVersion::Deferred => knn::unindexed_refusal(
+					ir,
+					cx.effects.registry,
+					stages,
+					&answers.indexes,
+					&exact,
+				)?,
+			}
+		}
+		_ => None,
+	};
+	if let Some(refusal) = unindexed {
+		return Ok(Some(planned(AccessChoice {
+			access: PhysOp::Union,
+			fallback: None,
+			enforce: None,
+			residual: Vec::new(),
+			point_lookup: None,
+			knn: None,
+			refusal: Some(refusal),
+			key_operands: Vec::new(),
+		})));
+	}
 	let ranks = match stages.as_ref() {
 		Some(stages) => knn::ranks(ir, cx.effects.registry, stages, &exact)?,
 		None => false,

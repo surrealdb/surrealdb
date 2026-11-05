@@ -10,6 +10,26 @@ For the release **process** (how releases are cut and shipped), see
 [`RELEASING.md`](./RELEASING.md). For end-user release notes, see
 <https://surrealdb.com/releases>.
 
+## v4.0.1 — an approximate KNN query with no vector index is refused
+
+The approximate KNN operator `<|K,EF|>` names no distance, so only an HNSW or
+DiskANN index search answers it. A `SELECT` whose `<|K,EF|>` field is the
+first column of no vector index of the table is refused with an error, before
+any row is read.
+
+**Impact**:
+
+- A query that returned no rows because its vector index was never defined,
+  was removed or names another field now fails. The error says that the
+  operator needs an HNSW or DiskANN index on the field.
+- A query whose index exists is unchanged, including while a concurrent build
+  of that index is still running.
+- `WITH NOINDEX` still returns no rows for `<|K,EF|>`, and the brute-force
+  form `<|K,DISTANCE|>` still needs no index.
+
+**What to do**: define an HNSW or DiskANN index on the field, or write the
+brute-force form with the distance to rank by, such as `<|K,COSINE|>`.
+
 ## v4.0.0 — the TiKV storage backend is built from its own repository
 
 The TiKV storage backend, its client, and the `kv-tikv` and `storage-tikv`

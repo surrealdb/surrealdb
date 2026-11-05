@@ -181,17 +181,13 @@ value = '''
 value = "[{ count: 2 }]"
 
 [[test.results]]
-value = '''
-'SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: point <|2,40|> $q]
-        TableScan [ctx: Db] [table: pt, direction: Forward]
-''''
+error = "Invalid query: The KNN operator `<|2,40|>` needs an HNSW or DiskANN index on `point`; define one, or name a distance to search without an index, as in `<|2,EUCLIDEAN|>`."
 
 [[test.results]]
-value = "[]"
+error = "Invalid query: The KNN operator `<|2,40|>` needs an HNSW or DiskANN index on `point`; define one, or name a distance to search without an index, as in `<|2,EUCLIDEAN|>`."
 
 [[test.results]]
-value = "[{ count: 0 }]"
+error = "Invalid query: The KNN operator `<|2,40|>` needs an HNSW or DiskANN index on `point`; define one, or name a distance to search without an index, as in `<|2,EUCLIDEAN|>`."
 
 [[test.results]]
 value = "NONE"
@@ -274,14 +270,10 @@ value = "NONE"
 value = "[{ grp: 'a', id: pt:5, point: [21f, 2f] }]"
 
 [[test.results]]
-value = '''
-'SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: point <|2,40|> $q]
-        TableScan [ctx: Db] [table: pt, direction: Forward]
-''''
+error = "Invalid query: The KNN operator `<|2,40|>` needs an HNSW or DiskANN index on `point`; define one, or name a distance to search without an index, as in `<|2,EUCLIDEAN|>`."
 
 [[test.results]]
-value = "[]"
+error = "Invalid query: The KNN operator `<|2,40|>` needs an HNSW or DiskANN index on `point`; define one, or name a distance to search without an index, as in `<|2,EUCLIDEAN|>`."
 
 [[test.results]]
 value = "[pt:2, pt:5]"
@@ -570,11 +562,9 @@ SELECT VALUE id FROM pt WHERE point <|2,EUCLIDEAN|> $q ORDER BY id;
 EXPLAIN SELECT count() FROM pt WHERE point <|2,EUCLIDEAN|> $q GROUP ALL;
 SELECT count() FROM pt WHERE point <|2,EUCLIDEAN|> $q GROUP ALL;
 
--- DEFECT (2), absent-index half. `<|k,EF|>` asks for an ANN traversal, which
--- only a vector index can perform. With none defined the operator survives as
--- an ordinary `Filter` over the scan and matches nothing — no error, and
--- nothing in the plan says the query has become unanswerable. Correct answer:
--- the two nearest points, as `<|2,EUCLIDEAN|>` reports above.
+-- `<|k,EF|>` asks for an ANN traversal, which only a vector index can
+-- perform. With none defined the statement is refused before any row is read,
+-- its `EXPLAIN` included, and the error names the brute-force form above.
 EXPLAIN SELECT id FROM pt WHERE point <|2,40|> $q;
 SELECT VALUE id FROM pt WHERE point <|2,40|> $q;
 SELECT count() FROM pt WHERE point <|2,40|> $q GROUP ALL;
@@ -615,10 +605,9 @@ EXPLAIN SELECT id, vector::distance::knn() AS d FROM pt WHERE grp = 'a' AND poin
 SELECT VALUE id FROM pt WHERE grp = 'a' AND point <|2,40|> $q ORDER BY id;
 SELECT VALUE id FROM pt WHERE grp = 'a' AND point <|2,EUCLIDEAN|> $q ORDER BY id;
 
--- DEFECT (2), decommissioned half. Preparing the index for removal returns the
--- plan to `Filter` over `TableScan` and the ANN answer to `[]`, while the
--- brute-force form over the same rows still answers. Correct answer: the two
--- nearest points.
+-- An index prepared for removal serves no search, so the ANN form is refused
+-- as it is with no index, while the brute-force form over the same rows still
+-- answers.
 ALTER INDEX pt_hnsw ON pt PREPARE REMOVE;
 CREATE pt:5 SET point = [21f, 2f], grp = 'a';
 EXPLAIN SELECT id FROM pt WHERE point <|2,40|> $q;

@@ -11,9 +11,9 @@ side that does not read the record being scanned — a bind parameter, a functio
 call (including one with a closure argument), an array with computed elements,
 an uncorrelated subquery — is evaluated once, before the scan reads anything,
 with the `array<number>` coercion and its error messages. One that reads the
-record being scanned (a field) fails planning. KNN in projection position, a
-bare expression, and an Approximate form without an HNSW index evaluate to
-false per row.
+record being scanned (a field) fails planning, and so does an Approximate
+form without a vector index. KNN in projection position and a bare expression
+evaluate to false per row.
 Dimension mismatches skip records (no error). Operands of a KNN evaluated as a
 predicate are deliberately not computed, so an erroring operand yields false
 rather than an error. A multi-source FROM restores the stripped conjunct so
@@ -84,7 +84,7 @@ value = "[{ id: pts:1 }, { id: pts:2 }]"
 value = "false"
 
 [[test.results]]
-value = "[]"
+error = "Invalid query: The KNN operator `<|2,100|>` needs an HNSW or DiskANN index on `point`; define one, or name a distance to search without an index, as in `<|2,EUCLIDEAN|>`."
 
 [[test.results]]
 value = "[{ id: pts:1, near: false }, { id: pts:2, near: false }, { id: pts:3, near: false }]"
@@ -140,7 +140,7 @@ LET $q2 = array::map([2,3,4,5], |$x| <float> $x);
 SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> $q2;
 -- 14. bare expression KNN: no document -> false
 RETURN [1f,2f] <|1,EUCLIDEAN|> [1f,2f];
--- 15. Approximate form without an HNSW index: false per row
+-- 15. Approximate form without an HNSW index: refused
 SELECT id FROM pts WHERE point <|2,100|> [2f,3f,4f,5f];
 -- 16. erroring right-hand operand, projection position: KNN predicates never
 --     evaluate their operands (legacy hands operate::knn the expression

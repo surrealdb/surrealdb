@@ -14,6 +14,11 @@
 //!   top-level `AND` chain (one under an `OR`, a `NOT` or a call), and every `<|k|>` operator, is
 //!   refused for the statement before any row is read, whatever the read's access path would
 //!   answer.
+//! - **The unindexed** ([`unindexed_refusal`]). An approximate operator (`<|k, ef|>`) names no
+//!   distance, so only a vector index search answers it. A read of one table whose definitions the
+//!   plan holds is refused when such an operator's field is the first column of no HNSW or DiskANN
+//!   index of the table that is not being removed (at the stamp, for a versioned read), unless the
+//!   read is `WITH NOINDEX`.
 //! - **Brute force** ([`ranked`]). The first brute-force operator (`<|k, DISTANCE|>`) of the
 //!   innermost stage that holds one, whose left side is a path and whose right side is a literal
 //!   vector or an expression computable without a row, is ranked by a `phys.knn_topk` that stands
@@ -283,11 +288,14 @@ pub(super) struct Exact {
 /// The approximate operators of the stages over the one table source a read at a stamp makes,
 /// each with the brute-force operator it is ranked as: an operator whose field is the first column
 /// of a vector index of `indexes` (the table's indexes at the stamp, or those it declares now for a
-/// stamp only the run evaluates), over that index's distance.
-/// An index entry describes the present, so the nearest rows are ranked among the records the
-/// read finds at the stamp.
+/// stamp only the run evaluates) that searches it ([`searches_column`]), over that index's
+/// distance. A field written as a projection builtin naming a literal field
+/// (`type::field("point")`) is matched as that field, as the access path matches it. An index entry
+/// describes the present, so the nearest rows are ranked among the records the read finds at the
+/// stamp.
 pub(super) fn exact_at_stamp(
 	ir: &Ir,
+	registry: &FunctionRegistry,
 	stages: &Stages,
 	indexes: &[crate::catalog::IndexDefinition],
 ) -> Result<Vec<Exact>, IrError> {
@@ -309,9 +317,7 @@ pub(super) fn exact_at_stamp(
 				| crate::catalog::Index::Spatial => return None,
 			};
 			let column = index.cols.first()?;
-			(!index.prepare_remove
-				&& crate::exec::planner::util::idiom_matches_column(field, column))
-			.then(|| distance.clone())
+			(!index.prepare_remove && searches_column(field, column)).then(|| distance.clone())
 		})
 	};
 	let mut found = Vec::new();
@@ -321,7 +327,6 @@ pub(super) fn exact_at_stamp(
 		};
 		for (position, conjunct) in &predicate.conjuncts {
 			let LogicalExpr::Binary {
-				left,
 				op: BinaryOperator::NearestNeighbor(nn),
 				..
 			} = conjunct
@@ -329,6 +334,15 @@ pub(super) fn exact_at_stamp(
 				continue;
 			};
 			let NearestNeighbor::Approximate(k, _) = **nn else {
+				continue;
+			};
+			let mut resolved = conjunct.clone();
+			resolve_knn_field_operands(&mut resolved, registry);
+			let LogicalExpr::Binary {
+				left,
+				..
+			} = &resolved
+			else {
 				continue;
 			};
 			let (Some(distance), Some(op)) =
@@ -343,6 +357,86 @@ pub(super) fn exact_at_stamp(
 		}
 	}
 	Ok(found)
+}
+
+/// The refusal of a read of one table source whose stages hold an approximate `KNN` operator
+/// (`<|k, ef|>`) that no vector index can answer: one `exact` does not rank by brute force, whose
+/// field is the first column of no HNSW or DiskANN index of `indexes` that is not being removed.
+/// A column that flattens (`*`) serves no search ([`searches_column`]).
+///
+/// The approximate form names no distance, so only an index search answers it; without one the
+/// statement is refused before any row is read, as a write's operator is ([`write_refusal`]).
+/// `indexes` are the indexes the read sees: those online now, or those the table had at the
+/// stamp of a versioned read. An index the caller's field permissions keep from the search still
+/// counts, so whether the operator is refused does not depend on who runs it.
+pub(super) fn unindexed_refusal(
+	ir: &Ir,
+	registry: &FunctionRegistry,
+	stages: &Stages,
+	indexes: &[crate::catalog::IndexDefinition],
+	exact: &[Exact],
+) -> Result<Option<Refusal>, IrError> {
+	if stages.united {
+		return Ok(None);
+	}
+	let indexed = |field: &LogicalExpr| {
+		indexes.iter().any(|index| {
+			!index.prepare_remove
+				&& matches!(
+					index.index,
+					crate::catalog::Index::Hnsw(_) | crate::catalog::Index::DiskAnn(_)
+				) && index.cols.first().is_some_and(|column| searches_column(field, column))
+		})
+	};
+	for (_, region, predicate) in filter_predicates(ir, stages, &[])? {
+		let Some((leaves, _)) = conjunct_values(ir, region) else {
+			continue;
+		};
+		for (position, conjunct) in &predicate.conjuncts {
+			let LogicalExpr::Binary {
+				op: BinaryOperator::NearestNeighbor(nn),
+				..
+			} = conjunct
+			else {
+				continue;
+			};
+			let NearestNeighbor::Approximate(k, ef) = **nn else {
+				continue;
+			};
+			// A projection builtin naming a literal field (`type::field("point")`) names the field
+			// the access path matches an index by.
+			let mut resolved = conjunct.clone();
+			resolve_knn_field_operands(&mut resolved, registry);
+			let LogicalExpr::Binary {
+				left,
+				..
+			} = &resolved
+			else {
+				continue;
+			};
+			let op = leaves.get(*position).and_then(|leaf| defining_op(ir, *leaf));
+			if exact.iter().any(|rewrite| Some(rewrite.op) == op) || indexed(left) {
+				continue;
+			}
+			let field = written(ir, &predicate.operands, left);
+			return Ok(Some(Refusal::Query {
+				message: format!(
+					"The KNN operator `<|{k},{ef}|>` needs an HNSW or DiskANN index on \
+					 `{field}`; define one, or name a distance to search without an index, \
+					 as in `<|{k},EUCLIDEAN|>`."
+				),
+			}));
+		}
+	}
+	Ok(None)
+}
+
+/// Whether a vector index whose first column is `column` searches the `KNN` operator over
+/// `field`: the column is the field as written, and does not flatten (`*`), as the access path
+/// matches no vector index over a flattened column.
+fn searches_column(field: &LogicalExpr, column: &crate::expr::Idiom) -> bool {
+	!column.0.iter().any(|part| matches!(part, crate::expr::Part::All))
+		&& crate::exec::planner::util::idiom_matches_column(field, column)
 }
 
 /// Rewrites each operator `exact` names to its brute-force operator.
