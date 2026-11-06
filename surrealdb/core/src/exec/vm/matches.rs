@@ -72,6 +72,9 @@ pub(crate) struct ExecutorTables {
 	excluded: Arc<[TableName]>,
 	/// Whether a source's table is only known when the statement runs.
 	open: bool,
+	/// Whether the enclosing unit has already admitted the row in scope before
+	/// evaluating the clause (such as a live subscription's notification unit).
+	admitted: bool,
 }
 
 impl Default for ExecutorTables {
@@ -87,12 +90,22 @@ impl ExecutorTables {
 			known: Arc::from(known),
 			excluded: Arc::from(excluded),
 			open,
+			admitted: false,
 		}
 	}
 
 	/// No executor at all: the set outside any SELECT.
 	pub(crate) fn none() -> Self {
 		Self::new(Vec::new(), Vec::new(), false)
+	}
+
+	/// No executor at all, and the enclosing unit has already admitted the row
+	/// in scope before evaluating the clause.
+	pub(crate) fn admitted() -> Self {
+		Self {
+			admitted: true,
+			..Self::none()
+		}
 	}
 
 	/// The first table read whole, the table index functions report against.
@@ -103,6 +116,11 @@ impl ExecutorTables {
 	/// Whether a row of `table` is evaluated by an executor.
 	pub(crate) fn has_executor(&self, table: &TableName) -> bool {
 		self.known.contains(table) || (self.open && !self.excluded.contains(table))
+	}
+
+	/// Whether the enclosing unit has already admitted the row in scope.
+	pub(crate) fn is_admitted(&self) -> bool {
+		self.admitted
 	}
 }
 
@@ -503,8 +521,11 @@ impl MatchesEval {
 			}
 			// SECURITY: the row's `id` is whatever the source built, so the
 			// catalog of the table it names is read only for a caller who may
-			// select the record it names (see `may_select_named_record`).
-			if !may_select_named_record(ctx, &rid).await? {
+			// select the record it names (see `may_select_named_record`). A
+			// subscription's notification unit has already admitted the record
+			// image before running the subscriber's clauses, including on a
+			// delete where the record is no longer in storage.
+			if !self.executor_tables.is_admitted() && !may_select_named_record(ctx, &rid).await? {
 				return Ok(Value::Bool(false));
 			}
 			let target = match &self.probe {

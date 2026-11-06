@@ -1110,3 +1110,44 @@ async fn test_live_update_leaving_subscriber_permission_fires_notification() {
 	assert_eq!(notif.action, PublicAction::Update);
 	assert_eq!(notif.result, PublicValue::None);
 }
+
+/// GH-7617: a LIVE SELECT whose WHERE clause holds a full-text match
+/// (`@@`) must notify when a newly written record matches, and stay silent
+/// when it does not.
+#[tokio::test]
+async fn test_live_fulltext_match_notifies() {
+	let (recv, ds) = new_ds_with_broker().await.unwrap();
+	let (ns, db) = ("test", "test");
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.ensure_ns_db(None, ns, db).await.unwrap();
+	tx.commit().await.unwrap();
+
+	let owner_ses = Session::owner().with_ns(ns).with_db(db);
+	let live_ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
+	ds.execute(
+		"DEFINE TABLE lt; \
+		 DEFINE ANALYZER la TOKENIZERS class,blank FILTERS lowercase; \
+		 DEFINE INDEX lti ON lt FIELDS title FULLTEXT ANALYZER la BM25",
+		&owner_ses,
+		None,
+	)
+	.await
+	.unwrap();
+	ds.execute("LIVE SELECT * FROM lt WHERE title @@ 'physics'", &live_ses, None).await.unwrap();
+	while recv.try_recv().is_ok() {}
+
+	ds.execute("CREATE lt:cooking SET title = 'Cooking with chemistry'", &owner_ses, None)
+		.await
+		.unwrap();
+	let spurious = tokio::time::timeout(tokio::time::Duration::from_millis(300), recv.recv()).await;
+	assert!(spurious.is_err(), "a non-matching record must not notify");
+
+	ds.execute("CREATE lt:physics SET title = 'Cooking with physics'", &owner_ses, None)
+		.await
+		.unwrap();
+	let notif = tokio::time::timeout(tokio::time::Duration::from_millis(500), recv.recv())
+		.await
+		.expect("a full-text match in the LIVE WHERE clause should notify")
+		.expect("channel should not be closed");
+	assert_eq!(notif.action, PublicAction::Create);
+}

@@ -24,6 +24,9 @@
 //! - **The loop's clauses.** The ops after a select loop in its region, up to the next select loop
 //!   that does not read its rows, shape its rows (a sort, and the select loop that projects the
 //!   sorted rows) and are decided with it; a select loop among them decides nothing of its own.
+//! - **Live subscriptions.** A `logical.subscriber` op's `WHERE` and projection clauses run over
+//!   the record image the notification unit has already admitted, with no select loop around them:
+//!   their `MATCHES` operators have no executor table and judge each row on its value.
 //!
 //! An operator outside every select loop, or in a closure body, a function body or a permission or
 //! field frame, has no attribute: lowering answers it `false`. The pass reads the logical select
@@ -441,7 +444,51 @@ pub(crate) fn run(ir: &mut Ir, registry: &FunctionRegistry) {
 		}
 	}
 	subjects_scopes(ir, registry, &mut table);
+	subscriber_clauses(ir, registry, &mut table);
 	*ir.matches_table_mut() = table;
+}
+
+/// Decides the `MATCHES` operators of a live subscription's `WHERE` and projection clauses as the
+/// rows of a source that builds them are judged: the notification unit runs the clauses over the
+/// record image it has already admitted, which no select loop holds, so each row is judged on the
+/// operator's left operand and the full-text index of its table
+/// ([`crate::exec::vm::matches::MatchesEval`]'s value path), and no row of the unit has an
+/// executor table.
+///
+/// Only the subscriber's own clauses: the admission and field-view regions, a closure body, a
+/// function body and a nested permission, field or event frame answer `false` there, as they do
+/// elsewhere. A query no index answers stays `false` rather than raising `NoIndexFoundForMatch`,
+/// since a condition is meant to skip a record, not to abort the write that notified it.
+fn subscriber_clauses(ir: &Ir, registry: &FunctionRegistry, table: &mut MatchesTable) {
+	let mut clauses = Vec::new();
+	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
+		if let Some(OpKind::Logical(LogOp::Subscriber(attrs))) = ir.op(op).map(|data| &data.kind)
+			&& let Some(data) = ir.op(op)
+		{
+			let start = attrs.admitted() + attrs.viewed();
+			let count = usize::from(attrs.cond) + attrs.projected();
+			clauses.extend(data.regions.iter().copied().skip(start).take(count));
+		}
+		Walk::Continue
+	});
+	for region in clauses {
+		let mut held = Held::default();
+		operators_in(ir, registry, region, &mut held);
+		for op in held.matches {
+			if table.holds(op) {
+				continue;
+			}
+			table.matches.insert(
+				op,
+				MatchesAttr {
+					registered: false,
+					executor_tables: ExecutorTables::admitted(),
+					field: left_field(ir, op),
+					scoped: false,
+				},
+			);
+		}
+	}
 }
 
 /// Decides the `MATCHES` operators, `KNN` operators and index function calls of each write's
