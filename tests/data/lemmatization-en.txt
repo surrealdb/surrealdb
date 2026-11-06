@@ -24375,7 +24375,7 @@ occupier	occupiers
 occupy	occupied
 occupy	occupies
 occupy	occupying
-occur	occured
+occur	occurred
 occur	occuring
 occur	occurred
 occur	occurring
