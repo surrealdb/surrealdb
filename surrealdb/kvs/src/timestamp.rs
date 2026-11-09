@@ -604,43 +604,41 @@ mod tests {
 		}
 	}
 
+	/// An HLC timestamp built from its millisecond and counter.
+	fn stamp(millis: u64, counter: u64) -> u64 {
+		(millis << 16) | counter
+	}
+
+	const FULL_COUNTER: u64 = 0xFFFF;
+
 	#[test]
 	fn test_hlc_next_after_clock_advanced() {
-		// The clock is ahead of the last timestamp: its millisecond with a counter of 0.
-		let last = (1000u64 << 16) | 7;
-		assert_eq!(super::HlcTimeStamp::next_after(last, 1001), 1001u64 << 16);
+		// The clock is ahead: use its millisecond, counter back to 0.
+		assert_eq!(HlcTimeStamp::next_after(stamp(1000, 7), 1001), stamp(1001, 0));
 	}
 
 	#[test]
 	fn test_hlc_next_after_same_millisecond() {
-		// The clock reads the last timestamp's millisecond: the counter increments.
-		let last = (1000u64 << 16) | 7;
-		assert_eq!(super::HlcTimeStamp::next_after(last, 1000), (1000u64 << 16) | 8);
+		// Same millisecond: the counter goes up by one.
+		assert_eq!(HlcTimeStamp::next_after(stamp(1000, 7), 1000), stamp(1000, 8));
 	}
 
 	#[test]
 	fn test_hlc_next_after_same_millisecond_full_counter() {
-		// A full counter carries into the next millisecond rather than waiting for it.
-		let last = (1000u64 << 16) | 0xFFFF;
-		assert_eq!(super::HlcTimeStamp::next_after(last, 1000), 1001u64 << 16);
+		// Same millisecond, counter full: move on to the next millisecond without waiting.
+		assert_eq!(HlcTimeStamp::next_after(stamp(1000, FULL_COUNTER), 1000), stamp(1001, 0));
 	}
 
 	#[test]
 	fn test_hlc_next_after_clock_behind() {
-		// The clock has gone backwards: continue from the last timestamp, never wait.
-		let last = (1000u64 << 16) | 7;
-		let next = super::HlcTimeStamp::next_after(last, 980);
-		assert_eq!(next, (1000u64 << 16) | 8);
-		assert!(next > last);
+		// The clock went back to 980: carry on from the last timestamp without waiting.
+		assert_eq!(HlcTimeStamp::next_after(stamp(1000, 7), 980), stamp(1000, 8));
 	}
 
 	#[test]
 	fn test_hlc_next_after_clock_behind_full_counter() {
-		// The clock has gone backwards and the counter is full: the next millisecond.
-		let last = (1000u64 << 16) | 0xFFFF;
-		let next = super::HlcTimeStamp::next_after(last, 980);
-		assert_eq!(next, 1001u64 << 16);
-		assert!(next > last);
+		// The clock went back and the counter is full: move on to the next millisecond.
+		assert_eq!(HlcTimeStamp::next_after(stamp(1000, FULL_COUNTER), 980), stamp(1001, 0));
 	}
 
 	#[test]
