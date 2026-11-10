@@ -394,6 +394,18 @@ async fn kept_writes_to_a_named_table_answer_as_writes_compiled_with_their_reque
 	requests.push(owner("IF true { UPSERT ls:620 SET n = 1; SELECT * FROM ls:620 }", &[]));
 	requests
 		.push(owner("IF (SELECT VALUE n FROM ONLY ls:620) = 1 { UPSERT ls:621 SET n = 1 }", &[]));
+	// An event and a permission defined between two identical requests are what the second fires
+	// and enforces.
+	requests.push(owner("UPSERT type::record('ls', $k) SET n = 1", &[("k", int(700))]));
+	requests.push(owner(
+		"DEFINE TABLE evlog SCHEMALESS; DEFINE EVENT ls_log ON ls THEN (CREATE evlog SET at = $after.id)",
+		&[],
+	));
+	requests.push(owner("UPSERT type::record('ls', $k) SET n = 1", &[("k", int(701))]));
+	requests.push(alice("UPSERT type::record('ls', $k) SET n = 1", &[("k", int(702))]));
+	requests.push(owner("DEFINE TABLE OVERWRITE ls SCHEMALESS PERMISSIONS FULL", &[]));
+	requests.push(alice("UPSERT type::record('ls', $k) SET n = 1", &[("k", int(703))]));
+	requests.push(owner("SELECT VALUE at FROM evlog ORDER BY at", &[]));
 	// A plan kept before its table exists is judged again once the table does.
 	requests.push(owner("CREATE type::record('fresh', $k) SET n = $k", &[("k", int(1))]));
 	requests.push(owner("CREATE type::record('fresh', $k) SET n = $k", &[("k", int(2))]));
