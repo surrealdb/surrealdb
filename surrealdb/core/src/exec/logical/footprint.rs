@@ -341,7 +341,7 @@ pub(crate) fn write_targets(source: &LogicalWriteSource) -> Option<Vec<TableName
 					out.push(table.clone());
 				} else if let LogicalExpr::RecordId(rid) = target {
 					out.push(rid.table.clone());
-				} else if let Some(table) = record_call_table(target) {
+				} else if let Some((table, _)) = record_call(target) {
 					out.push(table);
 				} else {
 					return None;
@@ -366,7 +366,7 @@ pub(crate) fn write_targets(source: &LogicalWriteSource) -> Option<Vec<TableName
 					} else if let SourceRef::RecordId(rid) = &source.source {
 						tables.push(rid.table.clone());
 					} else if let SourceRef::Dynamic(expr) = &source.source
-						&& let Some(table) = record_call_table(expr)
+						&& let Some((table, _)) = record_call(expr)
 					{
 						tables.push(table);
 					} else {
@@ -385,10 +385,10 @@ pub(crate) fn write_targets(source: &LogicalWriteSource) -> Option<Vec<TableName
 	}
 }
 
-/// The table of the record `type::record(<table>, <key>)` builds, where `<table>` is a constant
-/// string or table: the record is of that table whatever the key holds, or the call fails and the
-/// write writes nothing.
-pub(crate) fn record_call_table(expr: &LogicalExpr) -> Option<TableName> {
+/// The table and the key of `type::record(<table>, <key>)` where `<table>` is a constant string or
+/// table: the record the call builds is of that table whatever the key holds, or the call fails and
+/// builds nothing. `None` for any other expression, and for an empty table name, which fails.
+pub(crate) fn record_call(expr: &LogicalExpr) -> Option<(TableName, &LogicalExpr)> {
 	let LogicalExpr::Call(call) = expr else {
 		return None;
 	};
@@ -398,19 +398,31 @@ pub(crate) fn record_call_table(expr: &LogicalExpr) -> Option<TableName> {
 	if name != "type::record" {
 		return None;
 	}
-	let [table, _key] = call.args.as_slice() else {
+	let [table, key] = call.args.as_slice() else {
 		return None;
 	};
 	let value = crate::exec::planner::static_value(table)?;
 	if let crate::val::Value::Table(table) = value {
-		return Some(table);
+		return Some((table, key));
 	}
 	if let crate::val::Value::String(name) = value
 		&& !name.is_empty()
 	{
-		return Some(TableName::from(name));
+		return Some((TableName::from(name), key));
 	}
 	None
+}
+
+/// The key of the call [`record_call`] reads, to be written in place.
+pub(crate) fn record_call_key_mut(expr: &mut LogicalExpr) -> Option<&mut LogicalExpr> {
+	record_call(expr)?;
+	let LogicalExpr::Call(call) = expr else {
+		return None;
+	};
+	let [_, key] = call.args.as_mut_slice() else {
+		return None;
+	};
+	Some(key)
 }
 
 /// Pushes the table `expr`, or each element of it where it is a literal list, names, as a table
@@ -867,6 +879,26 @@ mod tests {
 		assert!(!field.overlaps(&function));
 		assert!(!Resource::table_catalog(TableName::new("t")).overlaps(&function));
 		assert!(!data("t").overlaps(&field));
+	}
+
+	/// A write to `type::record(<table>, <key>)` with a constant table writes that table whatever
+	/// its key, as the target of a `CREATE` or `UPSERT` and as the record an `UPDATE` or `DELETE`
+	/// reads its rows from; a table computed when the write runs, or an empty one, names none.
+	#[test]
+	fn a_record_built_for_a_constant_table_names_its_table() {
+		let targets = |sql: &str| {
+			let LogicalOp::Write(write) = super::super::lower_test(sql) else {
+				panic!("a write: {sql}");
+			};
+			write_targets(&write.source)
+		};
+		let t = Some(vec![TableName::new("t")]);
+		assert_eq!(targets("UPSERT type::record('t', $k) SET a = 1"), t);
+		assert_eq!(targets("CREATE type::record('t', [$a, 1]) SET a = 1"), t);
+		assert_eq!(targets("UPDATE type::record('t', $k) SET a = 1"), t);
+		assert_eq!(targets("DELETE type::record('t', $k)"), t);
+		assert_eq!(targets("UPSERT type::record($t, 1) SET a = 1"), None);
+		assert_eq!(targets("UPSERT type::record('', 1) SET a = 1"), None);
 	}
 
 	/// Each arm of a statement `IF` has its own footprint: a write in one arm

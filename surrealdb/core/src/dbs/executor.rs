@@ -1397,13 +1397,6 @@ pub(crate) fn install_statement_state(ctx: &mut FrozenContext) -> Arc<StatementC
 	counters
 }
 
-/// Whether `op` is a write statement, bare or under its `TIMEOUT`: one the
-/// cache of compiled statements may keep ([`crate::exec::vm::serve::kept_for_requests`]).
-fn is_write_statement(op: &LogicalOp) -> bool {
-	matches!(op, LogicalOp::Write(_))
-		|| matches!(op, LogicalOp::Timeout(timeout) if matches!(timeout.input.as_ref(), LogicalOp::Write(_)))
-}
-
 /// Guard that stops the timeout task when dropped, so it does not
 /// outlive the execution it was bounding.
 ///
@@ -6094,7 +6087,8 @@ impl Executor {
 									lowered,
 									&mut plan_session,
 									inline,
-									*read_only || is_write_statement(lowered),
+									*read_only
+										|| crate::exec::vm::serve::is_write_statement(lowered),
 									keep_logged,
 									false,
 									&mut builder,
@@ -6281,16 +6275,9 @@ impl Executor {
 		}
 		let ctx = compile_phase!("bind", planning.bound_context(&self.ctx, txn));
 		let opt = &planning.opt;
-		let caches = cacheable
-			&& self.ctx.compiled_units().is_some_and(|units| units.caches_statements())
-			&& !crate::exec::planner::fold::changes_the_catalog(op)
-			&& !op.any(|node| matches!(node, LogicalOp::Explain(_)));
-		let freed = caches.then(|| crate::exec::vm::serve::free_literals(op, &ctx)).flatten();
-		let (kept, literals) = match &freed {
-			Some((kept, literals)) => (kept, literals.as_slice()),
-			None => (op, &[][..]),
-		};
-		if caches && crate::exec::vm::serve::kept_for_requests(kept, &ctx, literals) {
+		let keeping = cacheable.then(|| crate::exec::vm::serve::Keeping::of(op, &ctx)).flatten();
+		if let Some(keeping) = keeping {
+			let (kept, literals) = keeping.statement(op);
 			// Served from the cache of compiled statements as the request
 			// arrives, in a context of the session the statements before it
 			// leave. One whose compilation fails is served when it is reached,
@@ -6317,14 +6304,10 @@ impl Executor {
 				})
 				.await
 			{
-				let plan: Arc<dyn crate::exec::ExecOperator> = match freed {
-					Some((_, literals)) => {
-						Arc::new(crate::exec::vm::serve::LiteralBound::new(plan, literals))
-					}
-					None => plan,
-				};
 				return PlannedStatement {
-					entry: Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Operator(plan))),
+					entry: Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Operator(
+						keeping.bind(plan),
+					))),
 					logged,
 				};
 			}

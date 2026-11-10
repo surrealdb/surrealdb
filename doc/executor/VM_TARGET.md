@@ -179,8 +179,15 @@ body again. Lookup and compilation happen only while a query is planned.
   compiles the statement with its request. A kept compilation is
   served while the catalog it read holds (`exec::catalog_deps`): a `DEFINE` or
   `REMOVE` of anything it read compiles the statement again for the next
-  request. A write, a schema statement and an `EXPLAIN` are compiled with
-  their request.
+  request. A write is kept the same way when its one target names the table
+  it writes without the plan depending on the value: a variable whose value is
+  a record id of one table, a list of such ids, or for a `CREATE` that table;
+  `type::record(<table>, <key>)` with a constant table and a key that is a
+  variable or a list of variables and literals; or a record id or a key
+  written out, which is read as a variable. Every other request variable a
+  kept write reads is read when it runs. A write planned when the request
+  reaches it, after the request's first write, is kept and served the same
+  way. A schema statement and an `EXPLAIN` are compiled with their request.
 - **Specialization**: a small body is still inlined into its caller rather than
   linked.
 - **Catalog units**: what a plan lowers from the catalog alone, the same for

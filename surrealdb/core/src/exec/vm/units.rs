@@ -613,8 +613,9 @@ impl CompiledUnits {
 		}
 	}
 
-	/// How the requests for statements compiled when they are reached were
-	/// served: a request's top-level statements planned after its first write
+	/// How the requests for statements planned when they are reached and not
+	/// kept for later requests were served: a request's top-level statements
+	/// after its first write that [`super::serve::Keeping`] does not keep
 	/// ([`super::serve::request_statement`]) and statements an expression reaches
 	/// at run time ([`super::serve::statement`]) share this cache.
 	#[cfg(test)]

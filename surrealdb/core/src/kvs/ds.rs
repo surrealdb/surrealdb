@@ -1953,12 +1953,12 @@ impl Datastore {
 	/// How the requests for compiled top-level statements have been served
 	/// since this datastore started.
 	///
-	/// A request's read-only statement is served the compilation kept for the
-	/// same statement text under the same namespace, database, principal class
-	/// and capabilities (a hit), or compiled and kept for later requests (a
-	/// miss). A kept compilation reads the request's variables when it runs, so
-	/// requests that bind other values to them hit it. One whose catalog
-	/// dependencies no longer hold when it is looked up counts as an
+	/// A request's statement that the cache keeps, a read or a write, is served
+	/// the compilation kept for the same statement text under the same
+	/// namespace, database, principal class and capabilities (a hit), or
+	/// compiled and kept for later requests (a miss). A kept compilation reads the request's
+	/// variables when it runs, so requests that bind other values to them hit it. One whose
+	/// catalog dependencies no longer hold when it is looked up counts as an
 	/// invalidation and a miss.
 	pub fn statement_cache_stats(&self) -> StatementCacheStats {
 		let stats = self.compiled_units.statement_stats();
@@ -1969,9 +1969,10 @@ impl Datastore {
 		}
 	}
 
-	/// How the statements compiled when they are reached were served, which
-	/// [`Self::statement_cache_stats`] does not count: a request's top-level
-	/// statements after its first write, and statements an expression reaches at
+	/// How the statements planned when they are reached and not kept for later
+	/// requests were served, which [`Self::statement_cache_stats`] does not
+	/// count: a request's top-level statements after its first write that its
+	/// cache of statements does not keep, and statements an expression reaches at
 	/// run time.
 	#[cfg(test)]
 	pub(crate) fn reached_statement_stats(&self) -> crate::exec::vm::compile_cache::Stats {
