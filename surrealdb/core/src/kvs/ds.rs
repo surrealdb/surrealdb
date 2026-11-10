@@ -1969,6 +1969,15 @@ impl Datastore {
 		}
 	}
 
+	/// How the statements compiled when they are reached were served, which
+	/// [`Self::statement_cache_stats`] does not count: a request's top-level
+	/// statements after its first write, and statements an expression reaches at
+	/// run time.
+	#[cfg(test)]
+	pub(crate) fn reached_statement_stats(&self) -> crate::exec::vm::compile_cache::Stats {
+		self.compiled_units.reached_statement_stats()
+	}
+
 	/// The currently installed observer. Cheap to clone; internal handle is
 	/// an `Arc`.
 	///

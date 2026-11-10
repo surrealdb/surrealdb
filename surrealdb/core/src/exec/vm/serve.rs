@@ -365,6 +365,9 @@ pub(crate) async fn request_statement(
 	binds_rows: bool,
 ) -> anyhow::Result<Arc<dyn ExecOperator>> {
 	crate::exec::compiles::note_statement_served();
+	if let Some(plan) = kept_reached_write(exec, &op, principal.clone(), binds_rows).await {
+		return Ok(plan);
+	}
 	let params = statement_params(&op);
 	let folded: Vec<&str> = crate::exec::planner::UNIT_RUNTIME_PARAMS
 		.iter()
@@ -444,6 +447,45 @@ pub(crate) async fn request_statement(
 	);
 	let params = params.into_iter().filter(|name| !shadowed.contains(name)).collect();
 	served(exec, units.session_statements(), keyed, params, compile).await
+}
+
+/// `op`, a write among a request's top-level statements that is planned when
+/// the request reaches it, served as [`kept_request_statement`] serves the
+/// writes a request compiles when it arrives: where [`kept_for_requests`]
+/// keeps it, one compilation serves every value of the request variables it
+/// reads, as it would before the request's first write. `None` where it is
+/// not kept so, the value of a top-level `LET` among them, or where the kept
+/// compilation fails, which [`request_statement`] then raises as it plans the
+/// statement itself.
+async fn kept_reached_write(
+	exec: &ExecutionContext,
+	op: &LogicalOp,
+	principal: Option<Arc<crate::iam::Auth>>,
+	binds_rows: bool,
+) -> Option<Arc<dyn ExecOperator>> {
+	let write = matches!(op, LogicalOp::Write(_))
+		|| matches!(op, LogicalOp::Timeout(timeout) if matches!(timeout.input.as_ref(), LogicalOp::Write(_)));
+	if binds_rows
+		|| !write
+		|| !exec.ctx().compiled_units().is_some_and(|units| units.caches_statements())
+		|| crate::exec::planner::fold::changes_the_catalog(op)
+		|| op.any(|node| matches!(node, LogicalOp::Explain(_)))
+	{
+		return None;
+	}
+	let freed = free_literals(op, exec.ctx());
+	let (kept, literals) = match &freed {
+		Some((kept, literals)) => (kept, literals.as_slice()),
+		None => (op, &[][..]),
+	};
+	if !kept_for_requests(kept, exec.ctx(), literals) {
+		return None;
+	}
+	let plan = kept_request_statement(exec, kept.clone(), principal, literals).await.ok()?;
+	Some(match freed {
+		Some((_, literals)) => Arc::new(LiteralBound::new(plan, literals)),
+		None => plan,
+	})
 }
 
 /// `op`, a top-level statement of a request that the request compiles when it
@@ -623,7 +665,7 @@ pub(crate) fn source_only_request_variables(
 	use crate::expr::logical::{LogicalSource, SourceRef};
 	if let LogicalOp::Write(write) = op {
 		// A write that reads a request variable elsewhere reads none when it runs.
-		return write_run_time_reads(op, write, ctx).unwrap_or_default();
+		return write_run_time_reads(op, write, ctx, literals).unwrap_or_default();
 	}
 	if let LogicalOp::Timeout(timeout) = op
 		&& let LogicalOp::Write(write) = timeout.input.as_ref()
@@ -631,7 +673,8 @@ pub(crate) fn source_only_request_variables(
 		// A write under `TIMEOUT` reads what the write reads; a name its timeout
 		// reads is folded into the plan with the timeout, so it reads none of
 		// them when it runs.
-		let mut reads = write_run_time_reads(&timeout.input, write, ctx).unwrap_or_default();
+		let mut reads =
+			write_run_time_reads(&timeout.input, write, ctx, literals).unwrap_or_default();
 		let mut in_timeout = std::collections::BTreeSet::new();
 		let _ = timeout.timeout.visit_deep(&mut |node| {
 			if let LogicalExpr::Param(param) = node {
@@ -724,7 +767,12 @@ pub(crate) fn source_only_request_variables(
 /// `UPDATE` or `DELETE` reads its target as the source of the rows it writes
 /// (`UPDATE $id`). The write is kept under that class ([`SourceClass`]) and
 /// the bind names the table from it, so the plan is the one main makes for a
-/// write that names the table, with the target read when it runs. A `RELATE` keeps its edge
+/// write that names the table, with the target read when it runs. A target
+/// `type::record(<table>, <key>)` whose table is a constant names its table in
+/// the statement's text whatever the key holds ([`record_key_reads`]): its key,
+/// a variable or a list of variables and literals, is read when the write runs.
+/// A record id written out as the target is such a variable once
+/// [`free_literals`] frees it. A `RELATE` keeps its edge
 /// table as written; each of its endpoints is a variable of any record class
 /// or reads no request variable.
 ///
@@ -739,20 +787,27 @@ pub(crate) fn source_only_request_variables(
 /// that folded the value raises, as the stages of a write that names no one
 /// table do for every name of their statement
 /// ([`super::units::StageSetUnit`]). A write that holds a statement, a graph lookup or a recursion,
-/// an `INSERT`, a write over the rows of a read, and one whose target is written
-/// in the statement's text is compiled with its request.
+/// an `INSERT`, a write over the rows of a read, and one whose target is a table or any
+/// other expression is compiled with its request.
+///
+/// `literals` are the placeholders [`free_literals`] wrote in place of the
+/// write's literals, read as request variables holding those values.
 fn write_run_time_reads(
 	op: &LogicalOp,
 	write: &crate::expr::logical::LogicalWrite,
 	ctx: &crate::ctx::FrozenContext,
+	literals: &[(String, crate::val::Value)],
 ) -> Option<RunTimeReads> {
 	use std::collections::BTreeMap;
 
 	use crate::expr::logical::{
 		LogicalField, LogicalFields, LogicalWriteSource, LogicalWriteStatement,
 	};
+	let literal =
+		|name: &str| literals.iter().find(|(held, _)| held == name).map(|(_, value)| value);
 	let readable = |name: &str| {
-		!crate::exec::planner::UNIT_RUNTIME_PARAMS.contains(&name) && ctx.is_request_param(name)
+		!crate::exec::planner::UNIT_RUNTIME_PARAMS.contains(&name)
+			&& (ctx.is_request_param(name) || literal(name).is_some())
 	};
 	let mut reads: BTreeMap<String, usize> = BTreeMap::new();
 	let mut nested = false;
@@ -937,7 +992,7 @@ fn write_run_time_reads(
 		if !readable(name) || reads.get(name).copied().unwrap_or(0) != usize::from(scalar) {
 			return None;
 		}
-		let value = ctx.value(name)?;
+		let value = literal(name).or_else(|| ctx.value(name))?;
 		let class = match value {
 			crate::val::Value::Table(table) if creates => SourceClass::Table(table.clone()),
 			value @ (crate::val::Value::None
@@ -1061,14 +1116,20 @@ fn write_run_time_reads(
 				return None;
 			};
 			let creates = matches!(write.statement, LogicalWriteStatement::Create(_));
-			source(&param(target)?, true, creates, true)?;
+			match param(target) {
+				Some(name) => source(&name, true, creates, true)?,
+				// The key's variables are scalars of the write, counted with its other reads.
+				None => {
+					record_key_reads(target, &readable)?;
+				}
+			}
 		}
 		(
 			LogicalWriteStatement::Update(_) | LogicalWriteStatement::Delete(_),
 			LogicalWriteSource::Rows(rows),
 		) => {
 			let LogicalOp::Source(crate::expr::logical::LogicalSource {
-				source: crate::expr::logical::SourceRef::Param(name),
+				source: rows_source,
 				with: None,
 				for_update: false,
 				..
@@ -1076,7 +1137,20 @@ fn write_run_time_reads(
 			else {
 				return None;
 			};
-			source(name.as_str(), false, false, true)?;
+			match rows_source {
+				crate::expr::logical::SourceRef::Param(name) => {
+					source(name.as_str(), false, false, true)?;
+				}
+				// The source is no scalar of the write, so its key's variables are added here.
+				crate::expr::logical::SourceRef::Dynamic(expr) => {
+					for name in record_key_reads(expr, &readable)? {
+						*reads.entry(name).or_default() += 1;
+					}
+				}
+				crate::expr::logical::SourceRef::Table(_)
+				| crate::expr::logical::SourceRef::RecordId(_)
+				| crate::expr::logical::SourceRef::Mock(_) => return None,
+			}
 		}
 		_ => return None,
 	}
@@ -1203,6 +1277,40 @@ fn record_key_param(expr: &LogicalExpr) -> Option<&str> {
 	}
 }
 
+/// The request variables the key of `type::record(<table>, <key>)` reads, where the table is a
+/// constant and the key is a variable `readable` admits, or a list of such variables and literals;
+/// `None` for any other expression. The table names the write's subjects whatever the key holds
+/// ([`crate::exec::logical::footprint::write_targets`]), so no choice of the plan depends on the
+/// key's value, and the key is read when the write runs.
+fn record_key_reads(expr: &LogicalExpr, readable: &dyn Fn(&str) -> bool) -> Option<Vec<String>> {
+	crate::exec::logical::footprint::record_call_table(expr)?;
+	let LogicalExpr::Call(call) = expr else {
+		return None;
+	};
+	let [_, key] = call.args.as_slice() else {
+		return None;
+	};
+	let variable = |expr: &LogicalExpr| {
+		if let LogicalExpr::Param(param) = expr
+			&& readable(param.as_str())
+		{
+			Some(param.as_str().to_owned())
+		} else {
+			None
+		}
+	};
+	if let LogicalExpr::Array(items) = key {
+		let mut names = Vec::new();
+		for item in items {
+			if !matches!(item, LogicalExpr::Literal(_)) {
+				names.push(variable(item)?);
+			}
+		}
+		return (!names.is_empty()).then_some(names);
+	}
+	Some(vec![variable(key)?])
+}
+
 /// The name of the placeholder variable [`free_literals`] writes in place of
 /// the `ordinal`-th literal it frees. A statement can spell it, so
 /// [`free_literals`] frees nothing where the name is read or bound.
@@ -1215,9 +1323,10 @@ fn literal_placeholder(ordinal: usize) -> String {
 /// the value each placeholder holds; `None` where it has no such literal.
 ///
 /// A literal is freed only where a request variable in its place would be
-/// read when the statement runs ([`source_only_request_variables`]), in a
-/// statement that reads only its source: a record id that is its one source,
-/// and the key of `type::record(<table>, <key>)` as that source. A freed
+/// read when the statement runs ([`source_only_request_variables`]): in a
+/// statement that reads only its source, a record id that is its one source,
+/// and the key of `type::record(<table>, <key>)` as that source; in a write,
+/// its one target as [`free_write_literals`] frees it. A freed
 /// literal's value is no part of the key the compilation is kept under, only
 /// its class is; every other literal stays in the statement as written, keyed
 /// by its value. An array written as the source is a `Values` leaf, not a
@@ -1229,6 +1338,11 @@ pub(crate) fn free_literals(
 	ctx: &crate::ctx::FrozenContext,
 ) -> Option<(LogicalOp, Vec<(String, crate::val::Value)>)> {
 	use crate::expr::logical::{LogicalSource, SourceRef};
+	if matches!(op, LogicalOp::Write(_))
+		|| matches!(op, LogicalOp::Timeout(timeout) if matches!(timeout.input.as_ref(), LogicalOp::Write(_)))
+	{
+		return free_write_literals(op, ctx);
+	}
 	fn rewrite(op: &mut LogicalOp, literals: &mut Vec<(String, crate::val::Value)>) {
 		if let LogicalOp::Source(LogicalSource {
 			source,
@@ -1327,6 +1441,163 @@ pub(crate) fn free_literals(
 		return None;
 	}
 	Some((freed, literals))
+}
+
+/// [`free_literals`] for `op`, a write, under its `TIMEOUT` at most: the literal its one target is
+/// written with, written as a placeholder variable. A `CREATE` or `UPSERT` target, or the record an
+/// `UPDATE` or `DELETE` reads its rows from, that is a record id written out becomes the variable
+/// itself, read as [`write_run_time_reads`] reads `CREATE $id`; the key of
+/// `type::record(<table>, <key>)`, written out whole, becomes the variable as that key. Every other
+/// literal stays as written. `None` where nothing is freed, or where the write so freed is not
+/// kept ([`source_only_request_variables`]).
+fn free_write_literals(
+	op: &LogicalOp,
+	ctx: &crate::ctx::FrozenContext,
+) -> Option<(LogicalOp, Vec<(String, crate::val::Value)>)> {
+	use crate::expr::logical::{LogicalSource, LogicalWriteSource, SourceRef};
+	/// `expr` as the value of a freed literal: one a substitution keeps exactly.
+	fn literal(expr: &LogicalExpr) -> Option<crate::val::Value> {
+		let value = if matches!(expr, LogicalExpr::RecordId(_) | LogicalExpr::Literal(_)) {
+			crate::exec::planner::util::try_literal_to_value(expr)?
+		} else if matches!(expr, LogicalExpr::Array(_)) {
+			crate::exec::planner::static_value(expr)?
+		} else {
+			return None;
+		};
+		(!crate::exec::planner::util::substitution_is_lossy(&value)).then_some(value)
+	}
+	/// The key of `expr`, `type::record(<table>, <key>)` with a constant table.
+	fn record_key(expr: &mut LogicalExpr) -> Option<&mut LogicalExpr> {
+		crate::exec::logical::footprint::record_call_table(expr)?;
+		let LogicalExpr::Call(call) = expr else {
+			return None;
+		};
+		let [_, key] = call.args.as_mut_slice() else {
+			return None;
+		};
+		Some(key)
+	}
+	fn free(
+		expr: &mut LogicalExpr,
+		literals: &mut Vec<(String, crate::val::Value)>,
+	) -> Option<Freed> {
+		let whole = matches!(expr, LogicalExpr::RecordId(_));
+		let slot = if whole {
+			Some(expr)
+		} else {
+			record_key(expr)
+		};
+		let slot = slot?;
+		let value = literal(slot)?;
+		let name = literal_placeholder(literals.len());
+		*slot = LogicalExpr::Param(name.clone().into());
+		literals.push((name.clone(), value));
+		Some(match whole {
+			true => Freed::Whole(name),
+			false => Freed::Key(name),
+		})
+	}
+	let mut freed = op.clone();
+	let written = if let LogicalOp::Timeout(timeout) = &mut freed {
+		timeout.input.as_mut()
+	} else {
+		&mut freed
+	};
+	let LogicalOp::Write(write) = written else {
+		return None;
+	};
+	let mut literals = Vec::new();
+	let freed_target = match &mut write.source {
+		LogicalWriteSource::Targets(targets) => match targets.as_mut_slice() {
+			[target] => free(target, &mut literals),
+			_ => None,
+		},
+		LogicalWriteSource::Rows(rows) => {
+			if let LogicalOp::Source(LogicalSource {
+				source,
+				..
+			}) = rows.as_mut()
+			{
+				match source {
+					SourceRef::RecordId(rid) => {
+						let value = literal(&LogicalExpr::RecordId(rid.clone()));
+						value.map(|value| {
+							let name = literal_placeholder(literals.len());
+							*source = SourceRef::Param(name.clone().into());
+							literals.push((name.clone(), value));
+							Freed::Whole(name)
+						})
+					}
+					SourceRef::Dynamic(expr) => record_key(expr).and_then(|key| {
+						let value = literal(key)?;
+						let name = literal_placeholder(literals.len());
+						*key = LogicalExpr::Param(name.clone().into());
+						literals.push((name.clone(), value));
+						Some(Freed::Key(name))
+					}),
+					SourceRef::Table(_) | SourceRef::Param(_) | SourceRef::Mock(_) => None,
+				}
+			} else {
+				None
+			}
+		}
+		LogicalWriteSource::Inserts(_) => None,
+	};
+	// The statement as written names the target too: the slot table of its free names, and the
+	// key it is kept under, read it there, so it names the placeholder as the plan does.
+	free_written_target(&mut write.statement, freed_target?)?;
+	let written = statement_params(op);
+	if literals.iter().any(|(name, _)| written.contains(name) || ctx.value(name).is_some()) {
+		return None;
+	}
+	let names = source_only_request_variables(&freed, ctx, &literals).names;
+	if !literals.iter().all(|(name, _)| names.contains(name)) {
+		return None;
+	}
+	Some((freed, literals))
+}
+
+/// What [`free_write_literals`] freed of a write's target: the whole target, or the key of
+/// `type::record(<table>, <key>)`, each now the named placeholder.
+enum Freed {
+	Whole(String),
+	Key(String),
+}
+
+/// `statement`, the write as written, with its one target freed as `freed` says; `None` where the
+/// statement does not name one target of the shape freed.
+fn free_written_target(
+	statement: &mut crate::expr::logical::LogicalWriteStatement,
+	freed: Freed,
+) -> Option<()> {
+	use crate::expr::logical::LogicalWriteStatement;
+	use crate::expr::{Expr, Function};
+	let what = match statement {
+		LogicalWriteStatement::Create(stmt) => &mut stmt.what,
+		LogicalWriteStatement::Update(stmt) => &mut stmt.what,
+		LogicalWriteStatement::Upsert(stmt) => &mut stmt.what,
+		LogicalWriteStatement::Delete(stmt) => &mut stmt.what,
+		LogicalWriteStatement::Insert(_) | LogicalWriteStatement::Relate(_) => return None,
+	};
+	let [target] = what.as_mut_slice() else {
+		return None;
+	};
+	match freed {
+		Freed::Whole(name) => *target = Expr::Param(name.into()),
+		Freed::Key(name) => {
+			let Expr::FunctionCall(call) = target else {
+				return None;
+			};
+			if !matches!(&call.receiver, Function::Normal(f) if f == "type::record") {
+				return None;
+			}
+			let [_, key] = call.arguments.as_mut_slice() else {
+				return None;
+			};
+			*key = Expr::Param(name.into());
+		}
+	}
+	Some(())
 }
 
 /// A kept request statement run with the values of the literals

@@ -613,6 +613,15 @@ impl CompiledUnits {
 		}
 	}
 
+	/// How the requests for statements compiled when they are reached were
+	/// served: a request's top-level statements planned after its first write
+	/// ([`super::serve::request_statement`]) and statements an expression reaches
+	/// at run time ([`super::serve::statement`]) share this cache.
+	#[cfg(test)]
+	pub(crate) fn reached_statement_stats(&self) -> super::compile_cache::Stats {
+		self.statements.stats()
+	}
+
 	/// The size of the encoding of the largest argument values a body
 	/// compiled for them is kept for. A body compiled for larger values
 	/// serves its own call only and is not kept.

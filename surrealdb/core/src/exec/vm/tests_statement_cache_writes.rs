@@ -296,6 +296,77 @@ async fn kept_writes_answer_as_writes_compiled_with_their_request() {
 	assert!(kept.hits >= 20, "{kept:?}");
 }
 
+/// Writes whose target names its table in the statement's text — `type::record(<table>, <key>)`
+/// with a variable or a list of variables as the key, or a record id written out — answer as they
+/// do compiled with their request: alone, several in one transaction, where every write after the
+/// first is planned when the request reaches it, with values the stages refuse, a key no record id
+/// can hold, a record that already exists, a definition changed between two identical requests and
+/// a table that does not exist yet.
+#[tokio::test]
+async fn kept_writes_to_a_named_table_answer_as_writes_compiled_with_their_request() {
+	let mut requests = Vec::new();
+	for key in [1, 2, 3, 1] {
+		requests.push(owner(
+			"UPSERT type::record('ls', $k) SET n = $v",
+			&[("k", int(10 + key)), ("v", int(key))],
+		));
+		requests.push(owner(
+			"UPDATE type::record('pk', $k) SET n = $v RETURN n",
+			&[("k", int(1 + key % 2)), ("v", int(key * 10))],
+		));
+		requests.push(owner(
+			"CREATE type::record('pk', $k) CONTENT $c",
+			&[("k", int(200 + key)), ("c", object(&[("name", text("made")), ("n", int(key))]))],
+		));
+		requests.push(owner(
+			"UPSERT type::record('ls', [$a, $b]) SET n = $b",
+			&[("a", text("pair")), ("b", int(key))],
+		));
+		requests.push(owner(
+			"BEGIN; CREATE type::record('ls', $k) SET n = 1; \
+			 UPSERT type::record('ls', $k) SET n += 1; UPDATE type::record('ls', $k) SET n += 1; \
+			 DELETE type::record('ls', $j) RETURN BEFORE; COMMIT;",
+			&[("k", int(300 + key * 10)), ("j", int(10 + key))],
+		));
+		requests.push(owner(
+			&format!(
+				"UPSERT ls:{a} SET n = {key}; UPSERT ls:{b} SET n = {key}; UPDATE ls:1 SET n += 1; \
+				 UPSERT type::record('ls', ['lit', {key}]) SET n = {key}",
+				a = 400 + key,
+				b = 500 + key,
+			),
+			&[],
+		));
+	}
+	// Values the stages refuse, a key no record id holds, and a record that exists fail as they do
+	// compiled with the request.
+	requests
+		.push(owner("UPDATE type::record('pk', $k) SET n = $v", &[("k", int(1)), ("v", int(-1))]));
+	requests.push(owner(
+		"UPDATE type::record('pk', $k) SET n = $v",
+		&[("k", int(1)), ("v", text("x"))],
+	));
+	requests.push(owner("CREATE type::record('pk', $k) SET n = 1", &[("k", text(""))]));
+	requests.push(owner("CREATE type::record('pk', $k) SET n = 1", &[("k", int(201))]));
+	requests.push(owner("CREATE pk:201 SET n = 1", &[]));
+	// A definition changed between two identical requests is what the second enforces.
+	requests
+		.push(owner("UPDATE type::record('pk', $k) SET n = $v", &[("k", int(2)), ("v", int(50))]));
+	requests
+		.push(owner("DEFINE FIELD OVERWRITE n ON pk TYPE int DEFAULT 0 ASSERT $value < 40", &[]));
+	requests
+		.push(owner("UPDATE type::record('pk', $k) SET n = $v", &[("k", int(2)), ("v", int(50))]));
+	// A table the first write defines is the table the second writes.
+	requests.push(owner("CREATE type::record('fresh', $k) SET n = 1", &[("k", int(1))]));
+	requests.push(owner("CREATE type::record('fresh', $k) SET n = 2", &[("k", int(2))]));
+	requests.push(owner(
+		"SELECT * FROM pk ORDER BY id; SELECT * FROM ls ORDER BY id; SELECT * FROM fresh ORDER BY id",
+		&[],
+	));
+	let kept = same_on_and_off(SETUP, &requests).await;
+	assert!(kept.hits >= 30, "{kept:?}");
+}
+
 /// A schema statement between two identical kept writes changes what the second coerces,
 /// derives, fires, indexes and enforces, as it does for writes compiled with their request.
 #[tokio::test]
@@ -503,7 +574,7 @@ async fn statements_of_one_shape_link_one_bundle_of_their_table() {
 	.await;
 	assert_eq!(units, (2, 1), "a new definition, and a statement of another shape, compile anew");
 	let units = catalog_units(async {
-		run("UPDATE ls:3 SET n = 7", &[]).await;
+		run("UPDATE ls SET n = 7 WHERE id = ls:3", &[]).await;
 	})
 	.await;
 	assert_eq!(units, (0, 0), "a statement planned for its request alone links nothing");

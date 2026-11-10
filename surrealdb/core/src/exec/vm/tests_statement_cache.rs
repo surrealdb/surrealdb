@@ -131,8 +131,11 @@ async fn a_value_a_let_binds_is_the_value_the_statement_reads() {
 	}
 }
 
+/// A write to `type::record(<table>, $n)` names its table in its text, so no choice of its plan
+/// depends on `$n`: one compilation serves every value of it, whether the write is a request's
+/// first or is planned when the request reaches it after an earlier write.
 #[tokio::test]
-async fn a_write_is_compiled_with_its_request() {
+async fn a_write_to_a_record_of_a_named_table_is_compiled_once_for_its_key() {
 	let db = TestDb::new(PEOPLE).await;
 	let (ds, owner) = (db.datastore(), TestDb::owner());
 	let base = ds.statement_cache_stats();
@@ -143,7 +146,35 @@ async fn a_write_is_compiled_with_its_request() {
 		answer(ds, &owner, "UPDATE type::record('person', $n) SET age = 1", Some(number(n))).await;
 		answer(ds, &owner, "DELETE type::record('person', $n)", Some(number(n))).await;
 	}
-	assert_eq!(now(), stats(0, 0, 0));
+	assert_eq!(now(), stats(9, 3, 0));
+	let reached = ds.reached_statement_stats();
+	let sql = "BEGIN; CREATE type::record('person', $n) SET name = 'x'; \
+		UPSERT type::record('person', $n) SET age = 2; UPDATE type::record('person', $n) SET age += 1; \
+		COMMIT;";
+	for n in 20..23 {
+		ds.execute(sql, &owner, Some(number(n))).await.expect("the request runs");
+	}
+	// The `CREATE` is the text of the requests before; the `UPSERT` and `UPDATE` compile once.
+	assert_eq!(now(), stats(9 + 7, 3 + 2, 0));
+	let reached = since_compiled(reached, ds.reached_statement_stats());
+	assert_eq!(reached, 0, "no write after the first is compiled when the request reaches it");
+	assert_eq!(
+		last_answer(
+			ds,
+			&owner,
+			"SELECT VALUE [id, age] FROM person WHERE id > person:9 ORDER BY id"
+		)
+		.await,
+		"[[person:20, 3], [person:21, 3], [person:22, 3]]"
+	);
+}
+
+/// How many statements the run-time cache compiled between `before` and `after`, kept or not.
+fn since_compiled(
+	before: crate::exec::vm::compile_cache::Stats,
+	after: crate::exec::vm::compile_cache::Stats,
+) -> u64 {
+	(after.compiles + after.private) - (before.compiles + before.private)
 }
 
 #[tokio::test]
@@ -737,8 +768,14 @@ async fn a_kept_plan_is_served_across_changes_it_did_not_read_and_compiled_again
 		 DEFINE TABLE person SCHEMALESS; CREATE person:1 SET name = 'new'",
 	)
 	.await;
+	// The setup's own `CREATE` is a kept write, counted apart from the read.
+	let rebuilt = ds.statement_cache_stats();
 	assert_eq!(read(1).await, "['c-new']");
-	assert_eq!(now(), stats(4, 2, 0), "a database defined again is compiled for afresh");
+	assert_eq!(
+		since(rebuilt, ds.statement_cache_stats()),
+		stats(0, 1, 0),
+		"a database defined again is compiled for afresh"
+	);
 }
 
 const CLASSES: &str = "

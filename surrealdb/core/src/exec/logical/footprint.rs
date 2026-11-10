@@ -341,6 +341,8 @@ pub(crate) fn write_targets(source: &LogicalWriteSource) -> Option<Vec<TableName
 					out.push(table.clone());
 				} else if let LogicalExpr::RecordId(rid) = target {
 					out.push(rid.table.clone());
+				} else if let Some(table) = record_call_table(target) {
+					out.push(table);
 				} else {
 					return None;
 				}
@@ -363,6 +365,10 @@ pub(crate) fn write_targets(source: &LogicalWriteSource) -> Option<Vec<TableName
 						tables.push(table.clone());
 					} else if let SourceRef::RecordId(rid) = &source.source {
 						tables.push(rid.table.clone());
+					} else if let SourceRef::Dynamic(expr) = &source.source
+						&& let Some(table) = record_call_table(expr)
+					{
+						tables.push(table);
 					} else {
 						named = false;
 					}
@@ -377,6 +383,34 @@ pub(crate) fn write_targets(source: &LogicalWriteSource) -> Option<Vec<TableName
 			named.then_some(tables)
 		}
 	}
+}
+
+/// The table of the record `type::record(<table>, <key>)` builds, where `<table>` is a constant
+/// string or table: the record is of that table whatever the key holds, or the call fails and the
+/// write writes nothing.
+pub(crate) fn record_call_table(expr: &LogicalExpr) -> Option<TableName> {
+	let LogicalExpr::Call(call) = expr else {
+		return None;
+	};
+	let crate::expr::Function::Normal(name) = &call.receiver else {
+		return None;
+	};
+	if name != "type::record" {
+		return None;
+	}
+	let [table, _key] = call.args.as_slice() else {
+		return None;
+	};
+	let value = crate::exec::planner::static_value(table)?;
+	if let crate::val::Value::Table(table) = value {
+		return Some(table);
+	}
+	if let crate::val::Value::String(name) = value
+		&& !name.is_empty()
+	{
+		return Some(TableName::from(name));
+	}
+	None
 }
 
 /// Pushes the table `expr`, or each element of it where it is a literal list, names, as a table
