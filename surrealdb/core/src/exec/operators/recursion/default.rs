@@ -50,9 +50,10 @@
 //!
 //! 6. **After loop:** `depth >= min_depth` → return `Ok(current)` (the cities array).
 //!
-//! If at any step the path returns a dead end (`None`/`Null` or empty after cleaning) or we
-//! detect a cycle (`next == current`), we exit early: we return the previous `current` if
-//! `depth > min_depth`, otherwise the final value from the dead end.
+//! If a step returns a dead end (`None`/`Null` or empty after cleaning), we return the
+//! previous `current` if `depth > min_depth`, otherwise the final value from the dead end.
+//! An unchanged recursion target counts as a successful step. The body continues to run
+//! until `min_depth` is reached, then an unchanged result terminates the traversal.
 
 use surrealdb_types::ToSql;
 
@@ -84,10 +85,11 @@ pub(crate) async fn evaluate_recurse_default_with(
 
 		// Clean up dead ends from array results
 		let next = clean_iteration(next);
+		let repeated = next == current;
+		let is_target = is_recursion_target(&next);
 
-		// Check termination conditions.
-		if is_final(&next) || next == current {
-			// Reached a dead end or cycle.
+		// Invalid identity values are terminal, just like an exhausted path.
+		if is_final(&next) || (repeated && !is_target) {
 			// Use `depth > min_depth` (not `>=`) because the current iteration
 			// produced a dead end, so we've only completed (depth - 1) successful
 			// traversals.
@@ -100,11 +102,17 @@ pub(crate) async fn evaluate_recurse_default_with(
 
 		// Non-RecordId values during recursion are an error --
 		// recursion is intended purely for record graph traversal.
-		if !is_recursion_target(&next) {
+		if !is_target {
 			return Err(crate::exec::Error::InvalidRecursionTarget {
 				value: next.to_sql(),
 			}
 			.into());
+		}
+
+		// Repeated targets satisfy a depth, but do not skip body evaluations
+		// below the minimum: later evaluations can write or reach a dead end.
+		if repeated && depth >= min_depth {
+			return Ok(current);
 		}
 
 		current = next;
