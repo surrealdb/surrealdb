@@ -387,6 +387,10 @@ pub(crate) struct DecisionCx<'a> {
 	/// bounds: the read is not the subject of a write, whose stages judge each stored record
 	/// themselves.
 	pub(crate) id_bounds: bool,
+	/// Whether the statement the read stands in writes nothing, so a stored record an expression
+	/// of the statement reads holds one value from the read's start to its last row. Asked only
+	/// where a lookup's key may read such a record ([`lookup_operand`]).
+	pub(crate) reads_stably: &'a dyn Fn() -> bool,
 }
 
 /// The decision before it is mapped to ops.
@@ -627,9 +631,10 @@ fn scan_probes(
 	set.try_map(|index| Ok::<_, std::convert::Infallible>(index_ref(index))).ok()
 }
 
-/// A lookup through a B-tree index of `table` over one plain field, keyed by a parameter the
-/// predicate compares that field to with `=`, with the parameter as the lookup's operand; `None`
-/// where the predicate holds no such comparison or no index answers it.
+/// A lookup through a B-tree index of `table` over one plain field, keyed by a parameter, or a path
+/// of fields into one ([`lookup_operand`]), the predicate compares that field to with `=`, with
+/// that key as the lookup's operand; `None` where the predicate holds no such comparison or no
+/// index answers it.
 ///
 /// This is the read a literal in the parameter's place is answered by, for a value the plan holds
 /// only once the statement runs: a `LET` of the block the statement is in, a loop variable, an
@@ -667,13 +672,13 @@ fn deferred_lookup(
 			continue;
 		};
 		let (field, key) = match (left.as_ref(), right.as_ref()) {
-			(LogicalExpr::Field(field), key @ LogicalExpr::Param(_))
-			| (key @ LogicalExpr::Param(_), LogicalExpr::Field(field)) => (field, key),
+			(LogicalExpr::Field(field), key) if parameter_root(key).is_some() => (field, key),
+			(key, LogicalExpr::Field(field)) if parameter_root(key).is_some() => (field, key),
 			_ => continue,
 		};
 		if field.as_str() == "id"
-			|| matches!(key, LogicalExpr::Param(name) if ROW_PARAMS.contains(&name.as_str()))
-			|| !deferrable(key, cx.registry)
+			|| parameter_root(key).is_some_and(|name| ROW_PARAMS.contains(&name))
+			|| !lookup_operand(key, cx)
 		{
 			continue;
 		}
@@ -710,6 +715,49 @@ fn deferred_lookup(
 		return Ok(Some((lookup, key.clone())));
 	}
 	Ok(None)
+}
+
+/// The parameter `expr` is, or the parameter a path of fields into it starts at (`$o.k`,
+/// `$row.a.b`); `None` for any other expression.
+fn parameter_root(expr: &LogicalExpr) -> Option<&str> {
+	if let LogicalExpr::Param(name) = expr {
+		return Some(name.as_str());
+	}
+	if let LogicalExpr::Access {
+		base,
+		..
+	} = expr
+	{
+		return parameter_root(base);
+	}
+	None
+}
+
+/// Whether `key`, a parameter or a path of fields into one ([`parameter_root`]), may key a lookup,
+/// evaluated once when the lookup opens in place of once per row. A parameter is one [`deferrable`]
+/// admits.
+///
+/// A path of fields reads no row. Where its base may be a record id, a field step fetches the
+/// record, which derives the record's computed fields: the key is read once when the lookup opens
+/// and the filter above it reads it again per row, and the two agree where the statement writes
+/// nothing between them ([`DecisionCx::reads_stably`]) and the field derives one value per fetch.
+/// A computed field whose body draws entropy may answer each fetch differently; the lookup then
+/// yields only the rows equal to its first answer, where a scan compares each row with a fresh
+/// one.
+fn lookup_operand(key: &LogicalExpr, cx: &DecisionCx<'_>) -> bool {
+	if matches!(key, LogicalExpr::Param(_)) {
+		return deferrable(key, cx.registry);
+	}
+	let effects = crate::exec::logical::effects::effects_of_expr(key, cx.registry);
+	// The path holds field steps over a parameter alone, so a fetch is the one impurity it may
+	// hold.
+	let fetches =
+		effects.impure || effects.set.intersects(crate::expr::logical::EffectSet::READS_DATA);
+	!effects.reads_row
+		&& !effects.reads_row_opaquely
+		&& !effects.index_operator
+		&& effects.set.is_deterministic()
+		&& (!fetches || (cx.reads_stably)())
 }
 
 /// The record-id bounds a table scan of `table` takes from `predicate`, with the expressions of
@@ -1863,10 +1911,26 @@ fn plan_source_choice(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Plann
 		let predicate = folded.as_ref().unwrap_or(&offer.predicate);
 		let cond = predicate.condition();
 		let knn_vectors = knn_vectors_of(cx, data, &answers, cond.as_ref(), offer.sort.as_ref())?;
+		let stable = std::cell::OnceCell::new();
+		// Only what the statement holding the read does while it runs falls between the lookup's
+		// opening and its last row.
+		let reads_stably = || {
+			*stable.get_or_init(|| {
+				super::nested::enclosing_statement(ir, op).is_some_and(|(_, owner)| {
+					!super::nested::statement_writes_logically(
+						ir,
+						&mut crate::exec::ir::core::facts::FactCache::new(),
+						&cx.effects,
+						owner,
+					)
+				})
+			})
+		};
 		let decision = DecisionCx {
 			registry: cx.effects.registry,
 			knn_vectors: &knn_vectors,
 			id_bounds: !offer.write_subjects && !offer.in_write,
+			reads_stably: &reads_stably,
 		};
 		let choice = select_access(attrs, &answers, predicate, offer.sort.as_ref(), &decision)?;
 		Ok((offer, choice))
@@ -2991,10 +3055,14 @@ impl DecisionCx<'static> {
 			std::sync::LazyLock::new(FunctionRegistry::with_builtins);
 		static NO_VECTORS: std::sync::LazyLock<KnnQueryVectors> =
 			std::sync::LazyLock::new(KnnQueryVectors::new);
+		fn never() -> bool {
+			false
+		}
 		Self {
 			registry: &REGISTRY,
 			knn_vectors: &NO_VECTORS,
 			id_bounds: true,
+			reads_stably: &never,
 		}
 	}
 }

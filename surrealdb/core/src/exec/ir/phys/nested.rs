@@ -354,6 +354,76 @@ pub(super) fn statement_writes(
 	cx: &EffectCx<'_>,
 	owner: OpId,
 ) -> bool {
+	writes_with(ir, facts, cx, owner, |_| true)
+}
+
+/// [`statement_writes`] for a statement not yet converted, whose ops may still be logical: a
+/// logical op writes where it is a write, a schema statement or any other op that is not known to
+/// only read or to shape what the statement reads ([`only_reads`]).
+pub(super) fn statement_writes_logically(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &EffectCx<'_>,
+	owner: OpId,
+) -> bool {
+	writes_with(ir, facts, cx, owner, |op| !only_reads(op))
+}
+
+/// Whether the logical op `op` reads, or shapes what its statement reads or yields, and writes
+/// nothing by its own shape.
+fn only_reads(op: &crate::exec::ir::logical::ops::LogOp) -> bool {
+	use crate::exec::ir::logical::ops::LogOp;
+	matches!(
+		op,
+		LogOp::Stmt { .. }
+			| LogOp::Statement { .. }
+			| LogOp::Source(_)
+			| LogOp::Values { .. }
+			| LogOp::Match { .. }
+			| LogOp::MatchRead { .. }
+			| LogOp::MatchOutput(_)
+			| LogOp::BindStep(_)
+			| LogOp::Subquery
+			| LogOp::UnionAll
+			| LogOp::Join { .. }
+			| LogOp::Filter
+			| LogOp::PermissionFilter { .. }
+			| LogOp::Split { .. }
+			| LogOp::Aggregate(_)
+			| LogOp::Distinct
+			| LogOp::Sort(_)
+			| LogOp::Window(_)
+			| LogOp::Limit { .. }
+			| LogOp::Project(_)
+			| LogOp::Fetch
+			| LogOp::Timeout
+			| LogOp::VersionScope
+			| LogOp::Only
+			| LogOp::Explain { .. }
+			| LogOp::Eval
+			| LogOp::Block
+			| LogOp::Let(_)
+			| LogOp::Return
+			| LogOp::Loop { .. }
+			| LogOp::If
+			| LogOp::Info { .. }
+			| LogOp::Sleep
+			| LogOp::Show(_)
+			| LogOp::Choose(_)
+			| LogOp::Yield
+			| LogOp::Next
+			| LogOp::Break
+	)
+}
+
+/// [`statement_writes`] with `logical` deciding whether a logical op writes.
+fn writes_with(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &EffectCx<'_>,
+	owner: OpId,
+	logical: impl Fn(&crate::exec::ir::logical::ops::LogOp) -> bool,
+) -> bool {
 	let mut ops = OpList::new();
 	ops.push(owner);
 	if let Some(data) = ir.op(owner) {
@@ -373,7 +443,8 @@ pub(super) fn statement_writes(
 					|| set.intersects(EffectSet::OPAQUE_BODY | EffectSet::WRITES_EXTERNAL)
 			}
 		}
-		Some(OpKind::Logical(_)) | None => true,
+		Some(OpKind::Logical(op)) => logical(op),
+		None => true,
 	})
 }
 
@@ -1144,6 +1215,7 @@ pub(super) fn index_for(
 		knn_vectors: &no_vectors,
 		// The lookup reads its key's rows for a statement that writes none of them.
 		id_bounds: true,
+		reads_stably: &|| false,
 	};
 	let decision =
 		access::decide(&answers, None, Some(&probe), None, false, &decision_cx).ok()??;
