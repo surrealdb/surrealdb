@@ -6087,8 +6087,7 @@ impl Executor {
 									lowered,
 									&mut plan_session,
 									inline,
-									*read_only
-										|| crate::exec::vm::serve::is_write_statement(lowered),
+									*read_only || crate::exec::vm::serve::writes_only(lowered),
 									keep_logged,
 									false,
 									&mut builder,
@@ -6242,7 +6241,7 @@ impl Executor {
 	/// the statements before it leave, into the request `builder` builds;
 	/// or, where it is not `inline`, or where it reads a parameter only the run
 	/// computes, leave it to be served when it is reached. A `cacheable`
-	/// statement — one that only reads, or a write — that reads the request's
+	/// statement - one that only reads, or one that only writes - that reads the request's
 	/// variables only where one compilation serves every value of them
 	/// ([`crate::exec::vm::serve::kept_for_requests`]), or whose literals in
 	/// those places are freed as such variables

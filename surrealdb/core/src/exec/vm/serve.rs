@@ -455,6 +455,18 @@ pub(crate) fn is_write_statement(op: &LogicalOp) -> bool {
 		|| matches!(op, LogicalOp::Timeout(timeout) if matches!(timeout.input.as_ref(), LogicalOp::Write(_)))
 }
 
+/// Whether `op` does nothing but write: a write statement ([`is_write_statement`]), an `IF` each
+/// of whose arms only writes, or a block of statements that each only write.
+pub(crate) fn writes_only(op: &LogicalOp) -> bool {
+	if let LogicalOp::If(ifop) = op {
+		return !ifop.arms.is_empty() && ifop.arms.iter().all(writes_only);
+	}
+	if let LogicalOp::Sequence(sequence) = op {
+		return !sequence.stmts.is_empty() && sequence.stmts.iter().all(writes_only);
+	}
+	is_write_statement(op)
+}
+
 /// How a request keeps `op`, one of its top-level statements, compiled for later requests: as
 /// written, or with the literals [`free_literals`] frees. The caller has judged `op` a read or a
 /// write.
@@ -501,19 +513,20 @@ impl Keeping {
 	}
 }
 
-/// `op`, a write among a request's top-level statements that is planned when the request reaches
-/// it, served as [`kept_request_statement`] serves the writes a request compiles when it arrives:
-/// where [`Keeping`] keeps it, one compilation serves every value of the request variables it
-/// reads, as it would before the request's first write. `None` where it is not kept, which
-/// includes a write that is the value of a top-level `LET` (`binds_rows`), and where the kept
-/// compilation fails, which [`request_statement`] then raises as it plans the statement itself.
+/// `op`, a write, or a block that only writes ([`writes_only`]), among a request's top-level
+/// statements that is planned when the request reaches it, served as [`kept_request_statement`]
+/// serves the writes a request compiles when it arrives: where [`Keeping`] keeps it, one
+/// compilation serves every value of the request variables it reads, as it would before the
+/// request's first write. `None` where it is not kept, which includes a write that is the value of
+/// a top-level `LET` (`binds_rows`), and where the kept compilation fails, which
+/// [`request_statement`] then raises as it plans the statement itself.
 async fn kept_reached_write(
 	exec: &ExecutionContext,
 	op: &LogicalOp,
 	principal: Option<Arc<crate::iam::Auth>>,
 	binds_rows: bool,
 ) -> Option<Arc<dyn ExecOperator>> {
-	if binds_rows || !is_write_statement(op) {
+	if binds_rows || !writes_only(op) {
 		return None;
 	}
 	let keeping = Keeping::of(op, exec.ctx())?;
@@ -719,6 +732,10 @@ pub(crate) fn source_only_request_variables(
 		reads.names.retain(|name| !in_timeout.contains(name));
 		reads.sources.retain(|(name, _)| !in_timeout.contains(name));
 		return reads;
+	}
+	if matches!(op, LogicalOp::If(_) | LogicalOp::Sequence(_)) && writes_only(op) {
+		// A block that only writes reads what its writes and its conditions read.
+		return block_run_time_reads(op, ctx, literals).unwrap_or_default();
 	}
 	let mut everywhere: BTreeMap<String, usize> = BTreeMap::new();
 	let _ = op.visit_scalars_deep(&mut |scalar| {
@@ -1300,31 +1317,93 @@ fn record_key_param(expr: &LogicalExpr) -> Option<&str> {
 }
 
 /// The request variables the key of `type::record(<table>, <key>)` reads, where the table is a
-/// constant and the key is a variable `readable` admits, or a list of such variables and literals;
-/// `None` for any other expression. The table names the write's subjects whatever the key holds
+/// constant and the key is an expression [`run_time_reads_of`] admits; `None` for any other
+/// expression. The table names the write's subjects whatever the key holds
 /// ([`crate::exec::logical::footprint::write_targets`]), so no choice of the plan depends on the
-/// key's value, and the key is read when the write runs.
+/// key's value, and the key is evaluated when the write runs.
 fn record_key_reads(expr: &LogicalExpr, readable: &dyn Fn(&str) -> bool) -> Option<Vec<String>> {
 	let (_, key) = crate::exec::logical::footprint::record_call(expr)?;
-	let variable = |expr: &LogicalExpr| {
-		if let LogicalExpr::Param(param) = expr
-			&& readable(param.as_str())
-		{
-			Some(param.as_str().to_owned())
-		} else {
-			None
+	run_time_reads_of(key, readable)
+}
+
+/// The variables `expr` reads, where it holds no statement, graph lookup, recursion or closure and
+/// every variable it reads is one `readable` admits: an expression evaluated when its statement
+/// runs, which no choice of a plan depends on. `None` otherwise.
+fn run_time_reads_of(expr: &LogicalExpr, readable: &dyn Fn(&str) -> bool) -> Option<Vec<String>> {
+	use std::ops::ControlFlow;
+	let mut names: Vec<String> = Vec::new();
+	let walked = expr.visit_deep(&mut |node| {
+		if let LogicalExpr::Param(param) = node {
+			if !readable(param.as_str()) {
+				return ControlFlow::Break(());
+			}
+			if !names.iter().any(|name| name == param.as_str()) {
+				names.push(param.as_str().to_owned());
+			}
+			return ControlFlow::Continue(());
 		}
+		if matches!(
+			node,
+			LogicalExpr::Subquery(_)
+				| LogicalExpr::Lookup { .. }
+				| LogicalExpr::Recurse(_)
+				| LogicalExpr::RepeatRecurse(_)
+				| LogicalExpr::Closure(_)
+		) {
+			return ControlFlow::Break(());
+		}
+		ControlFlow::Continue(())
+	});
+	walked.is_continue().then_some(names)
+}
+
+/// The request variables `op`, a block that only writes ([`writes_only`]), reads where one
+/// compilation serves every value of them: those each of its writes reads as
+/// [`write_run_time_reads`] admits, and those each `IF` condition reads ([`run_time_reads_of`]).
+/// The block's plan writes the tables its writes name and evaluates every condition when it runs,
+/// whatever the values. `None` where a write is not so admitted, a write is under a `TIMEOUT`, or a
+/// condition holds a statement or reads any other variable.
+fn block_run_time_reads(
+	op: &LogicalOp,
+	ctx: &crate::ctx::FrozenContext,
+	literals: &[(String, crate::val::Value)],
+) -> Option<RunTimeReads> {
+	let readable = |name: &str| {
+		!crate::exec::planner::UNIT_RUNTIME_PARAMS.contains(&name)
+			&& (ctx.is_request_param(name) || literals.iter().any(|(held, _)| held == name))
 	};
-	if let LogicalExpr::Array(items) = key {
-		let mut names = Vec::new();
-		for item in items {
-			if !matches!(item, LogicalExpr::Literal(_)) {
-				names.push(variable(item)?);
+	let mut reads = RunTimeReads::default();
+	let mut add = |more: RunTimeReads| {
+		for name in more.names {
+			if !reads.names.contains(&name) {
+				reads.names.push(name);
 			}
 		}
-		return (!names.is_empty()).then_some(names);
+		for (name, class) in more.sources {
+			if !reads.sources.iter().any(|(held, _)| *held == name) {
+				reads.sources.push((name, class));
+			}
+		}
+	};
+	let mut pending = vec![op];
+	while let Some(op) = pending.pop() {
+		if let LogicalOp::Write(write) = op {
+			add(write_run_time_reads(op, write, ctx, literals)?);
+		} else if let LogicalOp::If(ifop) = op {
+			for condition in &ifop.conditions {
+				add(RunTimeReads {
+					names: run_time_reads_of(condition, &readable)?,
+					sources: Vec::new(),
+				});
+			}
+			pending.extend(ifop.arms.iter());
+		} else if let LogicalOp::Sequence(sequence) = op {
+			pending.extend(sequence.stmts.iter());
+		} else {
+			return None;
+		}
 	}
-	Some(vec![variable(key)?])
+	Some(reads)
 }
 
 /// The name of the placeholder variable [`free_literals`] writes in place of
@@ -1342,7 +1421,8 @@ fn literal_placeholder(ordinal: usize) -> String {
 /// read when the statement runs ([`source_only_request_variables`]): in a
 /// statement that reads only its source, a record id that is its one source,
 /// and the key of `type::record(<table>, <key>)` as that source; in a write,
-/// its one target as [`free_write_literals`] frees it. A freed
+/// or in each write of a block that only writes ([`writes_only`]), its one
+/// target as [`free_write_target`] frees it. A freed
 /// literal's value is no part of the key the compilation is kept under, only
 /// its class is; every other literal stays in the statement as written, keyed
 /// by its value. An array written as the source is a `Values` leaf, not a
@@ -1356,6 +1436,9 @@ pub(crate) fn free_literals(
 	use crate::expr::logical::{LogicalSource, SourceRef};
 	if is_write_statement(op) {
 		return free_write_literals(op, ctx);
+	}
+	if writes_only(op) {
+		return free_block_literals(op, ctx);
 	}
 	fn rewrite(op: &mut LogicalOp, literals: &mut Vec<(String, crate::val::Value)>) {
 		if let LogicalOp::Source(LogicalSource {
@@ -1449,18 +1532,76 @@ pub(crate) fn free_literals(
 	Some((freed, literals))
 }
 
-/// [`free_literals`] for `op`, a write, under its `TIMEOUT` at most: the literal its one target is
-/// written with, written as a placeholder variable. A `CREATE` or `UPSERT` target, or the record an
-/// `UPDATE` or `DELETE` reads its rows from, that is a record id written out becomes the variable
-/// itself, read as [`write_run_time_reads`] reads `CREATE $id`; the key of
-/// `type::record(<table>, <key>)`, written out whole, becomes the variable as that key. Every other
-/// literal stays as written. `None` where nothing is freed, where the statement as written does
-/// not name its target in the shape the plan does ([`free_written_target`]), or where the write so
-/// freed is not kept ([`source_only_request_variables`]).
+/// [`free_literals`] for `op`, a write, under its `TIMEOUT` at most: its one target freed as
+/// [`free_write_target`] frees it. `None` where nothing is freed, or where the write so freed is
+/// not kept ([`kept_with_freed`]).
 fn free_write_literals(
 	op: &LogicalOp,
 	ctx: &crate::ctx::FrozenContext,
 ) -> Option<(LogicalOp, Vec<(String, crate::val::Value)>)> {
+	let mut literals = Vec::new();
+	let freed = free_write_target(op, &mut literals)?;
+	kept_with_freed(op, freed, literals, ctx)
+}
+
+/// [`free_literals`] for `op`, a block that only writes ([`writes_only`]): the target of each of
+/// its writes freed as [`free_write_target`] frees it, numbered in the order the block is written.
+/// A write whose target frees nothing stays as written. `None` where nothing is freed, or where the
+/// block so freed is not kept ([`kept_with_freed`]).
+fn free_block_literals(
+	op: &LogicalOp,
+	ctx: &crate::ctx::FrozenContext,
+) -> Option<(LogicalOp, Vec<(String, crate::val::Value)>)> {
+	fn free(op: &mut LogicalOp, literals: &mut Vec<(String, crate::val::Value)>) {
+		if let LogicalOp::If(ifop) = op {
+			ifop.arms.iter_mut().for_each(|arm| free(arm, literals));
+		} else if let LogicalOp::Sequence(sequence) = op {
+			sequence.stmts.iter_mut().for_each(|stmt| free(stmt, literals));
+		} else if let Some(freed) = free_write_target(op, literals) {
+			*op = freed;
+		}
+	}
+	let mut freed = op.clone();
+	let mut literals = Vec::new();
+	free(&mut freed, &mut literals);
+	if literals.is_empty() {
+		return None;
+	}
+	kept_with_freed(op, freed, literals, ctx)
+}
+
+/// `freed`, `op` with `literals` written as placeholder variables, where it is kept for those
+/// variables: no placeholder is a name the statement reads or the context binds, and the request
+/// reads each of them when it runs ([`source_only_request_variables`]). `None` otherwise.
+fn kept_with_freed(
+	op: &LogicalOp,
+	freed: LogicalOp,
+	literals: Vec<(String, crate::val::Value)>,
+	ctx: &crate::ctx::FrozenContext,
+) -> Option<(LogicalOp, Vec<(String, crate::val::Value)>)> {
+	let written = statement_params(op);
+	if literals.iter().any(|(name, _)| written.contains(name) || ctx.value(name).is_some()) {
+		return None;
+	}
+	let names = source_only_request_variables(&freed, ctx, &literals).names;
+	if !literals.iter().all(|(name, _)| names.contains(name)) {
+		return None;
+	}
+	Some((freed, literals))
+}
+
+/// `op`, a write under its `TIMEOUT` at most, with the literal its one target is written with
+/// written as a placeholder variable numbered after `literals`, to which its value is added. A
+/// `CREATE` or `UPSERT` target, or the record an `UPDATE` or `DELETE` reads its rows from, that is
+/// a record id written out becomes the variable itself, read as [`write_run_time_reads`] reads
+/// `CREATE $id`; the key of `type::record(<table>, <key>)`, written out whole, becomes the variable
+/// as that key. Every other literal stays as written. `None`, with `literals` as it was, where
+/// nothing is freed or where the statement as written does not name its target in the shape the
+/// plan does ([`free_written_target`]).
+fn free_write_target(
+	op: &LogicalOp,
+	literals: &mut Vec<(String, crate::val::Value)>,
+) -> Option<LogicalOp> {
 	use crate::exec::logical::footprint::{record_call, record_call_key_mut};
 	use crate::expr::logical::{LogicalSource, LogicalWriteSource, SourceRef};
 	/// `expr` as the value of a freed literal: one a substitution keeps exactly.
@@ -1482,9 +1623,12 @@ fn free_write_literals(
 				matches!(key, LogicalExpr::Literal(_) | LogicalExpr::Array(_))
 			})
 	}
+	/// `expr` with its literal written as the placeholder numbered `ordinal`, the value of which
+	/// is added to `found`.
 	fn free(
 		expr: &mut LogicalExpr,
-		literals: &mut Vec<(String, crate::val::Value)>,
+		ordinal: usize,
+		found: &mut Vec<(String, crate::val::Value)>,
 	) -> Option<Freed> {
 		let whole = matches!(expr, LogicalExpr::RecordId(_));
 		let slot = if whole {
@@ -1493,9 +1637,9 @@ fn free_write_literals(
 			record_call_key_mut(expr)?
 		};
 		let value = literal(slot)?;
-		let name = literal_placeholder(literals.len());
+		let name = literal_placeholder(ordinal);
 		*slot = LogicalExpr::Param(name.clone().into());
-		literals.push((name.clone(), value));
+		found.push((name.clone(), value));
 		Some(if whole {
 			Freed::Whole(name)
 		} else {
@@ -1545,10 +1689,11 @@ fn free_write_literals(
 	let LogicalOp::Write(write) = written else {
 		return None;
 	};
-	let mut literals = Vec::new();
+	let ordinal = literals.len();
+	let mut found = Vec::new();
 	let freed_target = match &mut write.source {
 		LogicalWriteSource::Targets(targets) => match targets.as_mut_slice() {
-			[target] => free(target, &mut literals),
+			[target] => free(target, ordinal, &mut found),
 			_ => None,
 		},
 		LogicalWriteSource::Rows(rows) => {
@@ -1560,13 +1705,13 @@ fn free_write_literals(
 				match source {
 					SourceRef::RecordId(rid) => {
 						literal(&LogicalExpr::RecordId(rid.clone())).map(|value| {
-							let name = literal_placeholder(literals.len());
+							let name = literal_placeholder(ordinal);
 							*source = SourceRef::Param(name.clone().into());
-							literals.push((name.clone(), value));
+							found.push((name.clone(), value));
 							Freed::Whole(name)
 						})
 					}
-					SourceRef::Dynamic(expr) => free(expr, &mut literals),
+					SourceRef::Dynamic(expr) => free(expr, ordinal, &mut found),
 					SourceRef::Table(_) | SourceRef::Param(_) | SourceRef::Mock(_) => None,
 				}
 			} else {
@@ -1578,18 +1723,11 @@ fn free_write_literals(
 	// The statement as written names the target too: the slot table of its free names, and the
 	// key it is kept under, read it there, so it names the placeholder as the plan does.
 	free_written_target(&mut write.statement, freed_target?)?;
-	let written = statement_params(op);
-	if literals.iter().any(|(name, _)| written.contains(name) || ctx.value(name).is_some()) {
-		return None;
-	}
-	let names = source_only_request_variables(&freed, ctx, &literals).names;
-	if !literals.iter().all(|(name, _)| names.contains(name)) {
-		return None;
-	}
-	Some((freed, literals))
+	literals.extend(found);
+	Some(freed)
 }
 
-/// What [`free_write_literals`] freed of a write's target: the whole target, or the key of
+/// What [`free_write_target`] freed of a write's target: the whole target, or the key of
 /// `type::record(<table>, <key>)`, each now the named placeholder.
 enum Freed {
 	Whole(String),

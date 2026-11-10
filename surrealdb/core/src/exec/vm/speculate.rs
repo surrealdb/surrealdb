@@ -266,7 +266,8 @@ pub(super) async fn runs_unseen_schema(
 	reached(planner, op, closures_from_outside, None).await.is_none()
 }
 
-/// The tables each variable the write `op` is (under its `TIMEOUT` at most) names
+/// The tables each variable the write `op` is (under its `TIMEOUT` at most), or each write of `op`
+/// where it is a block that only writes ([`crate::exec::vm::serve::writes_only`]), names
 /// as a target holds in every run of the plan `planner` makes: the table a kept statement's class
 /// of value names ([`Planner::named_targets`]), or the tables the value the planning
 /// context binds the name to names, which the bind folds into the plan. A name
@@ -329,6 +330,29 @@ fn variable_targets(
 			| Value::Range(_)
 			| Value::Closure(_) => None,
 		}
+	}
+	let held = |name: &str| match planner.named_targets().iter().find(|(named, _)| named == name) {
+		Some((_, table)) => Some(vec![table.clone()]),
+		None if planner.param_is_shadowed(name) => None,
+		None => planner.frozen().value(name).and_then(tables),
+	};
+	if matches!(op, LogicalOp::If(_) | LogicalOp::Sequence(_))
+		&& crate::exec::vm::serve::writes_only(op)
+	{
+		// A block that does nothing but write binds no variable, so each of its writes names its
+		// target by a variable the request fixes.
+		let mut out = std::collections::BTreeMap::new();
+		let _ = op.visit_ops_deep(&mut |node| {
+			if let LogicalOp::Write(write) = node {
+				for name in target_variables(&write.source) {
+					if let Some(tables) = held(name) {
+						out.insert(name.to_owned(), tables);
+					}
+				}
+			}
+			std::ops::ControlFlow::<()>::Continue(())
+		});
+		return out;
 	}
 	let root = match op {
 		LogicalOp::Write(write) => write,
@@ -401,12 +425,7 @@ fn variable_targets(
 	};
 	let mut out = std::collections::BTreeMap::new();
 	for name in target_variables(&root.source) {
-		let held = match planner.named_targets().iter().find(|(named, _)| named == name) {
-			Some((_, table)) => Some(vec![table.clone()]),
-			None if planner.param_is_shadowed(name) => None,
-			None => planner.frozen().value(name).and_then(tables),
-		};
-		if let Some(held) = held {
+		if let Some(held) = held(name) {
 			out.insert(name.to_owned(), held);
 		}
 	}

@@ -376,6 +376,24 @@ async fn kept_writes_to_a_named_table_answer_as_writes_compiled_with_their_reque
 	requests.push(bob("UPSERT type::record('ls', $k) SET n = 1", &[("k", int(951))]));
 	requests.push(alice("UPSERT ls:952 SET n = 1; UPSERT ls:953 SET n = 1", &[]));
 	requests.push(bob("UPSERT ls:954 SET n = 1; UPSERT ls:955 SET n = 1", &[]));
+	// Blocks that only write: an `IF` with an `ELSE` arm, a nested `IF` whose condition reads a
+	// variable, a block after a request's first write, and blocks compiled with their request: one
+	// holding a read, and one whose condition holds a statement.
+	for (k, go) in [(600, true), (601, false), (600, false), (602, true)] {
+		requests.push(owner(
+			"IF $go { UPSERT type::record('ls', $k) SET n = 1; UPDATE type::record('ls', $k) SET n += 1 } \
+			 ELSE { DELETE type::record('ls', $k) }",
+			&[("k", int(k)), ("go", Value::Bool(go))],
+		));
+		requests.push(owner(
+			"UPSERT ls:610 SET n = $k; IF $go { IF $k > 600 { UPSERT type::record('ls', [$k, 'n']) \
+			 SET n = $k }; UPSERT ls:611 SET n = 2 }",
+			&[("k", int(k)), ("go", Value::Bool(go))],
+		));
+	}
+	requests.push(owner("IF true { UPSERT ls:620 SET n = 1; SELECT * FROM ls:620 }", &[]));
+	requests
+		.push(owner("IF (SELECT VALUE n FROM ONLY ls:620) = 1 { UPSERT ls:621 SET n = 1 }", &[]));
 	// A plan kept before its table exists is judged again once the table does.
 	requests.push(owner("CREATE type::record('fresh', $k) SET n = $k", &[("k", int(1))]));
 	requests.push(owner("CREATE type::record('fresh', $k) SET n = $k", &[("k", int(2))]));

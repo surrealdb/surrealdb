@@ -195,6 +195,42 @@ async fn writes_that_differ_only_in_a_key_written_out_are_compiled_once() {
 	);
 }
 
+/// A block that only writes is one statement kept for the values its writes and its conditions
+/// read: requests that bind other values, and so take another arm, are served the one compilation,
+/// and a block of writes to records written out is kept for those records' keys.
+#[tokio::test]
+async fn a_block_that_only_writes_is_compiled_once() {
+	let db = TestDb::new(PEOPLE).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let base = ds.statement_cache_stats();
+	let now = || since(base, ds.statement_cache_stats());
+	let sql = "BEGIN; IF $go { UPSERT type::record('person', $k) SET n = 1; \
+		UPDATE type::record('person', $k) SET n += 1 } ELSE { DELETE type::record('person', $k) }; \
+		COMMIT;";
+	for (k, go) in [(30, true), (31, true), (30, false)] {
+		let mut vars = Variables::new();
+		vars.insert("k", k);
+		vars.insert("go", go);
+		ds.execute(sql, &owner, Some(vars)).await.expect("the request runs");
+	}
+	assert_eq!(now(), stats(2, 1, 0), "one compilation serves both arms and every key");
+	let literal = |a: i64, b: i64| {
+		format!("IF true {{ UPSERT person:{a} SET n = 5; UPSERT person:{b} SET n = 5 }}")
+	};
+	ds.execute(&literal(40, 41), &owner, None).await.expect("the request runs");
+	ds.execute(&literal(42, 43), &owner, None).await.expect("the request runs");
+	assert_eq!(now(), stats(3, 2, 0), "a block of other keys written out is served the one kept");
+	assert_eq!(
+		last_answer(
+			ds,
+			&owner,
+			"SELECT VALUE [id, n] FROM person WHERE id >= person:30 ORDER BY id"
+		)
+		.await,
+		"[[person:31, 2], [person:40, 5], [person:41, 5], [person:42, 5], [person:43, 5]]"
+	);
+}
+
 /// How many statements the run-time cache compiled between `before` and `after`, kept or not.
 fn since_compiled(
 	before: crate::exec::vm::compile_cache::Stats,
