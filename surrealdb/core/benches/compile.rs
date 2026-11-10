@@ -74,6 +74,7 @@ const FIXTURE: &str = "
 	);
 	CREATE doc:1 SET a = 0, b = 0, c = 0;
 	DEFINE TABLE bulk SCHEMALESS;
+	DEFINE TABLE wrow SCHEMALESS;
 ";
 
 fn point_select(salt: u64) -> String {
@@ -114,6 +115,27 @@ fn block_of_ten(salt: u64) -> String {
 	text.push_str(&format!("SELECT * FROM block_row WHERE v = {salt};\n"));
 	text.push_str("COMMIT;");
 	text
+}
+
+/// Statements a request writes in one transaction: each one after the first is planned when the
+/// request reaches it, so this case measures the per-statement cost of that path.
+const WRITES_PER_BLOCK: u64 = 120;
+
+fn block_of_writes(salt: u64) -> String {
+	let mut text = String::from("BEGIN;\n");
+	for i in 0..WRITES_PER_BLOCK {
+		text.push_str(&format!("UPSERT type::record('wrow', [{salt}, {i}]) CONTENT {{ a: 1 }};\n"));
+	}
+	text.push_str("COMMIT;");
+	text
+}
+
+/// The rows of [`block_of_writes`] written by one statement the request compiles once.
+fn loop_of_writes(salt: u64) -> String {
+	format!(
+		"BEGIN;\nFOR $i IN 0..{WRITES_PER_BLOCK} {{ \
+		 UPSERT type::record('wrow', [{salt}, $i]) CONTENT {{ a: 1 }}; }};\nCOMMIT;"
+	)
 }
 
 fn graph_five_way(salt: u64) -> String {
@@ -214,6 +236,18 @@ fn corpus() -> Vec<Case> {
 			name: "block_ten_statements_begin_commit",
 			setup: FIXTURE.into(),
 			text: block_of_ten,
+			vars: None,
+		},
+		Case {
+			name: "block_120_upserts_begin_commit",
+			setup: FIXTURE.into(),
+			text: block_of_writes,
+			vars: None,
+		},
+		Case {
+			name: "loop_120_upserts_begin_commit",
+			setup: FIXTURE.into(),
+			text: loop_of_writes,
 			vars: None,
 		},
 		Case {
