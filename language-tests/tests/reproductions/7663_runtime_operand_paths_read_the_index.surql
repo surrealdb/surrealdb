@@ -19,8 +19,9 @@ or every column. It is one read where a literal prefix reads every record
 under the prefix. A value in any column that the index may not list every
 equal record under reads the whole table.
 
-UPDATE and DELETE read their subjects through the same lookup, and the write
-judges each one on its WHERE.
+UPDATE, UPSERT and DELETE read their subjects through the same lookup, and the
+write judges each one on its WHERE; an UPSERT whose WHERE admits none creates
+its record as it does WITH NOINDEX.
 
 The lookup is a superset of the rows: the whole predicate stays above it, a
 conjunct beside an OR included. A field of a value that may be a record reads
@@ -552,6 +553,42 @@ value = "NONE"
 
 [[test.results]]
 value = "[opair:2]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ attributes: { form: 'UPSERT' }, children: [{ attributes: { projections: '*' }, children: [{ attributes: { access: 'k = $o.k', guard: '$o', index: 'wi_k', table: 'wi' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', operator: 'WriteOperator' }"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "[[1, 4], [1f, 4], ['1', 1], [2, 0]]"
 */
 
 DEFINE TABLE item SCHEMAFULL;
@@ -919,3 +956,18 @@ DEFINE FUNCTION fn::opair_plan($k: int) { RETURN SELECT VALUE id FROM opair WHER
 fn::opair_plan(1);
 DEFINE FUNCTION fn::opair_first($k: int) { RETURN SELECT VALUE id FROM opair WHERE a = 1 AND k = $k ORDER BY b LIMIT 1; };
 fn::opair_first(1);
+
+-- An UPSERT with a WHERE writes through the index as the same write WITH NOINDEX does: every
+-- subject its WHERE admits, or a record it creates where none does.
+DELETE wi RETURN NONE;
+DELETE wn RETURN NONE;
+INSERT INTO wi [{ id: 101, k: 1, n: 0 }, { id: 102, k: 1.0, n: 0 }, { id: 103, k: '1', n: 0 }, { id: 104, k: 2, n: 0 }, { id: 105, n: 0 }] RETURN NONE;
+INSERT INTO wn [{ id: 101, k: 1, n: 0 }, { id: 102, k: 1.0, n: 0 }, { id: 103, k: '1', n: 0 }, { id: 104, k: 2, n: 0 }, { id: 105, n: 0 }] RETURN NONE;
+DEFINE FUNCTION fn::wi_upsert_plan($o: object) { RETURN UPSERT wi SET n += 1 WHERE k = $o.k EXPLAIN; };
+fn::wi_upsert_plan({ k: 1 });
+DEFINE FUNCTION fn::wi_upsert($o: object) { RETURN array::sort(UPSERT wi SET n += 1 WHERE k = $o.k RETURN VALUE [k, n]); };
+DEFINE FUNCTION fn::wn_upsert($o: object) { RETURN array::sort(UPSERT wn WITH NOINDEX SET n += 1 WHERE k = $o.k RETURN VALUE [k, n]); };
+DEFINE FUNCTION fn::w_pairs() { RETURN array::sort(SELECT VALUE [k, n] FROM wi) == array::sort(SELECT VALUE [k, n] FROM wn); };
+array::all(array::map(array::concat($classes, ['absent', 1]), |$v| fn::wi_upsert({ k: $v }) == fn::wn_upsert({ k: $v }) AND fn::w_pairs()));
+array::all(array::map([{}, { k: NONE }], |$o| fn::wi_upsert($o) == fn::wn_upsert($o) AND fn::w_pairs()));
+SELECT VALUE [k, n] FROM wi WHERE id IN [wi:101, wi:102, wi:103, wi:104] ORDER BY id;
