@@ -339,15 +339,43 @@ fn variable_targets(
 	if matches!(op, LogicalOp::If(_) | LogicalOp::Sequence(_))
 		&& crate::exec::vm::serve::writes_only(op)
 	{
-		// A block that does nothing but write binds no variable, so each of its writes names its
-		// target by a variable the request fixes.
+		// The block's own writes - its statements and the arms of its `IF`s, at any depth - bind
+		// no variable, so each names its target by a variable the request fixes. A write nested
+		// in one of them, in a subquery, may name its target by a variable a `LET` or a `FOR`
+		// there binds, which the request's value does not fix: a name such a write reads reaches
+		// every table.
+		fn own_writes<'a>(
+			op: &'a LogicalOp,
+			out: &mut Vec<&'a crate::expr::logical::LogicalWrite>,
+		) {
+			if let LogicalOp::If(ifop) = op {
+				ifop.arms.iter().for_each(|arm| own_writes(arm, out));
+			} else if let LogicalOp::Sequence(sequence) = op {
+				sequence.stmts.iter().for_each(|stmt| own_writes(stmt, out));
+			} else if let LogicalOp::Write(write) = op {
+				out.push(write);
+			} else if let LogicalOp::Timeout(timeout) = op
+				&& let LogicalOp::Write(write) = timeout.input.as_ref()
+			{
+				out.push(write);
+			}
+		}
+		let mut own = Vec::new();
+		own_writes(op, &mut own);
 		let mut out = std::collections::BTreeMap::new();
+		for write in &own {
+			for name in target_variables(&write.source) {
+				if let Some(tables) = held(name) {
+					out.insert(name.to_owned(), tables);
+				}
+			}
+		}
 		let _ = op.visit_ops_deep(&mut |node| {
-			if let LogicalOp::Write(write) = node {
+			if let LogicalOp::Write(write) = node
+				&& !own.iter().any(|mine| std::ptr::eq(*mine, write))
+			{
 				for name in target_variables(&write.source) {
-					if let Some(tables) = held(name) {
-						out.insert(name.to_owned(), tables);
-					}
+					out.remove(name);
 				}
 			}
 			std::ops::ControlFlow::<()>::Continue(())
