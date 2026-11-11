@@ -187,7 +187,9 @@ body again. Lookup and compilation happen only while a query is planned.
   written out, which is read as a variable. Every other request variable a
   kept write reads is read when it runs. A write planned when the request
   reaches it, after the request's first write, is kept and served the same
-  way. A schema statement and an `EXPLAIN` are compiled with their request.
+  way, and so is an `IF` whose arms, or a block whose statements, do nothing
+  but write, at any depth (`vm::serve::writes_only`). A schema statement and
+  an `EXPLAIN` are compiled with their request.
 - **Specialization**: a small body is still inlined into its caller rather than
   linked.
 - **Catalog units**: what a plan lowers from the catalog alone, the same for
