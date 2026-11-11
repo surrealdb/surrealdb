@@ -417,6 +417,83 @@ async fn kept_writes_to_a_named_table_answer_as_writes_compiled_with_their_reque
 	assert!(kept.hits >= 30, "{kept:?}");
 }
 
+/// Statements that read a name an earlier `LET` of their request binds, and reads a request
+/// reaches after its first write, answer as they do compiled with their request: a `LET` computed
+/// from a request variable and one written out as a constant, read as a write's target, key, data
+/// value and an `IF` condition; a `LET` that binds the name a request variable binds; a `LET`
+/// whose value is another class of target; a read of a record key and of a source after a write,
+/// in the write's explicit transaction, in an auto-commit transaction of its own, and in the
+/// transaction whose write creates the table it reads; a read that reads a `LET` binding only in
+/// its filter; and one statement text read with a `LET` that shadows a defined parameter and
+/// without it.
+#[tokio::test]
+async fn kept_statements_reading_let_bindings_answer_as_compiled_with_their_request() {
+	let mut requests = Vec::new();
+	for key in [1, 2, 3, 1] {
+		requests.push(owner(
+			"LET $row = type::record('ls', $k); UPSERT $row SET n = $k RETURN n",
+			&[("k", int(800 + key))],
+		));
+		requests.push(owner(
+			"LET $key = $k * 2; LET $v = $k + 1; \
+			 UPSERT type::record('ls', $key) SET n = $v RETURN id, n",
+			&[("k", int(810 + key))],
+		));
+		requests.push(owner(
+			"LET $go = $k > 841; IF $go { UPSERT type::record('ls', $k) SET n = 1 } \
+			 ELSE { UPSERT type::record('ls', $k) SET n = 2 }",
+			&[("k", int(840 + key))],
+		));
+		requests.push(owner(
+			&format!("LET $c = {}; UPSERT type::record('ls', $c) SET n = $c RETURN n", 820 + key),
+			&[],
+		));
+		requests.push(owner(
+			"LET $k = $k + 1000; UPSERT type::record('ls', $k) SET n = $k RETURN id, n",
+			&[("k", int(key))],
+		));
+		requests.push(owner(
+			"BEGIN; UPSERT ls:830 SET n = $k; SELECT VALUE n FROM type::record('ls', $k); \
+			 LET $src = type::record('ls', $k); SELECT n FROM $src; COMMIT;",
+			&[("k", int(key))],
+		));
+		requests.push(owner(
+			"UPSERT ls:850 SET n = 1; LET $min = $k; \
+			 SELECT VALUE n FROM ls WHERE n >= $min AND n < 5 ORDER BY n",
+			&[("k", int(key))],
+		));
+		requests.push(owner(
+			"UPSERT ls:860 SET n = $k; SELECT VALUE n FROM type::record('ls', $k);",
+			&[("k", int(key))],
+		));
+		requests.push(owner(
+			"BEGIN; CREATE type::record('fresh', $k) SET n = $k; \
+			 SELECT VALUE n FROM type::record('fresh', $k); REMOVE TABLE fresh; COMMIT;",
+			&[("k", int(key))],
+		));
+	}
+	// One statement text, with a `LET` that shadows a defined parameter and without it.
+	requests.push(owner("DEFINE PARAM $c VALUE 5", &[]));
+	requests.push(owner("LET $c = 821; UPSERT ls:900 SET n = $c RETURN n", &[]));
+	requests.push(owner("UPSERT ls:900 SET n = $c RETURN n", &[]));
+	requests.push(owner("LET $c = 822; UPSERT ls:900 SET n = $c RETURN n", &[]));
+	requests.push(owner("UPSERT ls:900 SET n = $c RETURN n", &[]));
+	// A `LET` bound to another class of target: a table, and an array of records.
+	requests.push(owner("LET $row = type::table('ls'); UPDATE $row SET m = 1 RETURN NONE", &[]));
+	requests.push(owner("LET $row = [ls:1, ls:2]; UPDATE $row SET m = 2 RETURN VALUE m", &[]));
+	requests.push(owner("SELECT * FROM ls ORDER BY id", &[]));
+	let kept = same_on_and_off(SETUP, &requests).await;
+	// Nine statements of the loop are kept by their first request and served to the next three:
+	// every write, the `IF` block, and the two reads after a write. The auto-commit write and read
+	// are served what the explicit transaction's write and read keep, from their first request on:
+	// a key written out is read as a variable. In the transaction that creates `fresh`, the write
+	// is served and the read is compiled again each time, never served another transaction's
+	// compilation. The write reading `$c` is kept apart with the `LET` and with the defined
+	// parameter, each served once. The read whose filter reads `$min` is compiled with its
+	// request.
+	assert!(kept.hits >= 40, "{kept:?}");
+}
+
 /// A schema statement between two identical kept writes changes what the second coerces,
 /// derives, fires, indexes and enforces, as it does for writes compiled with their request.
 #[tokio::test]

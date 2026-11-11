@@ -670,8 +670,28 @@ fn named_targets(sources: &[(String, SourceClass)]) -> Vec<(String, crate::val::
 		.collect()
 }
 
+/// Whether a kept request statement may read `name` when it runs rather than fold its value: a
+/// name the context binds where the statement runs, a request variable or a name an earlier `LET`
+/// of the request binds, or a placeholder [`free_literals`] wrote in place of a literal of
+/// `literals`; never one of the session's own values, which a compilation folds and is keyed by
+/// ([`kept_request_statement`]).
+///
+/// A `LET`'s name is read as a request variable is: the kept compilation is planned with the name
+/// shadowed, which the binder reads at run time whatever binds it
+/// ([`crate::exec::ir::cache::planning`]), and the statement reads the value the context holds
+/// where it runs.
+fn run_time_readable(
+	name: &str,
+	ctx: &crate::ctx::FrozenContext,
+	literals: &[(String, crate::val::Value)],
+) -> bool {
+	!crate::exec::planner::UNIT_RUNTIME_PARAMS.contains(&name)
+		&& (ctx.value(name).is_some() || literals.iter().any(|(held, _)| held == name))
+}
+
 /// The request variables a kept request statement reads when it runs rather
-/// than folding them into its plan ([`source_only_request_variables`]).
+/// than folding them into its plan ([`source_only_request_variables`]). A
+/// request variable here is any name [`run_time_readable`] admits.
 #[derive(Default)]
 pub(crate) struct RunTimeReads {
 	/// Every such name: those of [`Self::sources`], those read only as the
@@ -785,10 +805,7 @@ pub(crate) fn source_only_request_variables(
 	});
 	let literal =
 		|name: &str| literals.iter().find(|(held, _)| held == name).map(|(_, value)| value);
-	let readable = |name: &str| {
-		!crate::exec::planner::UNIT_RUNTIME_PARAMS.contains(&name)
-			&& (ctx.is_request_param(name) || literal(name).is_some())
-	};
+	let readable = |name: &str| run_time_readable(name, ctx, literals);
 	let mut names: Vec<String> = as_keys
 		.iter()
 		.filter(|(name, count)| {
@@ -845,7 +862,7 @@ pub(crate) fn source_only_request_variables(
 /// `WHERE` and its `RETURN` fields — is read when it runs and keys nothing.
 /// No choice of the plan depends on its value: the kept compilation is planned
 /// with the name shadowed, so the bind substitutes no value for it, and the IR
-/// binder answers a request variable no statement binds as read at run time
+/// binder answers a name the unit is told is shadowed as read at run time
 /// ([`crate::exec::ir::cache::planning::PlanningCatalog`]). What the value
 /// decides — the kind a `CONTENT` accepts, a field's coercion, an `ASSERT`, a
 /// permission — the stages judge per record, with the errors a compilation
@@ -870,10 +887,7 @@ fn write_run_time_reads(
 	};
 	let literal =
 		|name: &str| literals.iter().find(|(held, _)| held == name).map(|(_, value)| value);
-	let readable = |name: &str| {
-		!crate::exec::planner::UNIT_RUNTIME_PARAMS.contains(&name)
-			&& (ctx.is_request_param(name) || literal(name).is_some())
-	};
+	let readable = |name: &str| run_time_readable(name, ctx, literals);
 	let mut reads: BTreeMap<String, usize> = BTreeMap::new();
 	let mut nested = false;
 	let mut count = |expr: &LogicalExpr| {
@@ -1382,10 +1396,7 @@ fn block_run_time_reads(
 	ctx: &crate::ctx::FrozenContext,
 	literals: &[(String, crate::val::Value)],
 ) -> Option<RunTimeReads> {
-	let readable = |name: &str| {
-		!crate::exec::planner::UNIT_RUNTIME_PARAMS.contains(&name)
-			&& (ctx.is_request_param(name) || literals.iter().any(|(held, _)| held == name))
-	};
+	let readable = |name: &str| run_time_readable(name, ctx, literals);
 	let mut reads = RunTimeReads::default();
 	let mut add = |more: RunTimeReads| {
 		for name in more.names {
@@ -1848,7 +1859,9 @@ impl ExecOperator for LiteralBound {
 /// where one compilation serves every value of it
 /// ([`source_only_request_variables`]), so a request that binds other values
 /// to them is served the compilation. A statement that reads none, or reads
-/// one elsewhere, is compiled with its request.
+/// one elsewhere, is compiled with its request. Only a variable the request
+/// binds ([`crate::ctx::Context::is_request_param`]) counts as read
+/// elsewhere; a name a top-level `LET` binds never does.
 ///
 /// `literals` are as [`source_only_request_variables`] reads them.
 pub(crate) fn kept_for_requests(

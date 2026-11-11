@@ -172,7 +172,9 @@ body again. Lookup and compilation happen only while a query is planned.
   The key is the statement as written, the namespace and database, the class
   of the principal, whether permissions are suppressed and the capabilities.
   The compilation reads those variables when it runs, so requests that bind
-  other values to them are served the one compilation. Main plans such a
+  other values to them are served the one compilation. A name an earlier
+  `LET` of the request binds is read as a request variable is
+  (`vm::serve::run_time_readable`). Main plans such a
   source as a value the statement computes, whatever the key, so the kept plan
   is the plan main makes. A variable read anywhere else, a `FROM $name` among
   those places (which is planned for the table or record its value names),

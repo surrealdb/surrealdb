@@ -231,6 +231,40 @@ async fn a_block_that_only_writes_is_compiled_once() {
 	);
 }
 
+/// A write that reads a name an earlier `LET` of its request binds reads it when it runs, as it
+/// reads a request variable: one compilation serves every value, whether the `LET`'s value is
+/// computed when the request runs or written out as a constant.
+#[tokio::test]
+async fn a_write_reading_a_let_binding_is_compiled_once() {
+	let db = TestDb::new(PEOPLE).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let base = ds.statement_cache_stats();
+	let now = || since(base, ds.statement_cache_stats());
+	let reached = ds.reached_statement_stats();
+	let computed = "BEGIN; LET $row = type::record('person', $n); UPSERT $row SET age = 7; COMMIT;";
+	for n in 50..53 {
+		ds.execute(computed, &owner, Some(number(n))).await.expect("the request runs");
+	}
+	assert_eq!(now(), stats(2, 1, 0), "the write reading a computed `LET` compiles once");
+	assert_eq!(since_compiled(reached, ds.reached_statement_stats()), 0);
+	for k in 60..63 {
+		let constant =
+			format!("BEGIN; LET $k = {k}; UPSERT type::record('person', $k) SET age = 8; COMMIT;");
+		ds.execute(&constant, &owner, None).await.expect("the request runs");
+	}
+	assert_eq!(now(), stats(4, 2, 0), "the write reading a constant `LET` compiles once");
+	assert_eq!(
+		last_answer(
+			ds,
+			&owner,
+			"SELECT VALUE [id, age] FROM person WHERE id >= person:50 ORDER BY id"
+		)
+		.await,
+		"[[person:50, 7], [person:51, 7], [person:52, 7], [person:60, 8], [person:61, 8], \
+		 [person:62, 8]]"
+	);
+}
+
 /// A read the cache keeps when its request arrives is kept as well when the request reaches it
 /// after its first write: one compilation serves every value of its key.
 #[tokio::test]
