@@ -544,10 +544,10 @@ impl Keeping {
 	/// Whether `op` is planned with its literals as written instead of kept: a literal freed from
 	/// it is one its table converts ([`plans_its_literals`]). Read in `exec` before the kept
 	/// compilation is looked up, every time the statement is served; a catalog that cannot be read
-	/// answers that it is. The caller then plans `op` as it plans a statement no cache keeps, on
-	/// the route it reached it by. A request asks it of every statement planned when it is reached
-	/// and of a write it compiles when it arrives; a read it compiles when it arrives keeps its
-	/// freed literals.
+	/// answers that it is. The caller then plans `op` as it plans a statement [`Keeping`] does not
+	/// keep, on the route it reached it by. A request asks it of every statement planned when it is
+	/// reached and of a write it compiles when it arrives; a read it compiles when it arrives
+	/// keeps its freed literals.
 	pub(crate) async fn plans_as_written(&self, op: &LogicalOp, exec: &ExecutionContext) -> bool {
 		let (kept, literals) = self.statement(op);
 		// Boxed: the future reads the catalog, and it is held by every caller's frame.

@@ -447,6 +447,9 @@ async fn a_literal_of_a_table_that_converts_it_answers_as_written() {
 		"UPSERT counter:['a', 5.0] SET v += 1 RETURN VALUE v",
 		"UPDATE type::record('counter', ['a', 5.0]) SET v += 1 RETURN VALUE v",
 		"DELETE counter:['b', 1.0] RETURN BEFORE",
+		// A block and an `IF` that only write.
+		"{ UPDATE counter:['a', 5.0] SET v += 1 RETURN VALUE v; }",
+		"IF true { UPDATE counter:['a', 5.0] SET v += 1 RETURN VALUE v }",
 		"UPSERT plain:1 SET v = 1 RETURN NONE; UPDATE counter:['a', 5.0] SET v += 1 RETURN VALUE v; \
 		 SELECT VALUE v FROM counter:['a', 5.0]; SELECT id FROM tc:one",
 		"SELECT VALUE [id, v] FROM counter",

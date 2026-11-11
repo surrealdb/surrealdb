@@ -6292,7 +6292,7 @@ impl Executor {
 			// leave. One whose compilation fails is served when it is reached,
 			// which raises its error as a statement planned then does; a write
 			// whose literals its tables convert is compiled below as written. A
-			// read keeps its freed literals here, as it always has on arrival.
+			// read compiled on arrival keeps its freed literals.
 			let probe = crate::exec::context::statement_context(
 				&ctx,
 				opt,
