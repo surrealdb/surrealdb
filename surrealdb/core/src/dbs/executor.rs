@@ -6290,7 +6290,9 @@ impl Executor {
 			// Served from the cache of compiled statements as the request
 			// arrives, in a context of the session the statements before it
 			// leave. One whose compilation fails is served when it is reached,
-			// which raises its error as a statement planned then does.
+			// which raises its error as a statement planned then does; a write
+			// whose literals its tables convert is compiled below as written. A
+			// read keeps its freed literals here, as it always has on arrival.
 			let probe = crate::exec::context::statement_context(
 				&ctx,
 				opt,
@@ -6302,25 +6304,33 @@ impl Executor {
 				None,
 			)
 			.await;
-			if let Ok(probe) = probe
-				&& let Ok(plan) = crate::exec::vm::out_of_line(|| {
-					crate::exec::vm::serve::kept_request_statement(
-						&probe,
-						kept.clone(),
-						Some(Arc::clone(&opt.auth)),
-						literals,
-					)
-				})
-				.await
-			{
-				return PlannedStatement {
-					entry: Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Operator(
-						keeping.bind(plan),
-					))),
-					logged,
-				};
+			let as_written = match &probe {
+				Ok(probe) if crate::exec::vm::serve::writes_only(op) => {
+					keeping.plans_as_written(op, probe).await
+				}
+				Ok(_) | Err(_) => false,
+			};
+			if !as_written {
+				if let Ok(probe) = probe
+					&& let Ok(plan) = crate::exec::vm::out_of_line(|| {
+						crate::exec::vm::serve::kept_request_statement(
+							&probe,
+							kept.clone(),
+							Some(Arc::clone(&opt.auth)),
+							literals,
+						)
+					})
+					.await
+				{
+					return PlannedStatement {
+						entry: Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Operator(
+							keeping.bind(plan),
+						))),
+						logged,
+					};
+				}
+				return served();
 			}
-			return served();
 		}
 		let planned = crate::exec::planner::plan_request_statement(
 			op.clone(),

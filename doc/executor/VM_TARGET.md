@@ -190,13 +190,16 @@ body again. Lookup and compilation happen only while a query is planned.
   statements, do nothing but write, at any depth (`vm::serve::writes_only`),
   is kept as a write is. A statement planned when the request reaches it
   (`Executor::compile_request` names when) is kept and served the same way
-  where it only reads or only writes. A record id or a key written out is
+  where it only reads or only writes. In such a statement, and in a write
+  compiled when the request arrives, a record id or a key written out is
   compiled as written, not read as a variable, where its table's record ids
-  name their components, which the plan coerces a written-out key to, and in
-  a read where its table defines a computed field, which a read of a record
+  carry a key structure (an `id` that names its components, or an aggregated
+  view's group key), which the plan coerces a written-out key to, and in a
+  read where its table defines a computed field, which a read of a record
   written out derives only where the read selects it
-  (`vm::serve::plans_its_literals`, judged against the catalog on every
-  serve). A schema statement and an `EXPLAIN` are compiled with their
+  (`vm::serve::Keeping::plans_as_written`, judged against the catalog on
+  every serve). A read compiled when the request arrives keeps its freed
+  literals. A schema statement and an `EXPLAIN` are compiled with their
   request.
 - **Specialization**: a small body is still inlined into its caller rather than
   linked.

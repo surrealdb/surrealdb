@@ -414,8 +414,9 @@ async fn literal_sources_in_transactions_lets_and_lists_answer_as_written() {
 	}
 }
 
-/// The tables a literal and a value read when the statement runs are planned differently for:
-/// one whose record ids name their components, and one with a computed field that raises.
+/// The tables a literal and a value read when the statement runs are planned differently for: one
+/// whose record ids name their components, an aggregated view keyed by a cast group value, and one
+/// with a computed field that raises.
 const CONVERTING: &str = "
 	DEFINE TABLE counter SCHEMALESS;
 	DEFINE FIELD id ON counter TYPE [site: string, n: int];
@@ -423,16 +424,20 @@ const CONVERTING: &str = "
 	DEFINE TABLE tc SCHEMALESS;
 	DEFINE FIELD c ON tc COMPUTED <int> bad;
 	CREATE tc:one SET bad = 'x' RETURN NONE;
+	DEFINE TABLE src SCHEMALESS;
+	DEFINE TABLE agg AS SELECT <int> n AS n, count() AS c FROM src GROUP BY n;
+	CREATE src:1 SET n = 5 RETURN NONE;
+	CREATE src:2 SET n = 5 RETURN NONE;
 	DEFINE TABLE plain SCHEMALESS;
 	CREATE plain:1 SET v = 0 RETURN NONE;
 	CREATE plain:2 SET v = 0 RETURN NONE;
 	CREATE plain:3 SET v = 0 RETURN NONE;
 ";
 
-/// A literal of a table whose record ids name their components, coerced to them as written, and a
-/// read of a table with a computed field it does not select, answer as written, kept or not: when
-/// the request arrives and when it reaches them after a write. So does a range written out as a
-/// write's target.
+/// A write's literal of a table whose record ids carry a key structure, coerced to it as written,
+/// answers as written, kept or not, when the request arrives and when it reaches it after a write.
+/// So does a read the request reaches after a write, of such a table or of one with a computed
+/// field the read does not select, and a range written out as a write's target.
 #[tokio::test]
 async fn a_literal_of_a_table_that_converts_it_answers_as_written() {
 	let db = Pair::new(CONVERTING).await;
@@ -442,11 +447,12 @@ async fn a_literal_of_a_table_that_converts_it_answers_as_written() {
 		"UPSERT counter:['a', 5.0] SET v += 1 RETURN VALUE v",
 		"UPDATE type::record('counter', ['a', 5.0]) SET v += 1 RETURN VALUE v",
 		"DELETE counter:['b', 1.0] RETURN BEFORE",
-		"SELECT VALUE v FROM counter:['a', 5.0]",
-		"SELECT id FROM tc:one",
 		"UPSERT plain:1 SET v = 1 RETURN NONE; UPDATE counter:['a', 5.0] SET v += 1 RETURN VALUE v; \
 		 SELECT VALUE v FROM counter:['a', 5.0]; SELECT id FROM tc:one",
 		"SELECT VALUE [id, v] FROM counter",
+		// An aggregated view's records are keyed by its group values.
+		"UPSERT plain:1 SET v = 2 RETURN NONE; SELECT VALUE c FROM agg:[5.0]; \
+		 SELECT VALUE c FROM agg:[5]",
 		// A range written out as a write's target.
 		"UPDATE plain:1..3 SET v += 1 RETURN VALUE [id, v]",
 		"DELETE plain:2..3 RETURN BEFORE",

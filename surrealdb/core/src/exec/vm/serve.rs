@@ -541,6 +541,20 @@ impl Keeping {
 		}
 	}
 
+	/// Whether `op` is planned with its literals as written instead of kept: a literal freed from
+	/// it is one its table converts ([`plans_its_literals`]). Read in `exec` before the kept
+	/// compilation is looked up, every time the statement is served; a catalog that cannot be read
+	/// answers that it is. The caller then plans `op` as it plans a statement no cache keeps, on
+	/// the route it reached it by. A request asks it of every statement planned when it is reached
+	/// and of a write it compiles when it arrives; a read it compiles when it arrives keeps its
+	/// freed literals.
+	pub(crate) async fn plans_as_written(&self, op: &LogicalOp, exec: &ExecutionContext) -> bool {
+		let (kept, literals) = self.statement(op);
+		// Boxed: the future reads the catalog, and it is held by every caller's frame.
+		!literals.is_empty()
+			&& Box::pin(plans_its_literals(exec, kept, literals)).await.unwrap_or(true)
+	}
+
 	/// `plan`, the compilation [`Self::statement`] names, run with the values of the freed
 	/// literals bound.
 	pub(crate) fn bind(self, plan: Arc<dyn ExecOperator>) -> Arc<dyn ExecOperator> {
@@ -556,8 +570,8 @@ impl Keeping {
 /// [`kept_request_statement`] serves the statements a request compiles when it arrives: where
 /// [`Keeping`] keeps it, one compilation serves every value of the request variables it reads.
 /// The caller has judged `op` a read or a write. `None` where it is not kept, which includes a
-/// statement that is the value of a top-level `LET` (`binds_rows`), and where the kept compilation
-/// is refused or fails - a literal its tables convert ([`plans_its_literals`]) among them - which
+/// statement that is the value of a top-level `LET` (`binds_rows`) and one whose literals its
+/// tables convert ([`Keeping::plans_as_written`]), and where the kept compilation fails, which
 /// [`request_statement`] then plans as written, raising the error as it does.
 async fn kept_reached_statement(
 	exec: &ExecutionContext,
@@ -569,17 +583,22 @@ async fn kept_reached_statement(
 		return None;
 	}
 	let keeping = Keeping::of(op, exec.ctx())?;
+	if keeping.plans_as_written(op, exec).await {
+		return None;
+	}
 	let (kept, literals) = keeping.statement(op);
 	let plan = kept_request_statement(exec, kept.clone(), principal, literals).await.ok()?;
 	Some(keeping.bind(plan))
 }
 
 /// Whether `op`, a statement [`free_literals`] wrote `literals` into, is planned with each literal
-/// as written instead: a literal names a record of a table whose record ids name their components,
-/// which the plan coerces a written-out key to and a value read when the statement runs is not; or
-/// `op` reads and the table defines a computed field, which a read of a written-out record derives
-/// only where the read selects it and a read of a value read when it runs derives whole. The tables
-/// are read from the catalog each time, so a definition made after the statement was kept counts.
+/// as written instead: a literal names a record of a table whose record ids carry a key structure
+/// ([`crate::catalog::table_key`]: an `id` that names its components, or an aggregated view's group
+/// key), which the plan coerces a written-out key to and a value read when the statement runs is
+/// not; or `op` reads and the table defines a computed field, which a read of a written-out record
+/// derives only where the read selects it and a read of a value read when it runs derives whole.
+/// The tables are read from the transaction's catalog each time, so a definition made after the
+/// statement was kept counts.
 async fn plans_its_literals(
 	exec: &ExecutionContext,
 	op: &LogicalOp,
@@ -629,13 +648,21 @@ async fn plans_its_literals(
 		}
 		std::ops::ControlFlow::<()>::Continue(())
 	});
+	use crate::catalog::providers::TableProvider;
 	let reads = !writes_only(op);
+	let db = exec.database()?;
+	let (ns, db) = (db.ns_ctx.ns.namespace_id, db.db.database_id);
+	// Without a transaction no catalog answers, and the statement is planned as written.
+	let Some(txn) = exec.try_txn() else {
+		return Ok(true);
+	};
 	for table in &tables {
-		let descriptor = super::descriptor::table(exec, table).await?;
-		if descriptor
-			.fields
-			.iter()
-			.any(|field| field.key_part.is_some() || (reads && field.computed.is_some()))
+		let Some(definition) = txn.get_tb(ns, db, table, None).await? else {
+			continue;
+		};
+		let fields = txn.all_tb_fields(ns, db, table, None).await?;
+		if crate::catalog::table_key(&definition, &fields).is_some()
+			|| (reads && fields.iter().any(|field| field.computed.is_some()))
 		{
 			return Ok(true);
 		}
@@ -667,11 +694,6 @@ pub(crate) async fn kept_request_statement(
 	principal: Option<Arc<crate::iam::Auth>>,
 	literals: &[(String, crate::val::Value)],
 ) -> anyhow::Result<Arc<dyn ExecOperator>> {
-	if !literals.is_empty() && plans_its_literals(exec, &op, literals).await? {
-		anyhow::bail!(crate::exec::Error::InvalidStatement(
-			"a statement whose literals its tables convert is planned as written".to_owned()
-		));
-	}
 	let params = statement_params(&op);
 	let folded: Vec<&str> = crate::exec::planner::UNIT_RUNTIME_PARAMS
 		.iter()
