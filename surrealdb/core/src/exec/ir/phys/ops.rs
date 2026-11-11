@@ -816,11 +816,19 @@ pub(crate) struct IndexLookupAttrs {
 	/// `Parent` or `Probe` key pins one.
 	pub(crate) fields: Vec<Strand>,
 	pub(crate) key: LookupKeyShape,
-	/// The count of `Operand` operands after the one per field, each a value a field step of a
-	/// key's path reads, where a step on a record id would fetch a record the statement may write
-	/// while the lookup's rows are read. The lookup reads the table whole where any of them is a
-	/// record id, or an array or set holding one at any depth.
-	pub(crate) guards: u32,
+	/// The field each guard's step reads, one per `Operand` operand after the one per field: each
+	/// such operand is a value a field step of a key's path reads, so a step on a record id
+	/// fetches the record. What the lookup does where one holds a record id is [`Self::stable`]'s.
+	pub(crate) guards: Vec<Strand>,
+	/// Whether the statement holding the lookup writes nothing while the lookup's rows are read;
+	/// read only where `guards` is not empty, and `true` where it is. There a fetched record holds
+	/// the same stored fields when the lookup opens and when a row is judged, so the lookup reads
+	/// the table whole only where a guard holds a record id whose fetch may still answer the
+	/// stepped field differently: through a computed field, which is derived on each fetch, or a
+	/// conditional `SELECT` permission a checked caller's fetch judges each time. Elsewhere the
+	/// statement may write the record between the two, and the lookup reads the table whole where
+	/// any guard is a record id, or an array or set holding one at any depth.
+	pub(crate) stable: bool,
 }
 
 /// The attributes of a full-text scan.

@@ -185,7 +185,11 @@ impl PhysOp {
 					LookupKeyShape::Probe => 1,
 					LookupKeyShape::Operand => 2,
 				});
-				encoder.len(attrs.guards as usize);
+				encoder.len(attrs.guards.len());
+				for field in &attrs.guards {
+					encoder.str(field.as_str());
+				}
+				encoder.bool(attrs.stable);
 			}
 			PhysOp::RecordScan(attrs) => {
 				encoder.str(attrs.table.as_str());
@@ -387,7 +391,8 @@ mod tests {
 			fields: vec![Strand::new("a")],
 			key: LookupKeyShape::Parent,
 			read: ReadClauses::default(),
-			guards: 0,
+			guards: Vec::new(),
+			stable: true,
 		}))
 	}
 

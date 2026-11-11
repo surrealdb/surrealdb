@@ -266,7 +266,7 @@ pub(super) fn lower_source_under(
 				LookupKeyShape::Probe => LookupKey::Join,
 				LookupKeyShape::Operand => {
 					let keys = attrs.fields.len();
-					if keys == 0 || data.operands.len() != keys + attrs.guards as usize {
+					if keys == 0 || data.operands.len() != keys + attrs.guards.len() {
 						return Err(invariant(
 							"an index lookup with other than one operand per field it pins and \
 							 per guard",
@@ -277,10 +277,12 @@ pub(super) fn lower_source_under(
 						.iter()
 						.map(|operand| host_scalar_of(em, cx, ir, *operand, needs))
 						.collect::<Result<Vec<_>, _>>()?;
-					let guards = scalars.split_off(keys);
+					let guards =
+						scalars.split_off(keys).into_iter().zip(attrs.guards.iter().cloned());
 					LookupKey::Scalars {
 						keys: scalars,
-						guards,
+						guards: guards.collect(),
+						stable: attrs.stable,
 					}
 				}
 			};
@@ -1971,7 +1973,8 @@ pub(super) mod tests {
 				fields: vec![Strand::from("a")],
 				key,
 				read: Default::default(),
-				guards: 0,
+				guards: Vec::new(),
+				stable: true,
 			})
 		};
 		let lookup = rows_over(&mut b, PhysOp::IndexLookup(attrs(LookupKeyShape::Parent)), &[key]);

@@ -25,9 +25,13 @@ its record as it does WITH NOINDEX.
 
 The lookup is a superset of the rows: the whole predicate stays above it, a
 conjunct beside an OR included. A field of a value that may be a record reads
-the stored record, which a statement that writes may change between the lookup
-and a row: there the lookup reads the whole table when the parameter holds a
-record id. Every value, a missing field and every record finds the records a
+the record, and the lookup is guarded by each value a step reads. A statement
+that writes may change the record between the lookup and a row: there the
+lookup reads the whole table when a guard holds a record id. A read changes no
+record, but a computed field is derived on each fetch and may answer each
+differently: there the lookup reads the whole table when a guard holds a record
+id whose table defines the stepped field as computed, and keeps the index for a
+stored field. Every value, a missing field and every record finds the records a
 forced table scan finds, and every write leaves the state WITH NOINDEX leaves.
 """
 issue = 7663
@@ -57,31 +61,31 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $o.k' }, children: [{ attributes: { access: 'k = $o.k', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $o.k' }, children: [{ attributes: { access: 'k = $o.k', guard: '$o', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $o.k' }, children: [{ attributes: { access: 'k = $o.k', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $o.k' }, children: [{ attributes: { access: 'k = $o.k', guard: '$o', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $row.k' }, children: [{ attributes: { access: 'k = $row.k', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $r.k' }, children: [{ attributes: { access: 'k = $r.k', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $row.k' }, children: [{ attributes: { access: 'k = $row.k', guard: '$row', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $s.k AND ($s.open OR flag = true)' }, children: [{ attributes: { access: 'k = $s.k', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $r.k' }, children: [{ attributes: { access: 'k = $r.k', guard: '$r', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
 
 [[test.results]]
-value = "[{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $key.k' }, children: [{ attributes: { access: 'k = $key.k', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }]"
+value = "NONE"
+
+[[test.results]]
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $s.k AND ($s.open OR flag = true)' }, children: [{ attributes: { access: 'k = $s.k', guard: '$s', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+
+[[test.results]]
+value = "[{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $key.k' }, children: [{ attributes: { access: 'k = $key.k', guard: '$key', index: 'item_k', table: 'item' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }]"
 
 [[test.results]]
 value = "NONE"
@@ -156,7 +160,7 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'a = $o.a AND b = 1 AND k = 1' }, children: [{ attributes: { access: 'a = $o.a AND b = 1 AND k = 1', index: 'pair_abk', table: 'pair' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'a = $o.a AND b = 1 AND k = 1' }, children: [{ attributes: { access: 'a = $o.a AND b = 1 AND k = 1', guard: '$o', index: 'pair_abk', table: 'pair' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
 
 [[test.results]]
 value = "NONE"
@@ -171,13 +175,13 @@ value = "NONE"
 value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'a = 1 AND b = 1 AND k = $k' }, children: [{ attributes: { access: 'a = 1 AND b = 1 AND k = $k', index: 'pair_abk', table: 'pair' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
 
 [[test.results]]
-value = "[{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'a = $o.a AND b = $o.b AND k = $o.k' }, children: [{ attributes: { access: 'a = $o.a AND b = $o.b AND k = $o.k', index: 'pair_abk', table: 'pair' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }]"
+value = "[{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'a = $o.a AND b = $o.b AND k = $o.k' }, children: [{ attributes: { access: 'a = $o.a AND b = $o.b AND k = $o.k', guard: '$o', index: 'pair_abk', table: 'pair' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }]"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'a = $o.a AND k = 1' }, children: [{ attributes: { access: 'a = $o.a', index: 'pair_abk', table: 'pair' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'a = $o.a AND k = 1' }, children: [{ attributes: { access: 'a = $o.a', guard: '$o', index: 'pair_abk', table: 'pair' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
 
 [[test.results]]
 value = "NONE"
@@ -195,7 +199,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'tenant = $tenant AND scope = $key.scope AND generation = $key.generation AND doc = $key.doc AND pack = $pack' }, children: [{ attributes: { access: 'tenant = $tenant AND scope = $key.scope AND generation = $key.generation', index: 'field_value_by_generation', table: 'field_value' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }]"
+value = "[{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'tenant = $tenant AND scope = $key.scope AND generation = $key.generation AND doc = $key.doc AND pack = $pack' }, children: [{ attributes: { access: 'tenant = $tenant AND scope = $key.scope AND generation = $key.generation', guard: '$key', index: 'field_value_by_generation', table: 'field_value' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }]"
 
 [[test.results]]
 value = "NONE"
@@ -393,7 +397,7 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'a = $o.a' }, children: [{ attributes: { access: 'a = $o.a', index: 'upair_ab', table: 'upair' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'a = $o.a' }, children: [{ attributes: { access: 'a = $o.a', guard: '$o', index: 'upair_ab', table: 'upair' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
 
 [[test.results]]
 value = "true"
@@ -589,6 +593,42 @@ value = "true"
 
 [[test.results]]
 value = "[[1, 4], [1f, 4], ['1', 1], [2, 0]]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k = $r.coin' }, children: [{ attributes: { access: 'k = $r.coin', guard: '$r', index: 'vol_k', table: 'vol' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[1]"
 */
 
 DEFINE TABLE item SCHEMAFULL;
@@ -971,3 +1011,21 @@ DEFINE FUNCTION fn::w_pairs() { RETURN array::sort(SELECT VALUE [k, n] FROM wi) 
 array::all(array::map(array::concat($classes, ['absent', 1]), |$v| fn::wi_upsert({ k: $v }) == fn::wn_upsert({ k: $v }) AND fn::w_pairs()));
 array::all(array::map([{}, { k: NONE }], |$o| fn::wi_upsert($o) == fn::wn_upsert($o) AND fn::w_pairs()));
 SELECT VALUE [k, n] FROM wi WHERE id IN [wi:101, wi:102, wi:103, wi:104] ORDER BY id;
+
+-- A record argument's field is read once when the lookup opens. A stored field holds one value
+-- while a read runs, so the lookup keeps the index; a computed field is derived on each fetch and
+-- may answer each differently, so where the record's table defines the stepped field as computed
+-- the lookup reads the table whole and judges each row on a fetch of its own, as a scan does. A
+-- scan returns both rows on about one call in four; a lookup keyed by one fetch never does.
+DEFINE TABLE vol_cfg SCHEMALESS;
+DEFINE FIELD coin ON vol_cfg COMPUTED rand::bool();
+CREATE vol_cfg:one SET stored = true RETURN NONE;
+DEFINE TABLE vol SCHEMALESS;
+DEFINE INDEX vol_k ON vol FIELDS k;
+INSERT INTO vol [{ id: 1, k: true }, { id: 2, k: false }] RETURN NONE;
+DEFINE FUNCTION fn::vol_rows($r: record) { RETURN SELECT VALUE record::id(id) FROM vol WHERE k = $r.coin ORDER BY id; };
+array::any(array::map(array::repeat(0, 200), |$i| fn::vol_rows(vol_cfg:one) == [1, 2]));
+DEFINE FUNCTION fn::vol_plan($r: record) { RETURN SELECT VALUE id FROM vol WHERE k = $r.coin EXPLAIN; };
+fn::vol_plan(vol_cfg:one);
+DEFINE FUNCTION fn::vol_stored($r: record) { RETURN SELECT VALUE record::id(id) FROM vol WHERE k = $r.stored ORDER BY id; };
+fn::vol_stored(vol_cfg:one);

@@ -1391,7 +1391,8 @@ mod tests {
 			fields: vec![Strand::new("a")],
 			key: LookupKeyShape::Parent,
 			read: ReadClauses::default(),
-			guards: 0,
+			guards: Vec::new(),
+			stable: true,
 		}));
 		let union = PhysOp::IndexUnion(Box::new(IndexUnionAttrs {
 			topk: None,

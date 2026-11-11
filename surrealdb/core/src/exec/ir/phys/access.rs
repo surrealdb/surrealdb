@@ -390,7 +390,7 @@ pub(crate) struct DecisionCx<'a> {
 	pub(crate) id_bounds: bool,
 	/// Whether the statement the read stands in writes nothing, so a stored record an expression
 	/// of the statement reads holds one value from the read's start to its last row. Asked only
-	/// where a lookup's key may read such a record ([`lookup_operand`]).
+	/// where a lookup's key may read such a record ([`IndexLookupAttrs::stable`]).
 	pub(crate) reads_stably: &'a dyn Fn() -> bool,
 }
 
@@ -756,7 +756,7 @@ fn deferred_lookup(
 	};
 	let mut fields = Vec::with_capacity(pinned);
 	let mut operands = Vec::with_capacity(pinned);
-	let mut guards: Vec<&LogicalExpr> = Vec::new();
+	let mut guards: Vec<(&LogicalExpr, &Strand)> = Vec::new();
 	let mut deferred_any = false;
 	for column in index.cols.iter().take(pinned) {
 		let [Part::Field(name)] = column.0.as_slice() else {
@@ -769,9 +769,9 @@ fn deferred_lookup(
 		operands.push((*key).clone());
 		deferred_any |= *used != KeyUse::Literal;
 		if *used == KeyUse::Guarded {
-			for base in field_step_bases(key) {
-				if !guards.contains(&base) {
-					guards.push(base);
+			for step in field_steps(key) {
+				if !guards.contains(&step) {
+					guards.push(step);
 				}
 			}
 		}
@@ -779,16 +779,18 @@ fn deferred_lookup(
 	if !deferred_any {
 		return Ok(None);
 	}
-	let guard_count = u32::try_from(guards.len())
-		.map_err(|_| invariant("an index lookup with more guards than a count holds"))?;
-	operands.extend(guards.into_iter().cloned());
+	let stable = guards.is_empty() || (cx.reads_stably)();
+	let (bases, stepped): (Vec<&LogicalExpr>, Vec<Strand>) =
+		guards.into_iter().map(|(base, field)| (base, field.clone())).unzip();
+	operands.extend(bases.into_iter().cloned());
 	let lookup = PhysOp::IndexLookup(Box::new(IndexLookupAttrs {
 		table: table.table.clone(),
 		read: read_clauses(table, with),
 		index: index_ref(&index),
 		fields,
 		key: LookupKeyShape::Operand,
-		guards: guard_count,
+		guards: stepped,
+		stable,
 	}));
 	Ok(Some((lookup, pinned, operands)))
 }
@@ -800,29 +802,31 @@ enum KeyUse {
 	Literal,
 	/// A value the plan holds only once the statement runs, evaluated when the lookup opens.
 	Deferred,
-	/// A path of fields into a parameter, where a field step on a record id would fetch a record
-	/// the statement may write while the lookup's rows are read. The value is deferred, and the
-	/// values its field steps read guard it ([`field_step_bases`]): the lookup reads the table
-	/// whole where a step would fetch a record, so the path is never evaluated against one.
+	/// A path of fields into a parameter whose steps may fetch a record. The value is deferred,
+	/// and each value a field step reads guards it with the field that step reads
+	/// ([`field_steps`]): the lookup reads the table whole where a step would fetch a record
+	/// whose field may answer the row's fetch differently ([`IndexLookupAttrs::stable`]), so the
+	/// key is never read from such a record.
 	Guarded,
 }
 
-/// The values the field steps of `path`, a path of fields into a parameter, read, outermost first:
-/// the parameter and each shorter path (`$o` and `$o.a` for `$o.a.k`). Each is listed after the
-/// values it is read from, so evaluating them in order reaches no step past one that would fetch.
-fn field_step_bases(path: &LogicalExpr) -> Vec<&LogicalExpr> {
-	let mut bases = Vec::new();
+/// The field steps of `path`, a path of fields into a parameter, outermost first: each as the
+/// value it reads and the field it reads of it, the parameter and each shorter path (`$o` with
+/// `a` and `$o.a` with `k` for `$o.a.k`). Each value is listed after the values it is read from,
+/// so evaluating them in order reaches no step past one whose guard reads the table whole.
+fn field_steps(path: &LogicalExpr) -> Vec<(&LogicalExpr, &Strand)> {
+	let mut steps = Vec::new();
 	let mut at = path;
 	while let LogicalExpr::Access {
 		base,
-		..
+		field,
 	} = at
 	{
-		bases.push(base.as_ref());
+		steps.push((base.as_ref(), field));
 		at = base;
 	}
-	bases.reverse();
-	bases
+	steps.reverse();
+	steps
 }
 
 /// The count of leading index columns `access` pins with equalities; `None` for an access that is
@@ -890,14 +894,13 @@ fn parameter_root(expr: &LogicalExpr) -> Option<&str> {
 /// parameter is one [`deferrable`] admits.
 ///
 /// A path of fields reads no row. Where its base may be a record id, a field step fetches the
-/// record, which derives the record's computed fields: the key is read once when the lookup opens
-/// and the filter above it, or the write's `WHERE`, reads it again per row. The two agree where the
-/// statement writes nothing between them ([`DecisionCx::reads_stably`]) and the field derives one
-/// value per fetch. A computed field whose body draws entropy may answer each fetch differently;
-/// the lookup then yields only the rows equal to its first answer, where a scan compares each row
-/// with a fresh one. In a statement that may write between them, the path is guarded
-/// ([`KeyUse::Guarded`]): where a step would fetch a record the lookup reads the table whole, and
-/// the rows are judged on fresh fetches as a scan's are.
+/// record: the key is read once when the lookup opens and the filter above it, or the write's
+/// `WHERE`, reads it again per row. The two may disagree where the statement writes the record
+/// between them, where the field is computed, which is derived on each fetch and may answer each
+/// differently (a body that draws entropy or reads the clock), and where a checked caller's fetch
+/// judges a conditional `SELECT` permission each time. Such a path is guarded
+/// ([`KeyUse::Guarded`]): where a step would fetch a record whose field may disagree, the lookup
+/// reads the table whole, and the rows are judged on fresh fetches as a scan's are.
 fn lookup_operand(key: &LogicalExpr, cx: &DecisionCx<'_>) -> Option<KeyUse> {
 	if matches!(key, LogicalExpr::Param(_)) {
 		return deferrable(key, cx.registry).then_some(KeyUse::Deferred);
@@ -914,7 +917,7 @@ fn lookup_operand(key: &LogicalExpr, cx: &DecisionCx<'_>) -> Option<KeyUse> {
 	{
 		return None;
 	}
-	Some(if fetches && !(cx.reads_stably)() {
+	Some(if fetches {
 		KeyUse::Guarded
 	} else {
 		KeyUse::Deferred
@@ -3641,7 +3644,7 @@ mod tests {
 	}
 
 	#[test]
-	fn a_path_that_may_fetch_a_record_is_guarded_where_reads_are_not_stable() {
+	fn a_path_that_may_fetch_a_record_is_guarded_by_the_field_each_step_reads() {
 		// The test context reads nothing stably, as in a statement that writes.
 		let table = answers(vec![idx(1, "ix", &["x"])]);
 		let param = |name: &str| LogicalExpr::Param(crate::expr::Param::from(String::from(name)));
@@ -3649,7 +3652,8 @@ mod tests {
 		let PhysOp::IndexLookup(attrs) = &choice.access else {
 			panic!("an index lookup, got {:?}", choice.access);
 		};
-		assert_eq!(attrs.guards, 1);
+		assert_eq!(attrs.guards, vec![Strand::from("k")]);
+		assert!(!attrs.stable);
 		let path = LogicalExpr::Access {
 			base: Box::new(param("o")),
 			field: Strand::from("k"),
@@ -3660,12 +3664,12 @@ mod tests {
 		let PhysOp::IndexLookup(attrs) = &choice.access else {
 			panic!("an index lookup, got {:?}", choice.access);
 		};
-		assert_eq!(attrs.guards, 0);
+		assert!(attrs.guards.is_empty());
 		assert_eq!(choice.key_operands, vec![param("p")]);
 	}
 
 	#[test]
-	fn a_path_takes_no_guard_where_reads_are_stable() {
+	fn a_path_is_guarded_by_each_step_where_reads_are_stable_too() {
 		let table = answers(vec![idx(1, "ix", &["x"])]);
 		let (cond, _, _) = parts("WHERE x = $o.a.k");
 		let predicate = cond.as_ref().map(Reconstructed::of_condition).unwrap_or_default();
@@ -3679,21 +3683,23 @@ mod tests {
 		let PhysOp::IndexLookup(attrs) = &choice.access else {
 			panic!("an index lookup, got {:?}", choice.access);
 		};
-		assert_eq!(attrs.guards, 0);
-		assert_eq!(choice.key_operands.len(), 1);
-		// Where reads are not stable, each value a step of the path reads guards it, the parameter
+		// Each value a step of the path reads guards it with the field it reads, the parameter
 		// first.
-		let choice = chosen(&table, "WHERE x = $o.a.k").expect("a choice");
-		let PhysOp::IndexLookup(attrs) = &choice.access else {
-			panic!("an index lookup, got {:?}", choice.access);
-		};
-		assert_eq!(attrs.guards, 2);
+		assert_eq!(attrs.guards, vec![Strand::from("a"), Strand::from("k")]);
+		assert!(attrs.stable);
 		let param = LogicalExpr::Param(crate::expr::Param::from(String::from("o")));
 		let first = LogicalExpr::Access {
 			base: Box::new(param.clone()),
 			field: Strand::from("a"),
 		};
 		assert_eq!(&choice.key_operands[1..], &[param, first]);
+		// Where reads are not stable, the same guards read the table whole for any record.
+		let choice = chosen(&table, "WHERE x = $o.a.k").expect("a choice");
+		let PhysOp::IndexLookup(attrs) = &choice.access else {
+			panic!("an index lookup, got {:?}", choice.access);
+		};
+		assert_eq!(attrs.guards, vec![Strand::from("a"), Strand::from("k")]);
+		assert!(!attrs.stable);
 	}
 
 	#[test]

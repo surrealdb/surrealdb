@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use common::future::stream::Yielder;
 use futures::StreamExt;
-use surrealdb_strand::Strand;
+use surrealdb_strand::{Strand, TableName};
 
 use super::batch::RecordReader;
 use super::groups::GroupMut;
@@ -2161,19 +2161,31 @@ pub(super) async fn run_storage_source(
 				super::program::LookupKey::Scalars {
 					keys: scalars,
 					guards,
+					stable,
 				} => {
 					// A guard or a key whose evaluation fails reads the table whole: the
 					// filter, or the write's `WHERE`, then raises where a scan would, and not
 					// where the table holds no row to judge.
 					let mut whole = false;
-					for guard in guards {
-						match host_scalar(program, guard, ctx, None).await {
-							Ok(value) if !step_fetches(&value) => {}
-							Ok(_) | Err(ControlFlow::Err(_)) => {
+					for (guard, field) in guards {
+						let value = match host_scalar(program, guard, ctx, None).await {
+							Ok(value) => value,
+							Err(ControlFlow::Err(_)) => {
 								whole = true;
 								break;
 							}
 							Err(other) => return Err(other),
+						};
+						let mut tables = Vec::new();
+						record_tables(&value, &mut tables);
+						if !tables.is_empty()
+							&& (!*stable
+								|| fetch_may_vary(ctx, &tables, field)
+									.await
+									.map_err(ControlFlow::Err)?)
+						{
+							whole = true;
+							break;
 						}
 					}
 					for scalar in scalars {
@@ -2949,16 +2961,60 @@ pub(super) async fn run_storage_source(
 	}
 }
 
-/// Whether a field step on `value` fetches a record
-/// ([`super::program::LookupKey::Scalars`]): `value` is a record id, or an
-/// array or set holding one at any depth, since a step on an array or a set
-/// steps into each element. A step on an object reads one of its values and
-/// fetches nothing.
-fn step_fetches(value: &Value) -> bool {
+/// Whether a field step reading `field` of a record of one of `tables` may
+/// answer two fetches of the record differently while nothing writes it. A
+/// fetch derives the record's computed fields, so a computed definition of
+/// `field`, or one under it (`field.a`), may answer each fetch differently (a
+/// body that draws entropy or reads the clock); one not rooted at a field may
+/// be reached by any step, and a component the record id names reads the id
+/// alone. Where the caller's reads are checked, a fetch also judges the
+/// table's conditional `SELECT` permission, which hides the record, and a
+/// conditional `SELECT` permission of such a definition, which hides the
+/// field: either may judge each fetch differently. A stored field under no
+/// conditional permission holds one value.
+async fn fetch_may_vary(
+	ctx: &ExecutionContext,
+	tables: &[&TableName],
+	field: &Strand,
+) -> anyhow::Result<bool> {
+	use crate::catalog::Permission;
+	let checked =
+		crate::exec::permission::should_check_perms(ctx.database()?, crate::iam::Action::View)?;
+	let conditional =
+		|permission: &Permission| checked && matches!(permission, Permission::Specific(_));
+	for table in tables {
+		let descriptor = super::descriptor::table(ctx, table).await?;
+		if descriptor.definition.as_ref().is_some_and(|def| conditional(&def.permissions.select)) {
+			return Ok(true);
+		}
+		let varies = descriptor.fields.iter().any(|def| {
+			def.key_part.is_none()
+				&& match def.name.0.first() {
+					Some(crate::expr::part::Part::Field(name)) => name.as_str() == field.as_str(),
+					_ => true,
+				} && (def.computed.is_some() || conditional(&def.select_permission))
+		});
+		if varies {
+			return Ok(true);
+		}
+	}
+	Ok(false)
+}
+
+/// The tables of the record ids `value` holds at any depth of its arrays and
+/// sets, each once: a field step on `value` fetches a record where it is a
+/// record id, and steps into each element of an array or a set. A step on an
+/// object reads one of its values and fetches nothing, so `value` fetches
+/// nothing where none are found.
+fn record_tables<'a>(value: &'a Value, tables: &mut Vec<&'a TableName>) {
 	match value {
-		Value::RecordId(_) => true,
-		Value::Array(array) => array.iter().any(step_fetches),
-		Value::Set(set) => set.iter().any(step_fetches),
+		Value::RecordId(id) => {
+			if !tables.contains(&&id.table) {
+				tables.push(&id.table);
+			}
+		}
+		Value::Array(array) => array.iter().for_each(|value| record_tables(value, tables)),
+		Value::Set(set) => set.iter().for_each(|value| record_tables(value, tables)),
 		Value::Object(_)
 		| Value::None
 		| Value::Null
@@ -2978,7 +3034,7 @@ fn step_fetches(value: &Value) -> bool {
 		| Value::File(_)
 		| Value::Regex(_)
 		| Value::Range(_)
-		| Value::Closure(_) => false,
+		| Value::Closure(_) => {}
 	}
 }
 

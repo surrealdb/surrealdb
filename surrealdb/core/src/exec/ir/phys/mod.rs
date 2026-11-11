@@ -899,7 +899,7 @@ impl PhysOp {
 			PhysOp::IndexLookup(attrs) => exactly(
 				u16::try_from(attrs.fields.len())
 					.ok()
-					.zip(u16::try_from(attrs.guards).ok())
+					.zip(u16::try_from(attrs.guards.len()).ok())
 					.and_then(|(fields, guards)| fields.checked_add(guards))
 					.unwrap_or(u16::MAX),
 				1,

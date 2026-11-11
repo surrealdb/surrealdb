@@ -112,6 +112,9 @@ mod tests_id_list;
 mod tests_late_layers;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
+mod tests_lookup_guard;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_morsel;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]

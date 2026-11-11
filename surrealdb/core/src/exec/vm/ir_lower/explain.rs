@@ -1425,11 +1425,15 @@ impl<'a> TreeWalk<'a> {
 					("index".to_string(), attrs.index.index.to_string()),
 					("access".to_string(), access.join(" AND ")),
 				];
-				// The values whose record ids read the table whole in place of the index.
-				if attrs.guards > 0 {
-					let mut guards = Vec::new();
-					for at in attrs.fields.len()..attrs.fields.len() + attrs.guards as usize {
-						guards.push(self.text_of(self.operand(operands, at)?));
+				// The values whose record ids may read the table whole in place of the index.
+				if !attrs.guards.is_empty() {
+					// Two steps may read different fields of one value: each value is named once.
+					let mut guards: Vec<String> = Vec::new();
+					for at in attrs.fields.len()..attrs.fields.len() + attrs.guards.len() {
+						let guard = self.text_of(self.operand(operands, at)?);
+						if !guards.contains(&guard) {
+							guards.push(guard);
+						}
 					}
 					lookup.push(("guard".to_string(), guards.join(", ")));
 				}

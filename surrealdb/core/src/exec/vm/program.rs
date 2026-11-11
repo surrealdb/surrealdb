@@ -6303,11 +6303,17 @@ pub(super) enum LookupKey {
 	/// leading column of the index the key pins, in column order.
 	Scalars {
 		keys: Vec<HostScalar>,
-		/// The values the field steps of a key's path read, read before the
-		/// keys, each after the values it is read from: where a step would
-		/// fetch a record the statement may write while the rows are read,
-		/// the table is read whole without evaluating the keys.
-		guards: Vec<HostScalar>,
+		/// The values the field steps of a key's path read, each with the
+		/// field its step reads, read before the keys and each after the
+		/// values it is read from: where a step would fetch a record whose
+		/// field may answer a row's fetch differently, the table is read whole
+		/// without evaluating the keys.
+		guards: Vec<(HostScalar, Strand)>,
+		/// Whether the statement writes nothing while the rows are read, so
+		/// a fetch answers differently only through a computed field or a
+		/// conditional `SELECT` permission; where it may write, any fetched
+		/// record may.
+		stable: bool,
 	},
 }
 
