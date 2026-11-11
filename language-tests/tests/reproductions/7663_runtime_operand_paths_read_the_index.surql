@@ -16,8 +16,11 @@ it opens, as it does for the parameter itself.
 Over a composite index the lookup is keyed by every leading column an equality
 pins, each with a run-time operand or a literal: the first, a middle, the last
 or every column. It is one read where a literal prefix reads every record
-under the prefix. A value in any column that the index may not list every
-equal record under reads the whole table.
+under the prefix. A record id written out pins its column as the same record
+id held by a parameter would, except one keyed by an array or an object: that
+one pins no column, and the lookup keys only the columns before it. A value in
+any column that the index may not list every equal record under reads the
+whole table.
 
 UPDATE, UPSERT and DELETE read their subjects through the same lookup, and the
 write judges each one on its WHERE; an UPSERT whose WHERE admits none creates
@@ -629,6 +632,66 @@ value = "NONE"
 
 [[test.results]]
 value = "[1]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'a = $p AND b = (pair:1)' }, children: [{ attributes: { access: 'a = $p AND b = pair:1', index: 'ri_ab', table: 'ri' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'a = $p AND b = (pair:[1, 2])' }, children: [{ attributes: { access: 'a = $p', index: 'ri_ab', table: 'ri' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[1, 12]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[[true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true]]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ attributes: { form: 'UPDATE' }, children: [{ attributes: { projections: '*' }, children: [{ attributes: { access: 'a = $p AND b = pair:1', index: 'ri_ab', table: 'ri' }, context: 'Db', operator: 'IndexLookup' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', operator: 'WriteOperator' }"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "true"
 */
 
 DEFINE TABLE item SCHEMAFULL;
@@ -1029,3 +1092,42 @@ DEFINE FUNCTION fn::vol_plan($r: record) { RETURN SELECT VALUE id FROM vol WHERE
 fn::vol_plan(vol_cfg:one);
 DEFINE FUNCTION fn::vol_stored($r: record) { RETURN SELECT VALUE record::id(id) FROM vol WHERE k = $r.stored ORDER BY id; };
 fn::vol_stored(vol_cfg:one);
+
+-- A record id written out keys its column as the same record id held by a parameter would: one
+-- keyed by a number, a string or a uuid joins the key beside the run-time operand, one keyed by
+-- an array or an object does not. Every form finds the records a read WITH NOINDEX finds, and a write through the
+-- lookup leaves what the write WITH NOINDEX leaves.
+LET $ri_rows = [
+	{ id: 1, a: 1, b: pair:1, n: 0 }, { id: 2, a: 1, b: pair:2, n: 0 }, { id: 3, a: 1, b: 1, n: 0 },
+	{ id: 4, a: 2, b: pair:1, n: 0 }, { id: 5, a: 1, b: pair:x, n: 0 },
+	{ id: 6, a: 1, b: pair:[1, 2], n: 0 }, { id: 7, a: 1, b: pair:{ k: 1 }, n: 0 },
+	{ id: 8, a: 1, b: pair:u'0192e6a4-8b3c-7c11-9a2b-3c4d5e6f7a8b', n: 0 },
+	{ id: 9, a: 1, b: other:1, n: 0 }, { id: 10, a: 1, b: 'pair:1', n: 0 },
+	{ id: 11, a: 1, b: [pair:1], n: 0 }, { id: 12, a: 1.0, b: pair:1, n: 0 }
+];
+DEFINE TABLE ri SCHEMALESS;
+DEFINE INDEX ri_ab ON ri FIELDS a, b;
+DEFINE TABLE rn SCHEMALESS;
+DEFINE INDEX rn_ab ON rn FIELDS a, b;
+INSERT INTO ri $ri_rows RETURN NONE;
+INSERT INTO rn $ri_rows RETURN NONE;
+DEFINE FUNCTION fn::ri_plan($p: int) { RETURN SELECT VALUE id FROM ri WHERE a = $p AND b = pair:1 EXPLAIN; };
+fn::ri_plan(1);
+DEFINE FUNCTION fn::ri_plan_array($p: int) { RETURN SELECT VALUE id FROM ri WHERE a = $p AND b = pair:[1, 2] EXPLAIN; };
+fn::ri_plan_array(1);
+DEFINE FUNCTION fn::ri_ids($p: any) { RETURN SELECT VALUE record::id(id) FROM ri WHERE a = $p AND b = pair:1 ORDER BY id; };
+fn::ri_ids(1);
+DEFINE FUNCTION fn::ri_same($p: any) { RETURN [
+	(SELECT VALUE id FROM ri WHERE a = $p AND b = pair:1 ORDER BY id) == (SELECT VALUE record::id(id) FROM rn WITH NOINDEX WHERE a = $p AND b = pair:1 ORDER BY id).map(|$i| type::record('ri', $i)),
+	(SELECT VALUE id FROM ri WHERE a = $p AND b = pair:x ORDER BY id) == (SELECT VALUE record::id(id) FROM rn WITH NOINDEX WHERE a = $p AND b = pair:x ORDER BY id).map(|$i| type::record('ri', $i)),
+	(SELECT VALUE id FROM ri WHERE a = $p AND b = pair:u'0192e6a4-8b3c-7c11-9a2b-3c4d5e6f7a8b' ORDER BY id) == (SELECT VALUE record::id(id) FROM rn WITH NOINDEX WHERE a = $p AND b = pair:u'0192e6a4-8b3c-7c11-9a2b-3c4d5e6f7a8b' ORDER BY id).map(|$i| type::record('ri', $i)),
+	(SELECT VALUE id FROM ri WHERE a = $p AND b = pair:[1, 2] ORDER BY id) == (SELECT VALUE record::id(id) FROM rn WITH NOINDEX WHERE a = $p AND b = pair:[1, 2] ORDER BY id).map(|$i| type::record('ri', $i)),
+	(SELECT VALUE id FROM ri WHERE a = $p AND b = pair:{ k: 1 } ORDER BY id) == (SELECT VALUE record::id(id) FROM rn WITH NOINDEX WHERE a = $p AND b = pair:{ k: 1 } ORDER BY id).map(|$i| type::record('ri', $i)),
+	(SELECT VALUE id FROM ri WHERE a = $p AND b = other:1 ORDER BY id) == (SELECT VALUE record::id(id) FROM rn WITH NOINDEX WHERE a = $p AND b = other:1 ORDER BY id).map(|$i| type::record('ri', $i))
+] };
+array::map([1, 2, 1.0, 1dec, '1', NONE], |$p| fn::ri_same($p));
+DEFINE FUNCTION fn::ri_bump_plan($p: int) { RETURN UPDATE ri SET n += 1 WHERE a = $p AND b = pair:1 EXPLAIN; };
+fn::ri_bump_plan(1);
+DEFINE FUNCTION fn::ri_bump($p: any) { RETURN array::sort(UPDATE ri SET n += 1 WHERE a = $p AND b = pair:1 RETURN VALUE record::id(id)); };
+DEFINE FUNCTION fn::rn_bump($p: any) { RETURN array::sort(UPDATE rn WITH NOINDEX SET n += 1 WHERE a = $p AND b = pair:1 RETURN VALUE record::id(id)); };
+array::all(array::map([1, 2, 1.0], |$p| fn::ri_bump($p) == fn::rn_bump($p))) AND (SELECT VALUE [record::id(id), n] FROM ri ORDER BY id) == (SELECT VALUE [record::id(id), n] FROM rn ORDER BY id);

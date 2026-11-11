@@ -666,7 +666,8 @@ fn scan_probes(
 /// statement runs.
 ///
 /// A column's value is a parameter or a path of fields into one ([`lookup_operand`]), or a literal
-/// the index lists every equal record under ([`crate::exec::vm::lookup_key`]). The index is the
+/// or a record id written out that the index lists every equal record under
+/// ([`crate::exec::vm::lookup_key`], [`lookup_value`]). The index is the
 /// single B-tree read the decision chooses for the equalities on those values alone, with a literal
 /// in each value's place and no order, as a read that pages its rows chooses it (no bitmap fusion
 /// of several indexes); the key pins the run of leading columns that read's equalities pin. The
@@ -798,7 +799,7 @@ fn deferred_lookup(
 /// How a lookup takes the value it compares a column to ([`lookup_value`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum KeyUse {
-	/// A literal, which the plan holds.
+	/// A literal or a record id written out, which the plan holds.
 	Literal,
 	/// A value the plan holds only once the statement runs, evaluated when the lookup opens.
 	Deferred,
@@ -851,12 +852,21 @@ fn equality_prefix(access: &BTreeAccess) -> Option<usize> {
 }
 
 /// How a lookup may take `key` as the value of a column ([`deferred_lookup`]): a literal whose
-/// value the index lists every equal record under, or a parameter or a path of fields into one that
-/// [`lookup_operand`] admits; `None` otherwise.
+/// value the index lists every equal record under, a record id written out as a constant that
+/// holds such a value, or a parameter or a path of fields into one that [`lookup_operand`] admits;
+/// `None` otherwise. A record id written out is judged as the lookup judges the same record id held
+/// by a parameter ([`crate::exec::vm::lookup_key`]): one keyed by a number, a string or a uuid
+/// joins the key, one keyed by an array or an object does not, whether its key is written out or
+/// holds a parameter.
 fn lookup_value(key: &LogicalExpr, cx: &DecisionCx<'_>) -> Option<KeyUse> {
 	if let LogicalExpr::Literal(literal) = key {
 		return crate::exec::vm::lookup_key(&leaf_literal_to_value(literal))
 			.then_some(KeyUse::Literal);
+	}
+	if let LogicalExpr::RecordId(_) = key {
+		return crate::exec::planner::util::try_literal_to_value(key)
+			.filter(crate::exec::vm::lookup_key)
+			.map(|_| KeyUse::Literal);
 	}
 	let name = parameter_root(key)?;
 	if ROW_PARAMS.contains(&name) {
@@ -3640,6 +3650,44 @@ mod tests {
 			let choice = chosen(&table, snippet).expect("a choice");
 			assert_eq!(tag(&choice), PhysTag::IndexScan, "{snippet}");
 			assert!(choice.key_operands.is_empty(), "{snippet}");
+		}
+	}
+
+	#[test]
+	fn a_record_id_written_out_keys_a_lookup_as_a_parameter_holding_it_would() {
+		let table = answers(vec![idx(1, "ix", &["x"]), idx(2, "pair", &["y", "z"])]);
+		let param = LogicalExpr::Param(crate::expr::Param::from(String::from("p")));
+		let lookup = |snippet: &str| {
+			let choice = chosen(&table, snippet).expect("a choice");
+			let PhysOp::IndexLookup(attrs) = &choice.access else {
+				panic!("{snippet}: an index lookup, got {:?}", choice.access);
+			};
+			(attrs.fields.clone(), choice.key_operands)
+		};
+		// A record id keyed by a number, a string or a uuid joins the key beside the parameter.
+		for snippet in [
+			"WHERE y = $p AND z = pair:1",
+			"WHERE y = $p AND z = pair:x",
+			"WHERE y = $p AND z = pair:u'0192e6a4-8b3c-7c11-9a2b-3c4d5e6f7a8b'",
+		] {
+			let (fields, operands) = lookup(snippet);
+			assert_eq!(fields, vec![Strand::from("y"), Strand::from("z")], "{snippet}");
+			assert_eq!(operands[0], param, "{snippet}");
+			assert!(matches!(operands[1], LogicalExpr::RecordId(_)), "{snippet}: {operands:?}");
+		}
+		// In the leading column, before the parameter, it keys the lookup as well.
+		let (fields, operands) = lookup("WHERE y = pair:1 AND z = $p");
+		assert_eq!(fields, vec![Strand::from("y"), Strand::from("z")]);
+		assert!(matches!(operands[0], LogicalExpr::RecordId(_)), "{operands:?}");
+		assert_eq!(operands[1], param);
+		// A record id keyed by an array is one the index may not list every equal record under,
+		// written out or holding a parameter: the parameter's column alone is keyed.
+		for snippet in ["WHERE y = $p AND z = pair:[1, 2]", "WHERE y = $p AND z = pair:[$k, 2]"] {
+			assert_eq!(
+				lookup(snippet),
+				(vec![Strand::from("y")], vec![param.clone()]),
+				"{snippet}"
+			);
 		}
 	}
 
