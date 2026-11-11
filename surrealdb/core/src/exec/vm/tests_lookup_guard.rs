@@ -1,9 +1,10 @@
 //! A run-time index lookup keyed by a field of a record argument (`k = $r.k`) reads the index where
 //! every fetch of the record answers that field alike, and the table whole where a fetch may answer
-//! it differently: a computed field, which is derived on each fetch, or a conditional `SELECT`
-//! permission a checked caller's fetch judges each time.
+//! it differently: in a read, a computed field, which is derived on each fetch, or a conditional
+//! `SELECT` permission a checked caller's fetch judges each time; in a write, any record, which the
+//! write may change between the two fetches. A field of an object reads the index in either.
 //!
-//! Each test counts the keys a read transaction reads while running one statement, on two
+//! Each test counts the keys a transaction reads while running one statement, on two
 //! datastores that differ only in how many records the looked-up table holds. A lookup reads the
 //! same keys on both; a read of the table whole reads more on the larger one.
 
@@ -47,17 +48,18 @@ const SCHEMA: &str = "
 	DEFINE FUNCTION fn::linked_derived($r: any) {
 		RETURN SELECT VALUE k FROM item WHERE k = $r.derived_link.k;
 	};
+	DEFINE FUNCTION fn::bump($r: any) { RETURN UPDATE item SET n = 1 WHERE k = $r.k RETURN VALUE k; };
 ";
 
-/// The keys a read transaction reads running `sql` as `session` where `item` holds `rows`
-/// records.
+/// The keys a transaction reads running `sql` as `session` where `item` holds `rows` records. The
+/// transaction may write, and is cancelled.
 async fn keys_read(rows: usize, session: &Session, sql: &str) -> u64 {
 	let setup = format!(
 		"{SCHEMA} INSERT INTO item (array::map(<array> 0..{rows}, |$i| {{ k: $i }})) RETURN NONE;"
 	);
 	let db = TestDb::quiescent(&setup, true).await;
 	let txn =
-		Arc::new(db.datastore().transaction(TransactionType::Read).await.expect("a transaction"));
+		Arc::new(db.datastore().transaction(TransactionType::Write).await.expect("a transaction"));
 	let request = QueryRequest::new(sql, session).with_transaction(Arc::clone(&txn));
 	let mut responses = db.datastore().run(request).await.expect("the request runs");
 	let answer = responses.pop().expect("a response").result.expect("the statement answers");
@@ -105,4 +107,11 @@ async fn a_checked_read_reads_the_table_whole_under_a_conditional_permission() {
 	for sql in ["fn::hidden(cfg:one)", "fn::stored(gated:one)"] {
 		assert!(!reads_the_index(&alice, sql).await, "{sql}: reads the index");
 	}
+}
+
+#[tokio::test]
+async fn a_write_reads_the_index_for_an_object_and_the_table_whole_for_a_record() {
+	let owner = TestDb::owner();
+	assert!(reads_the_index(&owner, "fn::bump({ k: 1 })").await, "an object's field");
+	assert!(!reads_the_index(&owner, "fn::bump(plain:one)").await, "a stored field of a record");
 }

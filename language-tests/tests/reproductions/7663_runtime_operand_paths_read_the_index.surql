@@ -32,9 +32,11 @@ the record, and the lookup is guarded by each value a step reads. A statement
 that writes may change the record between the lookup and a row: there the
 lookup reads the whole table when a guard holds a record id. A read changes no
 record, but a computed field is derived on each fetch and may answer each
-differently: there the lookup reads the whole table when a guard holds a record
-id whose table defines the stepped field as computed, and keeps the index for a
-stored field. Every value, a missing field and every record finds the records a
+differently, and a checked caller's fetch judges a conditional SELECT
+permission each time: there the lookup reads the whole table when a guard holds
+a record id whose table defines the stepped field as computed, or whose table
+or field carries such a permission for a checked caller, and keeps the index
+for a stored field. Every value, a missing field and every record finds the records a
 forced table scan finds, and every write leaves the state WITH NOINDEX leaves.
 """
 issue = 7663
