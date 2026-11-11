@@ -811,7 +811,7 @@ enum KeyUse {
 	Guarded,
 }
 
-/// The field steps of `path`, a path of fields into a parameter, outermost first: each as the
+/// The field steps of `path`, a path of fields into a parameter, in evaluation order: each as the
 /// value it reads and the field it reads of it, the parameter and each shorter path (`$o` with
 /// `a` and `$o.a` with `k` for `$o.a.k`). Each value is listed after the values it is read from,
 /// so evaluating them in order reaches no step past one whose guard reads the table whole.
