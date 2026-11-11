@@ -615,9 +615,11 @@ impl CompiledUnits {
 
 	/// How the requests for statements planned when they are reached and not
 	/// kept for later requests were served: a request's top-level statements
-	/// after its first write that [`super::serve::Keeping`] does not keep
-	/// ([`super::serve::request_statement`]) and statements an expression reaches
-	/// at run time ([`super::serve::statement`]) share this cache.
+	/// planned when the request reaches them (`Executor::compile_request` names
+	/// when) that [`super::serve::Keeping`] does not keep and that fold no
+	/// session value ([`super::serve::request_statement`]), and statements an
+	/// expression reaches at run time ([`super::serve::statement`]), share this
+	/// cache.
 	#[cfg(test)]
 	pub(crate) fn reached_statement_stats(&self) -> super::compile_cache::Stats {
 		self.statements.stats()

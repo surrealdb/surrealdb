@@ -1971,9 +1971,9 @@ impl Datastore {
 
 	/// How the statements planned when they are reached and not kept for later
 	/// requests were served, which [`Self::statement_cache_stats`] does not
-	/// count: a request's top-level statements after its first write that its
-	/// cache of statements does not keep, and statements an expression reaches at
-	/// run time.
+	/// count: a request's top-level statements planned when the request reaches
+	/// them that its cache of statements does not keep and that fold no session
+	/// value, and statements an expression reaches at run time.
 	#[cfg(test)]
 	pub(crate) fn reached_statement_stats(&self) -> crate::exec::vm::compile_cache::Stats {
 		self.compiled_units.reached_statement_stats()

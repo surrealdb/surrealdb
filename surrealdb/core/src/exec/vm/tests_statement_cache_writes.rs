@@ -368,7 +368,8 @@ async fn kept_writes_to_a_named_table_answer_as_writes_compiled_with_their_reque
 	}
 	// After a request's first write: a write under a `TIMEOUT`, and a write a `LET` binds.
 	requests.push(owner(
-		"UPSERT ls:900 SET n = 1; UPSERT ls:901 SET n = 2 TIMEOUT 5s; 		 LET $x = UPSERT ls:902 SET n = 3; RETURN $x",
+		"UPSERT ls:900 SET n = 1; UPSERT ls:901 SET n = 2 TIMEOUT 5s; \
+		 LET $x = UPSERT ls:902 SET n = 3; RETURN $x",
 		&[],
 	));
 	// Record users the table's permissions refuse are refused alike, each judged as themselves.
