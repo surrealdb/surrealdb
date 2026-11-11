@@ -90,8 +90,9 @@ fn params_of(
 }
 
 /// The parameters statement `op` names, which its compilation may fold the
-/// planning context's values of: those its expressions read, at any depth, and
-/// those it reads its rows from, a source of `FROM $name` among them.
+/// planning context's values of: those its expressions read, at any depth, a
+/// write's `RETURN` fields among them, and those it reads its rows from, a
+/// source of `FROM $name` among them.
 fn statement_params(op: &LogicalOp) -> std::collections::BTreeSet<String> {
 	let mut names = params_of(|visit| {
 		let _ = op.visit_scalars_deep(&mut |scalar| {
@@ -107,9 +108,44 @@ fn statement_params(op: &LogicalOp) -> std::collections::BTreeSet<String> {
 		{
 			names.insert(param.as_str().to_owned());
 		}
+		if let LogicalOp::Write(write) = node {
+			names.extend(params_of(|visit| {
+				let _ = output_scalars(write, visit);
+			}));
+		}
 		std::ops::ControlFlow::<()>::Continue(())
 	});
 	names
+}
+
+/// Applies `f` to each expression of `write`'s `RETURN` fields, which the write's
+/// [`LogicalOp::for_each_scalar`] leaves out: they are lowered apart from its logical form.
+/// `None` where the fields have no logical form.
+fn output_scalars(
+	write: &crate::expr::logical::LogicalWrite,
+	f: &mut dyn FnMut(&LogicalExpr),
+) -> Option<()> {
+	use crate::expr::logical::{LogicalField, LogicalFields};
+	if let Some(crate::expr::output::Output::Fields(fields)) = write.statement.output() {
+		match crate::expr::logical::lower_fields(fields.clone()).ok()? {
+			LogicalFields::Value {
+				expr,
+				..
+			} => f(&expr),
+			LogicalFields::Select(fields) => {
+				for field in &fields {
+					if let LogicalField::Single {
+						expr,
+						..
+					} = field
+					{
+						f(expr);
+					}
+				}
+			}
+		}
+	}
+	Some(())
 }
 
 /// `compile`, served from the compile cache under `key` for `frame` in
@@ -882,9 +918,7 @@ fn write_run_time_reads(
 ) -> Option<RunTimeReads> {
 	use std::collections::BTreeMap;
 
-	use crate::expr::logical::{
-		LogicalField, LogicalFields, LogicalWriteSource, LogicalWriteStatement,
-	};
+	use crate::expr::logical::{LogicalWriteSource, LogicalWriteStatement};
 	let literal =
 		|name: &str| literals.iter().find(|(held, _)| held == name).map(|(_, value)| value);
 	let readable = |name: &str| run_time_readable(name, ctx, literals);
@@ -969,25 +1003,7 @@ fn write_run_time_reads(
 		count(scalar);
 		Ok::<(), std::convert::Infallible>(())
 	});
-	if let Some(crate::expr::output::Output::Fields(fields)) = write.statement.output() {
-		match crate::expr::logical::lower_fields(fields.clone()).ok()? {
-			LogicalFields::Value {
-				expr,
-				..
-			} => count(&expr),
-			LogicalFields::Select(fields) => {
-				for field in &fields {
-					if let LogicalField::Single {
-						expr,
-						..
-					} = field
-					{
-						count(expr);
-					}
-				}
-			}
-		}
-	}
+	output_scalars(write, &mut count)?;
 	if nested {
 		return None;
 	}

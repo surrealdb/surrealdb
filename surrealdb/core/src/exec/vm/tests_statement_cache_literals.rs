@@ -315,7 +315,8 @@ async fn a_literal_id_list_with_duplicates_and_mixed_tables_answers_as_written()
 }
 
 /// A placeholder is seen by its statement alone: a client variable of the same name is read by
-/// a statement that names it, and is not changed by a statement whose literal is freed.
+/// a statement that names it, and is not changed by a statement whose literal is freed; a write
+/// that names it only in its `RETURN` reads it as written.
 #[tokio::test]
 async fn a_placeholder_neither_shadows_nor_is_shadowed_by_a_request_variable() {
 	let db = Pair::new(TABLES).await;
@@ -333,6 +334,16 @@ async fn a_placeholder_neither_shadows_nor_is_shadowed_by_a_request_variable() {
 	] {
 		for _ in 0..2 {
 			db.same_with(&owner, sql, Some(vars.clone())).await;
+		}
+	}
+	// A write that names a placeholder in its `RETURN` alone, with no value bound to it.
+	for sql in [
+		"UPSERT type::record('ls', 1) SET n = 0 RETURN VALUE $`\\0literal 0`",
+		"UPSERT ls:2 SET n = 0 RETURN VALUE $`\\0literal 0`",
+		"UPDATE ls:2 SET n = 1 RETURN $`\\0literal 0` AS v",
+	] {
+		for _ in 0..2 {
+			db.same(&owner, sql).await;
 		}
 	}
 }
