@@ -176,12 +176,16 @@ impl PhysOp {
 			PhysOp::IndexLookup(attrs) => {
 				encoder.str(attrs.table.as_str());
 				encoder.index(&attrs.index);
-				encoder.str(attrs.field.as_str());
+				encoder.len(attrs.fields.len());
+				for field in &attrs.fields {
+					encoder.str(field.as_str());
+				}
 				encoder.u8(match attrs.key {
 					LookupKeyShape::Parent => 0,
 					LookupKeyShape::Probe => 1,
 					LookupKeyShape::Operand => 2,
 				});
+				encoder.len(attrs.guards as usize);
 			}
 			PhysOp::RecordScan(attrs) => {
 				encoder.str(attrs.table.as_str());
@@ -380,9 +384,10 @@ mod tests {
 				position: 0,
 				scalar: Box::default(),
 			},
-			field: Strand::new("a"),
+			fields: vec![Strand::new("a")],
 			key: LookupKeyShape::Parent,
 			read: ReadClauses::default(),
+			guards: 0,
 		}))
 	}
 

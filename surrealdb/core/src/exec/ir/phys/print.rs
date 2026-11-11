@@ -2794,8 +2794,9 @@ text_struct!(IndexLookupAttrs {
 	table: TableName,
 	read: ReadClauses,
 	index: IndexRef,
-	field: Strand,
-	key: LookupKeyShape
+	fields: Vec<Strand>,
+	key: LookupKeyShape,
+	guards: u32
 });
 text_struct!(FullTextScanAttrs {
 	table: TableName,
@@ -3727,9 +3728,10 @@ mod tests {
 			PhysTag::IndexLookup => PhysOp::IndexLookup(Box::new(IndexLookupAttrs {
 				table: table("t"),
 				index: index_ref(),
-				field: strand("a"),
+				fields: vec![strand("a")],
 				key: LookupKeyShape::Probe,
 				read: ReadClauses::default(),
+				guards: 0,
 			})),
 			PhysTag::FullTextScan => PhysOp::FullTextScan(Box::new(FullTextScanAttrs {
 				table: table("t"),

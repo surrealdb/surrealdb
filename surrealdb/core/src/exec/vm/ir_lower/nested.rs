@@ -1072,9 +1072,10 @@ mod tests {
 			OpKind::Phys(PhysOp::IndexLookup(Box::new(IndexLookupAttrs {
 				table: TableName::from("t"),
 				index: named("by_a"),
-				field: Strand::from("a"),
+				fields: vec![Strand::from("a")],
 				key: LookupKeyShape::Parent,
 				read: Default::default(),
+				guards: 0,
 			}))),
 			&[key],
 			1,

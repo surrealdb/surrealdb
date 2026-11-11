@@ -265,7 +265,23 @@ pub(super) fn lower_source_under(
 				LookupKeyShape::Parent => LookupKey::Parent(parent_path(ir, operand()?)?),
 				LookupKeyShape::Probe => LookupKey::Join,
 				LookupKeyShape::Operand => {
-					LookupKey::Scalar(host_scalar_of(em, cx, ir, operand()?, needs)?)
+					let keys = attrs.fields.len();
+					if keys == 0 || data.operands.len() != keys + attrs.guards as usize {
+						return Err(invariant(
+							"an index lookup with other than one operand per field it pins and \
+							 per guard",
+						));
+					}
+					let mut scalars = data
+						.operands
+						.iter()
+						.map(|operand| host_scalar_of(em, cx, ir, *operand, needs))
+						.collect::<Result<Vec<_>, _>>()?;
+					let guards = scalars.split_off(keys);
+					LookupKey::Scalars {
+						keys: scalars,
+						guards,
+					}
 				}
 			};
 			Ok(Leaf {
@@ -1952,9 +1968,10 @@ pub(super) mod tests {
 			Box::new(IndexLookupAttrs {
 				table: TableName::from("t"),
 				index: named("by_a"),
-				field: Strand::from("a"),
+				fields: vec![Strand::from("a")],
 				key,
 				read: Default::default(),
+				guards: 0,
 			})
 		};
 		let lookup = rows_over(&mut b, PhysOp::IndexLookup(attrs(LookupKeyShape::Parent)), &[key]);

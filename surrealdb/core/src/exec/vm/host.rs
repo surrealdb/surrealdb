@@ -2137,7 +2137,7 @@ pub(super) async fn run_storage_source(
 			rows.finish(state, ctx, yielder, flush_at).await
 		}
 		// The records the index lists under the key, where it lists every
-		// record whose field equals the key; otherwise the table whole. The
+		// record whose fields equal its values; otherwise the table whole. The
 		// index is the one the plan read from the catalog under the
 		// snapshot this run reads.
 		Source::Lookup {
@@ -2150,17 +2150,57 @@ pub(super) async fn run_storage_source(
 				.map_err(ControlFlow::Err)?;
 			let def = descriptor.defined().map_err(ControlFlow::Err)?;
 			refuse_lightweight(table, def)?;
-			let key = match key {
+			// One value per column the key pins; the table whole where any of them is one the
+			// index may not list every equal record under.
+			let mut keys = Vec::new();
+			match key {
 				super::program::LookupKey::Parent(outer) => {
-					super::nested::key_at(ctx.value("parent"), outer).cloned()
+					keys.extend(super::nested::key_at(ctx.value("parent"), outer).cloned());
 				}
-				super::program::LookupKey::Join => state.lookup_key.clone(),
-				super::program::LookupKey::Scalar(scalar) => {
-					Some(host_scalar(program, scalar, ctx, None).await?)
+				super::program::LookupKey::Join => keys.extend(state.lookup_key.clone()),
+				super::program::LookupKey::Scalars {
+					keys: scalars,
+					guards,
+				} => {
+					// A guard or a key whose evaluation fails reads the table whole: the
+					// filter, or the write's `WHERE`, then raises where a scan would, and not
+					// where the table holds no row to judge.
+					let mut whole = false;
+					for guard in guards {
+						match host_scalar(program, guard, ctx, None).await {
+							Ok(value) if !step_fetches(&value) => {}
+							Ok(_) | Err(ControlFlow::Err(_)) => {
+								whole = true;
+								break;
+							}
+							Err(other) => return Err(other),
+						}
+					}
+					for scalar in scalars {
+						if whole {
+							break;
+						}
+						match host_scalar(program, scalar, ctx, None).await {
+							Ok(value) => keys.push(value),
+							Err(ControlFlow::Err(_)) => whole = true,
+							Err(other) => return Err(other),
+						}
+					}
+					if whole {
+						keys.clear();
+					}
 				}
+			}
+			let access = if version.is_some() || keys.is_empty() || !keys.iter().all(lookup_key) {
+				None
+			} else if index.cols.len() == 1 {
+				// An equality on a unique index reads one complete key, so a key of a
+				// composite index, which pins a prefix of its columns, is a compound read.
+				keys.pop().map(crate::exec::index::access_path::BTreeAccess::literal_equality)
+			} else {
+				Some(crate::exec::index::access_path::BTreeAccess::literal_compound(keys, None))
 			};
-			let key = key.filter(|key| version.is_none() && lookup_key(key));
-			let Some(key) = key else {
+			let Some(access) = access else {
 				let range = RecordPrefix {
 					ns: db_ctx.ns_ctx.ns.namespace_id,
 					db: db_ctx.db.database_id,
@@ -2184,14 +2224,15 @@ pub(super) async fn run_storage_source(
 				)
 				.await;
 			};
-			let access = crate::exec::index::access_path::BTreeAccess::literal_equality(key);
+			// A key that leaves a column unpinned reaches a record holding an array there
+			// through an entry per element.
 			let mut records = IndexRecords::open(
 				ctx,
 				index,
 				&access,
 				crate::kvs::Direction::Forward,
 				version,
-				false,
+				access_repeats_records(index, &access),
 				None,
 			)?;
 			if index_runs_in_place(pipeline, state) {
@@ -2908,14 +2949,39 @@ pub(super) async fn run_storage_source(
 	}
 }
 
-/// The records an index lists, in its order: each batch of record ids is
-/// read as the index scan operator reads it, an id whose record is gone
-/// yielding nothing.
-///
-/// A scan that reaches a record through several entries (see
-/// [`access_repeats_records`]) lists it once: the first entry to name it, in the
-/// index's order, stands for the record. The repeats are dropped from the ids
-/// before any record is read, so they cost no read.
+/// Whether a field step on `value` fetches a record
+/// ([`super::program::LookupKey::Scalars`]): `value` is a record id, or an
+/// array or set holding one at any depth, since a step on an array or a set
+/// steps into each element. A step on an object reads one of its values and
+/// fetches nothing.
+fn step_fetches(value: &Value) -> bool {
+	match value {
+		Value::RecordId(_) => true,
+		Value::Array(array) => array.iter().any(step_fetches),
+		Value::Set(set) => set.iter().any(step_fetches),
+		Value::Object(_)
+		| Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
+		| Value::Uuid(_)
+		| Value::Bytes(_)
+		| Value::String(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => false,
+	}
+}
+
 /// Whether a B-tree equality on `key` lists every record whose field `=` the
 /// key ([`Source::Lookup`]): a value keyed alike by every value equal to it,
 /// whatever format the index was stamped at. An array is listed by its
@@ -2927,7 +2993,7 @@ pub(super) async fn run_storage_source(
 /// below that format misses a computed decimal equal to it (`2.0dec`) for every
 /// read until it is rebuilt. A string equals a regex it matches, but no entry is
 /// keyed by a regex.
-pub(super) fn lookup_key(key: &Value) -> bool {
+pub(crate) fn lookup_key(key: &Value) -> bool {
 	match key {
 		Value::None
 		| Value::Null
@@ -2961,6 +3027,14 @@ pub(super) fn lookup_key(key: &Value) -> bool {
 	}
 }
 
+/// The records an index lists, in its order: each batch of record ids is
+/// read as the index scan operator reads it, an id whose record is gone
+/// yielding nothing.
+///
+/// A scan that reaches a record through several entries (see
+/// [`access_repeats_records`]) lists it once: the first entry to name it, in the
+/// index's order, stands for the record. The repeats are dropped from the ids
+/// before any record is read, so they cost no read.
 struct IndexRecords {
 	listing: Listing,
 	reader: RecordReader,

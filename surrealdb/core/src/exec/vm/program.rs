@@ -6299,8 +6299,16 @@ pub(super) enum LookupKey {
 	/// The key the join running the pipeline hands it
 	/// ([`State::lookup_key`](super::interp::State)).
 	Join,
-	/// A value the statement computes that reads no row of the table.
-	Scalar(HostScalar),
+	/// Values the statement computes that read no row of the table, one per
+	/// leading column of the index the key pins, in column order.
+	Scalars {
+		keys: Vec<HostScalar>,
+		/// The values the field steps of a key's path read, read before the
+		/// keys, each after the values it is read from: where a step would
+		/// fetch a record the statement may write while the rows are read,
+		/// the table is read whole without evaluating the keys.
+		guards: Vec<HostScalar>,
+	},
 }
 
 /// An `INSERT`'s `INTO` clause: a table name or a string naming one.
@@ -6539,10 +6547,11 @@ pub(super) enum Source {
 		/// records.
 		decode: Option<crate::exec::operators::scan::common::DecodeFields>,
 	},
-	/// The records of `table` B-tree index `index` lists under an equality to
-	/// the key `key` reads when the pipeline opens. Every record of `table`,
-	/// in key order, where the key is one the index may not list every equal
-	/// record under ([`super::payload::Plan::IndexLookup`]).
+	/// The records of `table` B-tree index `index` lists under an equality of
+	/// its leading columns to the values `key` reads when the pipeline opens.
+	/// Every record of `table`, in key order, where any value is one the index
+	/// may not list every equal record under
+	/// ([`super::payload::Plan::IndexLookup`]).
 	Lookup {
 		table: TableName,
 		index: crate::exec::index::access_path::IndexRef,

@@ -800,8 +800,9 @@ pub(crate) enum LookupKeyShape {
 	Parent,
 	/// The row the probe keeps.
 	Probe,
-	/// The lookup's one operand, a value that reads no row of the table: evaluated once each
-	/// time the lookup opens.
+	/// The lookup's operands, one per field of [`IndexLookupAttrs::fields`] and then one per
+	/// guard ([`IndexLookupAttrs::guards`]), values that read no row of the table: evaluated once
+	/// each time the lookup opens.
 	Operand,
 }
 
@@ -811,8 +812,15 @@ pub(crate) struct IndexLookupAttrs {
 	pub(crate) table: TableName,
 	pub(crate) read: ReadClauses,
 	pub(crate) index: IndexRef,
-	pub(crate) field: Strand,
+	/// The leading columns of the index the key pins, in column order, each a plain field. A
+	/// `Parent` or `Probe` key pins one.
+	pub(crate) fields: Vec<Strand>,
 	pub(crate) key: LookupKeyShape,
+	/// The count of `Operand` operands after the one per field, each a value a field step of a
+	/// key's path reads, where a step on a record id would fetch a record the statement may write
+	/// while the lookup's rows are read. The lookup reads the table whole where any of them is a
+	/// record id, or an array or set holding one at any depth.
+	pub(crate) guards: u32,
 }
 
 /// The attributes of a full-text scan.

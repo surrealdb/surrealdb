@@ -1388,9 +1388,10 @@ mod tests {
 		let lookup = PhysOp::IndexLookup(Box::new(IndexLookupAttrs {
 			table: table("t"),
 			index: index_ref(),
-			field: Strand::new("a"),
+			fields: vec![Strand::new("a")],
 			key: LookupKeyShape::Parent,
 			read: ReadClauses::default(),
+			guards: 0,
 		}));
 		let union = PhysOp::IndexUnion(Box::new(IndexUnionAttrs {
 			topk: None,
