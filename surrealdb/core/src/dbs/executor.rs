@@ -1135,6 +1135,9 @@ enum Planned {
 	Served {
 		op: LogicalOp,
 		front_end: bool,
+		/// Whether the statement only reads or only writes, so the cache of
+		/// request statements may keep it ([`Executor::compile_one`]).
+		keepable: bool,
 	},
 	/// Planned when it is reached, for that run alone
 	/// ([`StatementPlan::Reached`]).
@@ -1173,10 +1176,13 @@ enum StatementPlan {
 	Ready(Arc<dyn crate::exec::ExecOperator>),
 	/// Planned for the catalog its transaction reads when it runs, served
 	/// from the compile cache by its text (`vm::serve`): `op` as written, a
-	/// front end's plan where `front_end`.
+	/// front end's plan where `front_end`. A `keepable` statement only reads
+	/// or only writes, and is kept for later requests where
+	/// `vm::serve::Keeping::of` keeps it (`vm::serve::request_statement`).
 	Served {
 		op: LogicalOp,
 		front_end: bool,
+		keepable: bool,
 	},
 	/// Planned when it is reached, for the catalog its transaction reads then
 	/// and for this run alone: an `EXPLAIN`, whose operator renders what this
@@ -2391,6 +2397,7 @@ impl Executor {
 			StatementPlan::Served {
 				op,
 				front_end,
+				keepable,
 			} => {
 				let probe =
 					self.statement_context(&txn, &cancellation, true, ContextLevel::Root).await?;
@@ -2407,6 +2414,7 @@ impl Executor {
 								op,
 								principal,
 								self.binds_rows,
+								keepable,
 							)
 						})
 						.await
@@ -5889,9 +5897,11 @@ impl Executor {
 			Planned::Served {
 				op,
 				front_end,
+				keepable,
 			} => Ok(StatementPlan::Served {
 				op,
 				front_end,
+				keepable,
 			}),
 			Planned::Reached {
 				op,
@@ -6137,7 +6147,7 @@ impl Executor {
 								.map(crate::exec::vm::RequestEntry::Operator),
 							)
 						} else {
-							served_for(plan, true)
+							served_for(plan, true, false)
 						};
 						compiled[at] = Some(PlannedStatement {
 							entry,
@@ -6266,7 +6276,7 @@ impl Executor {
 	) -> PlannedStatement {
 		let logged = keep_logged.then(|| op.clone());
 		let served = || PlannedStatement {
-			entry: served_for(op.clone(), false),
+			entry: served_for(op.clone(), false, cacheable),
 			logged: keep_logged.then(|| op.clone()),
 		};
 		if !inline || (!planning.computed.is_empty() && reads_any(op, &planning.computed)) {
@@ -6384,7 +6394,7 @@ fn holds_closure(expr: &crate::expr::logical::LogicalExpr) -> bool {
 /// ([`StatementPlan::Reached`]) — an `EXPLAIN`, whose operator renders what
 /// that run measured, and a statement holding a schema statement, whose
 /// planning models it with a speculative run in the transaction it runs in.
-fn served_for(op: LogicalOp, front_end: bool) -> Planned {
+fn served_for(op: LogicalOp, front_end: bool, keepable: bool) -> Planned {
 	if op.any(|node| matches!(node, LogicalOp::Explain(_)))
 		|| crate::exec::planner::fold::changes_the_catalog(&op)
 	{
@@ -6396,6 +6406,7 @@ fn served_for(op: LogicalOp, front_end: bool) -> Planned {
 		Planned::Served {
 			op,
 			front_end,
+			keepable,
 		}
 	}
 }

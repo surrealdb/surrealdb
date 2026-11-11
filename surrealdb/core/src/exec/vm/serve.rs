@@ -358,14 +358,21 @@ async fn statement_in(
 /// those values are larger than `ExecConfig::specialised_body_max_arg_bytes`,
 /// or hold a value that has no encoding, the statement reads them when it
 /// runs instead.
+///
+/// A `keepable` statement, one that only reads or only writes, is first
+/// served as the request would serve it on its arrival
+/// ([`kept_reached_statement`]).
 pub(crate) async fn request_statement(
 	exec: &ExecutionContext,
 	op: LogicalOp,
 	principal: Option<Arc<crate::iam::Auth>>,
 	binds_rows: bool,
+	keepable: bool,
 ) -> anyhow::Result<Arc<dyn ExecOperator>> {
 	crate::exec::compiles::note_statement_served();
-	if let Some(plan) = kept_reached_write(exec, &op, principal.clone(), binds_rows).await {
+	if keepable
+		&& let Some(plan) = kept_reached_statement(exec, &op, principal.clone(), binds_rows).await
+	{
 		return Ok(plan);
 	}
 	let params = statement_params(&op);
@@ -513,23 +520,30 @@ impl Keeping {
 	}
 }
 
-/// `op`, a write, or a block that only writes ([`writes_only`]), among a request's top-level
-/// statements that is planned when the request reaches it, served as [`kept_request_statement`]
-/// serves the writes a request compiles when it arrives: where [`Keeping`] keeps it, one
-/// compilation serves every value of the request variables it reads, as it would before the
-/// request's first write. `None` where it is not kept, which includes a write that is the value of
-/// a top-level `LET` (`binds_rows`), and where the kept compilation fails, which
-/// [`request_statement`] then raises as it plans the statement itself.
-async fn kept_reached_write(
+/// `op`, a statement among a request's top-level statements that only reads or only writes and
+/// that is planned when the request reaches it (`Executor::compile_request` names when), served as
+/// [`kept_request_statement`] serves the statements a request compiles when it arrives: where
+/// [`Keeping`] keeps it, one compilation serves every value of the request variables it reads.
+/// The caller has judged `op` a read or a write. `None` where it is not kept, which includes a
+/// statement that is the value of a top-level `LET` (`binds_rows`) and a read whose literal source
+/// [`free_literals`] frees, and where the kept compilation fails, which [`request_statement`] then
+/// raises as it plans the statement itself.
+/// A read so freed is planned as written: the planner reads a literal source as the record it
+/// names, coerced to the table's `id` type and with only the computed fields the read selects
+/// derived, and a placeholder source keeps neither.
+async fn kept_reached_statement(
 	exec: &ExecutionContext,
 	op: &LogicalOp,
 	principal: Option<Arc<crate::iam::Auth>>,
 	binds_rows: bool,
 ) -> Option<Arc<dyn ExecOperator>> {
-	if binds_rows || !writes_only(op) {
+	if binds_rows {
 		return None;
 	}
 	let keeping = Keeping::of(op, exec.ctx())?;
+	if keeping.freed.is_some() && !writes_only(op) {
+		return None;
+	}
 	let (kept, literals) = keeping.statement(op);
 	let plan = kept_request_statement(exec, kept.clone(), principal, literals).await.ok()?;
 	Some(keeping.bind(plan))
@@ -2086,7 +2100,8 @@ mod tests {
 			let ctx = db.exec_ctx_as(&session, crate::kvs::TransactionType::Read).await;
 			let principal = Some(Arc::clone(&ctx.root().auth));
 			let op = parse_op("(SELECT VALUE id FROM doc WHERE owner = $auth)");
-			let plan = super::request_statement(&ctx, op, principal, false).await.expect("plans");
+			let plan =
+				super::request_statement(&ctx, op, principal, false, true).await.expect("plans");
 			let rows = crate::exec::operators::test_util::collect(&plan, &ctx).await;
 			let expected = crate::val::Value::RecordId(crate::val::RecordId::new(
 				"doc".into(),

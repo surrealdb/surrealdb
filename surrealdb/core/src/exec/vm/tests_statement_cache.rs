@@ -231,6 +231,29 @@ async fn a_block_that_only_writes_is_compiled_once() {
 	);
 }
 
+/// A read the cache keeps when its request arrives is kept as well when the request reaches it
+/// after its first write: one compilation serves every value of its key.
+#[tokio::test]
+async fn a_read_after_a_write_is_compiled_once_for_its_key() {
+	let db = TestDb::new(PEOPLE).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let base = ds.statement_cache_stats();
+	let now = || since(base, ds.statement_cache_stats());
+	let reached = ds.reached_statement_stats();
+	let sql = "BEGIN; UPSERT person:70 SET age = 1; \
+		SELECT VALUE name FROM type::record('person', $n); COMMIT;";
+	for (n, name) in [(1, "ann"), (2, "bob"), (3, "cat")] {
+		let mut responses =
+			ds.execute(sql, &owner, Some(number(n))).await.expect("the request runs");
+		// The response before the `COMMIT`'s.
+		let read = responses.remove(responses.len() - 2).result.expect("answers");
+		assert_eq!(read.to_sql(), format!("['{name}']"), "`$n` = {n}");
+	}
+	// The write and the read each compile once and are served to the requests after.
+	assert_eq!(now(), stats(4, 2, 0));
+	assert_eq!(since_compiled(reached, ds.reached_statement_stats()), 0);
+}
+
 /// How many statements the run-time cache compiled between `before` and `after`, kept or not.
 fn since_compiled(
 	before: crate::exec::vm::compile_cache::Stats,

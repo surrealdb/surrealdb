@@ -185,11 +185,15 @@ body again. Lookup and compilation happen only while a query is planned.
   `type::record(<table>, <key>)` with a constant table and a key that is a
   variable or a list of variables and literals; or a record id or a key
   written out, which is read as a variable. Every other request variable a
-  kept write reads is read when it runs. A write planned when the request
-  reaches it, after the request's first write, is kept and served the same
-  way, and so is an `IF` whose arms, or a block whose statements, do nothing
-  but write, at any depth (`vm::serve::writes_only`). A schema statement and
-  an `EXPLAIN` are compiled with their request.
+  kept write reads is read when it runs. An `IF` whose arms, or a block whose
+  statements, do nothing but write, at any depth (`vm::serve::writes_only`),
+  is kept as a write is. A statement planned when the request reaches it
+  (`Executor::compile_request` names when) is kept and served the same way
+  where it only reads or only writes; a read whose source is a literal is
+  then compiled as written, since a literal source read as a variable is
+  neither coerced to the table's `id` type nor pruned to the computed fields
+  the read selects. A schema statement and an `EXPLAIN` are compiled with
+  their request.
 - **Specialization**: a small body is still inlined into its caller rather than
   linked.
 - **Catalog units**: what a plan lowers from the catalog alone, the same for
