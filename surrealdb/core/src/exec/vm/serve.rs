@@ -38,6 +38,7 @@
 
 use std::sync::Arc;
 
+use super::compile::is_write_statement;
 use super::compile_cache::{BuildId, ObjectVersion, SourceClass, UnitKey, UnitObject};
 use super::program::UnitFrame;
 use crate::exec::{Clause, ExecOperator, ExecutionContext};
@@ -490,12 +491,6 @@ pub(crate) async fn request_statement(
 	);
 	let params = params.into_iter().filter(|name| !shadowed.contains(name)).collect();
 	served(exec, units.session_statements(), keyed, params, compile).await
-}
-
-/// Whether `op` is a write statement, bare or under its `TIMEOUT`.
-pub(crate) fn is_write_statement(op: &LogicalOp) -> bool {
-	matches!(op, LogicalOp::Write(_))
-		|| matches!(op, LogicalOp::Timeout(timeout) if matches!(timeout.input.as_ref(), LogicalOp::Write(_)))
 }
 
 /// Whether `op` does nothing but write: a write statement ([`is_write_statement`]), an `IF` each
