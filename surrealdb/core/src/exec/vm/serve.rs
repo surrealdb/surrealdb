@@ -556,12 +556,9 @@ impl Keeping {
 /// [`kept_request_statement`] serves the statements a request compiles when it arrives: where
 /// [`Keeping`] keeps it, one compilation serves every value of the request variables it reads.
 /// The caller has judged `op` a read or a write. `None` where it is not kept, which includes a
-/// statement that is the value of a top-level `LET` (`binds_rows`) and a read whose literal source
-/// [`free_literals`] frees, and where the kept compilation fails, which [`request_statement`] then
-/// raises as it plans the statement itself.
-/// A read so freed is planned as written: the planner reads a literal source as the record it
-/// names, coerced to the table's `id` type and with only the computed fields the read selects
-/// derived, and a placeholder source keeps neither.
+/// statement that is the value of a top-level `LET` (`binds_rows`), and where the kept compilation
+/// is refused or fails - a literal its tables convert ([`plans_its_literals`]) among them - which
+/// [`request_statement`] then plans as written, raising the error as it does.
 async fn kept_reached_statement(
 	exec: &ExecutionContext,
 	op: &LogicalOp,
@@ -572,12 +569,78 @@ async fn kept_reached_statement(
 		return None;
 	}
 	let keeping = Keeping::of(op, exec.ctx())?;
-	if keeping.freed.is_some() && !writes_only(op) {
-		return None;
-	}
 	let (kept, literals) = keeping.statement(op);
 	let plan = kept_request_statement(exec, kept.clone(), principal, literals).await.ok()?;
 	Some(keeping.bind(plan))
+}
+
+/// Whether `op`, a statement [`free_literals`] wrote `literals` into, is planned with each literal
+/// as written instead: a literal names a record of a table whose record ids name their components,
+/// which the plan coerces a written-out key to and a value read when the statement runs is not; or
+/// `op` reads and the table defines a computed field, which a read of a written-out record derives
+/// only where the read selects it and a read of a value read when it runs derives whole. The tables
+/// are read from the catalog each time, so a definition made after the statement was kept counts.
+async fn plans_its_literals(
+	exec: &ExecutionContext,
+	op: &LogicalOp,
+	literals: &[(String, crate::val::Value)],
+) -> anyhow::Result<bool> {
+	use crate::expr::logical::{LogicalSource, LogicalWriteSource, SourceRef};
+	fn records(value: &crate::val::Value, tables: &mut Vec<surrealdb_strand::TableName>) {
+		if let crate::val::Value::RecordId(rid) = value {
+			if !tables.contains(&rid.table) {
+				tables.push(rid.table.clone());
+			}
+		} else if let crate::val::Value::Array(values) = value {
+			for value in values.iter() {
+				records(value, tables);
+			}
+		}
+	}
+	let mut tables = Vec::new();
+	for (_, value) in literals {
+		records(value, &mut tables);
+	}
+	// The key of `type::record(<table>, <key>)` is freed alone: its table is the call's.
+	let freed_key = |expr: &LogicalExpr| {
+		crate::exec::logical::footprint::record_call(expr).and_then(|(table, key)| {
+			matches!(key, LogicalExpr::Param(name) if literals.iter().any(|(held, _)| held == name.as_str()))
+				.then_some(table)
+		})
+	};
+	let _ = op.visit_ops_deep(&mut |node| {
+		let mut exprs: Vec<&LogicalExpr> = Vec::new();
+		if let LogicalOp::Write(write) = node
+			&& let LogicalWriteSource::Targets(targets) = &write.source
+		{
+			exprs.extend(targets);
+		}
+		if let LogicalOp::Source(LogicalSource {
+			source: SourceRef::Dynamic(expr),
+			..
+		}) = node
+		{
+			exprs.push(expr);
+		}
+		for table in exprs.into_iter().filter_map(freed_key) {
+			if !tables.contains(&table) {
+				tables.push(table);
+			}
+		}
+		std::ops::ControlFlow::<()>::Continue(())
+	});
+	let reads = !writes_only(op);
+	for table in &tables {
+		let descriptor = super::descriptor::table(exec, table).await?;
+		if descriptor
+			.fields
+			.iter()
+			.any(|field| field.key_part.is_some() || (reads && field.computed.is_some()))
+		{
+			return Ok(true);
+		}
+	}
+	Ok(false)
 }
 
 /// `op`, a top-level statement of a request that the request compiles when it
@@ -604,6 +667,11 @@ pub(crate) async fn kept_request_statement(
 	principal: Option<Arc<crate::iam::Auth>>,
 	literals: &[(String, crate::val::Value)],
 ) -> anyhow::Result<Arc<dyn ExecOperator>> {
+	if !literals.is_empty() && plans_its_literals(exec, &op, literals).await? {
+		anyhow::bail!(crate::exec::Error::InvalidStatement(
+			"a statement whose literals its tables convert is planned as written".to_owned()
+		));
+	}
 	let params = statement_params(&op);
 	let folded: Vec<&str> = crate::exec::planner::UNIT_RUNTIME_PARAMS
 		.iter()
@@ -1557,15 +1625,7 @@ pub(crate) fn free_literals(
 	if literals.is_empty() {
 		return None;
 	}
-	let written = statement_params(op);
-	if literals.iter().any(|(name, _)| written.contains(name) || ctx.value(name).is_some()) {
-		return None;
-	}
-	let names = source_only_request_variables(&freed, ctx, &literals).names;
-	if !literals.iter().all(|(name, _)| names.contains(name)) {
-		return None;
-	}
-	Some((freed, literals))
+	kept_with_freed(op, freed, literals, ctx)
 }
 
 /// [`free_literals`] for `op`, a write, under its `TIMEOUT` at most: its one target freed as
@@ -1764,7 +1824,7 @@ fn free_write_target(
 }
 
 /// What [`free_write_target`] freed of a write's target: the whole target, or the key of
-/// `type::record(<table>, <key>)`, each now the named placeholder.
+/// `type::record(<table>, <key>)`, each the named placeholder.
 enum Freed {
 	Whole(String),
 	Key(String),
@@ -1872,7 +1932,9 @@ impl ExecOperator for LiteralBound {
 /// to them is served the compilation. A statement that reads none, or reads
 /// one elsewhere, is compiled with its request. Only a variable the request
 /// binds ([`crate::ctx::Context::is_request_param`]) counts as read
-/// elsewhere; a name a top-level `LET` binds never does.
+/// elsewhere; a name a top-level `LET` binds never does, so a statement that
+/// reads one elsewhere is kept with that name folded, compiled once for each
+/// value of it ([`served`]).
 ///
 /// `literals` are as [`source_only_request_variables`] reads them.
 pub(crate) fn kept_for_requests(
