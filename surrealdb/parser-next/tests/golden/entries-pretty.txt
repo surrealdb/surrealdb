@@ -129,6 +129,8 @@ b53b4a0e4cc2cf23 language-tests/tests/bench/crud/update_1000.surql
 e7beb87ecda562a5 language-tests/tests/bench/crud/update_10000_return_after_computed.surql
 e7beb87ecda562a5 language-tests/tests/bench/crud/update_10000_return_after_computed_perms.surql
 fbd168eb320e273c language-tests/tests/bench/crud/update_10000_return_diff.surql
+f6b323a7d47d2190 language-tests/tests/bench/crud/upsert_120_for.surql
+9601e3794a39e168 language-tests/tests/bench/crud/upsert_120_statements.surql
 6db4d0ef7b4513bf language-tests/tests/bench/executor/array_closures.surql
 62bd6c0c5be5e4a9 language-tests/tests/bench/executor/block_let_path.surql
 2a0b84584de07e7e language-tests/tests/bench/executor/bound_param_path.surql

@@ -3,11 +3,14 @@
 //! A write whose request variables are its target, named by a variable whose value names one
 //! table, and values its clauses read is compiled once per statement text, frame and class of
 //! target: requests that bind other records of that table and other values to its clauses are
-//! served the one kept. Each test runs the same requests against a datastore that keeps
-//! statements and one that keeps none, and the two answer alike, the state they leave included.
+//! served the one kept. A target that names its table in the statement's text,
+//! `type::record(<table>, <key>)` with a constant table, is kept the same way with its key read
+//! when the write runs, and a record id or key written out is read as such a variable. Each test
+//! runs the same requests against a datastore that keeps statements and one that keeps none, and
+//! the two answer alike, the state they leave included.
 
 use surrealdb_cnf::ConfigMap;
-use surrealdb_types::{Array, Object, RecordId, Table, ToSql, Value, Variables};
+use surrealdb_types::{Array, Object, Range, RecordId, Table, ToSql, Value, Variables};
 
 use crate::dbs::Session;
 use crate::exec::operators::test_util::TestDb;
@@ -296,6 +299,202 @@ async fn kept_writes_answer_as_writes_compiled_with_their_request() {
 	assert!(kept.hits >= 20, "{kept:?}");
 }
 
+/// Writes whose target names its table in the statement's text (`type::record(<table>, <key>)`
+/// with a variable or a list of variables as the key, or a record id written out) answer as they
+/// do compiled with their request: alone, several in one transaction, where every write after the
+/// first is planned when the request reaches it, under a `TIMEOUT` and as a `LET`'s value there,
+/// with keys of every class, values the stages refuse, a key no record id can hold, a record that
+/// already exists, a definition changed between two identical requests, a table that does not
+/// exist yet, and for record users the table's permissions refuse.
+#[tokio::test]
+async fn kept_writes_to_a_named_table_answer_as_writes_compiled_with_their_request() {
+	let mut requests = Vec::new();
+	for key in [1, 2, 3, 1] {
+		requests.push(owner(
+			"UPSERT type::record('ls', $k) SET n = $v",
+			&[("k", int(10 + key)), ("v", int(key))],
+		));
+		requests.push(owner(
+			"UPDATE type::record('pk', $k) SET n = $v RETURN n",
+			&[("k", int(1 + key % 2)), ("v", int(key * 10))],
+		));
+		requests.push(owner(
+			"CREATE type::record('pk', $k) CONTENT $c",
+			&[("k", int(200 + key)), ("c", object(&[("name", text("made")), ("n", int(key))]))],
+		));
+		requests.push(owner(
+			"UPSERT type::record('ls', [$a, $b]) SET n = $b",
+			&[("a", text("pair")), ("b", int(key))],
+		));
+		requests.push(owner(
+			"BEGIN; CREATE type::record('ls', $k) SET n = 1; \
+			 UPSERT type::record('ls', $k) SET n += 1; UPDATE type::record('ls', $k) SET n += 1; \
+			 DELETE type::record('ls', $j) RETURN BEFORE; COMMIT;",
+			&[("k", int(300 + key * 10)), ("j", int(10 + key))],
+		));
+		requests.push(owner(
+			&format!(
+				"UPSERT ls:{a} SET n = {key}; UPSERT ls:{b} SET n = {key}; UPDATE ls:1 SET n += 1; \
+				 UPSERT type::record('ls', ['lit', {key}]) SET n = {key}",
+				a = 400 + key,
+				b = 500 + key,
+			),
+			&[],
+		));
+	}
+	// Values the stages refuse, a key no record id holds, and a record that exists fail as they do
+	// compiled with the request.
+	requests
+		.push(owner("UPDATE type::record('pk', $k) SET n = $v", &[("k", int(1)), ("v", int(-1))]));
+	requests.push(owner(
+		"UPDATE type::record('pk', $k) SET n = $v",
+		&[("k", int(1)), ("v", text("x"))],
+	));
+	requests.push(owner("CREATE type::record('pk', $k) SET n = 1", &[("k", text(""))]));
+	requests.push(owner("CREATE type::record('pk', $k) SET n = 1", &[("k", int(201))]));
+	requests.push(owner("CREATE pk:201 SET n = 1", &[]));
+	// A definition changed between two identical requests is what the second enforces.
+	requests
+		.push(owner("UPDATE type::record('pk', $k) SET n = $v", &[("k", int(2)), ("v", int(50))]));
+	requests
+		.push(owner("DEFINE FIELD OVERWRITE n ON pk TYPE int DEFAULT 0 ASSERT $value < 40", &[]));
+	requests
+		.push(owner("UPDATE type::record('pk', $k) SET n = $v", &[("k", int(2)), ("v", int(50))]));
+	// Keys of every class: a range writes the records it spans, a record id of another table lends
+	// its key, and NONE is a key as its text.
+	let range = |from: i64, to: i64| Value::Range(Box::new(Range::from(from..to)));
+	for k in [range(1, 3), record("pk", 1), Value::None, text("s"), Value::Bool(true)] {
+		requests.push(owner("UPDATE type::record('ls', $k) SET n += 100 RETURN n", &[("k", k)]));
+	}
+	// After a request's first write: a write under a `TIMEOUT`, and a write a `LET` binds.
+	requests.push(owner(
+		"UPSERT ls:900 SET n = 1; UPSERT ls:901 SET n = 2 TIMEOUT 5s; \
+		 LET $x = UPSERT ls:902 SET n = 3; RETURN $x",
+		&[],
+	));
+	// Record users the table's permissions refuse are refused alike, each judged as themselves.
+	requests.push(alice("UPSERT type::record('ls', $k) SET n = 1", &[("k", int(950))]));
+	requests.push(bob("UPSERT type::record('ls', $k) SET n = 1", &[("k", int(951))]));
+	requests.push(alice("UPSERT ls:952 SET n = 1; UPSERT ls:953 SET n = 1", &[]));
+	requests.push(bob("UPSERT ls:954 SET n = 1; UPSERT ls:955 SET n = 1", &[]));
+	// Blocks that only write: an `IF` with an `ELSE` arm, a nested `IF` whose condition reads a
+	// variable, a block after a request's first write, and blocks compiled with their request: one
+	// holding a read, and one whose condition holds a statement.
+	for (k, go) in [(600, true), (601, false), (600, false), (602, true)] {
+		requests.push(owner(
+			"IF $go { UPSERT type::record('ls', $k) SET n = 1; UPDATE type::record('ls', $k) SET n += 1 } \
+			 ELSE { DELETE type::record('ls', $k) }",
+			&[("k", int(k)), ("go", Value::Bool(go))],
+		));
+		requests.push(owner(
+			"UPSERT ls:610 SET n = $k; IF $go { IF $k > 600 { UPSERT type::record('ls', [$k, 'n']) \
+			 SET n = $k }; UPSERT ls:611 SET n = 2 }",
+			&[("k", int(k)), ("go", Value::Bool(go))],
+		));
+	}
+	requests.push(owner("IF true { UPSERT ls:620 SET n = 1; SELECT * FROM ls:620 }", &[]));
+	requests
+		.push(owner("IF (SELECT VALUE n FROM ONLY ls:620) = 1 { UPSERT ls:621 SET n = 1 }", &[]));
+	// An event and a permission defined between two identical requests are what the second fires
+	// and enforces.
+	requests.push(owner("UPSERT type::record('ls', $k) SET n = 1", &[("k", int(700))]));
+	requests.push(owner(
+		"DEFINE TABLE evlog SCHEMALESS; DEFINE EVENT ls_log ON ls THEN (CREATE evlog SET at = $after.id)",
+		&[],
+	));
+	requests.push(owner("UPSERT type::record('ls', $k) SET n = 1", &[("k", int(701))]));
+	requests.push(alice("UPSERT type::record('ls', $k) SET n = 1", &[("k", int(702))]));
+	requests.push(owner("DEFINE TABLE OVERWRITE ls SCHEMALESS PERMISSIONS FULL", &[]));
+	requests.push(alice("UPSERT type::record('ls', $k) SET n = 1", &[("k", int(703))]));
+	requests.push(owner("SELECT VALUE at FROM evlog ORDER BY at", &[]));
+	// A plan kept before its table exists is judged again once the table does.
+	requests.push(owner("CREATE type::record('fresh', $k) SET n = $k", &[("k", int(1))]));
+	requests.push(owner("CREATE type::record('fresh', $k) SET n = $k", &[("k", int(2))]));
+	requests.push(owner(
+		"SELECT * FROM pk ORDER BY id; SELECT * FROM ls ORDER BY id; SELECT * FROM fresh ORDER BY id",
+		&[],
+	));
+	let kept = same_on_and_off(SETUP, &requests).await;
+	assert!(kept.hits >= 30, "{kept:?}");
+}
+
+/// Statements that read a name an earlier `LET` of their request binds, and reads a request
+/// reaches after its first write, answer as they do compiled with their request: a `LET` computed
+/// from a request variable and one written out as a constant, read as a write's target, key, data
+/// value and an `IF` condition; a `LET` that binds the name a request variable binds; a `LET`
+/// whose value is another class of target; a read of a record key and of a source after a write,
+/// in the write's explicit transaction, in an auto-commit transaction of its own, and in the
+/// transaction whose write creates the table it reads; a read that reads a `LET` binding only in
+/// its filter; and one statement text read with a `LET` that shadows a defined parameter and
+/// without it.
+#[tokio::test]
+async fn kept_statements_reading_let_bindings_answer_as_compiled_with_their_request() {
+	let mut requests = Vec::new();
+	for key in [1, 2, 3, 1] {
+		requests.push(owner(
+			"LET $row = type::record('ls', $k); UPSERT $row SET n = $k RETURN n",
+			&[("k", int(800 + key))],
+		));
+		requests.push(owner(
+			"LET $key = $k * 2; LET $v = $k + 1; \
+			 UPSERT type::record('ls', $key) SET n = $v RETURN id, n",
+			&[("k", int(810 + key))],
+		));
+		requests.push(owner(
+			"LET $go = $k > 841; IF $go { UPSERT type::record('ls', $k) SET n = 1 } \
+			 ELSE { UPSERT type::record('ls', $k) SET n = 2 }",
+			&[("k", int(840 + key))],
+		));
+		requests.push(owner(
+			&format!("LET $c = {}; UPSERT type::record('ls', $c) SET n = $c RETURN n", 820 + key),
+			&[],
+		));
+		requests.push(owner(
+			"LET $k = $k + 1000; UPSERT type::record('ls', $k) SET n = $k RETURN id, n",
+			&[("k", int(key))],
+		));
+		requests.push(owner(
+			"BEGIN; UPSERT ls:830 SET n = $k; SELECT VALUE n FROM type::record('ls', $k); \
+			 LET $src = type::record('ls', $k); SELECT n FROM $src; COMMIT;",
+			&[("k", int(key))],
+		));
+		requests.push(owner(
+			"UPSERT ls:850 SET n = 1; LET $min = $k; \
+			 SELECT VALUE n FROM ls WHERE n >= $min AND n < 5 ORDER BY n",
+			&[("k", int(key))],
+		));
+		requests.push(owner(
+			"UPSERT ls:860 SET n = $k; SELECT VALUE n FROM type::record('ls', $k);",
+			&[("k", int(key))],
+		));
+		requests.push(owner(
+			"BEGIN; CREATE type::record('fresh', $k) SET n = $k; \
+			 SELECT VALUE n FROM type::record('fresh', $k); REMOVE TABLE fresh; COMMIT;",
+			&[("k", int(key))],
+		));
+	}
+	// One statement text, with a `LET` that shadows a defined parameter and without it.
+	requests.push(owner("DEFINE PARAM $c VALUE 5", &[]));
+	requests.push(owner("LET $c = 821; UPSERT ls:900 SET n = $c RETURN n", &[]));
+	requests.push(owner("UPSERT ls:900 SET n = $c RETURN n", &[]));
+	requests.push(owner("LET $c = 822; UPSERT ls:900 SET n = $c RETURN n", &[]));
+	requests.push(owner("UPSERT ls:900 SET n = $c RETURN n", &[]));
+	// A `LET` bound to another class of target: a table, and an array of records.
+	requests.push(owner("LET $row = type::table('ls'); UPDATE $row SET m = 1 RETURN NONE", &[]));
+	requests.push(owner("LET $row = [ls:1, ls:2]; UPDATE $row SET m = 2 RETURN VALUE m", &[]));
+	requests.push(owner("SELECT * FROM ls ORDER BY id", &[]));
+	let kept = same_on_and_off(SETUP, &requests).await;
+	// Nine statements of the loop are kept by their first request and served to the next three:
+	// every write, the `IF` block, and the two reads after a write. The auto-commit write and read
+	// are served what the explicit transaction's write and read keep, from their first request on:
+	// a key written out is read as a variable. In the transaction that creates `fresh`, the write
+	// is served and the read is compiled again each time, never served another transaction's
+	// compilation. The write reading `$c` is kept apart with the `LET` and with the defined
+	// parameter, each served once. The read whose filter reads `$min` is compiled with its
+	// request.
+	assert!(kept.hits >= 40, "{kept:?}");
+}
+
 /// A schema statement between two identical kept writes changes what the second coerces,
 /// derives, fires, indexes and enforces, as it does for writes compiled with their request.
 #[tokio::test]
@@ -503,10 +702,19 @@ async fn statements_of_one_shape_link_one_bundle_of_their_table() {
 	.await;
 	assert_eq!(units, (2, 1), "a new definition, and a statement of another shape, compile anew");
 	let units = catalog_units(async {
-		run("UPDATE ls:3 SET n = 7", &[]).await;
+		run("UPDATE ls SET n = 7 WHERE id = ls:3", &[]).await;
 	})
 	.await;
 	assert_eq!(units, (0, 0), "a statement planned for its request alone links nothing");
+	let units = catalog_units(async {
+		run("UPDATE ls:2 SET n = 5", &[]).await;
+	})
+	.await;
+	assert_eq!(
+		units,
+		(0, 1),
+		"a record id written out links the bundle its variable form compiled"
+	);
 	let got = answers(ds, &owner("SELECT VALUE [n, m] FROM ls ORDER BY id", &[])).await;
 	assert_eq!(got, vec!["[[6, 0], [5, 0], [7, 0]]".to_owned()]);
 }

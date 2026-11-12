@@ -1135,6 +1135,9 @@ enum Planned {
 	Served {
 		op: LogicalOp,
 		front_end: bool,
+		/// Whether the statement only reads or only writes, so the cache of
+		/// request statements may keep it ([`Executor::compile_one`]).
+		keepable: bool,
 	},
 	/// Planned when it is reached, for that run alone
 	/// ([`StatementPlan::Reached`]).
@@ -1173,10 +1176,13 @@ enum StatementPlan {
 	Ready(Arc<dyn crate::exec::ExecOperator>),
 	/// Planned for the catalog its transaction reads when it runs, served
 	/// from the compile cache by its text (`vm::serve`): `op` as written, a
-	/// front end's plan where `front_end`.
+	/// front end's plan where `front_end`. A `keepable` statement only reads
+	/// or only writes, and is kept for later requests where
+	/// `vm::serve::Keeping::of` keeps it (`vm::serve::request_statement`).
 	Served {
 		op: LogicalOp,
 		front_end: bool,
+		keepable: bool,
 	},
 	/// Planned when it is reached, for the catalog its transaction reads then
 	/// and for this run alone: an `EXPLAIN`, whose operator renders what this
@@ -1395,13 +1401,6 @@ pub(crate) fn install_statement_state(ctx: &mut FrozenContext) -> Arc<StatementC
 		}
 	}
 	counters
-}
-
-/// Whether `op` is a write statement, bare or under its `TIMEOUT`: one the
-/// cache of compiled statements may keep ([`crate::exec::vm::serve::kept_for_requests`]).
-fn is_write_statement(op: &LogicalOp) -> bool {
-	matches!(op, LogicalOp::Write(_))
-		|| matches!(op, LogicalOp::Timeout(timeout) if matches!(timeout.input.as_ref(), LogicalOp::Write(_)))
 }
 
 /// Guard that stops the timeout task when dropped, so it does not
@@ -2398,6 +2397,7 @@ impl Executor {
 			StatementPlan::Served {
 				op,
 				front_end,
+				keepable,
 			} => {
 				let probe =
 					self.statement_context(&txn, &cancellation, true, ContextLevel::Root).await?;
@@ -2414,6 +2414,7 @@ impl Executor {
 								op,
 								principal,
 								self.binds_rows,
+								keepable,
 							)
 						})
 						.await
@@ -5896,9 +5897,11 @@ impl Executor {
 			Planned::Served {
 				op,
 				front_end,
+				keepable,
 			} => Ok(StatementPlan::Served {
 				op,
 				front_end,
+				keepable,
 			}),
 			Planned::Reached {
 				op,
@@ -6094,7 +6097,7 @@ impl Executor {
 									lowered,
 									&mut plan_session,
 									inline,
-									*read_only || is_write_statement(lowered),
+									*read_only || crate::exec::vm::serve::writes_only(lowered),
 									keep_logged,
 									false,
 									&mut builder,
@@ -6144,7 +6147,7 @@ impl Executor {
 								.map(crate::exec::vm::RequestEntry::Operator),
 							)
 						} else {
-							served_for(plan, true)
+							served_for(plan, true, false)
 						};
 						compiled[at] = Some(PlannedStatement {
 							entry,
@@ -6248,7 +6251,7 @@ impl Executor {
 	/// the statements before it leave, into the request `builder` builds;
 	/// or, where it is not `inline`, or where it reads a parameter only the run
 	/// computes, leave it to be served when it is reached. A `cacheable`
-	/// statement — one that only reads, or a write — that reads the request's
+	/// statement - one that only reads, or one that only writes - that reads the request's
 	/// variables only where one compilation serves every value of them
 	/// ([`crate::exec::vm::serve::kept_for_requests`]), or whose literals in
 	/// those places are freed as such variables
@@ -6273,7 +6276,7 @@ impl Executor {
 	) -> PlannedStatement {
 		let logged = keep_logged.then(|| op.clone());
 		let served = || PlannedStatement {
-			entry: served_for(op.clone(), false),
+			entry: served_for(op.clone(), false, cacheable),
 			logged: keep_logged.then(|| op.clone()),
 		};
 		if !inline || (!planning.computed.is_empty() && reads_any(op, &planning.computed)) {
@@ -6281,20 +6284,15 @@ impl Executor {
 		}
 		let ctx = compile_phase!("bind", planning.bound_context(&self.ctx, txn));
 		let opt = &planning.opt;
-		let caches = cacheable
-			&& self.ctx.compiled_units().is_some_and(|units| units.caches_statements())
-			&& !crate::exec::planner::fold::changes_the_catalog(op)
-			&& !op.any(|node| matches!(node, LogicalOp::Explain(_)));
-		let freed = caches.then(|| crate::exec::vm::serve::free_literals(op, &ctx)).flatten();
-		let (kept, literals) = match &freed {
-			Some((kept, literals)) => (kept, literals.as_slice()),
-			None => (op, &[][..]),
-		};
-		if caches && crate::exec::vm::serve::kept_for_requests(kept, &ctx, literals) {
+		let keeping = cacheable.then(|| crate::exec::vm::serve::Keeping::of(op, &ctx)).flatten();
+		if let Some(keeping) = keeping {
+			let (kept, literals) = keeping.statement(op);
 			// Served from the cache of compiled statements as the request
 			// arrives, in a context of the session the statements before it
 			// leave. One whose compilation fails is served when it is reached,
-			// which raises its error as a statement planned then does.
+			// which raises its error as a statement planned then does; a write
+			// whose literals its tables convert is compiled below as written. A
+			// read compiled on arrival keeps its freed literals.
 			let probe = crate::exec::context::statement_context(
 				&ctx,
 				opt,
@@ -6306,29 +6304,33 @@ impl Executor {
 				None,
 			)
 			.await;
-			if let Ok(probe) = probe
-				&& let Ok(plan) = crate::exec::vm::out_of_line(|| {
-					crate::exec::vm::serve::kept_request_statement(
-						&probe,
-						kept.clone(),
-						Some(Arc::clone(&opt.auth)),
-						literals,
-					)
-				})
-				.await
-			{
-				let plan: Arc<dyn crate::exec::ExecOperator> = match freed {
-					Some((_, literals)) => {
-						Arc::new(crate::exec::vm::serve::LiteralBound::new(plan, literals))
-					}
-					None => plan,
-				};
-				return PlannedStatement {
-					entry: Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Operator(plan))),
-					logged,
-				};
+			let as_written = match &probe {
+				Ok(probe) if crate::exec::vm::serve::writes_only(op) => {
+					keeping.plans_as_written(op, probe).await
+				}
+				Ok(_) | Err(_) => false,
+			};
+			if !as_written {
+				if let Ok(probe) = probe
+					&& let Ok(plan) = crate::exec::vm::out_of_line(|| {
+						crate::exec::vm::serve::kept_request_statement(
+							&probe,
+							kept.clone(),
+							Some(Arc::clone(&opt.auth)),
+							literals,
+						)
+					})
+					.await
+				{
+					return PlannedStatement {
+						entry: Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Operator(
+							keeping.bind(plan),
+						))),
+						logged,
+					};
+				}
+				return served();
 			}
-			return served();
 		}
 		let planned = crate::exec::planner::plan_request_statement(
 			op.clone(),
@@ -6402,7 +6404,7 @@ fn holds_closure(expr: &crate::expr::logical::LogicalExpr) -> bool {
 /// ([`StatementPlan::Reached`]) — an `EXPLAIN`, whose operator renders what
 /// that run measured, and a statement holding a schema statement, whose
 /// planning models it with a speculative run in the transaction it runs in.
-fn served_for(op: LogicalOp, front_end: bool) -> Planned {
+fn served_for(op: LogicalOp, front_end: bool, keepable: bool) -> Planned {
 	if op.any(|node| matches!(node, LogicalOp::Explain(_)))
 		|| crate::exec::planner::fold::changes_the_catalog(&op)
 	{
@@ -6414,6 +6416,7 @@ fn served_for(op: LogicalOp, front_end: bool) -> Planned {
 		Planned::Served {
 			op,
 			front_end,
+			keepable,
 		}
 	}
 }

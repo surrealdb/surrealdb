@@ -266,7 +266,8 @@ pub(super) async fn runs_unseen_schema(
 	reached(planner, op, closures_from_outside, None).await.is_none()
 }
 
-/// The tables each variable the write `op` is (under its `TIMEOUT` at most) names
+/// The tables each variable the write `op` is (under its `TIMEOUT` at most), or each write of `op`
+/// where it is a block that only writes ([`crate::exec::vm::serve::writes_only`]), names
 /// as a target holds in every run of the plan `planner` makes: the table a kept statement's class
 /// of value names ([`Planner::named_targets`]), or the tables the value the planning
 /// context binds the name to names, which the bind folds into the plan. A name
@@ -329,6 +330,57 @@ fn variable_targets(
 			| Value::Range(_)
 			| Value::Closure(_) => None,
 		}
+	}
+	let held = |name: &str| match planner.named_targets().iter().find(|(named, _)| named == name) {
+		Some((_, table)) => Some(vec![table.clone()]),
+		None if planner.param_is_shadowed(name) => None,
+		None => planner.frozen().value(name).and_then(tables),
+	};
+	if matches!(op, LogicalOp::If(_) | LogicalOp::Sequence(_))
+		&& crate::exec::vm::serve::writes_only(op)
+	{
+		// The block's own writes - its statements and the arms of its `IF`s, at any depth - bind
+		// no variable, so each names its target by a variable the request fixes. A write nested
+		// in one of them, in a subquery, may name its target by a variable a `LET` or a `FOR`
+		// there binds, which the request's value does not fix: a name such a write reads reaches
+		// every table.
+		fn own_writes<'a>(
+			op: &'a LogicalOp,
+			out: &mut Vec<&'a crate::expr::logical::LogicalWrite>,
+		) {
+			if let LogicalOp::If(ifop) = op {
+				ifop.arms.iter().for_each(|arm| own_writes(arm, out));
+			} else if let LogicalOp::Sequence(sequence) = op {
+				sequence.stmts.iter().for_each(|stmt| own_writes(stmt, out));
+			} else if let LogicalOp::Write(write) = op {
+				out.push(write);
+			} else if let LogicalOp::Timeout(timeout) = op
+				&& let LogicalOp::Write(write) = timeout.input.as_ref()
+			{
+				out.push(write);
+			}
+		}
+		let mut own = Vec::new();
+		own_writes(op, &mut own);
+		let mut out = std::collections::BTreeMap::new();
+		for write in &own {
+			for name in target_variables(&write.source) {
+				if let Some(tables) = held(name) {
+					out.insert(name.to_owned(), tables);
+				}
+			}
+		}
+		let _ = op.visit_ops_deep(&mut |node| {
+			if let LogicalOp::Write(write) = node
+				&& !own.iter().any(|mine| std::ptr::eq(*mine, write))
+			{
+				for name in target_variables(&write.source) {
+					out.remove(name);
+				}
+			}
+			std::ops::ControlFlow::<()>::Continue(())
+		});
+		return out;
 	}
 	let root = match op {
 		LogicalOp::Write(write) => write,
@@ -401,12 +453,7 @@ fn variable_targets(
 	};
 	let mut out = std::collections::BTreeMap::new();
 	for name in target_variables(&root.source) {
-		let held = match planner.named_targets().iter().find(|(named, _)| named == name) {
-			Some((_, table)) => Some(vec![table.clone()]),
-			None if planner.param_is_shadowed(name) => None,
-			None => planner.frozen().value(name).and_then(tables),
-		};
-		if let Some(held) = held {
+		if let Some(held) = held(name) {
 			out.insert(name.to_owned(), held);
 		}
 	}
