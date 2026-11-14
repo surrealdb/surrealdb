@@ -2,7 +2,9 @@
 //! every fetch of the record answers that field alike, and the table whole where a fetch may answer
 //! it differently: in a read, a computed field, which is derived on each fetch, or a conditional
 //! `SELECT` permission a checked caller's fetch judges each time; in a write, any record, which the
-//! write may change between the two fetches. A field of an object reads the index in either.
+//! write may change between the two fetches. A field of an object reads the index in either. An
+//! event's body keys the lookup by a path into `$after` as a function body does by a path into its
+//! argument.
 //!
 //! Each test counts the keys a transaction reads while running one statement, on two
 //! datastores that differ only in how many records the looked-up table holds. A lookup reads the
@@ -18,7 +20,7 @@ use crate::kvs::TransactionType;
 use crate::kvs::request::QueryRequest;
 
 /// The schema: `item` is looked up by `k`; each function keys the lookup by one path into its
-/// record argument.
+/// record argument, and each event by one path into `$after`.
 const SCHEMA: &str = "
 	DEFINE ACCESS user ON DATABASE TYPE RECORD SIGNIN (SELECT * FROM user WHERE id = $id);
 	DEFINE TABLE user SCHEMALESS PERMISSIONS FULL;
@@ -49,6 +51,27 @@ const SCHEMA: &str = "
 		RETURN SELECT VALUE k FROM item WHERE k = $r.derived_link.k;
 	};
 	DEFINE FUNCTION fn::bump($r: any) { RETURN UPDATE item SET n = 1 WHERE k = $r.k RETURN VALUE k; };
+	DEFINE TABLE ev_log SCHEMALESS PERMISSIONS FULL;
+	DEFINE TABLE ev_read SCHEMALESS PERMISSIONS FULL;
+	DEFINE EVENT read ON ev_read WHEN true THEN {
+		CREATE ev_log SET k = (SELECT VALUE k FROM item WHERE k = $after.k) RETURN NONE;
+	};
+	DEFINE TABLE ev_linked SCHEMALESS PERMISSIONS FULL;
+	DEFINE EVENT read ON ev_linked WHEN true THEN {
+		CREATE ev_log SET k = (SELECT VALUE k FROM item WHERE k = $after.r.k) RETURN NONE;
+	};
+	DEFINE TABLE ev_derived SCHEMALESS PERMISSIONS FULL;
+	DEFINE EVENT read ON ev_derived WHEN true THEN {
+		CREATE ev_log SET k = (SELECT VALUE k FROM item WHERE k = $after.r.derived) RETURN NONE;
+	};
+	DEFINE TABLE ev_write SCHEMALESS PERMISSIONS FULL;
+	DEFINE EVENT bump ON ev_write WHEN true THEN {
+		UPDATE item SET n = 1 WHERE k = $after.k RETURN NONE;
+	};
+	DEFINE TABLE ev_write_linked SCHEMALESS PERMISSIONS FULL;
+	DEFINE EVENT bump ON ev_write_linked WHEN true THEN {
+		UPDATE item SET n = 1 WHERE k = $after.r.k RETURN NONE;
+	};
 ";
 
 /// The keys a transaction reads running `sql` as `session` where `item` holds `rows` records. The
@@ -114,4 +137,22 @@ async fn a_write_reads_the_index_for_an_object_and_the_table_whole_for_a_record(
 	let owner = TestDb::owner();
 	assert!(reads_the_index(&owner, "fn::bump({ k: 1 })").await, "an object's field");
 	assert!(!reads_the_index(&owner, "fn::bump(plain:one)").await, "a stored field of a record");
+}
+
+#[tokio::test]
+async fn an_event_keys_the_lookup_by_its_images_as_a_function_by_its_arguments() {
+	let owner = TestDb::owner();
+	for sql in [
+		"CREATE ev_read SET k = 1 RETURN VALUE k",
+		"CREATE ev_linked SET k = 1, r = cfg:one RETURN VALUE k",
+		"CREATE ev_write SET k = 1 RETURN VALUE k",
+	] {
+		assert!(reads_the_index(&owner, sql).await, "{sql}: reads the table whole");
+	}
+	for sql in [
+		"CREATE ev_derived SET k = 1, r = cfg:one RETURN VALUE k",
+		"CREATE ev_write_linked SET k = 1, r = cfg:one RETURN VALUE k",
+	] {
+		assert!(!reads_the_index(&owner, sql).await, "{sql}: reads the index");
+	}
 }
