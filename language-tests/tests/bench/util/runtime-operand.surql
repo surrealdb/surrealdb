@@ -18,6 +18,8 @@ value = "'OK'"
 	DEFINE FUNCTION fn::rt_pair_last($k: int) { RETURN SELECT VALUE id FROM pair WHERE a = 1 AND b = 21 AND k = $k; };
 	DEFINE FUNCTION fn::rt_pair_every($o: object) { RETURN SELECT VALUE id FROM pair WHERE a = $o.a AND b = $o.b AND k = $o.k; };
 	DEFINE FUNCTION fn::rt_bump_path($o: object) { RETURN UPDATE item SET n = 1 WHERE k = $o.k RETURN NONE; };
+	DEFINE TABLE rt_src SCHEMALESS;
+	DEFINE EVENT rt_bump ON rt_src WHEN true THEN { UPDATE item SET n = 1 WHERE k = $after.k RETURN NONE; };
 	-- `$n` rows in each table; every key the benches read matches one row of its table.
 	DEFINE FUNCTION fn::rt_fill($n: int) {
 		FOR $i IN 0..$n {
