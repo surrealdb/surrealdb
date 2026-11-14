@@ -233,6 +233,7 @@ a45203ef136a584c language-tests/tests/bench/planner/runtime_operand_closure_path
 64ec91df957701c5 language-tests/tests/bench/planner/runtime_operand_composite_every.surql
 5c55fc2f31fd35c4 language-tests/tests/bench/planner/runtime_operand_composite_first.surql
 c29c3d4232d67868 language-tests/tests/bench/planner/runtime_operand_composite_last.surql
+09fe29ac5eb8205b language-tests/tests/bench/planner/runtime_operand_event_path.surql
 5bafb2f270fbd005 language-tests/tests/bench/planner/runtime_operand_field_path.surql
 9eb599404e20523a language-tests/tests/bench/planner/runtime_operand_update_path.surql
 8758c52d7778f73a language-tests/tests/bench/recursion/computed_field_select.surql
@@ -448,7 +449,7 @@ a06c398dbae2de77 language-tests/tests/bench/util/recursion-items-dynamic-1000.su
 332a16bc31eb5070 language-tests/tests/bench/util/references-5000.surql
 5be6b09720a605aa language-tests/tests/bench/util/runtime-operand-5000.surql
 4140076e40c4e27e language-tests/tests/bench/util/runtime-operand-50000.surql
-39f7b611d4c1ae8d language-tests/tests/bench/util/runtime-operand.surql
+c65c2dcbc6ab81fe language-tests/tests/bench/util/runtime-operand.surql
 f4964fc1558d0839 language-tests/tests/bench/util/schemafull-record-table.surql
 780ed27b1ca4cf8c language-tests/tests/bench/vector/build_diskann_768.surql
 780ed27b1ca4cf8c language-tests/tests/bench/vector/build_diskann_768_20k.surql
@@ -4288,6 +4289,7 @@ b0c738b51a47bc0e language-tests/tests/reproductions/7601_versioned_table_read_re
 c21d88774a1d3ec1 language-tests/tests/reproductions/7603_one_writers_live_notifications_follow_commit_order.surql
 72be871820f6e2f9 language-tests/tests/reproductions/7645_runtime_bound_param_reads_the_index.surql
 a027308e7c6b3bac language-tests/tests/reproductions/7663_runtime_operand_paths_read_the_index.surql
+1e19485d6b31c8be language-tests/tests/reproductions/7698_event_image_paths_read_the_index.surql
 cfdc5aad357bed4b language-tests/tests/reproductions/828_enforced_relation_import_order.surql
 7fc9c905161cad9b language-tests/tests/reproductions/893_fulltext_compaction_term_round_grouping.surql
 24b0b941623cfc81 language-tests/tests/reproductions/903_use_ns_db_expression_argument.surql
