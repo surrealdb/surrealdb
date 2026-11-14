@@ -649,8 +649,8 @@ struct Candidate {
 ///
 /// A read qualifies when
 ///
-/// - it is a record read by id (never a locked read) or an index lookup, with its key as its first
-///   operand;
+/// - it is a record read by id (never a locked read), or an index lookup that pins one column and
+///   carries no guard, with its key as its first operand;
 /// - it runs on every iteration that completes: it stands in the loop's body through statements,
 ///   blocks and pipelines only, never under a condition, a clause, a nested loop or a choice, and
 ///   the loop holds no `break`, `continue` or `return` that can end an iteration before it;
@@ -772,7 +772,8 @@ fn collect_reads(ir: &Ir, owner: OpId, found: &mut Vec<PrefetchRead>) {
 			};
 			let shape = if matches!(kind, PhysOp::RecordScan(attrs) if !attrs.for_update) {
 				Some(PrefetchShape::Point)
-			} else if matches!(kind, PhysOp::IndexLookup(..)) {
+			} else if matches!(kind, PhysOp::IndexLookup(attrs) if attrs.fields.len() == 1 && attrs.guards.is_empty())
+			{
 				Some(PrefetchShape::Range)
 			} else {
 				None

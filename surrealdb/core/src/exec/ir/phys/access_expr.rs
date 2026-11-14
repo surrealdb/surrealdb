@@ -405,7 +405,39 @@ fn computed_outside_clauses(ir: &Ir, value: ValueId) -> bool {
 	else {
 		return false;
 	};
-	let mut region = Some(ir.enclosing_region(op));
+	outside_clauses(ir, ir.enclosing_region(op))
+}
+
+/// Whether `value` is the variable of a `FOR` body, an argument of a function or closure body, or
+/// a value an event binds (its record, `$before`, `$after`, `$event`, `$input`), that no clause
+/// region encloses: it holds one value for every run of a statement the body holds, bound before
+/// the rows the statement's clauses judge.
+fn bound_by_body(ir: &Ir, value: ValueId) -> bool {
+	let Some(ValueDef::BlockArg {
+		block,
+		..
+	}) = ir.value(value).map(|data| data.def)
+	else {
+		return false;
+	};
+	let Some(region) = ir.block(block).map(|block| block.parent) else {
+		return false;
+	};
+	ir.region(region).is_some_and(|data| {
+		matches!(
+			data.kind,
+			RegionKind::StatementFor
+				| RegionKind::ValueFor
+				| RegionKind::FunctionBody
+				| RegionKind::ClosureBody
+				| RegionKind::EventFrame
+		)
+	}) && outside_clauses(ir, region)
+}
+
+/// Whether no clause region encloses `region`, up to the statement it is in.
+fn outside_clauses(ir: &Ir, region: RegionId) -> bool {
+	let mut region = Some(region);
 	while let Some(at) = region {
 		let Some(data) = ir.region(at) else {
 			return false;
@@ -457,12 +489,15 @@ impl Rebuild<'_> {
 	/// `value` as the analyzer reads it, or `None` when it holds a form the analyzer does not read.
 	///
 	/// A value an op computes outside every clause, which a `KNN` operator's query vector moved out
-	/// of its predicate is ([`super::knn::hoist_vectors`]), holds one value for every row the
-	/// clause judges: where its form is not read, it is a per-execution operand.
+	/// of its predicate is ([`super::knn::hoist_vectors`]), and a loop variable or argument a body
+	/// outside every clause binds, hold one value for every row the clause judges: where its form
+	/// is not read, each is a per-execution operand.
 	fn expr(&mut self, value: ValueId) -> Option<LogicalExpr> {
 		match self.expr_form(value) {
 			Some(expr) => Some(expr),
-			None if computed_outside_clauses(self.ir, value) => Some(self.operand(value)),
+			None if computed_outside_clauses(self.ir, value) || bound_by_body(self.ir, value) => {
+				Some(self.operand(value))
+			}
 			None => None,
 		}
 	}

@@ -228,6 +228,14 @@ cb1d29660875916e language-tests/tests/bench/planner/correlated_index_lookup_few.
 e72a4f570d45b6de language-tests/tests/bench/planner/or_filter_disjoint_200k.surql
 4b07d050e7c96e71 language-tests/tests/bench/planner/order_index_latest_n.surql
 61c548bbd1630fff language-tests/tests/bench/planner/order_index_under_limit.surql
+4159376f2873332f language-tests/tests/bench/planner/runtime_operand_closure_composite.surql
+a45203ef136a584c language-tests/tests/bench/planner/runtime_operand_closure_path.surql
+64ec91df957701c5 language-tests/tests/bench/planner/runtime_operand_composite_every.surql
+5c55fc2f31fd35c4 language-tests/tests/bench/planner/runtime_operand_composite_first.surql
+c29c3d4232d67868 language-tests/tests/bench/planner/runtime_operand_composite_last.surql
+09fe29ac5eb8205b language-tests/tests/bench/planner/runtime_operand_event_path.surql
+5bafb2f270fbd005 language-tests/tests/bench/planner/runtime_operand_field_path.surql
+9eb599404e20523a language-tests/tests/bench/planner/runtime_operand_update_path.surql
 8758c52d7778f73a language-tests/tests/bench/recursion/computed_field_select.surql
 873d11bb51882863 language-tests/tests/bench/recursion/dynamic_field_update.surql
 5c7cb16a3fbbf472 language-tests/tests/bench/recursion/user_function_fib.surql
@@ -439,6 +447,9 @@ ad7d2be85fb59425 language-tests/tests/bench/util/recursion-items-computed-1000.s
 a06c398dbae2de77 language-tests/tests/bench/util/recursion-items-dynamic-1000.surql
 48ff9cf7afca7c05 language-tests/tests/bench/util/references-100000.surql
 332a16bc31eb5070 language-tests/tests/bench/util/references-5000.surql
+5be6b09720a605aa language-tests/tests/bench/util/runtime-operand-5000.surql
+4140076e40c4e27e language-tests/tests/bench/util/runtime-operand-50000.surql
+3bb319e41053912a language-tests/tests/bench/util/runtime-operand.surql
 f4964fc1558d0839 language-tests/tests/bench/util/schemafull-record-table.surql
 780ed27b1ca4cf8c language-tests/tests/bench/vector/build_diskann_768.surql
 780ed27b1ca4cf8c language-tests/tests/bench/vector/build_diskann_768_20k.surql
@@ -4276,6 +4287,9 @@ b99045fbd7ad86df language-tests/tests/reproductions/7593_write_with_in_over_comp
 b0c738b51a47bc0e language-tests/tests/reproductions/7601_versioned_table_read_returns_deleted_record.surql
 6d0ec05eaa70e6db language-tests/tests/reproductions/7602_diskann_i8_build_answers_knn.surql
 c21d88774a1d3ec1 language-tests/tests/reproductions/7603_one_writers_live_notifications_follow_commit_order.surql
+72be871820f6e2f9 language-tests/tests/reproductions/7645_runtime_bound_param_reads_the_index.surql
+a027308e7c6b3bac language-tests/tests/reproductions/7663_runtime_operand_paths_read_the_index.surql
+39fbac84892689b3 language-tests/tests/reproductions/7698_event_image_paths_read_the_index.surql
 cfdc5aad357bed4b language-tests/tests/reproductions/828_enforced_relation_import_order.surql
 7fc9c905161cad9b language-tests/tests/reproductions/893_fulltext_compaction_term_round_grouping.surql
 24b0b941623cfc81 language-tests/tests/reproductions/903_use_ns_db_expression_argument.surql

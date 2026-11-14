@@ -6289,6 +6289,34 @@ pub(super) enum HostScalar {
 	Code(u16),
 }
 
+/// Where the key of an index lookup ([`Source::Lookup`]) comes from, read
+/// each time the pipeline opens.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum LookupKey {
+	/// The value at a path of fields into `$parent`, read through objects
+	/// alone.
+	Parent(Vec<surrealdb_strand::Strand>),
+	/// The key the join running the pipeline hands it
+	/// ([`State::lookup_key`](super::interp::State)).
+	Join,
+	/// Values the statement computes that read no row of the table, one per
+	/// leading column of the index the key pins, in column order.
+	Scalars {
+		keys: Vec<HostScalar>,
+		/// The values the field steps of a key's path read, each with the
+		/// field its step reads, read before the keys and each after the
+		/// values it is read from: where a step would fetch a record whose
+		/// field may answer a row's fetch differently, the table is read whole
+		/// without evaluating the keys.
+		guards: Vec<(HostScalar, Strand)>,
+		/// Whether the statement writes nothing while the rows are read, so
+		/// a fetch answers differently only through a computed field or a
+		/// conditional `SELECT` permission; where it may write, any fetched
+		/// record may.
+		stable: bool,
+	},
+}
+
 /// An `INSERT`'s `INTO` clause: a table name or a string naming one.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct InsertInto {
@@ -6525,17 +6553,15 @@ pub(super) enum Source {
 		/// records.
 		decode: Option<crate::exec::operators::scan::common::DecodeFields>,
 	},
-	/// The records of `table` B-tree index `index` lists under an equality to
-	/// a key read when the pipeline opens: the value at `outer`, a path of
-	/// fields into `$parent` read through objects alone, or with no `outer`
-	/// the key the join running the pipeline hands it
-	/// ([`State::lookup_key`](super::interp::State)). Every record of
-	/// `table`, in key order, where the key is one the index may not list
-	/// every equal record under ([`super::payload::Plan::IndexLookup`]).
+	/// The records of `table` B-tree index `index` lists under an equality of
+	/// its leading columns to the values `key` reads when the pipeline opens.
+	/// Every record of `table`, in key order, where any value is one the index
+	/// may not list every equal record under
+	/// ([`super::payload::Plan::IndexLookup`]).
 	Lookup {
 		table: TableName,
 		index: crate::exec::index::access_path::IndexRef,
-		outer: Option<Vec<surrealdb_strand::Strand>>,
+		key: LookupKey,
 	},
 	/// The records the B-tree scans `branches` list, each once: branch by
 	/// branch, or merged by `merge`'s key.

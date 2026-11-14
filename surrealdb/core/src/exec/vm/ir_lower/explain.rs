@@ -1416,12 +1416,27 @@ impl<'a> TreeWalk<'a> {
 				)
 			}
 			PhysOp::IndexLookup(attrs) => {
-				let key = self.text_of(self.operand(operands, 0)?);
+				let mut access = Vec::with_capacity(attrs.fields.len());
+				for (at, field) in attrs.fields.iter().enumerate() {
+					access.push(format!("{field} = {}", self.text_of(self.operand(operands, at)?)));
+				}
 				let mut lookup = vec![
 					("table".to_string(), attrs.table.to_string()),
 					("index".to_string(), attrs.index.index.to_string()),
-					("access".to_string(), format!("{} = {key}", attrs.field)),
+					("access".to_string(), access.join(" AND ")),
 				];
+				// The values whose record ids may read the table whole in place of the index.
+				if !attrs.guards.is_empty() {
+					// Two steps may read different fields of one value: each value is named once.
+					let mut guards: Vec<String> = Vec::new();
+					for at in attrs.fields.len()..attrs.fields.len() + attrs.guards.len() {
+						let guard = self.text_of(self.operand(operands, at)?);
+						if !guards.contains(&guard) {
+							guards.push(guard);
+						}
+					}
+					lookup.push(("guard".to_string(), guards.join(", ")));
+				}
 				lookup.extend(self.paging.take().unwrap_or_default());
 				Ok(self.node("IndexLookup", ContextLevel::Database, lookup, vec![]))
 			}

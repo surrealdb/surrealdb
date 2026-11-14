@@ -2280,7 +2280,8 @@ text_unit_enum!(CountSelect {
 });
 text_unit_enum!(LookupKeyShape {
 	Parent,
-	Probe
+	Probe,
+	Operand
 });
 text_unit_enum!(MaterializeImage {
 	KeyAndValue
@@ -2793,8 +2794,10 @@ text_struct!(IndexLookupAttrs {
 	table: TableName,
 	read: ReadClauses,
 	index: IndexRef,
-	field: Strand,
-	key: LookupKeyShape
+	fields: Vec<Strand>,
+	key: LookupKeyShape,
+	guards: Vec<Strand>,
+	stable: bool
 });
 text_struct!(FullTextScanAttrs {
 	table: TableName,
@@ -3726,9 +3729,11 @@ mod tests {
 			PhysTag::IndexLookup => PhysOp::IndexLookup(Box::new(IndexLookupAttrs {
 				table: table("t"),
 				index: index_ref(),
-				field: strand("a"),
+				fields: vec![strand("a")],
 				key: LookupKeyShape::Probe,
 				read: ReadClauses::default(),
+				guards: Vec::new(),
+				stable: true,
 			})),
 			PhysTag::FullTextScan => PhysOp::FullTextScan(Box::new(FullTextScanAttrs {
 				table: table("t"),

@@ -316,11 +316,11 @@ fn check_join(ir: &Ir, op: OpId, data: &OpData, attrs: &JoinAttrs) -> Result<(),
 		.regions
 		.get(usize::from(pair) * 2 + 1)
 		.and_then(|region| build_key_field(ir, *region, &attrs.alias));
-	if field.as_ref() != Some(&lookup.field) {
+	if field.as_slice() != lookup.fields.as_slice() {
 		return fail(format!(
 			"the index lookup of a phys.join reads `{}`, and the right key of pair {pair} reads \
 			 another field of the alias",
-			lookup.field
+			lookup.fields.iter().map(|field| field.as_str()).collect::<Vec<_>>().join(", ")
 		));
 	}
 	if right_table(ir, right).as_ref() != Some(&lookup.table) {
