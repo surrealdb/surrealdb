@@ -56,6 +56,10 @@ const SCHEMA: &str = "
 	DEFINE EVENT read ON ev_read WHEN true THEN {
 		CREATE ev_log SET k = (SELECT VALUE k FROM item WHERE k = $after.k) RETURN NONE;
 	};
+	DEFINE TABLE ev_when SCHEMALESS PERMISSIONS FULL;
+	DEFINE EVENT read ON ev_when WHEN (SELECT VALUE k FROM item WHERE k = $after.k) = [1] THEN {
+		CREATE ev_log SET k = 1 RETURN NONE;
+	};
 	DEFINE TABLE ev_linked SCHEMALESS PERMISSIONS FULL;
 	DEFINE EVENT read ON ev_linked WHEN true THEN {
 		CREATE ev_log SET k = (SELECT VALUE k FROM item WHERE k = $after.r.k) RETURN NONE;
@@ -144,6 +148,7 @@ async fn an_event_keys_the_lookup_by_its_images_as_a_function_by_its_arguments()
 	let owner = TestDb::owner();
 	for sql in [
 		"CREATE ev_read SET k = 1 RETURN VALUE k",
+		"CREATE ev_when SET k = 1 RETURN VALUE k",
 		"CREATE ev_linked SET k = 1, r = cfg:one RETURN VALUE k",
 		"CREATE ev_write SET k = 1 RETURN VALUE k",
 	] {

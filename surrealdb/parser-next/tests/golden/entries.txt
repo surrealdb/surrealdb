@@ -449,7 +449,7 @@ f760b41c8a5c9777 language-tests/tests/bench/util/recursion-items-dynamic-1000.su
 a782ce89b03dc1bc language-tests/tests/bench/util/references-5000.surql
 de8172400ccee256 language-tests/tests/bench/util/runtime-operand-5000.surql
 5f45af375c021092 language-tests/tests/bench/util/runtime-operand-50000.surql
-5e5bcc7f31268947 language-tests/tests/bench/util/runtime-operand.surql
+bf4c24ec024b453f language-tests/tests/bench/util/runtime-operand.surql
 2332283a6544e320 language-tests/tests/bench/util/schemafull-record-table.surql
 780ed27b1ca4cf8c language-tests/tests/bench/vector/build_diskann_768.surql
 780ed27b1ca4cf8c language-tests/tests/bench/vector/build_diskann_768_20k.surql
@@ -4289,7 +4289,7 @@ b0c738b51a47bc0e language-tests/tests/reproductions/7601_versioned_table_read_re
 feb211d2656893e9 language-tests/tests/reproductions/7603_one_writers_live_notifications_follow_commit_order.surql
 351f4454ddf13aca language-tests/tests/reproductions/7645_runtime_bound_param_reads_the_index.surql
 f7972394daef155e language-tests/tests/reproductions/7663_runtime_operand_paths_read_the_index.surql
-72e092763bee914b language-tests/tests/reproductions/7698_event_image_paths_read_the_index.surql
+62fe7dd33e0e225f language-tests/tests/reproductions/7698_event_image_paths_read_the_index.surql
 833d2c1ce4deba0e language-tests/tests/reproductions/828_enforced_relation_import_order.surql
 7fc9c905161cad9b language-tests/tests/reproductions/893_fulltext_compaction_term_round_grouping.surql
 7012e5f28cc37303 language-tests/tests/reproductions/903_use_ns_db_expression_argument.surql

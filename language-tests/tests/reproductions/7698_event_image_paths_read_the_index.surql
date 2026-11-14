@@ -12,8 +12,9 @@ runs, before any statement of its body runs, as a function binds its
 arguments. A statement of the body whose WHERE compares an indexed field with
 `=` to one of them, or to a path of fields into one, reads through the field's
 index: an IndexLookup that evaluates the operand when it opens, over one
-column or several, for SELECT, UPDATE, DELETE and UPSERT alike, and from a
-statement nested in an IF, a FOR or a closure of the body.
+column or several, for SELECT, UPDATE, DELETE and UPSERT alike, in the
+event's WHEN clause, and from a statement nested in an IF, a FOR or a closure
+of the body.
 
 A path that steps through a record id is guarded as it is in a function: a
 read keeps the index for a stored field and reads the whole table for a field
@@ -114,6 +115,12 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[]"
 
 [[test.results]]
@@ -129,6 +136,9 @@ value = "[{ event: 'CREATE', events: 25 }, { event: 'DELETE', events: 25 }, { ev
 value = "true"
 
 [[test.results]]
+value = "[{ event: 'CREATE', events: 25 }, { event: 'DELETE', events: 25 }, { event: 'UPDATE', events: 25 }]"
+
+[[test.results]]
 value = "NONE"
 
 [[test.results]]
@@ -148,6 +158,15 @@ value = "[]"
 
 [[test.results]]
 value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -169,6 +188,24 @@ value = "[]"
 
 [[test.results]]
 value = "true"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "10"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "[]"
 
 [[test.results]]
 value = "[]"
@@ -211,6 +248,7 @@ value = "NONE"
 
 [[test.results]]
 value = "true"
+
 */
 
 -- The records the events read: every class of value in `k` and in either column of `a, b`, and
@@ -275,8 +313,14 @@ DEFINE EVENT rows ON chk WHEN true THEN {
 		(SELECT VALUE id FROM item WHERE a = $after.a AND b = $after.b ORDER BY id) == (SELECT VALUE id FROM item WITH NOINDEX WHERE a = $after.a AND b = $after.b ORDER BY id),
 		(SELECT VALUE id FROM item WHERE a = $before.a AND b = $before.b ORDER BY id) == (SELECT VALUE id FROM item WITH NOINDEX WHERE a = $before.a AND b = $before.b ORDER BY id),
 		(SELECT VALUE id FROM item WHERE kind = $event ORDER BY id) == (SELECT VALUE id FROM item WITH NOINDEX WHERE kind = $event ORDER BY id),
-		(SELECT VALUE id FROM item WHERE k = $after.link.k ORDER BY id) == (SELECT VALUE id FROM item WITH NOINDEX WHERE k = $after.link.k ORDER BY id)
+		(SELECT VALUE id FROM item WHERE k = $after.link.k ORDER BY id) == (SELECT VALUE id FROM item WITH NOINDEX WHERE k = $after.link.k ORDER BY id),
+		(SELECT VALUE id FROM item WHERE k = $value.k ORDER BY id) == (SELECT VALUE id FROM item WITH NOINDEX WHERE k = $value.k ORDER BY id)
 	] RETURN NONE;
+};
+-- A WHEN clause is code of the event as its body is: its reads find the same records.
+DEFINE TABLE when_got SCHEMALESS;
+DEFINE EVENT when_rows ON chk WHEN (SELECT VALUE id FROM item WHERE k = $after.k ORDER BY id) == (SELECT VALUE id FROM item WITH NOINDEX WHERE k = $after.k ORDER BY id) THEN {
+	CREATE when_got SET event = $event RETURN NONE;
 };
 FOR $v IN $classes {
 	CREATE chk SET k = $v, a = $v, b = 1, link = cfg:one RETURN NONE;
@@ -287,8 +331,10 @@ UPDATE chk SET k = 'moved', a = 'moved' RETURN NONE;
 DELETE chk RETURN NONE;
 SELECT event, count() AS events FROM got GROUP BY event ORDER BY event;
 array::all(array::flatten(SELECT VALUE same FROM got));
+SELECT event, count() AS events FROM when_got GROUP BY event ORDER BY event;
 
--- Each write of an event body leaves the state the same write WITH NOINDEX leaves.
+-- Each write of an event body leaves the state the same write WITH NOINDEX leaves, written
+-- directly in the body and nested in an IF.
 DEFINE TABLE wi SCHEMALESS;
 DEFINE INDEX wi_k ON wi FIELDS k;
 DEFINE TABLE wn SCHEMALESS;
@@ -300,15 +346,24 @@ FOR $v IN $classes {
 CREATE wi SET n = 0 RETURN NONE;
 CREATE wn SET n = 0 RETURN NONE;
 DEFINE TABLE wsrc SCHEMALESS;
-DEFINE EVENT writes ON wsrc WHEN true THEN {
+DEFINE EVENT writes ON wsrc WHEN $event != 'DELETE' THEN {
+	UPDATE wi SET n += 1 WHERE k = $after.k;
+	UPDATE wn WITH NOINDEX SET n += 1 WHERE k = $after.k;
+	UPSERT wi SET n += 10 WHERE k = $before.k;
+	UPSERT wn WITH NOINDEX SET n += 10 WHERE k = $before.k;
+};
+DEFINE EVENT deletes ON wsrc WHEN $event = 'DELETE' THEN {
+	DELETE wi WHERE k = $before.k;
+	DELETE wn WITH NOINDEX WHERE k = $before.k;
+};
+DEFINE TABLE wsrc_if SCHEMALESS;
+DEFINE EVENT writes_if ON wsrc_if WHEN true THEN {
 	IF $event = 'DELETE' {
 		DELETE wi WHERE k = $before.k;
 		DELETE wn WITH NOINDEX WHERE k = $before.k;
 	} ELSE {
 		UPDATE wi SET n += 1 WHERE k = $after.k;
 		UPDATE wn WITH NOINDEX SET n += 1 WHERE k = $after.k;
-		UPSERT wi SET n += 10 WHERE k = $before.k;
-		UPSERT wn WITH NOINDEX SET n += 10 WHERE k = $before.k;
 	};
 };
 DEFINE FUNCTION fn::w_same() { RETURN array::sort(SELECT VALUE [k, n] FROM wi) == array::sort(SELECT VALUE [k, n] FROM wn); };
@@ -319,10 +374,16 @@ fn::w_same();
 DELETE wsrc RETURN NONE;
 fn::w_same();
 count(SELECT * FROM wi);
+FOR $v IN $classes { CREATE wsrc_if SET k = $v RETURN NONE; };
+fn::w_same();
+UPDATE wsrc_if SET k = 'moved' RETURN NONE;
+DELETE wsrc_if RETURN NONE;
+fn::w_same();
+count(SELECT * FROM wi);
 
 -- A path that steps through a record whose table computes the stepped field reads the whole
--- table: the filter's own fetch may answer differently from the fetch that keyed the lookup, so
--- across 200 events both records of `vol` are returned at least once, as a scan returns them.
+-- table: the filter fetches the record again for each row, so a scan returns both records of
+-- `vol` on about one event in four, which a lookup keyed by one fetch never does.
 DEFINE TABLE vol_cfg SCHEMALESS;
 DEFINE FIELD coin ON vol_cfg COMPUTED rand::bool();
 CREATE vol_cfg:one RETURN NONE;
