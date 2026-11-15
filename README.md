@@ -18,7 +18,6 @@
 <p align="center">
     <a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/docker/pulls/surrealdb/surrealdb?label=docker%20pulls&style=flat-square"></a>
     &nbsp;
-    <a href="https://crates.io/crates/surrealdb"><img src="https://img.shields.io/crates/d/surrealdb?color=dca282&label=rust&style=flat-square"></a>
 	&nbsp;
     <a href="https://www.npmjs.com/package/surrealdb.js"><img src="https://img.shields.io/npm/dt/surrealdb.js?color=f7df1e&label=javascript&style=flat-square"></a>
     &nbsp;
