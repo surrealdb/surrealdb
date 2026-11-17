@@ -1,8 +1,5 @@
-<a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
-    <img width="100%" src="/img/white/hero.png" alt="SurrealDB Hero">
-</a>
-<a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
-    <img width="100%" src="/img/black/hero.png" alt="SurrealDB Hero">
+<a href="https://surrealdb.com" target="_blank">
+    <img width="100%" src="./img/hero.svg" alt="SurrealDB - The database and memory for every agent">
 </a>
 
 <p align="center">
@@ -124,39 +121,39 @@ Getting started with SurrealDB is as easy as starting up the SurrealDB database 
 **Server side code**
 
 <p>
-    <a href="https://surrealdb.com/docs/integration/sdks/rust"><img width=60 title="Rust" src="https://raw.githubusercontent.com/surrealdb/icons/main/rust.svg" /></a>
+    <a href="https://surrealdb.com/docs/integration/sdks/rust"><img width=60 title="Rust" src="./img/sdks/server/rust.svg" /></a>
     &nbsp;
-    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="JavaScript" src="https://raw.githubusercontent.com/surrealdb/icons/main/javascript.svg" /></a>
+    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="JavaScript" src="./img/sdks/server/javascript.svg" /></a>
 	&nbsp;
-    <a href="https://surrealdb.com/docs/sdk/javascript/engines/wasm"><img width=60 title="WebAssembly" src="https://raw.githubusercontent.com/surrealdb/icons/main/webassembly.svg" /></a>
+    <a href="https://surrealdb.com/docs/sdk/javascript/engines/wasm"><img width=60 title="WebAssembly" src="./img/sdks/server/webassembly.svg" /></a>
 	&nbsp;
-    <a href="https://surrealdb.com/docs/sdk/javascript/engines/node"><img width=60 title="Node.js" src="https://raw.githubusercontent.com/surrealdb/icons/main/nodejs.svg" /></a>
+    <a href="https://surrealdb.com/docs/sdk/javascript/engines/node"><img width=60 title="Node.js" src="./img/sdks/server/nodejs.svg" /></a>
 	&nbsp;
-    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="Deno" src="https://raw.githubusercontent.com/surrealdb/icons/main/deno.svg" /></a>
+    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="Deno" src="./img/sdks/server/deno.svg" /></a>
 	&nbsp;
-	<a href="https://surrealdb.com/docs/integration/sdks/python"><img width=60 title="Python" src="https://raw.githubusercontent.com/surrealdb/icons/main/python.svg" /></a>
+	<a href="https://surrealdb.com/docs/integration/sdks/python"><img width=60 title="Python" src="./img/sdks/server/python.svg" /></a>
 	&nbsp;
-    <a href="https://surrealdb.com/docs/integration/sdks/golang"><img width=60 title="Golang" src="https://raw.githubusercontent.com/surrealdb/icons/main/golang.svg" /></a>
+    <a href="https://surrealdb.com/docs/integration/sdks/golang"><img width=60 title="Golang" src="./img/sdks/server/golang.svg" /></a>
 	&nbsp;
-    <a href="https://surrealdb.com/docs/integration/sdks/dotnet"><img width=60 title=".NET" src="https://raw.githubusercontent.com/surrealdb/icons/main/dotnet.svg" /></a>
+    <a href="https://surrealdb.com/docs/integration/sdks/dotnet"><img width=60 title=".NET" src="./img/sdks/server/dotnet.svg" /></a>
 	&nbsp;
-    <a href="https://surrealdb.com/docs/integration/sdks/php"><img width=60 title="PHP" src="https://raw.githubusercontent.com/surrealdb/icons/main/php.svg" /></a>
+    <a href="https://surrealdb.com/docs/integration/sdks/php"><img width=60 title="PHP" src="./img/sdks/server/php.svg" /></a>
 	&nbsp;
-    <a href="https://surrealdb.com/docs/integration/sdks/java"><img width=60 title="Java" src="https://raw.githubusercontent.com/surrealdb/icons/main/java.svg" /></a>
+    <a href="https://surrealdb.com/docs/integration/sdks/java"><img width=60 title="Java" src="./img/sdks/server/java.svg" /></a>
 </p>
 
 **Client side apps**
 
 <p>
-	<a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="JavaScript" src="https://raw.githubusercontent.com/surrealdb/icons/main/javascript.svg" /></a>
+	<a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="JavaScript" src="./img/sdks/client/javascript.svg" /></a>
     &nbsp;
-    <a href="https://surrealdb.com/docs/sdk/javascript/engines/wasm"><img width=60 title="WebAssembly" src="https://raw.githubusercontent.com/surrealdb/icons/main/webassembly.svg" /></a>
+    <a href="https://surrealdb.com/docs/sdk/javascript/engines/wasm"><img width=60 title="WebAssembly" src="./img/sdks/client/webassembly.svg" /></a>
 	&nbsp;
-    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="React" src="https://raw.githubusercontent.com/surrealdb/icons/main/reactjs.svg" /></a>
+    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="React" src="./img/sdks/client/reactjs.svg" /></a>
 	&nbsp;
-    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="Next.js" src="https://raw.githubusercontent.com/surrealdb/icons/main/nextjs.svg" /></a>
+    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="Next.js" src="./img/sdks/client/nextjs.svg" /></a>
 	&nbsp;
-    <a href="https://surrealdb.com/docs/integration/sdks/ember"><img width=60 title="Ember.js" src="https://raw.githubusercontent.com/surrealdb/icons/main/emberjs.svg" /></a>
+    <a href="https://surrealdb.com/docs/integration/sdks/ember"><img width=60 title="Ember.js" src="./img/sdks/client/emberjs.svg" /></a>
 </p>
 
 <h2><img height="20" src="/img/cloud.svg?raw=true">&nbsp;&nbsp;SurrealDB Cloud</h2>
