@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use common::future::stream::Yielder;
 use futures::StreamExt;
-use surrealdb_strand::Strand;
+use surrealdb_strand::{Strand, TableName};
 
 use super::batch::RecordReader;
 use super::groups::GroupMut;
@@ -2137,25 +2137,82 @@ pub(super) async fn run_storage_source(
 			rows.finish(state, ctx, yielder, flush_at).await
 		}
 		// The records the index lists under the key, where it lists every
-		// record whose field equals the key; otherwise the table whole. The
+		// record whose fields equal its values; otherwise the table whole. The
 		// index is the one the plan read from the catalog under the
 		// snapshot this run reads.
 		Source::Lookup {
 			table,
 			index,
-			outer,
+			key,
 		} => {
 			let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
 				.await
 				.map_err(ControlFlow::Err)?;
 			let def = descriptor.defined().map_err(ControlFlow::Err)?;
 			refuse_lightweight(table, def)?;
-			let key = match outer {
-				Some(outer) => super::nested::key_at(ctx.value("parent"), outer).cloned(),
-				None => state.lookup_key.clone(),
+			// One value per column the key pins; the table whole where any of them is one the
+			// index may not list every equal record under.
+			let mut keys = Vec::new();
+			match key {
+				super::program::LookupKey::Parent(outer) => {
+					keys.extend(super::nested::key_at(ctx.value("parent"), outer).cloned());
+				}
+				super::program::LookupKey::Join => keys.extend(state.lookup_key.clone()),
+				super::program::LookupKey::Scalars {
+					keys: scalars,
+					guards,
+					stable,
+				} => {
+					// A guard or a key whose evaluation fails reads the table whole: the
+					// filter, or the write's `WHERE`, then raises where a scan would, and not
+					// where the table holds no row to judge.
+					let mut whole = false;
+					for (guard, field) in guards {
+						let value = match host_scalar(program, guard, ctx, None).await {
+							Ok(value) => value,
+							Err(ControlFlow::Err(_)) => {
+								whole = true;
+								break;
+							}
+							Err(other) => return Err(other),
+						};
+						let mut tables = Vec::new();
+						record_tables(&value, &mut tables);
+						if !tables.is_empty()
+							&& (!*stable
+								|| fetch_may_vary(ctx, &tables, field)
+									.await
+									.map_err(ControlFlow::Err)?)
+						{
+							whole = true;
+							break;
+						}
+					}
+					for scalar in scalars {
+						if whole {
+							break;
+						}
+						match host_scalar(program, scalar, ctx, None).await {
+							Ok(value) => keys.push(value),
+							Err(ControlFlow::Err(_)) => whole = true,
+							Err(other) => return Err(other),
+						}
+					}
+					if whole {
+						keys.clear();
+					}
+				}
+			}
+			let access = if version.is_some() || keys.is_empty() || !keys.iter().all(lookup_key) {
+				None
+			} else if index.cols.len() == 1 {
+				// An equality on a unique index reads one complete key, so a key of a
+				// composite index, which pins a prefix of its columns, is a compound read.
+				keys.pop().map(crate::exec::index::access_path::BTreeAccess::literal_equality)
+			} else {
+				Some(crate::exec::index::access_path::BTreeAccess::literal_compound(keys, None))
 			};
-			let key = key.filter(|key| version.is_none() && lookup_key(key));
-			let Some(key) = key else {
+			let Some(access) = access else {
 				let range = RecordPrefix {
 					ns: db_ctx.ns_ctx.ns.namespace_id,
 					db: db_ctx.db.database_id,
@@ -2179,14 +2236,15 @@ pub(super) async fn run_storage_source(
 				)
 				.await;
 			};
-			let access = crate::exec::index::access_path::BTreeAccess::literal_equality(key);
+			// A key that leaves a column unpinned reaches a record holding an array there
+			// through an entry per element.
 			let mut records = IndexRecords::open(
 				ctx,
 				index,
 				&access,
 				crate::kvs::Direction::Forward,
 				version,
-				false,
+				access_repeats_records(index, &access),
 				None,
 			)?;
 			if index_runs_in_place(pipeline, state) {
@@ -2903,14 +2961,83 @@ pub(super) async fn run_storage_source(
 	}
 }
 
-/// The records an index lists, in its order: each batch of record ids is
-/// read as the index scan operator reads it, an id whose record is gone
-/// yielding nothing.
-///
-/// A scan that reaches a record through several entries (see
-/// [`access_repeats_records`]) lists it once: the first entry to name it, in the
-/// index's order, stands for the record. The repeats are dropped from the ids
-/// before any record is read, so they cost no read.
+/// Whether a field step reading `field` of a record of one of `tables` may
+/// answer two fetches of the record differently while nothing writes it. A
+/// fetch derives the record's computed fields, so a computed definition of
+/// `field`, or one under it (`field.a`), may answer each fetch differently (a
+/// body that draws entropy or reads the clock); one not rooted at a field may
+/// be reached by any step, and a component the record id names reads the id
+/// alone. Where the caller's reads are checked, a fetch also judges the
+/// table's conditional `SELECT` permission, which hides the record, and a
+/// conditional `SELECT` permission of such a definition, which hides the
+/// field: either may judge each fetch differently. A stored field under no
+/// conditional permission holds one value.
+async fn fetch_may_vary(
+	ctx: &ExecutionContext,
+	tables: &[&TableName],
+	field: &Strand,
+) -> anyhow::Result<bool> {
+	use crate::catalog::Permission;
+	let checked =
+		crate::exec::permission::should_check_perms(ctx.database()?, crate::iam::Action::View)?;
+	let conditional =
+		|permission: &Permission| checked && matches!(permission, Permission::Specific(_));
+	for table in tables {
+		let descriptor = super::descriptor::table(ctx, table).await?;
+		if descriptor.definition.as_ref().is_some_and(|def| conditional(&def.permissions.select)) {
+			return Ok(true);
+		}
+		let varies = descriptor.fields.iter().any(|def| {
+			def.key_part.is_none()
+				&& match def.name.0.first() {
+					Some(crate::expr::part::Part::Field(name)) => name.as_str() == field.as_str(),
+					_ => true,
+				} && (def.computed.is_some() || conditional(&def.select_permission))
+		});
+		if varies {
+			return Ok(true);
+		}
+	}
+	Ok(false)
+}
+
+/// The tables of the record ids `value` holds at any depth of its arrays and
+/// sets, each once: a field step on `value` fetches a record where it is a
+/// record id, and steps into each element of an array or a set. A step on an
+/// object reads one of its values and fetches nothing, so `value` fetches
+/// nothing where none are found.
+fn record_tables<'a>(value: &'a Value, tables: &mut Vec<&'a TableName>) {
+	match value {
+		Value::RecordId(id) => {
+			if !tables.contains(&&id.table) {
+				tables.push(&id.table);
+			}
+		}
+		Value::Array(array) => array.iter().for_each(|value| record_tables(value, tables)),
+		Value::Set(set) => set.iter().for_each(|value| record_tables(value, tables)),
+		Value::Object(_)
+		| Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Date(_)
+		| Value::Time(_)
+		| Value::Timestamp(_)
+		| Value::Interval(_)
+		| Value::Uuid(_)
+		| Value::Bytes(_)
+		| Value::String(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => {}
+	}
+}
+
 /// Whether a B-tree equality on `key` lists every record whose field `=` the
 /// key ([`Source::Lookup`]): a value keyed alike by every value equal to it,
 /// whatever format the index was stamped at. An array is listed by its
@@ -2922,7 +3049,7 @@ pub(super) async fn run_storage_source(
 /// below that format misses a computed decimal equal to it (`2.0dec`) for every
 /// read until it is rebuilt. A string equals a regex it matches, but no entry is
 /// keyed by a regex.
-pub(super) fn lookup_key(key: &Value) -> bool {
+pub(crate) fn lookup_key(key: &Value) -> bool {
 	match key {
 		Value::None
 		| Value::Null
@@ -2956,6 +3083,14 @@ pub(super) fn lookup_key(key: &Value) -> bool {
 	}
 }
 
+/// The records an index lists, in its order: each batch of record ids is
+/// read as the index scan operator reads it, an id whose record is gone
+/// yielding nothing.
+///
+/// A scan that reaches a record through several entries (see
+/// [`access_repeats_records`]) lists it once: the first entry to name it, in the
+/// index's order, stands for the record. The repeats are dropped from the ids
+/// before any record is read, so they cost no read.
 struct IndexRecords {
 	listing: Listing,
 	reader: RecordReader,

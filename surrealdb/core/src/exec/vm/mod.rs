@@ -42,6 +42,7 @@ pub(crate) mod footprint;
 mod manifest;
 pub(crate) mod serve;
 pub(crate) use dispatch::Deref;
+pub(crate) use host::lookup_key;
 pub(crate) use leaf::Class as LeafClass;
 pub(crate) use morsel::MorselMetrics;
 #[cfg(test)]
@@ -109,6 +110,9 @@ mod tests_id_list;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_late_layers;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod tests_lookup_guard;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_morsel;
