@@ -80,7 +80,7 @@ SurrealDB is used for data-intensive systems such as applications requiring mult
 
 View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), and [documentation](https://surrealdb.com/docs).
 
-<img width="100%" src="./img/interface.svg" alt="Surrealist">
+<img width="100%" src="./img/interface.svg" alt="SurrealDB Studio running a SurrealQL query and showing its results">
 
 <h2><img height="19" align="absmiddle" src="./img/icons/list.svg" alt="">&nbsp;&nbsp;Contents</h2>
 
@@ -365,8 +365,8 @@ DEFINE TABLE post SCHEMALESS
 <h2><img height="23" align="absmiddle" src="./img/icons/help.svg" alt="">&nbsp;&nbsp;Why SurrealDB?</h2>
 
 <p align="center">
-    <a href="https://surrealdb.com/cloud" target="_blank">
-        <img width="100%" src="./img/cloud-banner.svg" alt="SurrealDB Cloud">
+    <a href="https://surrealdb.com/surrealdb/features" target="_blank">
+        <img width="100%" src="./img/data-models.svg" alt="SurrealDB data models: relational, document, AI, vector search, graph, key-value, geospatial, time-series, files, and full-text search">
     </a>
 </p>
 
