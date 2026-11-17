@@ -131,8 +131,11 @@ async fn a_value_a_let_binds_is_the_value_the_statement_reads() {
 	}
 }
 
+/// A write to `type::record(<table>, $n)` names its table in its text, so no choice of its plan
+/// depends on `$n`: one compilation serves every value of it, whether the write is a request's
+/// first or is planned when the request reaches it after an earlier write.
 #[tokio::test]
-async fn a_write_is_compiled_with_its_request() {
+async fn a_write_to_a_record_of_a_named_table_is_compiled_once_for_its_key() {
 	let db = TestDb::new(PEOPLE).await;
 	let (ds, owner) = (db.datastore(), TestDb::owner());
 	let base = ds.statement_cache_stats();
@@ -143,7 +146,154 @@ async fn a_write_is_compiled_with_its_request() {
 		answer(ds, &owner, "UPDATE type::record('person', $n) SET age = 1", Some(number(n))).await;
 		answer(ds, &owner, "DELETE type::record('person', $n)", Some(number(n))).await;
 	}
-	assert_eq!(now(), stats(0, 0, 0));
+	assert_eq!(now(), stats(9, 3, 0));
+	let reached = ds.reached_statement_stats();
+	let sql = "BEGIN; CREATE type::record('person', $n) SET name = 'x'; \
+		UPSERT type::record('person', $n) SET age = 2; UPDATE type::record('person', $n) SET age += 1; \
+		COMMIT;";
+	for n in 20..23 {
+		ds.execute(sql, &owner, Some(number(n))).await.expect("the request runs");
+	}
+	// The `CREATE` is the text of the requests before; the `UPSERT` and `UPDATE` compile once.
+	assert_eq!(now(), stats(9 + 7, 3 + 2, 0));
+	let reached = since_compiled(reached, ds.reached_statement_stats());
+	assert_eq!(reached, 0, "no write after the first is compiled when the request reaches it");
+	assert_eq!(
+		last_answer(
+			ds,
+			&owner,
+			"SELECT VALUE [id, age] FROM person WHERE id > person:9 ORDER BY id"
+		)
+		.await,
+		"[[person:20, 3], [person:21, 3], [person:22, 3]]"
+	);
+}
+
+/// Writes whose targets differ only in a key written out are one statement once the key is read
+/// as a variable: the first compiles and the next are served it, in one request as in the next.
+#[tokio::test]
+async fn writes_that_differ_only_in_a_key_written_out_are_compiled_once() {
+	let db = TestDb::new(PEOPLE).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let base = ds.statement_cache_stats();
+	let now = || since(base, ds.statement_cache_stats());
+	let sql = |salt: i64| {
+		format!(
+			"BEGIN; UPSERT type::record('person', ['a', {salt}, 1]) SET n = 1; \
+			 UPSERT type::record('person', ['a', {salt}, 2]) SET n = 1; \
+			 UPSERT type::record('person', ['a', {salt}, 3]) SET n = 1; \
+			 UPDATE person:1 SET n = 1; UPDATE person:2 SET n = 1; COMMIT;"
+		)
+	};
+	ds.execute(&sql(0), &owner, None).await.expect("the request runs");
+	assert_eq!(now(), stats(3, 2, 0), "each shape compiles once and serves the rest");
+	ds.execute(&sql(1), &owner, None).await.expect("the request runs");
+	assert_eq!(now(), stats(8, 2, 0), "a request of other keys is served every write");
+	assert_eq!(
+		last_answer(ds, &owner, "SELECT VALUE n FROM person WHERE n = 1 ORDER BY id").await,
+		"[1, 1, 1, 1, 1, 1, 1, 1]"
+	);
+}
+
+/// A block that only writes is one statement kept for the values its writes and its conditions
+/// read: requests that bind other values, and so take another arm, are served the one compilation,
+/// and a block of writes to records written out is kept for those records' keys.
+#[tokio::test]
+async fn a_block_that_only_writes_is_compiled_once() {
+	let db = TestDb::new(PEOPLE).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let base = ds.statement_cache_stats();
+	let now = || since(base, ds.statement_cache_stats());
+	let sql = "BEGIN; IF $go { UPSERT type::record('person', $k) SET n = 1; \
+		UPDATE type::record('person', $k) SET n += 1 } ELSE { DELETE type::record('person', $k) }; \
+		COMMIT;";
+	for (k, go) in [(30, true), (31, true), (30, false)] {
+		let mut vars = Variables::new();
+		vars.insert("k", k);
+		vars.insert("go", go);
+		ds.execute(sql, &owner, Some(vars)).await.expect("the request runs");
+	}
+	assert_eq!(now(), stats(2, 1, 0), "one compilation serves both arms and every key");
+	let literal = |a: i64, b: i64| {
+		format!("IF true {{ UPSERT person:{a} SET n = 5; UPSERT person:{b} SET n = 5 }}")
+	};
+	ds.execute(&literal(40, 41), &owner, None).await.expect("the request runs");
+	ds.execute(&literal(42, 43), &owner, None).await.expect("the request runs");
+	assert_eq!(now(), stats(3, 2, 0), "a block of other keys written out is served the one kept");
+	assert_eq!(
+		last_answer(
+			ds,
+			&owner,
+			"SELECT VALUE [id, n] FROM person WHERE id >= person:30 ORDER BY id"
+		)
+		.await,
+		"[[person:31, 2], [person:40, 5], [person:41, 5], [person:42, 5], [person:43, 5]]"
+	);
+}
+
+/// A write that reads a name an earlier `LET` of its request binds reads it when it runs, as it
+/// reads a request variable: one compilation serves every value, whether the `LET`'s value is
+/// computed when the request runs or written out as a constant.
+#[tokio::test]
+async fn a_write_reading_a_let_binding_is_compiled_once() {
+	let db = TestDb::new(PEOPLE).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let base = ds.statement_cache_stats();
+	let now = || since(base, ds.statement_cache_stats());
+	let reached = ds.reached_statement_stats();
+	let computed = "BEGIN; LET $row = type::record('person', $n); UPSERT $row SET age = 7; COMMIT;";
+	for n in 50..53 {
+		ds.execute(computed, &owner, Some(number(n))).await.expect("the request runs");
+	}
+	assert_eq!(now(), stats(2, 1, 0), "the write reading a computed `LET` compiles once");
+	assert_eq!(since_compiled(reached, ds.reached_statement_stats()), 0);
+	for k in 60..63 {
+		let constant =
+			format!("BEGIN; LET $k = {k}; UPSERT type::record('person', $k) SET age = 8; COMMIT;");
+		ds.execute(&constant, &owner, None).await.expect("the request runs");
+	}
+	assert_eq!(now(), stats(4, 2, 0), "the write reading a constant `LET` compiles once");
+	assert_eq!(
+		last_answer(
+			ds,
+			&owner,
+			"SELECT VALUE [id, age] FROM person WHERE id >= person:50 ORDER BY id"
+		)
+		.await,
+		"[[person:50, 7], [person:51, 7], [person:52, 7], [person:60, 8], [person:61, 8], \
+		 [person:62, 8]]"
+	);
+}
+
+/// A read the cache keeps when its request arrives is kept as well when the request reaches it
+/// after its first write: one compilation serves every value of its key.
+#[tokio::test]
+async fn a_read_after_a_write_is_compiled_once_for_its_key() {
+	let db = TestDb::new(PEOPLE).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let base = ds.statement_cache_stats();
+	let now = || since(base, ds.statement_cache_stats());
+	let reached = ds.reached_statement_stats();
+	let sql = "BEGIN; UPSERT person:70 SET age = 1; \
+		SELECT VALUE name FROM type::record('person', $n); COMMIT;";
+	for (n, name) in [(1, "ann"), (2, "bob"), (3, "cat")] {
+		let mut responses =
+			ds.execute(sql, &owner, Some(number(n))).await.expect("the request runs");
+		// The response before the `COMMIT`'s.
+		let read = responses.remove(responses.len() - 2).result.expect("answers");
+		assert_eq!(read.to_sql(), format!("['{name}']"), "`$n` = {n}");
+	}
+	// The write and the read each compile once and are served to the requests after.
+	assert_eq!(now(), stats(4, 2, 0));
+	assert_eq!(since_compiled(reached, ds.reached_statement_stats()), 0);
+}
+
+/// How many statements the run-time cache compiled between `before` and `after`, kept or not.
+fn since_compiled(
+	before: crate::exec::vm::compile_cache::Stats,
+	after: crate::exec::vm::compile_cache::Stats,
+) -> u64 {
+	(after.compiles + after.private) - (before.compiles + before.private)
 }
 
 #[tokio::test]
@@ -737,8 +887,14 @@ async fn a_kept_plan_is_served_across_changes_it_did_not_read_and_compiled_again
 		 DEFINE TABLE person SCHEMALESS; CREATE person:1 SET name = 'new'",
 	)
 	.await;
+	// The setup's own `CREATE` is a kept write, counted apart from the read.
+	let rebuilt = ds.statement_cache_stats();
 	assert_eq!(read(1).await, "['c-new']");
-	assert_eq!(now(), stats(4, 2, 0), "a database defined again is compiled for afresh");
+	assert_eq!(
+		since(rebuilt, ds.statement_cache_stats()),
+		stats(0, 1, 0),
+		"a database defined again is compiled for afresh"
+	);
 }
 
 const CLASSES: &str = "

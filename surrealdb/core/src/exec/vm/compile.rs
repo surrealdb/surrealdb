@@ -251,7 +251,7 @@ pub(super) async fn compile(planner: &Planner<'_>, op: &LogicalOp) -> Lowered<Co
 
 /// Whether `op` is a write, under its `TIMEOUT` at most: the one statement whose stages a compile
 /// links.
-fn is_write_statement(op: &LogicalOp) -> bool {
+pub(super) fn is_write_statement(op: &LogicalOp) -> bool {
 	match op {
 		LogicalOp::Write(_) => true,
 		LogicalOp::Timeout(timeout) => matches!(*timeout.input, LogicalOp::Write(_)),

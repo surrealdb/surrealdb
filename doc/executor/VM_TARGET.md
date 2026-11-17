@@ -162,7 +162,7 @@ body again. Lookup and compilation happen only while a query is planned.
   value or client parameter read from outside, in it or any function it
   calls), a body reached from inside another body's compilation (the outer
   unit holds it), a `VERSION`ed call, a body the VM does not run.
-- **Request statements**: a read-only top-level statement of a request that
+- **Request statements**: a top-level statement of a request that only reads and
   reads its request's variables only as the key of a record of a constant
   table (`FROM type::record('person', $n)`) is served from the node's cache of
   statements
@@ -174,13 +174,33 @@ body again. Lookup and compilation happen only while a query is planned.
   The compilation reads those variables when it runs, so requests that bind
   other values to them are served the one compilation. Main plans such a
   source as a value the statement computes, whatever the key, so the kept plan
-  is the plan main makes. A variable read anywhere else, a `FROM $name` among
+  is the plan main makes. A name an earlier `LET` of the request binds is read
+  as a request variable is (`vm::serve::run_time_readable`). A variable read anywhere else, a `FROM $name` among
   those places (which is planned for the table or record its value names),
   compiles the statement with its request. A kept compilation is
   served while the catalog it read holds (`exec::catalog_deps`): a `DEFINE` or
   `REMOVE` of anything it read compiles the statement again for the next
-  request. A write, a schema statement and an `EXPLAIN` are compiled with
-  their request.
+  request. A write is kept the same way when its one target names the table
+  it writes without the plan depending on the value: a variable whose value is
+  a record id of one table, a list of such ids, or for a `CREATE` that table;
+  `type::record(<table>, <key>)` with a constant table and a key that is a
+  variable or a list of variables and literals; or a record id or a key
+  written out, which is read as a variable. Every other request variable a
+  kept write reads is read when it runs. An `IF` whose arms, or a block whose
+  statements, do nothing but write, at any depth (`vm::serve::writes_only`),
+  is kept as a write is. A statement planned when the request reaches it
+  (`Executor::compile_request` names when) is kept and served the same way
+  where it only reads or only writes. In such a statement, and in a write
+  compiled when the request arrives, a record id or a key written out is
+  compiled as written, not read as a variable, where its table's record ids
+  carry a key structure (an `id` that names its components, or an aggregated
+  view's group key), which the plan coerces a written-out key to, and in a
+  read where its table defines a computed field, which a read of a record
+  written out derives only where the read selects it
+  (`vm::serve::Keeping::plans_as_written`, judged against the catalog on
+  every serve). A read compiled when the request arrives keeps its freed
+  literals. A schema statement and an `EXPLAIN` are compiled with their
+  request.
 - **Specialization**: a small body is still inlined into its caller rather than
   linked.
 - **Catalog units**: what a plan lowers from the catalog alone, the same for
