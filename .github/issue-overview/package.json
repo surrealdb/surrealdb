@@ -1,0 +1,12 @@
+{
+	"name": "issue-overview",
+	"private": true,
+	"type": "module",
+	"description": "Draws the pinned issue overview chart for surrealdb/surrealdb",
+	"dependencies": {
+		"d3-hierarchy": "3.1.2",
+		"d3-polygon": "3.0.1",
+		"d3-voronoi-treemap": "1.1.2",
+		"seedrandom": "3.0.5"
+	}
+}
