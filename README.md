@@ -158,11 +158,8 @@ Getting started with SurrealDB is as easy as starting up the SurrealDB database 
 
 <h2><img height="20" src="/img/cloud.svg?raw=true">&nbsp;&nbsp;SurrealDB Cloud</h2>
 
-<a href="https://surrealdb.com/cloud#gh-dark-mode-only" target="_blank">
-    <img width="100%" src="/img/white/cloud.png" alt="SurrealDB Cloud">
-</a>
-<a href="https://surrealdb.com/cloud#gh-light-mode-only" target="_blank">
-    <img width="100%" src="/img/black/cloud.png" alt="SurrealDB Cloud">
+<a href="https://surrealdb.com/cloud" target="_blank">
+    <img width="100%" src="./img/cloud-banner.svg" alt="SurrealDB Cloud">
 </a>
 
 SurrealDB is available as a [managed cloud service](https://app.surrealdb.com/overview). Forget about infrastructure operations, monitoring, backups or capacity planning. [SurrealDB Cloud](https://surrealdb.com/cloud) allows you to focus on building great products using the power and flexibility of SurrealDB in just a few clicks. Grow from prototype to enterprise-scale. The SurrealDB Cloud scalable architecture allows your database to evolve as your application grows, ensuring you are always ahead of demand. However if you want to deploy SurrealDB yourself, keep reading below.
@@ -367,10 +364,7 @@ DEFINE TABLE post SCHEMALESS
 
 <h2><img height="20" src="./img/features.svg">&nbsp;&nbsp;Why SurrealDB?</h2>
 
-<p>
-	<img width="49%" src="./img/illustrations/database-api-security.jpg" />
-	<img width="49%" src="./img/illustrations/multimodel-database.jpg" />
-</p>
+<img width="100%" src="./img/sections/database-api-permissions.png" alt="Database, API, and permissions">
 
 ### Database, API, and permissions
 
@@ -380,53 +374,49 @@ SurrealDB combines the database layer, the querying layer, and the API and authe
 
 As a multi-model database, SurrealDB enables developers to use multiple techniques to store and model data, without having to choose a method in advance. With the use of tables, SurrealDB has similarities with relational databases, but with the added functionality and flexibility of advanced nested fields and arrays. Inter-document record links allow for simple to understand and highly-performant related queries without the use of JOINs, eliminating the N+1 query problem.
 
-<p>
-	<img width="49%" src="./img/illustrations/graph-database.jpg" />
-	<img width="49%" src="./img/illustrations/schema-direct-to-client.jpg" />
-</p>
+<img width="100%" src="./img/sections/graph-relations.png" alt="Advanced inter-document relations and analysis. No JOINs. No pain.">
 
 ### Advanced inter-document relations and analysis. No JOINs. No pain.
 
 With full graph database functionality SurrealDB enables more advanced querying and analysis. Records (or vertices) can be connected to one another with edges, each with its own record properties and metadata. Simple extensions to traditional SQL queries allow for multi-table, multi-depth document retrieval, efficiently in the database, without the use of complicated JOINs and without bringing the data down to the client.
 
+<img width="100%" src="./img/sections/schema-definition.png" alt="Simple schema definition for frontend and backend development">
+
 ### Simple schema definition for frontend and backend development
 
 With SurrealDB, specify your database and API schema in one place, and define column rules and constraints just once. Once a schema is defined, database access is automatically granted to the relevant users. No more custom API code, and no more GraphQL integration. Simple, flexible, and ready for production in minutes not months.
 
-<p>
-	<img width="49%" src="./img/illustrations/browser-sync.jpg" />
-	<img width="49%" src="./img/illustrations/multiple-integrations.jpg" />
-</p>
+<img width="100%" src="./img/sections/client-connections.png" alt="Connect and query directly from web-browsers and client devices">
 
 ### Connect and query directly from web-browsers and client devices
 
 Connect directly to SurrealDB from any end-user client device. Run SurrealQL queries directly within web-browsers, ensuring that users can only view or modify the data that they are allowed to access. Highly-performant WebSocket connections allow for efficient bi-directional queries, responses and notifications.
 
+<img width="100%" src="./img/sections/query-tools.png" alt="Query the database with the tools you want">
+
 ### Query the database with the tools you want
 
 Your data, your choice. SurrealDB is designed to be flexible to use, with support for SurrealQL, GraphQL (coming soon), CRUD support over REST, and JSON-RPC querying and modification over WebSockets. With direct-to-client connection with in-built permissions, SurrealDB speeds up the development process, and fits in seamlessly into any tech stack.
 
-<p>
-	<img width="49%" src="./img/illustrations/realtime-live-queries.jpg" />
-	<img width="49%" src="./img/illustrations/scale-up.jpg" />
-</p>
+<img width="100%" src="./img/sections/live-queries.png" alt="Realtime live queries and data changes direct to application">
 
 ### Realtime live queries and data changes direct to application
 
 SurrealDB keeps every client device in-sync with data modifications pushed in realtime to the clients, applications, end-user devices, and server-side libraries. Live SQL queries allow for advanced filtering of the changes to which a client subscribes, and efficient data formats, including DIFFing and PATCHing enable highly-performant web-based data syncing.
 
+<img width="100%" src="./img/sections/scale.png" alt="Scale effortlessly to hundreds of nodes for high-availability and scalability">
+
 ### Scale effortlessly to hundreds of nodes for high-availability and scalability
 
 SurrealDB can be run as a single in-memory node, or as part of a distributed cluster - offering highly-available and highly-scalable system characteristics. Designed from the ground up to run in a distributed environment, SurrealDB makes use of special techniques when handling multi-table transactions, and document record IDs - with no use of table or row locks.
 
-<p>
-	<img width="49%" src="./img/illustrations/database-plugins.jpg" />
-	<img width="49%" src="./img/illustrations/cloud-or-embedded.jpg" />
-</p>
+<img width="100%" src="./img/sections/javascript-functions.png" alt="Extend your database with JavaScript functions">
 
 ### Extend your database with JavaScript functions
 
 Embedded JavaScript functions allow for advanced, custom functionality, with computation logic being moved to the data layer. This improves upon the traditional approach of moving data to the client devices before applying any computation logic, ensuring that only the necessary data is transferred remotely. These advanced JavaScript functions, with support for the ES2020 standard, allow any developer to analyse the data in ever more simple-yet-advanced ways.
+
+<img width="100%" src="./img/sections/embedded-or-cloud.png" alt="Designed to be embedded or to run distributed in the cloud">
 
 ### Designed to be embedded or to run distributed in the cloud
 
