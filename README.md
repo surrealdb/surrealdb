@@ -162,9 +162,11 @@ Getting started with SurrealDB is as easy as starting up the SurrealDB database 
 
 <h2><img height="20" src="/img/cloud.svg?raw=true">&nbsp;&nbsp;SurrealDB Cloud</h2>
 
-<a href="https://surrealdb.com/cloud" target="_blank">
-    <img width="100%" src="./img/cloud-banner.svg" alt="SurrealDB Cloud">
-</a>
+<p align="center">
+    <a href="https://surrealdb.com/cloud" target="_blank">
+        <img width="100%" src="./img/cloud-banner.svg" alt="SurrealDB Cloud">
+    </a>
+</p>
 
 SurrealDB is available as a [managed cloud service](https://app.surrealdb.com/overview). Forget about infrastructure operations, monitoring, backups or capacity planning. [SurrealDB Cloud](https://surrealdb.com/cloud) allows you to focus on building great products using the power and flexibility of SurrealDB in just a few clicks. Grow from prototype to enterprise-scale. The SurrealDB Cloud scalable architecture allows your database to evolve as your application grows, ensuring you are always ahead of demand. However if you want to deploy SurrealDB yourself, keep reading below.
 
