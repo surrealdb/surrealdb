@@ -168,7 +168,7 @@ SurrealDB is available as a [managed cloud service](https://app.surrealdb.com/ov
 
 SurrealDB is designed to be simple to install and simple to run - using just one command from your terminal. In addition to traditional installation, SurrealDB can be installed and run with HomeBrew, Docker, or using any other container orchestration tool such as Docker Compose, Docker Swarm, Rancher, or in Kubernetes.
 
-<h4><a href="https://surrealdb.com/install"><img height="18" align="absmiddle" src="./img/apple.svg" alt=""></a>&nbsp;Install on macOS</h4>
+<h4><a href="https://surrealdb.com/install"><img height="18" align="absmiddle" src="./img/apple.svg" alt=""></a>&nbsp;&nbsp;Install on macOS</h4>
 
 The quickest way to get going with SurrealDB on macOS is to use Homebrew. This will install both the command-line tools, and the SurrealDB server as a single executable. If you don't use Homebrew, follow the instructions for Linux below to install SurrealDB.
 
@@ -182,7 +182,7 @@ If you want to test a version with the latest features, published every night, i
 brew install surrealdb/tap/surreal-nightly
 ```
 
-<h4><a href="https://surrealdb.com/install"><img height="18" align="absmiddle" src="./img/linux.svg" alt=""></a>&nbsp;Install on Linux</h4>
+<h4><a href="https://surrealdb.com/install"><img height="18" align="absmiddle" src="./img/linux.svg" alt=""></a>&nbsp;&nbsp;Install on Linux</h4>
 
 The easiest and preferred way to get going with SurrealDB on Unix operating systems is to install and use the SurrealDB command-line tool. Run the following command in your terminal and follow the on-screen instructions.
 
@@ -202,7 +202,7 @@ If you want to test a version with the latest features, published every night, i
 curl --proto '=https' --tlsv1.2 -sSf https://install.surrealdb.com | sh -s -- --nightly
 ```
 
-<h4><a href="https://surrealdb.com/install"><img height="18" align="absmiddle" src="./img/windows.svg" alt=""></a>&nbsp;Install on Windows</h4>
+<h4><a href="https://surrealdb.com/install"><img height="18" align="absmiddle" src="./img/windows.svg" alt=""></a>&nbsp;&nbsp;Install on Windows</h4>
 
 The easiest and preferred way to get going with SurrealDB on Windows is to install and use the SurrealDB command-line tool. Run the following command in your terminal and follow the on-screen instructions.
 
@@ -216,7 +216,7 @@ If you want to test a version with the latest features, published every night, i
 iex "& { $(irm https://windows.surrealdb.com) } -Nightly"
 ```
 
-<h4><a href="https://surrealdb.com/install"><img height="18" align="absmiddle" src="./img/docker.svg" alt=""></a>&nbsp;Run using Docker</h4>
+<h4><a href="https://surrealdb.com/install"><img height="18" align="absmiddle" src="./img/docker.svg" alt=""></a>&nbsp;&nbsp;Run using Docker</h4>
 
 Docker can be used to manage and run SurrealDB database instances without the need to install any command-line tools. The SurrealDB docker container contains the full command-line tools for importing and exporting data from a running server, or for running a server itself.
 
