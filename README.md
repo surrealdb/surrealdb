@@ -1,6 +1,8 @@
-<a href="https://surrealdb.com" target="_blank">
-    <img width="100%" src="./img/hero.svg" alt="SurrealDB - The database and memory for every agent">
-</a>
+<p align="center">
+    <a href="https://surrealdb.com" target="_blank">
+        <img width="100%" src="./img/hero.svg" alt="SurrealDB - The database and memory for every agent">
+    </a>
+</p>
 
 <br>
 
@@ -78,7 +80,7 @@ SurrealDB is used for data-intensive systems such as applications requiring mult
 
 View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), and [documentation](https://surrealdb.com/docs).
 
-<img width="100%" src="./img/interface.png" alt="Surrealist">
+<img width="100%" src="./img/interface.svg" alt="Surrealist">
 
 <h2><img height="20" src="./img/contents.svg">&nbsp;&nbsp;Contents</h2>
 
