@@ -2,6 +2,8 @@
     <img width="100%" src="./img/hero.svg" alt="SurrealDB - The database and memory for every agent">
 </a>
 
+<br>
+
 <p align="center">
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/github/v/release/surrealdb/surrealdb?color=ff00a0&include_prereleases&label=version&sort=semver&style=flat-square"></a>
     &nbsp;
