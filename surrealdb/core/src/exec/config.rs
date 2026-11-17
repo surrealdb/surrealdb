@@ -358,7 +358,7 @@ impl Default for ExecConfig {
 			gql_max_path_rows: 1_000_000,
 			gql_max_output_rows: 1_000_000,
 			external_sorting_buffer_limit: 50_000,
-			generation_allocation_limit: 2 << 20,
+			generation_allocation_limit: 1 << 20,
 			fan_out_row_threshold: DEFAULT_FAN_OUT_ROW_THRESHOLD,
 			morsel_split_rows: DEFAULT_MORSEL_SPLIT_ROWS,
 			morsel_needs_view: true,
@@ -451,7 +451,7 @@ impl cnf::Config for ExecConfig {
 			.parse_key_with(
 				"generation_allocation_limit",
 				&mut self.generation_allocation_limit,
-				|x| x.parse::<usize>().ok().map(|x| 2 << x.min(28)),
+				|x| x.parse::<usize>().ok().map(|x| 1usize << x.min(28)),
 			);
 	}
 }

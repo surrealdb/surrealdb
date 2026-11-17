@@ -137,9 +137,16 @@ mod tests {
 		assert_eq!(c.gql_max_output_rows, 7);
 		let c: ExecConfig = map_with("external_sorting_buffer_limit", "7").load();
 		assert_eq!(c.external_sorting_buffer_limit, 7);
-		// Parsed as an exponent, not a byte count: `2 << min(x, 28)`.
+		// Parsed as an exponent, not a byte count: `2^min(x, 28)`. This matches
+		// the global `GENERATION_ALLOCATION_LIMIT` in `surrealdb-cnf`.
 		let c: ExecConfig = map_with("generation_allocation_limit", "3").load();
-		assert_eq!(c.generation_allocation_limit, 2 << 3);
+		assert_eq!(c.generation_allocation_limit, 1 << 3);
+		let c: ExecConfig = map_with("generation_allocation_limit", "20").load();
+		assert_eq!(c.generation_allocation_limit, 2usize.pow(20));
+		let c: ExecConfig = map_with("generation_allocation_limit", "99").load();
+		assert_eq!(c.generation_allocation_limit, 2usize.pow(28));
+		// The default is 2^20, the same as the global limit's default.
+		assert_eq!(ExecConfig::default().generation_allocation_limit, 2usize.pow(20));
 	}
 
 	#[test]
