@@ -53,6 +53,55 @@
         rustChannel = (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml)).toolchain.channel;
         rustManifestSha256 = "sha256-gh/xTkxKHL4eiRXzWv8KP7vfjSk61Iq48x47BEDFgfk=";
 
+        nightlyPin = pkgs.lib.strings.trim (builtins.readFile ./rust-toolchain.nightly);
+        nightlyDate =
+          assert pkgs.lib.assertMsg (pkgs.lib.hasPrefix "nightly-" nightlyPin)
+            "rust-toolchain.nightly must start with nightly-";
+          pkgs.lib.removePrefix "nightly-" nightlyPin;
+        nightlyManifestSha256 = "sha256-2ppS21jOURao7IT5IOE1xz6JqjnpcvLOM865W2MMB54=";
+        nightlyComponents = fenix.packages.${system}.toolchainOf {
+          channel = "nightly";
+          date = nightlyDate;
+          sha256 = nightlyManifestSha256;
+        };
+        nightlyToolchain = fenix.packages.${system}.combine (with nightlyComponents; [
+          cargo
+          rustc
+          rust-std
+          rustfmt
+        ]);
+
+        revisionLockSource = pkgs.fetchCrate {
+          pname = "revision-lock";
+          version = "0.2.0";
+          registryDl = "https://static.crates.io/crates";
+          hash = "sha256-Jx4doNYO5hhAFCoXmfqi/0XeoMszcA6CXRw4IBcz+0c=";
+        };
+
+        revisionLockCargoDeps =
+          pkgs.runCommand "revision-lock-0.2.0-cargo-deps"
+            {
+              cargoDeps = pkgs.rustPlatform.importCargoLock {
+                lockFile = "${revisionLockSource}/Cargo.lock";
+                extraRegistries = {
+                  "https://github.com/rust-lang/crates.io-index" = "https://static.crates.io/crates";
+                };
+              };
+            }
+            ''
+              cp -R "$cargoDeps" "$out"
+              chmod u+w "$out/.cargo" "$out/.cargo/config.toml"
+              sed -i '/^\[source\."https:\/\/github.com\/rust-lang\/crates.io-index"\]$/,+2d' "$out/.cargo/config.toml"
+              sed -i 's|directory = "cargo-vendor-dir"|directory = "@vendor@"|' "$out/.cargo/config.toml"
+            '';
+
+        revisionLock = pkgs.rustPlatform.buildRustPackage {
+          pname = "revision-lock";
+          version = "0.2.0";
+          src = revisionLockSource;
+          cargoDeps = revisionLockCargoDeps;
+        };
+
         mkRustToolchain = {target, extraComponents ? []}:
           with fenix.packages.${system};
           combine ([
@@ -120,14 +169,44 @@
               (targets.${target}.toolchainOf { channel = rustChannel; sha256 = rustManifestSha256; }).rustfmt
             ];
             rustToolchain = mkRustToolchain { inherit target extraComponents; };
+            cargoFmtToolchainShim = pkgs.writeShellScriptBin "cargo-fmt" ''
+              if [ -n "''${RUSTUP_TOOLCHAIN:-}" ]; then
+                exec ${pkgs.rustup}/bin/rustup run "$RUSTUP_TOOLCHAIN" cargo-fmt "$@"
+              fi
+              exec ${rustToolchain}/bin/cargo-fmt "$@"
+            '';
             buildSpec = spec.buildSpec;
           in pkgs.mkShell (buildSpec // {
             hardeningDisable = [ "fortify" ];
 
             depsBuildBuild = buildSpec.depsBuildBuild or [ ]
-              ++ [ rustToolchain ] ++ (with pkgs; [ nixfmt cargo-watch wasm-pack pre-commit cargo-make]);
+              ++ [ cargoFmtToolchainShim rustToolchain revisionLock ]
+              ++ (with pkgs; [
+                nixfmt
+                cargo-watch
+                wasm-pack
+                pre-commit
+                cargo-make
+                cargo-nextest
+                rustup
+              ]);
 
             inherit (util) SURREAL_BUILD_VERSION SURREAL_BUILD_METADATA;
+
+            shellHook = (buildSpec.shellHook or "") + ''
+              export RUSTUP_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}/surrealdb/rustup"
+              mkdir -p "$RUSTUP_HOME"
+              nightly_link="$RUSTUP_HOME/toolchains/surrealdb-nightly-2026-05-11"
+              if [ "$(readlink "$nightly_link" 2>/dev/null)" != "${nightlyToolchain}" ]; then
+                if [ -e "$nightly_link" ] && [ ! -L "$nightly_link" ]; then
+                  echo "error: $nightly_link exists and is not a symbolic link" >&2
+                  return 1
+                fi
+                rm -f "$nightly_link"
+                rustup toolchain link surrealdb-nightly-2026-05-11 ${nightlyToolchain}
+              fi
+              export SURREAL_NIGHTLY_RUST_TOOLCHAIN=surrealdb-nightly-2026-05-11
+            '';
           })) util.platforms);
 
         # nix run
