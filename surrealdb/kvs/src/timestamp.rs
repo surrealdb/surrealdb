@@ -202,9 +202,12 @@ impl HlcTimeStamp {
 	/// Uses a global atomic to ensure monotonicity across all calls.
 	///
 	/// This method will never return a timestamp that is less than or equal to any previously
-	/// returned timestamp. If the system clock goes backwards, it continues from the last known
-	/// good timestamp. If more than 65,535 timestamps are requested within the same millisecond,
-	/// it will spin-wait until the next millisecond.
+	/// returned timestamp. While the system clock is ahead of the last timestamp, the result is
+	/// the current millisecond with a counter of 0. Otherwise, whether the clock reads the same
+	/// millisecond or has gone backwards, it continues from the last timestamp: the same
+	/// millisecond with the counter incremented, or the next millisecond with a counter of 0
+	/// once the counter is full. It never waits for the clock, so timestamps can run ahead of
+	/// the wall clock until it catches up.
 	///
 	/// Note: the atomic counter is **process-local**, so this monotonicity holds only within a
 	/// single process. Distributed/cross-node changefeed ordering must come from the storage
@@ -215,10 +218,8 @@ impl HlcTimeStamp {
 
 		use web_time::{SystemTime, UNIX_EPOCH};
 
-		// Set the timestamps and masks
+		// Set the last timestamp
 		static LAST_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
-		const COUNTER_MASK: u64 = 0xFFFF;
-		const COUNTER_MAX: u64 = COUNTER_MASK;
 		// Set the memory ordering for atomic operations
 		let ordering = Ordering::SeqCst;
 		// Loop until the timestamp is set
@@ -230,27 +231,28 @@ impl HlcTimeStamp {
 				.as_millis() as u64;
 			// Get the last timestamp
 			let last = LAST_TIMESTAMP.load(ordering);
-			let last_millis = last >> 16;
-			let last_counter = last & COUNTER_MASK;
 			// Determine the next timestamp
-			let (next_millis, next_counter) = if now_millis > last_millis {
-				// Time advanced, reset counter
-				(now_millis, 0)
-			} else if now_millis == last_millis && last_counter < COUNTER_MAX {
-				// Same millisecond, increment counter
-				(now_millis, last_counter + 1)
-			} else {
-				// Counter exhausted, spin until next millisecond
-				continue;
-			};
-			// Create the next timestamp
-			let next = (next_millis << 16) | next_counter;
+			let next = Self::next_after(last, now_millis);
 			// Compare and exchange the last timestamp with the next timestamp
 			if LAST_TIMESTAMP.compare_exchange_weak(last, next, ordering, Ordering::Relaxed).is_ok()
 			{
 				// The timestamp was successfully set, return the new timestamp
 				return HlcTimeStamp(next);
 			}
+		}
+	}
+
+	/// The timestamp that follows `last` when the system clock reads `now_millis`.
+	///
+	/// While the clock is ahead of `last`, this is the current millisecond with a counter of 0.
+	/// Otherwise it is `last + 1`: the same millisecond with the counter incremented, or, once
+	/// the counter is full, the next millisecond with a counter of 0. The result is always
+	/// strictly greater than `last`, so it never waits for the clock.
+	fn next_after(last: u64, now_millis: u64) -> u64 {
+		if now_millis > last >> 16 {
+			now_millis << 16
+		} else {
+			last + 1
 		}
 	}
 }
@@ -600,6 +602,43 @@ mod tests {
 				"Concurrent HLC timestamps should have no duplicates"
 			);
 		}
+	}
+
+	/// An HLC timestamp built from its millisecond and counter.
+	fn stamp(millis: u64, counter: u64) -> u64 {
+		(millis << 16) | counter
+	}
+
+	const FULL_COUNTER: u64 = 0xFFFF;
+
+	#[test]
+	fn test_hlc_next_after_clock_advanced() {
+		// The clock is ahead: use its millisecond, counter back to 0.
+		assert_eq!(HlcTimeStamp::next_after(stamp(1000, 7), 1001), stamp(1001, 0));
+	}
+
+	#[test]
+	fn test_hlc_next_after_same_millisecond() {
+		// Same millisecond: the counter goes up by one.
+		assert_eq!(HlcTimeStamp::next_after(stamp(1000, 7), 1000), stamp(1000, 8));
+	}
+
+	#[test]
+	fn test_hlc_next_after_same_millisecond_full_counter() {
+		// Same millisecond, counter full: move on to the next millisecond without waiting.
+		assert_eq!(HlcTimeStamp::next_after(stamp(1000, FULL_COUNTER), 1000), stamp(1001, 0));
+	}
+
+	#[test]
+	fn test_hlc_next_after_clock_behind() {
+		// The clock went back to 980: carry on from the last timestamp without waiting.
+		assert_eq!(HlcTimeStamp::next_after(stamp(1000, 7), 980), stamp(1000, 8));
+	}
+
+	#[test]
+	fn test_hlc_next_after_clock_behind_full_counter() {
+		// The clock went back and the counter is full: move on to the next millisecond.
+		assert_eq!(HlcTimeStamp::next_after(stamp(1000, FULL_COUNTER), 980), stamp(1001, 0));
 	}
 
 	#[test]
