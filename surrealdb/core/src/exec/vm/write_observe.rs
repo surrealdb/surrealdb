@@ -367,6 +367,15 @@ pub(crate) async fn notify_unit(
 	};
 	let lowered = &unit.plan;
 	let program = &unit.program;
+	// The images as a read of the same record gives them. A view row's data
+	// carries no `id`, its identity being its key, so a subscriber to a view
+	// table would otherwise see a record without one: its `WHERE` on `id`
+	// would match nothing and its `result` would omit the field. Normalising
+	// here covers every path a notification is computed on — the write
+	// inline, the router's replay, the external host and the late-subscriber
+	// recheck — and leaves the row itself untouched for the other observers.
+	let named = images.with_record_id(rid);
+	let images = &*named;
 	let deriving = subscriber_frame(ctx, subscription, session, images, |images| {
 		(Arc::clone(&images.initial), Arc::clone(&images.current))
 	});

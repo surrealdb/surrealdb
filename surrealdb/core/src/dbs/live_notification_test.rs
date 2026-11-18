@@ -1110,3 +1110,70 @@ async fn test_live_update_leaving_subscriber_permission_fires_notification() {
 	assert_eq!(notif.action, PublicAction::Update);
 	assert_eq!(notif.result, PublicValue::None);
 }
+
+/// Regression test for #7607: view-table records store `Record.data` without
+/// a top-level `id` field; LIVE notifications on a view table must still
+/// include `id` in `result` and match `WHERE` predicates on `id` across
+/// CREATE, UPDATE, and DELETE.
+#[tokio::test]
+async fn test_live_view_table_carries_id_and_filters_by_id() {
+	let (recv, ds) = new_ds_with_broker().await.unwrap();
+	let (ns, db) = ("test", "test");
+	setup_ns_db_table(&ds, ns, db, "src").await;
+
+	let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
+	let mut res = ds
+		.execute(
+			"CREATE src:1 SET g = 'a';
+			 DEFINE TABLE w AS SELECT g, count() AS n FROM src GROUP BY g;
+			 LIVE SELECT * FROM w;
+			 LIVE SELECT * FROM w WHERE id = w:['a'];
+			 LIVE SELECT * FROM w WHERE g = 'a';",
+			&ses,
+			None,
+		)
+		.await
+		.unwrap();
+	let _ = res.remove(0).result.unwrap();
+	let _ = res.remove(0).result.unwrap();
+	let subs: [_; 3] = std::array::from_fn(|_| {
+		let val = res.remove(0).result.unwrap();
+		let PublicValue::Uuid(id) = val else {
+			panic!("LIVE SELECT should answer with a subscription id, got: {val:?}");
+		};
+		id
+	});
+
+	let expected_record = PublicValue::RecordId(PublicRecordId {
+		table: "w".into(),
+		key: PublicRecordIdKey::Array(vec![PublicValue::String("a".to_string())].into()),
+	});
+
+	for (stmt, expected_action, expected_n) in [
+		("CREATE src:2 SET g = 'a'", PublicAction::Update, 2),
+		("DELETE src:2", PublicAction::Update, 1),
+		("DELETE src:1", PublicAction::Delete, 1),
+		("CREATE src:3 SET g = 'a'", PublicAction::Create, 1),
+	] {
+		ds.execute(stmt, &ses, None).await.unwrap().remove(0).result.unwrap();
+		let mut got = Vec::with_capacity(3);
+		for _ in 0..3 {
+			let n = tokio::time::timeout(tokio::time::Duration::from_secs(2), recv.recv())
+				.await
+				.unwrap_or_else(|_| panic!("timed out waiting for notifications on `{stmt}`"))
+				.unwrap();
+			got.push(n);
+		}
+		let expected_result =
+			crate::syn::value(&format!("{{ id: w:['a'], g: 'a', n: {expected_n} }}")).unwrap();
+		for id in subs {
+			let n = got
+				.iter()
+				.find(|n| n.id == id)
+				.unwrap_or_else(|| panic!("missing notification for {id} on `{stmt}`"));
+			assert_eq!(n.action, expected_action, "stmt: {stmt}");
+			assert_eq!(n.record, expected_record, "stmt: {stmt}");
+			assert_eq!(n.result, expected_result, "stmt: {stmt}");
+		}
+	}
+}

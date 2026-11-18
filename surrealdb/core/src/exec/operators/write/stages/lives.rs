@@ -45,6 +45,7 @@
 // Entry points the IR lowering emits; no Rust call site reaches them directly.
 #![allow(dead_code)]
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -102,6 +103,38 @@ pub(crate) struct Images {
 }
 
 impl Images {
+	/// The images of `rid` as a read of the same record gives them
+	/// ([`crate::catalog::Record::kv_decode_value`]): an object image without
+	/// `id`, or with another one, is cloned with `id` set to `rid`. A view
+	/// row's data carries none, its identity being its key, so its subscriber
+	/// would otherwise see a record without one.
+	///
+	/// Borrows when both images already carry `rid`, so an ordinary table's
+	/// images are not cloned.
+	pub(crate) fn with_record_id(&self, rid: &RecordId) -> Cow<'_, Self> {
+		fn named(image: &Arc<Value>, rid: &RecordId) -> Option<Arc<Value>> {
+			let Value::Object(object) = image.as_ref() else {
+				return None;
+			};
+			if matches!(object.get("id"), Some(Value::RecordId(existing)) if existing == rid) {
+				return None;
+			}
+			let mut object = object.clone();
+			object.insert("id", Value::RecordId(rid.clone()));
+			Some(Arc::new(Value::Object(object)))
+		}
+		let initial = named(&self.initial, rid);
+		let current = named(&self.current, rid);
+		if initial.is_none() && current.is_none() {
+			return Cow::Borrowed(self);
+		}
+		Cow::Owned(Self {
+			initial: initial.unwrap_or_else(|| Arc::clone(&self.initial)),
+			current: current.unwrap_or_else(|| Arc::clone(&self.current)),
+			action: self.action,
+		})
+	}
+
 	/// The image the notification is about: what was there for a delete, what
 	/// is there otherwise.
 	pub(crate) fn subject(&self) -> &Arc<Value> {
