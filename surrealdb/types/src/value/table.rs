@@ -6,6 +6,7 @@ use surrealdb_types_derive::write_sql;
 
 use crate as surrealdb_types;
 use crate::sql::{SqlFormat, ToSql};
+use crate::{RecordId, RecordIdKey};
 
 /// A value type referencing a specific table.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -17,6 +18,19 @@ impl Table {
 	/// Create a new table.
 	pub fn new(s: impl Into<String>) -> Self {
 		Table(s.into())
+	}
+
+	/// Create a record ID in this table with the given key.
+	///
+	/// ```
+	/// use surrealdb_types::{RecordId, Table};
+	///
+	/// let person = Table::new("person");
+	/// assert_eq!(person.to_record_id("alice"), RecordId::new("person", "alice"));
+	/// assert_eq!(person.to_record_id(42), RecordId::new("person", 42));
+	/// ```
+	pub fn to_record_id(&self, key: impl Into<RecordIdKey>) -> RecordId {
+		RecordId::new(self.clone(), key)
 	}
 
 	/// Convert the table to a string.
