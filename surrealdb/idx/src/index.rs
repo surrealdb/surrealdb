@@ -953,7 +953,7 @@ impl<'a> IndexOperation<'a> {
 		#[cfg(not(diskann))]
 		{
 			let _ = (p, require_compaction);
-			bail!("DISKANN indexes require a 64-bit, non-WASM platform")
+			bail!("DISKANN indexes require a little-endian 64-bit (or wasm) platform")
 		}
 		#[cfg(diskann)]
 		{

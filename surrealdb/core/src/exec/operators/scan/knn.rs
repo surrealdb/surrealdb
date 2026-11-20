@@ -269,7 +269,7 @@ pub(crate) async fn ann_search(
 		#[cfg(not(diskann))]
 		Index::DiskAnn(_) => {
 			Err(ControlFlow::Err(anyhow::anyhow!(
-				"DISKANN indexes require a 64-bit, non-WASM platform"
+				"DISKANN indexes require a little-endian 64-bit (or wasm) platform"
 			)))?;
 			unreachable!()
 		}

@@ -121,8 +121,10 @@ tokio = { workspace = true, default-features = false, features = [
 # DiskANN (the `diskann` library of the `surrealdb-diskann` crate) is a dependency
 # on 64-bit targets and on wasm, which that crate supports on wasm32. Other 32-bit targets
 # (i686, armv7, …) leave it out, so `surrealdb-idx` still compiles there and HNSW is
-# their vector index. The matching source gate is the `diskann` cfg set in build.rs.
-[target.'cfg(any(target_family = "wasm", target_pointer_width = "64"))'.dependencies]
+# their vector index. Big-endian targets (powerpc64, s390x, …) leave it out too, because
+# `diskann-utils` only compiles for little-endian targets. The matching source gate is
+# the `diskann` cfg set in build.rs.
+[target.'cfg(all(any(target_family = "wasm", target_pointer_width = "64"), target_endian = "little"))'.dependencies]
 diskann.workspace = true
 diskann-utils.workspace = true
 diskann-vector.workspace = true
