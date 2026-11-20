@@ -1,10 +1,9 @@
-use syn::{Field, LitStr, Path};
+use syn::{Field, Lit, LitStr, Path};
 
 #[derive(Debug, Default)]
 pub struct FieldAttributes {
 	pub rename: Option<String>,
-	/// When set, missing field during from_value uses this default (either Default::default() or a
-	/// path).
+	/// Default for a missing field during from_value.
 	pub default: Option<FieldDefault>,
 	pub wrap: bool,
 	/// When true, this field's serialized object is merged into the parent instead of
@@ -19,6 +18,8 @@ pub enum FieldDefault {
 	UseDefault,
 	/// Use the given path as a function call (e.g. `default_code()`).
 	Path(Path),
+	/// Use a Rust literal, converting string literals into the field type.
+	Literal(Lit),
 }
 
 impl FieldAttributes {
@@ -44,15 +45,20 @@ impl FieldAttributes {
 						field_attrs.wrap = true;
 					} else if meta.path.is_ident("default") {
 						if meta.input.peek(syn::token::Eq) {
-							// #[surreal(default = "path")]
-							let value =
-								meta.value().expect("surreal(default = ...) requires a path value");
+							let value = meta
+								.value()
+								.expect("surreal(default = ...) requires a string value");
 							let lit_str: LitStr = value
 								.parse()
 								.expect("surreal(default = ...) value must be a string");
-							let path = syn::parse_str::<Path>(&lit_str.value())
-								.expect("surreal(default = \"...\") must be a valid path");
-							field_attrs.default = Some(FieldDefault::Path(path));
+							field_attrs.default =
+								Some(if let Ok(literal) = lit_str.parse::<Lit>() {
+									FieldDefault::Literal(literal)
+								} else {
+									FieldDefault::Path(lit_str.parse::<Path>().expect(
+										"surreal(default = \"...\") must be a Rust literal or function path",
+									))
+								});
 						} else {
 							// #[surreal(default)]
 							field_attrs.default = Some(FieldDefault::UseDefault);
@@ -72,5 +78,70 @@ impl FieldAttributes {
 		}
 
 		field_attrs
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn parse_field_default() {
+		let field = syn::parse_quote! {
+			#[surreal(default)]
+			value: bool
+		};
+		assert!(matches!(FieldAttributes::parse(&field).default, Some(FieldDefault::UseDefault)));
+	}
+
+	#[test]
+	fn parse_function_default() {
+		let field = syn::parse_quote! {
+			#[surreal(default = "defaults::enabled")]
+			value: bool
+		};
+		assert!(matches!(FieldAttributes::parse(&field).default, Some(FieldDefault::Path(_))));
+	}
+
+	#[test]
+	fn parse_literal_default() {
+		let field = syn::parse_quote! {
+			#[surreal(default = "true")]
+			value: bool
+		};
+		assert!(matches!(
+			FieldAttributes::parse(&field).default,
+			Some(FieldDefault::Literal(Lit::Bool(literal))) if literal.value
+		));
+	}
+
+	#[test]
+	#[should_panic(expected = "must be a Rust literal or function path")]
+	fn reject_default_expression() {
+		let field = syn::parse_quote! {
+			#[surreal(default = "1 + 2")]
+			value: i64
+		};
+		FieldAttributes::parse(&field);
+	}
+
+	#[test]
+	#[should_panic(expected = "must be a Rust literal or function path")]
+	fn reject_malformed_default() {
+		let field = syn::parse_quote! {
+			#[surreal(default = "\"unterminated")]
+			value: String
+		};
+		FieldAttributes::parse(&field);
+	}
+
+	#[test]
+	#[should_panic(expected = "value must be a string")]
+	fn reject_unquoted_default() {
+		let field = syn::parse_quote! {
+			#[surreal(default = true)]
+			value: bool
+		};
+		FieldAttributes::parse(&field);
 	}
 }

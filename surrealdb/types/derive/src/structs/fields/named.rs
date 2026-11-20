@@ -144,22 +144,24 @@ impl NamedFields {
 					});
 				} else {
 					let retrieval = match &field.default {
-						Some(FieldDefault::UseDefault) => quote! {
-							let #field_name = if let Some(field_value) = map.remove(#obj_key) {
-								<#potentially_wrapped_ty as SurrealValue>::from_value(field_value)
-									.map_err(|e| #error_internal)?#val_access
-							} else {
-								<#ty>::default()
+						Some(default) => {
+							let default = match default {
+								FieldDefault::UseDefault => quote! { <#ty>::default() },
+								FieldDefault::Path(path) => quote! { #path() },
+								FieldDefault::Literal(syn::Lit::Str(literal)) => {
+									quote! { ::core::convert::Into::into(#literal) }
+								}
+								FieldDefault::Literal(literal) => quote! { #literal },
 							};
-						},
-						Some(FieldDefault::Path(path)) => quote! {
-							let #field_name = if let Some(field_value) = map.remove(#obj_key) {
-								<#potentially_wrapped_ty as SurrealValue>::from_value(field_value)
-									.map_err(|e| #error_internal)?#val_access
-							} else {
-								#path()
-							};
-						},
+							quote! {
+								let #field_name = if let Some(field_value) = map.remove(#obj_key) {
+									<#potentially_wrapped_ty as SurrealValue>::from_value(field_value)
+										.map_err(|e| #error_internal)?#val_access
+								} else {
+									#default
+								};
+							}
+						}
 						None => quote! {
 							let field_value = map.remove(#obj_key).unwrap_or_default();
 							let #field_name = <#potentially_wrapped_ty as SurrealValue>::from_value(field_value)

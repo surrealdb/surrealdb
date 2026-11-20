@@ -56,6 +56,15 @@ pub(crate) fn unraw(ident: &syn::Ident) -> String {
 /// - `#[surreal(lowercase)]` - Lowercase enum variant names. Legacy alias of `rename_all =
 ///   "lowercase"`; prefer `rename_all` in new code.
 /// - `#[surreal(skip)]` - Skip a field during serialization
+/// - `#[surreal(default)]` - Use `Default::default()` for a missing named field. On a struct, start
+///   from `Self::default()` and replace fields that are present, taking precedence over field
+///   defaults.
+/// - `#[surreal(default = "path::to::function")]` - Call a function for a missing named field.
+/// - `#[surreal(default = "true")]` - Use a Rust literal for a missing named field. Unsuffixed
+///   numeric literals use the field's type. String literals convert into the field type with
+///   `Into`, for example `#[surreal(default = r#""guest""#)]` for a `String`. The outer string must
+///   contain a literal or function path, not an arbitrary expression. Field defaults apply during
+///   `from_value` and do not change `is_value` or untagged enum variant selection.
 /// - `#[surreal(wrap)]` - Wrap a type that doesn't implement `SurrealValue` but does implement
 ///   `Serialize + Deserialize` with `SerdeWrapper`
 ///
