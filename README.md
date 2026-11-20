@@ -380,7 +380,7 @@ SurrealDB combines the database layer, the querying layer, and the API and authe
 
 ### Tables, documents, and graph
 
-As a multi-model database, SurrealDB enables developers to use multiple techniques to store and model data, without having to choose a method in advance. With the use of tables, SurrealDB has similarities with relational databases, but with the added functionality and flexibility of advanced nested fields and arrays. Inter-document record links allow for simple to understand and highly-performant related queries without the use of JOINs, eliminating the N+1 query problem.
+As a multi-model database, SurrealDB enables developers to use multiple techniques to store and model data, without having to choose a method in advance. With the use of tables, SurrealDB has similarities with relational databases, but with the added functionality and flexibility of advanced nested fields and arrays. Inter-document record links support querying related data without explicit JOIN syntax. Query performance still depends on the access pattern and the amount of related data.
 
 <img width="100%" src="./img/sections/graph-relations.svg" alt="Advanced inter-document relations and analysis. No JOINs. No pain.">
 
