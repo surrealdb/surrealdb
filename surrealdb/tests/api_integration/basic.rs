@@ -8,7 +8,7 @@ use serde_json::json;
 use surrealdb::IndexedResults;
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess, Token};
 use surrealdb::opt::{Config, PatchOp, PatchOps, Resource};
-use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object};
+use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Table, Value, array, object};
 use surrealdb_expr::parser as syn;
 use surrealdb_types::Array;
 use ulid::Ulid;
@@ -802,6 +802,39 @@ pub async fn insert_table(new_db: impl CreateDb) {
 		db.insert(Resource::from(table)).content(json!([{ "foo": "bar" }])).await.unwrap();
 	let users: Vec<ApiRecordId> = db.insert(table).await.unwrap();
 	assert!(!users.is_empty());
+}
+
+pub async fn typed_table_resources(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	let err = db.create::<Option<ApiRecordId>>("user:archive").await.unwrap_err();
+	assert!(err.message().contains(r#"Table::new("user:archive")"#));
+
+	for table in [Table::new("user"), Table::new("user:archive")] {
+		let created: Option<ApiRecordId> = db.create(table.clone()).await.unwrap();
+		let created = created.unwrap();
+		assert_eq!(created.id.table, table);
+
+		let inserted: Vec<ApiRecordId> = db
+			.insert(table.clone())
+			.content(json!([{ "id": "first" }, { "id": "second" }]))
+			.await
+			.unwrap();
+		assert_eq!(inserted.len(), 2);
+		for key in ["first", "second"] {
+			assert!(inserted.contains(&ApiRecordId {
+				id: RecordId::new(table.clone(), key),
+			}));
+		}
+
+		let selected: Vec<ApiRecordId> = db.select(table).await.unwrap();
+		assert_eq!(selected.len(), 3);
+		assert!(selected.contains(&created));
+		assert!(inserted.iter().all(|record| selected.contains(record)));
+	}
 }
 
 pub async fn insert_thing(new_db: impl CreateDb) {
@@ -2512,6 +2545,8 @@ define_include_tests!(basic => {
 	create_record_with_id_in_content,
 	#[test_log::test(tokio::test)]
 	insert_table,
+	#[test_log::test(tokio::test)]
+	typed_table_resources,
 	#[test_log::test(tokio::test)]
 	insert_thing,
 	#[test_log::test(tokio::test)]
