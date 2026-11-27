@@ -360,7 +360,7 @@ mod create_resource {
 fn no_colon(a: &str) -> Result<()> {
 	if a.contains(':') {
 		return Err(Error::internal(format!(
-			"Table name `{a}` contained a colon (:), this is dissallowed to avoid confusion with record-id's try `Table(\"{a}\")` instead."
+			"Table name {a:?} contains a colon and could be confused with a record ID. Use `Table::new({a:?})` for a table name."
 		)));
 	}
 	Ok(())
@@ -422,6 +422,13 @@ impl<R> into_resource::Sealed<Vec<R>> for Vec<Value> {
 
 impl<R> IntoResource<Vec<R>> for QueryRange {}
 impl<R> into_resource::Sealed<Vec<R>> for QueryRange {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.into())
+	}
+}
+
+impl<R> IntoResource<Vec<R>> for Table {}
+impl<R> into_resource::Sealed<Vec<R>> for Table {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
@@ -497,16 +504,12 @@ where
 	}
 }
 
-// impl<T, R> CreateResource<Option<R>> for Table<T> where T: Into<String> {}
-// impl<T, R> create_resource::Sealed<Option<R>> for Table<T>
-// where
-// 	T: Into<String>,
-// {
-// 	fn into_resource(self) -> Result<Resource> {
-// 		let t = self.0.into();
-// 		Ok(t.into())
-// 	}
-// }
+impl<R> CreateResource<Option<R>> for Table {}
+impl<R> create_resource::Sealed<Option<R>> for Table {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.into())
+	}
+}
 
 impl<R> CreateResource<Option<R>> for &str {}
 impl<R> create_resource::Sealed<Option<R>> for &str {
